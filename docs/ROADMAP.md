@@ -9,7 +9,9 @@ CLI/extension split, and the two Pi pattern studies the phases below lean on:
 [pi--best-practices.md](./pi--best-practices.md) (the **authoritative** patterns from Pi's
 own `examples/`, including the SDK) and
 [agent-stuff-best-practices.md](./agent-stuff-best-practices.md) (idiomatic real-world
-patterns from `mitsuhiko/agent-stuff`).
+patterns from `mitsuhiko/agent-stuff`). For how perk should use subagents, see
+[erk-subagent-usage.md](./erk-subagent-usage.md) — erk's governing principle that a subagent
+is a **context-and-capability device**, not a parallelism trick.
 
 ## Core thesis
 
@@ -53,7 +55,10 @@ Two corollaries that shape the build:
 - **Safety is structural, not prompted.** Read-only modes (plan, CI) are enforced by tool
   gating (`setActiveTools` + `tool_call` blocking), never by instructions. Build this as
   one reusable primitive (see Phase 2, where its consumers — perk-owned plan mode and the
-  CI executor — first appear).
+  CI executor — first appear). Its sibling is **context isolation** — a disposable child
+  whose verbose work never reaches the parent — realized in-process for the CI executor and
+  via a borrowed engine (`pi-subagents`) for delegation; the two compose into a read-only
+  child (see Implementation craft below, and Phase 2).
 - **Skills are opt-in expertise**, invoked by a user or command, and persist for the
   session. They carry "how to do this well," never a critical transition. (Guideline-only
   skills also fail when forked to a subagent — keep them in the main context.)
@@ -84,6 +89,26 @@ are non-negotiable constraints for *every* perk extension, not phase-specific ni
 - **Keep internal bookkeeping out of the model's context.** Use the `context` event to strip
   UI-only / control messages and de-duplicate stale follow-ups (per `goal.ts`), so perk's
   own mode/state messages never pollute the window.
+- **Subagents are a context-and-capability device, not a parallelism trick**
+  ([erk-subagent-usage.md](./erk-subagent-usage.md)). Spawn a disposable child (a
+  `pi --mode json -p` subagent or a read-only SDK session) to move verbose, isolatable work
+  *out of* the parent and to make read-only work structurally safe. The child returns
+  **double-delivery** — compact prose for the human plus a structured block for the
+  orchestrator (the cross-context twin of the dual-surface tool return above) — and its raw
+  data never enters the parent. **Route, don't relay:** pass paths / `details` refs between
+  contexts; never read content into the parent only to hand it onward (that doubles context).
+  The owner keeps what a child must never hold — **judgment** (reconciliation, design
+  analysis), **user interaction**, and **durable-state writes**; children do mechanical,
+  read-only, bounded work on the cheapest model that suffices. This is the spawn/handoff
+  sibling of the gating primitive (Phase 2): perk **borrows the spawn engine
+  (`pi-subagents`) and owns the agent definitions** (open decision #6), and uses an
+  in-process read-only SDK session where determinism matters most (the CI executor).
+- **Inference lives in the agent layer; deterministic planes stay deterministic.** perk's
+  extension tools and the Python `perk` CLI carry *no* agentic reasoning — the agent reasons
+  and passes computed values down as arguments (erk's "inference hoisting"). A bounded
+  one-shot model call may sit low, but a full agent loop must hoist up. This keeps the
+  deterministic planes testable and is the where-may-inference-live complement to
+  cli-vs-pi's authority split.
 - **Skills carry judgment, tools carry mechanics; a skill's `description` is its only
   trigger.** Write skill descriptions as concrete "use when…" phrases and bundle helper
   scripts rather than prose; keep all deterministic mechanics in extension tools.
@@ -324,6 +349,31 @@ an evidence-based call after a full loop of use — and tie perk-owned plan mode
 + GitHub state. Deepen `/implement`'s warm path with the `ctx.newSession` / handoff pattern
 for a fresh context (pi best-practices §8), the in-process twin of the CLI cold door.
 
+**The gating primitive's sibling is context isolation, and it comes in two shapes**
+([erk-subagent-usage.md](./erk-subagent-usage.md)) — both honoring the same handoff contract
+(**cap model-visible output, keep the full result in `details`/a scratch file, verify the
+handoff, return double-delivery**: prose + structured block):
+
+- **In-process read-only SDK session** (`createAgentSession`, `tools:["read",…]`) —
+  **perk-owned.** Deterministic, in-process, no extra process boundary; the right shape for
+  the **read-only CI executor** (the most test- and determinism-sensitive consumer).
+- **Spawned-child delegation engine** — **borrow `pi-subagents`** (open decision #6) rather
+  than rebuild it. It already implements every principle in
+  [erk-subagent-usage.md](./erk-subagent-usage.md) — tool-allowlist gating, `file-only`
+  output handoff (route-don't-relay), `outputSchema`-enforced structured output, model
+  tiering + fallback, depth/recursion guards, worktree-per-parallel-writer, and
+  `ctx.hasUI`-clean headless behavior — behind a **thin seam** (one `subagent` tool + a
+  directory of agent defs). perk **owns the agent definitions, chains, and acceptance
+  wiring** (the workflow-specific part the engine is designed to let consumers own); perk
+  borrows only the engine. This is the shape for **`/pr-address` classification**, parallel
+  review/audit, and (later) **Explore-then-Plan** children for the plan stage.
+
+Pick a cheap model for the mechanical child work and reserve the top-tier model for the
+parent's authoring. Keep perk the authority on workflow state: the engine's acceptance gates
+are a mechanism perk *uses*, never the owner of perk's plan/objective transitions. A Phase 2
+**spike/doctor check** confirms `pi-subagents` runs cleanly under the Phase 3 SDK/`-p` worker
+before perk leans on it (open decision #6).
+
 **Objectives as plan factories** (PRIOR_ART §3). Now that the loop is closed and validated,
 add the objective layer: treat an objective as a long-running goal that *generates bounded
 plans*, not something implemented directly — the genuine differentiator over simpler gallery
@@ -362,18 +412,22 @@ cheaper model — pi best-practices §9).
   the **Run → Report → Fix → Verify** cycle — the executor reports failures, the parent
   agent analyzes and fixes, the executor re-verifies. This structurally prevents the
   "auto-fix trap" (blind `--fix`, broad excepts, suppressed warnings) and keeps noisy test
-  output out of the main context. Uses the gating primitive built above. agent-stuff supplies
-  two working templates (best-practices §9, §11): `loop.ts`'s
-  iterate-until-`signal_success` controller for the cycle, and `review.ts`'s `navigateTree`
-  branch-and-return sub-session (run the read-only pass in a child branch against a rubric,
-  then inject only the summary) to keep the noisy work out of the main context window. The
-  **authoritative** isolated-context template is Pi's own `examples/subagent/`
-  (pi best-practices §8): spawn `pi --mode json -p --no-session --tools <read-only set>`,
-  stream/parse JSON events, propagate abort, and **cap model-visible output while keeping
-  the full result in `details`** — or, equivalently, spin a read-only SDK session
-  (`tools: ["read",…]`). Project-supplied agents/prompts are untrusted: gate them behind a
-  scope flag + confirm.
-- **`/pr-address` = classify-then-act**: classify each piece of feedback
+  output out of the main context. Uses the gating primitive + the **in-process read-only SDK session**
+  built above (perk-owned, deterministic — not the spawned-child engine). agent-stuff
+  supplies two working controllers for the *cycle*
+  (best-practices §9, §11): `loop.ts`'s iterate-until-`signal_success` loop, and
+  `review.ts`'s `navigateTree` branch-and-return sub-session (run the read-only pass in a
+  child branch against a rubric, then inject only the summary). (For the spawned variant used elsewhere,
+  `examples/subagent/` is the authoritative template — pi best-practices §8 — including
+  **abort propagation**; perk borrows `pi-subagents` for that engine, open decision #6.) Project-supplied agents/prompts are untrusted: gate
+  them behind a scope flag + confirm.
+- **`/pr-address` = classify-then-act, in an isolated child**: run the verbose comment
+  fetch + classification inside a **spawned read-only child** (the borrowed `pi-subagents`
+  engine), so raw
+  GitHub comment JSON never enters the main session — erk measured ~65–70% context savings
+  here ([erk-subagent-usage.md](./erk-subagent-usage.md)). The child returns
+  **double-delivery**: a compact prose table for the human and a structured block (thread
+  ids + classification) the parent acts on. Classify each piece of feedback
   (actionable / informational / praise / question) *before* acting; only actionable items
   get code changes. Offer a **preview variant** (classification only). Distinguish **review
   threads vs discussion comments** (different GitHub APIs, counted separately).
@@ -445,11 +499,12 @@ the Phase 2 cold doors run by a process instead of a human.
 
 ### Internalization schedule
 
-| Borrowed in Phase 0 | Internalized | Why |
+| Borrowed | Internalize? | Why |
 |---|---|---|
-| `@tombell/pi-plan` | Phase 2 (decide: keep-wrap vs own) | Internalizing plan mode needs the gating primitive (Phase 2) and ties it to plan-save / GitHub state; the thin loop (Phase 1) keeps borrowing it |
-| `@juicesharp/rpiv-todo` | Phase 2 (→ perk checkpoints) or keep | Don't fake todos; once perk owns implement phases, checkpoints belong to perk |
-| `@tombell/pi-diff`, status bar | Likely **keep** | Additive UX, no workflow authority — no reason to rebuild |
+| `@tombell/pi-plan` (Phase 0) | Phase 2 (decide: keep-wrap vs own) | Internalizing plan mode needs the gating primitive (Phase 2) and ties it to plan-save / GitHub state; the thin loop (Phase 1) keeps borrowing it |
+| `@juicesharp/rpiv-todo` (Phase 0) | Phase 2 (→ perk checkpoints) or keep | Don't fake todos; once perk owns implement phases, checkpoints belong to perk |
+| `@tombell/pi-diff`, status bar (Phase 0) | Likely **keep** | Additive UX, no workflow authority — no reason to rebuild |
+| `pi-subagents` (Phase 2) | **Keep the engine, own the defs** | Principled, headless-clean delegation engine behind a thin seam (open decision #6); internalize a minimal spawn primitive only if weight / determinism / headless costs prove out |
 
 ### Gallery evaluation
 
@@ -457,7 +512,8 @@ the Phase 2 cold doors run by a process instead of a human.
 |---|---|---|
 | **Own — but study as prior art** | `@tombell/pi-plan` (plan mode), `@juicesharp/rpiv-pi` (whole five-skill workflow), `@plannotator/pi-extension` (plan/PR review UI) | No — perk's reason to exist. Read source; don't depend. |
 | **Strong default candidates** (additive, low-risk) | `@juicesharp/rpiv-todo`, `@tombell/pi-status` or `pi-powerline-footer`, `@tombell/pi-diff` | Yes — curated set, recommended in scaffolded settings |
-| **Recommend optionally / document** | subagents (`@tintinweb/pi-subagents`, `@gotgenes/pi-subagents`, `pi-subagents`), `pi-ask-user` / `@juicesharp/rpiv-ask-user-question`, `@gotgenes/pi-permission-system`, `pi-lens` / `pi-simplify` | No default; document as project-dependent add-ons |
+| **Borrow the engine, own the defs** | `pi-subagents` (subagent delegation engine) | Phase-2 borrow (open decision #6) — engine only; perk owns the agent defs + acceptance wiring, CI executor uses an in-process SDK session |
+| **Recommend optionally / document** | alternative subagent packages (`@tintinweb/pi-subagents`, `@gotgenes/pi-subagents`), `pi-ask-user` / `@juicesharp/rpiv-ask-user-question`, `@gotgenes/pi-permission-system`, `pi-lens` / `pi-simplify` | No default; document as project-dependent add-ons |
 | **Avoid defaulting** | `@plannotator/pi-extension` (heavy browser UI), `pi-crew` (competing orchestration), memory/web/MCP packages | No — out of scope or conflicts with "no dashboard in v1" |
 
 ## Non-goals (at least early)
@@ -468,7 +524,8 @@ the Phase 2 cold doors run by a process instead of a human.
   before writing), not the Claude-specific mechanism.
 - No remote-planner / queue complexity before the interactive loop is solid.
 - No bootstrap-dependence on heavy or competing workflow packages — borrow only thin,
-  cheap-to-unwind pieces.
+  cheap-to-unwind pieces. (Thinness is about the *seam*, not package size: the Phase-2
+  `pi-subagents` borrow is heavy but sits behind a one-tool seam — open decision #6.)
 - No port of erk's **Python/Click/gateway/DI architecture** or **Textual TUI** — reimplement
   idiomatically in TypeScript/Pi; use Pi's status lines/widgets, not a dashboard
   (PRIOR_ART §11).
@@ -508,3 +565,13 @@ the Phase 2 cold doors run by a process instead of a human.
    in-session behavior; the two coordinate through durable state + process launch + a
    shared static schema, never in-process coupling. (The earlier slash-command lean is
    superseded.)
+6. **Subagent engine — RESOLVED toward borrow-then-own.** Borrow **`pi-subagents`** as the
+   delegation *engine* — it already embodies the
+   [erk-subagent-usage.md](./erk-subagent-usage.md) principles (tool-gating, route-don't-relay
+   `file-only` handoff, `outputSchema` structured output, model tiering + fallback, depth
+   guards, worktree isolation, `ctx.hasUI`-clean headless) — while perk **owns the agent
+   definitions, chains, and acceptance wiring**. Keep the seam thin (one `subagent` tool + a
+   directory of agent defs) so it stays cheap to unwind. The **CI executor** is the carve-out:
+   it uses a perk-owned **in-process read-only SDK session**, not the spawned engine. Gate: a
+   Phase 2 spike/doctor check that `pi-subagents` runs cleanly under the SDK/`-p` worker, plus
+   the discipline that its acceptance gates never own perk's plan/objective transitions.
