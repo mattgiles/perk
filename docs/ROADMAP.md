@@ -52,7 +52,8 @@ reminder lives at **exactly one** — the most specific tier that achieves compl
 Two corollaries that shape the build:
 - **Safety is structural, not prompted.** Read-only modes (plan, CI) are enforced by tool
   gating (`setActiveTools` + `tool_call` blocking), never by instructions. Build this as
-  one reusable primitive (see Phase 1).
+  one reusable primitive (see Phase 2, where its consumers — perk-owned plan mode and the
+  CI executor — first appear).
 - **Skills are opt-in expertise**, invoked by a user or command, and persist for the
   session. They carry "how to do this well," never a critical transition. (Guideline-only
   skills also fail when forked to a subagent — keep them in the main context.)
@@ -70,7 +71,7 @@ are non-negotiable constraints for *every* perk extension, not phase-specific ni
   3 headless/`-p`/RPC worker. Expose CLI flags so an external supervisor can drive a session
   non-interactively (the queue is just this).
 - **Structural enforcement, with prompting as the cooperative layer on top.** The gating
-  primitive (Phase 1) follows `go-to-bed.ts`: `tool_call` returns `{ block, reason }` and
+  primitive (Phase 2) follows `go-to-bed.ts`: `tool_call` returns `{ block, reason }` and
   the model cannot proceed by being persuaded. Command-safety enforcement follows `uv.ts`:
   a wrapped `bash` tool with **defense in depth** (PATH shims *and* a spawn-time hard block,
   since shims are bypassable via explicit paths).
@@ -117,40 +118,55 @@ are non-negotiable constraints for *every* perk extension, not phase-specific ni
    the simpler "single canonical body + workflow-created PR" direction. Shapes the whole
    GitHub layer. **Lean (PRIOR_ART §12):** adopt erk's *newer* simplification (single
    canonical body + workflow-created PR) rather than reproducing the legacy draft-PR
-   plumbing — keep migration-compat as a Phase 3 import helper, not a v1 constraint. Includes the **lifecycle state machine**: a minimal, machine-readable
-   `lifecycle_stage` (erk's durable set collapses to roughly `planned → impl`, with
-   `merged`/`closed` inferred from PR state, not stored). Start with the fewest stages that
-   are *observably distinct from GitHub state*; erk's lesson was that it over-split stages
-   and later had to consolidate them. (See PRIOR_ART §1.)
-   Whichever direction is chosen, adopt erk's proven **storage discipline** (PRIOR_ART §2):
-   a **two-part split** — compact, queryable metadata (header) separate from the full plan
-   body (collapsible, fetched only when needed) — and a **provider-agnostic plan ref** as
-   the *sole* source of truth for plan↔branch mapping (string ID + `provider` field, so
+   plumbing — keep migration-compat as a Phase 3 import helper, not a v1 constraint. Includes
+   the **lifecycle state machine**: a minimal, machine-readable `lifecycle_stage` (erk's
+   durable set collapses to roughly `planned → impl`, with `merged`/`closed` inferred from PR
+   state, not stored). Start with the fewest stages that are *observably distinct from GitHub
+   state*; erk's lesson was that it over-split stages and later had to consolidate them. (See
+   PRIOR_ART §1.) Whichever direction is chosen, adopt erk's proven **storage discipline**
+   (PRIOR_ART §2): a **two-part split** — compact, queryable metadata (header) separate from
+   the full plan body (collapsible, fetched only when needed) — and a **provider-agnostic plan
+   ref** as the *sole* source of truth for plan↔branch mapping (string ID + `provider` field, so
    non-GitHub backends stay cheap; never encode state in branch names). Saves must be
    **idempotent** keyed on the Pi session id (prevents retry-loop duplicate plans), and
    commands must tolerate **staged field population** (branch/PR refs are null until
    submit) via LBYL checks.
-3. **GitHub access strategy** — shell out to `gh` first (matches existing auth
+3. **Stage registry** — the single declarative, language-neutral schema that enumerates the
+   workflow's resumable **stages** and, per stage, a descriptor: the worktree/branch it
+   needs, the state it reads/writes, the extension command it maps to, its legal
+   predecessors/successors, and which **entry doors** are allowed (warm in-session,
+   cold-local, cold-remote). The Python `perk` CLI generates its subcommands from this
+   registry; the TS extension drives its in-session transitions from it — so CLI↔extension
+   parity is **by construction, not discipline** ([cli-vs-pi.md](./cli-vs-pi.md) §4). Lock
+   the stage set and descriptor shape *before building*, because both planes depend on it
+   and it is the contract that keeps the two languages from drifting. Start with the
+   smallest set that closes the loop (`plan → save → implement → ship`); add
+   `objective-plan`, `submit`/`address`/`land`, and `learn` as Phase 2 deepens.
+4. **GitHub access strategy** — shell out to `gh` first (matches existing auth
    assumptions), then harden metadata-sensitive operations behind deterministic extension
    tools. Decide the *seam* now even if v1 is shell-based.
-4. **Command naming** — flat (`/plan`, `/implement`, `/ship`) vs hyphenated
+5. **Command naming** — flat (`/plan`, `/implement`, `/ship`) vs hyphenated
    (`/perk-*`). Low-stakes; decide quickly.
 
 ## The bootstrap arc
 
-The organizing principle: **borrow-then-own**. In the bootstrap phase perk composes
-existing Pi gallery packages to get a working loop immediately, then progressively
-internalizes each piece into perk-owned, GitHub-backed, deterministic surfaces.
+Two organizing principles. **Borrow-then-own:** compose existing Pi gallery packages to get
+a working loop immediately, then progressively internalize each piece into perk-owned,
+GitHub-backed, deterministic surfaces. **Close-then-deepen:** close a *thin* end-to-end loop
+first so perk can ship perk, then deepen each stage *through that loop* — deferring the most
+speculative work (objectives) until a real plan→ship pipeline exists to validate it.
 
 ```
-Phase 0:  perk = skeleton + borrowed packages  →  can PLAN perk's own work
-Phase 1:  perk owns planning                    →  every later plan lives in perk
-Phase 2:  perk owns implement/ship              →  perk ships perk
-Phase 3:  perk owns headless/queue              →  perk's backlog runs itself
+Phase 0:  skeleton + CLI(init/doctor/worktree) + borrowed plan mode   →  can PLAN perk
+Phase 1:  close the thin loop  (plan → save → implement → ship)       →  perk SHIPS perk
+Phase 2:  deepen the loop  (objectives, CI iteration, review, recon)  →  perk ships perk WELL
+Phase 3:  headless worker, queue, migration, tests                    →  perk's backlog runs itself
 ```
 
-Each arrow is a **dogfood gate**: a phase does not start until the previous one made
-perk able to drive it.
+Each arrow is a **dogfood gate**: a phase does not start until the previous one made perk
+able to drive it. The close-then-deepen ordering makes the gates *stronger* — because the
+whole loop closes at the end of Phase 1, every later stage is built *through perk's own
+plan→ship loop*, not merely through planning.
 
 ## Phases
 
@@ -176,13 +192,17 @@ Then adopt the curated default set as **borrowed scaffolding**:
 - `@juicesharp/rpiv-todo` — checklist overlay surviving `/reload` and compaction.
 - `@tombell/pi-diff` + a status bar (`@tombell/pi-status` or `pi-powerline-footer`).
 
-Ship the two operational commands that make the package installable and keep it
-healthy — perk-native ports of erk's `init` and `doctor` (see
+**CLI slice.** Stand up the **`perk` CLI exterior** (the session host — see
+[cli-vs-pi.md](./cli-vs-pi.md)): `init`, `doctor`, **worktree lifecycle** (create / list /
+remove), a **process-launch primitive** (exec `pi`, primed for a stage), and the
+**stage-registry plumbing** that turns foundational decision #3 into generated subcommands.
+`init`/`doctor` are perk-native ports of erk's commands (see
 [erk source](https://github.com/dagster-io/erk): `src/erk/cli/commands/init/main.py`,
-`src/erk/cli/commands/doctor.py`). These live in the **Python `perk` CLI** (the session
-*exterior* — see [cli-vs-pi.md](./cli-vs-pi.md)), not as slash commands. They are part of
+`src/erk/cli/commands/doctor.py`) and are CLI commands, not slash commands — they are part of
 the substrate, not a later nicety: `init` is what makes a repo dogfoodable, and `doctor` is
 what keeps the borrowed-package + GitHub setup trustworthy while everything else is in flux.
+The per-stage **cold-door launchers** (`perk plan`, `perk implement`, …) arrive with their
+stages in Phases 1–2; Phase 0 builds the plumbing they plug into.
 
 **`perk init`** — port erk's idempotent, multi-step init. The bootstrap order is
 shell-first: install the `perk` CLI (`pip`/`uv`), then `perk init` runs *from the shell* to
@@ -231,45 +251,89 @@ Carry over these behaviors from erk:
 with a live todo overlay, on a repo that `perk init` scaffolded and `perk doctor` keeps
 healthy. perk's earliest self-use is *planning perk*.
 
-### Phase 1 — Self-hosting planning loop (own planning)
+### Phase 1 — Close the thin loop (own the spine)
 
-Replace borrowed plan mode with perk's own surfaces: `/plan`, `/plan-save`, `/replan`,
-`/objective`, `/objective-plan`, with GitHub-backed plan storage. Port the `objective`
-skill. The extension owns mode state, tool gating, footer/status display, and approval
-transitions; skills provide reasoning and document structure. Decide here whether to keep
-wrapping `@tombell/pi-plan` or internalize it — now an evidence-based decision after a
-full phase of use. Build the tool-gating mechanism (read-only allowlist via
-`setActiveTools` + blocking unsafe calls in `tool_call`) as a **reusable primitive**: the
-same machinery powers plan mode here *and* the read-only CI executor in Phase 2
-(PRIOR_ART §5). Design it once, generically, not as a plan-mode special case. Pi's own
-`examples/plan-mode/` is the **complete authoritative recipe** (pi best-practices §5):
-`setActiveTools` allowlist + `tool_call` bash sub-allowlist + hidden `before_agent_start`
-mode-context + `context` strip-when-off + persist/restore + a `--plan` flag. And
-`examples/preset.ts` generalizes it (model + thinking + tools + instructions, with
-**snapshot-then-restore** of prior state and project-overrides-global config) — its shipped
-config literally defines `plan`/`implement` presets, so perk's mode system is an already-
-blessed pattern. (agent-stuff's `go-to-bed.ts` is the template for the `{ block, reason }`
-half.)
+Goal: a *minimal* end-to-end **plan → save → implement → ship** that lets **perk ship
+perk**. Build only the spine; defer every deepening (objectives, CI iteration, review
+classification, the PR-body craft) to Phase 2. The point is to close the loop fast so that
+all later depth is built *through* it.
 
-Implement the storage mechanics from foundational decision #2 (PRIOR_ART §2): header/body
-split on the GitHub side, a provider-agnostic plan ref materialized in `.pi/workflow/`
-with the canonical copy in GitHub and transient linkage in session `appendEntry`, and
-idempotent `/plan-save` keyed on the Pi session id. Make `/plan-save` (and other terminal
-actions) a **terminating tool** (`terminate: true`) so the turn ends on the save without an
-extra LLM round-trip, and mark cache-mutating tools `executionMode: "sequential"` to avoid
-races on the `.pi/workflow/` cache (pi best-practices §6). Encode the **plan-authoring rules**
-in the planning skill — most importantly erk's hard rule that **line-number references are
-disallowed** (they drift); require durable anchors (function names, behavioral
-descriptions, structural locations) instead.
+Keep **borrowed plan mode** for read-only exploration — don't internalize it yet, since that
+needs the gating primitive, which lands in Phase 2 alongside its consumers (perk-owned plan
+mode and the CI executor). Build perk-owned, GitHub-backed **plan storage** and the spine
+commands on top of it:
 
-**Objectives as plan factories** (PRIOR_ART §3). Treat an objective as a long-running goal
-that *generates bounded plans*, not something implemented directly — this is a genuine
-differentiator over the simpler gallery workflows. Carry over erk's storage model:
-frontmatter is canonical, a rendered table is for humans, steps are a **flat list with
-phases derived from ID prefix**. Split responsibilities the same way as plans: the
-**mechanics** (storage, step mutation, status, dependency-graph next-node selection for
-`/objective-plan`) are deterministic extension tools; the **judgment** (which node to plan,
-which nodes a PR completed) stays in skills/prompts.
+- **`/plan-save`** — the storage mechanics from foundational decision #2 (PRIOR_ART §2):
+  header/body split on the GitHub side, a provider-agnostic **plan ref** materialized in
+  `.pi/workflow/` with the canonical copy in GitHub and transient linkage in session
+  `appendEntry`, **idempotent** on the Pi session id. Make it a **terminating tool**
+  (`terminate: true`) so the turn ends on the save without an extra LLM round-trip, and mark
+  cache-mutating tools `executionMode: "sequential"` to avoid races on the `.pi/workflow/`
+  cache (pi best-practices §6). Encode the **plan-authoring rules** in the planning skill —
+  most importantly erk's hard rule that **line-number references are disallowed** (they
+  drift); require durable anchors (function names, behavioral descriptions, structural
+  locations) instead.
+- **`/implement`** — a *thin* execution path. The primary transition is the **CLI cold
+  door** (`perk implement <plan>`: materialize the worktree from the plan ref + launch a
+  fresh `pi`), which gives a clean implement context *for free* — no perk-owned gating or
+  `handoff` sophistication required yet. The warm in-session command just continues in the
+  current worktree.
+- **`/ship`** — a *thin* finish: commit, open a PR whose body carries the plan, and land it
+  once approved. Defer the two-target body craft, `pr check`, and the draft→ready nuance to
+  Phase 2.
+
+**Stage-transition hygiene.** Guard the spine's transitions with Pi's **session-lifecycle
+gates** (`session_before_switch` / `session_before_fork` → `{ cancel }`): port erk's
+dirty-repo / commit-before-leaving checks, failing safe (block) when headless (pi
+best-practices §7).
+
+**CLI slice:** the cold-door launchers for the spine — `perk plan`, `perk implement`,
+`perk ship`, and `perk resume <plan>` — generated from the stage registry (foundational #3).
+
+**Testing starts here, not in Phase 3.** A self-hosting tool must test its deterministic
+core (plan storage, plan-ref, the registry) as it is built. Stand up command/extension tests
+via the SDK + `SessionManager.inMemory()` (pi best-practices §2) from this phase on; only the
+end-to-end *worker* tests wait for Phase 3.
+
+**Dogfood gate:** perk ships perk. Every Phase 2 and Phase 3 change is authored and saved as
+a perk plan, then implemented and landed *through perk's own thin loop* — so all later
+deepening rests on a validated plan→ship spine, not on planning alone.
+
+### Phase 2 — Deepen the loop (objectives, CI, review)
+
+With the thin loop closed, deepen each stage *through perk's own plan→ship loop* — the true
+dogfooding the close-then-deepen ordering buys. This is where the differentiating depth
+lands: **objectives** (the plan factory), the **read-only CI executor**, **review
+handling**, and the polished PR mechanics. Port `pr-operations` and CI-iteration skills.
+Project-local markdown (the old `.erk/prompt-hooks/*`) becomes extension-injected config at
+the right workflow point (via `before_agent_start` or the `resources_discover` event — pi
+best-practices §12).
+
+**Build the tool-gating primitive here** (its consumers now exist): a read-only allowlist
+via `setActiveTools` + blocking unsafe calls in `tool_call`, designed once and generically
+so the *same* machinery powers perk-owned plan mode *and* the read-only CI executor
+(PRIOR_ART §5). Pi's own `examples/plan-mode/` is the **complete authoritative recipe** (pi
+best-practices §5): `setActiveTools` allowlist + `tool_call` bash sub-allowlist + hidden
+`before_agent_start` mode-context + `context` strip-when-off + persist/restore + a `--plan`
+flag; and `examples/preset.ts` generalizes it (model + thinking + tools + instructions, with
+**snapshot-then-restore** and project-overrides-global config) — its shipped config literally
+defines `plan`/`implement` presets, so perk's mode system is an already-blessed pattern.
+(agent-stuff's `go-to-bed.ts` is the template for the `{ block, reason }` half.) With the
+primitive in hand, **decide whether to internalize `@tombell/pi-plan` or keep wrapping it** —
+an evidence-based call after a full loop of use — and tie perk-owned plan mode to `/plan-save`
++ GitHub state. Deepen `/implement`'s warm path with the `ctx.newSession` / handoff pattern
+for a fresh context (pi best-practices §8), the in-process twin of the CLI cold door.
+
+**Objectives as plan factories** (PRIOR_ART §3). Now that the loop is closed and validated,
+add the objective layer: treat an objective as a long-running goal that *generates bounded
+plans*, not something implemented directly — the genuine differentiator over simpler gallery
+workflows, and the reason it lands *after* a working plan→ship pipeline exists to prove the
+plans it emits are useful. Carry over erk's storage model: frontmatter is canonical, a
+rendered table is for humans, steps are a **flat list with phases derived from ID prefix**.
+Split responsibilities the same way as plans: the **mechanics** (storage, step mutation,
+status, dependency-graph next-node selection for `/objective-plan`) are deterministic
+extension tools; the **judgment** (which node to plan, which nodes a PR completed) stays in
+skills/prompts.
 
 Borrow directly from agent-stuff's `goal.ts` (best-practices §11), the closest working prior
 art to a long-running objective: **budget accounting** (sum assistant token usage on
@@ -283,26 +347,8 @@ For long-running loops, keep within the context window with threshold-triggered 
 (`ctx.getContextUsage` + `ctx.compact`, or a custom `session_before_compact` summary on a
 cheaper model — pi best-practices §9).
 
-**Dogfood gate:** the plans for Phase 2 and Phase 3 are authored and saved *with perk's
-own planning loop* and stored as perk's own durable artifacts.
-
-### Phase 2 — Self-hosting implement/ship (own execution)
-
-Build `/implement`, `/pr-submit`, `/pr-address`, `/ship` as extension-owned
-orchestration: branch/worktree setup, plan materialization, phase execution, CI policy,
-review-thread fetch/resolve, commit + PR generation. Port `pr-operations` and
-CI-iteration skills. Project-local markdown (the old `.erk/prompt-hooks/*`) becomes
-extension-injected config at the right workflow point (via `before_agent_start` or the
-`resources_discover` event — pi best-practices §12). Guard stage transitions with Pi's
-**session-lifecycle gates** (`session_before_switch` / `session_before_fork` →
-`{ cancel }`): port erk's dirty-repo / commit-before-leaving checks here, failing safe
-(block) when headless (pi best-practices §7). When a stage needs a *fresh* context (e.g.
-implement shouldn't inherit the planning conversation), use the `ctx.newSession` / handoff
-pattern (pi best-practices §8), the in-process twin of the CLI cold door. Reuse the *shape*
-of erk's flow but drop the Python CLI as the engine. Developed by *planning it in Phase 1's
-loop*.
-
-**PR submission mechanics** to carry over (PRIOR_ART §4):
+**Deepen PR submission** — split the thin `/ship` into `/pr-submit` + land, and carry over
+(PRIOR_ART §4):
 - **Feed plan context into PR generation** so the description matches original intent, and
   use the **two-target split** — a plain-text commit message vs an HTML-enhanced GitHub PR
   body that embeds the full plan in a collapsible section (plan in the PR, not the commit).
@@ -316,7 +362,7 @@ loop*.
   the **Run → Report → Fix → Verify** cycle — the executor reports failures, the parent
   agent analyzes and fixes, the executor re-verifies. This structurally prevents the
   "auto-fix trap" (blind `--fix`, broad excepts, suppressed warnings) and keeps noisy test
-  output out of the main context. Reuses the Phase 1 gating primitive. agent-stuff supplies
+  output out of the main context. Uses the gating primitive built above. agent-stuff supplies
   two working templates (best-practices §9, §11): `loop.ts`'s
   iterate-until-`signal_success` controller for the cycle, and `review.ts`'s `navigateTree`
   branch-and-return sub-session (run the read-only pass in a child branch against a rubric,
@@ -349,9 +395,14 @@ source of truth for what exists, not just what was intended." erk separates body
 into Mechanical (command-updated), Reconcilable (LLM-updated post-merge), and Immutable
 (never touched); mirror that boundary so reconciliation never clobbers historical notes.
 
-**Dogfood gate:** perk's own PRs are submitted, reviewed, and landed through perk.
-`rpiv-todo` checklists can be retired in favor of perk-owned checkpoints; the
-borrow→own internalization is largely complete.
+**CLI slice:** cold doors for the deepened stages — `perk objective-plan`, `perk submit`,
+`perk address`, `perk land` — plus the **local-vs-remote target** option on each
+([cli-vs-pi.md](./cli-vs-pi.md) §4.5), the seam the Phase 3 worker reuses.
+
+**Dogfood gate:** perk now drives its *full* workflow on itself — objectives select the next
+plan, the read-only CI executor iterates, reviews are classified and resolved, and objective
+prose reconciles after landing. `rpiv-todo` checklists can be retired in favor of perk-owned
+checkpoints; the borrow→own internalization is largely complete.
 
 ### Phase 3 — Headless worker, queue, migration, tests (own autonomy)
 
@@ -368,9 +419,13 @@ re-`subscribe` and `bindExtensions` to the new session (pi best-practices §2). 
 `control.ts` (startup flags as a non-interactive drive API) and `split-fork.ts` (fork a
 session file + spawn a fresh `pi`) are corroborating patterns. Add migration helpers
 (import existing planned PRs, translate objective markers, map residual `.claude`
-references). Add tests at two levels: command/extension tests via the SDK +
-`SessionManager.inMemory()`, and end-to-end worker tests via RPC/JSON mode. Developed
+references). **Extend the test suite** from Phase 1's command/extension tests (SDK +
+`SessionManager.inMemory()`) to **end-to-end worker tests** via RPC/JSON mode. Developed
 entirely through perk's interactive loop.
+
+**CLI slice:** the supervisor — queue management and `workflow run` list / cancel / retry
+([cli-vs-pi.md](./cli-vs-pi.md) §2.2), launching stages on the **remote** target. This is
+the Phase 2 cold doors run by a process instead of a human.
 
 **Dogfood gate:** perk schedules and executes its own remaining work.
 
@@ -392,7 +447,7 @@ entirely through perk's interactive loop.
 
 | Borrowed in Phase 0 | Internalized | Why |
 |---|---|---|
-| `@tombell/pi-plan` | Phase 1 (decide: keep-wrap vs own) | Plan-mode transitions must be perk-owned and tied to plan-save / GitHub state |
+| `@tombell/pi-plan` | Phase 2 (decide: keep-wrap vs own) | Internalizing plan mode needs the gating primitive (Phase 2) and ties it to plan-save / GitHub state; the thin loop (Phase 1) keeps borrowing it |
 | `@juicesharp/rpiv-todo` | Phase 2 (→ perk checkpoints) or keep | Don't fake todos; once perk owns implement phases, checkpoints belong to perk |
 | `@tombell/pi-diff`, status bar | Likely **keep** | Additive UX, no workflow authority — no reason to rebuild |
 
@@ -430,16 +485,20 @@ entirely through perk's interactive loop.
 1. **`@juicesharp/rpiv-pi`** — prior art, competitor, or foundation? Lean:
    study, don't bootstrap-depend. perk's GitHub-canonical workflow + objectives model is
    the differentiator; borrowing only `pi-plan` + `rpiv-todo` keeps internalization cheap.
-2. **Plan mode** — reimplement natively or fork/wrap `@tombell/pi-plan`? Lean: borrow in
-   Phase 0, decide in Phase 1 from real usage.
+2. **Plan mode** — reimplement natively or fork/wrap `@tombell/pi-plan`? Lean: borrow
+   through Phase 1's thin loop, decide in Phase 2 from real usage (when the gating primitive
+   lands with the CI executor).
 3. **Objective status model** — erk uses a two-tier resolution (explicit status wins, else
    infer from the PR column) to serve both the parser and humans reading raw markdown, but
    this creates a "stale-status trap" on manual edits (PRIOR_ART §3). Lean:
    **explicit-status-only** unless human-editable raw tables are a hard requirement —
    simpler and trap-free.
-4. **Minimum dogfoodable loop** — is Phase 0 "plan-only" enough to start, or add a thin
-   manual implement/ship path so the full loop is dogfoodable before Phase 1? Lean:
-   plan-only is the honest minimum; implement/ship stays manual git until Phase 2.
+4. **Minimum dogfoodable loop — RESOLVED toward the thin loop.** Phase 1 closes a *thin*
+   end-to-end `plan → save → implement → ship` so **perk ships perk** before any deep stage
+   work; objectives and CI depth move to Phase 2. This closes the dogfood loop earliest and
+   validates plan storage/ref against a real implement/ship *before* investing in the
+   objective factory — avoiding erk's over-build-then-consolidate trap. (Supersedes the
+   earlier "plan-only until Phase 2" lean.)
 5. **`init`/`doctor` delivery — RESOLVED (see [cli-vs-pi.md](./cli-vs-pi.md)).** perk ships
    a **Python `perk` CLI** (successor to `erk`) that owns the session *exterior*: `init`,
    `doctor`, worktree lifecycle, process launch (`perk <stage>`), and headless supervision.
