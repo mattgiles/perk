@@ -1,0 +1,61 @@
+"""Real subprocess-based implementations of GT kit operations interfaces.
+
+This module provides concrete implementations that wrap subprocess.run calls
+for git and Graphite (gt) commands. These are the production implementations
+used by GT kit CLI commands.
+
+Design:
+- Each implementation wraps existing subprocess patterns from CLI commands
+- Returns match interface contracts (str | None, bool, tuple)
+- Uses check=False to allow LBYL error handling
+- RealGtKit composes git, graphite, and GitHub (from erk_shared.gateway.github)
+- Satisfies GtKit Protocol through structural typing
+"""
+
+from pathlib import Path
+
+from erk_shared.context.factories import get_repo_info
+from erk_shared.gateway.git.abc import Git
+from erk_shared.gateway.git.real import RealGit
+from erk_shared.gateway.github.abc import LocalGitHub
+from erk_shared.gateway.github.issues.real import RealGitHubIssues
+from erk_shared.gateway.github.real import RealLocalGitHub
+from erk_shared.gateway.graphite.abc import Graphite
+from erk_shared.gateway.graphite.real import RealGraphite
+from erk_shared.gateway.time.abc import Time
+from erk_shared.gateway.time.real import RealTime
+
+
+class RealGtKit:
+    """Real composite operations implementation.
+
+    Combines real git, GitHub, and Graphite operations for production use.
+    Satisfies the GtKit Protocol through structural typing.
+
+    GitHub operations now use the main RealLocalGitHub from erk_shared.gateway.github
+    which provides repo_root-based methods.
+    """
+
+    git: Git
+    github: LocalGitHub
+    graphite: Graphite
+    time: Time
+
+    def __init__(self, cwd: Path) -> None:
+        """Initialize real operations instances.
+
+        Args:
+            cwd: Working directory for determining repo info. Required for
+                 GitHub operations that need repo_info (like get_pr_for_branch).
+        """
+        self.time = RealTime()
+        self.git = RealGit()
+
+        # Compute repo_info from cwd
+        repo_root = self.git.repo.get_repository_root(cwd)
+        repo_info = get_repo_info(self.git, repo_root)
+
+        # Create issues first, then compose into github
+        issues = RealGitHubIssues(target_repo=None, time=self.time)
+        self.github = RealLocalGitHub(time=self.time, repo_info=repo_info, issues=issues)
+        self.graphite = RealGraphite()

@@ -1,0 +1,398 @@
+"""Tests for review prompt assembly."""
+
+import pytest
+
+from erk.review.models import ParsedReview, ReviewFrontmatter
+from erk.review.prompt_assembly import assemble_review_prompt
+
+
+def _make_review(
+    *,
+    name: str,
+    marker: str,
+    body: str,
+) -> ParsedReview:
+    """Create a test review with common defaults."""
+    return ParsedReview(
+        frontmatter=ReviewFrontmatter(
+            name=name,
+            paths=("**/*.py",),
+            marker=marker,
+            model="claude-sonnet-4-5",
+            timeout_minutes=30,
+            allowed_tools="Read(*)",
+            enabled=True,
+        ),
+        body=body,
+        filename=f"{name.lower().replace(' ', '-')}.md",
+    )
+
+
+class TestAssemblePrPrompt:
+    """Tests for PR mode prompt assembly."""
+
+    def test_basic_prompt_assembly(self) -> None:
+        """Assemble a basic review prompt with all boilerplate."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test-review -->",
+            body="Check for bugs in the code.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=123,
+            base_branch=None,
+        )
+
+        # Check that key elements are present
+        assert "REPO: owner/repo" in prompt
+        assert "PR NUMBER: 123" in prompt
+        assert "Test Review: Review code changes." in prompt
+        assert "Check for bugs in the code." in prompt
+        assert "<!-- test-review -->" in prompt
+        assert "gh pr diff 123" in prompt
+        assert "post-pr-inline-comment" in prompt
+        assert "post-or-update-pr-summary" in prompt
+        assert "get-review-activity-log" in prompt
+        assert "Activity Log" in prompt
+        # Must NOT contain the old raw jq pipeline
+        assert "gh pr view" not in prompt
+
+    def test_prompt_includes_review_name_in_inline_comment_format(self) -> None:
+        """Prompt includes review name in inline comment format."""
+        review = _make_review(
+            name="Dignified Python",
+            marker="<!-- dignified-python -->",
+            body="Review body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=456,
+            base_branch=None,
+        )
+
+        # The inline comment format should include the review name
+        assert "**Dignified Python**" in prompt
+
+    def test_prompt_preserves_body_content(self) -> None:
+        """Prompt preserves the full review body content."""
+        body = """\
+## Step 1: Load Rules
+
+Read the rules file.
+
+## Step 2: Analyze
+
+Check each file against the rules.
+
+## Step 3: Report
+
+Post findings.
+"""
+        review = _make_review(
+            name="Multi-Step Review",
+            marker="<!-- multi-step -->",
+            body=body,
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=789,
+            base_branch=None,
+        )
+
+        # All body content should be preserved
+        assert "## Step 1: Load Rules" in prompt
+        assert "## Step 2: Analyze" in prompt
+        assert "## Step 3: Report" in prompt
+        assert "Read the rules file." in prompt
+
+    def test_prompt_uses_correct_pr_number(self) -> None:
+        """Prompt uses the correct PR number throughout."""
+        review = _make_review(
+            name="Test",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=999,
+            base_branch=None,
+        )
+
+        # PR number should appear in multiple places
+        assert "PR NUMBER: 999" in prompt
+        assert "gh pr diff 999" in prompt
+        assert "--pr-number 999" in prompt
+
+    def test_prompt_includes_deduplication_step(self) -> None:
+        """Prompt includes a step to deduplicate against existing comments."""
+        review = _make_review(
+            name="Dignified Python",
+            marker="<!-- dignified-python -->",
+            body="Review body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=42,
+            base_branch=None,
+        )
+
+        assert "Deduplicate Against Existing Comments" in prompt
+        assert "erk exec get-pr-review-comments --pr 42 --include-resolved" in prompt
+
+    def test_prompt_deduplication_references_review_name(self) -> None:
+        """Deduplication step references the review name for prefix matching."""
+        review = _make_review(
+            name="Tripwire Check",
+            marker="<!-- tripwire -->",
+            body="Review body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=100,
+            base_branch=None,
+        )
+
+        assert "**Tripwire Check**:" in prompt
+        assert "Do NOT post violations marked DUPLICATE" in prompt
+
+    def test_prompt_collect_dedup_post_step_order(self) -> None:
+        """Steps follow collect -> dedup -> post -> summary order."""
+        review = _make_review(
+            name="Test",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=1,
+            base_branch=None,
+        )
+
+        diff_pos = prompt.index("## Step 3: Get the Diff")
+        collect_pos = prompt.index("## Step 4: Collect Violations")
+        dedup_pos = prompt.index("## Step 5: Deduplicate Against Existing Comments")
+        post_pos = prompt.index("## Step 6: Post Only NEW Violations")
+        summary_pos = prompt.index("## Step 7: Post Summary Comment")
+
+        assert diff_pos < collect_pos < dedup_pos < post_pos < summary_pos
+
+    def test_summary_wraps_details_in_collapsible_block(self) -> None:
+        """Summary format wraps verbose sections in a collapsible details block."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test-review -->",
+            body="Check for issues.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=42,
+            base_branch=None,
+        )
+
+        # The details block must be present
+        assert "<details>" in prompt
+        assert "<summary>Details</summary>" in prompt
+        assert "</details>" in prompt
+
+        # Violation count line must appear before the details block opens
+        violation_count_pos = prompt.index("Found X violations across Y files.")
+        details_open_pos = prompt.index("<details>")
+        assert violation_count_pos < details_open_pos
+
+        # Extract only the content inside the details block
+        details_close_pos = prompt.index("</details>")
+        details_content = prompt[details_open_pos:details_close_pos]
+
+        # Detailed sections must be inside the details block
+        assert "### Patterns Checked" in details_content
+        assert "### Violations Summary" in details_content
+        assert "### Files Reviewed" in details_content
+        assert "### Activity Log" in details_content
+
+    def test_prompt_includes_exclude_section(self) -> None:
+        """Prompt includes file exclusion section when patterns provided."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=123,
+            base_branch=None,
+            exclude_patterns=(".claude/skills/", "vendor/"),
+        )
+
+        assert "## File Exclusions" in prompt
+        assert "`.claude/skills/`" in prompt
+        assert "`vendor/`" in prompt
+        # Exclusion section should appear before collect step
+        exclusion_pos = prompt.index("## File Exclusions")
+        collect_pos = prompt.index("## Step 4: Collect Violations")
+        assert exclusion_pos < collect_pos
+
+    def test_prompt_no_exclude_section_when_empty(self) -> None:
+        """Prompt does not include exclusion section when no patterns."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=123,
+            base_branch=None,
+            exclude_patterns=(),
+        )
+
+        assert "## File Exclusions" not in prompt
+
+
+class TestAssembleLocalPrompt:
+    """Tests for local mode prompt assembly."""
+
+    def test_local_prompt_assembly(self) -> None:
+        """Assemble a local review prompt with git diff commands."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test-review -->",
+            body="Check for bugs.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="owner/repo",
+            pr_number=None,
+            base_branch="main",
+        )
+
+        # Should contain local mode elements
+        assert "REPO: owner/repo" in prompt
+        assert "BASE BRANCH: main" in prompt
+        assert "Test Review: Review local code changes" in prompt
+        assert "Check for bugs." in prompt
+        assert "git diff --name-only $(git merge-base main HEAD)...HEAD" in prompt
+        assert "git diff $(git merge-base main HEAD)...HEAD" in prompt
+
+        # Should NOT contain PR mode elements
+        assert "PR NUMBER:" not in prompt
+        assert "gh pr diff" not in prompt
+        assert "post-or-update-pr-summary" not in prompt
+
+    def test_local_prompt_uses_base_branch(self) -> None:
+        """Local prompt uses the specified base branch."""
+        review = _make_review(
+            name="Test",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=None,
+            base_branch="develop",
+        )
+
+        assert "BASE BRANCH: develop" in prompt
+        assert "git merge-base develop HEAD" in prompt
+
+    def test_local_prompt_outputs_to_stdout(self) -> None:
+        """Local prompt instructs to output violations to stdout."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=None,
+            base_branch="main",
+        )
+
+        # Should have stdout-based output instructions
+        assert "Output Violations" in prompt
+        assert "**Test Review Violation**" in prompt
+        assert "Summary" in prompt
+
+    def test_local_prompt_includes_exclude_section(self) -> None:
+        """Local prompt includes file exclusion section when patterns provided."""
+        review = _make_review(
+            name="Test Review",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        prompt = assemble_review_prompt(
+            review=review,
+            repository="test/repo",
+            pr_number=None,
+            base_branch="main",
+            exclude_patterns=(".claude/skills/",),
+        )
+
+        assert "## File Exclusions" in prompt
+        assert "`.claude/skills/`" in prompt
+        # Exclusion section should appear before output step
+        exclusion_pos = prompt.index("## File Exclusions")
+        output_pos = prompt.index("## Step 3: Output Violations")
+        assert exclusion_pos < output_pos
+
+
+class TestAssembleValidation:
+    """Tests for parameter validation."""
+
+    def test_raises_if_both_pr_and_base_provided(self) -> None:
+        """Raises ValueError if both pr_number and base_branch provided."""
+        review = _make_review(
+            name="Test",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            assemble_review_prompt(
+                review=review,
+                repository="test/repo",
+                pr_number=123,
+                base_branch="main",
+            )
+
+    def test_raises_if_neither_pr_nor_base_provided(self) -> None:
+        """Raises ValueError if neither pr_number nor base_branch provided."""
+        review = _make_review(
+            name="Test",
+            marker="<!-- test -->",
+            body="Body.",
+        )
+
+        with pytest.raises(ValueError, match="Must specify either"):
+            assemble_review_prompt(
+                review=review,
+                repository="test/repo",
+                pr_number=None,
+                base_branch=None,
+            )

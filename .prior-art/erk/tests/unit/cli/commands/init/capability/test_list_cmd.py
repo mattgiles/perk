@@ -1,0 +1,116 @@
+"""Tests for erk init capability list command."""
+
+import re
+
+from click.testing import CliRunner
+
+from erk.cli.cli import cli
+from erk_shared.context.types import GlobalConfig
+from tests.fakes.gateway.erk_installation import FakeErkInstallation
+from tests.fakes.gateway.git import FakeGit
+from tests.test_utils.env_helpers import erk_isolated_fs_env
+
+
+def test_capability_list_shows_available_capabilities() -> None:
+    """Test that list command shows all registered capabilities."""
+    runner = CliRunner()
+    with erk_isolated_fs_env(runner, env_overrides=None) as env:
+        git_ops = FakeGit(git_common_dirs={env.cwd: env.git_dir})
+        global_config = GlobalConfig.test(
+            env.cwd / "fake-erks", use_graphite=False, shell_setup_complete=False
+        )
+
+        erk_installation = FakeErkInstallation(config=global_config)
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            erk_installation=erk_installation,
+            global_config=global_config,
+        )
+
+        result = runner.invoke(cli, ["init", "capability", "list"], obj=test_ctx)
+
+        assert result.exit_code == 0, result.output
+        # Check main header
+        assert "Erk capabilities:" in result.output
+        # Check a project capability with scope label
+        assert "learned-docs" in result.output
+        assert "[project]" in result.output
+        assert "Autolearning documentation system" in result.output
+        # Check a user capability with scope label
+        assert "statusline" in result.output
+        assert "[user]" in result.output
+
+
+def test_capability_list_works_without_repo() -> None:
+    """Test that list command works outside a git repository."""
+    runner = CliRunner()
+    with erk_isolated_fs_env(runner, env_overrides=None) as env:
+        # FakeGit returns None for git_common_dir when not in a repo
+        git_ops = FakeGit(git_common_dirs={})
+        global_config = GlobalConfig.test(
+            env.cwd / "fake-erks", use_graphite=False, shell_setup_complete=False
+        )
+
+        erk_installation = FakeErkInstallation(config=global_config)
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            erk_installation=erk_installation,
+            global_config=global_config,
+        )
+
+        result = runner.invoke(cli, ["init", "capability", "list"], obj=test_ctx)
+
+        assert result.exit_code == 0, result.output
+        assert "learned-docs" in result.output
+
+
+def test_capability_list_sorts_alphabetically() -> None:
+    """Test that capabilities are sorted alphabetically within each scope."""
+    runner = CliRunner()
+    with erk_isolated_fs_env(runner, env_overrides=None) as env:
+        git_ops = FakeGit(git_common_dirs={env.cwd: env.git_dir})
+        global_config = GlobalConfig.test(
+            env.cwd / "fake-erks", use_graphite=False, shell_setup_complete=False
+        )
+
+        erk_installation = FakeErkInstallation(config=global_config)
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            erk_installation=erk_installation,
+            global_config=global_config,
+        )
+
+        result = runner.invoke(cli, ["init", "capability", "list"], obj=test_ctx)
+
+        assert result.exit_code == 0, result.output
+
+        # Extract capability names from output
+        # Format is "  ✓/○ capability-name [scope] description"
+        capability_pattern = re.compile(r"^\s+[✓○?]\s+(\S+)\s+\[(\w+)\]", re.MULTILINE)
+
+        # Collect capabilities by scope
+        project_capabilities: list[str] = []
+        user_capabilities: list[str] = []
+
+        for match in capability_pattern.finditer(result.output):
+            cap_name = match.group(1)
+            scope = match.group(2)
+            if scope == "project":
+                project_capabilities.append(cap_name)
+            elif scope == "user":
+                user_capabilities.append(cap_name)
+
+        # Verify each scope is sorted alphabetically
+        assert project_capabilities == sorted(project_capabilities), (
+            f"Project capabilities not sorted: {project_capabilities}"
+        )
+        assert user_capabilities == sorted(user_capabilities), (
+            f"User capabilities not sorted: {user_capabilities}"
+        )
+
+        # Verify we found capabilities in both scopes
+        assert len(project_capabilities) > 0, "No project capabilities found"
+        assert len(user_capabilities) > 0, "No user capabilities found"

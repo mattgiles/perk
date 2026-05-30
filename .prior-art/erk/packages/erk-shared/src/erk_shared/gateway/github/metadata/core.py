@@ -1,0 +1,894 @@
+"""Core operations for creating, rendering, and parsing metadata blocks."""
+
+import logging
+import re
+from typing import Any
+
+import yaml
+
+from erk_shared.gateway.github.metadata.registry import (
+    BlockCategory,
+    get_block_type,
+)
+from erk_shared.gateway.github.metadata.schemas import (
+    ImplementationStatusSchema,
+    ObjectiveHeaderSchema,
+    PlanSchema,
+    SubmissionQueuedSchema,
+    WorkflowStartedSchema,
+    WorktreeCreationSchema,
+)
+from erk_shared.gateway.github.metadata.types import (
+    BlockKeys,
+    MetadataBlock,
+    MetadataBlockError,
+    MetadataBlockSchema,
+    MetadataParseResult,
+    RawMetadataBlock,
+)
+from erk_shared.output.next_steps import format_next_steps_markdown
+
+logger = logging.getLogger(__name__)
+
+
+def create_metadata_block(
+    key: str,
+    data: dict[str, Any],
+    *,
+    schema: MetadataBlockSchema | None,
+) -> MetadataBlock:
+    """
+    Create a metadata block with optional schema validation.
+
+    Args:
+        key: The metadata block key (appears in summary)
+        data: The structured data (will be rendered as YAML)
+        schema: Optional schema to validate data against
+
+    Returns:
+        MetadataBlock instance
+
+    Raises:
+        ValueError: If schema validation fails
+    """
+    if schema is not None:
+        schema.validate(data)
+
+    return MetadataBlock(key=key, data=data)
+
+
+def render_metadata_block(block: MetadataBlock) -> str:
+    """
+    Render a metadata block as markdown with HTML comment wrappers.
+
+    Returns markdown like:
+    <!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+    <!-- erk:metadata-block:{key} -->
+    <details>
+    <summary>{key}</summary>
+    ```yaml
+    {yaml_content}
+    ```
+    </details>
+    <!-- /erk:metadata-block -->
+    """
+    yaml_content = yaml.safe_dump(
+        block.data,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    )
+
+    # Remove trailing newline from YAML dump
+    yaml_content = yaml_content.rstrip("\n")
+
+    return f"""<!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+<!-- erk:metadata-block:{block.key} -->
+<details>
+<summary>{block.key}</summary>
+
+```yaml
+
+{yaml_content}
+
+```
+
+</details>
+<!-- /erk:metadata-block:{block.key} -->"""
+
+
+def render_erk_issue_event(
+    title: str,
+    metadata: MetadataBlock | None,
+    description: str,
+) -> str:
+    """
+    Format a GitHub issue comment for an erk event with consistent structure.
+
+    Creates a comment with:
+    - Title line
+    - Metadata block (collapsible YAML) if provided
+    - Horizontal separator
+    - Optional description/instructions
+
+    Args:
+        title: The event title (e.g., "Starting implementation")
+        metadata: Optional metadata block with event details
+        description: Optional instructions or additional context
+
+    Returns:
+        Formatted comment body ready for GitHub API
+
+    Example:
+        >>> comment = render_erk_issue_event(
+        ...     "Starting implementation",
+        ...     description="**Worktree:** `my-worktree`"
+        ... )
+    """
+    # Build comment structure
+    parts = [
+        title,
+        "",  # Blank line after title
+    ]
+
+    # Add metadata block if provided
+    if metadata is not None:
+        metadata_markdown = render_metadata_block(metadata)
+        parts.extend([metadata_markdown, ""])  # Blank line after metadata
+
+    parts.extend(["---", ""])  # Separator and blank line
+
+    # Add description if provided
+    if description:
+        parts.append(description)
+
+    return "\n".join(parts)
+
+
+def create_implementation_status_block(
+    *,
+    status: str,
+    timestamp: str,
+    summary: str | None = None,
+    branch_name: str | None = None,
+    pr_url: str | None = None,
+    commit_sha: str | None = None,
+    worktree_path: str | None = None,
+    status_history: list[dict[str, str]] | None = None,
+) -> MetadataBlock:
+    """Create an erk-implementation-status block with validation.
+
+    Args:
+        status: Current status (pending, in_progress, complete, failed)
+        timestamp: ISO 8601 timestamp
+        summary: Optional summary text
+        branch_name: Optional git branch name
+        pr_url: Optional pull request URL
+        commit_sha: Optional final commit SHA
+        worktree_path: Optional path to worktree
+        status_history: Optional list of status transitions with timestamps and reasons
+
+    Returns:
+        MetadataBlock with erk-implementation-status schema
+    """
+    schema = ImplementationStatusSchema()
+    data: dict[str, Any] = {
+        "status": status,
+        "timestamp": timestamp,
+    }
+    if summary is not None:
+        data["summary"] = summary
+    if branch_name is not None:
+        data["branch_name"] = branch_name
+    if pr_url is not None:
+        data["pr_url"] = pr_url
+    if commit_sha is not None:
+        data["commit_sha"] = commit_sha
+    if worktree_path is not None:
+        data["worktree_path"] = worktree_path
+    if status_history is not None:
+        data["status_history"] = status_history
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+def create_worktree_creation_block(
+    *,
+    worktree_name: str,
+    branch_name: str,
+    timestamp: str,
+    pr_number: int | None = None,
+    plan_file: str | None = None,
+) -> MetadataBlock:
+    """Create an erk-worktree-creation block with validation.
+
+    Args:
+        worktree_name: Name of the worktree
+        branch_name: Git branch name
+        timestamp: ISO 8601 timestamp of creation
+        pr_number: Optional GitHub PR number this worktree implements
+        plan_file: Optional path to the plan file
+
+    Returns:
+        MetadataBlock with erk-worktree-creation schema
+    """
+    schema = WorktreeCreationSchema()
+    data: dict[str, Any] = {
+        "worktree_name": worktree_name,
+        "branch_name": branch_name,
+        "timestamp": timestamp,
+    }
+
+    if pr_number is not None:
+        data["pr_number"] = pr_number
+
+    if plan_file is not None:
+        data["plan_file"] = plan_file
+
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+def create_plan_block(
+    pr_number: int,
+    worktree_name: str,
+    timestamp: str,
+    plan_file: str | None = None,
+) -> MetadataBlock:
+    """Create an erk-pr block with validation.
+
+    Args:
+        pr_number: GitHub PR number for this plan
+        worktree_name: Auto-generated worktree name from issue title
+        timestamp: ISO 8601 timestamp of issue creation
+        plan_file: Optional path to the plan file
+
+    Returns:
+        MetadataBlock with erk-pr schema
+    """
+    schema = PlanSchema()
+    data: dict[str, Any] = {
+        "pr_number": pr_number,
+        "worktree_name": worktree_name,
+        "timestamp": timestamp,
+    }
+
+    if plan_file is not None:
+        data["plan_file"] = plan_file
+
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+def create_submission_queued_block(
+    *,
+    queued_at: str,
+    submitted_by: str,
+    pr_number: int,
+    validation_results: dict[str, bool],
+    expected_workflow: str,
+) -> MetadataBlock:
+    """Create a submission-queued block with validation.
+
+    Args:
+        queued_at: ISO 8601 timestamp when submission was queued
+        submitted_by: Username from git config (user.name)
+        pr_number: GitHub PR issue number
+        validation_results: Dict with validation checks (pr_is_open, has_erk_pr_title, etc.)
+        expected_workflow: Name of the GitHub Actions workflow that will run
+
+    Returns:
+        MetadataBlock with submission-queued schema
+    """
+    schema = SubmissionQueuedSchema()
+    data = {
+        "status": "queued",
+        "queued_at": queued_at,
+        "submitted_by": submitted_by,
+        "pr_number": pr_number,
+        "validation_results": validation_results,
+        "expected_workflow": expected_workflow,
+        "trigger_mechanism": "label-based-webhook",
+    }
+
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+def create_workflow_started_block(
+    *,
+    started_at: str,
+    workflow_run_id: str,
+    workflow_run_url: str,
+    pr_number: int,
+    branch_name: str | None = None,
+    worktree_path: str | None = None,
+) -> MetadataBlock:
+    """Create a workflow-started block with validation.
+
+    Args:
+        started_at: ISO 8601 timestamp when workflow started
+        workflow_run_id: GitHub Actions run ID
+        workflow_run_url: Full URL to the workflow run
+        pr_number: GitHub PR issue number
+        branch_name: Optional git branch name
+        worktree_path: Optional path to worktree
+
+    Returns:
+        MetadataBlock with workflow-started schema
+    """
+    schema = WorkflowStartedSchema()
+    data: dict[str, Any] = {
+        "status": "started",
+        "started_at": started_at,
+        "workflow_run_id": workflow_run_id,
+        "workflow_run_url": workflow_run_url,
+        "pr_number": pr_number,
+    }
+
+    if branch_name is not None:
+        data["branch_name"] = branch_name
+
+    if worktree_path is not None:
+        data["worktree_path"] = worktree_path
+
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+# Backward compatibility alias
+create_plan_issue_block = create_plan_block
+
+
+def create_plan_body_block(plan_content: str) -> MetadataBlock:
+    """Create a metadata block that wraps the plan body content.
+
+    This creates a collapsible block to make the issue more readable,
+    showing the plan content behind a disclosure triangle.
+
+    Args:
+        plan_content: The full plan markdown content
+
+    Returns:
+        MetadataBlock with key BlockKeys.PLAN_BODY
+    """
+    data = {
+        "content": plan_content,
+    }
+    return MetadataBlock(key=BlockKeys.PLAN_BODY, data=data)
+
+
+def render_plan_body_block(block: MetadataBlock) -> str:
+    """Render a plan-body metadata block with the plan as collapsible markdown.
+
+    Returns markdown like:
+    <!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+    <!-- erk:metadata-block:plan-body -->
+    <details open>
+    <summary><strong>📋 Implementation Plan</strong></summary>
+
+    {plan_content}
+
+    </details>
+    <!-- /erk:metadata-block:plan-body -->
+    """
+    if "content" not in block.data:
+        raise ValueError("plan-body block must have 'content' field")
+
+    plan_content = block.data["content"]
+
+    return f"""<!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+<!-- erk:metadata-block:{block.key} -->
+<details open>
+<summary><strong>\U0001f4cb Implementation Plan</strong></summary>
+
+{plan_content}
+
+</details>
+<!-- /erk:metadata-block:{block.key} -->"""
+
+
+def format_execution_commands(pr_number: int, *, url: str, branch_name: str) -> str:
+    """Format execution commands section for plan issues.
+
+    Args:
+        pr_number: GitHub PR issue number
+        url: GitHub issue URL
+        branch_name: Branch name for checkout commands
+
+    Returns:
+        Formatted markdown with copy-pasteable commands
+    """
+    return format_next_steps_markdown(pr_number, url=url, branch_name=branch_name)
+
+
+def format_plan_commands_section(pr_number: int) -> str:
+    """Format copy-pasteable commands section for plan issues.
+
+    Args:
+        pr_number: GitHub PR issue number
+
+    Returns:
+        Formatted markdown with copy-pasteable commands for the issue body
+    """
+    return f"""## Commands
+
+```bash
+erk br co --for-pr {pr_number}
+```
+
+```bash
+erk pr dispatch {pr_number}
+```"""
+
+
+def format_plan_issue_body_simple(plan_content: str) -> str:
+    """Format issue body with plan in collapsible block, no execution commands.
+
+    This is an optimized version that doesn't require the issue number,
+    allowing issue creation without a subsequent body update call.
+    Execution commands are shown in CLI output instead of the issue body.
+
+    Args:
+        plan_content: The plan markdown content
+
+    Returns:
+        Issue body with plan wrapped in collapsible <details> block
+    """
+    plan_block = create_plan_body_block(plan_content)
+    return render_plan_body_block(plan_block)
+
+
+def format_plan_issue_body(plan_content: str, pr_number: int, *, url: str, branch_name: str) -> str:
+    """Format the complete issue body for a plan issue.
+
+    Creates an issue body with:
+    1. Plan content wrapped in collapsible metadata block
+    2. Horizontal rule separator
+    3. Execution commands section
+
+    Args:
+        plan_content: The plan markdown content
+        pr_number: GitHub PR issue number (for command formatting)
+        url: GitHub issue URL
+        branch_name: Branch name for checkout commands
+
+    Returns:
+        Complete issue body ready for GitHub
+    """
+    plan_block = create_plan_body_block(plan_content)
+    plan_markdown = render_plan_body_block(plan_block)
+    commands_section = format_execution_commands(pr_number, url=url, branch_name=branch_name)
+
+    return f"""{plan_markdown}
+
+---
+
+{commands_section}"""
+
+
+def extract_raw_metadata_blocks(text: str) -> list[RawMetadataBlock]:
+    """
+    Extract raw metadata blocks using HTML comment markers (Phase 1).
+
+    Extracts blocks delimited by:
+    <!-- erk:metadata-block:key --> ... <!-- /erk:metadata-block -->
+
+    Does NOT validate or parse the body structure. Returns raw body content
+    for caller to parse.
+
+    Args:
+        text: Markdown text potentially containing metadata blocks
+
+    Returns:
+        List of RawMetadataBlock instances with unparsed body content
+    """
+    raw_blocks: list[RawMetadataBlock] = []
+
+    # Phase 1 pattern: Extract only using HTML comment markers
+    # Captures key and raw body content between markers
+    # Accepts both <!-- /erk:metadata-block --> and <!-- /erk:metadata-block:key -->
+    pattern = r"<!-- erk:metadata-block:(.+?) -->(.+?)<!-- /erk:metadata-block(?::\1)? -->"
+
+    matches = re.finditer(pattern, text, re.DOTALL)
+
+    for match in matches:
+        key = match.group(1).strip()
+        body = match.group(2).strip()
+        raw_blocks.append(RawMetadataBlock(key=key, body=body))
+
+    return raw_blocks
+
+
+def parse_metadata_block_body(body: str) -> dict[str, Any]:
+    """
+    Parse the body of a metadata block (Phase 2).
+
+    Expects body format:
+    <details>
+    <summary>key</summary>
+    ```yaml
+    content
+    ```
+    </details>
+
+    Also accepts legacy format with <code> tags in summary.
+
+    Args:
+        body: Raw body content from a metadata block
+
+    Returns:
+        The parsed YAML data as a dict
+
+    Raises:
+        ValueError: If body format is invalid or YAML parsing fails
+    """
+    # Phase 2 pattern: Extract YAML content from details structure
+    # Accept both <details> and <details open>
+    pattern = (
+        r"<details(?:\s+open)?>\s*<summary>(?:<code>)?[^<]+(?:</code>)?</summary>\s*"
+        r"```yaml\s*(.*?)\s*```\s*</details>"
+    )
+
+    match = re.search(pattern, body, re.DOTALL)
+    if not match:
+        raise ValueError("Body does not match expected <details> structure")
+
+    yaml_content = match.group(1)
+
+    # Parse YAML (strict - raises on error)
+    try:
+        data = yaml.safe_load(yaml_content)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse YAML content: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValueError(f"YAML content is not a dict, got {type(data).__name__}")
+
+    return data
+
+
+def parse_metadata_blocks(text: str) -> MetadataParseResult:
+    """
+    Extract all metadata blocks from markdown text (two-phase parsing).
+
+    Phase 1: Extract raw blocks using HTML comment markers
+    Phase 2: Route by category — content blocks are preserved as-is,
+             YAML and unknown blocks are parsed
+
+    Errors are collected in the result rather than logged silently.
+
+    Args:
+        text: Markdown text potentially containing metadata blocks
+
+    Returns:
+        MetadataParseResult with parsed blocks, content blocks, and any errors
+    """
+    blocks: list[MetadataBlock] = []
+    errors: list[MetadataBlockError] = []
+    content_blocks: list[RawMetadataBlock] = []
+
+    # Phase 1: Extract raw blocks
+    raw_blocks = extract_raw_metadata_blocks(text)
+
+    # Phase 2: Route each block by category
+    for raw_block in raw_blocks:
+        block_type = get_block_type(raw_block.key)
+
+        # Content blocks are preserved as raw blocks, not YAML-parsed
+        if block_type is not None and block_type.category == BlockCategory.CONTENT:
+            content_blocks.append(raw_block)
+            continue
+
+        # YAML and unknown blocks go through YAML parsing
+        try:
+            data = parse_metadata_block_body(raw_block.body)
+            blocks.append(MetadataBlock(key=raw_block.key, data=data))
+        except ValueError as e:
+            errors.append(MetadataBlockError(key=raw_block.key, message=str(e)))
+            continue
+
+    return MetadataParseResult(
+        blocks=tuple(blocks),
+        errors=tuple(errors),
+        content_blocks=tuple(content_blocks),
+    )
+
+
+def find_metadata_block(text: str, key: str) -> MetadataBlock | None:
+    """
+    Find a specific metadata block by key.
+
+    Args:
+        text: Markdown text to search
+        key: The metadata block key to find
+
+    Returns:
+        MetadataBlock if found, None otherwise
+    """
+    result = parse_metadata_blocks(text)
+    for block in result.blocks:
+        if block.key == key:
+            return block
+    return None
+
+
+def has_metadata_block(text: str, key: str) -> bool:
+    """Check whether a metadata block with the given key exists.
+
+    Args:
+        text: Markdown text to search.
+        key: The metadata block key to look for.
+
+    Returns:
+        True if the block exists, False otherwise.
+    """
+    return find_metadata_block(text, key) is not None
+
+
+def extract_metadata_value(
+    text: str,
+    key: str,
+    field: str,
+) -> Any | None:
+    """
+    Extract a specific field value from a metadata block.
+
+    Args:
+        text: Markdown text to search
+        key: The metadata block key
+        field: The YAML field to extract
+
+    Returns:
+        The field value if found, None otherwise
+
+    Example:
+        >>> text = "...comment with metadata block..."
+        >>> extract_metadata_value(text, "erk-implementation-status", "status")
+        "complete"
+    """
+    block = find_metadata_block(text, key)
+    if block is None:
+        return None
+
+    return block.data.get(field)
+
+
+def replace_metadata_block_in_body(
+    body: str,
+    key: str,
+    new_block_content: str,
+) -> str:
+    """Replace a metadata block in the body with new content.
+
+    Uses the HTML comment markers to locate and replace the block.
+    This is used internally by update functions to replace individual blocks.
+
+    Args:
+        body: Full issue body
+        key: Metadata block key (e.g., "plan-header")
+        new_block_content: New rendered block content (from render_metadata_block())
+
+    Returns:
+        Updated body with block replaced
+
+    Raises:
+        ValueError: If block not found
+    """
+    # Pattern to match the entire metadata block from opening to closing comment.
+    # Supports both closing tag formats:
+    #   - <!-- /erk:metadata-block:key -->
+    #   - <!-- /erk:metadata-block -->
+    escaped_key = re.escape(key)
+    pattern = (
+        rf"(?:<!-- WARNING: Machine-generated\. Manual edits may break erk tooling\. -->\n)*"
+        rf"<!-- erk:metadata-block:{escaped_key} -->"
+        rf"(.+?)"
+        rf"<!-- /erk:metadata-block(?::{escaped_key})? -->"
+    )
+
+    if not re.search(pattern, body, re.DOTALL):
+        raise ValueError(f"Metadata block '{key}' not found in body")
+
+    return re.sub(pattern, new_block_content, body, flags=re.DOTALL)
+
+
+def add_metadata_block(
+    body: str,
+    rendered_block: str,
+) -> str:
+    """Add a rendered metadata block to an entity body.
+
+    Inserts the block before the last footer separator (``\\n---\\n``)
+    if one exists, otherwise appends it.
+
+    Args:
+        body: The current entity body (PR body, issue body, etc.)
+        rendered_block: The fully rendered metadata block string
+            (from ``render_metadata_block()``)
+
+    Returns:
+        Updated body with the block added.
+    """
+    footer_separator = "\n---\n"
+    footer_idx = body.rfind(footer_separator)
+    if footer_idx != -1:
+        before_footer = body[:footer_idx]
+        after_footer = body[footer_idx:]
+        return before_footer + "\n\n" + rendered_block + after_footer
+    return body + "\n\n" + rendered_block
+
+
+def create_objective_header_block(
+    *,
+    created_at: str,
+    created_by: str,
+    objective_comment_id: int | None,
+    slug: str | None,
+) -> MetadataBlock:
+    """Create an objective-header metadata block with validation.
+
+    Args:
+        created_at: ISO 8601 timestamp of objective creation
+        created_by: GitHub username of objective creator
+        objective_comment_id: GitHub comment ID containing objective content (nullable)
+        slug: Short kebab-case identifier for the objective (nullable)
+
+    Returns:
+        MetadataBlock with objective-header schema
+    """
+    schema = ObjectiveHeaderSchema()
+    data: dict[str, Any] = {
+        "created_at": created_at,
+        "created_by": created_by,
+        "objective_comment_id": objective_comment_id,
+    }
+    if slug is not None:
+        data["slug"] = slug
+    return create_metadata_block(
+        key=schema.get_key(),
+        data=data,
+        schema=schema,
+    )
+
+
+def render_objective_body_block(content: str) -> str:
+    """Render objective content wrapped in objective-body metadata block.
+
+    Returns markdown like:
+    <!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+    <!-- erk:metadata-block:objective-body -->
+    <details open>
+    <summary><strong>Objective</strong></summary>
+
+    {content}
+
+    </details>
+    <!-- /erk:metadata-block:objective-body -->
+    """
+    return f"""<!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+<!-- erk:metadata-block:objective-body -->
+<details open>
+<summary><strong>Objective</strong></summary>
+
+{content}
+
+</details>
+<!-- /erk:metadata-block:objective-body -->"""
+
+
+def format_objective_content_comment(content: str) -> str:
+    """Format objective content for the first comment.
+
+    Wraps objective content in collapsible objective-body metadata block.
+    If the content contains roadmap tables, wraps them with HTML comment
+    markers for reliable table detection by update-objective-node.
+
+    Args:
+        content: The full objective markdown content
+
+    Returns:
+        Comment body with objective wrapped in metadata block
+    """
+    from erk_shared.gateway.github.metadata.roadmap import wrap_roadmap_tables_with_markers
+
+    marked_content = wrap_roadmap_tables_with_markers(content.strip())
+    return render_objective_body_block(marked_content)
+
+
+def extract_objective_header_comment_id(issue_body: str) -> int | None:
+    """Extract objective_comment_id from objective-header block.
+
+    Args:
+        issue_body: Issue body containing objective-header block
+
+    Returns:
+        objective_comment_id if found, None if block is missing or field is unset
+    """
+    block = find_metadata_block(issue_body, BlockKeys.OBJECTIVE_HEADER)
+    if block is None:
+        return None
+
+    return block.data.get("objective_comment_id")
+
+
+def extract_objective_slug(issue_body: str) -> str | None:
+    """Extract slug from objective-header metadata block.
+
+    Args:
+        issue_body: Issue body containing objective-header block
+
+    Returns:
+        slug value if found, None if block is missing or field is unset
+    """
+    return extract_metadata_value(issue_body, BlockKeys.OBJECTIVE_HEADER, "slug")
+
+
+def extract_objective_from_comment(comment_body: str) -> str | None:
+    """Extract objective content from a comment with objective-body metadata block.
+
+    Args:
+        comment_body: Comment body potentially containing objective content
+
+    Returns:
+        Extracted objective content, or None if markers not found
+    """
+    raw_blocks = extract_raw_metadata_blocks(comment_body)
+    for block in raw_blocks:
+        if block.key == BlockKeys.OBJECTIVE_BODY:
+            # Extract content from <details> structure
+            # The objective-body block uses <strong> tags in summary (not <code>)
+            # Accept both <details> and <details open>
+            pattern = r"<details(?:\s+open)?>\s*<summary>.*?</summary>\s*(.*?)\s*</details>"
+            match = re.search(pattern, block.body, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+
+    return None
+
+
+def update_objective_header_comment_id(
+    issue_body: str,
+    comment_id: int,
+) -> str:
+    """Update objective_comment_id field in objective-header metadata block.
+
+    Args:
+        issue_body: Current issue body containing objective-header block
+        comment_id: GitHub comment ID containing the objective content
+
+    Returns:
+        Updated issue body with new objective_comment_id field
+
+    Raises:
+        ValueError: If objective-header block not found or invalid
+    """
+    block = find_metadata_block(issue_body, BlockKeys.OBJECTIVE_HEADER)
+    if block is None:
+        raise ValueError("objective-header block not found in issue body")
+
+    updated_data = dict(block.data)
+    updated_data["objective_comment_id"] = comment_id
+
+    schema = ObjectiveHeaderSchema()
+    schema.validate(updated_data)
+
+    new_block = MetadataBlock(key=BlockKeys.OBJECTIVE_HEADER, data=updated_data)
+    new_block_content = render_metadata_block(new_block)
+
+    return replace_metadata_block_in_body(issue_body, BlockKeys.OBJECTIVE_HEADER, new_block_content)

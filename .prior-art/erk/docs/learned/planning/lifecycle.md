@@ -1,0 +1,1099 @@
+---
+title: Plan Lifecycle
+last_audited: "2026-02-11 00:00 PT"
+audit_result: clean
+read_when:
+  - "creating a plan"
+  - "closing a plan"
+  - "understanding plan states"
+tripwires:
+  - action: "manually creating an erk-pr with gh issue create"
+    warning: "Use `erk exec plan-save --plan-file <path>` instead. Manual creation requires complex metadata block format (see Metadata Block Reference section)."
+  - action: "saving a plan linked to an objective"
+    warning: "Always verify the link was saved correctly with `erk exec get-pr-metadata <issue> objective_issue`. Silent failures can leave plans unlinked from their objectives."
+  - action: "implementing custom PR/plan relevance assessment logic"
+    warning: "Reference `/local:check-superceded` verdict classification system first. Use SUPERSEDED, PARTIALLY_SUPERSEDED, STILL_RELEVANT, NEEDS_REVIEW verdict categories for consistency. Note: DIFFERENT_APPROACH is a match type in the evidence table, not a verdict."
+  - action: "after plan-implement execution completes"
+    warning: "Always clean .erk/impl-context/ with `git rm -rf .erk/impl-context/` and commit. Transient artifacts cause CI formatter failures (Prettier)."
+  - action: "implementing PR body generation with checkout footers"
+    warning: "HTML `<details>` tags will fail `has_checkout_footer_for_pr()` validation. Use plain text backtick format: `` `gh pr checkout <number>` ``"
+  - action: "calling commands that depend on `.erk/impl-context/plan-ref.json` metadata"
+    warning: "Verify metadata file exists in worktree; if missing, operations silently return empty values. read_plan_ref() tries plan-ref.json first, falls back to legacy issue.json."
+  - action: "delegating batch file renames from a plan"
+    warning: "Verify each file path exists before delegating. Wrong paths cause silent coverage gaps in rename operations."
+  - action: "renaming a lifecycle stage value"
+    warning: "Update 3 locations: LifecycleStageValue type, valid_stages set, and color conditions in compute_lifecycle_display(). Missing any location causes silent validation failures or incorrect TUI colors."
+    score: 7
+---
+
+# Plan Lifecycle
+
+Complete documentation for the erk plan lifecycle from creation through merge. The lifecycle is currently GitHub-specific but uses provider-agnostic abstractions (PlanRef, PlanProviderType) designed for future provider generalization.
+
+## Table of Contents
+
+- [Executive Summary](#executive-summary)
+- [Understanding Investigation Findings](#understanding-investigation-findings)
+- [Phase 1: Plan Creation](#phase-1-plan-creation)
+- [Phase 2: Plan Submission](#phase-2-plan-submission)
+- [Phase 3: Workflow Dispatch](#phase-3-workflow-dispatch)
+- [Phase 4: Implementation](#phase-4-implementation)
+- [Phase 5: PR Finalization & Merge](#phase-5-pr-finalization--merge)
+- [State Linking Mechanisms](#state-linking-mechanisms)
+- [Metadata Block Reference](#metadata-block-reference)
+- [Quick State Reconstruction](#quick-state-reconstruction)
+
+---
+
+## Executive Summary
+
+The erk plan lifecycle manages implementation plans from creation through automated execution and PR merge.
+
+### Lifecycle Overview
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Create    │────▶│   Submit    │────▶│  Dispatch   │────▶│  Implement  │────▶│    Merge    │
+│    Plan     │     │    Plan     │     │  Workflow   │     │    Plan     │     │     PR      │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+       │                  │                   │                   │                   │
+       ▼                  ▼                   ▼                   ▼                   ▼
+ GitHub Issue       git branch            GitHub Actions      Code Changes        Issue Closed
+ with erk-pr        creates branch        finds existing      committed           via commit
+ label              + draft PR            PR and executes     and pushed          message
+```
+
+### Key File Locations at a Glance
+
+| Location                          | Purpose                                                        |
+| --------------------------------- | -------------------------------------------------------------- |
+| `~/.claude/plans/*.md`            | Local plan storage (sorted by modification time)               |
+| `.erk/impl-context/plan.md`       | Immutable plan in worktree (local implementation)              |
+| `.erk/impl-context/progress.md`   | Mutable progress tracking                                      |
+| `.erk/impl-context/plan-ref.json` | Plan reference (provider-agnostic, replaces legacy issue.json) |
+| `.erk/impl-context/run-info.json` | GitHub Actions run reference (remote only)                     |
+
+### Which Phase Am I In?
+
+| Observable State                      | Current Phase                | `lifecycle_stage` |
+| ------------------------------------- | ---------------------------- | ----------------- |
+| Issue has `erk-pr` label, no comments | Phase 1: Created             | `planned`         |
+| Issue has `submission-queued` comment | Phase 2: Submitted           | `planned`         |
+| Issue has `workflow-started` comment  | Phase 3: Dispatched          | `impl`            |
+| PR is draft, workflow running         | Phase 4: Implementing        | `impl`            |
+| PR is ready for review                | Phase 5: Complete            | `impl`            |
+| Issue is CLOSED                       | Merged (PR closed the issue) | —                 |
+
+**Note:** The `lifecycle_stage` field in plan-header metadata provides a machine-readable equivalent of these observable states. See [Lifecycle Stage Tracking](#lifecycle-stage-tracking) for details.
+
+### Plan Relevance Assessment
+
+When evaluating whether a plan should be implemented or closed, use the verdict classification system from `/local:check-superceded`:
+
+| Verdict              | Meaning                                       |
+| -------------------- | --------------------------------------------- |
+| SUPERSEDED           | All key changes are present in master         |
+| PARTIALLY_SUPERSEDED | Some key changes present, others still needed |
+| STILL_RELEVANT       | Most key changes are absent from master       |
+| NEEDS_REVIEW         | Evidence is ambiguous, manual review required |
+
+**Usage:** Run `/local:check-superceded <pr-number>` to assess whether a PR has been superseded before deciding to implement or close it.
+
+### Session Idempotency
+
+Plan save operations are idempotent within a session. The `plan-save` command:
+
+1. Checks if a plan was already created for this session ID
+2. If found, returns the existing issue instead of creating a duplicate
+3. Queries GitHub for an existing plan saved by this session
+
+This prevents duplicate issues when retry loops occur (e.g., hook blocking → retry → would-be duplicate).
+
+### Plan Storage Lookup Priority
+
+When looking up plan files, the system checks in order:
+
+| Priority | Location                      | Condition            |
+| -------- | ----------------------------- | -------------------- |
+| 1        | `--plan-file` argument        | Always checked first |
+| 2        | `.erk/scratch/sessions/{id}/` | With `--session-id`  |
+| 3        | `~/.claude/plans/` (by mtime) | Fallback             |
+
+See [Plan Lookup Strategy](plan-lookup-strategy.md) for details on session-scoped lookups.
+
+---
+
+## Understanding Investigation Findings
+
+When a plan includes an "Investigation Findings" section, these are **mandatory corrections** that MUST be incorporated, not optional suggestions.
+
+### What Investigation Findings Are
+
+Investigation findings appear in plans (especially erk-learn consolidation plans) after an agent:
+
+1. **Validates original assumptions** - Checks if files exist, features are implemented, APIs work as documented
+2. **Discovers reality mismatches** - Finds when original plans referenced non-existent files, outdated APIs, or completed work
+3. **Documents corrections** - Records what actually exists vs what was planned
+
+**Example from a real plan:**
+
+```markdown
+## Investigation Findings
+
+### Corrections to Original Plans
+
+- **#6134**: `prompt-executor-gateway.md` still references Haiku - confirmed needs update
+- **#6131**: `preprocessing.md` exists (81 lines) - needs UPDATE not CREATE
+- **#6130**: Pattern templates don't exist anywhere - confirmed CREATE needed
+```
+
+### Why They Matter
+
+Without investigation findings, agents would:
+
+- Create duplicate files that already exist
+- Update non-existent files
+- Implement features that are already complete
+- Reference APIs that have changed
+
+Investigation findings **correct the plan** to match current reality.
+
+### How to Use Investigation Findings
+
+When implementing a plan with investigation findings:
+
+1. **Read them first** - Before starting implementation, understand what changed
+2. **Trust them completely** - They reflect actual codebase investigation
+3. **Follow their directives** - "UPDATE not CREATE" means use Edit, not Write
+4. **Don't second-guess** - The investigation was thorough
+
+**Anti-pattern:** Skipping investigation findings and following original plan items that were later corrected.
+
+**Correct pattern:** Use investigation findings to understand what actions to take, then refer to implementation steps for execution order.
+
+---
+
+## Phase 1: Plan Creation
+
+Plans can be created through two paths: interactive (via Claude) or CLI (direct).
+
+### Interactive Path: Plan Mode + `/erk:plan-save`
+
+The interactive path uses Claude's plan mode for guided plan creation:
+
+```bash
+# 1. Enter Plan Mode (automatic for complex tasks)
+# 2. Create plan interactively
+# 3. Exit Plan Mode
+# 4. Save to GitHub:
+/erk:plan-save
+```
+
+This workflow:
+
+1. Claude enters Plan Mode for the task
+2. Plan creation with context extraction
+3. Plan saved to `~/.claude/plans/*.md` on Exit Plan Mode
+4. `/erk:plan-save` creates GitHub Issue with `erk-pr` label
+
+### CLI Path: `erk pr create --file <path>`
+
+Direct plan creation from a file:
+
+```bash
+erk pr create --file my-plan.md
+```
+
+This creates a GitHub Issue directly from the plan file.
+
+### Plan Storage
+
+Plans are stored in GitHub Issues:
+
+- **Issue body**: Contains `plan-header` metadata block
+- **First comment**: Contains `plan-body` with full plan content in collapsible details
+
+**Issue body structure:**
+
+````markdown
+# Plan: [Title]
+
+<!-- WARNING: Machine-generated. Manual edits may break erk tooling. -->
+<!-- erk:metadata-block:plan-header -->
+<details>
+<summary><code>plan-header</code></summary>
+
+```yaml
+created_at: 2025-01-15T10:30:00Z
+created_by: username
+last_dispatched_at: null
+last_dispatched_run_id: null
+last_local_impl_at: null
+lifecycle_stage: planned
+```
+````
+
+</details>
+<!-- /erk:metadata-block:plan-header -->
+```
+
+**First comment structure:**
+
+```markdown
+<!-- erk:metadata-block:plan-body -->
+<details>
+<summary><code>plan-body</code></summary>
+
+[Full plan content here]
+
+</details>
+<!-- /erk:metadata-block:plan-body -->
+```
+
+### The `erk-pr` Label
+
+The `erk-pr` label marks issues as implementation plans:
+
+- **Auto-created** if it doesn't exist (green, #0E8A16)
+- **Required** for submission and implementation
+- **Validated** before workflow dispatch
+
+---
+
+## Phase 2: Plan Submission
+
+Dispatch prepares the plan for remote execution via `erk pr dispatch <issue_number>`.
+
+**Key responsibility**: `erk pr dispatch` is the **source of truth** for branch and PR creation. The workflow dispatch (Phase 3) expects these to already exist.
+
+### Pre-Submission Validation
+
+Before submission, the command validates:
+
+1. **Label check**: Issue must have `erk-pr` label
+2. **State check**: Issue must be OPEN (not closed)
+3. **Clean working directory**: No uncommitted changes
+
+### Branch Reuse Detection
+
+Before creating a new branch, `erk pr submit` checks for existing local branches matching the plan's branch pattern:
+
+```
+Found existing local branch(es) for this issue:
+  • plnd/feature-01-10-0900
+  • plnd/feature-01-12-1430
+
+New branch would be: plnd/feature-01-15-1600
+
+Use existing branch 'plnd/feature-01-12-1430'? [Y/n]
+```
+
+**Note:** Legacy plans may still use the `P{number}-*` pattern. Current plans use the `plnd/` prefix.
+
+**User options:**
+
+1. **Use existing** (default): Continue with the most recent branch
+2. **Delete and create new**: Remove existing branches, start fresh
+3. **Abort**: Cancel submission
+
+This prevents branch proliferation when resubmitting plans.
+
+### Branch Creation
+
+Branches are created directly via git:
+
+```bash
+git branch <branch_name> <base_branch>
+```
+
+**Branch naming**: Erk computes the branch name using `sanitize_worktree_name()` with a timestamp suffix. Branch names follow the pattern `plnd/{slug}-{timestamp}` where the slug is derived from the plan title.
+
+**Example**: Plan "Add user authentication" → `plnd/add-user-authentic-11-30-1430`
+
+**Legacy format**: Older plans may use the `P{issue}-{slug}-{timestamp}` format (e.g., `P123-add-user-authentic-11-30-1430`). The `P{issue}-` prefix is considered legacy; `plan-ref.json` is now the sole source of truth for plan-to-branch mapping.
+
+### Learn Plan Base Branch Selection
+
+Learn plans (issues with `erk-learn` label) use special base branch logic:
+
+1. **Extract parent reference**: Read `learned_from_issue` from plan-header metadata
+2. **Fetch parent plan**: Get the parent implementation plan's issue
+3. **Get parent branch**: Extract `branch_name` from parent's plan-header
+4. **Stack on parent**: Use parent's branch as base instead of trunk
+
+This creates a branch hierarchy:
+
+```
+trunk (main)
+    └── plnd/feature-branch-01-15-1430 (parent implementation)
+            └── plnd/docs-for-feature-01-16-0900 (learn plan)
+```
+
+**Note:** Legacy plans may still use the `P{issue}-` prefix pattern. Current plans use `plnd/` prefix.
+
+**Fallback**: If parent lookup fails (missing parent, no branch recorded), falls back to trunk.
+
+**Implementation**: See `get_learn_plan_parent_branch()` in `src/erk/cli/commands/pr/dispatch_cmd.py`.
+
+### `.erk/impl-context/` Folder Creation
+
+The submit command creates the `.erk/impl-context/` folder structure:
+
+```
+.erk/impl-context/
+├── plan.md         # Full plan content from issue
+└── ref.json        # Plan reference metadata (provider, plan_id, url, etc.)
+```
+
+**`ref.json` structure:**
+
+```json
+{
+  "provider": "github",
+  "pr_id": "123",
+  "url": "https://github.com/owner/repo/issues/123",
+  "created_at": "2025-01-15T10:30:00Z",
+  "synced_at": "2025-01-15T10:30:00Z",
+  "labels": [],
+  "objective_id": null
+}
+```
+
+### Draft PR Creation
+
+A draft PR is created locally (for correct commit attribution):
+
+- **Title**: Issue title with "Plan: " prefix stripped
+- **Body**: Includes checkout instructions and metadata
+- **State**: Draft (marked ready after implementation)
+
+**Note**: The PR body includes `**Plan:** #<issue_number>` to link back to the issue. Issue closing is handled via commit message keywords ("Closes #N") when the PR is merged.
+
+### `distinct_id` Generation
+
+A 6-character base36 identifier is generated for workflow run discovery:
+
+- Used in workflow `run-name` for matching
+- Enables polling to find the specific run
+- Format: `{issue_number}:{distinct_id}` in run display title
+
+### Metadata Update
+
+After submission, the issue receives a `submission-queued` comment with metadata:
+
+```yaml
+schema: submission-queued
+queued_at: 2025-01-15T10:30:00Z
+submitted_by: username
+issue_number: 123
+validation_results:
+  pr_is_open: true
+  has_erk_pr_label: true
+expected_workflow: erk-impl
+```
+
+---
+
+## Phase 3: Workflow Dispatch
+
+The `plan-implement.yml` workflow handles remote implementation.
+
+### Workflow Inputs
+
+| Input          | Description                          |
+| -------------- | ------------------------------------ |
+| `issue_number` | GitHub issue number to implement     |
+| `submitted_by` | GitHub username of submitter         |
+| `distinct_id`  | 6-char base36 for run discovery      |
+| `issue_title`  | Issue title for workflow run display |
+
+### Concurrency Control
+
+```yaml
+concurrency:
+  group: implement-issue-${{ github.event.inputs.issue_number }}
+  cancel-in-progress: true
+```
+
+This ensures only one implementation runs per issue at a time.
+
+### Workflow Phases
+
+#### Phase 1: Checkout & Setup
+
+- Checkout repository with full history
+- Install tools: `uv`, `erk`, `claude`, `prettier`
+- Configure git with submitter identity
+- Detect trunk branch (main or master)
+
+#### Phase 2: Find PR & Checkout Branch
+
+- Find existing PR via `gh pr list --head <branch_name>` (by branch, not body search)
+- Checkout the implementation branch
+- Update `.erk/impl-context/` with fresh plan content (for reruns)
+
+#### Phase 3: Use Existing PR
+
+- Use existing PR (created by `erk pr submit`)
+- Post `workflow-started` comment to issue
+- Update issue body with `last_dispatched_run_id`
+
+#### Phase 4: Implementation
+
+- Recreate `.erk/impl-context/` with fresh plan content, then untrack from git (Claude reads `.erk/impl-context/` directly)
+- Create `.erk/impl-context/run-info.json` with workflow run details
+- Execute `/erk:plan-implement` with Claude
+
+#### Phase 5: Submission
+
+- Stage implementation changes (NOT `.erk/impl-context/` deletion)
+- Run `/erk:git-pr-push` to create proper commit message
+- Clean up `.erk/impl-context/` in separate commit
+- Mark PR ready for review
+- Update PR body with implementation summary
+- Trigger CI via empty commit
+
+---
+
+## Phase 4: Implementation
+
+Implementation executes the plan, whether locally or via GitHub Actions.
+
+### `.erk/impl-context/` Folder
+
+`.erk/impl-context/` is used for both local and remote implementation. In GitHub Actions, it is initially committed (to transfer plan content to the branch), then untracked before Claude runs so implementation changes don't conflict with it. After implementation, it is cleaned up in a separate commit.
+
+### `.erk/impl-context/run-info.json`
+
+Created in GitHub Actions to track the workflow run:
+
+```json
+{
+  "run_id": "1234567890",
+  "run_url": "https://github.com/owner/repo/actions/runs/1234567890"
+}
+```
+
+### `/erk:plan-implement` Command
+
+The implementation command:
+
+1. Validates `.erk/impl-context/` exists with `plan.md` and `progress.md`
+2. Creates TodoWrite entries for tracking
+3. Posts start comment to GitHub issue (if linked)
+4. Executes each phase sequentially
+5. Updates `progress.md` as steps complete
+6. Runs CI validation
+7. Cleans up artifacts
+
+### Progress Tracking
+
+Progress is tracked in `.erk/impl-context/progress.md`:
+
+```markdown
+---
+completed_nodes: 3
+total_nodes: 5
+steps:
+  - text: "1. First step"
+    completed: true
+  - text: "2. Second step"
+    completed: true
+  - text: "3. Third step"
+    completed: true
+  - text: "4. Fourth step"
+    completed: false
+  - text: "5. Fifth step"
+    completed: false
+---
+
+# Progress Tracking
+
+- [x] 1. First step
+- [x] 2. Second step
+- [x] 3. Third step
+- [ ] 4. Fourth step
+- [ ] 5. Fifth step
+```
+
+Progress tracking is done via the TodoWrite tool in the Claude Code session.
+
+### Detecting Queued vs Implemented Plans
+
+A PR associated with a plan may exist but not contain the actual implementation:
+
+- **Queued Plan**: PR contains only `.erk/impl-context/` folder with plan files
+- **Implemented Plan**: PR contains actual source code changes
+
+To verify implementation status:
+
+1. Check if PR diff includes changes outside `.erk/impl-context/`
+2. Use `gh pr diff <number>` and look for actual implementation files
+3. Don't rely solely on PR state (OPEN/MERGED) - a PR can be open with only plan files
+
+This pattern was discovered when verifying prerequisite PR #5577: the PR existed and was open, but only contained `.erk/impl-context/` plan files, not the actual PlanSynthesizer agent.
+
+### No-Changes Error Scenario
+
+When implementation produces no code changes (duplicate plan, work already merged), the workflow handles this gracefully:
+
+1. **Detects no changes**: Branch has no commits beyond base
+2. **Creates diagnostic PR**: Updates PR body with diagnostic information
+3. **Applies `no-changes` label**: Marks PR for user review
+4. **Posts issue comment**: Links issue to diagnostic PR
+5. **Exits gracefully**: Returns exit code 0 (success)
+
+**Exit code semantics:**
+
+- Exit 0 = Success (PR updated and ready for review)
+- Exit 1 = Error (GitHub API failure)
+
+The workflow treats no-changes as successful completion, not an error. Users review the diagnostic PR to determine if work is already done.
+
+See [No Code Changes Handling](no-changes-handling.md) for details.
+
+---
+
+## Phase 5: PR Finalization & Merge
+
+The final phase prepares the PR for review and merge.
+
+### `/erk:git-pr-push` Submission
+
+The pure git submission flow:
+
+1. Analyze staged changes
+2. Generate AI commit message
+3. Commit with proper attribution
+4. Push to remote
+5. Update PR body with summary
+
+### `.erk/impl-context/` Cleanup
+
+In GitHub Actions, `.erk/impl-context/` is removed in a separate commit after CI passes:
+
+```bash
+git rm -rf .erk/impl-context/
+git commit -m "Remove .erk/impl-context/ folder after implementation"
+git push
+```
+
+This keeps the implementation commit clean.
+
+#### Timing and Distinction
+
+The cleanup happens in a specific sequence:
+
+1. **Implementation commit** - Contains the actual code changes
+2. **CI validation** - Tests, formatting, type checking must pass
+3. **Remove `.erk/impl-context/`** - Cleanup commit (this step)
+4. **Push changes** - Both commits pushed to PR
+
+**Clear sequence**: CI passes → remove `.erk/impl-context/` → commit → push
+
+### PR Ready for Review
+
+```bash
+gh pr ready "$BRANCH_NAME"
+```
+
+Marks the draft PR as ready for review.
+
+### PR Body Update
+
+The PR body is updated with:
+
+1. Implementation summary (from commit message)
+2. Standardized footer from `get-pr-body-footer`
+3. Checkout instructions
+
+### CI Trigger
+
+An empty commit triggers push-event workflows:
+
+```bash
+git commit --allow-empty -m "Trigger CI workflows"
+git push
+```
+
+This is needed because workflow dispatch doesn't trigger PR workflows.
+
+### Auto-Close on Merge
+
+GitHub automatically closes the linked issue when the PR is merged if the commit message contains "Closes #N" or similar keywords.
+
+The `gt finalize` command (used during PR finalization) adds the closing keyword to the commit message, ensuring the issue is closed when the PR merges.
+
+---
+
+## Objective Roadmap Integration
+
+When implementing a plan that corresponds to an objective roadmap step, the workflow includes automatic roadmap updates via markers.
+
+### Marker-Based State Management
+
+1. **Create markers during planning:**
+   - `objective-context` marker: stores objective issue number (read by plan-save to link the plan to its parent objective)
+   - `roadmap-step` marker: stores step ID (e.g., "1C.2") for automatic roadmap updates
+
+2. **Automatic roadmap update on plan save:**
+   - `/erk:plan-save` checks for `roadmap-step` marker
+   - If present, runs `erk exec update-objective-node` to update the objective's roadmap table with the plan link
+   - Marker is cleared after successful submission
+
+### Lifecycle
+
+```
+Create markers → Save plan → Update roadmap → Submit → Clear markers
+```
+
+### When to Use
+
+This pattern applies when a plan is created from an objective step via `/erk:objective-plan`. The markers are set automatically during that workflow. Manual marker creation is not typically needed.
+
+---
+
+## State Linking Mechanisms
+
+Entities are connected through GitHub's native linking and deterministic metadata.
+
+### Branch → Issue
+
+Branches follow the pattern `plnd/{slug}-{timestamp}`. The association between branch and plan is tracked in `plan-ref.json`, which is the sole source of truth for plan-to-branch mapping.
+
+**Legacy format:** Older branches may use the `P{issue}-{slug}-{timestamp}` pattern (e.g., `P123-feature-name-01-15-1430`), where the issue number is encoded in the branch name. This format is considered legacy.
+
+#### Objective-Linked Branches
+
+When a plan is associated with an objective (via `plan.objective_id`), the branch name encodes the objective ID:
+
+**Format**: `plnd/O{objective}-{slug}-{timestamp}`
+
+**Example**: `plnd/O6234-consolidated-do-01-30-1128`
+
+**Legacy format**: Older objective-linked branches may use `P{plan}-O{objective}-{slug}-{timestamp}` (e.g., `P6318-O6234-consolidated-do-01-30-1128`).
+
+This encoding enables:
+
+- **Traceability**: Branches visually indicate their objective context
+- **Automated tracking**: Commands can extract objective ID via `extract_objective_number(branch_name)`
+- **Workflow routing**: Objective-aware cleanup and status updates
+
+The objective ID is passed through the implementation pipeline:
+
+1. `plan.objective_id` is set when plan is created from an objective step
+2. `generate_planned_pr_branch_name(..., objective_id=plan.objective_id)` encodes it into the branch name
+3. Downstream commands extract it via `extract_objective_number(current_branch)`
+
+**Backwards Compatibility**: All extraction functions work with both current and legacy formats (`plnd/O456-...`, `P123-O456-...`, and `P123-...`).
+
+### PR → Issue
+
+PRs are linked to issues through:
+
+- **PR body**: Contains `**Plan:** #<issue_number>` reference
+- **Commit message**: The `gt finalize` command adds "Closes #N" keyword to ensure issue closure on merge
+
+### Issue → Workflow Run
+
+The `plan-header` metadata block contains:
+
+```yaml
+last_dispatched_run_id: "1234567890"
+last_dispatched_at: 2025-01-15T10:30:00Z
+```
+
+Updated by `erk exec update-pr-header` command.
+
+### Workflow Run → Issue
+
+The workflow receives `issue_number` as input:
+
+```yaml
+inputs:
+  issue_number:
+    description: "GitHub issue number to implement"
+    required: true
+```
+
+Available throughout as `${{ inputs.issue_number }}`.
+
+### Run Discovery
+
+The `distinct_id` enables finding the specific workflow run:
+
+1. **Generation**: 6-char base36 created at dispatch time
+2. **Run name**: Set to `"{issue_number}:{distinct_id}"`
+3. **Polling**: Match runs by `displayTitle` containing `:distinct_id`
+
+---
+
+## Metadata Block Reference
+
+All metadata blocks use a consistent format:
+
+````html
+<!-- erk:metadata-block:{key} -->
+<details>
+  <summary><code>{key}</code></summary>
+
+  ```yaml {structured_data} ```
+</details>
+<!-- /erk:metadata-block:{key} -->
+````
+
+### Block Types
+
+| Block Key                   | Location            | Purpose                                         |
+| --------------------------- | ------------------- | ----------------------------------------------- |
+| `plan-header`               | Issue body          | Plan metadata (created_at, dispatched_at, etc.) |
+| `plan-body`                 | Issue first comment | Full plan content in collapsible details        |
+| `submission-queued`         | Issue comment       | Marks submission to queue                       |
+| `workflow-started`          | Issue comment       | Links to specific workflow run                  |
+| `erk-implementation-status` | Issue comment       | Progress updates during implementation          |
+| `erk-worktree-creation`     | Issue comment       | Documents local worktree creation               |
+
+### `plan-header` Schema
+
+```yaml
+created_at: 2025-01-15T10:30:00Z
+created_by: username
+last_dispatched_at: 2025-01-15T11:00:00Z # null if never dispatched
+last_dispatched_run_id: "1234567890" # null if never dispatched
+last_local_impl_at: 2025-01-15T12:00:00Z # null if never implemented locally
+lifecycle_stage: planned # null if not yet tracked (see Lifecycle Stage Tracking)
+```
+
+### `submission-queued` Schema
+
+```yaml
+schema: submission-queued
+queued_at: 2025-01-15T10:30:00Z
+submitted_by: username
+issue_number: 123
+validation_results:
+  pr_is_open: true
+  has_erk_pr_label: true
+expected_workflow: erk-impl
+```
+
+### `workflow-started` Schema
+
+```yaml
+schema: workflow-started
+status: started
+started_at: 2025-01-15T10:30:00Z
+workflow_run_id: "1234567890"
+workflow_run_url: https://github.com/owner/repo/actions/runs/1234567890
+branch_name: 123-add-user-authentic-11-30-1430
+issue_number: 123
+```
+
+### `erk-implementation-status` Schema
+
+```yaml
+status: in_progress # pending, in_progress, complete, failed
+completed_nodes: 3
+total_nodes: 5
+timestamp: 2025-01-15T10:30:00Z
+node_description: "Implementing feature X" # optional
+```
+
+### `erk-worktree-creation` Schema
+
+```yaml
+worktree_name: 123-add-user-authentic-11-30-1430
+branch_name: 123-add-user-authentic-11-30-1430
+timestamp: 2025-01-15T10:30:00Z
+issue_number: 123 # optional
+```
+
+---
+
+## Quick State Reconstruction
+
+### From Issue Number
+
+```bash
+# Get issue details
+gh issue view 123 --json title,body,comments,labels
+
+# Find branches for this issue (by naming convention: 123-*)
+git branch -r | grep "origin/123-"
+
+# Find associated PR (by branch name)
+BRANCH=$(git branch -r | grep "origin/123-" | head -1 | sed 's/origin\///')
+gh pr list --head "$BRANCH"
+
+# Find workflow runs
+gh run list --workflow=plan-implement.yml | grep "123:"
+```
+
+### From Branch Name
+
+```bash
+# Get branch info
+git log origin/123-add-user-authentic-11-30-1430 --oneline -5
+
+# Find PR
+gh pr view 123-add-user-authentic-11-30-1430
+
+# Check for .erk/impl-context/
+git ls-tree origin/123-add-user-authentic-11-30-1430 | grep impl-context
+```
+
+### From PR Number
+
+```bash
+# Get PR details
+gh pr view 456 --json title,body,headRefName
+
+# Get linked issues via GitHub's native linking
+gh pr view 456 --json closingIssuesReferences -q '.closingIssuesReferences[].number'
+```
+
+### From Workflow Run
+
+```bash
+# Get run details
+gh run view 1234567890
+
+# Extract issue from run name (format: "123:abc123")
+gh run view 1234567890 --json displayTitle -q '.displayTitle' | cut -d: -f1
+```
+
+---
+
+## `.erk/impl-context/plan-ref.json` Dependency Contract
+
+The `.erk/impl-context/plan-ref.json` file (with legacy fallback to `issue.json`) is a critical worktree setup contract. Several commands depend on it:
+
+### Commands That Read `.erk/impl-context/plan-ref.json`
+
+| Command                     | Behavior if Missing                         |
+| --------------------------- | ------------------------------------------- |
+| `erk exec get-closing-text` | Returns empty string (PR lacks "Closes #N") |
+| `erk exec impl-signal`      | Fails silently (no GitHub comment posted)   |
+| `/erk:plan-implement`       | Continues without issue tracking            |
+
+### Silent Failure Pattern
+
+The most insidious failure is with `get-closing-text`:
+
+1. Worktree setup skips creating `.erk/impl-context/plan-ref.json`
+2. Implementation proceeds normally
+3. PR is created without "Closes #N" in commit message
+4. Issue remains open after PR merge
+
+**Detection:** Check PR commit messages for "Closes #N" reference.
+
+**Recovery:** Manually close the issue or amend the commit message.
+
+### Ensuring Contract is Met
+
+When setting up implementation environments:
+
+```bash
+# Always verify after setup
+if [ ! -f .erk/impl-context/plan-ref.json ] && [ ! -f .erk/impl-context/issue.json ]; then
+  echo "ERROR: Missing plan-ref.json - issue linking will fail"
+  exit 1
+fi
+```
+
+---
+
+## Plan Metadata Field Population Lifecycle
+
+Different plan fields are populated at different lifecycle stages:
+
+| Field                    | Planning  | Submitted | Implementing | Landed |
+| ------------------------ | --------- | --------- | ------------ | ------ |
+| `issue_number`           | ✓         | ✓         | ✓            | ✓      |
+| `title`                  | ✓         | ✓         | ✓            | ✓      |
+| `created_at`             | ✓         | ✓         | ✓            | ✓      |
+| `created_by`             | ✓         | ✓         | ✓            | ✓      |
+| `lifecycle_stage`        | `planned` | `planned` | `impl`       | —      |
+| `branch_name`            | ✗         | ✓         | ✓            | ✓      |
+| `pr_number`              | ✗         | ✓         | ✓            | ✓      |
+| `last_dispatched_at`     | ✗         | ✗         | ✓            | ✓      |
+| `last_dispatched_run_id` | ✗         | ✗         | ✓            | ✓      |
+
+### Why `branch_name` is null During Planning
+
+During the planning stage:
+
+- Plan exists only as a GitHub issue with `erk-pr` label
+- No branch has been created yet
+- Branch is created during `erk pr submit` (Phase 2)
+
+**Implication:** Workflows that need branch information must verify the plan has been submitted (check for `branch_name` field).
+
+### Graceful Failure Patterns for Metadata
+
+Commands that depend on plan-header metadata should handle missing fields gracefully:
+
+#### Example: `get-pr-info` Dependency
+
+The `get-pr-info` command returns plan metadata including `head_ref_name` and `base_ref_name`:
+
+```bash
+erk exec get-pr-info <issue_number>
+```
+
+**Failure modes:**
+
+1. **Plan not found** → Returns `{"success": false, "error": "plan_not_found"}`
+2. **Branch not yet created** → `head_ref_name` is null in output
+
+**Correct handling:**
+
+```bash
+PLAN_INFO=$(erk exec get-pr-info <issue_number>)
+
+if echo "$PLAN_INFO" | jq -e '.success == false' > /dev/null 2>&1; then
+  echo "Plan not found"
+  exit 1
+fi
+
+HEAD_REF=$(echo "$PLAN_INFO" | jq -r '.head_ref_name // empty')
+if [ -z "$HEAD_REF" ]; then
+  echo "Plan has not been submitted yet (no branch created)"
+  exit 1
+fi
+```
+
+#### Validation Checklist Before Plan Dispatch
+
+Before dispatching a plan for implementation, validate:
+
+| Check               | Command                                         | Expected        |
+| ------------------- | ----------------------------------------------- | --------------- |
+| Plan exists         | `erk exec get-issue-body <number>`              | `success: true` |
+| Has erk-pr label    | Check `labels` field in output                  | Contains label  |
+| Branch exists       | `erk exec get-pr-metadata <number> branch_name` | Non-null value  |
+| PR exists           | `erk exec get-pr-info <number>`                 | `head_ref_name` |
+| Not already running | Check for `workflow-started` comment on issue   | No such comment |
+| Issue is open       | Check `state` field in `get-issue-body` output  | `OPEN`          |
+
+#### When Branch Metadata Becomes Available
+
+The `head_ref_name` field in `get-pr-info` output becomes non-null after:
+
+1. **Plan submission** completes (Phase 2: `erk pr submit`)
+2. **Branch and PR creation** finishes
+
+**Timeline:**
+
+- **Planning** (Phase 1): ❌ `head_ref_name` is null
+- **Submitted** (Phase 2): ✅ `head_ref_name` populated
+- **Implementing** (Phase 4): ✅ Available
+- **Merged** (Phase 5): ✅ Available (PR still exists, just closed)
+
+**Anti-pattern:**
+
+```bash
+# DON'T: Assume head_ref_name always exists
+PLAN_INFO=$(erk exec get-pr-info <issue_number>)
+HEAD_REF=$(echo "$PLAN_INFO" | jq -r '.head_ref_name')
+gh pr view "$HEAD_REF"  # Fails if plan not submitted
+```
+
+**Correct pattern:**
+
+```bash
+# DO: Check for null head_ref_name
+PLAN_INFO=$(erk exec get-pr-info <issue_number>)
+HEAD_REF=$(echo "$PLAN_INFO" | jq -r '.head_ref_name // empty')
+
+if [ -z "$HEAD_REF" ]; then
+  echo "Plan has not been submitted yet. Run: erk pr submit <number>"
+  exit 1
+fi
+
+gh pr view "$PR_NUMBER"
+```
+
+---
+
+## Lifecycle Stage Tracking
+
+The `lifecycle_stage` field in the plan-header metadata block provides machine-readable tracking of a plan's current position in the lifecycle. This field is set automatically by various commands as a plan progresses.
+
+### Stage Values
+
+| Stage      | Meaning                                | Color (TUI) |
+| ---------- | -------------------------------------- | ----------- |
+| `prompted` | Plan created, planning not yet started | magenta     |
+| `planning` | Plan is being written by an agent      | magenta     |
+| `planned`  | Plan written, ready for implementation | dim         |
+| `impl`     | Implementation in progress or complete | yellow      |
+
+Legacy values `implementing` and `implemented` are accepted by schema validation for backwards compatibility but are never written. The display layer renders all three as `[yellow]impl[/yellow]`. See [Lifecycle Stage Consolidation](lifecycle-stage-consolidation.md) for details.
+
+The field is nullable — plans created before this feature have `lifecycle_stage: null`, and the TUI falls back to inferring stage from PR metadata (draft state, open/merged/closed), displaying `impl` (yellow) for non-draft open PRs.
+
+### Write Points
+
+Each stage is set by specific commands at well-defined moments:
+
+| Stage      | Set By                                                                                      | When                                              |
+| ---------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `prompted` | `one_shot_dispatch`                                                                         | One-shot plan created                             |
+| `planning` | `one-shot.yml` workflow                                                                     | Agent begins writing plan                         |
+| `planned`  | `plan_save`, `plan create`, `register_one_shot_plan`, `PlannedPRBackend.create_plan`        | Plan saved to GitHub                              |
+| `impl`     | `mark-impl-started`, `impl-signal` (started/submitted), `handle-no-changes`, `pr/shared.py` | Implementation begins, completes, or PR submitted |
+
+### Explicit Updates via Exec Command
+
+The `update-pr-header` exec command allows explicit field updates, including lifecycle stage:
+
+```bash
+erk exec update-pr-header 123 lifecycle_stage=impl
+```
+
+Returns JSON on success:
+
+```json
+{ "success": true, "pr_id": "123", "fields_updated": ["lifecycle_stage"] }
+```
+
+The backend validates that the plan exists, the field names are valid, and enum values (like lifecycle_stage) are one of the allowed values.
+
+### Display Computation
+
+`compute_lifecycle_display()` in `erk_shared.gateway.plan_data_provider.lifecycle` computes the display string for TUI tables:
+
+1. Reads `lifecycle_stage` from plan-header fields (preferred)
+2. Falls back to inferring from PR metadata (`is_draft` + `pr_state`) for plans without the field
+3. Returns Rich color-coded markup
+
+The fallback inference handles two additional terminal states not in the `LifecycleStageValue` type: `merged` (green) and `closed` (dim red). These are derived from PR state, not stored in plan-header.
+
+### Stacked State
+
+The `is_stacked` parameter is an input to both `compute_status_indicators()` and `format_lifecycle_with_status()`. It is derived from `base_ref_name` on `PullRequestInfo`: if the PR's base branch is not master/main, the PR is stacked. When `is_stacked` is `True`, a pancake emoji (🥞) is prepended to the indicator list. This is an informational indicator that does not block the rocket emoji (🚀) in the implemented stage.
+
+See [Stacked PR Indicator](../tui/stacked-pr-indicator.md) for the full detection strategy and indicator classification.
+
+---
+
+## Planned PR Lifecycle
+
+Plans evolve through lifecycle stages within a single draft PR.
+
+**Lifecycle stages:** Plan Creation (Stage 1) → Implementation (Stage 2) → Review & Merge (Stage 3)
+
+**Branch teleport:** Because the branch is created during plan-save and the user returns to their original branch, implementation must teleport from remote before starting work.
+
+See [Planned PR Lifecycle](planned-pr-lifecycle.md) for body format details and [Planned PR Branch Teleport](planned-pr-branch-teleport.md) for the teleport mechanism.
+
+---
+
+## Related Documentation
+
+- [Planning Workflow](workflow.md) - `.erk/impl-context/` folder structure and commands
+- [Planned PR Lifecycle](planned-pr-lifecycle.md) - Planned PR body format and stage transitions
+- [Planned PR Branch Teleport](planned-pr-branch-teleport.md) - Branch teleport during planned-PR implementation
+- [Exec Command Patterns](../cli/exec-command-patterns.md) - Available `erk exec` commands
+- [Glossary](../glossary.md) - Erk terminology definitions

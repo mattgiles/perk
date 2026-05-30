@@ -1,0 +1,194 @@
+"""Marker file operations for inter-process communication.
+
+Usage:
+    erk exec marker create --session-id SESSION_ID <name>
+    erk exec marker read --session-id SESSION_ID <name>
+    erk exec marker exists --session-id SESSION_ID <name>
+    erk exec marker delete --session-id SESSION_ID <name>
+
+Marker files are stored in `.erk/scratch/sessions/<session-id>/` and are used for
+inter-process communication between hooks and commands. Session ID MUST be provided
+via the `--session-id` flag (erk code never has access to CLAUDE_CODE_SESSION_ID
+environment variable - session IDs must be passed explicitly).
+
+Exit codes:
+    create: 0 = created, 1 = error (missing session ID)
+    read: 0 = marker exists (content on stdout), 1 = marker doesn't exist or error
+    exists: 0 = exists, 1 = does not exist
+    delete: 0 = deleted (or didn't exist), 1 = error (missing session ID)
+"""
+
+import json
+
+import click
+
+from erk_shared.context.helpers import require_repo_root
+from erk_shared.scratch.scratch import get_scratch_dir
+
+MARKER_EXTENSION = ".marker"
+
+
+def _resolve_session_id(session_id: str | None) -> str | None:
+    """Resolve session ID from explicit argument.
+
+    Session ID must be provided via --session-id flag.
+    Erk code never has access to CLAUDE_CODE_SESSION_ID environment variable.
+    """
+    return session_id
+
+
+def _output_json(success: bool, message: str) -> None:
+    """Output JSON response."""
+    click.echo(json.dumps({"success": success, "message": message}))
+
+
+@click.group(name="marker")
+def marker() -> None:
+    """Manage marker files for inter-process communication."""
+
+
+@marker.command(name="create")
+@click.argument("name")
+@click.option(
+    "--session-id",
+    default=None,
+    help="Session ID for marker storage (required)",
+)
+@click.option(
+    "--associated-objective",
+    type=int,
+    default=None,
+    help="Associated objective issue number (stored in marker file)",
+)
+@click.option(
+    "--content",
+    default=None,
+    help="Content to store in marker file (alternative to --associated-objective)",
+)
+@click.pass_context
+def marker_create(
+    ctx: click.Context,
+    name: str,
+    session_id: str | None,
+    associated_objective: int | None,
+    content: str | None,
+) -> None:
+    """Create a marker file.
+
+    NAME is the marker name (e.g., 'incremental-plan').
+    The '.marker' extension is added automatically.
+
+    If --associated-objective is provided, the issue number is stored
+    in the marker file content. If --content is provided, that string is stored.
+    Otherwise, an empty file is created.
+    """
+    resolved_session_id = _resolve_session_id(session_id)
+    if resolved_session_id is None:
+        msg = "Missing session ID: provide --session-id flag"
+        _output_json(False, msg)
+        raise SystemExit(1) from None
+
+    repo_root = require_repo_root(ctx)
+    scratch_dir = get_scratch_dir(resolved_session_id, repo_root=repo_root)
+    marker_file = scratch_dir / f"{name}{MARKER_EXTENSION}"
+    if associated_objective is not None:
+        marker_file.write_text(str(associated_objective), encoding="utf-8")
+    elif content is not None:
+        marker_file.write_text(content, encoding="utf-8")
+    else:
+        marker_file.touch()
+    _output_json(True, f"Created marker: {name}")
+
+
+@marker.command(name="read")
+@click.argument("name")
+@click.option(
+    "--session-id",
+    default=None,
+    help="Session ID for marker storage (required)",
+)
+@click.pass_context
+def marker_read(ctx: click.Context, name: str, session_id: str | None) -> None:
+    """Read content from a marker file.
+
+    NAME is the marker name (e.g., 'plan-saved-issue').
+    Outputs the marker content to stdout (no JSON wrapper).
+    Exit code 0 if marker exists, 1 if it doesn't exist or error.
+    """
+    resolved_session_id = _resolve_session_id(session_id)
+    if resolved_session_id is None:
+        msg = "Missing session ID: provide --session-id flag"
+        _output_json(False, msg)
+        raise SystemExit(1) from None
+
+    repo_root = require_repo_root(ctx)
+    scratch_dir = get_scratch_dir(resolved_session_id, repo_root=repo_root)
+    marker_file = scratch_dir / f"{name}{MARKER_EXTENSION}"
+
+    if marker_file.exists():
+        content = marker_file.read_text(encoding="utf-8").strip()
+        click.echo(content)
+    else:
+        raise SystemExit(1) from None
+
+
+@marker.command(name="exists")
+@click.argument("name")
+@click.option(
+    "--session-id",
+    default=None,
+    help="Session ID for marker storage (required)",
+)
+@click.pass_context
+def marker_exists(ctx: click.Context, name: str, session_id: str | None) -> None:
+    """Check if a marker file exists.
+
+    NAME is the marker name (e.g., 'incremental-plan').
+    Exit code 0 if exists, 1 if not.
+    """
+    resolved_session_id = _resolve_session_id(session_id)
+    if resolved_session_id is None:
+        msg = "Missing session ID: provide --session-id flag"
+        _output_json(False, msg)
+        raise SystemExit(1) from None
+
+    repo_root = require_repo_root(ctx)
+    scratch_dir = get_scratch_dir(resolved_session_id, repo_root=repo_root)
+    marker_file = scratch_dir / f"{name}{MARKER_EXTENSION}"
+
+    if marker_file.exists():
+        _output_json(True, f"Marker exists: {name}")
+    else:
+        _output_json(False, f"Marker does not exist: {name}")
+        raise SystemExit(1) from None
+
+
+@marker.command(name="delete")
+@click.argument("name")
+@click.option(
+    "--session-id",
+    default=None,
+    help="Session ID for marker storage (required)",
+)
+@click.pass_context
+def marker_delete(ctx: click.Context, name: str, session_id: str | None) -> None:
+    """Delete a marker file.
+
+    NAME is the marker name (e.g., 'incremental-plan').
+    Succeeds even if marker doesn't exist (idempotent).
+    """
+    resolved_session_id = _resolve_session_id(session_id)
+    if resolved_session_id is None:
+        msg = "Missing session ID: provide --session-id flag"
+        _output_json(False, msg)
+        raise SystemExit(1) from None
+
+    repo_root = require_repo_root(ctx)
+    scratch_dir = get_scratch_dir(resolved_session_id, repo_root=repo_root)
+    marker_file = scratch_dir / f"{name}{MARKER_EXTENSION}"
+
+    if marker_file.exists():
+        marker_file.unlink()
+        _output_json(True, f"Deleted marker: {name}")
+    else:
+        _output_json(True, f"Marker already deleted: {name}")

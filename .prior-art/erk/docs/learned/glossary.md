@@ -1,0 +1,1041 @@
+---
+title: Erk Glossary
+last_audited: "2026-02-16 00:00 PT"
+audit_result: clean
+read_when:
+  - "understanding project terminology"
+  - "confused about domain-specific terms"
+  - "working with worktrees, plans, or stacks"
+  - "working with objectives or turns"
+tripwires:
+  - action: "parsing objective roadmap PR column status"
+    warning: "Roadmap table uses separate Plan and PR columns: Plan `#XXXX`=in progress (plan PR), PR `#XXXX`=done (merged PR), both empty=pending. Legacy 4-col format with `plan #XXXX` in PR column is auto-migrated."
+---
+
+# Erk Glossary
+
+Definitive terminology reference for the erk project.
+
+**Purpose**: Eliminate confusion about domain-specific terms. When in doubt about terminology, consult this document.
+
+---
+
+## Core Concepts
+
+### activate.sh
+
+A shell script at `.erk/activate.sh` in each worktree that sets up the development environment when sourced.
+
+**Purpose**: Opt-in shell integration. Users explicitly source this script rather than relying on automatic shell manipulation.
+
+**What it does**:
+
+1. CDs to the worktree directory
+2. Sets up Python virtual environment (via `uv sync`)
+3. Sources `.venv/bin/activate`
+4. Loads `.env` file
+5. Runs post-create commands
+
+**Usage**:
+
+```bash
+source ~/erks/erk/my-feature/.erk/activate.sh
+```
+
+**Generation**: Created by `write_worktree_activate_script()` during worktree creation.
+
+**Related**: [Activation Scripts](cli/activation-scripts.md)
+
+### Worktree
+
+Git's native feature for creating additional working directories for a repository.
+
+**Technical**: Created with `git worktree add`, allows working on multiple branches simultaneously without switching branches in a single directory.
+
+**Example**:
+
+```bash
+git worktree add ../feature-branch feature-branch
+```
+
+### Erk
+
+A **managed worktree** created and maintained by the erk tool.
+
+**Distinction from worktree**:
+
+- **Worktree** = git's feature (any directory managed by git worktree)
+- **Erk** = worktree + configuration + environment setup + lifecycle management
+
+**Features**:
+
+- Stored in standardized location (`~/erks/<repo>/<name>`)
+- Automatic `.env` file generation
+- Post-creation hook execution
+- Integration with graphite/GitHub
+
+**Example**: `erk create my-feature` creates both a git worktree and an erk.
+
+### Repo Root
+
+The main git repository directory containing `.git/` directory.
+
+**Location**: Where you originally cloned the repository.
+
+**Example**: If you cloned to `/Users/you/projects/erk`, that's the repo root.
+
+**Note**: In a worktree, `git rev-parse --git-common-dir` points back to the repo root's `.git` directory.
+
+### Root Worktree
+
+The primary git worktree where the `.git` directory lives (as opposed to linked worktrees which have `.git` files pointing elsewhere).
+
+**Terminology Note**: Use "root worktree" (not "main worktree") to avoid confusion with the "main" branch. This ensures "main" unambiguously refers to the branch name.
+
+**In Code**: `WorktreeInfo.is_root` field identifies the root worktree. Always use this instead of path comparison.
+
+**Detection**:
+
+- ✅ Correct: `if wt.is_root:`
+- ❌ Wrong: `if wt.path == repo_root:` (fails from non-root worktrees)
+
+**Related**: [Root Worktree Detection](architecture/erk-architecture.md#root-worktree-detection)
+
+### Erks Dir
+
+The directory containing all erks for a specific repository.
+
+**Path structure**: `{erks_root}/{repo_name}/`
+
+**Example**: If `erks_root = ~/erks` and repo is named `erk`, then `erks_dir = ~/erks/erk/`
+
+**Contents**:
+
+- Individual erk directories
+- `config.toml` (repo-specific configuration)
+
+### Erks Root
+
+The top-level directory containing all managed repositories' erk directories.
+
+**Configuration**: Set in `~/.erk/config.toml`:
+
+```toml
+erks_root = "/Users/you/erks"
+```
+
+**Structure**:
+
+```
+~/erks/                    ← erks root
+  ├── erk/                ← erks dir for "erk" repo
+  │   ├── feature-a/           ← individual erk
+  │   ├── feature-b/           ← individual erk
+  │   └── config.toml
+  ├── other-project/            ← erks dir for another repo
+  │   └── ...
+```
+
+### Worktree Path
+
+The absolute path to a specific erk directory.
+
+**Construction**: `{erks_dir}/{worktree_name}`
+
+**Example**: `~/erks/erk/my-feature/`
+
+**Code**: `worktree_path_for(repo.erks_dir, "my-feature")`
+
+### Branch Naming Convention
+
+Erk plan branches follow the pattern `plnd/{slug}-{timestamp}`:
+
+- **plnd/** - Prefix indicating a planned branch
+- `{slug}` - Kebab-case description of the work (max 31 chars before timestamp)
+- `{timestamp}` - Creation timestamp in `MM-DD-HHMM` format
+
+**Examples**:
+
+- `plnd/add-p-prefix-to-branch-nam-12-09-0934`
+- `plnd/fix-auth-bug-01-15-1430`
+
+**Plan-to-branch mapping**: Plan numbers are **not** encoded in branch names. `.erk/impl-context/plan-ref.json` is the sole source of truth for mapping plans to branches.
+
+#### With Objective ID
+
+When a plan is associated with an objective, the branch name includes the objective ID: `plnd/O{objective}-{slug}-{timestamp}`
+
+**Format**:
+
+- **plnd/** - Planned branch prefix
+- **O{objective}** - Objective issue number (encoded when `plan.objective_id` is set)
+- `{slug}` - Kebab-case description (truncated to fit 31-char limit)
+- `{timestamp}` - Creation timestamp in `MM-DD-HHMM` format
+
+**Examples**:
+
+- `plnd/O456-fix-auth-bug-01-15-1430`
+- `plnd/O6234-consolidated-do-01-30-1128`
+
+**Extraction**: Use `extract_objective_number(branch_name)` to extract the objective ID from a branch name. Returns `None` for branches without objectives.
+
+**Code**: Generated by `generate_planned_pr_branch_name(title, timestamp, objective_id=obj_id)` in `erk_shared.naming`
+
+### Claude Code Project Directory
+
+The directory where Claude Code stores session data for a specific project. Located at `~/.claude/projects/<encoded-path>` where the path is encoded by replacing `/` and `.` with `-`.
+
+**Contents**:
+
+- `<session-id>.jsonl` - Main session logs (UUID format)
+- `agent-<agent-id>.jsonl` - Subagent logs from Task tool invocations
+
+**Walk-up discovery**: When looking up a project from a working directory, the session store checks if an exact match exists for the current path, then walks up to parent directories until finding a match or hitting the filesystem root. This enables running erk commands from subdirectories of a Claude project.
+
+**See**: [Claude Code Session Layout](sessions/layout.md)
+
+---
+
+## Path Hierarchy in CLI Commands
+
+When writing CLI commands, use the correct path level for file lookups:
+
+| Path                      | What it represents             | When to use                                            |
+| ------------------------- | ------------------------------ | ------------------------------------------------------ |
+| `ctx.cwd`                 | Where the user ran the command | **Rarely correct** - only for user-relative operations |
+| `repo.root` / `repo_root` | Git worktree root              | `.erk/`, `.erk/impl-context/` lookups, git operations  |
+
+### Common Pattern: `.erk/impl-context/` Lookup
+
+`.erk/impl-context/` lives at the worktree root:
+
+```python
+impl_context_dir = repo_root / ".erk" / "impl-context"
+```
+
+### Common Mistake
+
+**❌ Wrong**: Using `ctx.cwd` for `.erk/impl-context/` lookup
+
+```python
+impl_context_dir = ctx.cwd / ".erk" / "impl-context"  # Wrong - user may run from any subdirectory
+```
+
+**✅ Correct**: Using worktree root
+
+```python
+impl_context_dir = repo_root / ".erk" / "impl-context"
+```
+
+---
+
+## Shell Concepts
+
+### Activation Scripts
+
+Shell scripts that change the parent shell's working directory. Used by navigation commands via the `--script` flag.
+
+**Usage**:
+
+```bash
+source <(erk up --script)
+source <(erk wt co my-worktree --script)
+```
+
+**Why needed**: A subprocess cannot change its parent's cwd (Unix process isolation). The `--script` flag outputs a path to an activation script that can be sourced.
+
+---
+
+## Git & Graphite Concepts
+
+**For comprehensive gt documentation**: See [Graphite Branch Setup](erk/graphite-branch-setup.md)
+
+### Force-Push After Squash
+
+When squashing commits on a branch that already has a PR:
+
+1. **Why it's needed**: Squashing rewrites git history, causing the local branch to diverge from remote
+2. **Why it's safe**: The PR already exists on remote - you're updating it, not creating it
+3. **Pattern**: After `gt squash`, use `gt submit` with `--force` (or equivalent)
+
+This pattern applies to:
+
+- Manual squash + submit workflows
+- Any workflow that rewrites history on an existing PR branch
+
+### Trunk Branch
+
+The default branch of the repository (typically `main` or `master`).
+
+The base branch from which all feature branches grow (trunk of the stack tree).
+
+**Detection**: `git symbolic-ref refs/remotes/origin/HEAD`
+
+### Stack
+
+A linear chain of dependent branches managed as worktrees by erk.
+
+**Erk concept**: A stack represents branches that depend on each other, where each branch's changes build on the parent branch. Erk manages these as separate worktrees for parallel development.
+
+**Underlying**: Uses Graphite for branch dependency tracking (`gt` commands).
+
+**Example**:
+
+```
+main (trunk)
+  └─> feature-a (adds user model)
+       └─> feature-a-2 (adds user controller)
+            └─> feature-a-3 (adds user views)
+```
+
+**Purpose**: Break large features into reviewable chunks while maintaining dependencies, with each branch in its own worktree.
+
+### Default Branch
+
+See: [Trunk Branch](#trunk-branch)
+
+---
+
+## Configuration Terms
+
+### Global Config
+
+Configuration stored in `~/.erk/config.toml`.
+
+**Scope**: Applies to all repositories managed by erk.
+
+**Location**: `~/.erk/config.toml`
+
+**Contents**:
+
+```toml
+erks_root = "/Users/you/worktrees"
+use_graphite = true
+shell_setup_complete = true
+
+prompt_learn_on_land = true  # Set false to disable learn prompts on erk land
+```
+
+**Access**: Via `ConfigStore` interface.
+
+### Repo Config
+
+Team-shared configuration stored in the repository.
+
+**Scope**: Applies to all users of the repository.
+
+**Location**: `<repo-root>/.erk/config.toml` (checked into git)
+
+**Contents**:
+
+```toml
+[env]
+DATABASE_URL = "postgresql://localhost/dev_db"
+
+[post_create]
+shell = "bash"
+commands = ["uv sync"]
+
+[pool]
+max_slots = 6
+
+[pool.checkout]
+commands = ["git fetch origin"]
+
+[github]
+repo = "owner/plans-repo"  # Store plans in separate repo
+```
+
+When `[github] repo` is configured, plans are created in the specified repository instead of the current repo. PRs use `Closes owner/plans-repo#N` format to close issues across repositories.
+
+**Access**: Via `load_config(repo_root)` function.
+
+### Local Config
+
+Per-user configuration that overrides repo config.
+
+**Scope**: Personal settings for this user in this repository.
+
+**Location**: `<repo-root>/.erk/config.local.toml` (gitignored)
+
+**Purpose**: Allows individual users to customize their erk experience without affecting other team members. Common uses:
+
+- Different pool sizes (more/fewer worktree slots)
+- Custom shell or post-create commands
+- Environment variable overrides
+
+**Contents**:
+
+```toml
+[pool]
+max_slots = 10  # User wants more slots than team default
+
+[env]
+MY_CUSTOM_VAR = "value"
+
+[post_create]
+shell = "zsh"
+commands = ["source ~/.zshrc"]
+```
+
+**Merge Semantics** (local overrides repo):
+
+- `env`: Dict merge (local values override repo values)
+- `post_create.commands`: Concatenation (repo commands run first, then local)
+- `post_create.shell`: Override (local wins if set)
+- `pool.max_slots`: Override (local wins if set)
+- `github.repo`: Override (local wins if set)
+
+**Access**: Via `load_local_config(repo_root)` + `merge_configs_with_local()`.
+
+**Creation**: `erk init` creates a template `.erk/config.local.toml` with commented examples.
+
+---
+
+## Capability System
+
+### Capability
+
+A feature or functionality that can be installed into a repository managed by erk. Capabilities control which artifacts (skills, workflows, agents, actions) are installed and tracked.
+
+**Types**:
+
+- **Required capabilities** (`required=True`): Always checked by `erk doctor` (e.g., hooks)
+- **Optional capabilities**: Only checked if explicitly installed (e.g., skills, workflows)
+
+**Management**:
+
+```bash
+erk capability add <name>    # Install a capability
+erk capability remove <name> # Uninstall a capability
+erk capability list          # Show installed capabilities
+```
+
+**Tracking**: Installed capabilities are recorded in `.erk/state.toml` under `[capabilities]`.
+
+**Related**: [Capability System Architecture](architecture/capability-system.md)
+
+### Installed Capabilities
+
+The set of capabilities explicitly installed in a repository, tracked in `.erk/state.toml`.
+
+**Location**: `.erk/state.toml` under `[capabilities]` section
+
+**Format**:
+
+```toml
+[capabilities]
+installed = ["dignified-python", "erk-impl"]
+```
+
+**API** (in `erk.artifacts.state`):
+
+- `add_installed_capability(project_dir, name)` - Record installation
+- `remove_installed_capability(project_dir, name)` - Record removal
+- `load_installed_capabilities(project_dir)` - Load installed set
+
+**Usage**: `erk doctor` uses this to only check artifacts for installed capabilities.
+
+### installed_capabilities Parameter
+
+A parameter pattern used in artifact health checking to filter which artifacts are checked.
+
+**Values**:
+
+| Value              | Behavior                                         | Use Case                              |
+| ------------------ | ------------------------------------------------ | ------------------------------------- |
+| `None`             | Check ALL artifacts regardless of installation   | Sync, orphan detection, missing files |
+| `frozenset({...})` | Check only artifacts from installed capabilities | `erk doctor` health checks            |
+
+**Example**:
+
+```python
+# Check ALL artifacts (for sync, orphan detection)
+_get_bundled_by_type("skill", installed_capabilities=None)
+
+# Check only installed artifacts (for erk doctor)
+installed = load_installed_capabilities(project_dir)
+_get_bundled_by_type("skill", installed_capabilities=installed)
+```
+
+---
+
+## Architecture Terms
+
+### Repo Context
+
+A frozen dataclass containing repository information.
+
+**Key Fields**:
+
+- `root: Path` - Working tree root for git commands (worktree or main repo)
+- `repo_name: str` - Repository name
+- `repo_dir: Path` - Path to erk metadata directory (`~/.erk/repos/<repo-name>`)
+- `worktrees_dir: Path` - Path to worktrees directory (`~/.erk/repos/<repo-name>/worktrees`)
+- `pool_json_path: Path` - Path to pool state file (`~/.erk/repos/<repo-name>/pool.json`)
+- `main_repo_root: Path | None` - Main repository root (defaults to `root` for backwards compatibility)
+- `github: GitHubRepoId | None` - GitHub repository identity, if available
+
+**Creation**: `discover_repo_or_sentinel(git, Path.cwd())`
+
+See `packages/erk-shared/src/erk_shared/context/types.py` for the canonical definition (discovery logic in `src/erk/core/repo_discovery.py`).
+
+#### root vs main_repo_root
+
+- **`root`**: The working tree root where git commands should run. For worktrees, this is the worktree directory. For main repos, equals `main_repo_root`.
+
+- **`main_repo_root`**: The main repository root (consistent across all worktrees). Used for:
+  - Deriving `repo_name` for metadata paths
+  - Operations that need the root worktree (e.g., escaping from a worktree being deleted)
+  - Resolving "root" as a target in commands like `stack move root`
+
+**Key insight:** When running from a worktree, git commands use `root` (the worktree), but metadata and escaping use `main_repo_root` (the main repo).
+
+### Erk Context
+
+A frozen dataclass containing all injected dependencies.
+
+**Purpose**: Dependency injection container passed to all commands. Created at CLI entry point and threaded through the application.
+
+**Key Integration Fields**:
+
+- `git: Git` - Git operations (branch ops via `git.branch` subgateway)
+- `github: LocalGitHub` - GitHub PR operations (issues via `github.issues` property)
+- `github_admin: GitHubAdmin` - GitHub Actions admin operations
+- `graphite: Graphite` - Graphite CLI operations
+- `graphite_branch_ops: GraphiteBranchOps | None` - None when Graphite disabled
+- `console: Console` - TTY detection, user feedback, and confirmation prompts
+- `time: Time` - Time abstraction
+- `shell: Shell` - Shell detection
+- `completion: Completion` - Shell completion generation
+- `script_writer: ScriptWriter` - Activation script generation
+- `pr_store: ManagedPrBackend` - Plan storage operations
+- `prompt_executor: PromptExecutor` - Claude CLI execution
+
+**Configuration Fields**:
+
+- `global_config: GlobalConfig | None` - Global configuration (may be None during init)
+- `local_config: LoadedConfig | None` - Merged configuration (repo config + local overrides)
+- `dry_run: bool` - Whether to print operations instead of executing
+
+**Path Fields**:
+
+- `cwd: Path` - Current working directory
+- `repo: RepoContext | NoRepoSentinel` - Repository context
+
+**Factory Methods**:
+
+- `create_context(dry_run=..., script=..., debug=...)` - Production context with real implementations
+- `context_for_test(...)` - Test context with configurable fakes (standalone function, not class method)
+
+See `packages/erk-shared/src/erk_shared/context/context.py` for the canonical definition (re-exported from `src/erk/core/context.py`).
+
+### PRDetails
+
+A frozen dataclass containing comprehensive PR information from a single GitHub API call. Implements the "Fetch Once, Use Everywhere" pattern.
+
+**Location**: `packages/erk-shared/src/erk_shared/gateway/github/types.py`
+
+**Related**: [GitHub Interface Patterns](architecture/github-interface-patterns.md)
+
+### PRNotFound
+
+A sentinel class returned when a PR lookup fails, preserving lookup context (branch name, PR number). Uses `isinstance` check (LBYL) instead of exceptions.
+
+**Location**: `packages/erk-shared/src/erk_shared/gateway/github/types.py`
+
+**Related**: [Not-Found Sentinel Pattern](architecture/not-found-sentinel.md)
+
+---
+
+## Event Types
+
+### ProgressEvent
+
+A frozen dataclass for emitting progress notifications during long-running operations.
+
+**Location**: `packages/erk-shared/src/erk_shared/gateway/gt/events.py`
+
+**Purpose**: Decouple progress reporting from rendering. Operations yield events; CLI layer renders them.
+
+**Fields**:
+
+- `message: str` - Human-readable progress message
+- `style: Literal["info", "success", "warning", "error"]` - Visual style hint (default: "info")
+
+**Example**:
+
+```python
+yield ProgressEvent("Analyzing changes with Claude...")
+yield ProgressEvent("Complete", style="success")
+```
+
+**Related**: [Claude CLI Progress Feedback Pattern](architecture/claude-cli-progress.md)
+
+### CompletionEvent
+
+A generic frozen dataclass wrapping the final result of a generator-based operation.
+
+**Location**: `packages/erk-shared/src/erk_shared/gateway/gt/events.py`
+
+**Purpose**: Signal operation completion and provide the result to the consumer.
+
+**Type Parameter**: `CompletionEvent[T]` where `T` is the result type.
+
+**Example**:
+
+```python
+yield CompletionEvent(MyResult(success=True, data=data))
+```
+
+**Related**: [Claude CLI Progress Feedback Pattern](architecture/claude-cli-progress.md)
+
+### ExecutorEvent
+
+A discriminated union of frozen dataclasses representing events from Claude CLI streaming execution. Consumed via pattern matching.
+
+**Location**: `packages/erk-shared/src/erk_shared/core/prompt_executor.py`
+
+**Related**: [Prompt Executor Gateway](architecture/prompt-executor-gateway.md), [Claude CLI Integration](architecture/claude-cli-integration.md)
+
+---
+
+## Gateway Terms
+
+### Dual-Source Pattern
+
+A pattern where both Graphite's local cache AND GitHub's API are queried to ensure completeness. Used when Graphite's cache may be incomplete (e.g., branches created outside `gt` commands).
+
+**Why needed**: Graphite only tracks branches created via `gt branch create`. Branches created through `git branch`, `gh pr create`, or where the PR base was changed in GitHub are invisible to Graphite's cache.
+
+**Example**: `land_pr.py` queries both `graphite.get_child_branches()` and `github.get_open_prs_with_base_branch()` to find ALL child branches before landing, preventing child PRs from being auto-closed.
+
+**Pattern**:
+
+```python
+graphite_children = ops.graphite.get_child_branches(...)
+github_children = [pr.head_branch for pr in ops.github.get_open_prs_with_base_branch(...)]
+all_children = list(set(graphite_children) | set(github_children))
+```
+
+**See**: [Gateway Hierarchy](architecture/gateway-hierarchy.md#dual-source-patterns-graphite--github)
+
+### Gateway
+
+An ABC (Abstract Base Class) defining an interface for an external system (Git, LocalGitHub, Graphite, etc.). Each gateway has an implementation pattern: `abc.py`, `real.py`, `fake.py` (3-file default), plus `dry_run.py` for dry-run-enabled gateways (4-file).
+
+**Related**: [Gateway ABC Implementation](architecture/gateway-abc-implementation.md), [Gateway Inventory](architecture/gateway-inventory.md)
+
+### Real Implementation
+
+Production implementation of a gateway (`Real<Interface>`, e.g., `RealGit`). Instantiated in `create_context()`.
+
+### Fake Implementation
+
+In-memory test implementation (`Fake<Interface>`, e.g., `FakeGit`). All state via constructor, no public setup methods. Located in `tests/fakes/`.
+
+### Dry Run Wrapper
+
+Wraps real implementation, prints messages instead of executing destructive operations (`DryRun<Interface>`, e.g., `DryRunGit`). Used when `--dry-run` flag is passed.
+
+---
+
+## Command-Specific Terms
+
+### Plan Folder
+
+A `.erk/impl-context/` folder containing implementation plans and progress tracking for a feature.
+
+**Usage**: `erk create --from-plan-file my-plan.md my-feature`
+
+**Behavior**:
+
+- Plan file is converted to `.erk/impl-context/` folder structure in the new worktree
+- Contains two files:
+  - `plan.md` - Immutable implementation plan
+  - `progress.md` - Mutable progress tracking with checkboxes
+- `.erk/impl-context/` is gitignored (not committed)
+- Useful for keeping implementation notes with the working code
+
+**Benefits**:
+
+- Separation of concerns: plan content vs progress tracking
+- No risk of corrupting plan while updating progress
+- Progress visible in `erk status` output
+
+**Example**:
+
+```bash
+# Create plan
+echo "## Implementation Plan\n1. Step 1\n2. Step 2" > plan.md
+
+# Create worktree from plan file
+erk create --from-plan-file plan.md my-feature
+
+# Plan structure created:
+# ~/erks/erk/my-feature/.erk/impl-context/
+#   ├── plan.md        (immutable)
+#   └── progress.md    (mutable, with checkboxes)
+```
+
+**Legacy Format**: Old worktrees may still use `.PLAN.md` single-file format. These will continue to work but won't show progress tracking.
+
+### Dry Run
+
+Mode where commands print what they would do without executing destructive operations.
+
+**Activation**: `--dry-run` flag on commands
+
+**Behavior**:
+
+- Read-only operations execute normally
+- Destructive operations print messages prefixed with `[DRY RUN]`
+
+**Example**:
+
+```bash
+erk delete my-feature --dry-run
+# Output: [DRY RUN] Would delete worktree: /Users/you/worktrees/erk/my-feature
+```
+
+---
+
+## Documentation System
+
+### Front Matter
+
+YAML metadata block at the beginning of agent documentation files.
+
+**Required fields**:
+
+- `title`: Human-readable document title
+- `read_when`: List of conditions when agents should read this doc
+
+**Optional fields**:
+
+- `tripwires`: List of action-triggered warnings
+
+**Example**:
+
+```yaml
+---
+title: Scratch Storage
+read_when:
+  - "writing temp files for AI workflows"
+tripwires:
+  - action: "writing to /tmp/"
+    warning: "Use .erk/scratch/<session-id>/ instead."
+---
+```
+
+### read_when
+
+A front matter field listing conditions that trigger documentation routing.
+
+**Purpose**: Powers the agent documentation index. When an agent's task matches a `read_when` condition, the index routes them to the relevant doc.
+
+**Distinction from tripwires**:
+
+- `read_when` = Agent actively searches for guidance (pull model)
+- `tripwires` = Agent is about to perform action (push model)
+
+**Example**:
+
+```yaml
+read_when:
+  - "creating a plan"
+  - "closing a plan"
+```
+
+### Tripwire
+
+An action-triggered rule that routes agents to documentation when specific behavior patterns are detected.
+
+**Format**: Defined in doc frontmatter with `action` (pattern to detect) and `warning` (guidance message).
+
+**Purpose**: Catches agents _before_ they make mistakes, complementing the `read_when` index which requires agents to actively seek guidance.
+
+**Example**:
+
+```yaml
+tripwires:
+  - action: "writing to /tmp/"
+    warning: "AI workflow files belong in .erk/scratch/<session-id>/, NOT /tmp/."
+```
+
+**See also**: [Tripwires System](commands/tripwires.md)
+
+---
+
+## Testing Terms
+
+### Isolated Filesystem
+
+A temporary directory created by Click's test runner for unit tests.
+
+**Usage**:
+
+```python
+runner = CliRunner()
+with runner.isolated_filesystem():
+    # Operations here happen in temporary directory
+    # Automatically cleaned up after test
+```
+
+**Purpose**: Prevent tests from affecting actual filesystem.
+
+### Integration Test
+
+Test that uses real implementations and filesystem operations.
+
+**Location**: `tests/integration/`
+
+**Characteristics**:
+
+- Uses `RealGit`, actual git commands
+- Slower than unit tests
+- Tests real integration with external tools
+
+**Example**: `tests/integration/test_git_integration.py`
+
+### Unit Test
+
+Test that uses fake implementations and isolated filesystem.
+
+**Location**: `tests/commands/`, `tests/core/`
+
+**Characteristics**:
+
+- Uses `FakeGit`, `FakeLocalGitHub`, etc.
+- Fast (no subprocess calls)
+- Majority of test suite
+
+**Example**: `tests/commands/test_rm.py`
+
+---
+
+## Plan & Extraction Concepts
+
+### Learn Plan
+
+A special type of implementation plan created by `/erk:learn`. Learn plans capture documentation improvements and learnings discovered during implementation sessions.
+
+**Characteristics**:
+
+- Labeled with `erk-pr` (like all plans)
+- **Issue identification**: Issues have the `erk-learn` label (in addition to `erk-pr`)
+- Created from session analysis to capture valuable insights
+- Contains documentation items rather than code changes
+- Marked with `plan_type: learn` in the plan-header metadata
+- PRs from learn plans receive the `erk-skip-learn` label
+
+**Identifying Learn Plans in Code**:
+
+- Label: Check for `erk-learn` in the plan's labels
+- Helper function: `is_issue_learn_plan(labels)` in `src/erk/cli/commands/pr/dispatch_cmd.py`
+- Plan metadata: Check `plan_type: learn` in plan-header
+- PR label: PRs from learn plans have `erk-skip-extraction`
+
+**Special Behaviors**:
+
+- `erk land` skips the "not learned from" warning for learn plans (they don't need learning)
+- `/erk:learn` validates the plan has the `erk-learn` label
+
+**Purpose**: Prevent valuable learnings from being lost after implementation sessions by systematically documenting patterns, decisions, and discoveries.
+
+**Related**: [erk-skip-learn](#erk-skip-learn), [Plan Lifecycle](planning/lifecycle.md)
+
+### erk-skip-learn
+
+A GitHub label added to PRs that originate from learn plans. When `erk land` detects this label, it automatically skips creating the pending-learn marker and deletes the worktree immediately.
+
+**Purpose**: Prevents infinite extraction loops where extracting insights from a learn-originated PR would lead to another learn plan.
+
+**Applied by**:
+
+- `erk pr dispatch` when the source plan has `plan_type: learn`
+- `gt finalize` when the `.erk/impl-context/plan.md` has `plan_type: learn`
+
+**Checked by**:
+
+- `erk land` - Skips insight extraction if label present
+
+**Design Decision**: Labels are used instead of PR body markers because:
+
+1. **Visibility** - Labels are visible in GitHub UI, making learn PRs easy to identify
+2. **Simplicity** - Label checks are simpler than parsing PR body content
+3. **Separation** - PR body remains focused on the actual PR description
+4. **Flexibility** - Labels can be manually added/removed for edge cases
+
+**Related**: [Learn Plan](#learn-plan), [pending-learn](#pending-learn), [Learn Origin Tracking](architecture/learn-origin-tracking.md)
+
+### erk-consolidated
+
+A GitHub label added to plans created by consolidating multiple learn plans. Prevents re-consolidation by `/local:replan-learn-plans`.
+
+**Purpose**: State machine marker that stops the consolidation workflow from picking up its own output.
+
+**Applied by**:
+
+- `/erk:replan` when operating in consolidation mode (multiple source plans)
+
+**Checked by**:
+
+- `/local:replan-learn-plans` - Filters out plans with this label before consolidation
+
+**Lifecycle**:
+
+1. Multiple `erk-learn` plans exist
+2. `/local:replan-learn-plans` consolidates them into single new plan
+3. New plan gets both `erk-learn` and `erk-consolidated` labels
+4. Original plans are closed with reference to new one
+5. Future consolidation runs skip the `erk-consolidated` plan
+
+**Related**: [Consolidation Labels](planning/consolidation-labels.md), [Learn Plan](#learn-plan)
+
+### pending-learn
+
+A marker state indicating a merged PR is queued for insight extraction. When `erk land` completes successfully (and the PR is not from a learn plan), it leaves the worktree in a "pending learn" state for later session analysis.
+
+**Purpose**: Queue merged PRs for documentation extraction to capture learnings.
+
+**Lifecycle**:
+
+1. PR merges via `erk land`
+2. If not learn-originated → worktree marked as pending-learn
+3. User runs learn workflow later to capture insights
+4. Worktree deleted after learning complete
+
+**Skip condition**: PRs with `erk-skip-learn` label bypass this marking.
+
+**Related**: [erk-skip-learn](#erk-skip-learn), [Learn Plan](#learn-plan)
+
+### Session Branch Fields
+
+Plan-header metadata fields for tracking pushed session logs. Sessions are accumulated on `planned-pr-context/{pr_number}` branches.
+
+**Fields:**
+
+| Field                 | Type                        | Description                                                                               |
+| --------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| `last_session_branch` | string \| null              | Branch containing accumulated preprocessed session XMLs                                   |
+| `last_session_id`     | string \| null              | Claude Code session ID of the last pushed session                                         |
+| `last_session_at`     | string \| null              | ISO 8601 timestamp of when the session was pushed                                         |
+| `last_session_source` | "local" \| "remote" \| null | Where the session originated - "local" for developer machine, "remote" for GitHub Actions |
+
+**Usage:**
+
+These fields are set by:
+
+- `erk exec push-session` - Pushes preprocessed session to learn branch and updates plan-header
+- GitHub Actions workflow (`plan-implement.yml`) - Automatically pushes session after remote implementation
+
+These fields are read by:
+
+- `erk exec get-learn-sessions` - Returns session sources with `preprocessed_manifest` for download
+- `/erk:learn` command - Uses branch reference to download remote sessions for analysis
+
+**Related**: [Learn Plan](#learn-plan), [Plan Header Metadata](architecture/erk-architecture.md)
+
+---
+
+## Abbreviations
+
+- **ABC**: Abstract Base Class (Python's `abc` module)
+- **CLI**: Command Line Interface
+- **DI**: Dependency Injection
+- **EAFP**: Easier to Ask for Forgiveness than Permission (exception-based error handling)
+- **LBYL**: Look Before You Leap (check-before-operation error handling)
+- **PR**: Pull Request (GitHub)
+- **TOML**: Tom's Obvious Minimal Language (configuration file format)
+
+---
+
+## Streaming & Execution Terms
+
+### Bypass PR Commands (Historical)
+
+A set of now-removed commands (`pr-prep`, `pr-update`, `prepare-local`) that allowed preparing PR branches locally without GitHub CLI. Removed in favor of the streamlined `gt` workflow.
+
+### Streaming Subprocess
+
+An execution pattern where subprocess output is streamed to the UI in real-time via background threads and cross-thread callbacks.
+
+**Key components**:
+
+- Background thread reads subprocess stdout
+- `app.call_from_thread()` safely updates UI from background thread
+- Event queue buffers parsed output
+
+**Related**: [TUI Streaming Output Patterns](tui/streaming-output.md)
+
+### PromptExecutor
+
+The core ABC for launching Claude CLI in various modes (interactive, streaming, command, prompt).
+
+**Location**: `packages/erk-shared/src/erk_shared/core/prompt_executor.py`
+
+**Related**: [Prompt Executor Gateway](architecture/prompt-executor-gateway.md)
+
+### ClaudePromptExecutor
+
+The real implementation of PromptExecutor. Launches the actual Claude CLI binary.
+
+**Location**: `src/erk/core/prompt_executor.py`
+
+### FakePromptExecutor
+
+The test fake for PromptExecutor. Constructor injection for all behaviors, tracks all calls.
+
+**Location**: `tests/fakes/prompt_executor.py`
+
+**Related**: [Prompt Executor Gateway](architecture/prompt-executor-gateway.md)
+
+### Capability Marker
+
+A parameter (like `repo_root`) whose presence/absence determines which execution path or feature set is available. Used to gracefully degrade functionality.
+
+**Example**: `PlanDetailScreen` uses `repo_root` to decide whether streaming execution is available or commands are disabled.
+
+**Related**: [Command Execution Strategies](tui/command-execution.md)
+
+---
+
+## Objectives System
+
+The objectives system enables incremental, bounded progress toward long-running goals. Objectives act as "plan factories" - they generate focused implementation plans rather than being implemented directly.
+
+### Objective
+
+A long-running goal that produces bounded plans when evaluated against the codebase.
+
+**Purpose**: Break large, complex goals into reviewable, implementable chunks. Instead of tackling "migrate all errors to Ensure class" in one massive PR, an objective evaluates the codebase, identifies a manageable subset of violations, and creates a plan for that subset.
+
+**Storage**: `.erk/objectives/<name>/`
+
+### Turn
+
+A single evaluation cycle where Claude assesses current state against the objective's desired state.
+
+**Output**: Either `STATUS: COMPLETE` (objective fully achieved) or `STATUS: GAPS_FOUND` (work remaining).
+
+**Mechanism**:
+
+1. Claude receives objective definition + accumulated notes + codebase access
+2. Evaluates current state vs desired state
+3. Reports status with optional gap description
+4. If gaps found, creates bounded implementation plan
+
+**CLI**: `erk objective plan <objective-name>`
+
+### Key Files
+
+| Concern | Location                          |
+| ------- | --------------------------------- |
+| CLI     | `src/erk/cli/commands/objective/` |
+
+---
+
+## Related Documentation
+
+- [AGENTS.md](../../AGENTS.md) - Coding standards

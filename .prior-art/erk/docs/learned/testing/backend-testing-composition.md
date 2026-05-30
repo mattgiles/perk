@@ -1,0 +1,82 @@
+---
+title: Backend Testing Composition
+read_when:
+  - "testing code that uses ManagedPrBackend"
+  - "deciding whether to fake a backend or gateway"
+  - "writing tests for exec scripts with backend operations"
+tripwires:
+  - action: "creating a FakeManagedPrBackend for testing caller code"
+    warning: "Use real backend + fake gateway instead. FakeLocalGitHub injected into ManagedGitHubPrBackend. Fake backends are only for validating ABC contract across providers."
+last_audited: "2026-02-16 14:20 PT"
+audit_result: clean
+---
+
+# Backend Testing Composition
+
+Pattern for testing code that uses Backend ABCs. The key insight: inject fake gateways into real backends, rather than creating fake backends.
+
+## Core Pattern
+
+```python
+# Correct: real backend with fake gateway
+fake_github = FakeLocalGitHub()
+fake_issues = FakeGitHubIssues()
+backend = ManagedGitHubPrBackend(fake_github, fake_issues, time=FakeTime())
+
+# Wrong: fake backend for testing callers
+fake_backend = FakeManagedPrBackend()  # Only for ABC contract tests
+```
+
+### Why Real Backend + Fake Gateway
+
+Backends contain business logic (metadata block formatting, comment rendering, event composition). Faking the backend bypasses this logic, making tests less valuable. By using the real backend with a fake gateway:
+
+1. Business logic in the backend is exercised
+2. Gateway interactions (API calls) are captured by the fake
+3. Tests verify the full call chain from caller -> backend -> gateway
+
+## Example: Testing impl_signal.py
+
+From `tests/unit/cli/commands/exec/scripts/test_impl_signal.py`:
+
+See `test_started_posts_comment_and_updates_metadata` in
+[`tests/unit/cli/commands/exec/scripts/test_impl_signal.py`](../../../tests/unit/cli/commands/exec/scripts/test_impl_signal.py)
+for the full test. The key elements:
+
+- Creates a `FakeLocalGitHub` with test PRs
+- Invokes `impl_signal` via `CliRunner` with `ErkContext.for_test(github=fake_github)`
+- Asserts on `fake_github.pr_comments`, `fake_github.updated_pr_bodies`, `fake_github.updated_pr_titles`, etc.
+
+## When to Use Fake Backends
+
+Fake backends are appropriate only for validating the ABC contract itself across different providers. For example, ensuring both `ManagedGitHubPrBackend` and a hypothetical alternative backend implement the same interface correctly.
+
+## Decision Table
+
+| Testing Scenario                | Approach                    |
+| ------------------------------- | --------------------------- |
+| Caller uses backend methods     | Real backend + fake gateway |
+| Backend ABC contract validation | Fake backend                |
+| Gateway method behavior         | Fake gateway directly       |
+
+## Assertion Pattern
+
+Assert on fake gateway mutation tracking properties:
+
+| Property                          | What It Tracks                                      |
+| --------------------------------- | --------------------------------------------------- |
+| `fake_github.pr_comments`         | List of `(pr_number, body)` tuples                  |
+| `fake_github.updated_pr_bodies`   | List of `(pr_number, new_body)` tuples              |
+| `fake_github.updated_pr_titles`   | List of `(pr_number, new_title)` tuples             |
+| `fake_github.updated_pr_bases`    | List of `(pr_number, new_base)` tuples              |
+| `fake_github.created_prs`         | List of `(branch, title, body, base, draft)` tuples |
+| `fake_github.added_labels`        | List of `(pr_number, label)` tuples                 |
+| `fake_github.merged_prs`          | List of merged PR numbers                           |
+| `fake_github.closed_prs`          | List of closed PR numbers                           |
+| `fake_github.resolved_thread_ids` | Set of resolved review thread IDs                   |
+
+## Related Documentation
+
+- [Gateway vs Backend](../architecture/gateway-vs-backend.md) - Architecture distinction
+- [Plan Backend Migration](../architecture/plan-backend-migration.md) - Migration pattern
+- [Erk Test Reference](testing.md) - General testing patterns

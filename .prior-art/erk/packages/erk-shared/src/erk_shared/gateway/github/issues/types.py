@@ -1,0 +1,77 @@
+"""Data types for GitHub issues integration."""
+
+from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import datetime
+
+from erk_shared.non_ideal_state import EnsurableResult
+
+
+@dataclass(frozen=True)
+class IssueInfo:
+    """Information about a GitHub issue."""
+
+    number: int
+    title: str
+    body: str
+    state: str  # "OPEN" or "CLOSED"
+    url: str
+    labels: list[str]
+    assignees: list[str]
+    created_at: datetime
+    updated_at: datetime
+    author: str  # GitHub login of the issue creator
+
+
+@dataclass(frozen=True)
+class IssueNotFound:
+    """Sentinel indicating an issue was not found.
+
+    Used as part of union return types for LBYL-style error handling.
+    """
+
+    issue_number: int
+
+
+@dataclass(frozen=True)
+class CreateIssueResult:
+    """Result from creating a GitHub issue.
+
+    Attributes:
+        number: Issue number (e.g., 123)
+        url: Full GitHub URL (e.g., https://github.com/owner/repo/issues/123)
+    """
+
+    number: int
+    url: str
+
+
+@dataclass(frozen=True)
+class IssueComment:
+    """A comment on a GitHub issue.
+
+    Attributes:
+        body: Markdown body of the comment
+        url: Full GitHub URL to the comment (html_url)
+        id: Numeric comment ID for reactions API
+        author: Comment author's GitHub login
+    """
+
+    body: str
+    url: str
+    id: int
+    author: str
+
+
+@dataclass(frozen=True)
+class IssueComments(EnsurableResult):
+    """A collection of issue/PR discussion comments.
+
+    Wraps tuple[IssueComment, ...] to enable .ensure() one-liner unwrapping
+    in T | GitHubAPIFailed union return types.
+    """
+
+    comments: tuple[IssueComment, ...]
+
+    def __iter__(self) -> Iterator[IssueComment]:
+        return iter(self.comments)

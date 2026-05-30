@@ -1,0 +1,626 @@
+"""Tests for FakeGit test infrastructure.
+
+These tests verify that FakeGit correctly simulates git behavior,
+tracks mutations, and provides reliable test doubles for CLI tests.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from erk_shared.gateway.git.abc import BranchDivergence, WorktreeInfo
+from erk_shared.gateway.git.branch_ops.types import BranchAlreadyExists, BranchCreated
+from tests.fakes.gateway.git import FakeGit
+
+
+def test_fake_gitops_list_worktrees() -> None:
+    """Test that FakeGit lists pre-configured worktrees."""
+    repo_root = Path("/repo")
+    wt1 = Path("/repo/wt1")
+    wt2 = Path("/repo/wt2")
+
+    worktrees = {
+        repo_root: [
+            WorktreeInfo(path=repo_root, branch="main"),
+            WorktreeInfo(path=wt1, branch="feature-1"),
+            WorktreeInfo(path=wt2, branch="feature-2"),
+        ]
+    }
+
+    git_ops = FakeGit(worktrees=worktrees)
+    result = git_ops.worktree.list_worktrees(repo_root)
+
+    assert len(result) == 3
+    assert result[0].path == repo_root
+    assert result[1].path == wt1
+    assert result[2].path == wt2
+
+
+def test_fake_gitops_add_worktree(tmp_path: Path) -> None:
+    """Test that FakeGit can add worktrees (in-memory only, no filesystem operations)."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_ops = FakeGit()
+
+    new_wt = repo_root / "new-wt"
+    git_ops.worktree.add_worktree(
+        repo_root, new_wt, branch="new-branch", ref=None, create_branch=True
+    )
+
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 1
+    assert worktrees[0].path == new_wt
+    assert worktrees[0].branch == "new-branch"
+    # FakeGit is purely in-memory - does not create directories
+
+
+def test_fake_gitops_remove_worktree() -> None:
+    """Test that FakeGit can remove worktrees."""
+    repo_root = Path("/repo")
+    wt1 = Path("/repo/wt1")
+
+    git_ops = FakeGit(
+        worktrees={
+            repo_root: [
+                WorktreeInfo(path=wt1, branch="feature-1"),
+            ]
+        }
+    )
+
+    git_ops.worktree.remove_worktree(repo_root, wt1, force=False)
+
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 0
+
+
+def test_fake_gitops_get_current_branch() -> None:
+    """Test that FakeGit returns configured current branch."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(current_branches={cwd: "feature-branch"})
+
+    branch = git_ops.branch.get_current_branch(cwd)
+    assert branch == "feature-branch"
+
+
+def test_fake_gitops_get_default_branch() -> None:
+    """Test that FakeGit returns configured trunk branch."""
+    repo_root = Path("/repo")
+    git_ops = FakeGit(trunk_branches={repo_root: "main"})
+
+    branch = git_ops.branch.detect_trunk_branch(repo_root)
+    assert branch == "main"
+
+
+def test_fake_gitops_get_git_common_dir() -> None:
+    """Test that FakeGit returns configured git common dir."""
+    cwd = Path("/repo")
+    git_dir = Path("/repo/.git")
+
+    git_ops = FakeGit(git_common_dirs={cwd: git_dir})
+
+    common_dir = git_ops.repo.get_git_common_dir(cwd)
+    assert common_dir == git_dir
+
+
+def test_fake_gitops_get_git_dir() -> None:
+    """Test that FakeGit returns configured per-worktree git dir."""
+    cwd = Path("/repo/worktree")
+    wt_git_dir = Path("/repo/.git/worktrees/worktree")
+    common_git_dir = Path("/repo/.git")
+
+    # When git_dirs is configured, returns per-worktree dir
+    git_ops = FakeGit(
+        git_dirs={cwd: wt_git_dir},
+        git_common_dirs={cwd: common_git_dir},
+    )
+    assert git_ops.repo.get_git_dir(cwd) == wt_git_dir
+
+    # When git_dirs is not configured, falls back to git_common_dirs
+    git_ops_fallback = FakeGit(git_common_dirs={cwd: common_git_dir})
+    assert git_ops_fallback.repo.get_git_dir(cwd) == common_git_dir
+
+
+def test_fake_gitops_detached_head() -> None:
+    """Test FakeGit with detached HEAD (None branch)."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(current_branches={cwd: None})
+
+    branch = git_ops.branch.get_current_branch(cwd)
+    assert branch is None
+
+
+def test_fake_gitops_worktree_not_found() -> None:
+    """Test FakeGit when worktree not found."""
+    repo_root = Path("/repo")
+    git_ops = FakeGit()
+
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 0
+
+
+def test_fake_gitops_has_uncommitted_changes_no_changes() -> None:
+    """Test has_uncommitted_changes returns False when no changes."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], [], [])})
+
+    assert not git_ops.status.has_uncommitted_changes(cwd)
+
+
+def test_fake_gitops_has_uncommitted_changes_staged() -> None:
+    """Test has_uncommitted_changes returns True when staged changes exist."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: (["file.txt"], [], [])})
+
+    assert git_ops.status.has_uncommitted_changes(cwd)
+
+
+def test_fake_gitops_has_uncommitted_changes_modified() -> None:
+    """Test has_uncommitted_changes returns True when modified changes exist."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], ["file.txt"], [])})
+
+    assert git_ops.status.has_uncommitted_changes(cwd)
+
+
+def test_fake_gitops_has_uncommitted_changes_untracked() -> None:
+    """Test has_uncommitted_changes returns True when untracked files exist."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], [], ["file.txt"])})
+
+    assert git_ops.status.has_uncommitted_changes(cwd)
+
+
+def test_fake_gitops_has_uncommitted_changes_all_types() -> None:
+    """Test has_uncommitted_changes with all types of changes."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: (["staged.txt"], ["modified.txt"], ["untracked.txt"])})
+
+    assert git_ops.status.has_uncommitted_changes(cwd)
+
+
+def test_fake_gitops_has_uncommitted_changes_unknown_path() -> None:
+    """Test has_uncommitted_changes returns False for unknown path."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    assert not git_ops.status.has_uncommitted_changes(cwd)
+
+
+# ========================================
+# Critical Gap Tests: High-Risk Methods
+# ========================================
+
+
+def test_fake_gitops_get_file_status_empty() -> None:
+    """Test get_file_status with no changes."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], [], [])})
+
+    staged, modified, untracked = git_ops.status.get_file_status(cwd)
+
+    assert staged == []
+    assert modified == []
+    assert untracked == []
+
+
+def test_fake_gitops_get_file_status_staged_only() -> None:
+    """Test get_file_status with only staged files."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: (["file.txt"], [], [])})
+
+    staged, modified, untracked = git_ops.status.get_file_status(cwd)
+
+    assert staged == ["file.txt"]
+    assert modified == []
+    assert untracked == []
+
+
+def test_fake_gitops_get_file_status_modified_only() -> None:
+    """Test get_file_status with only modified files."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], ["file.txt"], [])})
+
+    staged, modified, untracked = git_ops.status.get_file_status(cwd)
+
+    assert staged == []
+    assert modified == ["file.txt"]
+    assert untracked == []
+
+
+def test_fake_gitops_get_file_status_untracked_only() -> None:
+    """Test get_file_status with only untracked files."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: ([], [], ["file.txt"])})
+
+    staged, modified, untracked = git_ops.status.get_file_status(cwd)
+
+    assert staged == []
+    assert modified == []
+    assert untracked == ["file.txt"]
+
+
+def test_fake_gitops_get_file_status_mixed() -> None:
+    """Test get_file_status with all change types."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(file_statuses={cwd: (["a.txt"], ["b.txt"], ["c.txt"])})
+
+    staged, modified, untracked = git_ops.status.get_file_status(cwd)
+
+    assert staged == ["a.txt"]
+    assert modified == ["b.txt"]
+    assert untracked == ["c.txt"]
+
+
+def test_fake_gitops_move_worktree(tmp_path: Path) -> None:
+    """Test move_worktree updates state (in-memory only, no filesystem operations)."""
+    repo_root = tmp_path / "repo"
+    old_wt = tmp_path / "old-wt"
+    new_wt = tmp_path / "new-wt"
+
+    git_ops = FakeGit(
+        worktrees={repo_root: [WorktreeInfo(path=old_wt, branch="feature", is_root=False)]}
+    )
+
+    git_ops.worktree.move_worktree(repo_root, old_wt, new_wt)
+
+    # Verify state updated
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 1
+    assert worktrees[0].path == new_wt
+    assert worktrees[0].branch == "feature"
+
+    # FakeGit is purely in-memory - does not rename directories
+
+
+def test_fake_gitops_get_branch_head() -> None:
+    """Test get_branch_head returns commit SHA from dict."""
+    repo_root = Path("/repo")
+    git_ops = FakeGit(branch_heads={"main": "abc123", "feature": "def456"})
+
+    assert git_ops.branch.get_branch_head(repo_root, "main") == "abc123"
+    assert git_ops.branch.get_branch_head(repo_root, "feature") == "def456"
+    assert git_ops.branch.get_branch_head(repo_root, "nonexistent") is None
+
+
+def test_fake_gitops_get_commit_message() -> None:
+    """Test get_commit_message returns message from dict via commit subgateway."""
+    repo_root = Path("/repo")
+    git_ops = FakeGit(commit_messages={"abc123": "Initial commit", "def456": "Add feature"})
+
+    assert git_ops.commit.get_commit_message(repo_root, "abc123") == "Initial commit"
+    assert git_ops.commit.get_commit_message(repo_root, "def456") == "Add feature"
+    assert git_ops.commit.get_commit_message(repo_root, "unknown") is None
+
+
+def test_fake_gitops_get_ahead_behind() -> None:
+    """Test get_ahead_behind returns (ahead, behind) tuple."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(
+        ahead_behind={
+            (cwd, "main"): (0, 0),
+            (cwd, "feature"): (3, 1),
+        }
+    )
+
+    assert git_ops.branch.get_ahead_behind(cwd, "main") == (0, 0)
+    assert git_ops.branch.get_ahead_behind(cwd, "feature") == (3, 1)
+    assert git_ops.branch.get_ahead_behind(cwd, "unknown") == (0, 0)
+
+
+def test_fake_gitops_get_recent_commits() -> None:
+    """Test get_recent_commits returns commit list with limit."""
+    cwd = Path("/repo")
+    commits = [
+        {"sha": "abc123", "message": "Commit 1"},
+        {"sha": "def456", "message": "Commit 2"},
+        {"sha": "ghi789", "message": "Commit 3"},
+        {"sha": "jkl012", "message": "Commit 4"},
+        {"sha": "mno345", "message": "Commit 5"},
+        {"sha": "pqr678", "message": "Commit 6"},
+    ]
+    git_ops = FakeGit(recent_commits={cwd: commits})
+
+    # Default limit is 5
+    result = git_ops.commit.get_recent_commits(cwd, limit=5)
+    assert len(result) == 5
+    assert result[0]["sha"] == "abc123"
+
+    # Custom limit
+    result = git_ops.commit.get_recent_commits(cwd, limit=3)
+    assert len(result) == 3
+
+    # No commits configured
+    result = git_ops.commit.get_recent_commits(Path("/other"), limit=5)
+    assert result == []
+
+
+def test_fake_gitops_prune_worktrees_noop() -> None:
+    """Test prune_worktrees is a no-op (doesn't crash)."""
+    repo_root = Path("/repo")
+    git_ops = FakeGit()
+
+    # Should not raise
+    git_ops.worktree.prune_worktrees(repo_root)
+
+
+def test_fake_gitops_removed_worktrees_tracking() -> None:
+    """Test removed_worktrees tracking property updates on remove."""
+    repo_root = Path("/repo")
+    wt1 = Path("/repo/wt1")
+    wt2 = Path("/repo/wt2")
+
+    git_ops = FakeGit(
+        worktrees={
+            repo_root: [
+                WorktreeInfo(path=wt1, branch="feat-1", is_root=False),
+                WorktreeInfo(path=wt2, branch="feat-2", is_root=False),
+            ]
+        }
+    )
+
+    git_ops.worktree.remove_worktree(repo_root, wt1, force=False)
+    git_ops.worktree.remove_worktree(repo_root, wt2, force=False)
+
+    assert wt1 in git_ops.removed_worktrees
+    assert wt2 in git_ops.removed_worktrees
+    assert len(git_ops.removed_worktrees) == 2
+
+
+def test_fake_gitops_remove_worktree_error_injection() -> None:
+    """Test that FakeGit raises RuntimeError when remove_worktree_error is configured."""
+    repo_root = Path("/repo")
+    wt1 = Path("/repo/wt1")
+
+    git_ops = FakeGit(
+        worktrees={
+            repo_root: [
+                WorktreeInfo(path=wt1, branch="feature-1"),
+            ]
+        },
+        remove_worktree_error="Failed to remove worktree",
+    )
+
+    with pytest.raises(RuntimeError, match="Failed to remove worktree"):
+        git_ops.worktree.remove_worktree(repo_root, wt1, force=False)
+
+    # Worktree should not have been removed
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 1
+
+
+def test_fake_git_is_worktree_clean_with_clean_worktree() -> None:
+    """Test that is_worktree_clean returns True for clean worktree."""
+    worktree_path = Path("/repo/worktree")
+    git_ops = FakeGit(
+        existing_paths={worktree_path},
+    )
+
+    result = git_ops.worktree.is_worktree_clean(worktree_path)
+    assert result is True
+
+
+def test_fake_git_is_worktree_clean_with_uncommitted_changes() -> None:
+    """Test that is_worktree_clean returns False for dirty worktree."""
+    worktree_path = Path("/repo/worktree")
+    git_ops = FakeGit(
+        existing_paths={worktree_path},
+        dirty_worktrees={worktree_path},
+    )
+
+    result = git_ops.worktree.is_worktree_clean(worktree_path)
+    assert result is False
+
+
+def test_fake_git_is_worktree_clean_with_nonexistent_path() -> None:
+    """Test that is_worktree_clean returns False for nonexistent path."""
+    worktree_path = Path("/repo/nonexistent")
+    git_ops = FakeGit()
+
+    result = git_ops.worktree.is_worktree_clean(worktree_path)
+    assert result is False
+
+
+# ============================================================================
+# Commit Messages Since Tests
+# ============================================================================
+
+
+def test_fake_git_get_commit_messages_since_returns_configured_messages() -> None:
+    """Test get_commit_messages_since returns configured commit messages."""
+    cwd = Path("/repo")
+    messages = [
+        "Initial commit\n\nThis is the body of the first commit.",
+        "Add feature\n\nImplemented new feature X.",
+        "Fix bug",
+    ]
+    git_ops = FakeGit(commit_messages_since={(cwd, "main"): messages})
+
+    result = git_ops.commit.get_commit_messages_since(cwd, "main")
+
+    assert result == messages
+
+
+def test_fake_git_get_commit_messages_since_returns_empty_for_unknown_branch() -> None:
+    """Test get_commit_messages_since returns empty list for unknown branch."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    result = git_ops.commit.get_commit_messages_since(cwd, "main")
+
+    assert result == []
+
+
+def test_fake_git_get_commit_messages_since_returns_empty_for_unknown_cwd() -> None:
+    """Test get_commit_messages_since returns empty list for unknown cwd."""
+    cwd = Path("/repo")
+    other_cwd = Path("/other")
+    messages = ["Some commit"]
+    git_ops = FakeGit(commit_messages_since={(cwd, "main"): messages})
+
+    result = git_ops.commit.get_commit_messages_since(other_cwd, "main")
+
+    assert result == []
+
+
+# ============================================================================
+# Branch Commit Tests (commit_files_to_branch)
+# ============================================================================
+
+
+def test_fake_git_commit_files_to_branch_tracks_record() -> None:
+    """Test commit_files_to_branch records a BranchCommitRecord."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    git_ops.commit.commit_files_to_branch(
+        cwd,
+        branch="plnd/my-feature",
+        files={"dir/plan.md": "# Plan", "dir/ref.json": '{"key": "value"}'},
+        message="Add plan: My Feature",
+    )
+
+    assert len(git_ops.branch_commits) == 1
+    record = git_ops.branch_commits[0]
+    assert record.cwd == cwd
+    assert record.branch == "plnd/my-feature"
+    assert record.files == {"dir/plan.md": "# Plan", "dir/ref.json": '{"key": "value"}'}
+    assert record.message == "Add plan: My Feature"
+
+
+def test_fake_git_commit_files_to_branch_multiple_commits() -> None:
+    """Test multiple branch commits are tracked independently."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    git_ops.commit.commit_files_to_branch(
+        cwd, branch="branch-a", files={"a.txt": "A"}, message="First"
+    )
+    git_ops.commit.commit_files_to_branch(
+        cwd, branch="branch-b", files={"b.txt": "B"}, message="Second"
+    )
+
+    assert len(git_ops.branch_commits) == 2
+    assert git_ops.branch_commits[0].branch == "branch-a"
+    assert git_ops.branch_commits[1].branch == "branch-b"
+
+
+def test_fake_git_commit_files_to_branch_does_not_affect_regular_commits() -> None:
+    """Test that branch commits and regular commits are tracked separately."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    git_ops.commit.commit_files_to_branch(
+        cwd, branch="feature", files={"f.txt": "content"}, message="Branch commit"
+    )
+    git_ops.commit.commit(cwd, "Regular commit")
+
+    assert len(git_ops.branch_commits) == 1
+    assert len(git_ops.commits) == 1
+    assert git_ops.branch_commits[0].message == "Branch commit"
+    assert git_ops.commits[0].message == "Regular commit"
+
+
+# ============================================================================
+# Branch Divergence Tests
+# ============================================================================
+
+
+def test_fake_git_is_branch_diverged_returns_configured_divergence() -> None:
+    """Test is_branch_diverged_from_remote returns configured divergence state."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(
+        branch_divergence={
+            (cwd, "feature", "origin"): BranchDivergence(is_diverged=True, ahead=3, behind=2)
+        }
+    )
+
+    result = git_ops.branch.is_branch_diverged_from_remote(cwd, "feature", "origin")
+
+    assert result.is_diverged is True
+    assert result.ahead == 3
+    assert result.behind == 2
+
+
+def test_fake_git_is_branch_diverged_returns_default_for_unconfigured() -> None:
+    """Test is_branch_diverged_from_remote returns default for unconfigured branch."""
+    git_ops = FakeGit()
+
+    result = git_ops.branch.is_branch_diverged_from_remote(Path("/repo"), "feature", "origin")
+
+    assert result.is_diverged is False
+    assert result.ahead == 0
+    assert result.behind == 0
+
+
+def test_fake_git_is_branch_diverged_not_diverged_when_only_ahead() -> None:
+    """Test is_branch_diverged_from_remote with only ahead commits (not diverged)."""
+    cwd = Path("/repo")
+    git_ops = FakeGit(
+        branch_divergence={
+            (cwd, "feature", "origin"): BranchDivergence(is_diverged=False, ahead=3, behind=0)
+        }
+    )
+
+    result = git_ops.branch.is_branch_diverged_from_remote(cwd, "feature", "origin")
+
+    assert result.is_diverged is False
+    assert result.ahead == 3
+    assert result.behind == 0
+
+
+# ============================================================================
+# Discriminated Union Return Types Tests
+# ============================================================================
+
+
+def test_fake_create_branch_returns_branch_created() -> None:
+    """Test that FakeGitBranchOps.create_branch returns BranchCreated on success."""
+    cwd = Path("/repo")
+    git_ops = FakeGit()
+
+    result = git_ops.branch.create_branch(cwd, "feature", "main", force=False)
+
+    assert isinstance(result, BranchCreated)
+
+
+def test_fake_create_branch_returns_error_when_configured() -> None:
+    """Test that FakeGitBranchOps.create_branch returns BranchAlreadyExists when configured."""
+    cwd = Path("/repo")
+    error = BranchAlreadyExists(branch_name="feature", message="branch 'feature' already exists")
+    git_ops = FakeGit(create_branch_error=error)
+
+    result = git_ops.branch.create_branch(cwd, "feature", "main", force=False)
+
+    assert isinstance(result, BranchAlreadyExists)
+    assert result.branch_name == "feature"
+    assert result.error_type == "branch-already-exists"
+
+
+def test_fake_add_worktree_succeeds(tmp_path: Path) -> None:
+    """Test that FakeWorktree.add_worktree succeeds without error."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_ops = FakeGit()
+
+    new_wt = repo_root / "new-wt"
+    git_ops.worktree.add_worktree(
+        repo_root, new_wt, branch="new-branch", ref=None, create_branch=True
+    )
+
+    # Verify worktree was added
+    worktrees = git_ops.worktree.list_worktrees(repo_root)
+    assert len(worktrees) == 1
+    assert worktrees[0].branch == "new-branch"
+
+
+def test_fake_add_worktree_raises_when_error_configured(tmp_path: Path) -> None:
+    """Test that FakeWorktree.add_worktree raises RuntimeError when configured."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_ops = FakeGit(add_worktree_error="worktree add failed: path already exists")
+
+    new_wt = repo_root / "new-wt"
+    with pytest.raises(RuntimeError, match="path already exists"):
+        git_ops.worktree.add_worktree(
+            repo_root, new_wt, branch="new-branch", ref=None, create_branch=True
+        )

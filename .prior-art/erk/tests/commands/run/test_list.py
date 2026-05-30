@@ -1,0 +1,480 @@
+"""CLI tests for erk workflow run list command.
+
+This file focuses on CLI-specific concerns for the list runs command:
+- Command execution and exit codes
+- Output formatting and display (status indicators, Rich table)
+- PR-centric view with direct PR extraction
+
+The integration layer (list_workflow_runs) is tested in:
+- tests/unit/fakes/test_fake_github.py - Fake infrastructure tests
+- tests/integration/test_real_github.py - Real implementation tests
+
+This file trusts that unit layer and only tests CLI integration.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from erk.cli.commands.run.list_cmd import list_runs
+from erk.cli.constants import DISPATCH_WORKFLOW_NAME, PR_ADDRESS_WORKFLOW_NAME
+from erk.core.context import ErkContext
+from erk_shared.gateway.git.abc import WorktreeInfo
+from erk_shared.gateway.github.issues.types import IssueInfo
+from erk_shared.gateway.github.types import PullRequestInfo, WorkflowRun
+from tests.fakes.gateway.git import FakeGit
+from tests.fakes.gateway.github import FakeLocalGitHub
+from tests.fakes.gateway.github_issues import FakeGitHubIssues
+from tests.fakes.tests.context import create_test_context
+
+_IMPL_WORKFLOW = f".github/workflows/{DISPATCH_WORKFLOW_NAME}"
+_ADDR_WORKFLOW = f".github/workflows/{PR_ADDRESS_WORKFLOW_NAME}"
+
+
+def _make_git(tmp_path: Path) -> FakeGit:
+    """Create a standard FakeGit for run list tests."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    return FakeGit(
+        worktrees={repo_root: [WorktreeInfo(path=repo_root, branch="main")]},
+        current_branches={repo_root: "main"},
+        git_common_dirs={repo_root: repo_root / ".git"},
+    )
+
+
+def _repo_root(tmp_path: Path) -> Path:
+    return tmp_path / "repo"
+
+
+def _make_issue(number: int, title: str) -> IssueInfo:
+    """Create a standard IssueInfo for testing."""
+    now = datetime.now(UTC)
+    return IssueInfo(
+        number=number,
+        title=title,
+        body="",
+        state="OPEN",
+        url=f"https://github.com/owner/repo/issues/{number}",
+        labels=["erk-pr"],
+        assignees=[],
+        created_at=now,
+        updated_at=now,
+        author="test-user",
+    )
+
+
+def _make_ctx(
+    tmp_path: Path,
+    *,
+    workflow_runs: list[WorkflowRun],
+    issues: dict[int, IssueInfo] | None = None,
+    github: FakeLocalGitHub | None = None,
+) -> ErkContext:
+    """Create a test context with standard setup."""
+    git_ops = _make_git(tmp_path)
+    if issues is None:
+        issues = {1: _make_issue(1, "Dummy")}
+    issues_ops = FakeGitHubIssues(issues=issues)
+    if github is None:
+        github = FakeLocalGitHub(workflow_runs=workflow_runs)
+    return create_test_context(
+        git=git_ops,
+        github=github,
+        issues=issues_ops,
+        cwd=_repo_root(tmp_path),
+    )
+
+
+def test_list_runs_empty_state(tmp_path: Path) -> None:
+    """Test list command displays message when no runs found."""
+    git_ops = _make_git(tmp_path)
+    github_ops = FakeLocalGitHub(workflow_runs=[])
+    ctx = create_test_context(
+        git=git_ops,
+        github=github_ops,
+        cwd=_repo_root(tmp_path),
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "No workflow runs found" in result.output
+
+
+def test_list_runs_pr_address_format_shows_pr(tmp_path: Path) -> None:
+    """PR-address runs with #NNN in display_title show the PR number."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="1234567890",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc123",
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "1234567890" in result.output
+    assert "#456" in result.output
+
+
+def test_list_runs_new_plan_implement_format_shows_pr(
+    tmp_path: Path,
+) -> None:
+    """New plan-implement format with branch name and #pr_number shows PR directly."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="555666",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="plnd/add-branch-name-to-run-name (#460):abc456",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "#460" in result.output
+    assert "plan-implement" in result.output
+
+
+def test_list_runs_old_plan_format_shows_dash(
+    tmp_path: Path,
+) -> None:
+    """Old plan-implement format (no #pr) shows dashes for PR columns."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="111222",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="142:abc456",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "111222" in result.output
+
+
+def test_list_runs_no_pr_shows_dash(tmp_path: Path) -> None:
+    """Runs with no extractable PR number show '-' for pr/title/chks."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="999888",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="Some legacy title [abc123]",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "999888" in result.output
+    assert "X" not in result.output
+
+
+def test_list_runs_all_workflow_types_shown(tmp_path: Path) -> None:
+    """All workflow types are shown without needing --show-legacy."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="111111",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="plnd/add-feature (#460):abc456",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+        WorkflowRun(
+            run_id="222222",
+            status="completed",
+            conclusion="success",
+            branch="feat-2",
+            head_sha="def456",
+            display_title="pr-address:#460:def456",
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+        WorkflowRun(
+            run_id="333333",
+            status="completed",
+            conclusion="success",
+            branch="feat-3",
+            head_sha="ghi789",
+            display_title="one-shot:#461:ghi789",
+            workflow_path=".github/workflows/one-shot.yml",
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "111111" in result.output
+    assert "222222" in result.output
+    assert "333333" in result.output
+    assert "#460" in result.output
+    assert "#461" in result.output
+
+
+def test_list_runs_multiple_statuses(tmp_path: Path) -> None:
+    """Test list command displays multiple runs with different statuses."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="123",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="plnd/feat-1 (#201):abc",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+        WorkflowRun(
+            run_id="999888",
+            status="completed",
+            conclusion="failure",
+            branch="feat-2",
+            head_sha="def456",
+            display_title="plnd/feat-2 (#202):def",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+        WorkflowRun(
+            run_id="789",
+            status="in_progress",
+            conclusion=None,
+            branch="feat-3",
+            head_sha="ghi789",
+            display_title="plnd/feat-3 (#203):ghi",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "123" in result.output
+    assert "999888" in result.output
+    assert "789" in result.output
+    assert "#201" in result.output
+    assert "#202" in result.output
+    assert "#203" in result.output
+
+
+def test_list_runs_truncates_long_titles(tmp_path: Path) -> None:
+    """Test list command truncates PR titles longer than 50 characters."""
+    long_title = (
+        "This is a very long title that exceeds fifty characters "
+        "and should be truncated with ellipsis"
+    )
+    workflow_runs = [
+        WorkflowRun(
+            run_id="123",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="plnd/add-feature (#201):abc456",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+
+    pr_info = PullRequestInfo(
+        number=201,
+        state="OPEN",
+        url="https://github.com/owner/repo/pull/201",
+        is_draft=False,
+        title=long_title,
+        checks_passing=True,
+        owner="owner",
+        repo="repo",
+        has_conflicts=False,
+    )
+
+    github = FakeLocalGitHub(
+        workflow_runs=workflow_runs,
+        prs={"feat-1": pr_info},
+    )
+    ctx = _make_ctx(
+        tmp_path,
+        workflow_runs=workflow_runs,
+        github=github,
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert long_title not in result.output
+    assert "..." in result.output
+    assert "This is a very long" in result.output
+
+
+def test_list_runs_displays_submission_time(tmp_path: Path) -> None:
+    """Test list command displays submission time in local timezone."""
+    timestamp = datetime(2024, 11, 26, 14, 30, 45, tzinfo=UTC)
+    workflow_runs = [
+        WorkflowRun(
+            run_id="1234567890",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc456",
+            created_at=timestamp,
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "11-26" in result.output or "11-25" in result.output or "11-27" in result.output
+    assert "submitted" in result.output
+
+
+def test_list_runs_handles_missing_timestamp(tmp_path: Path) -> None:
+    """Test list command handles missing created_at gracefully."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="1234567890",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc456",
+            created_at=None,
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "submitted" in result.output
+
+
+def test_list_runs_shows_workflow_column(tmp_path: Path) -> None:
+    """Test that runs display the workflow source column."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="555666",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="plnd/fix-auth-bug (#460):abc456",
+            workflow_path=_IMPL_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "workflow" in result.output
+    assert "plan-implement" in result.output
+    assert "555666" in result.output
+    assert "#460" in result.output
+
+
+def test_list_runs_handles_queued_status(tmp_path: Path) -> None:
+    """Test list command displays queued status correctly."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="123",
+            status="queued",
+            conclusion=None,
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc",
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Queued" in result.output or "⧗" in result.output
+
+
+def test_list_runs_handles_cancelled_status(tmp_path: Path) -> None:
+    """Test list command displays cancelled status correctly."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="123",
+            status="completed",
+            conclusion="cancelled",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc",
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "Cancelled" in result.output or "⛔" in result.output
+
+
+def test_list_runs_pr_column_header(tmp_path: Path) -> None:
+    """Table uses 'pr' column header instead of 'plan'."""
+    workflow_runs = [
+        WorkflowRun(
+            run_id="123",
+            status="completed",
+            conclusion="success",
+            branch="feat-1",
+            head_sha="abc123",
+            display_title="pr-address:#456:abc",
+            workflow_path=_ADDR_WORKFLOW,
+        ),
+    ]
+    ctx = _make_ctx(tmp_path, workflow_runs=workflow_runs)
+
+    runner = CliRunner()
+    result = runner.invoke(list_runs, obj=ctx, catch_exceptions=False)
+
+    assert result.exit_code == 0
+    # The "pr" header appears in the table
+    assert "pr" in result.output

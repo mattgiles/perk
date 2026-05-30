@@ -1,0 +1,413 @@
+---
+title: Subprocess Wrappers
+last_audited: "2026-02-16 00:00 PT"
+audit_result: edited
+read_when:
+  - "using subprocess wrappers"
+  - "executing shell commands"
+  - "understanding subprocess patterns"
+tripwires:
+  - action: "using bare subprocess.run with check=True"
+    warning: "Use wrapper functions: run_subprocess_with_context() (gateway) or run_with_error_reporting() (CLI). Exception: Graceful degradation pattern with explicit CalledProcessError handling is acceptable for optional operations."
+    pattern: "subprocess\\.run\\("
+  - action: "adding a Claude subprocess call with --print mode"
+    warning: "Always include --no-session-persistence flag and use env=build_claude_subprocess_env() parameter. Both are required to prevent session persistence and CLAUDECODE context leakage. See the 'Claude Subprocess Environment' section."
+  - action: "using sed -i in scripts that run on both macOS and Linux"
+    warning: "macOS sed requires `sed -i ''` (empty string argument) while Linux sed uses `sed -i` (no argument). Scripts that use sed -i without handling this difference will fail silently on one platform."
+    score: 4
+---
+
+# Subprocess Execution Wrappers
+
+**NEVER use bare `subprocess.run(..., check=True)`. ALWAYS use wrapper functions.**
+
+This guide explains the two-layer pattern for subprocess execution in erk: gateway layer and CLI layer wrappers.
+
+## Scope
+
+**These rules apply to production erk code** in `src/erk/` and `packages/erk-shared/`.
+
+**Exception: erk-dev** (`packages/erk-dev/`) is developer tooling and is exempt from these rules. Direct `subprocess.run` is acceptable in erk-dev commands since they don't need the testability/dry-run benefits of wrapper functions.
+
+## Two-Layer Pattern
+
+Erk uses a two-layer design for subprocess execution to provide consistent error handling across different boundaries:
+
+- **Gateway layer**: `run_subprocess_with_context()` - Raises RuntimeError for business logic
+- **CLI layer**: `run_with_error_reporting()` - Prints user-friendly message and raises SystemExit
+
+## Wrapper Functions
+
+### run_subprocess_with_context (Gateway Layer)
+
+**When to use**: In business logic, gateway classes, and core functionality that may be called from multiple contexts.
+
+**Import**: `from erk_shared.subprocess_utils import run_subprocess_with_context`
+
+**Behavior**: Raises `RuntimeError` with rich context on failure
+
+**Usage**: Pass `cmd` (the command list), `operation_context` (human-readable description), and `cwd` (working directory). On failure, raises `RuntimeError` with the operation context, command, exit code, and stderr.
+
+<!-- Source: packages/erk-shared/src/erk_shared/subprocess_utils.py, run_subprocess_with_context -->
+
+See `run_subprocess_with_context()` in `packages/erk-shared/src/erk_shared/subprocess_utils.py` for the full signature and implementation.
+
+**Why use this**:
+
+- **Rich error messages**: Includes operation context, command, exit code, stderr
+- **Exception chaining**: Preserves original CalledProcessError for debugging
+- **Testable**: Can be caught and handled in tests
+
+### run_with_error_reporting (CLI Layer)
+
+**When to use**: In CLI command handlers where you want to immediately exit on failure with a user-friendly message.
+
+**Import**: `from erk.cli.subprocess_utils import run_with_error_reporting`
+
+**Behavior**: Prints error message to stderr and raises `SystemExit` on failure
+
+**Example**:
+
+```python
+from erk.cli.subprocess_utils import run_with_error_reporting
+
+# ✅ CORRECT: User-friendly error messages + SystemExit
+run_with_error_reporting(
+    ["gh", "pr", "view", str(pr_number)],
+    operation_context="view pull request",
+    cwd=repo_root,
+)
+```
+
+**Why use this**:
+
+- **User-friendly**: Error messages are clear and actionable
+- **CLI semantics**: Exits immediately with non-zero code
+- **No exception handling needed**: Wrapper handles everything
+
+## Why This Matters
+
+- **Rich error messages**: Both wrappers include operation context, command, exit code, and stderr
+- **Exception chaining**: Preserves original CalledProcessError for debugging
+- **Consistent patterns**: Two clear boundaries with appropriate error handling
+- **Debugging support**: Full context available in error messages and logs
+
+## LBYL Patterns to Keep
+
+**DO NOT migrate check=False LBYL patterns** - these are intentional:
+
+```python
+# ✅ CORRECT: Intentional LBYL pattern (keep as-is)
+result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+if result.returncode != 0:
+    return None  # Graceful degradation
+```
+
+When code explicitly uses `check=False` and checks the return code, this is a Look Before You Leap (LBYL) pattern for graceful degradation. Do not refactor these to use wrappers.
+
+## Graceful Degradation Pattern
+
+Not all subprocess calls should use `run_with_error_reporting()`. Use explicit exception handling when:
+
+1. **The operation is optional** - Failure should not stop the main workflow
+2. **Fire-and-forget semantics** - The result is informational, not critical
+3. **Warning vs Error** - You want to show a warning and continue, not exit
+
+### Example: Async Learn Trigger in Land Command
+
+```python
+# Pattern: check=True with explicit CalledProcessError handling
+try:
+    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    # Handle success
+except subprocess.CalledProcessError as e:
+    # Show warning, continue execution
+    user_output(click.style("⚠ ", fg="yellow") + f"Optional operation failed: {e}")
+except FileNotFoundError:
+    # Handle missing command gracefully
+    user_output(click.style("⚠ ", fg="yellow") + "Command not found")
+```
+
+### Decision Table
+
+| Scenario                       | Pattern                         | Reason                           |
+| ------------------------------ | ------------------------------- | -------------------------------- |
+| CLI command that must succeed  | `run_with_error_reporting()`    | SystemExit on failure is correct |
+| Optional background operation  | Explicit exception handling     | Main operation should continue   |
+| Gateway real.py implementation | `run_subprocess_with_context()` | Consistent error wrapping        |
+
+## GitHub API Commands with Retry
+
+For GitHub API commands that may fail due to transient network errors, use `execute_gh_command_with_retry()`:
+
+```python
+from erk_shared.subprocess_utils import execute_gh_command_with_retry
+
+result = execute_gh_command_with_retry(cmd, cwd, time_impl)
+```
+
+This builds on `run_subprocess_with_context()` and adds:
+
+- Automatic retry on transient errors (network timeouts, connection failures)
+- Exponential backoff delays (0.5s, 1.0s by default)
+- Time injection for testability
+
+See [GitHub API Retry Mechanism](github-api-retry-mechanism.md) for the full pattern.
+
+## Error Accumulation Pattern
+
+When streaming stdout line-by-line with `subprocess.Popen()`, stderr must be captured in a background thread to avoid deadlock. This pattern is used in `ClaudePromptExecutor.execute_command_streaming()`.
+
+### Why Background Thread for Stderr?
+
+The problem:
+
+1. Process writes to both stdout and stderr
+2. Main thread blocks on `for line in process.stdout`
+3. If stderr buffer fills, process blocks waiting for it to drain
+4. Deadlock: main thread waits for stdout, process waits for stderr
+
+The solution:
+
+```
+Main Thread                          Background Thread
+───────────────────────────────      ──────────────────────────
+process = Popen(stdout=PIPE,
+                stderr=PIPE)
+                                     for line in process.stderr:
+for line in process.stdout:              stderr_parts.append(line)
+    yield parse_event(line)
+
+process.wait()
+stderr_thread.join(timeout=5.0)
+# Use accumulated stderr in error msg
+```
+
+### Implementation Notes
+
+- Use `daemon=True` so thread doesn't prevent process exit
+- Use a timeout on `join()` to avoid hanging on pathological cases
+- Stderr is accumulated as list, joined only when needed for error message
+- See `src/erk/core/prompt_executor.py` for the canonical implementation
+
+### When to Use This Pattern
+
+- Streaming stdout with `Popen(stdout=PIPE)` while also capturing stderr
+- Long-running processes where stderr could fill its buffer
+- Real-time event processing that must not block
+
+### When NOT to Use This Pattern
+
+- Simple `subprocess.run(capture_output=True)` - handles this automatically
+- Fire-and-forget processes where stderr is ignored
+- Short-lived commands that complete quickly
+
+## Temporary File Lifecycle Pattern in Shell
+
+When passing large or formatted content to external CLI tools (like `gh pr comment`), use the standard Unix temp file pattern to avoid command-line argument limits and escape sequence issues.
+
+### The Pattern
+
+```bash
+# 1. Create temp file
+TEMP_FILE=$(mktemp)
+
+# 2. Write content with proper formatting
+printf "%b\n" "$CONTENT" > "$TEMP_FILE"
+
+# 3. Pass filename to command
+gh pr comment "$PR_NUMBER" --body-file "$TEMP_FILE"
+
+# 4. Cleanup
+rm "$TEMP_FILE"
+```
+
+### Why This Pattern?
+
+1. **Bypasses ARG_MAX**: Linux kernel limits command-line argument length to ~2MB. File I/O has no such limit.
+2. **Reliable escape sequences**: `printf "%b"` is POSIX standard for interpreting backslash escape sequences (`\n`, `\t`, etc.).
+3. **Clean resource management**: Explicit cleanup prevents temp file accumulation.
+
+### When to Use
+
+- GitHub Actions workflows posting CI outputs (rebase logs, test results)
+- Any CLI tool accepting file-based input (`--body-file`, `--input-file`, etc.)
+- Content that could potentially be large (>1KB as rule of thumb)
+- Multi-line content with escape sequences
+
+### Real-World Example
+
+<!-- Source: .github/workflows/pr-rebase.yml, "Post PR comment" step -->
+
+See the "Post PR comment" step in `.github/workflows/pr-rebase.yml` for a real-world example. It uses `printf "%b"` (no trailing newline) to write a BODY variable to a temp file, then passes it via `--body-file` to `gh pr comment`.
+
+This pattern is especially important in CI where large content is common and shell behavior differs from local development (GitHub Actions uses dash/sh, not bash).
+
+### See Also
+
+- [GitHub CLI PR Comment Patterns](../ci/github-cli-comment-patterns.md) - Full guide to CI comment posting patterns
+- [GitHub Actions Output Patterns](../ci/github-actions-output-patterns.md) - For `$GITHUB_OUTPUT` (different context)
+
+## Lenient vs. Strict Handlers
+
+Some subprocess operations should fail gracefully while others should fail fast.
+
+### Decision Matrix
+
+| Aspect                    | Lenient Handler                        | Strict Handler                         |
+| ------------------------- | -------------------------------------- | -------------------------------------- |
+| **Error handling**        | Returns `None` on any failure          | Raises exception or returns error type |
+| **Return type**           | `T \| None`                            | `T` or discriminated union             |
+| **Use case**              | Optional operations, fail-open         | Critical operations, fail-closed       |
+| **Caller responsibility** | Check for `None`, decide how to handle | Catch exception or check error type    |
+
+### Lenient Pattern
+
+Use when the operation is **optional** and the caller should decide how to handle absence:
+
+Returns `T | None` — `None` on any failure (missing data, API errors, not found).
+
+**Characteristics:**
+
+- **No exceptions** - Never raises, always returns `None` on failure
+- **No error messages** - Caller decides what to log
+- **Uniform failure** - All failure modes return `None` consistently
+
+**When to use:**
+
+- Background operations that shouldn't block main workflow
+- Optional data fetching (e.g., review comments for learn)
+- Exploratory queries where absence is expected
+
+### Strict Pattern
+
+Use when the operation is **critical** and failure should be explicit:
+
+A strict handler raises `SystemExit(1)` with JSON error output on any failure, providing clear error messages to the user.
+
+**Characteristics:**
+
+- **Explicit errors** - Each failure mode has specific error message
+- **Recovery attempts** - May try to infer missing data before failing
+- **Clear contract** - Caller knows exceptions mean critical failure
+
+**When to use:**
+
+- User-facing commands where failure needs explanation
+- Critical path operations that cannot continue without the data
+- CLI commands that should exit with error message
+
+### Real-World Example: trigger-async-learn
+
+The `trigger-async-learn` command uses **lenient handler** for PR lookup:
+
+```python
+# Lenient: Try to get PR info, but don't fail if unavailable
+pr_info = get_pr_info(...)
+if pr_info is None:
+    # No PR found - that's OK, just skip review comments
+    click.echo("No PR found for plan, skipping review comments", err=True)
+    review_comments = None
+else:
+    # PR found - fetch review comments
+    pr_number = pr_info["pr_number"]
+    review_comments = fetch_review_comments(repo_root, pr_number)
+
+# Continue with learn workflow (with or without review comments)
+upload_materials(sessions, review_comments)
+trigger_workflow(...)
+```
+
+**Why lenient?**
+
+- Learn can succeed without review comments
+- PR might not exist yet (plan created before implementation)
+- Running from GitHub Actions (no current branch for recovery)
+
+**Contrast with strict handler:**
+
+A user-facing command like `get-pr-info` is **strict** because the user explicitly asked for the data and expects either the answer or a clear error message.
+
+### See Also
+
+- [Fail-Open Patterns](fail-open-patterns.md) - When to allow graceful degradation
+- [Branch Name Inference](../planning/branch-name-inference.md) - Recovery mechanism for missing branch_name
+
+## Prompt Delivery via stdin (ARG_MAX Prevention)
+
+When passing prompts to Claude as a subprocess, erk uses `input=prompt` parameter in `subprocess.run()` to deliver the prompt via stdin rather than as a command-line argument.
+
+**Why stdin instead of `--prompt`?**
+
+Command-line argument length is capped by the OS `ARG_MAX` limit (typically ~2MB on Linux). Session logs, large diffs, and compiled prompt context can easily exceed this limit. Passing via stdin avoids this constraint entirely.
+
+### Python-Level Pattern
+
+Both `execute_prompt()` and `execute_prompt_passthrough()` in `src/erk/core/prompt_executor.py` use this pattern:
+
+```python
+result = subprocess.run(
+    cmd,           # claude --print --model ... (no --prompt arg)
+    input=prompt,  # prompt delivered via stdin
+    capture_output=True,
+    text=True,
+    cwd=cwd,
+    ...
+)
+```
+
+**Source**: `src/erk/core/prompt_executor.py` (lines ~569 and ~636)
+
+### When ARG_MAX Overflow Occurs
+
+- Large diffs (PR diff analysis)
+- Compiled session logs (>1MB JSONL → compressed XML)
+- Multi-step prompts with full context windows
+
+### Distinction from Shell `--body-file` Pattern
+
+The shell `--body-file` temp file pattern (used in CI workflows for `gh pr comment`) is a different solution to a different problem:
+
+| Scenario                            | Solution                             |
+| ----------------------------------- | ------------------------------------ |
+| Python subprocess calling `claude`  | `input=prompt` in `subprocess.run()` |
+| Bash script calling `gh pr comment` | `mktemp` + `--body-file <file>`      |
+
+The Python stdin approach avoids temp file management. The shell temp file pattern is used when calling CLI tools that accept `--body-file` arguments.
+
+## Claude Subprocess Environment
+
+When spawning Claude as a subprocess (using `--print` mode), two protections are required at every call site:
+
+1. **`--no-session-persistence` flag**: Prevents the subprocess Claude from creating persistent session artifacts that leak state between invocations.
+2. **`env=build_claude_subprocess_env()` parameter**: Strips the `CLAUDECODE` environment variable from the subprocess environment, preventing nested Claude instances from inheriting the parent's session context.
+
+See `build_claude_subprocess_env()` in `packages/erk-shared/src/erk_shared/subprocess_utils.py` for the shared utility.
+
+### When to Use
+
+- Every `subprocess.run()` or `subprocess.Popen()` call that invokes `claude` with `--print`
+- Every `run_subprocess_with_context()` call targeting the Claude CLI
+- Both streaming (`Popen`) and single-shot (`subprocess.run`) invocations
+
+### Required Pattern
+
+Both protections must be applied together. Applying only one leaves a gap:
+
+- Flag without env stripping: session won't persist but CLAUDECODE context leaks
+- Env stripping without flag: CLAUDECODE is clean but sessions still persist
+
+### Call Sites
+
+All Claude subprocess calls across the codebase use this pattern. Grep for `--no-session-persistence` to see the canonical call sites, which span `src/erk/`, `packages/erk-shared/`, `packages/erk-dev/`, and `scripts/`.
+
+## Summary
+
+- **Gateway layer**: Use `run_subprocess_with_context()` for business logic
+- **CLI layer**: Use `run_with_error_reporting()` for command handlers
+- **GitHub with retry**: Use `execute_gh_command_with_retry()` for network-sensitive operations
+- **Streaming with stderr**: Use background thread accumulation pattern
+- **Temp file pattern**: Use `mktemp` → `printf "%b"` → file-based input → `rm` for large/formatted content
+- **Claude prompt via stdin**: Use `input=prompt` in `subprocess.run()` to avoid ARG_MAX overflow
+- **Keep LBYL**: Don't migrate intentional `check=False` patterns
+- **Never use bare check=True**: Always use one of the wrapper functions

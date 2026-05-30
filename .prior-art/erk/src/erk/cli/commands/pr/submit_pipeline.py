@@ -1,0 +1,1125 @@
+"""Linear pipeline for PR submission.
+
+Replaces the dual-path branching orchestration with a sequence of plain
+functions transforming a frozen SubmitState dataclass.
+
+Each step: (ErkContext, SubmitState) -> SubmitState | SubmitError
+"""
+
+import concurrent.futures
+import dataclasses
+import sys
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
+
+import click
+
+from erk.cli.commands.pr.shared import (
+    assemble_pr_body,
+    echo_plan_context_status,
+    maybe_advance_lifecycle_to_impl,
+    recover_plan_header,
+    run_commit_message_generation,
+)
+from erk.cli.constants import ERK_PR_LABEL, PLANNED_PR_TITLE_PREFIX
+from erk.cli.ensure import UserFacingCliError
+from erk.cli.repo_resolution import get_remote_github
+from erk.core.commit_message_generator import CommitMessageGenerator
+from erk.core.context import ErkContext, NoRepoSentinel
+from erk.core.pr_context_provider import PrContext, PrContextProvider
+from erk_shared.gateway.git.abc import BranchDivergence
+from erk_shared.gateway.git.remote_ops.types import PullRebaseError, PushError
+from erk_shared.gateway.github.issues.types import IssueNotFound
+from erk_shared.gateway.github.label_ops import add_labels_resilient
+from erk_shared.gateway.github.metadata.core import (
+    extract_metadata_value,
+    extract_raw_metadata_blocks,
+    has_metadata_block,
+    replace_metadata_block_in_body,
+)
+from erk_shared.gateway.github.metadata.roadmap import (
+    render_objective_roadmap_block,
+    rerender_comment_roadmap,
+    update_node_in_frontmatter,
+)
+from erk_shared.gateway.github.metadata.types import BlockKeys
+from erk_shared.gateway.github.parsing import parse_git_remote_url
+from erk_shared.gateway.github.pr_footer import build_pr_body_footer
+from erk_shared.gateway.github.types import BodyText, GitHubRepoId, PRNotFound
+from erk_shared.gateway.gt.operations.finalize import ERK_SKIP_LEARN_LABEL, is_learn_plan
+from erk_shared.gateway.gt.prompts import truncate_diff
+from erk_shared.gateway.pr.diff_extraction import filter_diff_excluded_files
+from erk_shared.impl_context import impl_context_exists, remove_impl_context
+from erk_shared.impl_folder import (
+    has_plan_ref,
+    read_plan_ref,
+    resolve_impl_dir,
+    save_plan_ref,
+    validate_plan_linkage,
+)
+from erk_shared.scratch.scratch import write_scratch_file
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+
+
+def _add_planned_prefix(title: str) -> str:
+    """Prepend 'plnd/' prefix to PR title (idempotent).
+
+    Args:
+        title: The PR title to prefix
+
+    Returns:
+        The title with 'plnd/' prefix, skipping if already prefixed
+    """
+    if title.startswith(PLANNED_PR_TITLE_PREFIX):
+        return title
+    return f"{PLANNED_PR_TITLE_PREFIX}{title}"
+
+
+# ---------------------------------------------------------------------------
+# Data Types
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SubmitState:
+    """Immutable state threaded through the submit pipeline."""
+
+    cwd: Path
+    repo_root: Path
+    branch_name: str
+    parent_branch: str
+    trunk_branch: str
+    use_graphite: bool
+    force: bool
+    debug: bool
+    session_id: str
+    skip_description: bool
+    quiet: bool
+    pr_id: str | None
+    pr_number: int | None
+    pr_url: str | None
+    was_created: bool
+    base_branch: str | None
+    graphite_url: str | None
+    diff_file: Path | None
+    plan_context: PrContext | None
+    title: str | None
+    body: str | None
+    existing_pr_body: str
+    graphite_is_authed: bool | None
+    graphite_branch_tracked: bool | None
+
+
+@dataclass(frozen=True)
+class SubmitError:
+    """Error result from a pipeline step."""
+
+    phase: str
+    error_type: str
+    message: str
+    details: dict[str, str]
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Steps
+# ---------------------------------------------------------------------------
+
+SubmitStep = Callable[[ErkContext, SubmitState], SubmitState | SubmitError]
+
+
+def prepare_state(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Resolve repo_root, branch_name, parent_branch, trunk_branch, pr_id.
+
+    Single location for all discovery. Consolidates duplicate parent-branch
+    and pr-id discovery sites.
+    """
+    if not state.quiet:
+        click.echo(click.style("   Resolving branch and plan context...", dim=True))
+    cwd = state.cwd
+    repo_root = ctx.git.repo.get_repository_root(cwd)
+
+    branch_name = ctx.git.branch.get_current_branch(cwd)
+    if branch_name is None:
+        return SubmitError(
+            phase="prepare",
+            error_type="no_branch",
+            message="Not on a branch (detached HEAD state)",
+            details={},
+        )
+
+    trunk_branch = ctx.git.branch.detect_trunk_branch(repo_root)
+    parent_branch = ctx.branch_manager.get_parent_branch(repo_root, branch_name) or trunk_branch
+
+    # PR ID discovery via plan-ref.json in resolved .erk/impl-context/ dir
+    impl_dir = resolve_impl_dir(cwd, branch_name=branch_name)
+    pr_id: str | None = None
+    if impl_dir is not None:
+        try:
+            pr_id = validate_plan_linkage(impl_dir, branch_name)
+        except ValueError as e:
+            return SubmitError(
+                phase="prepare",
+                error_type="issue_linkage_mismatch",
+                message=str(e),
+                details={"branch": branch_name},
+            )
+
+    # Auto-repair: create plan-ref.json if missing but issue inferred from branch
+    if pr_id is not None and impl_dir is not None and not has_plan_ref(impl_dir):
+        remote_url = ctx.git.remote.get_remote_url(repo_root, "origin")
+        owner, repo_name = parse_git_remote_url(remote_url)
+        pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_id}"
+        save_plan_ref(
+            impl_dir,
+            provider="github",
+            pr_number=pr_id,
+            url=pr_url,
+            labels=(),
+            objective_id=None,
+            node_ids=None,
+        )
+
+    # Cache Graphite auth and branch tracking status to avoid redundant checks
+    graphite_is_authed: bool | None = None
+    graphite_branch_tracked: bool | None = None
+    if state.use_graphite:
+        is_authed, _, _ = ctx.graphite.check_auth_status()
+        graphite_is_authed = is_authed
+        if is_authed:
+            all_branches = ctx.graphite.get_all_branches(ctx.git, repo_root)
+            graphite_branch_tracked = branch_name in all_branches
+
+    return dataclasses.replace(
+        state,
+        cwd=cwd,
+        repo_root=repo_root,
+        branch_name=branch_name,
+        parent_branch=parent_branch,
+        trunk_branch=trunk_branch,
+        pr_id=pr_id,
+        graphite_is_authed=graphite_is_authed,
+        graphite_branch_tracked=graphite_branch_tracked,
+    )
+
+
+def cleanup_impl_for_submit(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Remove .erk/impl-context/ if present and git-tracked.
+
+    Inserted after prepare_state (which discovers pr_id) and before commit_wip
+    (which adds implementation changes). The cleanup commit is local-only; the
+    push happens later in push_and_create_pr.
+    """
+    if not impl_context_exists(state.repo_root):
+        return state
+
+    if not ctx.git.status.has_tracked_files(state.repo_root, ".erk/impl-context"):
+        return state
+
+    remove_impl_context(state.repo_root)
+    ctx.git.commit.stage_files(state.repo_root, [".erk/impl-context/"], force=True)
+    ctx.git.commit.commit(state.repo_root, "Remove .erk/impl-context/ before submission")
+
+    return state
+
+
+def commit_wip(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Check for uncommitted changes; if present, add_all + commit."""
+    if ctx.git.status.has_uncommitted_changes(state.cwd):
+        if not state.quiet:
+            click.echo(click.style("   Committing uncommitted changes...", dim=True))
+        ctx.git.commit.add_all(state.cwd)
+        ctx.git.commit.commit(state.cwd, "WIP: Prepare for PR submission")
+    return state
+
+
+def capture_existing_pr_body(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Capture full PR body before gt submit overwrites it."""
+    if not state.quiet:
+        click.echo(click.style("   Checking for existing PR...", dim=True))
+    pr_result = ctx.github.get_pr_for_branch(state.repo_root, state.branch_name)
+    if isinstance(pr_result, PRNotFound):
+        return state
+    if not pr_result.body:
+        return state
+    return dataclasses.replace(state, existing_pr_body=pr_result.body)
+
+
+def push_and_create_pr(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Push branch and create/find PR.
+
+    Dispatches internally: Graphite-first vs core path.
+    """
+    # Use cached Graphite check from prepare_state instead of re-checking
+    graphite_handles_push = (
+        state.use_graphite
+        and state.graphite_is_authed is True
+        and state.graphite_branch_tracked is True
+    )
+
+    if graphite_handles_push:
+        return _graphite_first_flow(ctx, state)
+    return _core_submit_flow(ctx, state)
+
+
+def _graphite_first_flow(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Graphite-first flow: gt submit handles push + PR creation."""
+    if not state.quiet:
+        click.echo(click.style("Phase 1: Graphite Submit", bold=True))
+
+    # Auto-force for plan implementations (branches always diverge from remote).
+    # Fall back to branch prefix when cleanup already deleted .erk/impl-context/
+    # but the first submit attempt failed before pushing.
+    is_plan_impl = state.pr_id is not None or state.branch_name.startswith("plnd/")
+    effective_force = state.force or is_plan_impl
+
+    # Pre-check: detect remote divergence before gt submit
+    # Use lightweight ls-remote to check if remote SHA matches local (avoids full fetch)
+    remote_sha = ctx.git.remote.get_remote_ref(state.repo_root, "origin", state.branch_name)
+    if remote_sha is not None:
+        local_sha = ctx.git.branch.get_branch_head(state.repo_root, state.branch_name)
+        if local_sha == remote_sha:
+            # SHAs match: no divergence possible, skip expensive fetch
+            divergence = BranchDivergence(is_diverged=False, ahead=0, behind=0)
+        else:
+            # SHAs differ: need full fetch to determine ahead/behind counts
+            ctx.git.remote.fetch_branch(state.repo_root, "origin", state.branch_name)
+            divergence = ctx.git.branch.is_branch_diverged_from_remote(
+                state.cwd, state.branch_name, "origin"
+            )
+        if divergence.behind > 0 and not effective_force:
+            ahead_msg = ""
+            if divergence.ahead > 0:
+                ahead_msg = f" and ahead by {divergence.ahead} commit(s)"
+            return SubmitError(
+                phase="push_and_create_pr",
+                error_type="remote_diverged",
+                message=(
+                    f"Branch '{state.branch_name}' is behind remote by "
+                    f"{divergence.behind} commit(s){ahead_msg}.\n\n"
+                    "The remote branch has been updated (e.g., by CI or another session).\n\n"
+                    "To fix:\n"
+                    "  erk pr diverge-fix --dangerous  # Fix divergence with remote\n"
+                    "  erk pr submit -f                # Force push"
+                ),
+                details={
+                    "branch": state.branch_name,
+                    "ahead": str(divergence.ahead),
+                    "behind": str(divergence.behind),
+                },
+            )
+        if is_plan_impl and not state.force and divergence.behind > 0:
+            if not state.quiet:
+                click.echo(click.style("   Auto-forcing: plan implementation branch", dim=True))
+
+    if not state.quiet:
+        click.echo(click.style("   Running gt submit...", dim=True))
+    sys.stdout.flush()
+    try:
+        ctx.graphite.submit_stack(
+            state.repo_root,
+            publish=True,
+            restack=False,
+            quiet=state.quiet,
+            force=effective_force,
+        )
+    except RuntimeError as e:
+        error_str = str(e)
+        if "restack" in error_str.lower():
+            return SubmitError(
+                phase="push_and_create_pr",
+                error_type="graphite_restack_required",
+                message=(
+                    "Your Graphite stack has conflicts that need manual resolution.\n\n"
+                    "Run these commands:\n"
+                    "  gt restack        # Resolve conflicts interactively\n"
+                    "  erk pr submit     # Re-submit after resolving"
+                ),
+                details={},
+            )
+        return SubmitError(
+            phase="push_and_create_pr",
+            error_type="graphite_submit_failed",
+            message=f"Graphite submit failed: {e}",
+            details={},
+        )
+    if not state.quiet:
+        click.echo(click.style("   Graphite submit completed", fg="green"))
+        click.echo("")
+
+    # Query GitHub for PR info
+    if not state.quiet:
+        click.echo(click.style("   Getting PR info...", dim=True))
+    pr_info = ctx.github.get_pr_for_branch(state.repo_root, state.branch_name)
+    if isinstance(pr_info, PRNotFound):
+        return SubmitError(
+            phase="push_and_create_pr",
+            error_type="pr_not_found",
+            message=(
+                f"PR not found for branch '{state.branch_name}' after gt submit.\n"
+                "This may happen if gt submit didn't create a PR. Try running:\n"
+                "  gt submit --publish"
+            ),
+            details={"branch": state.branch_name},
+        )
+
+    # Get Graphite URL
+    remote_url = ctx.git.remote.get_remote_url(state.repo_root, "origin")
+    owner, repo_name = parse_git_remote_url(remote_url)
+    repo_id = GitHubRepoId(owner=owner, repo=repo_name)
+    graphite_url = ctx.graphite.get_graphite_url(repo_id, pr_info.number)
+
+    if not state.quiet:
+        click.echo(click.style(f"   PR #{pr_info.number} ready", fg="green"))
+        click.echo("")
+
+    return dataclasses.replace(
+        state,
+        pr_number=pr_info.number,
+        pr_url=pr_info.url,
+        was_created=True,
+        base_branch=state.parent_branch,
+        graphite_url=graphite_url,
+    )
+
+
+def _core_submit_flow(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Core submit flow: git push + gh pr create."""
+    if not state.quiet:
+        click.echo(click.style("Phase 1: Creating or Updating PR", bold=True))
+
+    # Check GitHub authentication
+    is_gh_authed, gh_username, _ = ctx.github.check_auth_status()
+    if not is_gh_authed:
+        return SubmitError(
+            phase="push_and_create_pr",
+            error_type="github_auth_failed",
+            message="GitHub CLI is not authenticated. Run 'gh auth login'.",
+            details={},
+        )
+    if state.debug and not state.quiet:
+        click.echo(click.style(f"   Authenticated as {gh_username}", dim=True))
+
+    # Verify commits to push
+    commit_count = ctx.git.analysis.count_commits_ahead(state.cwd, state.parent_branch)
+    if commit_count == 0:
+        return SubmitError(
+            phase="push_and_create_pr",
+            error_type="no_commits",
+            message=f"No commits ahead of {state.parent_branch}. Nothing to submit.",
+            details={"parent_branch": state.parent_branch, "branch": state.branch_name},
+        )
+
+    # Divergence check and auto-rebase
+    divergence = ctx.git.branch.is_branch_diverged_from_remote(
+        state.cwd, state.branch_name, "origin"
+    )
+    if divergence.behind > 0:
+        if state.debug and not state.quiet:
+            click.echo(
+                click.style(
+                    f"   Branch is {divergence.behind} commit(s) behind remote, rebasing...",
+                    dim=True,
+                )
+            )
+        pull_result = ctx.git.remote.pull_rebase(state.cwd, "origin", state.branch_name)
+        if isinstance(pull_result, PullRebaseError):
+            return SubmitError(
+                phase="push_and_create_pr",
+                error_type="rebase_failed",
+                message=(
+                    f"Failed to rebase '{state.branch_name}' on origin.\n"
+                    f"Error: {pull_result.message}\n\n"
+                    f"To fix manually: git pull --rebase origin {state.branch_name}"
+                ),
+                details={"branch": state.branch_name},
+            )
+        divergence = ctx.git.branch.is_branch_diverged_from_remote(
+            state.cwd, state.branch_name, "origin"
+        )
+
+    if divergence.is_diverged and not state.force:
+        return SubmitError(
+            phase="push_and_create_pr",
+            error_type="branch_diverged",
+            message=(
+                f"Branch '{state.branch_name}' has diverged from remote.\n"
+                f"Local is {divergence.ahead} commit(s) ahead and "
+                f"{divergence.behind} commit(s) behind origin/{state.branch_name}.\n\n"
+                f"To fix: git pull --rebase origin {state.branch_name}\n"
+                f"Or use: erk pr submit -f (to force push)"
+            ),
+            details={
+                "branch": state.branch_name,
+                "ahead": str(divergence.ahead),
+                "behind": str(divergence.behind),
+            },
+        )
+
+    # Push
+    push_result = ctx.git.remote.push_to_remote(
+        state.cwd, "origin", state.branch_name, set_upstream=True, force=state.force
+    )
+    if isinstance(push_result, PushError):
+        if "non-fast-forward" in push_result.message or "rejected" in push_result.message.lower():
+            return SubmitError(
+                phase="push_and_create_pr",
+                error_type="branch_diverged",
+                message=(
+                    f"Branch '{state.branch_name}' has diverged from remote.\n"
+                    f"Your local branch is behind origin/{state.branch_name}.\n\n"
+                    f"To fix: git pull --rebase origin {state.branch_name}\n"
+                    f"Or use: erk pr submit -f (to force push)"
+                ),
+                details={"branch": state.branch_name},
+            )
+        raise UserFacingCliError(push_result.message, error_type="cli_error")
+
+    # Check for existing PR or create new one
+    existing_pr = ctx.github.get_pr_for_branch(state.repo_root, state.branch_name)
+
+    if isinstance(existing_pr, PRNotFound):
+        # Check parent branch has PR (stacked PRs)
+        if state.parent_branch != state.trunk_branch:
+            parent_pr = ctx.github.get_pr_for_branch(state.repo_root, state.parent_branch)
+            if isinstance(parent_pr, PRNotFound):
+                return SubmitError(
+                    phase="push_and_create_pr",
+                    error_type="parent_branch_no_pr",
+                    message=(
+                        f"Cannot create PR: parent branch '{state.parent_branch}' "
+                        f"does not have a PR yet.\n\n"
+                        f"This branch is part of a Graphite stack. Use 'gt submit' "
+                        f"to submit the entire stack at once, which will create PRs "
+                        f"for all branches in the correct order.\n\n"
+                        f"Run: gt submit -s"
+                    ),
+                    details={
+                        "branch": state.branch_name,
+                        "parent_branch": state.parent_branch,
+                    },
+                )
+
+        # Build initial PR body with footer
+        footer = build_pr_body_footer(0)
+        full_body = "" + footer
+
+        pr_number = ctx.github.create_pr(
+            state.repo_root,
+            branch=state.branch_name,
+            title="WIP",
+            body=full_body,
+            base=state.parent_branch,
+        )
+
+        # Construct PR URL from repo info instead of making another API call
+        remote_url = ctx.git.remote.get_remote_url(state.repo_root, "origin")
+        owner, repo_name = parse_git_remote_url(remote_url)
+        pr_url = f"https://github.com/{owner}/{repo_name}/pull/{pr_number}"
+
+        # Update footer with actual PR number
+        updated_footer = build_pr_body_footer(pr_number)
+        ctx.github.update_pr_body(state.repo_root, pr_number, "" + updated_footer)
+
+        if not state.quiet:
+            click.echo(click.style(f"   PR #{pr_number} created", fg="green"))
+            click.echo("")
+
+        return dataclasses.replace(
+            state,
+            pr_number=pr_number,
+            pr_url=pr_url,
+            was_created=True,
+            base_branch=state.parent_branch,
+        )
+
+    # PR exists
+    pr_number = existing_pr.number
+    pr_url = existing_pr.url
+
+    # Add footer if missing — use pre-captured body from capture_existing_pr_body step
+    current_body = state.existing_pr_body
+    has_footer = (
+        "erk slot teleport" in current_body
+        or "erk pr teleport" in current_body
+        or "erk pr checkout" in current_body
+    )
+    if not has_footer:
+        footer = build_pr_body_footer(pr_number)
+        ctx.github.update_pr_body(state.repo_root, pr_number, current_body + footer)
+
+    if not state.quiet:
+        click.echo(click.style(f"   PR #{pr_number} found (already exists)", fg="green"))
+        click.echo("")
+
+    return dataclasses.replace(
+        state,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        was_created=False,
+        base_branch=state.parent_branch,
+    )
+
+
+def label_code_pr(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Add erk-pr label to non-plan code PRs."""
+    if state.pr_id is not None:
+        return state  # Plan PRs already get erk-pr via plan creation
+    if state.pr_number is None:
+        return state
+    add_labels_resilient(
+        ctx.github,
+        time=ctx.time,
+        repo_root=state.repo_root,
+        pr_number=state.pr_number,
+        labels=(ERK_PR_LABEL,),
+    )
+    return state
+
+
+def extract_diff(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Local git diff to base branch, filter lock files, truncate, write scratch file."""
+    if state.skip_description:
+        return state
+
+    if state.base_branch is None:
+        return SubmitError(
+            phase="extract_diff",
+            error_type="no_base_branch",
+            message="No base branch determined for diff extraction",
+            details={},
+        )
+
+    pr_diff = ctx.git.analysis.get_diff_to_branch(state.cwd, state.base_branch)
+    if state.debug:
+        diff_lines = len(pr_diff.splitlines())
+        click.echo(click.style(f"   Diff retrieved ({diff_lines} lines)", dim=True))
+
+    # Filter lock files, truncate
+    pr_diff = filter_diff_excluded_files(pr_diff)
+    diff_content, was_truncated = truncate_diff(pr_diff)
+    if was_truncated and state.debug:
+        click.echo(click.style("   Diff truncated for size", dim=True))
+
+    # Write scratch file
+    diff_file = write_scratch_file(
+        diff_content,
+        session_id=state.session_id,
+        suffix=".diff",
+        prefix="pr-diff-",
+        repo_root=state.repo_root,
+    )
+
+    return dataclasses.replace(state, diff_file=diff_file)
+
+
+def fetch_plan_context(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Fetch plan context from linked erk-pr issue."""
+    if state.skip_description:
+        return state
+
+    plan_provider = PrContextProvider(
+        pr_backend=ctx.pr_backend, remote_github=get_remote_github(ctx)
+    )
+    github_info = ctx.repo.github if not isinstance(ctx.repo, NoRepoSentinel) else None
+    if github_info is None:
+        return SubmitError(
+            phase="plan_context",
+            error_type="no_repo",
+            message="Cannot determine GitHub owner/repo from current context",
+            details={},
+        )
+
+    plan_context = plan_provider.get_plan_context(
+        repo_root=state.repo_root,
+        branch_name=state.branch_name,
+        owner=github_info.owner,
+        repo=github_info.repo,
+    )
+
+    echo_plan_context_status(plan_context)
+
+    return dataclasses.replace(state, plan_context=plan_context)
+
+
+def extract_diff_and_fetch_plan_context(
+    ctx: ErkContext, state: SubmitState
+) -> SubmitState | SubmitError:
+    """Run extract_diff and fetch_plan_context concurrently."""
+    if state.skip_description:
+        return state
+
+    click.echo(click.style("Phase 2: Getting diff and plan context", bold=True))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        diff_future = executor.submit(extract_diff, ctx, state)
+        plan_future = executor.submit(fetch_plan_context, ctx, state)
+        diff_result = diff_future.result()
+        plan_result = plan_future.result()
+
+    if isinstance(diff_result, SubmitError):
+        return diff_result
+    if isinstance(plan_result, SubmitError):
+        return plan_result
+
+    click.echo("")
+
+    return dataclasses.replace(
+        state,
+        diff_file=diff_result.diff_file,
+        plan_context=plan_result.plan_context,
+    )
+
+
+def generate_description(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Generate AI PR title and body via CommitMessageGenerator."""
+    if state.skip_description:
+        return state
+    click.echo(click.style("Phase 3: Generating PR description", bold=True))
+
+    if state.diff_file is None:
+        return SubmitError(
+            phase="generate_description",
+            error_type="no_diff_file",
+            message="Failed to extract diff for AI analysis",
+            details={},
+        )
+
+    # Get commit messages for AI context
+    commit_messages = ctx.git.commit.get_commit_messages_since(state.cwd, state.parent_branch)
+
+    msg_gen = CommitMessageGenerator(ctx.prompt_executor, time=ctx.time)
+    msg_result = run_commit_message_generation(
+        generator=msg_gen,
+        diff_file=state.diff_file,
+        repo_root=state.repo_root,
+        current_branch=state.branch_name,
+        parent_branch=state.parent_branch,
+        commit_messages=commit_messages,
+        plan_context=state.plan_context,
+        debug=state.debug,
+        time=ctx.time,
+    )
+
+    if not msg_result.success:
+        return SubmitError(
+            phase="generate_description",
+            error_type="ai_generation_failed",
+            message=f"Failed to generate message: {msg_result.error_message}",
+            details={},
+        )
+
+    click.echo("")
+
+    return dataclasses.replace(
+        state,
+        title=msg_result.title or "Update",
+        body=msg_result.body or "",
+    )
+
+
+def enhance_with_graphite(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """No-op if graphite_url already set. Otherwise check auth + tracking, run gt submit."""
+    # Skip if Graphite already handled the push (graphite-first path)
+    if state.graphite_url is not None:
+        return state
+
+    # Skip if user disabled Graphite
+    if not state.use_graphite:
+        return state
+
+    click.echo(click.style("Phase 4: Graphite enhancement", bold=True))
+
+    if state.pr_number is None:
+        return state
+
+    # Use cached Graphite check from prepare_state
+    if state.graphite_is_authed is not True:
+        if state.debug:
+            click.echo(click.style("   Graphite not authenticated, skipping enhancement", dim=True))
+        click.echo("")
+        return state
+
+    if state.graphite_branch_tracked is not True:
+        if state.debug:
+            click.echo(
+                click.style("   Branch not tracked by Graphite, skipping enhancement", dim=True)
+            )
+        click.echo("")
+        return state
+
+    repo_root = state.repo_root
+
+    # Run gt submit
+    sys.stdout.flush()
+    try:
+        ctx.graphite.submit_stack(
+            repo_root,
+            publish=True,
+            restack=False,
+            quiet=state.quiet,
+            force=state.force,
+        )
+    except RuntimeError as e:
+        error_msg = str(e).lower()
+        if "nothing to submit" in error_msg or "no changes" in error_msg:
+            click.echo(click.style("   PR already up to date with Graphite", fg="green"))
+            click.echo("")
+            return state
+        return SubmitError(
+            phase="enhance_with_graphite",
+            error_type="graphite_enhance_failed",
+            message=f"Graphite enhancement failed: {e}",
+            details={},
+        )
+
+    # Get Graphite URL
+    remote_url = ctx.git.remote.get_remote_url(repo_root, "origin")
+    owner, repo_name = parse_git_remote_url(remote_url)
+    repo_id = GitHubRepoId(owner=owner, repo=repo_name)
+    graphite_url: str | None = None
+    if state.pr_number is not None:
+        graphite_url = ctx.graphite.get_graphite_url(repo_id, state.pr_number)
+
+    click.echo("")
+
+    return dataclasses.replace(state, graphite_url=graphite_url)
+
+
+def finalize_pr(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Update PR title/body with footer, add labels, amend local commit, clean up diff file."""
+    if state.skip_description:
+        return state
+    click.echo(click.style("Phase 5: Updating PR metadata", bold=True))
+
+    if state.pr_number is None:
+        return SubmitError(
+            phase="finalize_pr",
+            error_type="no_pr_number",
+            message="No PR number available for finalization",
+            details={},
+        )
+
+    pr_body = state.body or ""
+    pr_title = state.title or "Update"
+
+    # Use pre-captured PR body (captured before gt submit overwrites it)
+    existing_pr_body = state.existing_pr_body
+
+    # Check learn plan label
+    impl_dir = resolve_impl_dir(state.cwd, branch_name=state.branch_name)
+    is_learn_origin = is_learn_plan(impl_dir) if impl_dir is not None else False
+
+    # Recover plan-header if missing from existing PR body
+    recovered_header = None
+    header_missing = not has_metadata_block(existing_pr_body, BlockKeys.PLAN_HEADER)
+    if header_missing and state.plan_context is not None:
+        recovered_header = recover_plan_header(
+            ctx, repo_root=state.repo_root, pr_id=state.plan_context.pr_id
+        )
+        if recovered_header is not None and not state.quiet:
+            click.echo(click.style("   Recovered missing plan-header metadata", fg="yellow"))
+
+    # Assemble PR body with plan details and footer
+    final_body = assemble_pr_body(
+        body=pr_body,
+        plan_context=state.plan_context,
+        pr_number=state.pr_number,
+        header="",
+        existing_pr_body=existing_pr_body,
+        recovered_plan_header=recovered_header,
+    )
+
+    # Update PR metadata
+    ctx.github.update_pr_title_and_body(
+        repo_root=state.repo_root,
+        pr_number=state.pr_number,
+        title=pr_title,
+        body=BodyText(content=final_body),
+    )
+
+    # Publish draft PR if needed
+    pr_draft_check = ctx.github.get_pr(state.repo_root, state.pr_number)
+    if not isinstance(pr_draft_check, PRNotFound) and pr_draft_check.is_draft:
+        click.echo(click.style("   Publishing draft PR...", dim=True))
+        ctx.github.mark_pr_ready(state.repo_root, state.pr_number)
+
+    # Add learn skip label if applicable
+    if is_learn_origin:
+        add_labels_resilient(
+            ctx.github,
+            time=ctx.time,
+            repo_root=state.repo_root,
+            pr_number=state.pr_number,
+            labels=(ERK_SKIP_LEARN_LABEL,),
+        )
+
+    # Amend local commit with title and body (without metadata footer)
+    commit_message = pr_title
+    if pr_body:
+        commit_message = f"{pr_title}\n\n{pr_body}"
+    ctx.git.commit.amend_commit(state.repo_root, commit_message)
+
+    # Fix Graphite tracking divergence caused by the amend
+    if ctx.graphite_branch_ops is not None:
+        ctx.graphite_branch_ops.retrack_branch(state.repo_root, state.branch_name)
+
+    # Clean up temp diff file
+    if state.diff_file is not None and state.diff_file.exists():
+        try:
+            state.diff_file.unlink()
+        except OSError as e:
+            if state.debug:
+                click.echo(click.style(f"   Failed to clean up diff file: {e}", dim=True))
+
+    click.echo(click.style("   PR metadata updated", fg="green"))
+
+    # Update lifecycle stage for linked plan
+    pr_id_for_lifecycle: str | None = None
+    if state.plan_context is not None:
+        pr_id_for_lifecycle = state.plan_context.pr_id
+    elif state.pr_number is not None:
+        pr_id_for_lifecycle = str(state.pr_number)
+
+    if pr_id_for_lifecycle is not None:
+        maybe_advance_lifecycle_to_impl(
+            ctx,
+            repo_root=state.repo_root,
+            pr_id=pr_id_for_lifecycle,
+            quiet=state.quiet,
+        )
+
+    click.echo("")
+
+    return dataclasses.replace(
+        state,
+        title=pr_title,
+        body=pr_body,
+    )
+
+
+def link_pr_to_objective_nodes(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Link the PR to objective roadmap nodes if .erk/impl-context/ contains node_ids."""
+    if state.pr_number is None:
+        return state
+
+    impl_dir = resolve_impl_dir(state.cwd, branch_name=state.branch_name)
+    if impl_dir is None:
+        return state
+
+    plan_ref = read_plan_ref(impl_dir)
+    if plan_ref is None:
+        return state
+
+    if plan_ref.objective_id is None or plan_ref.node_ids is None:
+        return state
+
+    if len(plan_ref.node_ids) == 0:
+        return state
+
+    objective_id = plan_ref.objective_id
+    pr_ref = f"#{state.pr_number}"
+
+    issue = ctx.github_issues.get_issue(state.repo_root, objective_id)
+    if isinstance(issue, IssueNotFound):
+        click.echo(
+            click.style(
+                f"   Warning: Objective #{objective_id} not found, skipping node linking",
+                dim=True,
+            )
+        )
+        return state
+
+    linked_nodes: list[str] = []
+
+    # Extract roadmap block once before iterating through node_ids
+    raw_blocks = extract_raw_metadata_blocks(issue.body)
+    roadmap_block = None
+    for block in raw_blocks:
+        if block.key == BlockKeys.OBJECTIVE_ROADMAP:
+            roadmap_block = block
+            break
+
+    updated_body = issue.body
+    if roadmap_block is not None:
+        block_content = roadmap_block.body
+        for node_id in plan_ref.node_ids:
+            updated_block_content = update_node_in_frontmatter(
+                block_content,
+                node_id,
+                pr=pr_ref,
+                status=None,
+                description=None,
+                slug=None,
+                comment=None,
+            )
+            if updated_block_content is None:
+                continue
+
+            block_content = updated_block_content
+            linked_nodes.append(node_id)
+
+        if linked_nodes:
+            new_block_with_markers = render_objective_roadmap_block(block_content)
+            try:
+                updated_body = replace_metadata_block_in_body(
+                    updated_body, BlockKeys.OBJECTIVE_ROADMAP, new_block_with_markers
+                )
+            except ValueError:
+                linked_nodes.clear()
+
+    if linked_nodes:
+        ctx.github_issues.update_issue_body(
+            state.repo_root, objective_id, BodyText(content=updated_body)
+        )
+
+        # Re-render comment roadmap table if applicable
+        objective_comment_id = extract_metadata_value(
+            updated_body, BlockKeys.OBJECTIVE_HEADER, "objective_comment_id"
+        )
+        if objective_comment_id is not None:
+            comment_body = ctx.github_issues.get_comment_by_id(
+                state.repo_root, objective_comment_id
+            )
+            updated_comment = rerender_comment_roadmap(updated_body, comment_body)
+            if updated_comment is not None and updated_comment != comment_body:
+                ctx.github_issues.update_comment(
+                    state.repo_root, objective_comment_id, updated_comment
+                )
+
+        node_list = ", ".join(linked_nodes)
+        click.echo(
+            click.style(
+                f"   Linked PR #{state.pr_number} to objective #{objective_id} nodes: {node_list}",
+                fg="green",
+            )
+        )
+
+    return state
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Runner
+# ---------------------------------------------------------------------------
+
+
+@cache
+def _push_and_create_pipeline() -> tuple[SubmitStep, ...]:
+    return (
+        prepare_state,
+        cleanup_impl_for_submit,
+        commit_wip,
+        capture_existing_pr_body,
+        push_and_create_pr,
+        label_code_pr,
+    )
+
+
+def run_push_and_create_pipeline(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Run only the push-and-create portion of the submit pipeline."""
+    for step in _push_and_create_pipeline():
+        try:
+            result = step(ctx, state)
+        except Exception as e:
+            step_name = getattr(step, "__name__", repr(step))
+            return SubmitError(
+                phase=step_name,
+                error_type="unhandled_exception",
+                message=f"Unexpected error in {step_name}: {e}",
+                details={},
+            )
+        sys.stdout.flush()
+        if isinstance(result, SubmitError):
+            return result
+        state = result
+    return state
+
+
+@cache
+def _submit_pipeline() -> tuple[SubmitStep, ...]:
+    return (
+        prepare_state,
+        cleanup_impl_for_submit,
+        commit_wip,
+        capture_existing_pr_body,
+        push_and_create_pr,
+        label_code_pr,
+        extract_diff_and_fetch_plan_context,
+        generate_description,
+        enhance_with_graphite,
+        finalize_pr,
+        link_pr_to_objective_nodes,
+    )
+
+
+def run_submit_pipeline(ctx: ErkContext, state: SubmitState) -> SubmitState | SubmitError:
+    """Run the submit pipeline, returning final state or first error."""
+    for step in _submit_pipeline():
+        try:
+            result = step(ctx, state)
+        except Exception as e:
+            step_name = getattr(step, "__name__", repr(step))
+            return SubmitError(
+                phase=step_name,
+                error_type="unhandled_exception",
+                message=f"Unexpected error in {step_name}: {e}",
+                details={},
+            )
+        sys.stdout.flush()
+        if isinstance(result, SubmitError):
+            return result
+        state = result
+    return state
+
+
+def make_initial_state(
+    *,
+    cwd: Path,
+    use_graphite: bool,
+    force: bool,
+    debug: bool,
+    session_id: str | None,
+    skip_description: bool,
+    quiet: bool,
+) -> SubmitState:
+    """Create initial SubmitState with only CLI-provided values.
+
+    All discovery fields start as empty/None and are populated by prepare_state().
+    """
+    resolved_session_id = session_id if session_id is not None else str(uuid.uuid4())
+    return SubmitState(
+        cwd=cwd,
+        repo_root=cwd,
+        branch_name="",
+        parent_branch="",
+        trunk_branch="",
+        use_graphite=use_graphite,
+        force=force,
+        debug=debug,
+        session_id=resolved_session_id,
+        skip_description=skip_description,
+        quiet=quiet,
+        pr_id=None,
+        pr_number=None,
+        pr_url=None,
+        was_created=False,
+        base_branch=None,
+        graphite_url=None,
+        diff_file=None,
+        plan_context=None,
+        title=None,
+        body=None,
+        existing_pr_body="",
+        graphite_is_authed=None,
+        graphite_branch_tracked=None,
+    )

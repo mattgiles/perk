@@ -1,0 +1,70 @@
+"""Real implementation of CommandExecutor for production use."""
+
+from collections.abc import Callable
+from typing import Any, Protocol
+
+from erk_shared.gateway.command_executor.abc import CommandExecutor
+
+
+class NotifyFn(Protocol):
+    """Protocol for notify function with keyword-only severity parameter."""
+
+    def __call__(self, message: str, severity: str | None) -> None: ...
+
+
+class RealCommandExecutor(CommandExecutor):
+    """Production executor using injected dependencies.
+
+    Uses callables for each operation to decouple from concrete implementations.
+    """
+
+    def __init__(
+        self,
+        *,
+        browser_launch: Callable[[str], Any],
+        clipboard_copy: Callable[[str], Any],
+        close_pr_fn: Callable[[int, str], list[int]],
+        notify_fn: NotifyFn,
+        refresh_fn: Callable[[], None],
+        dispatch_to_queue_fn: Callable[[int, str], None],
+    ) -> None:
+        """Initialize with dependency functions.
+
+        Args:
+            browser_launch: Function to launch URL in browser (return value ignored)
+            clipboard_copy: Function to copy text to clipboard (return value ignored)
+            close_pr_fn: Function to close plan and linked PRs
+            notify_fn: Function to show notification
+            refresh_fn: Function to trigger data refresh
+            dispatch_to_queue_fn: Function to dispatch plan to implementation queue
+        """
+        self._browser_launch = browser_launch
+        self._clipboard_copy = clipboard_copy
+        self._close_pr_fn = close_pr_fn
+        self._notify_fn = notify_fn
+        self._refresh_fn = refresh_fn
+        self._dispatch_to_queue_fn = dispatch_to_queue_fn
+
+    def open_url(self, url: str) -> None:
+        """Open URL in browser."""
+        self._browser_launch(url)
+
+    def copy_to_clipboard(self, text: str) -> None:
+        """Copy text to clipboard."""
+        self._clipboard_copy(text)
+
+    def close_plan(self, pr_number: int, pr_url: str) -> list[int]:
+        """Close plan and linked PRs."""
+        return self._close_pr_fn(pr_number, pr_url)
+
+    def notify(self, message: str, *, severity: str | None) -> None:
+        """Show notification to user."""
+        self._notify_fn(message, severity)
+
+    def refresh_data(self) -> None:
+        """Trigger data refresh."""
+        self._refresh_fn()
+
+    def dispatch_to_queue(self, pr_number: int, pr_url: str) -> None:
+        """Dispatch plan to implementation queue."""
+        self._dispatch_to_queue_fn(pr_number, pr_url)

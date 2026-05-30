@@ -1,0 +1,1162 @@
+"""Tests for erk land command - core functionality.
+
+The land command:
+1. Merges the PR
+2. Deletes worktree and navigates to trunk
+
+It accepts:
+- No argument (current branch's PR)
+- PR number
+- PR URL
+- Branch name
+"""
+
+from click.testing import CliRunner
+
+from erk.cli.cli import cli
+from erk.core.repo_discovery import RepoContext
+from erk_shared.gateway.git.abc import WorktreeInfo
+from erk_shared.gateway.github.types import PRDetails, PullRequestInfo
+from erk_shared.gateway.graphite.types import BranchMetadata
+from tests.fakes.gateway.git import FakeGit
+from tests.fakes.gateway.github import FakeLocalGitHub
+from tests.fakes.gateway.github_issues import FakeGitHubIssues
+from tests.fakes.gateway.graphite import FakeGraphite
+from tests.test_utils.cli_helpers import assert_cli_error
+from tests.test_utils.env_helpers import erk_inmem_env
+
+
+def test_land_outputs_deferred_execution_script() -> None:
+    """Test land validation phase outputs script with deferred execution.
+
+    The land command now uses a two-phase approach:
+    1. Validation phase: validates preconditions, prompts user, outputs script
+    2. Execution phase: script calls `erk exec land-execute` to merge and cleanup
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Phase 1: Validation - outputs script, does NOT merge
+        # --down produces deferred script (new default executes directly without navigation)
+        result = runner.invoke(
+            cli, ["land", "--script", "--force", "--down"], obj=test_ctx, catch_exceptions=False
+        )
+
+        assert result.exit_code == 0
+
+        # Verify PR was NOT merged yet (deferred to script execution)
+        assert 123 not in github_ops.merged_prs
+
+        # Verify branch was NOT deleted yet
+        assert not any(branch == "feature-1" for _path, branch in graphite_ops.delete_branch_calls)
+
+        # Verify script was written with execution command
+        script_content = result.stdout
+        assert "erk exec land-execute" in script_content
+        # Script uses shell variables for pr-number and branch (passed as arguments)
+        assert '--pr-number="$PR_NUMBER"' in script_content
+        assert '--branch="$BRANCH"' in script_content
+        # Verify shell variable definitions
+        assert 'PR_NUMBER="${1:?Error: PR number required}"' in script_content
+        assert 'BRANCH="${2:?Error: Branch name required}"' in script_content
+        assert "--use-graphite" in script_content
+        # Script should cd to trunk after execution
+        assert str(repo.root) in script_content
+
+
+def test_land_execute_merges_and_cleans_up() -> None:
+    """Test erk exec land-execute performs merge and cleanup."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_1_path = repo_dir / "worktrees" / "feature-1"
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "feature-1",
+                feature_1_path: "feature-1",  # Set current branch for worktree
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_1_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_1_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Execute mode: called by the activation script with pre-validated params
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                "--branch=feature-1",
+                f"--worktree-path={feature_1_path}",
+                "--is-current-branch",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+
+        # Verify PR was merged
+        assert 123 in github_ops.merged_prs
+
+        # Verify worktree WAS removed (non-slot worktrees are removed after branch deletion)
+        assert feature_1_path in git_ops.removed_worktrees
+
+        # Verify branch was deleted (via Graphite gateway since use_graphite=True)
+        assert any(branch == "feature-1" for _path, branch in graphite_ops.delete_branch_calls)
+
+        # Verify "Deleted branch and removed worktree" message
+        assert "Deleted branch and removed worktree 'feature-1'" in result.output
+
+
+def test_land_error_from_execute_land_pr() -> None:
+    """Test land shows error when parent is not trunk."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        # feature-1 has parent develop (not trunk), which should cause error
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        # Configure feature-1 to have parent "develop" (not trunk "main")
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", commit_sha="abc123"),
+                "develop": BranchMetadata.branch(
+                    "develop", "main", children=["feature-1"], commit_sha="bcd234"
+                ),
+                "feature-1": BranchMetadata.branch("feature-1", "develop", commit_sha="def456"),
+            }
+        )
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops, graphite=graphite_ops, repo=repo, use_graphite=True
+        )
+
+        result = runner.invoke(cli, ["land", "--script"], obj=test_ctx, catch_exceptions=False)
+
+        assert_cli_error(result, 1, "Branch must be exactly one level up from main")
+
+
+def test_land_requires_clean_working_tree() -> None:
+    """Test land blocks when uncommitted changes exist."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            # HAS uncommitted changes
+            file_statuses={env.cwd: ([], ["modified.py"], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops, graphite=graphite_ops, repo=repo, use_graphite=True
+        )
+
+        result = runner.invoke(cli, ["land", "--script"], obj=test_ctx, catch_exceptions=False)
+
+        assert_cli_error(
+            result, 1, "Cannot delete current branch with uncommitted changes", "commit or stash"
+        )
+
+
+def test_land_detached_head() -> None:
+    """Test land fails gracefully on detached HEAD."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        # Detached HEAD: root worktree has branch=None
+        worktrees = {env.cwd: [WorktreeInfo(path=env.cwd, branch=None, is_root=True)]}
+        git_ops = FakeGit(
+            worktrees=worktrees,
+            current_branches={env.cwd: None},
+            git_common_dirs={env.cwd: env.git_dir},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        test_ctx = env.build_context(git=git_ops, use_graphite=True)
+
+        result = runner.invoke(cli, ["land", "--script"], obj=test_ctx, catch_exceptions=False)
+
+        assert_cli_error(result, 1, "Not currently on a branch", "detached HEAD")
+
+
+def test_land_error_no_pr_found() -> None:
+    """Test land shows specific error when no PR exists."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        # No PRs configured - branch has no PR
+        github_ops = FakeLocalGitHub(prs={})
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops, graphite=graphite_ops, github=github_ops, repo=repo, use_graphite=True
+        )
+
+        result = runner.invoke(cli, ["land", "--script"], obj=test_ctx, catch_exceptions=False)
+
+        assert_cli_error(result, 1, "No pull request found")
+
+
+def test_land_error_pr_not_open() -> None:
+    """Test land shows error when PR is not open."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        # PR is already MERGED (not OPEN)
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="MERGED",  # Not OPEN
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="",
+                    state="MERGED",  # Not OPEN
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+            },
+        )
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops, graphite=graphite_ops, github=github_ops, repo=repo, use_graphite=True
+        )
+
+        result = runner.invoke(cli, ["land", "--script"], obj=test_ctx, catch_exceptions=False)
+
+        assert_cli_error(result, 1, "is not open")
+
+
+def test_land_does_not_call_safe_chdir() -> None:
+    """Test land does NOT call safe_chdir (it's ineffective).
+
+    A subprocess cannot change the parent shell's working directory.
+    The shell integration (activation script) handles the cd, so calling
+    safe_chdir() in the Python process is misleading and unnecessary.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Use --force to skip cleanup confirmation, --down to test deferred script path
+        result = runner.invoke(
+            cli, ["land", "--script", "--force", "--down"], obj=test_ctx, catch_exceptions=False
+        )
+
+        assert result.exit_code == 0
+
+        # Verify safe_chdir was NOT called (it's ineffective, shell integration handles cd)
+        assert len(git_ops.chdir_history) == 0, (
+            "Should NOT call safe_chdir (activation script handles cd)"
+        )
+
+
+def test_land_default_executes_directly() -> None:
+    """Test that `erk land` without --up/--down merges directly without a deferred script.
+
+    The default behavior (no navigation flags) should execute the merge and cleanup
+    inline, without generating a shell script to source.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_1_path = repo_dir / "worktrees" / "feature-1"
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "feature-1",
+                feature_1_path: "feature-1",
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_1_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_1_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch("feature-1", "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Default: no --up or --down — should execute directly
+        result = runner.invoke(
+            cli, ["land", "--script", "--force"], obj=test_ctx, catch_exceptions=False
+        )
+
+        assert result.exit_code == 0
+
+        # PR should have been merged directly (not deferred to a script)
+        assert 123 in github_ops.merged_prs
+
+        # Output should contain the merge confirmation
+        assert "Merged PR #123" in result.output
+
+
+def test_land_up_and_down_mutually_exclusive() -> None:
+    """Test that --up and --down cannot be used together."""
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1"], repo_dir=repo_dir),
+            current_branches={env.cwd: "feature-1"},
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir},
+            repository_roots={env.cwd: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        github_ops = FakeLocalGitHub()
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            github=github_ops,
+            repo=repo,
+            issues=issues_ops,
+        )
+
+        result = runner.invoke(
+            cli, ["land", "--up", "--down", "--script"], obj=test_ctx, catch_exceptions=False
+        )
+
+        assert_cli_error(result, 1, "--up and --down are mutually exclusive")
+
+
+def test_land_updates_upstack_pr_base_branches() -> None:
+    """Test land updates upstack PR base branches before deleting remote.
+
+    When landing a PR with stacked branches upstack, the remote branch will be deleted.
+    GitHub automatically closes PRs whose base branch is deleted.
+    To prevent data loss, we update upstack PR base branches to target trunk first.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_1_path = repo_dir / "worktrees" / "feature-1"
+
+        # Setup: main -> feature-1 (landing) -> feature-2 (upstack with open PR)
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1", "feature-2"], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "feature-1",
+                feature_1_path: "feature-1",  # Set current branch for worktree
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_1_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_1_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch(
+                    "feature-1", "main", children=["feature-2"], commit_sha="def456"
+                ),
+                "feature-2": BranchMetadata.branch("feature-2", "feature-1", commit_sha="ghi789"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+                "feature-2": PullRequestInfo(
+                    number=456,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/456",
+                    is_draft=False,
+                    title="Feature 2",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+                456: PRDetails(
+                    number=456,
+                    url="https://github.com/owner/repo/pull/456",
+                    title="Feature 2",
+                    body="PR body 2",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="feature-1",
+                    head_ref_name="feature-2",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+            },
+            pr_bases={123: "main", 456: "feature-1"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Execute mode to test the actual merge behavior
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                "--branch=feature-1",
+                f"--worktree-path={feature_1_path}",
+                "--is-current-branch",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+
+        # Verify PR was merged
+        assert 123 in github_ops.merged_prs
+
+        # Verify worktree WAS removed (non-slot worktrees are removed after branch deletion)
+        assert feature_1_path in git_ops.removed_worktrees
+
+        # Verify branch was deleted (via Graphite gateway since use_graphite=True)
+        assert any(branch == "feature-1" for _path, branch in graphite_ops.delete_branch_calls)
+
+        # CRITICAL: Verify upstack PR base was updated to trunk before remote branch deletion
+        # This prevents GitHub from auto-closing PRs when their base branch is deleted
+        assert (456, "main") in github_ops.updated_pr_bases, (
+            "Upstack PR #456 should have its base updated to 'main' before remote deletion"
+        )
+
+
+def test_land_updates_github_only_child_pr_base() -> None:
+    """Test land updates child PRs even when not tracked by Graphite.
+
+    When a child branch/PR is created without using `gt branch create`, or its
+    base was set differently in GitHub, Graphite's cache won't know about it.
+    The land command should query GitHub directly to find all PRs that target
+    the branch being landed, and update their base branches.
+
+    Regression test for issue #4848.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_1_path = repo_dir / "worktrees" / "feature-1"
+
+        # Setup: main -> feature-1 (landing)
+        # feature-2 exists with PR targeting feature-1 but NOT in Graphite's cache
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1", "feature-2"], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "feature-1",
+                feature_1_path: "feature-1",  # Set current branch for worktree
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_1_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_1_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        # Graphite only knows about feature-1 - feature-2 was created outside Graphite
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch(
+                    "feature-1",
+                    "main",
+                    children=[],
+                    commit_sha="def456",  # No children!
+                ),
+            }
+        )
+
+        # GitHub has the child PR targeting feature-1
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+                "feature-2": PullRequestInfo(
+                    number=456,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/456",
+                    is_draft=False,
+                    title="Feature 2",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+                456: PRDetails(
+                    number=456,
+                    url="https://github.com/owner/repo/pull/456",
+                    title="Feature 2",
+                    body="PR body 2",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="feature-1",  # Child PR targets feature-1 (parent)
+                    head_ref_name="feature-2",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+            },
+            pr_bases={123: "main", 456: "feature-1"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Execute mode to test the actual merge behavior
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                "--branch=feature-1",
+                f"--worktree-path={feature_1_path}",
+                "--is-current-branch",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+
+        # Verify PR was merged
+        assert 123 in github_ops.merged_prs
+
+        # CRITICAL: Verify upstack PR #456 was found via GitHub query (not Graphite)
+        # and its base was updated to trunk before merge
+        assert (456, "main") in github_ops.updated_pr_bases, (
+            "Child PR #456 (found via GitHub, not Graphite) should have its base updated "
+            "to 'main' to prevent auto-close when feature-1 branch is deleted"
+        )
+
+
+def test_land_updates_upstack_pr_base_before_merge() -> None:
+    """Regression test: upstack PR base updates must happen BEFORE merge.
+
+    When repos have GitHub's "Automatically delete head branches" setting enabled,
+    GitHub auto-deletes branches immediately after merge. If we update upstack PR
+    bases AFTER the merge, GitHub will have already auto-closed those PRs (because
+    their base branch was deleted).
+
+    This test verifies the fix for issue #4750 by checking operation ordering:
+    update_pr_base_branch operations must appear BEFORE merge_pr in the operation log.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_1_path = repo_dir / "worktrees" / "feature-1"
+
+        # Setup: main -> feature-1 (landing) -> feature-2 (upstack with open PR)
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", ["feature-1", "feature-2"], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "feature-1",
+                feature_1_path: "feature-1",  # Set current branch for worktree
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_1_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_1_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk("main", children=["feature-1"], commit_sha="abc123"),
+                "feature-1": BranchMetadata.branch(
+                    "feature-1", "main", children=["feature-2"], commit_sha="def456"
+                ),
+                "feature-2": BranchMetadata.branch("feature-2", "feature-1", commit_sha="ghi789"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                "feature-1": PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Feature 1",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+                "feature-2": PullRequestInfo(
+                    number=456,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/456",
+                    is_draft=False,
+                    title="Feature 2",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Feature 1",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name="feature-1",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+                456: PRDetails(
+                    number=456,
+                    url="https://github.com/owner/repo/pull/456",
+                    title="Feature 2",
+                    body="PR body 2",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="feature-1",
+                    head_ref_name="feature-2",
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                ),
+            },
+            pr_bases={123: "main", 456: "feature-1"},
+            merge_should_succeed=True,
+        )
+
+        issues_ops = FakeGitHubIssues(username="testuser")
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+        )
+
+        # Execute mode to test the actual merge behavior and operation ordering
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                "--branch=feature-1",
+                f"--worktree-path={feature_1_path}",
+                "--is-current-branch",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+
+        # CRITICAL: Verify operation ordering via operation_log
+        # The update_pr_base_branch for upstack PR #456 must come BEFORE merge_pr for #123
+        operation_log = github_ops.operation_log
+
+        # Find indices of the relevant operations
+        update_base_idx = None
+        merge_idx = None
+        for i, op in enumerate(operation_log):
+            if op[0] == "update_pr_base_branch" and op[1] == 456:
+                update_base_idx = i
+            if op[0] == "merge_pr" and op[1] == 123:
+                merge_idx = i
+
+        assert update_base_idx is not None, "Expected update_pr_base_branch for PR #456"
+        assert merge_idx is not None, "Expected merge_pr for PR #123"
+        assert update_base_idx < merge_idx, (
+            f"REGRESSION: update_pr_base_branch must happen BEFORE merge_pr. "
+            f"Got update_base_idx={update_base_idx}, merge_idx={merge_idx}. "
+            f"operation_log={operation_log}"
+        )

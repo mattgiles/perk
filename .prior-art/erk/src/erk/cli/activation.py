@@ -1,0 +1,467 @@
+"""Shell activation script generation for worktree environments.
+
+This module provides utilities for generating shell scripts that activate
+worktree environments by setting up virtual environments and loading .env files.
+"""
+
+import shlex
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+import click
+
+from erk.core.display_utils import copy_to_clipboard_osc52
+from erk_shared.output.output import user_output
+
+
+@dataclass(frozen=True)
+class ActivationConfig:
+    """Configuration for activation instructions.
+
+    Replaces the combinatorial ActivationMode Literal with composable flags.
+    All fields required - use factory functions for convenience.
+
+    Attributes:
+        implement: If True, append `erk implement` to the source command.
+            False means activate-only mode (just source the script).
+        dangerous: If True, include --dangerous flag (skip permission prompts).
+        docker: If True, include --docker flag (filesystem isolation).
+        codespace: If not None, include --codespace flag for codespace isolation.
+            None = not using codespace mode.
+            "" (empty string) = use default codespace.
+            "name" = use named codespace.
+    """
+
+    implement: bool
+    dangerous: bool
+    docker: bool
+    codespace: str | None
+
+
+def activation_config_activate_only() -> ActivationConfig:
+    """Create config for activate-only mode (no implement command)."""
+    return ActivationConfig(implement=False, dangerous=False, docker=False, codespace=None)
+
+
+def activation_config_for_implement(
+    *,
+    dangerous: bool,
+    docker: bool,
+    codespace: str | None,
+) -> ActivationConfig:
+    """Create config for implement mode with specified flags."""
+    return ActivationConfig(implement=True, dangerous=dangerous, docker=docker, codespace=codespace)
+
+
+def build_activation_command(
+    config: ActivationConfig, script_path: Path, *, same_worktree: bool
+) -> str:
+    """Build the activation command string from config.
+
+    Args:
+        config: The activation configuration specifying which flags to include.
+        script_path: Path to the activation script.
+        same_worktree: If True, the user is already in the target worktree.
+            Skips the ``source activate.sh`` prefix since the environment is
+            already active.
+
+    Returns:
+        The shell command string to display/copy. Empty string when
+        same_worktree is True and no implement command is needed.
+    """
+    source_cmd = f"source {script_path}"
+
+    if not config.implement:
+        if same_worktree:
+            return ""
+        return source_cmd
+
+    if same_worktree:
+        parts = ["erk", "implement"]
+    else:
+        parts = [source_cmd, "&&", "erk", "implement"]
+    if config.docker:
+        parts.append("--docker")
+    if config.codespace is not None:
+        if config.codespace == "":
+            parts.append("--codespace")
+        else:
+            parts.append(f"--codespace {config.codespace}")
+    if config.dangerous:
+        parts.append("--dangerous")
+
+    return " ".join(parts)
+
+
+def render_error_script() -> str:
+    """Return a minimal shell script that returns non-zero.
+
+    Used in --script mode when the command fails. Instead of outputting
+    nothing (which causes ``source ""`` to break), we output a path to
+    this script so ``source`` gets a valid file and the non-zero return
+    stops ``&&`` chains cleanly.
+    """
+    return "# erk error\nreturn 1\n"
+
+
+def _render_logging_helper() -> str:
+    """Return shell helper functions for transparency logging.
+
+    These helpers handle ERK_QUIET and ERK_VERBOSE environment variables
+    to control output verbosity during worktree activation.
+
+    Normal mode (default): Shows brief progress indicators
+    Quiet mode (ERK_QUIET=1): Suppresses transparency output (errors still shown)
+    Verbose mode (ERK_VERBOSE=1): Shows full details with paths
+    """
+    return """# Transparency logging helper
+__erk_log() {
+  [ -n "$ERK_QUIET" ] && return
+  local prefix="$1" msg="$2"
+  if [ -t 2 ]; then
+    printf '\\033[0;36m%s\\033[0m %s\\n' "$prefix" "$msg" >&2
+  else
+    printf '%s %s\\n' "$prefix" "$msg" >&2
+  fi
+}
+__erk_log_verbose() {
+  [ -z "$ERK_VERBOSE" ] && return
+  __erk_log "$1" "$2"
+}"""
+
+
+def render_activation_script(
+    *,
+    worktree_path: Path,
+    target_subpath: Path | None,
+    post_cd_commands: Sequence[str] | None,
+    final_message: str,
+    comment: str,
+) -> str:
+    """Return shell code that activates a worktree's venv and .env.
+
+    The script:
+      - cds into the worktree (optionally to a subpath within it)
+      - runs `uv sync --quiet` (creates .venv if missing, syncs deps if lockfile changed)
+      - sources `.venv/bin/activate` if present
+      - exports variables from `.env` if present
+      - runs optional post-activation commands
+    Works in bash and zsh.
+
+    Args:
+        worktree_path: Path to the worktree directory
+        target_subpath: Optional relative path within the worktree to cd to.
+            If the subpath doesn't exist, a warning is shown and the script
+            falls back to the worktree root.
+        post_cd_commands: Optional sequence of shell commands to run after venv
+            activation, before final message.
+            Pass None if no post-cd commands are needed.
+        final_message: Shell command for final echo message
+        comment: Comment line for script identification
+
+    Returns:
+        Shell script as a string with newlines
+
+    Example:
+        >>> script = render_activation_script(
+        ...     worktree_path=Path("/path/to/worktree"),
+        ...     target_subpath=Path("src/lib"),
+        ...     post_cd_commands=None,
+        ...     final_message='echo "Ready: $(pwd)"',
+        ...     comment="work activate-script",
+        ... )
+    """
+    wt = shlex.quote(str(worktree_path))
+    venv_dir = shlex.quote(str(worktree_path / ".venv"))
+    venv_activate = shlex.quote(str(worktree_path / ".venv" / "bin" / "activate"))
+
+    # Generate the cd command with optional subpath handling
+    if target_subpath is not None:
+        subpath_quoted = shlex.quote(str(target_subpath))
+        # Check if subpath exists in target worktree, fall back to root with warning
+        cd_command = f"""__erk_log "->" "cd {worktree_path}"
+cd {wt}
+# Try to preserve relative directory position
+if [ -d {subpath_quoted} ]; then
+  cd {subpath_quoted}
+else
+  echo "Warning: '{target_subpath}' doesn't exist in target, using worktree root" >&2
+fi"""
+    else:
+        cd_command = f"""__erk_log "->" "cd {worktree_path}"
+cd {wt}"""
+
+    logging_helper = _render_logging_helper()
+
+    # Build optional post-activation commands section
+    post_activation_section = ""
+    if post_cd_commands:
+        post_activation_section = (
+            "# Post-activation commands\n" + "\n".join(post_cd_commands) + "\n"
+        )
+
+    return f"""# {comment}
+{logging_helper}
+{cd_command}
+# Always sync deps (idempotent — handles branch switches in reused slots)
+if [ ! -d {venv_dir} ]; then
+  __erk_log "->" "Creating virtual environment..."
+fi
+uv sync --quiet
+# Skip activation if VIRTUAL_ENV already points to this worktree's .venv
+# (guards against double activation when direnv triggers on cd)
+if [ "$VIRTUAL_ENV" != "{worktree_path}/.venv" ]; then
+  # Unset VIRTUAL_ENV to avoid conflicts with previous activations
+  unset VIRTUAL_ENV
+  if [ -f {venv_activate} ]; then
+    . {venv_activate}
+    __py_ver=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')
+    __erk_log "->" "Activating venv: {worktree_path / ".venv"} ($__py_ver)"
+  fi
+  # Load .env into the environment (allexport)
+  set -a
+  if [ -f ./.env ]; then
+    __erk_log "->" "Loading .env"
+    . ./.env
+  fi
+  set +a
+  # Shell completion
+  if [ -n "$BASH_VERSION" ]; then
+    eval "$(erk completion bash)"
+  elif [ -n "$ZSH_VERSION" ]; then
+    eval "$(erk completion zsh)"
+  fi
+fi
+{post_activation_section}# Optional: show where we are
+{final_message}
+"""
+
+
+def write_worktree_activate_script(
+    *,
+    worktree_path: Path,
+    post_create_commands: Sequence[str] | None,
+) -> Path:
+    """Write an activation script to .erk/bin/activate.sh in the worktree.
+
+    The script will:
+      - CD to the worktree root
+      - Create .venv with `uv sync` if not present
+      - Source `.venv/bin/activate` if present
+      - Export variables from `.env` if present
+      - Run post-create commands if provided
+
+    Args:
+        worktree_path: Path to the worktree directory
+        post_create_commands: Optional sequence of shell commands to embed in the
+            script. These run after venv activation and .env loading.
+
+    Returns:
+        Path to the written activation script (.erk/bin/activate.sh)
+    """
+    script_content = render_activation_script(
+        worktree_path=worktree_path,
+        target_subpath=None,
+        post_cd_commands=post_create_commands,
+        final_message='echo "Activated: $(pwd)"',
+        comment="erk worktree activation script",
+    )
+
+    bin_dir = worktree_path / ".erk" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    script_path = bin_dir / "activate.sh"
+    script_path.write_text(script_content, encoding="utf-8")
+
+    return script_path
+
+
+def ensure_worktree_activate_script(
+    *,
+    worktree_path: Path,
+    post_create_commands: Sequence[str] | None,
+) -> Path:
+    """Ensure an activation script exists at .erk/bin/activate.sh.
+
+    If the script doesn't exist, creates it. If it exists, returns
+    the path without modifying it (idempotent for existing scripts).
+
+    Args:
+        worktree_path: Path to the worktree directory
+        post_create_commands: Optional sequence of shell commands to embed in the
+            script. Only used if creating a new script.
+
+    Returns:
+        Path to the activation script (.erk/bin/activate.sh)
+    """
+    script_path = worktree_path / ".erk" / "bin" / "activate.sh"
+
+    if not script_path.exists():
+        return write_worktree_activate_script(
+            worktree_path=worktree_path,
+            post_create_commands=post_create_commands,
+        )
+
+    return script_path
+
+
+def _get_activation_instruction(config: ActivationConfig) -> str:
+    """Get the instruction message for the activation config."""
+    if not config.implement:
+        return "To activate the worktree environment:"
+    if config.docker:
+        return "To activate and start implementation (Docker isolation):"
+    if config.codespace is not None:
+        return "To activate and start implementation (codespace isolation):"
+    if config.dangerous:
+        return "To activate and start implementation (skip permissions):"
+    return "To activate and start implementation:"
+
+
+def print_activation_instructions(
+    script_path: Path,
+    *,
+    source_branch: str | None,
+    force: bool,
+    config: ActivationConfig,
+    copy: bool,
+    same_worktree: bool,
+) -> None:
+    """Print activation script instructions.
+
+    Displays instructions for activating the worktree environment. Used after
+    worktree creation or navigation to guide users through the opt-in shell
+    integration workflow.
+
+    When same_worktree is True, the user is already in the target worktree
+    with their venv activated. The ``source activate.sh`` prefix is omitted
+    since it would be noise. If there is nothing else to show (no branch
+    deletion, no implement command), the entire instruction block is suppressed.
+
+    When copy=True, the primary activation command is auto-copied to the
+    clipboard via OSC 52 (supported by iTerm2, Kitty, Alacritty, WezTerm,
+    and other modern terminals). Terminals without OSC 52 support will
+    silently ignore the sequence.
+
+    Args:
+        script_path: Path to the activation script (.erk/bin/activate.sh)
+        source_branch: If provided and force is True, shows delete command for this branch.
+        force: If True and source_branch is provided, shows the delete hint.
+        config: Configuration specifying what command to show and copy.
+            Uses composable flags (implement, dangerous, docker) instead of
+            the old combinatorial ActivationMode literal.
+        copy: If True, copy the primary command to clipboard via OSC 52 and show hint.
+        same_worktree: If True, the user is already in the target worktree.
+            Skips the ``source activate.sh`` prefix and suppresses the entire
+            block when there is nothing actionable to show.
+    """
+    source_cmd = f"source {script_path}"
+
+    # If deleting current branch, make the delete command the primary command
+    if source_branch is not None and force:
+        if same_worktree:
+            primary_cmd = f"erk br delete {source_branch} -f"
+            instruction = f"To delete branch {source_branch}:"
+        else:
+            primary_cmd = f"{source_cmd} && erk br delete {source_branch} -f"
+            instruction = f"To activate and delete branch {source_branch}:"
+    else:
+        primary_cmd = build_activation_command(config, script_path, same_worktree=same_worktree)
+        instruction = _get_activation_instruction(config)
+
+    # When same_worktree produces an empty command, suppress the entire block
+    if not primary_cmd:
+        return
+
+    user_output(f"\n{instruction}")
+    if copy:
+        clipboard_hint = click.style("(copied to clipboard)", dim=True)
+        user_output(f"  {primary_cmd}  {clipboard_hint}")
+        # Emit OSC 52 to copy the command to clipboard (invisible escape sequence)
+        user_output(copy_to_clipboard_osc52(primary_cmd), nl=False)
+    else:
+        user_output(f"  {primary_cmd}")
+
+
+def render_land_script() -> str:
+    """Return shell script content for land.sh.
+
+    The script wraps `erk land --script` to provide shell integration,
+    allowing the command to navigate the shell after landing a PR.
+
+    Uses process substitution to source script content directly from stdout.
+    """
+    return """#!/usr/bin/env bash
+# erk land wrapper - source this script to land with shell integration
+# Usage: source .erk/bin/land.sh [args...]
+source <(erk land --script "$@")
+"""
+
+
+def ensure_land_script(worktree_path: Path) -> Path:
+    """Ensure land.sh exists at .erk/bin/land.sh in the worktree.
+
+    Creates the script if it doesn't exist. The script wraps
+    `erk land --script` to provide shell integration.
+
+    Args:
+        worktree_path: Path to the worktree directory
+
+    Returns:
+        Path to the land script (.erk/bin/land.sh)
+    """
+    bin_dir = worktree_path / ".erk" / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    script_path = bin_dir / "land.sh"
+
+    if not script_path.exists():
+        script_path.write_text(render_land_script(), encoding="utf-8")
+
+    return script_path
+
+
+def print_temp_script_instructions(
+    script_path: Path,
+    *,
+    instruction: str,
+    copy: bool,
+    args: Sequence[str | int] | None,
+    extra_flags: Sequence[str] | None,
+) -> None:
+    """Print instructions for sourcing a temporary execution script.
+
+    Unlike print_activation_instructions() which is for persistent worktree
+    activation scripts at .erk/bin/activate.sh, this is for one-time execution
+    scripts (like land's deferred execution script) that contain specific state.
+
+    When copy=True, the source command is auto-copied to the clipboard via OSC 52
+    (supported by iTerm2, Kitty, Alacritty, WezTerm, and other modern terminals).
+
+    Args:
+        script_path: Path to the temporary script to source
+        instruction: Message to show before the command (e.g., "To land the PR:")
+        copy: If True, copy the source command to clipboard via OSC 52
+        args: Optional arguments to include in the source command. If provided,
+            these are properly quoted and appended to the source command.
+        extra_flags: Optional flags to append to the source command. These are
+            already-formatted flag strings (e.g., ["-f", "--up"]) that are passed
+            through to the script without quoting.
+    """
+    if args:
+        quoted_args = " ".join(shlex.quote(str(a)) for a in args)
+        source_cmd = f"source {script_path} {quoted_args}"
+    else:
+        source_cmd = f"source {script_path}"
+
+    if extra_flags:
+        source_cmd = f"{source_cmd} {' '.join(extra_flags)}"
+
+    user_output(f"\n{instruction}")
+    if copy:
+        clipboard_hint = click.style("(copied to clipboard)", dim=True)
+        user_output(f"  {source_cmd}  {clipboard_hint}")
+        user_output(copy_to_clipboard_osc52(source_cmd), nl=False)
+    else:
+        user_output(f"  {source_cmd}")

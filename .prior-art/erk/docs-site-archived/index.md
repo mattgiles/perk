@@ -1,0 +1,89 @@
+# `erk` Documentation
+
+**erk** is a CLI tool for plan-oriented agentic engineering—a workflow where AI agents create implementation plans, execute them in isolated worktrees, and ship code via automated PR workflows.
+
+For the philosophy and design principles behind erk, see [The TAO of erk](TAO.md).
+
+## Quick Start
+
+New to erk? Start here:
+
+1. [Prerequisites](tutorials/prerequisites.md) - Tools you need installed
+2. [Installation](tutorials/installation.md) - Install and configure erk
+3. [Your First Plan](tutorials/first-plan.md) - Complete tutorial from plan to PR
+
+## Features
+
+- **Plan-First Workflow**: AI agents create detailed implementation plans before writing code
+- **Worktree Isolation**: Each implementation runs in its own isolated git worktree
+- **Agent-Driven Development**: Automated PR workflows powered by Claude Code
+- **Documentation as Code**: Agent-generated documentation lives alongside the codebase
+
+## Documentation Sections
+
+### [Tutorials](tutorials/index.md)
+
+Step-by-step lessons to get you started.
+
+- [Prerequisites](tutorials/prerequisites.md) - Required tools and versions
+- [Installation](tutorials/installation.md) - Installing and initializing erk
+- [Your First Plan](tutorials/first-plan.md) - End-to-end tutorial
+
+### [Topics](topics/index.md)
+
+Core concepts that explain how erk works.
+
+- [Worktrees](topics/worktrees.md) - Parallel development with git worktrees
+- [Graphite Integration](tutorials/graphite-integration.md) - Stacked PR workflows with Graphite
+- [Plan Mode](topics/plan-mode.md) - Claude Code's planning workflow
+- [The Workflow](topics/the-workflow.md) - From idea to merged PR
+- [Plan-Oriented Engineering](topics/plan-oriented-engineering.md) - The philosophy behind erk
+- [Why GitHub Issues for Plans](topics/why-github-issues.md) - Why plans are stored as issues
+
+### [How-to Guides](howto/index.md)
+
+Task-focused recipes for specific goals.
+
+- [Use the Local Workflow](howto/local-workflow.md) - Plan, implement, and ship locally
+- [Run Remote Execution](howto/remote-execution.md) - Run implementations in GitHub Actions
+- [Checkout and Sync PRs](howto/pr-checkout-sync.md) - Review and iterate on PRs
+- [Automatic Merge Conflict Resolution](howto/conflict-resolution.md) - Handle merge conflicts with AI assistance
+- [Work Without Plans](howto/planless-workflow.md) - Quick changes without formal plans
+- [Extract Documentation](howto/documentation-extraction.md) - Capture patterns for future agents
+
+### [Reference](ref/index.md)
+
+Complete technical reference.
+
+- [CLI Command Reference](ref/commands.md) - All CLI commands
+- [Slash Command Reference](ref/slash-commands.md) - Claude Code slash commands
+- [Configuration Reference](ref/configuration.md) - Config files and options
+- [File Location Reference](ref/file-locations.md) - Where erk stores data
+
+### [FAQ](faq/index.md)
+
+Common questions and solutions.
+
+## Common User Journeys
+
+**"I want to start using erk"**
+→ [Prerequisites](tutorials/prerequisites.md) → [Installation](tutorials/installation.md) → [Your First Plan](tutorials/first-plan.md)
+
+**"I want to understand how erk works"**
+→ [The Workflow](topics/the-workflow.md) → [Plan-Oriented Engineering](topics/plan-oriented-engineering.md)
+
+**"I'm reviewing a teammate's PR"**
+→ [Checkout and Sync PRs](howto/pr-checkout-sync.md)
+
+**"My rebase has conflicts"**
+→ [Automatic Merge Conflict Resolution](howto/conflict-resolution.md)
+
+**"I need quick iteration without planning"**
+→ [Work Without Plans](howto/planless-workflow.md)
+
+## Other Documentation
+
+| Directory         | Audience     | Purpose                                  |
+| ----------------- | ------------ | ---------------------------------------- |
+| `docs/learned/`   | AI agents    | Agent-generated patterns and conventions |
+| `docs/developer/` | Contributors | Internal development docs                |

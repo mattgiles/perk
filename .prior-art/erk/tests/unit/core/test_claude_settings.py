@@ -1,0 +1,1570 @@
+"""Tests for claude_settings pure functions.
+
+These are pure unit tests (Layer 3) - no I/O, no fakes, no mocks.
+Testing the pure transformation functions for Claude settings manipulation.
+
+Also includes integration tests (Layer 2) for read/write operations on disk.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from erk.core.claude_settings import (
+    ERK_EXIT_PLAN_HOOK_COMMAND,
+    ERK_PERMISSION,
+    ERK_RUFF_FORMAT_HOOK_COMMAND,
+    ERK_STATUSLINE_COMMAND,
+    ERK_USER_PROMPT_HOOK_COMMAND,
+    NoBackupCreated,
+    StatuslineConfig,
+    StatuslineNotConfigured,
+    add_erk_hooks,
+    add_erk_permission,
+    add_erk_statusline,
+    add_ruff_format_hook,
+    get_erk_statusline_command,
+    get_repo_claude_settings_path,
+    get_statusline_config,
+    has_erk_permission,
+    has_erk_statusline,
+    has_exit_plan_hook,
+    has_ruff_format_hook,
+    has_user_prompt_hook,
+    read_claude_settings,
+    remove_erk_permission,
+    remove_erk_statusline,
+    remove_ruff_format_hook,
+    write_claude_settings,
+)
+
+
+def test_has_erk_permission_returns_true_when_present() -> None:
+    """Test that has_erk_permission returns True when permission exists."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)", "Bash(erk:*)", "Web Search(*)"],
+        }
+    }
+    assert has_erk_permission(settings) is True
+
+
+def test_has_erk_permission_returns_false_when_missing() -> None:
+    """Test that has_erk_permission returns False when permission is absent."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)", "Web Search(*)"],
+        }
+    }
+    assert has_erk_permission(settings) is False
+
+
+def test_has_erk_permission_returns_false_for_empty_allow() -> None:
+    """Test that has_erk_permission returns False for empty allow list."""
+    settings = {
+        "permissions": {
+            "allow": [],
+        }
+    }
+    assert has_erk_permission(settings) is False
+
+
+def test_has_erk_permission_returns_false_for_missing_permissions() -> None:
+    """Test that has_erk_permission returns False when permissions key is missing."""
+    settings: dict = {}
+    assert has_erk_permission(settings) is False
+
+
+def test_has_erk_permission_returns_false_for_missing_allow() -> None:
+    """Test that has_erk_permission returns False when allow key is missing."""
+    settings = {
+        "permissions": {},
+    }
+    assert has_erk_permission(settings) is False
+
+
+def test_add_erk_permission_adds_to_existing_list() -> None:
+    """Test that add_erk_permission adds permission to existing allow list."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)"],
+        }
+    }
+    result = add_erk_permission(settings)
+
+    assert ERK_PERMISSION in result["permissions"]["allow"]
+    assert "Bash(git:*)" in result["permissions"]["allow"]
+    # Original should not be modified
+    assert ERK_PERMISSION not in settings["permissions"]["allow"]
+
+
+def test_add_erk_permission_creates_permissions_if_missing() -> None:
+    """Test that add_erk_permission creates permissions structure if missing."""
+    settings: dict = {}
+    result = add_erk_permission(settings)
+
+    assert "permissions" in result
+    assert "allow" in result["permissions"]
+    assert ERK_PERMISSION in result["permissions"]["allow"]
+
+
+def test_add_erk_permission_creates_allow_if_missing() -> None:
+    """Test that add_erk_permission creates allow list if missing."""
+    settings = {
+        "permissions": {},
+    }
+    result = add_erk_permission(settings)
+
+    assert "allow" in result["permissions"]
+    assert ERK_PERMISSION in result["permissions"]["allow"]
+
+
+def test_add_erk_permission_does_not_duplicate() -> None:
+    """Test that add_erk_permission doesn't add permission if already present."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(erk:*)"],
+        }
+    }
+    result = add_erk_permission(settings)
+
+    # Should have exactly one occurrence
+    assert result["permissions"]["allow"].count(ERK_PERMISSION) == 1
+
+
+def test_add_erk_permission_preserves_other_keys() -> None:
+    """Test that add_erk_permission preserves other settings keys."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)"],
+            "ask": ["Write(*)"],
+        },
+        "statusLine": {
+            "type": "command",
+            "command": "echo test",
+        },
+        "alwaysThinkingEnabled": True,
+    }
+    result = add_erk_permission(settings)
+
+    # Other keys should be preserved
+    assert result["statusLine"]["type"] == "command"
+    assert result["alwaysThinkingEnabled"] is True
+    assert result["permissions"]["ask"] == ["Write(*)"]
+
+
+def test_add_erk_permission_is_pure_function() -> None:
+    """Test that add_erk_permission doesn't modify the input."""
+    original = {
+        "permissions": {
+            "allow": ["Bash(git:*)"],
+        }
+    }
+    # Make a copy of the original state
+    original_allow = original["permissions"]["allow"].copy()
+
+    add_erk_permission(original)
+
+    # Original should be unchanged
+    assert original["permissions"]["allow"] == original_allow
+    assert ERK_PERMISSION not in original["permissions"]["allow"]
+
+
+def test_erk_permission_constant_value() -> None:
+    """Test that ERK_PERMISSION has the expected value."""
+    assert ERK_PERMISSION == "Bash(erk:*)"
+
+
+# --- Tests for standalone hook detection functions ---
+
+
+def test_has_user_prompt_hook_returns_false_for_empty_settings() -> None:
+    """Test has_user_prompt_hook returns False for empty settings."""
+    assert has_user_prompt_hook({}) is False
+
+
+def test_has_user_prompt_hook_returns_true_when_configured() -> None:
+    """Test has_user_prompt_hook returns True when hook is configured."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is True
+
+
+def test_has_user_prompt_hook_returns_false_for_different_command() -> None:
+    """Test has_user_prompt_hook returns False for non-erk hook."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": "other-command"}],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is False
+
+
+def test_has_exit_plan_hook_returns_false_for_empty_settings() -> None:
+    """Test has_exit_plan_hook returns False for empty settings."""
+    assert has_exit_plan_hook({}) is False
+
+
+def test_has_exit_plan_hook_returns_true_when_configured() -> None:
+    """Test has_exit_plan_hook returns True when hook is configured."""
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert has_exit_plan_hook(settings) is True
+
+
+def test_has_exit_plan_hook_returns_false_for_wrong_matcher() -> None:
+    """Test has_exit_plan_hook returns False when matcher is wrong."""
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",  # Wrong matcher
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert has_exit_plan_hook(settings) is False
+
+
+# --- Integration tests using filesystem ---
+
+
+def test_read_write_roundtrip_with_representative_settings(tmp_path: Path) -> None:
+    """Test read/write roundtrip with a representative settings.json file.
+
+    This integration test uses a realistic settings structure similar to what
+    you'd find in an actual erk repository, including permissions, hooks, and
+    various configuration keys.
+    """
+    # Representative settings matching real-world usage
+    representative_settings = {
+        "permissions": {
+            "allow": [
+                "Bash(git:*)",
+                "Read(/tmp/*)",
+                "Write(/tmp/*)",
+            ],
+            "deny": [],
+            "ask": [],
+        },
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "echo 'session started'",
+                            "timeout": 5,
+                        }
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*.py",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "echo 'python file'",
+                            "timeout": 30,
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    # Write to disk
+    settings_path = get_repo_claude_settings_path(tmp_path)
+    write_claude_settings(settings_path, representative_settings)
+
+    # Verify file exists
+    assert settings_path.exists()
+
+    # Read back and verify
+    loaded_settings = read_claude_settings(settings_path)
+    assert loaded_settings is not None
+    assert loaded_settings == representative_settings
+
+    # Verify JSON formatting (pretty printed with indent=2)
+    raw_content = settings_path.read_text(encoding="utf-8")
+    assert "  " in raw_content  # Has indentation
+
+
+def test_add_permission_to_representative_settings(tmp_path: Path) -> None:
+    """Test adding erk permission to a representative settings file."""
+    # Start with settings that don't have erk permission
+    initial_settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)", "Read(/tmp/*)"],
+            "deny": [],
+            "ask": ["Write(*)"],
+        },
+        "hooks": {
+            "SessionStart": [{"matcher": "*", "hooks": []}],
+        },
+    }
+
+    settings_path = get_repo_claude_settings_path(tmp_path)
+    write_claude_settings(settings_path, initial_settings)
+
+    # Read, modify, and write back
+    settings = read_claude_settings(settings_path)
+    assert settings is not None
+    assert not has_erk_permission(settings)
+
+    updated = add_erk_permission(settings)
+    write_claude_settings(settings_path, updated)
+
+    # Verify final state
+    final = read_claude_settings(settings_path)
+    assert final is not None
+    assert has_erk_permission(final)
+    # Verify other settings preserved
+    assert final["permissions"]["ask"] == ["Write(*)"]
+    assert "hooks" in final
+
+
+def test_read_returns_none_for_nonexistent_file(tmp_path: Path) -> None:
+    """Test that read_claude_settings returns None when file doesn't exist."""
+    settings_path = tmp_path / ".claude" / "settings.json"
+    result = read_claude_settings(settings_path)
+    assert result is None
+
+
+def test_read_raises_on_invalid_json(tmp_path: Path) -> None:
+    """Test that read_claude_settings raises JSONDecodeError for invalid JSON."""
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("{ invalid json", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        read_claude_settings(settings_path)
+
+
+# --- Tests for hook functions ---
+
+
+def test_hook_command_constants() -> None:
+    """Test that hook command constants have expected values.
+
+    Hook commands include a resilience check (command -v erk) that gracefully
+    exits 0 if erk is not available, preventing "command not found" errors.
+    """
+    assert ERK_USER_PROMPT_HOOK_COMMAND == (
+        "command -v erk >/dev/null 2>&1 || exit 0; "
+        "ERK_HOOK_ID=user-prompt-hook erk exec user-prompt-hook"
+    )
+    assert ERK_EXIT_PLAN_HOOK_COMMAND == (
+        "command -v erk >/dev/null 2>&1 || exit 0; "
+        "ERK_HOOK_ID=exit-plan-mode-hook erk exec exit-plan-mode-hook"
+    )
+
+
+def test_hook_detection_returns_false_for_empty_settings() -> None:
+    """Test that hook detection functions return False for empty settings."""
+    settings: dict = {}
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_returns_false_for_missing_hooks_key() -> None:
+    """Test that hook detection returns False when hooks key is missing."""
+    settings = {"permissions": {"allow": []}}
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_returns_false_for_empty_hooks() -> None:
+    """Test that hook detection returns False for empty hooks structure."""
+    settings = {"hooks": {}}
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_detects_user_prompt_hook() -> None:
+    """Test that has_user_prompt_hook detects UserPromptSubmit hook."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": ERK_USER_PROMPT_HOOK_COMMAND,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is True
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_detects_pre_tool_use_hook() -> None:
+    """Test that has_exit_plan_hook detects PreToolUse hook with ExitPlanMode matcher."""
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": ERK_EXIT_PLAN_HOOK_COMMAND,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is True
+
+
+def test_hook_detection_detects_both_hooks() -> None:
+    """Test that hook detection finds both hooks when present."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": ERK_USER_PROMPT_HOOK_COMMAND,
+                        }
+                    ],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": ERK_EXIT_PLAN_HOOK_COMMAND,
+                        }
+                    ],
+                }
+            ],
+        }
+    }
+    assert has_user_prompt_hook(settings) is True
+    assert has_exit_plan_hook(settings) is True
+
+
+def test_hook_detection_ignores_wrong_matcher_for_pretooluse() -> None:
+    """Test that has_exit_plan_hook only matches PreToolUse with ExitPlanMode matcher."""
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",  # Wrong matcher
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": ERK_EXIT_PLAN_HOOK_COMMAND,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_requires_exact_command_match() -> None:
+    """Test that hook detection requires exact command string match."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "different-command",  # Different command
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is False
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_hook_detection_finds_hook_among_multiple_entries() -> None:
+    """Test that hook detection finds the erk hook among multiple hook entries."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*.py",
+                    "hooks": [{"type": "command", "command": "other-hook"}],
+                },
+                {
+                    "matcher": "*",
+                    "hooks": [
+                        {"type": "command", "command": "another-hook"},
+                        {"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND},
+                    ],
+                },
+            ]
+        }
+    }
+    assert has_user_prompt_hook(settings) is True
+    assert has_exit_plan_hook(settings) is False
+
+
+def test_add_erk_hooks_adds_both_hooks_to_empty_settings() -> None:
+    """Test that add_erk_hooks adds both hooks to empty settings."""
+    settings: dict = {}
+    result = add_erk_hooks(settings)
+
+    assert "hooks" in result
+    assert "UserPromptSubmit" in result["hooks"]
+    assert "PreToolUse" in result["hooks"]
+
+    # Verify UserPromptSubmit hook structure
+    user_prompt_hooks = result["hooks"]["UserPromptSubmit"]
+    assert len(user_prompt_hooks) == 1
+    assert user_prompt_hooks[0]["matcher"] == "*"
+    assert user_prompt_hooks[0]["hooks"][0]["command"] == ERK_USER_PROMPT_HOOK_COMMAND
+
+    # Verify PreToolUse hook structure
+    pre_tool_hooks = result["hooks"]["PreToolUse"]
+    assert len(pre_tool_hooks) == 1
+    assert pre_tool_hooks[0]["matcher"] == "ExitPlanMode"
+    assert pre_tool_hooks[0]["hooks"][0]["command"] == ERK_EXIT_PLAN_HOOK_COMMAND
+
+
+def test_add_erk_hooks_adds_missing_user_prompt_hook() -> None:
+    """Test that add_erk_hooks adds missing UserPromptSubmit hook."""
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # PreToolUse should be unchanged
+    assert len(result["hooks"]["PreToolUse"]) == 1
+
+    # UserPromptSubmit should be added
+    assert "UserPromptSubmit" in result["hooks"]
+    assert len(result["hooks"]["UserPromptSubmit"]) == 1
+
+
+def test_add_erk_hooks_adds_missing_pre_tool_hook() -> None:
+    """Test that add_erk_hooks adds missing PreToolUse hook."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # UserPromptSubmit should be unchanged
+    assert len(result["hooks"]["UserPromptSubmit"]) == 1
+
+    # PreToolUse should be added
+    assert "PreToolUse" in result["hooks"]
+    assert len(result["hooks"]["PreToolUse"]) == 1
+
+
+def test_add_erk_hooks_preserves_existing_hooks() -> None:
+    """Test that add_erk_hooks preserves existing hooks when adding erk hooks."""
+    settings = {
+        "hooks": {
+            "SessionStart": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "echo start"}]}
+            ],
+            "UserPromptSubmit": [
+                {"matcher": "*.py", "hooks": [{"type": "command", "command": "lint"}]}
+            ],
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # SessionStart should be preserved
+    assert "SessionStart" in result["hooks"]
+    assert len(result["hooks"]["SessionStart"]) == 1
+
+    # UserPromptSubmit should have the existing hook plus the erk hook
+    assert len(result["hooks"]["UserPromptSubmit"]) == 2
+
+    # PreToolUse should be added
+    assert "PreToolUse" in result["hooks"]
+
+
+def test_add_erk_hooks_does_not_duplicate_hooks() -> None:
+    """Test that add_erk_hooks doesn't add hooks if already present."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND}],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ],
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # Should not have duplicates
+    assert len(result["hooks"]["UserPromptSubmit"]) == 1
+    assert len(result["hooks"]["PreToolUse"]) == 1
+
+
+def test_add_erk_hooks_is_pure_function() -> None:
+    """Test that add_erk_hooks doesn't modify the input."""
+    original = {"hooks": {"SessionStart": []}}
+    original_copy = json.loads(json.dumps(original))
+
+    add_erk_hooks(original)
+
+    # Original should be unchanged
+    assert original == original_copy
+
+
+def test_add_erk_hooks_preserves_other_settings() -> None:
+    """Test that add_erk_hooks preserves other top-level settings."""
+    settings = {
+        "permissions": {"allow": ["Bash(git:*)"]},
+        "statusLine": {"type": "command", "command": "echo status"},
+        "alwaysThinkingEnabled": True,
+    }
+    result = add_erk_hooks(settings)
+
+    # Other settings should be preserved
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+    assert result["statusLine"]["type"] == "command"
+    assert result["alwaysThinkingEnabled"] is True
+
+
+# --- Tests for marker-based hook detection ---
+
+
+def test_is_erk_managed_hook_returns_true_for_erk_hooks() -> None:
+    """Test _is_erk_managed_hook returns True for commands with ERK_HOOK_ID marker."""
+    from erk.core.claude_settings import _is_erk_managed_hook
+
+    assert _is_erk_managed_hook(ERK_USER_PROMPT_HOOK_COMMAND) is True
+    assert _is_erk_managed_hook(ERK_EXIT_PLAN_HOOK_COMMAND) is True
+    assert _is_erk_managed_hook("ERK_HOOK_ID=custom-hook erk exec custom") is True
+
+
+def test_is_erk_managed_hook_returns_false_for_non_erk_hooks() -> None:
+    """Test _is_erk_managed_hook returns False for commands without ERK_HOOK_ID marker."""
+    from erk.core.claude_settings import _is_erk_managed_hook
+
+    assert _is_erk_managed_hook("echo hello") is False
+    assert _is_erk_managed_hook("erk exec something") is False
+    assert _is_erk_managed_hook("") is False
+
+
+def test_is_erk_managed_hook_entry_returns_true_for_erk_hooks() -> None:
+    """Test _is_erk_managed_hook_entry returns True for entries with erk hooks."""
+    from erk.core.claude_settings import _is_erk_managed_hook_entry
+
+    entry = {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND}],
+    }
+    assert _is_erk_managed_hook_entry(entry) is True
+
+
+def test_is_erk_managed_hook_entry_returns_false_for_non_erk_hooks() -> None:
+    """Test _is_erk_managed_hook_entry returns False for entries without erk hooks."""
+    from erk.core.claude_settings import _is_erk_managed_hook_entry
+
+    entry = {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "echo hello"}],
+    }
+    assert _is_erk_managed_hook_entry(entry) is False
+
+
+def test_is_erk_managed_hook_entry_handles_empty_hooks() -> None:
+    """Test _is_erk_managed_hook_entry handles entries with no hooks."""
+    from erk.core.claude_settings import _is_erk_managed_hook_entry
+
+    assert _is_erk_managed_hook_entry({"matcher": "*", "hooks": []}) is False
+    assert _is_erk_managed_hook_entry({"matcher": "*"}) is False
+
+
+def test_has_erk_hook_by_marker_finds_user_prompt_hook() -> None:
+    """Test has_erk_hook_by_marker finds UserPromptSubmit hook by marker."""
+    from erk.core.claude_settings import has_erk_hook_by_marker
+
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": ERK_USER_PROMPT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert (
+        has_erk_hook_by_marker(
+            settings,
+            hook_type="UserPromptSubmit",
+            marker="ERK_HOOK_ID=user-prompt-hook",
+            matcher=None,
+        )
+        is True
+    )
+
+
+def test_has_erk_hook_by_marker_finds_exit_plan_hook() -> None:
+    """Test has_erk_hook_by_marker finds ExitPlanMode hook by marker."""
+    from erk.core.claude_settings import has_erk_hook_by_marker
+
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert (
+        has_erk_hook_by_marker(
+            settings,
+            hook_type="PreToolUse",
+            marker="ERK_HOOK_ID=exit-plan-mode-hook",
+            matcher="ExitPlanMode",
+        )
+        is True
+    )
+
+
+def test_has_erk_hook_by_marker_returns_false_for_wrong_matcher() -> None:
+    """Test has_erk_hook_by_marker returns False when matcher doesn't match."""
+    from erk.core.claude_settings import has_erk_hook_by_marker
+
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",  # Wrong matcher
+                    "hooks": [{"type": "command", "command": ERK_EXIT_PLAN_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert (
+        has_erk_hook_by_marker(
+            settings,
+            hook_type="PreToolUse",
+            marker="ERK_HOOK_ID=exit-plan-mode-hook",
+            matcher="ExitPlanMode",
+        )
+        is False
+    )
+
+
+def test_has_erk_hook_by_marker_returns_false_for_missing_hooks() -> None:
+    """Test has_erk_hook_by_marker returns False for empty settings."""
+    from erk.core.claude_settings import has_erk_hook_by_marker
+
+    assert (
+        has_erk_hook_by_marker(
+            {},
+            hook_type="UserPromptSubmit",
+            marker="ERK_HOOK_ID=user-prompt-hook",
+            matcher=None,
+        )
+        is False
+    )
+
+
+def test_has_erk_hook_by_marker_finds_old_hook_commands() -> None:
+    """Test has_erk_hook_by_marker finds old hook commands by marker.
+
+    This tests that marker-based detection can find hooks even if the
+    command has changed, as long as the ERK_HOOK_ID marker is present.
+    """
+    from erk.core.claude_settings import has_erk_hook_by_marker
+
+    # Simulate an old hook command with the marker but different full command
+    old_command = "ERK_HOOK_ID=user-prompt-hook erk exec old-user-prompt-hook"
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": old_command}],
+                }
+            ]
+        }
+    }
+    assert (
+        has_erk_hook_by_marker(
+            settings,
+            hook_type="UserPromptSubmit",
+            marker="ERK_HOOK_ID=user-prompt-hook",
+            matcher=None,
+        )
+        is True
+    )
+
+
+# --- Tests for hook replacement behavior ---
+
+
+def test_add_erk_hooks_replaces_old_hooks() -> None:
+    """Test that add_erk_hooks replaces old erk hooks with current versions.
+
+    This is the key behavior change: old hooks with ERK_HOOK_ID marker
+    should be replaced, not duplicated.
+    """
+    # Simulate old hook command with marker but different command text
+    old_user_prompt_command = "ERK_HOOK_ID=user-prompt-hook erk exec old-command"
+    old_exit_plan_command = "ERK_HOOK_ID=exit-plan-mode-hook erk exec old-exit"
+
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": old_user_prompt_command}],
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": old_exit_plan_command}],
+                }
+            ],
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # Should have exactly one UserPromptSubmit hook (replaced, not appended)
+    assert len(result["hooks"]["UserPromptSubmit"]) == 1
+    assert (
+        result["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+        == ERK_USER_PROMPT_HOOK_COMMAND
+    )
+
+    # Should have exactly one ExitPlanMode PreToolUse hook (replaced, not appended)
+    assert len(result["hooks"]["PreToolUse"]) == 1
+    assert result["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == ERK_EXIT_PLAN_HOOK_COMMAND
+
+
+def test_add_erk_hooks_preserves_user_hooks_when_replacing() -> None:
+    """Test that add_erk_hooks preserves non-erk hooks when replacing erk hooks."""
+    old_erk_command = "ERK_HOOK_ID=user-prompt-hook erk exec old-command"
+    user_hook_command = "my-custom-lint-command"
+
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                # User's custom hook (should be preserved)
+                {
+                    "matcher": "*.py",
+                    "hooks": [{"type": "command", "command": user_hook_command}],
+                },
+                # Old erk hook (should be replaced)
+                {
+                    "matcher": "*",
+                    "hooks": [{"type": "command", "command": old_erk_command}],
+                },
+            ],
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # Should have two hooks: user's custom + erk's current
+    assert len(result["hooks"]["UserPromptSubmit"]) == 2
+
+    # Find the user hook and erk hook
+    user_hooks = [h for h in result["hooks"]["UserPromptSubmit"] if h["matcher"] == "*.py"]
+    erk_hooks = [h for h in result["hooks"]["UserPromptSubmit"] if h["matcher"] == "*"]
+
+    assert len(user_hooks) == 1
+    assert user_hooks[0]["hooks"][0]["command"] == user_hook_command
+
+    assert len(erk_hooks) == 1
+    assert erk_hooks[0]["hooks"][0]["command"] == ERK_USER_PROMPT_HOOK_COMMAND
+
+
+def test_add_erk_hooks_preserves_non_exitplanmode_pretooluse_hooks() -> None:
+    """Test that add_erk_hooks preserves non-ExitPlanMode PreToolUse hooks."""
+    old_exit_plan_command = "ERK_HOOK_ID=exit-plan-mode-hook erk exec old-exit"
+    user_bash_hook = "my-bash-validation"
+
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                # User's Bash validation hook (should be preserved)
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": user_bash_hook}],
+                },
+                # Old erk ExitPlanMode hook (should be replaced)
+                {
+                    "matcher": "ExitPlanMode",
+                    "hooks": [{"type": "command", "command": old_exit_plan_command}],
+                },
+            ],
+        }
+    }
+    result = add_erk_hooks(settings)
+
+    # Should have two hooks: user's Bash + erk's ExitPlanMode
+    assert len(result["hooks"]["PreToolUse"]) == 2
+
+    # Find the user hook and erk hook
+    bash_hooks = [h for h in result["hooks"]["PreToolUse"] if h["matcher"] == "Bash"]
+    exit_hooks = [h for h in result["hooks"]["PreToolUse"] if h["matcher"] == "ExitPlanMode"]
+
+    assert len(bash_hooks) == 1
+    assert bash_hooks[0]["hooks"][0]["command"] == user_bash_hook
+
+    assert len(exit_hooks) == 1
+    assert exit_hooks[0]["hooks"][0]["command"] == ERK_EXIT_PLAN_HOOK_COMMAND
+
+
+# --- Tests for backup file creation ---
+
+
+def test_write_claude_settings_creates_backup(tmp_path: Path) -> None:
+    """Test that write_claude_settings creates backup of existing file."""
+    settings_path = get_repo_claude_settings_path(tmp_path)
+
+    # Create initial settings
+    initial_settings = {"permissions": {"allow": ["Bash(git:*)"]}}
+    write_claude_settings(settings_path, initial_settings)
+
+    # Write new settings (should create backup)
+    new_settings = {"permissions": {"allow": ["Bash(erk:*)"]}}
+    write_claude_settings(settings_path, new_settings)
+
+    # Verify backup exists and contains original content
+    backup_path = settings_path.with_suffix(".json.bak")
+    assert backup_path.exists()
+    backup_content = json.loads(backup_path.read_text(encoding="utf-8"))
+    assert backup_content == initial_settings
+
+    # Verify new settings were written
+    current_content = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert current_content == new_settings
+
+
+def test_write_claude_settings_no_backup_for_new_file(tmp_path: Path) -> None:
+    """Test that write_claude_settings doesn't create backup for new file."""
+    settings_path = get_repo_claude_settings_path(tmp_path)
+
+    # Write to non-existent file
+    settings = {"permissions": {"allow": ["Bash(erk:*)"]}}
+    write_claude_settings(settings_path, settings)
+
+    # Verify no backup was created
+    backup_path = settings_path.with_suffix(".json.bak")
+    assert not backup_path.exists()
+
+
+def test_write_claude_settings_returns_backup_path(tmp_path: Path) -> None:
+    """Test that write_claude_settings returns the backup path when backup is created."""
+    settings_path = get_repo_claude_settings_path(tmp_path)
+
+    # Create initial settings
+    initial_settings = {"permissions": {"allow": ["Bash(git:*)"]}}
+    write_claude_settings(settings_path, initial_settings)
+
+    # Write new settings - should return backup path
+    new_settings = {"permissions": {"allow": ["Bash(erk:*)"]}}
+    result = write_claude_settings(settings_path, new_settings)
+
+    # Verify return value is the backup path
+    assert isinstance(result, Path)
+    assert result == settings_path.with_suffix(".json.bak")
+    assert result.exists()
+
+
+def test_write_claude_settings_returns_no_backup_sentinel(tmp_path: Path) -> None:
+    """Test that write_claude_settings returns NoBackupCreated for new file."""
+    settings_path = get_repo_claude_settings_path(tmp_path)
+
+    # Write to non-existent file - should return sentinel
+    settings = {"permissions": {"allow": ["Bash(erk:*)"]}}
+    result = write_claude_settings(settings_path, settings)
+
+    # Verify return value is the sentinel
+    assert isinstance(result, NoBackupCreated)
+
+
+# --- Tests for statusline functions ---
+
+
+def test_statusline_command_constant() -> None:
+    """Test that ERK_STATUSLINE_COMMAND has expected value."""
+    assert ERK_STATUSLINE_COMMAND == "uvx erk-statusline"
+
+
+def test_get_statusline_config_returns_not_configured_for_empty() -> None:
+    """Test get_statusline_config returns StatuslineNotConfigured for empty settings."""
+    settings: dict = {}
+    result = get_statusline_config(settings)
+    assert isinstance(result, StatuslineNotConfigured)
+
+
+def test_get_statusline_config_returns_not_configured_when_missing() -> None:
+    """Test get_statusline_config returns StatuslineNotConfigured when statusLine is missing."""
+    settings = {"permissions": {"allow": []}}
+    result = get_statusline_config(settings)
+    assert isinstance(result, StatuslineNotConfigured)
+
+
+def test_get_statusline_config_returns_not_configured_for_incomplete() -> None:
+    """Test get_statusline_config returns StatuslineNotConfigured for incomplete config."""
+    # Missing command
+    settings = {"statusLine": {"type": "command"}}
+    result = get_statusline_config(settings)
+    assert isinstance(result, StatuslineNotConfigured)
+
+    # Missing type
+    settings = {"statusLine": {"command": "echo test"}}
+    result = get_statusline_config(settings)
+    assert isinstance(result, StatuslineNotConfigured)
+
+
+def test_get_statusline_config_returns_config_when_present() -> None:
+    """Test get_statusline_config returns StatuslineConfig when configured."""
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": "uvx some-statusline",
+        }
+    }
+    result = get_statusline_config(settings)
+    assert isinstance(result, StatuslineConfig)
+    assert result.type == "command"
+    assert result.command == "uvx some-statusline"
+
+
+def test_has_erk_statusline_returns_false_for_empty() -> None:
+    """Test has_erk_statusline returns False for empty settings."""
+    settings: dict = {}
+    assert has_erk_statusline(settings) is False
+
+
+def test_has_erk_statusline_returns_false_for_different_command() -> None:
+    """Test has_erk_statusline returns False when different statusline is configured."""
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": "uvx other-statusline",  # Different tool entirely
+        }
+    }
+    assert has_erk_statusline(settings) is False
+
+
+def test_has_erk_statusline_accepts_without_uvx_prefix() -> None:
+    """Test has_erk_statusline returns True for bare erk-statusline command."""
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": "erk-statusline",  # No uvx prefix
+        }
+    }
+    assert has_erk_statusline(settings) is True
+
+
+def test_has_erk_statusline_accepts_with_uvx_prefix() -> None:
+    """Test has_erk_statusline returns True for uvx erk-statusline command."""
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": "uvx erk-statusline",
+        }
+    }
+    assert has_erk_statusline(settings) is True
+
+
+def test_has_erk_statusline_returns_true_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test has_erk_statusline returns True when erk-statusline is configured."""
+    monkeypatch.delenv("ERK_STATUSLINE_COMMAND", raising=False)
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": get_erk_statusline_command(),
+        }
+    }
+    assert has_erk_statusline(settings) is True
+
+
+def test_add_erk_statusline_to_empty_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test add_erk_statusline adds statusline config to empty settings."""
+    monkeypatch.delenv("ERK_STATUSLINE_COMMAND", raising=False)
+    settings: dict = {}
+    result = add_erk_statusline(settings)
+
+    assert "statusLine" in result
+    assert result["statusLine"]["type"] == "command"
+    assert "erk-statusline" in result["statusLine"]["command"]
+    # Original should not be modified
+    assert "statusLine" not in settings
+
+
+def test_add_erk_statusline_overwrites_existing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test add_erk_statusline overwrites existing statusline config."""
+    monkeypatch.delenv("ERK_STATUSLINE_COMMAND", raising=False)
+    settings = {
+        "statusLine": {
+            "type": "command",
+            "command": "uvx other-statusline",
+        }
+    }
+    result = add_erk_statusline(settings)
+
+    assert "erk-statusline" in result["statusLine"]["command"]
+    # Original should not be modified
+    assert settings["statusLine"]["command"] == "uvx other-statusline"
+
+
+def test_add_erk_statusline_preserves_other_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test add_erk_statusline preserves other settings keys."""
+    monkeypatch.delenv("ERK_STATUSLINE_COMMAND", raising=False)
+    settings = {
+        "permissions": {"allow": ["Bash(git:*)"]},
+        "hooks": {"UserPromptSubmit": []},
+        "alwaysThinkingEnabled": True,
+    }
+    result = add_erk_statusline(settings)
+
+    # statusLine should be added
+    assert "erk-statusline" in result["statusLine"]["command"]
+    # Other settings should be preserved
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+    assert "hooks" in result
+    assert result["alwaysThinkingEnabled"] is True
+
+
+def test_add_erk_statusline_is_pure_function() -> None:
+    """Test add_erk_statusline doesn't modify the input."""
+    original = {
+        "statusLine": {
+            "type": "command",
+            "command": "uvx other-statusline",
+        }
+    }
+    original_copy = json.loads(json.dumps(original))
+
+    add_erk_statusline(original)
+
+    # Original should be unchanged
+    assert original == original_copy
+
+
+# --- Tests for ruff format hook functions ---
+
+
+def test_ruff_format_hook_command_constant() -> None:
+    """Test that ERK_RUFF_FORMAT_HOOK_COMMAND has expected value."""
+    assert "ruff format" in ERK_RUFF_FORMAT_HOOK_COMMAND
+    assert "${file_path}" in ERK_RUFF_FORMAT_HOOK_COMMAND
+    assert "*.py" in ERK_RUFF_FORMAT_HOOK_COMMAND
+
+
+def test_has_ruff_format_hook_returns_false_for_empty_settings() -> None:
+    """Test has_ruff_format_hook returns False for empty settings."""
+    settings: dict = {}
+    assert has_ruff_format_hook(settings) is False
+
+
+def test_has_ruff_format_hook_returns_false_when_no_hooks() -> None:
+    """Test has_ruff_format_hook returns False when hooks key is missing."""
+    settings = {"permissions": {"allow": []}}
+    assert has_ruff_format_hook(settings) is False
+
+
+def test_has_ruff_format_hook_returns_false_when_no_post_tool_use() -> None:
+    """Test has_ruff_format_hook returns False when PostToolUse is missing."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [],
+        }
+    }
+    assert has_ruff_format_hook(settings) is False
+
+
+def test_has_ruff_format_hook_returns_false_for_different_matcher() -> None:
+    """Test has_ruff_format_hook returns False when matcher doesn't match Write|Edit."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "uv run ruff format"}],
+                }
+            ]
+        }
+    }
+    assert has_ruff_format_hook(settings) is False
+
+
+def test_has_ruff_format_hook_returns_false_for_different_command() -> None:
+    """Test has_ruff_format_hook returns False when command doesn't contain ruff format."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": "other-command"}],
+                }
+            ]
+        }
+    }
+    assert has_ruff_format_hook(settings) is False
+
+
+def test_has_ruff_format_hook_returns_true_when_configured() -> None:
+    """Test has_ruff_format_hook returns True when properly configured."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    assert has_ruff_format_hook(settings) is True
+
+
+def test_has_ruff_format_hook_returns_true_for_any_ruff_format_command() -> None:
+    """Test has_ruff_format_hook returns True for any command containing 'ruff format'."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": "uv run ruff format ${file_path}"}],
+                }
+            ]
+        }
+    }
+    assert has_ruff_format_hook(settings) is True
+
+
+def test_has_ruff_format_hook_finds_hook_among_multiple_entries() -> None:
+    """Test has_ruff_format_hook finds the hook among multiple PostToolUse entries."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{"type": "command", "command": "other-hook"}],
+                },
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                },
+            ]
+        }
+    }
+    assert has_ruff_format_hook(settings) is True
+
+
+def test_add_ruff_format_hook_to_empty_settings() -> None:
+    """Test add_ruff_format_hook adds hook to empty settings."""
+    settings: dict = {}
+    result = add_ruff_format_hook(settings)
+
+    assert "hooks" in result
+    assert "PostToolUse" in result["hooks"]
+    assert len(result["hooks"]["PostToolUse"]) == 1
+
+    hook_entry = result["hooks"]["PostToolUse"][0]
+    assert hook_entry["matcher"] == "Write|Edit"
+    assert hook_entry["hooks"][0]["command"] == ERK_RUFF_FORMAT_HOOK_COMMAND
+
+    # Original should not be modified
+    assert "hooks" not in settings
+
+
+def test_add_ruff_format_hook_preserves_existing_hooks() -> None:
+    """Test add_ruff_format_hook preserves existing hooks."""
+    settings = {
+        "hooks": {
+            "UserPromptSubmit": [
+                {"matcher": "*", "hooks": [{"type": "command", "command": "echo test"}]}
+            ],
+            "PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "lint"}]}],
+        }
+    }
+    result = add_ruff_format_hook(settings)
+
+    # UserPromptSubmit should be preserved
+    assert "UserPromptSubmit" in result["hooks"]
+    assert len(result["hooks"]["UserPromptSubmit"]) == 1
+
+    # PostToolUse should have both entries
+    assert len(result["hooks"]["PostToolUse"]) == 2
+
+
+def test_add_ruff_format_hook_does_not_duplicate() -> None:
+    """Test add_ruff_format_hook doesn't add if already present."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    result = add_ruff_format_hook(settings)
+
+    # Should not have duplicates
+    assert len(result["hooks"]["PostToolUse"]) == 1
+
+
+def test_add_ruff_format_hook_is_pure_function() -> None:
+    """Test add_ruff_format_hook doesn't modify the input."""
+    original = {"hooks": {"UserPromptSubmit": [{"matcher": "*", "hooks": []}]}}
+    original_copy = json.loads(json.dumps(original))
+
+    add_ruff_format_hook(original)
+
+    # Original should be unchanged
+    assert original == original_copy
+
+
+def test_add_ruff_format_hook_preserves_other_settings() -> None:
+    """Test add_ruff_format_hook preserves other top-level settings."""
+    settings = {
+        "permissions": {"allow": ["Bash(git:*)"]},
+        "statusLine": {"type": "command", "command": "echo status"},
+        "alwaysThinkingEnabled": True,
+    }
+    result = add_ruff_format_hook(settings)
+
+    # Other settings should be preserved
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+    assert result["statusLine"]["type"] == "command"
+    assert result["alwaysThinkingEnabled"] is True
+    # Hook should be added
+    assert "PostToolUse" in result["hooks"]
+
+
+# --- Tests for removal functions ---
+
+
+def test_remove_erk_statusline_removes_statusline() -> None:
+    """Test remove_erk_statusline removes statusLine from settings."""
+    settings = {
+        "statusLine": {"type": "command", "command": "uvx erk-statusline"},
+        "permissions": {"allow": ["Bash(git:*)"]},
+    }
+    result = remove_erk_statusline(settings)
+
+    assert "statusLine" not in result
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+    # Original should not be modified
+    assert "statusLine" in settings
+
+
+def test_remove_erk_statusline_handles_missing_statusline() -> None:
+    """Test remove_erk_statusline handles missing statusLine gracefully."""
+    settings = {"permissions": {"allow": ["Bash(git:*)"]}}
+    result = remove_erk_statusline(settings)
+
+    assert "statusLine" not in result
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+
+
+def test_remove_erk_statusline_is_pure_function() -> None:
+    """Test remove_erk_statusline doesn't modify the input."""
+    original = {"statusLine": {"type": "command", "command": "uvx erk-statusline"}}
+    original_copy = json.loads(json.dumps(original))
+
+    remove_erk_statusline(original)
+
+    assert original == original_copy
+
+
+def test_remove_ruff_format_hook_removes_hook() -> None:
+    """Test remove_ruff_format_hook removes the ruff format hook."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    result = remove_ruff_format_hook(settings)
+
+    assert "hooks" not in result or "PostToolUse" not in result.get("hooks", {})
+    # Original should not be modified
+    assert "PostToolUse" in settings["hooks"]
+
+
+def test_remove_ruff_format_hook_preserves_other_hooks() -> None:
+    """Test remove_ruff_format_hook preserves other hooks."""
+    settings = {
+        "hooks": {
+            "PostToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "lint"}]},
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                },
+            ],
+            "UserPromptSubmit": [{"matcher": "*", "hooks": []}],
+        }
+    }
+    result = remove_ruff_format_hook(settings)
+
+    # Bash hook should be preserved
+    assert len(result["hooks"]["PostToolUse"]) == 1
+    assert result["hooks"]["PostToolUse"][0]["matcher"] == "Bash"
+    # UserPromptSubmit should be preserved
+    assert "UserPromptSubmit" in result["hooks"]
+
+
+def test_remove_ruff_format_hook_handles_missing_hooks() -> None:
+    """Test remove_ruff_format_hook handles missing hooks gracefully."""
+    settings = {"permissions": {"allow": []}}
+    result = remove_ruff_format_hook(settings)
+
+    assert "hooks" not in result or result.get("hooks") == {}
+
+
+def test_remove_ruff_format_hook_is_pure_function() -> None:
+    """Test remove_ruff_format_hook doesn't modify the input."""
+    original = {
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Write|Edit",
+                    "hooks": [{"type": "command", "command": ERK_RUFF_FORMAT_HOOK_COMMAND}],
+                }
+            ]
+        }
+    }
+    original_copy = json.loads(json.dumps(original))
+
+    remove_ruff_format_hook(original)
+
+    assert original == original_copy
+
+
+def test_remove_erk_permission_removes_permission() -> None:
+    """Test remove_erk_permission removes Bash(erk:*) from settings."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)", "Bash(erk:*)", "Write(/tmp/*)"],
+        }
+    }
+    result = remove_erk_permission(settings)
+
+    assert ERK_PERMISSION not in result["permissions"]["allow"]
+    assert "Bash(git:*)" in result["permissions"]["allow"]
+    assert "Write(/tmp/*)" in result["permissions"]["allow"]
+    # Original should not be modified
+    assert ERK_PERMISSION in settings["permissions"]["allow"]
+
+
+def test_remove_erk_permission_handles_empty_allow_after_removal() -> None:
+    """Test remove_erk_permission cleans up empty structures."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(erk:*)"],
+        }
+    }
+    result = remove_erk_permission(settings)
+
+    # Empty permissions should be cleaned up
+    assert "permissions" not in result or "allow" not in result.get("permissions", {})
+
+
+def test_remove_erk_permission_handles_missing_permission() -> None:
+    """Test remove_erk_permission handles missing permission gracefully."""
+    settings = {
+        "permissions": {
+            "allow": ["Bash(git:*)"],
+        }
+    }
+    result = remove_erk_permission(settings)
+
+    assert result["permissions"]["allow"] == ["Bash(git:*)"]
+
+
+def test_remove_erk_permission_is_pure_function() -> None:
+    """Test remove_erk_permission doesn't modify the input."""
+    original = {
+        "permissions": {
+            "allow": ["Bash(erk:*)"],
+        }
+    }
+    original_copy = json.loads(json.dumps(original))
+
+    remove_erk_permission(original)
+
+    assert original == original_copy

@@ -1,0 +1,902 @@
+#!/usr/bin/env python3
+"""Exit Plan Mode Hook.
+
+Prompts user before exiting plan mode when a plan exists. This hook intercepts
+the ExitPlanMode tool via PreToolUse lifecycle to ask whether to save to GitHub
+or implement immediately.
+
+Exit codes:
+    0: Success (allow exit - no plan, implement-now marker present, or no session)
+    2: Block (plan exists, no implement-now marker - prompt user)
+
+This command is invoked via:
+    erk exec exit-plan-mode-hook
+
+Marker File State Machine
+=========================
+
+This hook uses marker files in .erk/scratch/sessions/<session-id>/ for state management.
+Marker files are self-describing: their names indicate their purpose and their contents
+explain their effect.
+
+Marker Files:
+    exit-plan-mode-hook.implement-now.marker
+        Created by: Agent (when user chooses "Implement without saving")
+        Effect: Next ExitPlanMode call is ALLOWED (exit plan mode, proceed to implementation)
+        Lifecycle: Deleted after being read by next hook invocation
+
+    exit-plan-mode-hook.plan-saved.marker
+        Created by: /erk:plan-save command (both new-branch and current-branch paths)
+        Content: First line is the plan PR number
+        Effect: Next ExitPlanMode call is BLOCKED with Step 2 "what next?" prompt
+        Lifecycle: Deleted after being read by next hook invocation
+
+    incremental-plan.marker
+        Created by: /local:incremental-plan-mode command (via `erk exec marker create --session-id`)
+        Effect: Next ExitPlanMode call is ALLOWED, skipping the save prompt entirely
+        Lifecycle: Deleted after being read by next hook invocation
+        Purpose: Streamlines "plan → implement → submit" loop for PR iteration
+
+State Transitions:
+    1. No marker files + plan exists → BLOCK with Step 1 prompt (save/implement/edit)
+    2. implement-now marker exists → ALLOW (delete marker)
+    3. incremental-plan marker exists → ALLOW (delete marker, skip save prompt)
+    4. plan-saved marker exists → BLOCK with Step 2 plain-text next-steps (delete marker)
+"""
+
+import os
+import sys
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Self
+
+import click
+
+from erk.hooks.decorators import HookContext, hook_command
+from erk_shared.context.types import GlobalConfig
+from erk_shared.gateway.branch_manager.abc import BranchManager
+from erk_shared.gateway.claude_installation.abc import ClaudeInstallation
+from erk_shared.gateway.git.abc import Git
+from erk_shared.impl_folder import read_plan_ref, resolve_impl_dir
+from erk_shared.output.next_steps import format_pr_next_steps_plain
+from erk_shared.scratch.plan_snapshots import snapshot_plan_for_session
+from erk_shared.scratch.scratch import get_scratch_dir
+from erk_shared.scratch.session_markers import (
+    get_existing_saved_branch,
+    read_objective_context_marker,
+    read_plan_saved_marker,
+)
+
+# Known terminal-based editors that cannot run inside Claude Code
+TERMINAL_EDITORS = frozenset(
+    {"vim", "vi", "nvim", "nano", "emacs", "pico", "ne", "micro", "jed", "mcedit", "joe", "ed"}
+)
+
+
+def abbreviate_for_header(current_branch: str | None) -> str:
+    """Abbreviate branch name to fit in 12-char header for AskUserQuestion.
+
+    Args:
+        current_branch: Current git branch name, or None.
+
+    Returns:
+        Abbreviated header string, max 12 characters.
+        Examples:
+        - "plnd/add-feature" -> "br:plnd/add-" (12 chars)
+        - "feature-x" -> "br:feature-x" (12 chars)
+        - None -> "Plan Action"
+    """
+    if current_branch is None:
+        return "Plan Action"
+    # Truncate if too long: "br:" + 9 chars = 12 max
+    abbreviated = current_branch
+    if len(abbreviated) > 9:
+        abbreviated = abbreviated[:9]
+    return f"br:{abbreviated}"
+
+
+def is_terminal_editor(editor: str | None) -> bool:
+    """Check if editor is a terminal-based (TUI) editor.
+
+    Terminal editors like vim cannot run inside Claude Code because they
+    need exclusive terminal control which conflicts with Claude's UI.
+
+    Args:
+        editor: The EDITOR environment variable value, or None.
+
+    Returns:
+        True if editor is a known terminal-based editor.
+    """
+    if editor is None:
+        return False
+    # Extract basename in case of full path like /usr/bin/vim
+    editor_name = Path(editor).name
+    return editor_name in TERMINAL_EDITORS
+
+
+# ============================================================================
+# Data Classes for Pure Logic
+# ============================================================================
+
+
+class ExitAction(Enum):
+    """Exit action for the hook."""
+
+    ALLOW = 0  # Exit code 0 - allow ExitPlanMode
+    BLOCK = 2  # Exit code 2 - block ExitPlanMode
+
+
+@dataclass(frozen=True)
+class HookInput:
+    """All inputs needed for decision logic."""
+
+    session_id: str | None
+    github_planning_enabled: bool
+    implement_now_marker_exists: bool
+    plan_saved_marker_exists: bool
+    plan_saved_pr_number: int | None  # Plan number read from plan-saved marker
+    plan_saved_branch_name: str | None  # Branch name read from plan-saved-branch marker
+    incremental_plan_marker_exists: bool
+    objective_context_marker_exists: bool
+    objective_id: int | None  # Objective issue number if marker exists
+    plan_file_path: Path | None  # Path to plan file if exists, None otherwise
+    pr_title: str | None  # Title extracted from plan file for display
+    current_branch: str | None
+    branch_has_commits: bool  # Whether branch has commits ahead of trunk
+    worktree_name: str | None  # Directory name of current worktree
+    pr_number: int | None  # PR number if exists for current branch
+    pr_number_from_plan_ref: int | None  # Plan number from .erk/impl-context/plan-ref.json
+    editor: str | None  # Value of EDITOR env var for TUI detection
+
+    @classmethod
+    def for_test(
+        cls,
+        *,
+        session_id: str | None = "test-session",
+        github_planning_enabled: bool = True,
+        implement_now_marker_exists: bool = False,
+        plan_saved_marker_exists: bool = False,
+        plan_saved_pr_number: int | None = None,
+        plan_saved_branch_name: str | None = None,
+        incremental_plan_marker_exists: bool = False,
+        objective_context_marker_exists: bool = False,
+        objective_id: int | None = None,
+        plan_file_path: Path | None = None,
+        pr_title: str | None = None,
+        current_branch: str | None = "feature-branch",
+        branch_has_commits: bool = False,
+        worktree_name: str | None = None,
+        pr_number: int | None = None,
+        pr_number_from_plan_ref: int | None = None,
+        editor: str | None = None,
+    ) -> Self:
+        """Create a HookInput with test defaults.
+
+        All fields have sensible defaults for testing:
+        - session_id: "test-session"
+        - github_planning_enabled: True
+        - All marker exists flags: False
+        - plan_saved_pr_number: None
+        - plan_saved_branch_name: None
+        - objective_issue: None
+        - plan_file_path: None
+        - pr_title: None
+        - current_branch: "feature-branch"
+        - branch_has_commits: False
+        - worktree_name: None
+        - pr_number: None
+        - pr_number_from_plan_ref: None
+        - editor: None
+        """
+        return cls(
+            session_id=session_id,
+            github_planning_enabled=github_planning_enabled,
+            implement_now_marker_exists=implement_now_marker_exists,
+            plan_saved_marker_exists=plan_saved_marker_exists,
+            plan_saved_pr_number=plan_saved_pr_number,
+            plan_saved_branch_name=plan_saved_branch_name,
+            incremental_plan_marker_exists=incremental_plan_marker_exists,
+            objective_context_marker_exists=objective_context_marker_exists,
+            objective_id=objective_id,
+            plan_file_path=plan_file_path,
+            pr_title=pr_title,
+            current_branch=current_branch,
+            branch_has_commits=branch_has_commits,
+            worktree_name=worktree_name,
+            pr_number=pr_number,
+            pr_number_from_plan_ref=pr_number_from_plan_ref,
+            editor=editor,
+        )
+
+
+@dataclass(frozen=True)
+class HookOutput:
+    """Decision result from pure logic."""
+
+    action: ExitAction
+    message: str
+    delete_implement_now_marker: bool = False
+    delete_plan_saved_marker: bool = False
+    delete_incremental_plan_marker: bool = False
+    delete_objective_context_marker: bool = False
+
+
+# ============================================================================
+# Pure Functions (no I/O, fully testable without mocking)
+# ============================================================================
+
+
+def extract_pr_title(plan_file_path: Path | None) -> str | None:
+    """Extract title from plan file for display in menu.
+
+    Pure function - only reads file content, no other I/O.
+
+    Looks for:
+    1. First H1 heading (# Title)
+    2. Content after "## Task" section
+
+    Returns None if file doesn't exist or no title found.
+    """
+    if plan_file_path is None or not plan_file_path.exists():
+        return None
+
+    text = plan_file_path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+
+    # Look for first H1 (skip generic titles)
+    for line in lines[:10]:
+        if line.startswith("# "):
+            title = line[2:].strip()
+            if title.lower() not in ("plan", "implementation plan"):
+                return title
+
+    # Look for ## Task section
+    for i, line in enumerate(lines[:20]):
+        if line.strip() == "## Task":
+            for next_line in lines[i + 1 : i + 5]:
+                if next_line.strip():
+                    return next_line.strip()
+
+    return None
+
+
+def build_step2_message(
+    *,
+    pr_number: int,
+    url: str,
+    branch_name: str,
+) -> str:
+    """Build the Step 2 blocking message after plan is saved.
+
+    Pure function - string building only. Testable without mocking.
+
+    Displays plain-text next-steps commands the user can copy-paste
+    into their shell. No interactive menu — just informational output.
+
+    Args:
+        pr_number: The plan PR number that was just saved.
+        url: The URL of the saved plan PR.
+        branch_name: The branch name of the saved plan PR.
+    """
+    next_steps = format_pr_next_steps_plain(pr_number, url=url, branch_name=branch_name)
+
+    lines = [
+        f"PR #{pr_number} saved successfully.",
+        "",
+        "Display ALL of the following next-steps commands to the user as plain text.",
+        "Show every line exactly as written — do NOT summarize, truncate, or omit any lines.",
+        "(do NOT use AskUserQuestion — just display the text):",
+        "",
+        next_steps,
+        "",
+        "Session complete. Do NOT call ExitPlanMode again.",
+    ]
+    return "\n".join(lines)
+
+
+def build_blocking_message(
+    *,
+    session_id: str,
+    current_branch: str | None,
+    branch_has_commits: bool,
+    plan_file_path: Path | None,
+    pr_title: str | None,
+    worktree_name: str | None,
+    pr_number: int | None,
+    pr_number_from_plan_ref: int | None,
+    editor: str | None,
+) -> str:
+    """Build the blocking message with AskUserQuestion instructions.
+
+    Pure function - string building only. Testable without mocking.
+
+    Args:
+        session_id: Claude session ID for marker creation commands.
+        current_branch: Current git branch name.
+        branch_has_commits: Whether branch has commits ahead of trunk.
+        plan_file_path: Path to the plan file, if it exists.
+        pr_title: Title extracted from plan file, if available.
+        worktree_name: Directory name of current worktree.
+        pr_number: PR number if exists for current branch.
+        pr_number_from_plan_ref: Plan number from .erk/impl-context/plan-ref.json.
+        editor: Value of EDITOR env var for TUI detection.
+    """
+    # Build context lines for the question
+    context_lines: list[str] = []
+
+    # First line: title
+    if pr_title:
+        context_lines.append(f"📋 {pr_title}")
+
+    # Second line: statusline-style context
+    statusline_parts: list[str] = []
+    if worktree_name:
+        statusline_parts.append(f"wt:{worktree_name}")
+    if current_branch:
+        statusline_parts.append(f"br:{current_branch}")
+    if pr_number is not None:
+        statusline_parts.append(f"pr:#{pr_number}")
+    if pr_number_from_plan_ref is not None:
+        statusline_parts.append(f"plan:#{pr_number_from_plan_ref}")
+
+    if statusline_parts:
+        statusline = " ".join(f"({part})" for part in statusline_parts)
+        context_lines.append(f"Current context: {statusline}")
+
+    context_block = "\n".join(context_lines)
+
+    # Build the question text
+    if context_block:
+        question_text = f"{context_block}\\n\\nWhat would you like to do with this plan?"
+    else:
+        question_text = "What would you like to do with this plan?"
+
+    # Build header for AskUserQuestion (max 12 chars)
+    header = abbreviate_for_header(current_branch)
+
+    lines: list[str] = []
+
+    # Instruct agent to display the plan so the user can review it
+    if plan_file_path is not None:
+        lines.extend(
+            [
+                "DISPLAY PLAN: Before asking the question below, read the plan file and display",
+                f"its contents to the user with proper markdown formatting: {plan_file_path}",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "PLAN SAVE PROMPT",
+            "",
+            "A plan exists for this session but has not been saved.",
+            "",
+            "Use AskUserQuestion to ask the user:",
+            f'  question: "{question_text}"',
+            f'  header: "{header}"',
+            "",
+            "IMPORTANT: Present options in this exact order:",
+        ]
+    )
+
+    option_num = 1
+    lines.append(
+        f'  {option_num}. "Create new branch and planned PR"'
+        " - Create a new branch and save plan as a planned PR. You stay on your current branch."
+    )
+    option_num += 1
+    lines.append(
+        f'  {option_num}. "Implement without saving" - Implement directly on the current branch '
+        "without creating a planned PR."
+    )
+    option_num += 1
+    if not branch_has_commits and current_branch not in ("master", "main"):
+        lines.append(
+            f'  {option_num}. "Make current empty branch a planned PR"'
+            " - Save plan as PR on the current branch."
+        )
+        option_num += 1
+    lines.append(
+        f'  {option_num}. "View/Edit the Plan" - Open plan in editor to '
+        "review or modify before deciding."
+    )
+
+    if current_branch in ("master", "main"):
+        lines.extend(
+            [
+                "",
+                f"⚠️  WARNING: Currently on '{current_branch}'. "
+                "We strongly discourage implementing directly on the trunk branch. "
+                "Consider creating a planned PR instead.",
+            ]
+        )
+
+    save_cmd = "/erk:plan-save"
+
+    lines.extend(
+        [
+            "",
+            "If user chooses 'Create new branch and planned PR':",
+            f"  1. Run {save_cmd}",
+            "  2. Call ExitPlanMode to end the planning session.",
+        ]
+    )
+
+    implement_now_lines = [
+        "",
+        "If user chooses 'Implement without saving':",
+        "  1. Create implement-now marker:",
+        f"     erk exec marker create --session-id {session_id} \\",
+        "       exit-plan-mode-hook.implement-now",
+        "  2. Call ExitPlanMode",
+        "  3. After exiting plan mode, implement the changes directly on the current branch.",
+        "     Do NOT run 'erk exec setup-impl' or create a new branch.",
+    ]
+    if plan_file_path is not None:
+        implement_now_lines.append(f"     Read the plan from: {plan_file_path}")
+    implement_now_lines.append(
+        "     Implement changes, run CI, and optionally 'erk pr submit' when done.",
+    )
+    lines.extend(implement_now_lines)
+
+    if not branch_has_commits and current_branch not in ("master", "main"):
+        lines.extend(
+            [
+                "",
+                "If user chooses 'Make current empty branch a planned PR':",
+                f"  1. Run {save_cmd} --current-branch",
+                "  2. Call ExitPlanMode to end the planning session.",
+                "     This converts the current branch into the plan PR branch",
+                "     instead of creating a new branch.",
+            ]
+        )
+
+    if plan_file_path is not None:
+        if is_terminal_editor(editor):
+            # TUI editors can't run inside Claude Code
+            editor_name = Path(editor).name if editor else "your editor"
+            lines.extend(
+                [
+                    "",
+                    "If user chooses 'View/Edit the Plan':",
+                    f"  1. Tell user: '{editor_name} is a terminal-based editor that cannot",
+                    "     run inside Claude Code. Please open the plan in a separate terminal:'",
+                    f"     {editor} {plan_file_path}",
+                    "  2. Wait for user to confirm they're done editing",
+                    "  3. Ask the same question again (loop until Save/Implement/Incremental)",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "If user chooses 'View/Edit the Plan':",
+                    f"  1. Run: ${{EDITOR:-code}} {plan_file_path}",
+                    "  2. After user confirms they're done editing, ask the same question again",
+                    "     (loop until user chooses Save, Implement, or Incremental)",
+                ]
+            )
+
+    return "\n".join(lines)
+
+
+def determine_exit_action(hook_input: HookInput) -> HookOutput:
+    """Determine what action to take based on inputs.
+
+    Pure function - all decision logic, no I/O. Testable without mocking!
+    """
+    # Early exit if github_planning is disabled
+    if not hook_input.github_planning_enabled:
+        return HookOutput(ExitAction.ALLOW, "")
+
+    # No session context
+    if hook_input.session_id is None:
+        return HookOutput(ExitAction.ALLOW, "No session context available, allowing exit")
+
+    # Implement-now marker present (user chose "Implement now")
+    if hook_input.implement_now_marker_exists:
+        return HookOutput(
+            ExitAction.ALLOW,
+            "Implement-now marker found, allowing exit",
+            delete_implement_now_marker=True,
+            delete_objective_context_marker=hook_input.objective_context_marker_exists,
+        )
+
+    # Incremental-plan marker present (session started via /local:incremental-plan-mode)
+    # Skip the "save as plan?" prompt and proceed directly to implementation
+    if hook_input.incremental_plan_marker_exists:
+        return HookOutput(
+            ExitAction.ALLOW,
+            "Incremental-plan mode: skipping save prompt, proceeding to implementation",
+            delete_incremental_plan_marker=True,
+        )
+
+    # Plan-saved marker present — show Step 2 "what next?" prompt
+    if hook_input.plan_saved_marker_exists:
+        pr_num = hook_input.plan_saved_pr_number
+        branch_name = hook_input.plan_saved_branch_name
+        if pr_num is not None and branch_name is not None:
+            saved_msg = build_step2_message(
+                pr_number=pr_num,
+                url="",
+                branch_name=branch_name,
+            )
+        else:
+            # Fallback for markers without a plan number (migration safety)
+            saved_msg = (
+                "PR saved. Planning session complete. "
+                "Do NOT call ExitPlanMode again — plan mode stays on "
+                "to prevent accidental edits. Session is done."
+            )
+        return HookOutput(
+            ExitAction.BLOCK,
+            saved_msg,
+            delete_plan_saved_marker=True,
+            delete_objective_context_marker=hook_input.objective_context_marker_exists,
+        )
+
+    # No plan file
+    if hook_input.plan_file_path is None:
+        return HookOutput(
+            ExitAction.ALLOW,
+            "No plan file found for this session, allowing exit",
+        )
+
+    # Plan exists, no implement-now marker - block and instruct
+    return HookOutput(
+        ExitAction.BLOCK,
+        build_blocking_message(
+            session_id=hook_input.session_id,
+            current_branch=hook_input.current_branch,
+            branch_has_commits=hook_input.branch_has_commits,
+            plan_file_path=hook_input.plan_file_path,
+            pr_title=hook_input.pr_title,
+            worktree_name=hook_input.worktree_name,
+            pr_number=hook_input.pr_number,
+            pr_number_from_plan_ref=hook_input.pr_number_from_plan_ref,
+            editor=hook_input.editor,
+        ),
+    )
+
+
+# ============================================================================
+# I/O Helper Functions
+# ============================================================================
+
+
+def _get_implement_now_marker_path(session_id: str, repo_root: Path) -> Path:
+    """Get implement-now marker path in .erk/scratch/sessions/<session_id>/.
+
+    Args:
+        session_id: The session ID to build the path for
+        repo_root: Path to the git repository root
+
+    Returns:
+        Path to implement-now marker file
+    """
+    scratch_dir = get_scratch_dir(session_id, repo_root=repo_root)
+    return scratch_dir / "exit-plan-mode-hook.implement-now.marker"
+
+
+def _get_plan_saved_marker_path(session_id: str, repo_root: Path) -> Path:
+    """Get plan-saved marker path in .erk/scratch/sessions/<session_id>/.
+
+    The plan-saved marker indicates the plan was already saved to GitHub,
+    so exit should proceed without triggering implementation.
+
+    Args:
+        session_id: The session ID to build the path for
+        repo_root: Path to the git repository root
+
+    Returns:
+        Path to plan-saved marker file
+    """
+    scratch_dir = get_scratch_dir(session_id, repo_root=repo_root)
+    return scratch_dir / "exit-plan-mode-hook.plan-saved.marker"
+
+
+def _get_incremental_plan_marker_path(session_id: str, repo_root: Path) -> Path:
+    """Get incremental-plan marker path in .erk/scratch/sessions/<session_id>/.
+
+    The incremental-plan marker indicates this session was started via
+    /local:incremental-plan, so we should skip the "save as plan?"
+    prompt and proceed directly to implementation.
+
+    Args:
+        session_id: The session ID to build the path for
+        repo_root: Path to the git repository root
+
+    Returns:
+        Path to incremental-plan marker file
+    """
+    return get_scratch_dir(session_id, repo_root=repo_root) / "incremental-plan.marker"
+
+
+def _get_objective_context_marker_path(session_id: str, repo_root: Path) -> Path:
+    """Get objective-context marker path in .erk/scratch/sessions/<session_id>/.
+
+    The objective-context marker stores the objective issue number when
+    a plan is created via /erk:objective-plan. The plan-save commands
+    read this marker to automatically link the plan to its objective.
+
+    Args:
+        session_id: The session ID to build the path for
+        repo_root: Path to the git repository root
+
+    Returns:
+        Path to objective-context marker file
+    """
+    return get_scratch_dir(session_id, repo_root=repo_root) / "objective-context.marker"
+
+
+def _read_objective_context(session_id: str, repo_root: Path) -> int | None:
+    """Read objective issue number from marker, if present.
+
+    Delegates to shared implementation in erk_shared.scratch.session_markers.
+
+    Args:
+        session_id: The session ID to look up
+        repo_root: Path to the git repository root
+
+    Returns:
+        Objective issue number, or None if marker doesn't exist or is invalid.
+    """
+    return read_objective_context_marker(session_id, repo_root)
+
+
+def _find_session_plan(
+    session_id: str, repo_root: Path, claude_installation: ClaudeInstallation
+) -> Path | None:
+    """Find plan file for the given session using slug lookup.
+
+    Args:
+        session_id: The session ID to search for
+        repo_root: Path to the git repository root
+        claude_installation: Gateway to Claude installation data
+
+    Returns:
+        Path to plan file if found, None otherwise
+    """
+    return claude_installation.find_plan_for_session(repo_root, session_id)
+
+
+def _get_worktree_name(git: Git, repo_root: Path) -> str | None:
+    """Get the directory name of the current worktree.
+
+    Args:
+        git: Git gateway for worktree operations
+        repo_root: Path to the git repository root
+
+    Returns:
+        Worktree directory name, or None if not found
+    """
+    worktrees = git.worktree.list_worktrees(repo_root)
+    if not worktrees:
+        return None
+
+    for wt in worktrees:
+        if wt.path == repo_root:
+            return wt.path.name
+
+    return None
+
+
+def _get_pr_number_for_branch(
+    branch_manager: BranchManager, repo_root: Path, branch: str
+) -> int | None:
+    """Get PR number for the given branch.
+
+    Args:
+        branch_manager: BranchManager for PR lookups (Graphite or GitHub)
+        repo_root: Path to the git repository root
+        branch: Branch name to look up
+
+    Returns:
+        PR number if exists, None otherwise
+    """
+    pr_info = branch_manager.get_pr_for_branch(repo_root, branch)
+    if pr_info is None:
+        return None
+    return pr_info.number
+
+
+# ============================================================================
+# Main Hook Entry Point
+# ============================================================================
+
+
+def _gather_inputs(
+    *,
+    session_id: str | None,
+    repo_root: Path,
+    github_planning_enabled: bool,
+    claude_installation: ClaudeInstallation,
+    git: Git,
+    branch_manager: BranchManager,
+    global_config: GlobalConfig | None,
+) -> HookInput:
+    """Gather all inputs from environment. All I/O happens here.
+
+    Args:
+        session_id: Claude session ID from hook_ctx, or None if not available.
+        repo_root: Path to the git repository root.
+        github_planning_enabled: Whether github_planning is enabled in config.
+        claude_installation: Gateway to Claude installation data.
+        git: Git gateway for worktree operations.
+        branch_manager: BranchManager for PR lookups.
+
+    Returns:
+        HookInput with all gathered state.
+    """
+    # Determine marker existence
+    implement_now_marker_exists = False
+    plan_saved_marker_exists = False
+    plan_saved_pr_number: int | None = None
+    plan_saved_branch_name: str | None = None
+    incremental_plan_marker_exists = False
+    objective_context_marker_exists = False
+    objective_id: int | None = None
+    if session_id is not None:
+        implement_now_marker_exists = _get_implement_now_marker_path(session_id, repo_root).exists()
+        plan_saved_marker_exists = _get_plan_saved_marker_path(session_id, repo_root).exists()
+        if plan_saved_marker_exists:
+            plan_saved_pr_number = read_plan_saved_marker(session_id, repo_root)
+            plan_saved_branch_name = get_existing_saved_branch(session_id, repo_root)
+        marker_path = _get_incremental_plan_marker_path(session_id, repo_root)
+        incremental_plan_marker_exists = marker_path.exists()
+        objective_context_marker_exists = _get_objective_context_marker_path(
+            session_id, repo_root
+        ).exists()
+        objective_id = _read_objective_context(session_id, repo_root)
+
+    # Find plan file path (None if doesn't exist)
+    plan_file_path: Path | None = None
+    if session_id is not None:
+        plan_file_path = _find_session_plan(session_id, repo_root, claude_installation)
+
+    # Extract title for display (after finding plan file)
+    pr_title: str | None = None
+    if plan_file_path is not None:
+        pr_title = extract_pr_title(plan_file_path)
+
+    # Get current branch (only if we need to show the blocking message)
+    current_branch: str | None = None
+    branch_has_commits = False
+    worktree_name: str | None = None
+    pr_number: int | None = None
+    pr_number_from_plan_ref: int | None = None
+
+    needs_blocking_message = (
+        session_id is not None
+        and plan_file_path is not None
+        and not implement_now_marker_exists
+        and not incremental_plan_marker_exists
+        and not plan_saved_marker_exists
+    )
+    # Get EDITOR env var for TUI detection
+    editor: str | None = None
+    if needs_blocking_message:
+        current_branch = git.branch.get_current_branch(repo_root)
+        worktree_name = _get_worktree_name(git, repo_root)
+        impl_dir = resolve_impl_dir(repo_root, branch_name=current_branch)
+        plan_ref = read_plan_ref(impl_dir) if impl_dir is not None else None
+        pr_number_from_plan_ref = (
+            int(plan_ref.pr_id) if plan_ref is not None and plan_ref.pr_id.isdigit() else None
+        )
+        editor = os.environ.get("EDITOR")
+        # Detect if branch has commits ahead of its parent
+        trunk_branch = git.branch.detect_trunk_branch(repo_root)
+        # Use Graphite stack parent if available, otherwise trunk
+        parent_branch = (
+            branch_manager.get_parent_branch(repo_root, current_branch) if current_branch else None
+        ) or trunk_branch
+        commits_ahead = git.analysis.count_commits_ahead(repo_root, parent_branch)
+        branch_has_commits = commits_ahead > 0
+        # Only lookup PR if we have a branch
+        if current_branch is not None:
+            pr_number = _get_pr_number_for_branch(branch_manager, repo_root, current_branch)
+
+    return HookInput(
+        session_id=session_id,
+        github_planning_enabled=github_planning_enabled,
+        implement_now_marker_exists=implement_now_marker_exists,
+        plan_saved_marker_exists=plan_saved_marker_exists,
+        plan_saved_pr_number=plan_saved_pr_number,
+        plan_saved_branch_name=plan_saved_branch_name,
+        incremental_plan_marker_exists=incremental_plan_marker_exists,
+        objective_context_marker_exists=objective_context_marker_exists,
+        objective_id=objective_id,
+        plan_file_path=plan_file_path,
+        pr_title=pr_title,
+        current_branch=current_branch,
+        branch_has_commits=branch_has_commits,
+        worktree_name=worktree_name,
+        pr_number=pr_number,
+        pr_number_from_plan_ref=pr_number_from_plan_ref,
+        editor=editor,
+    )
+
+
+def _execute_result(
+    result: HookOutput,
+    hook_input: HookInput,
+    repo_root: Path,
+    claude_installation: ClaudeInstallation,
+) -> None:
+    """Execute the decision result. All I/O happens here."""
+    session_id = hook_input.session_id
+
+    if result.delete_implement_now_marker and session_id:
+        _get_implement_now_marker_path(session_id, repo_root).unlink()
+
+    if result.delete_plan_saved_marker and session_id:
+        _get_plan_saved_marker_path(session_id, repo_root).unlink()
+
+    if result.delete_incremental_plan_marker and session_id:
+        _get_incremental_plan_marker_path(session_id, repo_root).unlink()
+
+    if result.delete_objective_context_marker and session_id:
+        _get_objective_context_marker_path(session_id, repo_root).unlink()
+
+    # Snapshot plan whenever a plan exists and user made a decision
+    # (implement-now or plan-saved, but NOT when blocking to prompt)
+    user_made_decision = result.delete_implement_now_marker or result.delete_plan_saved_marker
+    if hook_input.plan_file_path is not None and session_id is not None and user_made_decision:
+        snapshot_plan_for_session(
+            session_id=session_id,
+            plan_file_path=hook_input.plan_file_path,
+            project_cwd=repo_root,
+            claude_installation=claude_installation,
+            repo_root=repo_root,
+        )
+
+    if result.message:
+        click.echo(result.message, err=True)
+
+    sys.exit(result.action.value)
+
+
+@hook_command(name="exit-plan-mode-hook")
+def exit_plan_mode_hook(ctx: click.Context, *, hook_ctx: HookContext) -> None:
+    """Prompt user about plan saving when ExitPlanMode is called.
+
+    This PreToolUse hook intercepts ExitPlanMode calls to ask the user
+    whether to save the plan to GitHub or implement immediately.
+
+    Exit codes:
+        0: Success - allow exit (no plan, skip marker, or no session)
+        2: Block - plan exists, prompt user for action
+    """
+    # Scope check: only run in erk-managed projects
+    if not hook_ctx.is_erk_project:
+        return
+
+    # Get github_planning from injected context (defaults to True if not configured)
+    global_config = ctx.obj.global_config
+    github_planning_enabled = global_config.github_planning if global_config is not None else True
+
+    # Use branch_manager from context for PR lookups
+    branch_manager = ctx.obj.branch_manager
+
+    # Gather all inputs (I/O layer)
+    hook_input = _gather_inputs(
+        session_id=hook_ctx.session_id,
+        repo_root=hook_ctx.repo_root,
+        github_planning_enabled=github_planning_enabled,
+        claude_installation=ctx.obj.claude_installation,
+        git=ctx.obj.git,
+        branch_manager=branch_manager,
+        global_config=global_config,
+    )
+
+    # Pure decision logic (no I/O)
+    result = determine_exit_action(hook_input)
+
+    # Execute result (I/O layer)
+    _execute_result(result, hook_input, hook_ctx.repo_root, ctx.obj.claude_installation)
+
+
+if __name__ == "__main__":
+    exit_plan_mode_hook()

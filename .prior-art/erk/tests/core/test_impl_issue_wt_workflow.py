@@ -1,0 +1,274 @@
+"""Tests for implementation plan ref + worktree creation workflow.
+
+Tests the integration of plan file reading, worktree creation, issue creation,
+and linking them together via ref.json.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from erk_shared.impl_folder import (
+    create_impl_folder,
+    get_impl_dir,
+    has_plan_ref,
+    read_plan_ref,
+    save_plan_ref,
+)
+from tests.fakes.gateway.github_issues import FakeGitHubIssues
+from tests.test_utils.github_helpers import create_test_issue
+from tests.test_utils.paths import sentinel_path
+
+BRANCH = "feature/test-branch"
+"""Test branch name used across tests."""
+
+
+def test_save_and_read_plan_ref(tmp_path: Path) -> None:
+    """Test saving and reading plan reference from impl folder."""
+    impl_folder = get_impl_dir(tmp_path, branch_name=BRANCH)
+    impl_folder.mkdir(parents=True)
+
+    # Save plan reference
+    save_plan_ref(
+        impl_folder,
+        provider="github",
+        pr_number="42",
+        url="https://github.com/owner/repo/issues/42",
+        labels=(),
+        objective_id=None,
+        node_ids=None,
+    )
+
+    # Verify file was created
+    ref_json = impl_folder / "ref.json"
+    assert ref_json.exists()
+
+    # Read back and verify
+    ref = read_plan_ref(impl_folder)
+    assert ref is not None
+    assert ref.pr_id == "42"
+    assert ref.url == "https://github.com/owner/repo/issues/42"
+    assert ref.created_at is not None
+    assert ref.synced_at is not None
+
+
+def test_save_plan_ref_dir_must_exist(tmp_path: Path) -> None:
+    """Test that save_plan_ref raises if impl dir doesn't exist."""
+    impl_folder = get_impl_dir(tmp_path, branch_name=BRANCH)  # Doesn't exist
+
+    with pytest.raises(FileNotFoundError, match="Implementation directory does not exist"):
+        save_plan_ref(
+            impl_folder,
+            provider="github",
+            pr_number="42",
+            url="https://github.com/owner/repo/issues/42",
+            labels=(),
+            objective_id=None,
+            node_ids=None,
+        )
+
+
+def test_has_plan_ref_false_when_no_file(tmp_path: Path) -> None:
+    """Test has_plan_ref returns False when no ref.json or issue.json exists."""
+    impl_folder = get_impl_dir(tmp_path, branch_name=BRANCH)
+    impl_folder.mkdir(parents=True)
+
+    assert has_plan_ref(impl_folder) is False
+
+
+def test_has_plan_ref_true_when_file_exists(tmp_path: Path) -> None:
+    """Test has_plan_ref returns True when ref.json exists."""
+    impl_folder = get_impl_dir(tmp_path, branch_name=BRANCH)
+    impl_folder.mkdir(parents=True)
+
+    save_plan_ref(
+        impl_folder,
+        provider="github",
+        pr_number="42",
+        url="https://github.com/owner/repo/issues/42",
+        labels=(),
+        objective_id=None,
+        node_ids=None,
+    )
+
+    assert has_plan_ref(impl_folder) is True
+
+
+def test_read_plan_ref_returns_none_when_no_file(tmp_path: Path) -> None:
+    """Test read_plan_ref returns None when file doesn't exist."""
+    impl_folder = tmp_path / ".plan"
+    impl_folder.mkdir()
+
+    ref = read_plan_ref(impl_folder)
+    assert ref is None
+
+
+def test_workflow_create_plan_then_link_issue(tmp_path: Path) -> None:
+    """Test complete workflow: create plan folder, then link issue."""
+    plan_content = """# Test Plan
+
+## Objective
+Test the workflow.
+
+## Implementation Steps
+1. Step one
+2. Step two
+"""
+    # Step 1: Create plan folder (simulates erk create --from-plan)
+    impl_folder = create_impl_folder(tmp_path, plan_content, branch_name=BRANCH, overwrite=False)
+
+    # Step 2: Create issue (simulates gh issue create)
+    issues = FakeGitHubIssues(next_issue_number=123)
+    result = issues.create_issue(
+        repo_root=sentinel_path(),
+        title="Test Plan",
+        body=plan_content,
+        labels=["erk-pr"],
+    )
+
+    assert result.number == 123
+
+    # Step 3: Link issue to plan folder
+    save_plan_ref(
+        impl_folder,
+        provider="github",
+        pr_number=str(result.number),
+        url=result.url,
+        labels=(),
+        objective_id=None,
+        node_ids=None,
+    )
+
+    # Step 4: Verify link was created
+    assert has_plan_ref(impl_folder)
+
+    # Step 5: Read back and verify
+    ref = read_plan_ref(impl_folder)
+    assert ref is not None
+    assert ref.pr_id == "123"
+    assert ref.url == result.url
+
+
+def test_workflow_issue_creation_tracks_erk_pr_label() -> None:
+    """Test that issue creation includes erk-pr label."""
+    issues = FakeGitHubIssues()
+
+    issues.create_issue(
+        repo_root=sentinel_path(),
+        title="Implementation Plan",
+        body="Plan content here",
+        labels=["erk-pr"],
+    )
+
+    # Verify issue was created with label
+    assert len(issues.created_issues) == 1
+    title, body, labels = issues.created_issues[0]
+    assert title == "Implementation Plan"
+    assert body == "Plan content here"
+
+
+def test_workflow_get_issue_after_creation() -> None:
+    """Test retrieving issue info after creation."""
+    issues = FakeGitHubIssues(
+        next_issue_number=42, issues={42: create_test_issue(42, "Test Issue", "Body content")}
+    )
+
+    # Create issue
+    result = issues.create_issue(
+        repo_root=sentinel_path(),
+        title="Test Issue",
+        body="Body content",
+        labels=["erk-pr"],
+    )
+
+    # Retrieve issue info
+    info = issues.get_issue(sentinel_path(), result.number)
+
+    assert info is not None
+    assert info.number == 42
+    assert info.title == "Test Issue"
+    assert info.url == "https://github.com/test-owner/test-repo/issues/42"
+    assert info.state == "OPEN"
+
+
+def test_workflow_multiple_issues_increment_numbers() -> None:
+    """Test that multiple issue creations increment issue numbers."""
+    issues = FakeGitHubIssues(next_issue_number=10)
+
+    result1 = issues.create_issue(
+        repo_root=sentinel_path(), title="Issue 1", body="Body 1", labels=["label1"]
+    )
+    result2 = issues.create_issue(
+        repo_root=sentinel_path(), title="Issue 2", body="Body 2", labels=["label2"]
+    )
+    result3 = issues.create_issue(
+        repo_root=sentinel_path(), title="Issue 3", body="Body 3", labels=["label3"]
+    )
+
+    assert result1.number == 10
+    assert result2.number == 11
+    assert result3.number == 12
+
+    assert len(issues.created_issues) == 3
+
+
+def test_workflow_title_extraction_yaml_frontmatter(tmp_path: Path) -> None:
+    """Test that plan with YAML front matter title is used for issue."""
+    plan_content = """---
+title: Custom Title from YAML
+---
+
+# Some Other Heading
+
+Content here.
+"""
+
+    plan_file = tmp_path / "test-plan.md"
+    plan_file.write_text(plan_content, encoding="utf-8")
+
+    # In real workflow, agent would parse YAML and extract "Custom Title from YAML"
+    # For this test, we just verify the content contains the YAML
+    content = plan_file.read_text(encoding="utf-8")
+    assert "title: Custom Title from YAML" in content
+    assert "# Some Other Heading" in content
+
+
+def test_workflow_title_extraction_h1_heading(tmp_path: Path) -> None:
+    """Test that plan with H1 heading (no YAML) uses H1 for issue."""
+    plan_content = """# Implementation Plan for Feature X
+
+## Objective
+Build feature X.
+
+## Steps
+1. Step one
+2. Step two
+"""
+
+    plan_file = tmp_path / "test-plan.md"
+    plan_file.write_text(plan_content, encoding="utf-8")
+
+    # In real workflow, agent would extract "Implementation Plan for Feature X"
+    content = plan_file.read_text(encoding="utf-8")
+    lines = content.split("\n")
+    h1_line = next((line for line in lines if line.startswith("# ")), None)
+
+    assert h1_line is not None
+    title = h1_line.lstrip("# ").strip()
+    assert title == "Implementation Plan for Feature X"
+
+
+def test_workflow_title_extraction_filename_fallback(tmp_path: Path) -> None:
+    """Test that filename (without -plan.md) is used as fallback for issue title."""
+    plan_content = """Some plan content without YAML or H1 heading.
+
+Just plain text describing the plan.
+"""
+
+    plan_file = tmp_path / "feature-x-plan.md"
+    plan_file.write_text(plan_content, encoding="utf-8")
+
+    # In real workflow, agent would use "feature-x" as title
+    filename = plan_file.name
+    title = filename.replace("-plan.md", "")
+    assert title == "feature-x"

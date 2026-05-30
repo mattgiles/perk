@@ -1,0 +1,500 @@
+---
+description: Replan an existing plan against current codebase state
+argument-hint: <pr-number-or-url>
+---
+
+# /erk:replan
+
+Recomputes existing plan(s) against the current codebase state, creating a new plan and closing the original(s).
+
+Supports consolidating multiple plans into a single unified plan.
+
+## Usage
+
+```bash
+/erk:replan 2521                          # Single plan replan
+/erk:replan https://github.com/owner/repo/pull/2521
+/erk:replan 123 456 789                   # Consolidate multiple plans
+```
+
+---
+
+## Agent Instructions
+
+### Step 1: Parse Plan References
+
+Split `$ARGUMENTS` on whitespace. For each argument:
+
+- If numeric (e.g., `2521`), use directly as pr number
+- If URL (e.g., `https://github.com/owner/repo/pull/2521`), extract the number from the path
+
+Store all pr numbers in a list. Set `CONSOLIDATION_MODE=true` if multiple plans provided.
+
+If no argument provided, ask the user for the pr number.
+
+### Step 2: Validate Plans and Extract Metadata (Delegated)
+
+Delegate all validation and metadata extraction to a single `general-purpose` haiku Task agent. This keeps the 2N bash calls (N × `get-pr-info` + N × `get-pr-metadata`) out of the main conversation context.
+
+Launch a Task agent with:
+
+- `subagent_type`: `general-purpose`
+- `model`: `haiku`
+
+**Agent prompt** (adapt pr numbers from Step 1):
+
+> For each of the following PR numbers: [list pr numbers]
+>
+> 1. Run `erk exec get-pr-info <number>` for each plan
+> 2. Run `erk exec get-pr-metadata <number> objective_issue` for each plan
+>
+> Then return a structured summary in EXACTLY this format:
+>
+> ```
+> VALIDATION: PASS or FAIL
+> CONSOLIDATION_MODE: true or false (true if multiple plans)
+> IS_LEARN_PLAN: true or false (true if ANY plan has erk-learn label)
+>
+> PLANS:
+> # | Title | State | erk-pr | erk-learn | objective_issue
+> <number> | <title> | <open/closed> | <yes/no> | <yes/no> | <number or none>
+> ...
+>
+> OBJECTIVE_STATUS: AGREED:<number>, AGREED:none, or CONFLICT
+>
+> ERRORS:
+> <only present if VALIDATION is FAIL, list each error>
+>
+> WARNINGS:
+> <only present if any issues are closed, list each warning>
+> ```
+>
+> Rules for OBJECTIVE_STATUS:
+>
+> - AGREED:<number> — all plans that have an objective_issue share the same value
+> - AGREED:none — no plans have an objective_issue
+> - CONFLICT — plans have different objective_issue values
+>
+> Rules for VALIDATION:
+>
+> - FAIL if any plan does not exist
+> - FAIL if any plan is missing BOTH the erk-pr AND erk-learn labels (must have at least one)
+> - PASS otherwise (closed plans are warnings, not failures)
+
+**After the agent returns**, parse the structured summary:
+
+1. **If VALIDATION is FAIL**: Display each error and abort:
+
+   ```
+   Error: PR #<number> is not a valid plan (missing both erk-pr and erk-learn labels).
+   ```
+
+   ```
+   Error: PR #<number> not found.
+   ```
+
+2. **If WARNINGS present**: Display each warning but continue:
+
+   ```
+   Warning: PR #<number> is already closed. Proceeding with replan anyway.
+   ```
+
+3. **Store extracted data**:
+   - `IS_LEARN_PLAN` from the summary
+   - `CONSOLIDATION_MODE` from the summary
+   - Each plan's title (from the ISSUES table)
+   - Resolved `objective_issue`:
+     - If OBJECTIVE_STATUS is `AGREED:<number>`, use that number
+     - If OBJECTIVE_STATUS is `AGREED:none`, no objective
+     - If OBJECTIVE_STATUS is `CONFLICT`, ask the user which objective to use
+
+### Step 3: Plan Content Fetching (Delegated to Step 4)
+
+Plan content is fetched by each Explore agent in Step 4, not in the main context.
+This avoids dumping large plan bodies into the main conversation.
+
+Skip to Step 4.
+
+### Step 4: Deep Investigation
+
+Use the Explore agent (Task tool with subagent_type=Explore) to perform deep investigation of the codebase.
+
+**If CONSOLIDATION_MODE:**
+
+Launch parallel Explore agents (one per plan, using `run_in_background: true`), each investigating:
+
+- Plan items and their current status
+- Overlap potential with other plans being consolidated
+- File mentions and their current state
+
+**For each plan (parallel or sequential):**
+
+#### 4a: Fetch Plan Content (Agent's First Action)
+
+Each Explore agent MUST fetch its plan's content as its first action. This keeps the raw plan content inside the agent's context instead of the main conversation.
+
+**Fetch command:**
+
+```bash
+erk exec get-pr-info <number> --include-body
+```
+
+**Parse the response:** The JSON response includes a `body` field containing the full plan content. Extract `body` from the JSON output.
+
+**If the command fails (exit code 1):**
+
+Return an error to the main agent:
+
+```
+Error: PR #<number> not found.
+```
+
+The agent should fail early if it cannot fetch the plan content, rather than proceeding with incomplete information.
+
+#### 4b: Check Plan Items Against Codebase
+
+For each implementation item in the plan (now fetched in 4a):
+
+- Search for relevant files, functions, or patterns
+- Determine status: **implemented**, **partially implemented**, **not implemented**, or **obsolete**
+
+Build a comparison table showing:
+
+| Plan Item | Current Status | Notes |
+| --------- | -------------- | ----- |
+| ...       | ...            | ...   |
+
+#### 4c: Deep Investigation (MANDATORY)
+
+Go beyond the plan items to understand the actual implementation:
+
+1. **Data Structures**: Find all relevant types, dataclasses, and their fields
+2. **Helper Functions**: Identify utility functions and their purposes
+3. **Lifecycle & State**: Understand how state flows through the system
+4. **Naming Conventions**: Document actual names used (not guessed names)
+5. **Entry Points**: Map all places that trigger the relevant functionality
+6. **Configuration**: Find config options, defaults, and overrides
+
+#### 4d: Document Corrections and Discoveries
+
+Create two lists per plan:
+
+1. **Corrections to Original Plan**: Wrong assumptions, incorrect names, outdated information
+2. **Additional Details**: Implementation specifics, architectural insights, edge cases
+
+### Step 4e: Consolidation Analysis (CONSOLIDATION_MODE only)
+
+If consolidating multiple plans:
+
+1. **Identify Overlap**: Find items that appear in multiple plans
+2. **Merge Strategy**: Determine how to combine overlapping items
+3. **Dependency Ordering**: Order items by dependency across all plans
+4. **Attribution Tracking**: Track which items came from which plan
+
+### Step 4f: Wait for All Background Investigations (CRITICAL)
+
+**BEFORE proceeding to Step 5 or Step 6, you MUST wait for ALL background agents to complete.**
+
+If you launched agents with `run_in_background: true`:
+
+1. **Check agent status**: Use TaskOutput with `block: true` to wait for each background agent
+2. **Collect all results**: Do not proceed until every agent has returned its findings
+3. **Synthesize findings**: Combine results from all agents into a unified investigation summary
+
+**Why this matters:**
+
+- Background agents may discover critical corrections or implementation details
+- Creating the plan before investigations complete leads to incomplete or inaccurate plans
+- The consolidated plan quality depends on having ALL investigation data
+
+**How to wait:**
+
+For each background agent task_id, use TaskOutput tool with:
+
+- `block: true` to wait for completion
+- `timeout: 600000` (10 minutes)
+
+Then read the agent's findings from the output.
+
+Only after ALL agents have completed should you proceed to Step 5.
+
+### Step 5: Post Investigation to Original Plan(s)
+
+Before creating the new plan, post investigation findings to each original plan as a comment:
+
+```bash
+gh pr comment <original_number> --body "## Deep Investigation Notes (for implementing agent)
+
+### Corrections to Original Plan
+- [List corrections discovered]
+
+### Additional Details Not in Original Plan
+- [List new details discovered]
+
+### Key Architectural Insights
+- [List important discoveries]"
+```
+
+If consolidating, include note:
+
+```
+Note: This plan is being consolidated with #<other_numbers> into a unified plan.
+```
+
+### Step 6: Create New Plan (Always)
+
+**Always create a new plan**, regardless of implementation status.
+
+#### 6a: Gather Investigation Context
+
+Before entering Plan Mode, collect all investigation findings from Steps 4-5:
+
+1. **Investigation status per plan**: Completion percentages (e.g., "4/11 items implemented")
+2. **Specific discoveries**: File paths, line numbers, commit hashes, PR numbers
+3. **Corrections found**: What the original plan(s) got wrong
+4. **Codebase evidence**: Actual function names, class signatures, config values
+
+For consolidation mode, also gather:
+
+- **Overlap analysis**: Which items appeared in multiple plans
+- **Merge decisions**: Why items were combined or kept separate
+- **Attribution map**: Which source plan contributed each item
+
+#### 6b: Enter Plan Mode with Full Context
+
+Use EnterPlanMode to create an updated plan.
+
+**CRITICAL:** The plan content MUST include the investigation findings, not just summarize them. Each implementation step should have:
+
+- **Specific file paths** (e.g., `docs/learned/architecture/gateway-inventory.md:45`)
+- **What to change** (not "update X" but "add entry for CommandExecutor with ABC at line 105")
+- **Evidence** (commit hashes, PR numbers, current line numbers)
+- **Verification criteria** (how to confirm the step is complete)
+
+**Anti-pattern (sparse):**
+
+```
+1. Update gateway documentation
+2. Add missing tripwires
+```
+
+**Correct pattern (comprehensive):**
+
+```
+1. **Update gateway-inventory.md** (`docs/learned/architecture/gateway-inventory.md`)
+   - Add missing entries: CommandExecutor (abc.py:105), PlanDataProvider (abc.py:142)
+   - Fix import paths at lines 45, 67 (change `erk.gateways.` → `erk.gateway.`)
+   - Verification: All gateways in `src/erk/gateway/` have entries
+```
+
+---
+
+#### Single Plan Format
+
+```markdown
+# Plan: [Updated Title]
+
+> **Replans:** #<original_pr_number>
+
+## What Changed Since Original Plan
+
+- [List major codebase changes that affect this plan]
+
+## Investigation Findings
+
+### Corrections to Original Plan
+
+- [List any wrong assumptions or incorrect names]
+
+### Additional Details Discovered
+
+- [List implementation specifics not in original plan]
+
+## Remaining Gaps
+
+- [List items from original plan that still need implementation]
+
+## Implementation Steps
+
+1. [Updated step 1]
+2. [Updated step 2]
+```
+
+---
+
+#### Consolidated Plan Format (CONSOLIDATION_MODE)
+
+```markdown
+# Plan: [Unified Title]
+
+> **Consolidates:** #123, #456, #789
+
+## Source Plans
+
+| #   | Title             | Items Merged |
+| --- | ----------------- | ------------ |
+| 123 | [Title from plan] | X items      |
+| 456 | [Title from plan] | Y items      |
+| 789 | [Title from plan] | Z items      |
+
+## What Changed Since Original Plans
+
+- [List major codebase changes affecting any of the plans]
+
+## Investigation Findings
+
+### Corrections to Original Plans
+
+- **#123**: [corrections]
+- **#456**: [corrections]
+- **#789**: [corrections]
+
+### Additional Details Discovered
+
+- [Combined implementation specifics]
+
+### Overlap Analysis
+
+- [Items that appeared in multiple plans, now merged]
+
+## Remaining Gaps
+
+- [Combined items that still need implementation]
+
+## Implementation Steps
+
+1. [Step] _(from #123)_
+2. [Merged step] _(from #123, #456)_
+3. [Step] _(from #456)_
+4. [Step] _(from #789)_
+
+## Attribution
+
+Items by source:
+
+- **#123**: Steps 1, 2
+- **#456**: Steps 2, 3
+- **#789**: Step 4
+```
+
+---
+
+### Step 7: Save and Close
+
+After the user approves the plan in Plan Mode:
+
+1. Exit Plan Mode
+2. Run `/erk:plan-save` to create the new plan:
+   - **If any source plan(s) had `erk-learn` label** (`IS_LEARN_PLAN=true`): Add `--plan-type=learn` to the command
+   - **If the source plan(s) had an `objective_issue`**: Pass `--objective=<number>` to `/erk:plan-save`:
+     ```
+     /erk:plan-save --objective=<objective_number>
+     ```
+   - **If consolidating with conflicting objectives**: Use the objective chosen by the user in Step 2 via `--objective=<number>`
+   - **Otherwise**: Run `/erk:plan-save` without flags
+3. **If an objective was linked**, verify the link was saved correctly:
+   ```bash
+   erk exec get-pr-metadata <new_pr_number> objective_issue
+   ```
+   If the objective link is missing, fix it with:
+   ```bash
+   erk exec update-pr-header <new_pr_number> objective_issue=<number>
+   ```
+4. **If CONSOLIDATION_MODE** (multiple plans consolidated), add the `erk-consolidated` label:
+   ```bash
+   echo "[{\"pr_number\": <new_pr_number>, \"label\": \"erk-consolidated\"}]" | erk exec add-pr-labels-batch
+   ```
+   This prevents the consolidated plan from being re-consolidated by `/local:replan-learn-plans`.
+5. Close original plan(s) with comment linking to the new one:
+
+**Single plan:**
+
+```bash
+echo "[{\"pr_number\": <original_number>, \"comment\": \"Superseded by #<new_number> - see updated plan that accounts for codebase changes.\"}]" | erk exec close-prs
+```
+
+**Consolidated plans:**
+
+```bash
+echo '[{"pr_number": 123, "comment": "Consolidated into #<new_number> with #456, #789"}, {"pr_number": 456, "comment": "Consolidated into #<new_number> with #123, #789"}, {"pr_number": 789, "comment": "Consolidated into #<new_number> with #123, #456"}]' | erk exec close-prs
+```
+
+Display final summary:
+
+**Single plan:**
+
+```
+✓ Created new PR #<new_number>
+✓ Closed original PR #<original_number>
+
+Next steps:
+- Review the new plan: gh pr view <new_number>
+- Dispatch for implementation: erk pr dispatch <new_number>
+```
+
+**Consolidated plans:**
+
+```
+✓ Created consolidated PR #<new_number>
+✓ Closed original PRs: #123, #456, #789
+
+Source plans consolidated:
+- #123: [title]
+- #456: [title]
+- #789: [title]
+
+Next steps:
+- Review the consolidated plan: gh pr view <new_number>
+- Dispatch for implementation: erk pr dispatch <new_number>
+```
+
+### Step 8: Validate New Plan
+
+After saving and closing, verify the new plan is in a healthy state:
+
+```bash
+erk exec get-pr-info <new_pr_number>
+```
+
+Check the returned labels:
+
+- Has `erk-pr` label (required for dispatch)
+- If CONSOLIDATION_MODE: has `erk-consolidated` label
+- If IS_LEARN_PLAN: has `erk-learn` label
+
+If any expected label is missing, add it:
+
+```bash
+erk exec add-pr-label <new_pr_number> --label "<missing_label>"
+```
+
+Display validation result:
+
+```
+✓ PR #<number> validated: OPEN, labels: [list of labels]
+```
+
+If validation finds the plan is not OPEN, report the issue and stop.
+
+---
+
+## Error Cases
+
+| Error                    | Message                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| Plan not found           | `Error: PR #<number> not found.`                                                      |
+| Not a plan               | `Error: PR #<number> is not a valid plan (missing both erk-pr and erk-learn labels).` |
+| No plan content          | `Error: No plan content found in PR #<number>.`                                       |
+| GitHub CLI not available | `Error: GitHub CLI (gh) not available. Run: brew install gh && gh auth login`         |
+| No network               | `Error: Unable to reach GitHub. Check network connectivity.`                          |
+
+---
+
+## Important Notes
+
+- **DO NOT implement the plan** - This command only creates an updated plan
+- **DO NOT skip codebase analysis** - Always verify current state before replanning
+- **Use Explore agent** for comprehensive codebase searches (Task tool with subagent_type=Explore)
+- **Parallel investigation** for multiple plans (run_in_background: true)
+- Original plan(s) closed only after the new plan is successfully created
+- The new plan references all original plan(s) for traceability

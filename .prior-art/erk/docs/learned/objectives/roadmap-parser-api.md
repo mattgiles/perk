@@ -1,0 +1,119 @@
+---
+title: Roadmap Shared Parser Architecture
+read_when:
+  - "adding a new consumer of roadmap.py in erk_shared"
+  - "extending the roadmap data model with new fields"
+  - "understanding why the shared parser exists separately from its consumers"
+tripwires:
+  - action: "creating a new roadmap data type without using frozen dataclass"
+    warning: "RoadmapNode and RoadmapPhase are frozen dataclasses. New roadmap types must follow this pattern."
+  - action: "accessing node_id on a RoadmapNode"
+    warning: "The field is named 'id', not 'node_id'. This is a common mistake — check the actual dataclass definition."
+  - action: "importing parse_roadmap into a new consumer"
+    warning: "The shared module lives in erk_shared.gateway.github.metadata.roadmap and is consumed by both exec scripts and CLI commands. Import from this shared location."
+  - action: "using parse_roadmap() when strict v2 validation is needed"
+    warning: "Use parse_v2_roadmap() for commands that should reject legacy format. parse_roadmap() returns a legacy error string; parse_v2_roadmap() returns None for non-v2 content."
+last_audited: "2026-02-08 10:24 PT"
+audit_result: edited
+---
+
+# Roadmap Shared Parser Architecture
+
+The roadmap parser is a shared module consumed by two commands with fundamentally different usage patterns. This document explains **why** the shared module exists, how its consumers differ, and the non-obvious design choices in the data model.
+
+## Why a Shared Module?
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py -->
+
+The `roadmap.py` module in `erk_shared.gateway.github.metadata` exists because two commands need the same parsing logic but use different subsets of it. Both `check_cmd.py` (erk objective check) and `update_objective_node.py` consume the shared parser, but differ in scope: `check_cmd` imports 2 functions (`parse_roadmap`, `serialize_phases`) for validation workflow, while `update_objective_node` imports 3 functions and 1 type (`RoadmapNodeStatus`, `parse_roadmap`, `rerender_comment_roadmap`, `update_node_in_frontmatter`) for surgical node updates.
+
+<!-- Source: src/erk/cli/commands/objective/check_cmd.py, validate_objective -->
+<!-- Source: src/erk/cli/commands/exec/scripts/update_objective_node.py, _replace_node_refs_in_body -->
+
+The key insight: `update_objective_node` calls `parse_roadmap` for **validation**, not for mutation. It confirms the target node ID exists in the parsed output, then uses `update_node_in_frontmatter()` for YAML changes and `rerender_comment_roadmap()` for table rendering. The parsed data is thrown away after validation. This means the parser's job is to be a source of truth about table structure, not a round-trip serializer.
+
+## Non-Obvious Data Model Choices
+
+### Field naming: `id` not `node_id`
+
+The `RoadmapNode.id` field is named `id`, not `node_id`. Every consumer accesses `node.id` (e.g., `node.id` in check_cmd's consistency checks). This catches people who expect the field name to mirror the table column header "Step".
+
+### Phase suffix for sub-phases
+
+`RoadmapPhase` has a `suffix` field (empty string or a letter like `"A"`, `"B"`) to support sub-phase numbering (`Phase 1A`, `Phase 1B`). Phases are sorted by `(number, suffix)` tuple comparison, which gives correct ordering for both `1, 2, 3` and `1A, 1B, 2` patterns.
+
+### Parser returns warnings, not errors
+
+`parse_roadmap` returns `(phases, validation_errors)` where validation_errors are warning strings, not exceptions. The parser extracts whatever it can and reports problems alongside results. This matters because a partially-parsed roadmap is more useful than a crashed parse — `check_cmd` displays both the parsed phases and the warnings.
+
+## Module Location History
+
+The shared module now lives in `packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py`. It was originally located in `src/erk/cli/commands/exec/scripts/` when created for exec scripts, then moved to the shared package as it gained multiple consumers across both exec scripts and CLI commands.
+
+## Undocumented Helpers
+
+### `extract_raw_metadata_blocks()` (from core.py)
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/core.py, extract_raw_metadata_blocks -->
+
+Extracts all metadata blocks from text using HTML comment markers. Returns `list[RawMetadataBlock]` where each block has `.key` (str) and `.body` (raw string content). Used by `parse_roadmap()` to locate the `objective-roadmap` block before passing its body to frontmatter parsing.
+
+### `replace_metadata_block_in_body()` (from core.py)
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/core.py, replace_metadata_block_in_body -->
+
+Replaces an entire metadata block's content in the body. Finds the block by key and substitutes the content between the HTML comment markers. Used during roadmap mutations to replace the frontmatter block after updating node data.
+
+### `enrich_phase_names()` (from roadmap.py)
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py, enrich_phase_names -->
+
+Extracts phase names from markdown headers (e.g., `### Phase 1: Planning`) and replaces placeholder names in parsed `RoadmapPhase` objects. Called by `parse_roadmap()` after frontmatter parsing because frontmatter stores flat steps without phase names. Uses regex pattern `^###\s+Phase\s+(\d+)([A-Z]?):\s*(.+?)` to match headers.
+
+### RoadmapNode fields
+
+`RoadmapNode` has seven fields: `id`, `description`, `status`, `pr` (`str | None`), `depends_on` (`tuple[str, ...] | None`), `slug` (`str | None`), and `comment` (`str | None`). The `plan` field was removed (PR #8128) — plan references are no longer tracked in the roadmap. The `pr` field holds a PR reference (e.g., `"#123"`) for both in-progress and landed PRs. The `comment` field holds optional text explaining why a node is in a particular state (e.g., why skipped or blocked). The parser reads fields from v2/v3/v4 YAML frontmatter.
+
+### Conditional `comment` rendering
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py, render_roadmap_block_inner -->
+
+The `comment` field uses conditional rendering in `render_roadmap_block_inner()`: the field is only included in YAML output when **any** node in the phase has a non-None comment. This keeps the YAML compact when no nodes need comments, while making it available when any do.
+
+## Dual-Parser Pattern
+
+The module exposes two parsing entry points:
+
+### `parse_roadmap(body)` — Lenient Parser
+
+Returns `(phases, validation_errors)`. Always returns a tuple. For v2 YAML frontmatter, parses and returns phases. For non-v2 content, returns `([], [legacy_format_error])`. This is the standard parser used by most consumers.
+
+### `parse_v2_roadmap(body)` — Strict v2 Parser
+
+Returns `(phases, validation_errors) | None`. Returns `None` when the body is not in v2+ format (no metadata block, no `<details>` wrapper, or schema version not in v2/v3/v4). Use this when the caller needs to distinguish "not v2+ format" from "v2+ format with errors" — for example, commands that should reject legacy format explicitly rather than receiving an error string.
+
+### `add_node_to_frontmatter()`
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py, add_node_to_frontmatter -->
+
+`add_node_to_frontmatter()` adds a new node to a roadmap phase with auto-assigned node ID. Parameters: `block_content`, `phase`, `description`, `slug`, `status`, `depends_on`, `comment`. If `slug` is not provided, it auto-generates one via `slugify_description()`. Returns `(updated_yaml, assigned_node_id)` or `None` if frontmatter parsing fails.
+
+### `slugify_description()`
+
+<!-- Source: packages/erk-shared/src/erk_shared/gateway/github/metadata/roadmap.py, slugify_description -->
+
+`slugify_description()` converts a description string to a kebab-case slug: lowercase, replace non-alphanumeric with hyphens, collapse multiple hyphens, strip leading/trailing hyphens.
+
+### Related Exec Commands
+
+- `add-objective-node`: Uses `add_node_to_frontmatter()` to add nodes via CLI
+- `update-objective-node`: Supports `--description`, `--slug`, `--comment` flags for surgical node updates
+
+## Relationship to Sibling Docs
+
+This document covers the **structural architecture** of the shared parser. For specific behavioral rules:
+
+- **Status inference logic** → [Roadmap Status System](roadmap-status-system.md)
+- **Mutation-time vs parse-time semantics** → [Roadmap Mutation Semantics](../architecture/roadmap-mutation-semantics.md)
+- **Surgical vs full-body update decisions** → [Roadmap Mutation Patterns](roadmap-mutation-patterns.md)
+- **CLI usage and parsing rules** → [Roadmap Parser](roadmap-parser.md)

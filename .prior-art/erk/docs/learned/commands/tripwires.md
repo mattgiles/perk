@@ -1,0 +1,35 @@
+---
+title: Commands Tripwires
+read_when:
+  - "working on commands code"
+---
+
+<!-- AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY -->
+<!-- Edit source frontmatter, then run 'erk docs sync' to regenerate. -->
+<!-- Generated from commands/*.md frontmatter -->
+
+# Commands Tripwires
+
+Rules triggered by matching actions in code.
+
+**adding allowed-tools to a command or agent frontmatter** → Read [Tool Restriction Safety Pattern](tool-restriction-safety.md) first. ALWAYS apply the minimal-set principle — only allow tools the command actually needs
+
+**creating a CI-only or workflow-only command outside .claude/commands/erk/system/** → Read [System Folder Convention](system-folder-convention.md) first. CI-only and inner skill commands belong in the system/ subfolder. Read docs/learned/commands/system-folder-convention.md
+
+**creating a destructive slash command without a preview variant** → Read [Preview Command Pattern](preview-command-pattern.md) first. Consider pairing with a preview command (e.g., pr-address + pr-preview-address). Preview commands show planned actions without executing, reducing costly mistakes.
+
+**creating commands that delegate to subagents** → Read [Tool Restriction Safety Pattern](tool-restriction-safety.md) first. NEVER omit Task from allowed-tools if the command delegates to subagents
+
+**hardcoding 'master' or 'main' as branch name in a command or skill** → Read [Dynamic Trunk Detection](dynamic-trunk-detection.md) first. Use dynamic trunk detection: `TRUNK=$(erk exec detect-trunk-branch | jq -r '.trunk_branch')`. Hardcoded branch names break portability across repos.
+
+**hardcoding a choice in a command where user should decide** → Read [Skill and Command Patterns](skill-patterns.md) first. use AskUserQuestion to present options. Commands should empower user decisions, not make them.
+
+**modifying collateral finding categories or auto-apply behavior in audit-doc** → Read [Audit-Doc Design Decisions](audit-doc.md) first. CRITICAL: Read this doc first to understand the conceptual vs mechanical finding distinction
+
+**renaming any file in .claude/commands/ or .claude/skills/** → Read [Command Rename Pattern](command-rename-pattern.md) first. Read this doc — renames require a full reference sweep, not just a file move
+
+**using CLAUDE_SESSION_ID in hooks or Python code** → Read [Session ID Substitution](session-id-substitution.md) first. CLAUDE_SESSION_ID is NOT an environment variable — it is a string substitution performed by Claude Code's skill/command loader. Treating it as an env var in hooks or Python code will silently produce an empty string.
+
+**writing allowed-tools frontmatter** → Read [Tool Restriction Safety Pattern](tool-restriction-safety.md) first. Commands and agents use DIFFERENT allowed-tools syntax — check the format section
+
+**writing git diff/merge-base/reset against a literal branch name in .claude/ files** → Read [Dynamic Trunk Detection](dynamic-trunk-detection.md) first. Use dynamic trunk detection: `TRUNK=$(erk exec detect-trunk-branch | jq -r '.trunk_branch')`. Hardcoded branch names break portability across repos.

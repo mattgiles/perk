@@ -1,0 +1,102 @@
+"""Connect to a codespace and launch Claude."""
+
+import shlex
+
+import click
+
+from erk.cli.commands.codespace.resolve import resolve_codespace
+from erk.core.context import ErkContext
+from erk_shared.context.types import NoRepoSentinel
+
+
+def _build_export_prefix(env_vars: tuple[str, ...]) -> str:
+    """Parse --env KEY=VALUE args and return an export prefix string.
+
+    Returns empty string if no env vars provided, otherwise returns
+    'export K1=V1 K2=V2 && ' ready to prepend to a command.
+    """
+    if not env_vars:
+        return ""
+
+    parts: list[str] = []
+    for env_var in env_vars:
+        if "=" not in env_var:
+            click.echo(f"Error: Invalid --env format: {env_var!r} (expected KEY=VALUE)", err=True)
+            raise SystemExit(1)
+        key, value = env_var.split("=", 1)
+        parts.append(f"{key}={shlex.quote(value)}")
+
+    return f"export {' '.join(parts)} && "
+
+
+@click.command("connect")
+@click.argument("name", required=False)
+@click.option("--shell", is_flag=True, help="Drop into shell instead of launching Claude.")
+@click.option("--env", "env_vars", multiple=True, help="Set env var in remote session (KEY=VALUE).")
+@click.option(
+    "--branch", "-b", help="Branch to checkout on the codespace (default: current local branch)."
+)
+@click.pass_obj
+def connect_codespace(
+    ctx: ErkContext,
+    name: str | None,
+    *,
+    shell: bool,
+    env_vars: tuple[str, ...],
+    branch: str | None,
+) -> None:
+    """Connect to a codespace and launch Claude.
+
+    If NAME is provided, connects to that codespace. Otherwise, connects
+    to the default codespace.
+
+    Connects via SSH and launches Claude with --dangerously-skip-permissions
+    since codespace isolation provides safety.
+
+    Use --shell to drop into an interactive shell instead of launching Claude.
+    """
+    codespace = resolve_codespace(
+        ctx.codespace_registry,
+        name,
+        config_codespace_name=ctx.local_config.codespace_name,
+    )
+
+    # Determine local branch for remote checkout
+    # If --branch provided, use it directly; otherwise detect from local repo
+    if branch is not None:
+        local_branch = branch
+    elif isinstance(ctx.repo, NoRepoSentinel):
+        local_branch = None
+    else:
+        local_branch = ctx.git.branch.get_current_branch(ctx.repo_root)
+
+    if local_branch is not None:
+        quoted = shlex.quote(local_branch)
+        checkout_prefix = f"git fetch origin {quoted} && git checkout {quoted} && "
+    else:
+        checkout_prefix = ""
+
+    # Connect via SSH and launch Claude (or shell with --shell flag)
+    # -t: Force pseudo-terminal allocation (required for interactive TUI like claude)
+    # bash -l -c: Use login shell to ensure PATH is set up (claude installs to ~/.claude/local/)
+    #
+    # IMPORTANT: The entire remote command (bash -l -c '...') must be a single argument.
+    # SSH concatenates command arguments with spaces without preserving grouping.
+    export_prefix = _build_export_prefix(env_vars)
+    working_dir = ctx.local_config.codespace_working_directory
+    cd_prefix = f"cd {shlex.quote(working_dir)} && " if working_dir is not None else ""
+    if shell:
+        if export_prefix or cd_prefix or checkout_prefix:
+            remote_command = f"bash -l -c '{cd_prefix}{checkout_prefix}{export_prefix}exec bash -l'"
+        else:
+            remote_command = "bash -l"
+    else:
+        setup = "git pull && uv sync && source .venv/bin/activate"
+        claude_cmd = "claude --dangerously-skip-permissions"
+        inner = f"{cd_prefix}{checkout_prefix}{export_prefix}{setup} && {claude_cmd}"
+        remote_command = f"bash -l -c '{inner}'"
+
+    click.echo(f"Connecting to codespace '{codespace.name}'...", err=True)
+
+    # Replace current process with SSH session to codespace
+    ctx.codespace.exec_ssh_interactive(codespace.gh_name, remote_command)

@@ -1,0 +1,169 @@
+---
+title: Planned PR Lifecycle
+read_when:
+  - "working with planned-PR-backed plans"
+  - "understanding PR body format for planned PR plans"
+  - "debugging plan content extraction from PR bodies"
+  - "building or modifying lifecycle stage transitions"
+tripwires:
+  - action: "adding Closes #N to a planned PR footer"
+    warning: "Planned PR IS the plan. Self-referential close would close the plan itself. Use issue_number=None for github-draft-pr backend."
+  - action: "adding footer before PR creation"
+    warning: "PR footer needs the PR number, which isn't known until after create_pr returns. Add footer AFTER PR creation."
+  - action: "rewriting PR body without preserving metadata"
+    warning: "Extract metadata prefix on every lifecycle transition via find_metadata_block() to prevent metadata loss."
+  - action: "parsing plan content without backward compatibility"
+    warning: "extract_plan_content() handles both details-wrapped and old flat format. Always use it instead of manual parsing."
+  - action: "using `find_metadata_block` or `extract_plan_content` without validating separator context"
+    warning: "The content separator `\\n\\n---\\n\\n` can accidentally form from 'Remotely executed' notes + footer delimiter. find_metadata_block() validates via `<!-- erk:metadata-block:` marker in the prefix. Never skip this validation."
+  - action: "adding <code> inside <summary> elements in PR bodies"
+    warning: "Graphite doesn't render <code> inside <summary> — use plain text instead. GitHub renders it but Graphite does not. The correct format is <summary>original-plan</summary> not <summary><code>original-plan</code></summary>."
+    score: 8
+  - action: "marking a planned-PR plan as 'implementation complete' and referencing itself as the implementing PR"
+    warning: "Self-referential close prevention: when a planned PR IS the plan, it cannot close itself. The plan's implementation-complete event cannot reference the plan PR as the implementing PR. One-shot dispatch guards against this — do not remove the guard."
+    score: 9
+  - action: "executing push_and_create_pr before capture_existing_pr_body"
+    warning: "capture_existing_pr_body MUST execute before push_and_create_pr. gt submit overwrites the PR body, losing plan-header metadata."
+---
+
+# Planned PR Lifecycle
+
+Planned PRs serve as the backing store for plans. Plans evolve through lifecycle stages within a single PR.
+
+## Stage Definitions
+
+### Stage 1: Plan Creation
+
+`plan_save` / `PlannedPRBackend.create_plan()` creates a draft PR with `lifecycle_stage: planned` in the plan-header metadata. The body contains the plan-header metadata block, the plan content collapsed in a `<details>` tag, an optional AI-generated summary, and a checkout footer.
+
+Body format:
+
+```
+[optional AI-generated summary]
+
+<details>
+<summary>original-plan</summary>
+
+[plan content]
+
+</details>
+\n\n
+[metadata block]
+\n---\n
+[checkout footer]
+```
+
+The summary is generated during `/erk:plan-save` (Step 1.75) as a 2-3 sentence plain-text overview. When provided, it appears above the collapsed plan details, visible without expanding. When absent, the body starts directly with `<details>`.
+
+### Stage 2: Implementation
+
+After code changes, `erk pr submit` / `erk pr rewrite` rewrites the body. The metadata block is preserved. The AI-generated summary is inserted before the collapsed plan.
+
+Body format:
+
+```
+[AI-generated summary]
+
+<details>
+<summary>original-plan</summary>
+
+[plan content]
+
+</details>
+\n\n
+[metadata block]
+\n---\n
+[checkout footer]
+```
+
+### Stage 3: Review & Merge
+
+PR is marked ready for review. Standard review/merge flow. No body format changes in this stage.
+
+## Key Functions
+
+All in `packages/erk-shared/src/erk_shared/pr_store/planned_pr_lifecycle.py`:
+
+| Function                                                         | Purpose                                                                                                                                                  |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build_plan_stage_body(metadata_body, plan_content, *, summary)` | Build Stage 1 body: details-wrapped plan + metadata. Optional `summary: str \| None` prepends before `<details>`. Footer NOT included (needs PR number). |
+| `build_original_pr_section(plan_content)`                        | Wrap plan content in `<details><summary>original-plan</summary>` section. Used by both Stage 1 and Stage 2.                                              |
+| `extract_plan_content(pr_body)`                                  | Extract plan content from PR body at any lifecycle stage. Handles both details-wrapped and old flat format. Summary is NOT included in output.           |
+| `find_metadata_block(pr_body, "plan-header")`                    | Extract metadata block for preservation during stage transitions.                                                                                        |
+
+## Separator Semantics
+
+Two distinct separators serve different purposes:
+
+- **Content separator** (`\n\n---\n\n`, double newline each side): Between metadata block and content section. Found with `find()`.
+- **Footer separator** (`\n---\n`, single newline each side): Standard PR footer delimiter. Found with `rsplit()`.
+
+These are distinct: `find()` matches the first (content), `rsplit()` matches the last (footer).
+
+## False Match Prevention
+
+The content separator `\n\n---\n\n` can accidentally form when "Remotely executed" notes or other text end with a blank line followed by the footer delimiter `\n---\n`. This creates a false positive for `find()`.
+
+<!-- Source: packages/erk-shared/src/erk_shared/pr_store/planned_pr_lifecycle.py -->
+
+`find_metadata_block()` defends against this by validating that `<!-- erk:metadata-block:` appears in the prefix. If the marker is absent, the function returns None rather than treating the accidental separator as the real content boundary.
+
+The asymmetric search strategy reinforces this:
+
+- **Content separator**: `find()` — matches the _first_ occurrence (metadata is always at the top)
+- **Footer separator**: `rsplit()` — matches the _last_ occurrence (footer is always at the bottom)
+
+This means even if `\n\n---\n\n` appears mid-body, `find()` still finds the real separator first (which has the metadata marker above it), and `rsplit()` still finds the real footer last.
+
+## Constants
+
+**Source:** `PLAN_CONTENT_SEPARATOR`, `DETAILS_OPEN`, `DETAILS_CLOSE` in `packages/erk-shared/src/erk_shared/pr_store/planned_pr_lifecycle.py`
+
+## Self-Referential Close Prevention
+
+Planned PR IS the plan. The `pr_id` from prepare_state is the PR's own number. Using `Closes #N` in the footer would be self-referential, causing the plan to close itself. All three consumers of `assemble_pr_body()` set `issue_number=None` when the backend is `github-draft-pr`.
+
+## Footer Timing Constraint
+
+The PR footer (with checkout command) must be added AFTER `create_pr` returns, because it needs the PR number. `build_plan_stage_body()` intentionally excludes the footer.
+
+## Backward Compatibility
+
+`extract_plan_content()` handles both:
+
+- **Current format**: Content wrapped in `<details><summary>original-plan</summary>` tags (plain text in summary)
+- **Old format**: Content wrapped in `<details><summary><code>original-plan</code></summary>` tags (`<code>` tags inside summary — still parsed for compatibility, but no longer written)
+- **Legacy flat format**: Content after `PLAN_CONTENT_SEPARATOR` without details tags
+
+The `<code>` tags were removed because Graphite does not render them inside `<summary>` elements (only GitHub does). New writes use plain text in `<summary>`.
+
+## Branch Data Files
+
+Planned PR branches contain `.erk/impl-context/plan.md` and `.erk/impl-context/ref.json`, committed before PR creation to avoid GitHub's "empty branch" rejection. `plan.md` enables inline review comments on the plan via the PR's "Files Changed" tab.
+
+## Lifecycle Stage Tracking
+
+Plans use `lifecycle_stage` tracking. The stage progresses through the values (`planned` → `implementing` → `implemented`) and is stored in the plan-header metadata block within the PR body.
+
+See [Lifecycle Stage Tracking](lifecycle.md#lifecycle-stage-tracking) for the complete stage definitions and write points.
+
+## Type Naming (Historical)
+
+During PR #8679, plan-related types were consolidated to remove "issue-based" naming:
+
+| Old Name                                | New Name                         |
+| --------------------------------------- | -------------------------------- |
+| `IssueNextSteps` + `PlannedPRNextSteps` | `PlanNextSteps`                  |
+| `IssueNumberEvent`                      | `PlanNumberEvent`                |
+| `format_planned_pr_next_steps_plain()`  | `format_plan_next_steps_plain()` |
+
+The new `format_plan_next_steps_plain()` takes only `pr_number` and `url` parameters (no `branch_name`). Historical references to "issue-based" naming in documentation are intentional for migration context.
+
+<!-- Source: packages/erk-shared/src/erk_shared/output/next_steps.py, PlanNextSteps -->
+<!-- Source: packages/erk-shared/src/erk_shared/core/prompt_executor.py, PlanNumberEvent -->
+
+## Related Topics
+
+- [Planned PR Branch Teleport](planned-pr-branch-teleport.md) - How branches are teleported from remote
+- [PR Body Assembly](../architecture/pr-body-assembly.md) - How `assemble_pr_body()` handles both backends
+- [Plan Lifecycle](lifecycle.md) - Overall plan lifecycle

@@ -1,0 +1,7 @@
+# BEGIN skills managed runtime artifacts
+/.agents/state.yaml
+/.agents/local.yaml
+/.agents/skills/
+/.claude/skills/
+/.agents/cache/
+# END skills managed runtime artifacts

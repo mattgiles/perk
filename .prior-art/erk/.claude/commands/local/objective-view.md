@@ -1,0 +1,238 @@
+---
+description: View progress and associations for an objective issue
+context: fork
+agent: general-purpose
+---
+
+# /local:objective-view
+
+Displays progress and associations for an objective issue, including roadmap status analysis, associated PRs, and associated plans.
+
+## Usage
+
+```bash
+/local:objective-view [<objective_number>]
+```
+
+---
+
+## Agent Instructions
+
+### Step 1: Resolve Objective Reference
+
+Parse `$ARGUMENTS` for the objective number.
+
+**If `$ARGUMENTS` is provided (non-empty):** Use the provided value directly as the objective number (parse as number or URL).
+
+**If `$ARGUMENTS` is empty/not provided:** Infer the objective from the current branch:
+
+```bash
+erk exec resolve-objective-ref
+```
+
+Parse the JSON output:
+
+- If `"resolved": true`, use the `objective_number` from the result.
+- If `"resolved": false`, display error:
+
+```
+Error: No objective number provided and could not infer from current branch.
+Usage: /local:objective-view [<objective_number>]
+```
+
+### Step 2: Fetch Objective Issue
+
+```bash
+erk exec get-issue-body <objective_number>
+```
+
+Parse the JSON output to get:
+
+- `body`: The objective body content
+- `title`: The objective title
+- `state`: OPEN or CLOSED
+- `created_at`: Creation timestamp
+- `labels`: List of labels
+
+Verify the issue has the `erk-objective` label. If not:
+
+```
+Error: Issue #<number> is not an erk-objective issue (missing erk-objective label).
+```
+
+### Step 3: Fetch Comment Count
+
+```bash
+gh api repos/dagster-io/erk/issues/<objective_number> --jq '.comments'
+```
+
+This returns the comment count directly from the issue.
+
+### Step 4: Fetch Associated PRs
+
+```bash
+erk exec get-issue-timeline-prs <objective_number>
+```
+
+Parse JSON output to get list of PRs that reference this objective. The output has format:
+
+```json
+{
+  "success": true,
+  "issue_number": 4954,
+  "prs": [{ "number": 5054, "state": "MERGED", "is_draft": false }]
+}
+```
+
+### Step 5: Fetch Associated Plans
+
+```bash
+erk exec get-prs-for-objective <objective_number>
+```
+
+Parse JSON output to get plans linked to this objective. The output has format:
+
+```json
+{
+  "success": true,
+  "objective_number": 4954,
+  "plans": [{ "number": 5066, "state": "OPEN", "title": "P5066: Phase 8..." }]
+}
+```
+
+Note: This command fetches plans and filters by `objective_id` in the plan-header metadata block.
+
+### Step 6: Analyze Roadmap Progress
+
+Use a Task agent with `model: "haiku"` to analyze the objective body's Roadmap section:
+
+````
+Task(
+  subagent_type: "general-purpose",
+  model: "haiku",
+  description: "Analyze roadmap progress",
+  prompt: |
+    Analyze this objective issue's Roadmap section. For each phase, identify:
+
+    1. Phase name (e.g., "Phase 1A: Git Gateway Steelthread")
+    2. Total nodes in that phase
+    3. Completed nodes (status is "done")
+    4. Phase completion status (all nodes done = complete)
+
+    Return as JSON:
+
+    ```json
+    {
+      "phases": [
+        {
+          "name": "Phase 1A",
+          "total_nodes": 2,
+          "done_nodes": 2,
+          "complete": true
+        },
+        {
+          "name": "Phase 1B",
+          "total_nodes": 3,
+          "done_nodes": 1,
+          "complete": false
+        }
+      ],
+      "total_phases": 2,
+      "complete_phases": 1,
+      "total_nodes": 5,
+      "done_nodes": 3
+    }
+    ```
+
+    Handle variations in status values:
+
+    - done/complete/completed/✅ = done
+    - pending/todo/not-started = not done
+    - in-progress/wip/active = not done
+    - blocked/waiting = not done
+    - skipped/n/a = don't count toward total
+
+    Objective body:
+    <paste objective body content here>
+)
+````
+
+Replace `<paste objective body content here>` with the actual objective body from Step 2.
+
+### Step 7: Calculate Relative Time
+
+Convert `created_at` timestamp to relative time (e.g., "3d ago", "1w ago", "2mo ago").
+
+### Step 8: Display Results
+
+Format output as:
+
+```markdown
+## Objective #<number>: <title>
+
+**State:** <OPEN|CLOSED> | **Created:** <relative_time>
+
+### Progress
+
+- **Activities:** <comment_count> comments
+- **Roadmap:** <complete_phases>/<total_phases> phases, <done_nodes>/<total_nodes> nodes completed
+
+### Phase Details
+
+| Phase    | Nodes      | Status      |
+| -------- | ---------- | ----------- |
+| Phase 1A | 2/2 (100%) | ✅ Complete |
+| Phase 1B | 1/3 (33%)  | In Progress |
+| Phase 2A | 0/2 (0%)   | Pending     |
+
+### Associated PRs (<count>)
+
+| #    | State  | Title                     |
+| ---- | ------ | ------------------------- |
+| #123 | MERGED | Implement Git steelthread |
+| #124 | OPEN   | Add FakeGitHub            |
+
+### Associated Plans (<count>)
+
+| #    | State  | Title                         |
+| ---- | ------ | ----------------------------- |
+| #210 | OPEN   | P210: Phase 2A implementation |
+| #211 | CLOSED | P211: Phase 1B completion     |
+```
+
+If no associated PRs: `_No associated PRs found._`
+If no associated plans: `_No associated plans found._`
+
+### Step 9: Suggest Next Steps
+
+After displaying, suggest relevant actions based on state:
+
+**If objective is OPEN with pending phases:**
+
+```
+**Suggested actions:**
+- `/erk:objective-plan <number>` - Create a plan for the next pending node
+- `gh issue view <number> --web` - View full objective in browser
+```
+
+**If objective is OPEN with all phases complete:**
+
+```
+**All phases complete!** Consider closing this objective:
+- `/erk:objective-close <number>` - Close the objective with summary
+```
+
+**If objective is CLOSED:**
+
+```
+This objective is closed. View history in browser:
+- `gh issue view <number> --web`
+```
+
+---
+
+## Error Handling
+
+- **Objective not found:** Display "Error: Objective #<number> not found."
+- **GitHub API rate limited:** Display "Error: GitHub API rate limited. Try again later."
+- **Roadmap parsing fails:** Display roadmap section as-is with note: "Could not parse roadmap structure automatically."

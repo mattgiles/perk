@@ -1,0 +1,1094 @@
+"""Tests for navigation helper functions."""
+
+import os
+from pathlib import Path
+
+import click
+import pytest
+
+from erk.cli.commands.completions import complete_branch_names, complete_plan_files
+from erk.cli.commands.navigation_helpers import (
+    activate_root_repo,
+    delete_branch_and_worktree,
+    validate_for_deletion,
+)
+from erk.cli.ensure import UserFacingCliError
+from erk.core.repo_discovery import RepoContext
+from erk.core.worktree_pool import PoolState, SlotAssignment, SlotInfo, save_pool_state
+from erk_shared.context.types import GlobalConfig
+from erk_shared.gateway.git.abc import WorktreeInfo
+from erk_slots.navigation import (
+    get_slot_name_for_worktree,
+    render_deferred_deletion_commands,
+    unallocate_worktree_and_branch,
+)
+from tests.fakes.gateway.git import FakeGit
+from tests.fakes.tests.script_writer import FakeScriptWriter
+from tests.test_utils.test_context import context_for_test
+
+
+def make_test_repo_context(
+    repo_root: Path,
+    *,
+    main_repo_root: Path | None = None,
+    erk_root: Path | None = None,
+) -> RepoContext:
+    """Create a RepoContext for testing with sensible defaults.
+
+    Args:
+        repo_root: The repository root path (also used as main_repo_root if not specified)
+        main_repo_root: The main repo root (defaults to repo_root)
+        erk_root: The erk root directory (defaults to repo_root.parent / "erks")
+    """
+    main_repo = main_repo_root if main_repo_root is not None else repo_root
+    erk = erk_root if erk_root is not None else repo_root.parent / "erks"
+    repo_dir = erk / "repos" / "test-repo"
+    return RepoContext(
+        root=repo_root,
+        main_repo_root=main_repo,
+        repo_name="test-repo",
+        repo_dir=repo_dir,
+        worktrees_dir=repo_dir / "worktrees",
+        pool_json_path=repo_dir / "pool.json",
+    )
+
+
+def test_complete_branch_names_local_branches(tmp_path: Path) -> None:
+    """Test completion returns local branch names."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature-a", "feature-b"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_branch_names(child_ctx, None, "")
+
+    # Assert
+    assert sorted(result) == ["feature-a", "feature-b", "main"]
+
+
+def test_complete_branch_names_remote_branches_strip_prefix(tmp_path: Path) -> None:
+    """Test completion strips remote prefixes from remote branch names."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main"]},
+        remote_branches={repo_root: ["origin/feature-c", "upstream/feature-d"]},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_branch_names(child_ctx, None, "")
+
+    # Assert
+    assert sorted(result) == ["feature-c", "feature-d", "main"]
+
+
+def test_complete_branch_names_deduplication(tmp_path: Path) -> None:
+    """Test completion deduplicates branches that exist both locally and remotely."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature-a"]},
+        remote_branches={repo_root: ["origin/main", "origin/feature-a", "origin/feature-b"]},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_branch_names(child_ctx, None, "")
+
+    # Assert
+    # Should see each branch only once, not duplicated
+    assert sorted(result) == ["feature-a", "feature-b", "main"]
+
+
+def test_complete_branch_names_filters_by_prefix(tmp_path: Path) -> None:
+    """Test completion filters branches by incomplete prefix."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature-a", "feature-b", "bugfix-1"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_branch_names(child_ctx, None, "feat")
+
+    # Assert
+    assert sorted(result) == ["feature-a", "feature-b"]
+
+
+def test_complete_plan_files_finds_markdown_files(tmp_path: Path) -> None:
+    """Test completion finds .md files in current directory."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    # Create test .md files
+    (repo_root / "feature-plan.md").touch()
+    (repo_root / "bugfix-plan.md").touch()
+    (repo_root / "readme.md").touch()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_plan_files(child_ctx, None, "")
+
+    # Assert
+    assert sorted(result) == ["bugfix-plan.md", "feature-plan.md", "readme.md"]
+
+
+def test_complete_plan_files_no_markdown_files(tmp_path: Path) -> None:
+    """Test completion returns empty list when no .md files exist."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    # Create non-markdown files
+    (repo_root / "readme.txt").touch()
+    (repo_root / "notes.pdf").touch()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_plan_files(child_ctx, None, "")
+
+    # Assert
+    assert result == []
+
+
+def test_complete_plan_files_filters_by_prefix(tmp_path: Path) -> None:
+    """Test completion filters by incomplete prefix."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    # Create test .md files
+    (repo_root / "feature-plan.md").touch()
+    (repo_root / "fix-plan.md").touch()
+    (repo_root / "readme.md").touch()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_plan_files(child_ctx, None, "fea")
+
+    # Assert
+    assert result == ["feature-plan.md"]
+
+
+def test_complete_plan_files_returns_sorted_results(tmp_path: Path) -> None:
+    """Test completion returns results in sorted order."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    # Create test .md files in non-alphabetical order
+    (repo_root / "z-plan.md").touch()
+    (repo_root / "a-plan.md").touch()
+    (repo_root / "m-plan.md").touch()
+
+    git = FakeGit(
+        local_branches={repo_root: ["main"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx_obj = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+
+    # Create real Click context with parent chain for find_root()
+    root_ctx = click.Context(click.Command("root"))
+    root_ctx.obj = ctx_obj
+    child_ctx = click.Context(click.Command("complete"), parent=root_ctx)
+
+    # Act
+    result = complete_plan_files(child_ctx, None, "")
+
+    # Assert
+    assert result == ["a-plan.md", "m-plan.md", "z-plan.md"]
+
+
+def test_delete_branch_and_worktree_escapes_cwd_when_inside(tmp_path: Path) -> None:
+    """Test that delete_branch_and_worktree changes CWD before deletion when inside worktree."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=worktree_path, branch="feature")]},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Change to the worktree directory (simulating being inside it)
+    original_cwd = Path.cwd()
+    os.chdir(worktree_path)
+
+    try:
+        # Act
+        delete_branch_and_worktree(ctx, repo, "feature", worktree_path)
+
+        # Assert: CWD should have changed to repo_root (main_repo_root)
+        assert Path.cwd() == repo_root
+
+        # Assert: Worktree removal was called
+        assert worktree_path in git.removed_worktrees
+
+        # Assert: Branch was deleted
+        assert "feature" in git.deleted_branches
+    finally:
+        # Restore original CWD for test cleanup
+        os.chdir(original_cwd)
+
+
+def test_delete_branch_and_worktree_no_escape_when_outside(tmp_path: Path) -> None:
+    """Test that delete_branch_and_worktree does not change CWD when outside worktree."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=worktree_path, branch="feature")]},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Stay at repo_root (not inside worktree)
+    original_cwd = Path.cwd()
+    os.chdir(repo_root)
+
+    try:
+        # Act
+        delete_branch_and_worktree(ctx, repo, "feature", worktree_path)
+
+        # Assert: CWD should still be repo_root (unchanged)
+        assert Path.cwd() == repo_root
+
+        # Assert: Worktree removal was called
+        assert worktree_path in git.removed_worktrees
+
+        # Assert: Branch was deleted
+        assert "feature" in git.deleted_branches
+    finally:
+        # Restore original CWD for test cleanup
+        os.chdir(original_cwd)
+
+
+def test_delete_branch_and_worktree_escapes_via_symlink(tmp_path: Path) -> None:
+    """Test that delete_branch_and_worktree escapes CWD when worktree_path is accessed via symlink.
+
+    This tests the fix for the bug where Path.cwd() returns a resolved path,
+    but worktree_path might be a symlink. Without resolving both paths,
+    the equality check fails even when they refer to the same directory.
+    """
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+
+    # Create the actual worktree directory
+    worktrees_dir = tmp_path / "worktrees"
+    worktrees_dir.mkdir()
+    actual_worktree_path = worktrees_dir / "feature"
+    actual_worktree_path.mkdir()
+
+    # Create a symlink to the worktrees directory (common in some setups)
+    symlink_worktrees = tmp_path / "wt-link"
+    symlink_worktrees.symlink_to(worktrees_dir)
+    symlinked_worktree_path = symlink_worktrees / "feature"
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=actual_worktree_path, branch="feature")]},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Change to the ACTUAL worktree directory (resolved path)
+    original_cwd = Path.cwd()
+    os.chdir(actual_worktree_path)
+
+    try:
+        # Act: Pass the SYMLINKED path (unresolved) - this is the bug scenario
+        # Before fix: symlinked_worktree_path != Path.cwd() because one is resolved
+        # After fix: both are resolved, so they're equal
+        delete_branch_and_worktree(ctx, repo, "feature", symlinked_worktree_path)
+
+        # Assert: CWD should have changed to repo_root (escaped the worktree)
+        # Before fix: this would FAIL because the paths didn't compare equal,
+        # so os.chdir(repo_root) was never called
+        assert Path.cwd() == repo_root
+
+        # Assert: Worktree removal was called (with the symlinked path we passed)
+        assert symlinked_worktree_path in git.removed_worktrees
+
+        # Assert: Branch was deleted
+        assert "feature" in git.deleted_branches
+    finally:
+        # Restore original CWD for test cleanup
+        os.chdir(original_cwd)
+
+
+def test_delete_branch_and_worktree_uses_main_repo_root(tmp_path: Path) -> None:
+    """Regression test: function uses main_repo_root for safe directory escape.
+
+    Bug: When repo.root (= worktree path) was used for directory escape, the function
+    would delete the worktree, then fail when gt delete tried to run with
+    cwd pointing to the deleted directory.
+
+    Fix: The function now uses repo.main_repo_root (passed via RepoContext) to ensure
+    gt delete runs from a directory that still exists after worktree removal.
+
+    This test verifies the function escapes to main_repo_root (not repo.root) when
+    running from inside a worktree.
+    """
+    # Arrange
+    main_repo = tmp_path / "main-repo"
+    main_repo.mkdir()
+    git_dir = main_repo / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={main_repo: ["main", "feature"]},
+        remote_branches={main_repo: []},
+        git_common_dirs={main_repo: git_dir},
+        worktrees={main_repo: [WorktreeInfo(path=worktree_path, branch="feature")]},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=main_repo, global_config=global_config)
+
+    # Simulate running from worktree: repo.root == worktree_path, but main_repo_root is different
+    repo = make_test_repo_context(
+        worktree_path,  # When in worktree, repo.root == worktree path
+        main_repo_root=main_repo,  # But main_repo_root is the actual repo
+        erk_root=erk_root,
+    )
+
+    # Change to the worktree directory (simulating being inside it)
+    original_cwd = Path.cwd()
+    os.chdir(worktree_path)
+
+    try:
+        # Act: Function should use main_repo_root for escape, not repo.root
+        delete_branch_and_worktree(ctx, repo, "feature", worktree_path)
+
+        # Assert: CWD should have changed to main_repo (not worktree_path)
+        # Before fix: would escape to repo.root which == worktree_path (deleted!)
+        # After fix: escapes to main_repo_root which still exists
+        assert Path.cwd() == main_repo
+
+        # Assert: Operations completed successfully
+        assert "feature" in git.deleted_branches
+        assert worktree_path in git.removed_worktrees
+    finally:
+        # Restore original CWD for test cleanup
+        os.chdir(original_cwd)
+
+
+def test_delete_branch_and_worktree_escapes_from_subdirectory(tmp_path: Path) -> None:
+    """Test that delete_branch_and_worktree changes CWD when inside a subdirectory of worktree."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+    subdir = worktree_path / "src" / "deep"
+    subdir.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=worktree_path, branch="feature")]},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Change to a subdirectory inside the worktree
+    original_cwd = Path.cwd()
+    os.chdir(subdir)
+
+    try:
+        # Act
+        delete_branch_and_worktree(ctx, repo, "feature", worktree_path)
+
+        # Assert: CWD should have changed to repo_root
+        assert Path.cwd() == repo_root
+
+        # Assert: Worktree removal was called
+        assert worktree_path in git.removed_worktrees
+
+        # Assert: Branch was deleted
+        assert "feature" in git.deleted_branches
+    finally:
+        # Restore original CWD for test cleanup
+        os.chdir(original_cwd)
+
+
+def test_activate_root_repo_uses_main_repo_root_not_worktree_path(tmp_path: Path) -> None:
+    """Regression test: activate_root_repo uses main_repo_root, not repo.root.
+
+    Bug: When repo.root (= worktree path) was used for the activation script,
+    `erk pr land` would delete the worktree, then the activation script would
+    try to `cd` to the deleted worktree directory, causing "no such file or
+    directory" error.
+
+    Fix: The function now uses repo.main_repo_root to ensure the activation
+    script references a directory that still exists after worktree deletion.
+
+    This test verifies the activation script contains main_repo_root (not repo.root)
+    when running from inside a worktree where repo.root != main_repo_root.
+    """
+    # Arrange
+    main_repo = tmp_path / "main-repo"
+    main_repo.mkdir()
+    git_dir = main_repo / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={main_repo: ["main", "feature"]},
+        remote_branches={main_repo: []},
+        git_common_dirs={main_repo: git_dir},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=True,  # Enable script mode
+    )
+
+    script_writer = FakeScriptWriter()
+
+    ctx = context_for_test(
+        git=git,
+        cwd=worktree_path,
+        global_config=global_config,
+        script_writer=script_writer,
+    )
+
+    # Simulate running from worktree: repo.root == worktree_path
+    # but main_repo_root points to the actual main repository
+    repo = make_test_repo_context(
+        worktree_path,  # When in worktree, repo.root == worktree path
+        main_repo_root=main_repo,  # But main_repo_root is the actual repo
+        erk_root=erk_root,
+    )
+
+    # Act: Call activate_root_repo with script=True
+    # It should raise SystemExit(0) on success
+    with pytest.raises(SystemExit) as exc_info:
+        activate_root_repo(
+            ctx,
+            repo=repo,
+            script=True,
+            command_name="test",
+            post_cd_commands=None,
+            source_branch=None,
+            force=False,
+        )
+
+    # Assert: Function exited successfully
+    assert exc_info.value.code == 0
+
+    # Assert: Script was written
+    assert script_writer.last_script is not None
+
+    # Assert: Script contains main_repo_root path, NOT worktree_path
+    # This is the key assertion - the bug was using worktree_path here
+    script_content = script_writer.last_script.content
+    assert str(main_repo) in script_content, (
+        f"Expected main_repo_root ({main_repo}) in script, "
+        f"but got script that uses worktree path ({worktree_path})"
+    )
+    # Verify the cd command uses main_repo, not worktree_path
+    # shlex.quote() may or may not add quotes depending on path characters
+    assert f"cd {main_repo}" in script_content or f"cd '{main_repo}'" in script_content, (
+        f"Expected 'cd' to main_repo_root ({main_repo}), but script content was:\n{script_content}"
+    )
+
+
+# Tests for render_deferred_deletion_commands and get_slot_name_for_worktree
+
+
+def test_render_deferred_deletion_commands_slot_graphite(tmp_path: Path) -> None:
+    """Test deferred deletion commands for a slot worktree with Graphite."""
+    worktree_path = tmp_path / "worktrees" / "erk-slot-01"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = tmp_path / "repo"
+    main_repo_root.mkdir()
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature-branch",
+        slot_name="erk-slot-01",
+        is_graphite_managed=True,
+        main_repo_root=main_repo_root,
+        is_root_worktree=False,
+    )
+
+    assert len(commands) == 2
+    # For slots, use erk slot unassign
+    assert commands[0] == "erk slot unassign erk-slot-01"
+    # For Graphite, use gt delete
+    assert commands[1] == "gt delete -f --no-interactive feature-branch"
+
+
+def test_render_deferred_deletion_commands_slot_git(tmp_path: Path) -> None:
+    """Test deferred deletion commands for a slot worktree with plain Git."""
+    worktree_path = tmp_path / "worktrees" / "erk-slot-01"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = tmp_path / "repo"
+    main_repo_root.mkdir()
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature-branch",
+        slot_name="erk-slot-01",
+        is_graphite_managed=False,
+        main_repo_root=main_repo_root,
+        is_root_worktree=False,
+    )
+
+    assert len(commands) == 2
+    # For slots, use erk slot unassign
+    assert commands[0] == "erk slot unassign erk-slot-01"
+    # For plain Git, use git branch -D with -C flag
+    assert f"git -C {main_repo_root} branch -D feature-branch" in commands[1]
+
+
+def test_render_deferred_deletion_commands_regular_graphite(tmp_path: Path) -> None:
+    """Test deferred deletion commands for a regular worktree with Graphite."""
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = tmp_path / "repo"
+    main_repo_root.mkdir()
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature-branch",
+        slot_name=None,
+        is_graphite_managed=True,
+        main_repo_root=main_repo_root,
+        is_root_worktree=False,
+    )
+
+    assert len(commands) == 2
+    # For regular worktrees, use git worktree remove
+    assert f"git worktree remove --force {worktree_path}" in commands[0]
+    # For Graphite, use gt delete
+    assert commands[1] == "gt delete -f --no-interactive feature-branch"
+
+
+def test_render_deferred_deletion_commands_regular_git(tmp_path: Path) -> None:
+    """Test deferred deletion commands for a regular worktree with plain Git."""
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = tmp_path / "repo"
+    main_repo_root.mkdir()
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature-branch",
+        slot_name=None,
+        is_graphite_managed=False,
+        main_repo_root=main_repo_root,
+        is_root_worktree=False,
+    )
+
+    assert len(commands) == 2
+    # For regular worktrees, use git worktree remove
+    assert f"git worktree remove --force {worktree_path}" in commands[0]
+    # For plain Git, use git branch -D with -C flag
+    assert f"git -C {main_repo_root} branch -D feature-branch" in commands[1]
+
+
+def test_render_deferred_deletion_commands_special_characters(tmp_path: Path) -> None:
+    """Test that branch names with special characters are properly quoted."""
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = tmp_path / "repo"
+    main_repo_root.mkdir()
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature/add-login",
+        slot_name=None,
+        is_graphite_managed=True,
+        main_repo_root=main_repo_root,
+        is_root_worktree=False,
+    )
+
+    assert len(commands) == 2
+    # Branch name should be quoted to handle the slash
+    assert "gt delete -f --no-interactive feature/add-login" in commands[1]
+
+
+def test_render_deferred_deletion_commands_root_worktree_skips_cleanup(tmp_path: Path) -> None:
+    """Test that root worktree skips worktree cleanup commands."""
+    worktree_path = tmp_path / "repo"
+    worktree_path.mkdir(parents=True)
+    main_repo_root = worktree_path
+
+    commands = render_deferred_deletion_commands(
+        worktree_path=worktree_path,
+        branch="feature-branch",
+        slot_name=None,
+        is_graphite_managed=True,
+        main_repo_root=main_repo_root,
+        is_root_worktree=True,
+    )
+
+    # Root worktree: only branch deletion, no worktree removal
+    assert len(commands) == 1
+    assert commands[0] == "gt delete -f --no-interactive feature-branch"
+
+
+def test_get_slot_name_for_worktree_returns_slot_name(tmp_path: Path) -> None:
+    """Test get_slot_name_for_worktree returns slot name for assigned worktree."""
+    worktree_path = tmp_path / "worktrees" / "erk-slot-01"
+    worktree_path.mkdir(parents=True)
+
+    # Create pool state with an assignment
+    pool_json_path = tmp_path / "pool.json"
+    state = PoolState(
+        version="1.0",
+        pool_size=4,
+        slots=(SlotInfo(name="erk-slot-01"),),
+        assignments=(
+            SlotAssignment(
+                slot_name="erk-slot-01",
+                branch_name="feature-branch",
+                assigned_at="2025-01-01T00:00:00Z",
+                worktree_path=worktree_path,
+            ),
+        ),
+    )
+    save_pool_state(pool_json_path, state)
+
+    result = get_slot_name_for_worktree(pool_json_path, worktree_path)
+
+    assert result == "erk-slot-01"
+
+
+def test_get_slot_name_for_worktree_returns_none_for_regular_worktree(tmp_path: Path) -> None:
+    """Test get_slot_name_for_worktree returns None for non-slot worktree."""
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    # Create pool state with no matching assignment
+    pool_json_path = tmp_path / "pool.json"
+    state = PoolState(
+        version="1.0",
+        pool_size=4,
+        slots=(SlotInfo(name="erk-slot-01"),),
+        assignments=(),
+    )
+    save_pool_state(pool_json_path, state)
+
+    result = get_slot_name_for_worktree(pool_json_path, worktree_path)
+
+    assert result is None
+
+
+def test_get_slot_name_for_worktree_returns_none_without_pool_file(tmp_path: Path) -> None:
+    """Test get_slot_name_for_worktree returns None when pool.json doesn't exist."""
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+    pool_json_path = tmp_path / "pool.json"  # Does not exist
+
+    result = get_slot_name_for_worktree(pool_json_path, worktree_path)
+
+    assert result is None
+
+
+# Tests for validate_for_deletion helper
+
+
+def test_validate_for_deletion_passes_when_all_checks_pass(tmp_path: Path) -> None:
+    """Test validate_for_deletion passes when working tree is clean and PR is merged."""
+    from erk_shared.gateway.github.types import PullRequestInfo
+    from tests.fakes.gateway.github import FakeLocalGitHub
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        # No uncommitted changes
+        file_statuses={repo_root: ([], [], [])},
+    )
+
+    # PR is merged
+    github = FakeLocalGitHub(
+        prs={
+            "feature": PullRequestInfo(
+                number=123,
+                state="MERGED",
+                url="https://github.com/owner/repo/pull/123",
+                is_draft=False,
+                title="Feature",
+                checks_passing=None,
+                owner="owner",
+                repo="repo",
+                has_conflicts=None,
+            ),
+        }
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, github=github, cwd=repo_root, global_config=global_config)
+
+    # Should not raise
+    validate_for_deletion(
+        ctx=ctx,
+        repo_root=repo_root,
+        current_branch="feature",
+        worktree_path=worktree_path,
+        force=False,
+    )
+
+
+def test_validate_for_deletion_blocks_with_uncommitted_changes(tmp_path: Path) -> None:
+    """Test validate_for_deletion blocks when uncommitted changes exist."""
+    from tests.fakes.gateway.github import FakeLocalGitHub
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        # HAS uncommitted changes
+        file_statuses={repo_root: ([], ["modified.py"], [])},
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(
+        git=git, github=FakeLocalGitHub(), cwd=repo_root, global_config=global_config
+    )
+
+    # Should raise UserFacingCliError
+    with pytest.raises(UserFacingCliError):
+        validate_for_deletion(
+            ctx=ctx,
+            repo_root=repo_root,
+            current_branch="feature",
+            worktree_path=worktree_path,
+            force=False,
+        )
+
+
+def test_delete_branch_and_worktree_raises_on_worktree_remove_error(tmp_path: Path) -> None:
+    """Test that delete_branch_and_worktree raises ClickException when worktree removal fails."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=worktree_path, branch="feature")]},
+        remove_worktree_error="worktree is locked",
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Act & Assert: Should raise ClickException with the error message
+    with pytest.raises(click.ClickException, match="worktree is locked"):
+        delete_branch_and_worktree(ctx, repo, "feature", worktree_path)
+
+
+def test_unallocate_worktree_and_branch_raises_on_worktree_remove_error(tmp_path: Path) -> None:
+    """Test that unallocate_worktree_and_branch raises ClickException when removal fails."""
+    # Arrange
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    git_dir = repo_root / ".git"
+    git_dir.mkdir()
+    erk_root = tmp_path / "erks"
+    erk_root.mkdir()
+    worktree_path = tmp_path / "worktrees" / "feature"
+    worktree_path.mkdir(parents=True)
+
+    git = FakeGit(
+        local_branches={repo_root: ["main", "feature"]},
+        remote_branches={repo_root: []},
+        git_common_dirs={repo_root: git_dir},
+        worktrees={repo_root: [WorktreeInfo(path=worktree_path, branch="feature")]},
+        remove_worktree_error="worktree is locked",
+    )
+
+    global_config = GlobalConfig.test(
+        erk_root,
+        use_graphite=False,
+        shell_setup_complete=False,
+    )
+
+    ctx = context_for_test(git=git, cwd=repo_root, global_config=global_config)
+    repo = make_test_repo_context(repo_root, erk_root=erk_root)
+
+    # Act & Assert: Should raise ClickException with the error message
+    # (non-slot worktree path, so it takes the remove_worktree branch)
+    with pytest.raises(click.ClickException, match="worktree is locked"):
+        unallocate_worktree_and_branch(ctx, repo, "feature", worktree_path)

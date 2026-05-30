@@ -1,0 +1,249 @@
+"""Simple subprocess utilities for erk-shared.
+
+This module provides basic subprocess execution for GitHub CLI commands.
+It's intentionally minimal to avoid pulling in complex dependencies.
+"""
+
+import logging
+import os
+import subprocess
+import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import IO, Any
+
+from erk_shared.gateway.github.retry import (
+    RETRY_DELAYS,
+    RetriesExhausted,
+    RetryRequested,
+    with_retries,
+)
+from erk_shared.gateway.github.transient_errors import is_transient_error
+from erk_shared.gateway.time.abc import Time
+
+logger = logging.getLogger(__name__)
+
+
+def copied_env_for_git_subprocess() -> dict[str, str]:
+    """Return a copy of the environment for git subprocess calls.
+
+    Sets GIT_TERMINAL_PROMPT=0 so git commands fail fast with an error
+    instead of hanging while waiting for credentials or other interactive input.
+    """
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def build_claude_subprocess_env() -> dict[str, str]:
+    """Build environment for Claude subprocess with nested session guard removed.
+
+    Claude Code sets CLAUDECODE=1 to detect nested sessions and block them.
+    Our subprocess calls use --print (non-interactive, single-shot) with
+    --no-session-persistence, so they don't share runtime resources with
+    the parent session. Stripping CLAUDECODE allows these safe subprocess
+    calls to work when erk commands are invoked from within a Claude session.
+    """
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+    return env
+
+
+def _build_timing_description(cmd: Sequence[str]) -> str:
+    """Build a timing log description from a command.
+
+    For GraphQL queries, replaces the query text with a character count
+    to avoid verbose output in logs.
+    """
+    cmd_list = list(cmd)
+    # Check if this is a GraphQL command with query parameter
+    if len(cmd_list) >= 4 and cmd_list[1:3] == ["api", "graphql"]:
+        # Find query parameter and replace it
+        result_parts = []
+        for part in cmd_list:
+            if part.startswith("query="):
+                query_len = len(part) - len("query=")
+                result_parts.append(f"query=<{query_len} chars>")
+            else:
+                result_parts.append(part)
+        return " ".join(result_parts)
+    return " ".join(str(arg) for arg in cmd)
+
+
+def run_subprocess_with_context(
+    *,
+    cmd: Sequence[str],
+    operation_context: str,
+    cwd: Path | None = None,
+    timeout: float | None = None,
+    capture_output: bool = True,
+    text: bool = True,
+    encoding: str = "utf-8",
+    check: bool = True,
+    stdout: int | IO[Any] | None = None,
+    stderr: int | IO[Any] | None = None,
+    **kwargs: Any,
+) -> subprocess.CompletedProcess[str]:
+    """Execute subprocess with enriched error reporting for integration layer.
+
+    Wraps subprocess.run() to catch CalledProcessError and re-raise as RuntimeError
+    with operation context, stderr output, and command details.
+
+    Args:
+        cmd: Command and arguments to execute
+        operation_context: Human-readable description of operation
+        cwd: Working directory for command execution
+        timeout: Timeout in seconds for the subprocess. None means no timeout.
+        capture_output: Whether to capture stdout/stderr (default: True)
+        text: Whether to decode output as text (default: True)
+        encoding: Text encoding to use (default: "utf-8")
+        check: Whether to raise on non-zero exit (default: True)
+        stdout: File descriptor or file object for stdout
+        stderr: File descriptor or file object for stderr
+        **kwargs: Additional arguments passed to subprocess.run()
+
+    Returns:
+        CompletedProcess instance from subprocess.run()
+
+    Raises:
+        RuntimeError: If command fails or times out, with enriched error context
+        FileNotFoundError: If command binary is not found
+    """
+    timing_desc = _build_timing_description(cmd)
+    start_time = time.perf_counter()
+    logger.debug("Starting: %s", timing_desc)
+
+    try:
+        # Handle stdout/stderr arguments
+        if capture_output and (stdout is not None or stderr is not None):
+            capture_output = False
+
+        # Execute subprocess
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            timeout=timeout,
+            capture_output=capture_output,
+            text=text,
+            encoding=encoding,
+            check=check,
+            stdout=stdout,
+            stderr=stderr,
+            **kwargs,
+        )
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.debug("Completed in %dms: %s", elapsed_ms, timing_desc)
+        return result
+
+    except subprocess.TimeoutExpired as e:
+        cmd_str = " ".join(str(arg) for arg in cmd)
+        error_msg = f"Timed out after {timeout}s trying to {operation_context}"
+        error_msg += f"\nCommand: {cmd_str}"
+        raise RuntimeError(error_msg) from e
+
+    except subprocess.CalledProcessError as e:
+        cmd_str = " ".join(str(arg) for arg in cmd)
+        error_msg = f"Failed to {operation_context}"
+        error_msg += f"\nCommand: {cmd_str}"
+        error_msg += f"\nExit code: {e.returncode}"
+
+        if e.stdout:
+            stdout_text = e.stdout if isinstance(e.stdout, str) else e.stdout.decode("utf-8")
+            stdout_stripped = stdout_text.strip()
+            if stdout_stripped:
+                error_msg += f"\nstdout: {stdout_stripped}"
+
+        if e.stderr:
+            stderr_text = e.stderr if isinstance(e.stderr, str) else e.stderr.decode("utf-8")
+            stderr_stripped = stderr_text.strip()
+            if stderr_stripped:
+                error_msg += f"\nstderr: {stderr_stripped}"
+
+        raise RuntimeError(error_msg) from e
+
+    except FileNotFoundError as e:
+        cmd_str = " ".join(str(arg) for arg in cmd)
+        error_msg = f"Command not found while trying to {operation_context}: {cmd[0]}"
+        error_msg += f"\nFull command: {cmd_str}"
+        raise RuntimeError(error_msg) from e
+
+
+# Timeout in seconds for individual gh CLI commands.
+# Each gh call gets 60 seconds; the retry wrapper can still retry on
+# transient errors, but each attempt won't hang indefinitely.
+_GH_COMMAND_TIMEOUT = 60
+
+
+def execute_gh_command(cmd: list[str], cwd: Path) -> str:
+    """Execute a gh CLI command and return stdout.
+
+    Args:
+        cmd: Command and arguments to execute
+        cwd: Working directory for command execution
+
+    Returns:
+        stdout from the command
+
+    Raises:
+        RuntimeError: If command fails or times out, with enriched error context
+        FileNotFoundError: If gh is not installed
+    """
+    timing_desc = _build_timing_description(cmd)
+    result = run_subprocess_with_context(
+        cmd=cmd,
+        operation_context=f"execute gh command '{timing_desc}'",
+        cwd=cwd,
+        timeout=_GH_COMMAND_TIMEOUT,
+    )
+    stdout_preview = result.stdout[:200] if result.stdout else "(empty)"
+    logger.debug("gh command stdout preview: %s", stdout_preview)
+    return result.stdout
+
+
+def execute_gh_command_with_retry(
+    cmd: list[str],
+    cwd: Path,
+    time_impl: Time,
+    *,
+    retry_delays: list[float] | None = None,
+) -> str:
+    """Execute gh command with automatic retry on transient network errors.
+
+    Wraps execute_gh_command with retry logic using the with_retries pattern.
+    Transient errors (network timeouts, connection failures) trigger automatic
+    retry with configurable delays.
+
+    Args:
+        cmd: Command and arguments to execute
+        cwd: Working directory for command execution
+        time_impl: Time abstraction for sleep operations
+        retry_delays: Custom delays between retries. Defaults to RETRY_DELAYS.
+
+    Returns:
+        stdout from the command
+
+    Raises:
+        RuntimeError: If command fails after all retries, or with non-transient error
+        FileNotFoundError: If gh is not installed
+    """
+    timing_desc = _build_timing_description(cmd)
+
+    def try_execute() -> str | RetryRequested:
+        try:
+            return execute_gh_command(cmd, cwd)
+        except RuntimeError as e:
+            if is_transient_error(str(e)):
+                return RetryRequested(reason=str(e))
+            raise
+
+    delays = retry_delays if retry_delays is not None else list(RETRY_DELAYS)
+    result = with_retries(time_impl, f"execute gh command '{timing_desc}'", try_execute, delays)
+
+    if isinstance(result, RetriesExhausted):
+        msg = f"GitHub command failed after retries: {result.reason}"
+        raise RuntimeError(msg)
+
+    # Type narrowing: with_retries returns T | RetriesExhausted.
+    # After the isinstance check above, we know result is T (str).
+    assert isinstance(result, str)
+    return result

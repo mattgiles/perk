@@ -1,0 +1,123 @@
+"""Quick commit and submit operation for rapid iteration.
+
+This operation stages all changes, commits with "update" message if there are changes,
+then submits via Graphite or git push. Returns the PR URL for easy access.
+"""
+
+from collections.abc import Generator
+from pathlib import Path
+
+from erk_shared.gateway.branch_manager.types import SubmitBranchError
+from erk_shared.gateway.github.types import PRNotFound
+from erk_shared.gateway.gt.abc import GtKit
+from erk_shared.gateway.gt.events import CompletionEvent, ProgressEvent
+from erk_shared.gateway.gt.types import QuickSubmitError, QuickSubmitSuccess
+
+
+def execute_quick_submit(
+    ops: GtKit,
+    cwd: Path,
+) -> Generator[ProgressEvent | CompletionEvent[QuickSubmitSuccess | QuickSubmitError]]:
+    """Execute the quick-submit workflow.
+
+    Stages all changes, commits with "update" message if there are changes,
+    then submits via BranchManager (Graphite or git push). Returns the PR URL
+    after successful submit.
+
+    Args:
+        ops: GtKit operations interface.
+        cwd: Working directory (repository path).
+
+    Yields:
+        ProgressEvent for status updates
+        CompletionEvent with QuickSubmitSuccess or QuickSubmitError
+    """
+    # Step 1: Stage all changes
+    yield ProgressEvent("Staging all changes...")
+    try:
+        ops.git.commit.add_all(cwd)
+    except Exception as e:
+        yield CompletionEvent(
+            QuickSubmitError(
+                success=False,
+                error_type="stage-failed",
+                message=f"Failed to stage changes: {e}",
+            )
+        )
+        return
+
+    # Step 2: Check if there are staged changes
+    yield ProgressEvent("Checking for staged changes...")
+    has_changes = ops.git.status.has_staged_changes(cwd)
+    committed = False
+
+    # Step 3: Commit if there are staged changes
+    if has_changes:
+        yield ProgressEvent("Committing changes...")
+        try:
+            ops.git.commit.commit(cwd, "update")
+            committed = True
+        except Exception as e:
+            yield CompletionEvent(
+                QuickSubmitError(
+                    success=False,
+                    error_type="commit-failed",
+                    message=f"Failed to commit changes: {e}",
+                )
+            )
+            return
+
+    # Step 4: Submit via BranchManager (Graphite or git push)
+    repo_root = ops.git.repo.get_repository_root(cwd)
+    current_branch = ops.git.branch.get_current_branch(cwd)
+
+    if current_branch is None:
+        yield CompletionEvent(
+            QuickSubmitError(
+                success=False,
+                error_type="submit-failed",
+                message="Failed to determine current branch",
+            )
+        )
+        return
+
+    if ops.branch_manager.is_graphite_managed():
+        yield ProgressEvent("Submitting to Graphite...")
+    else:
+        yield ProgressEvent("Pushing to remote...")
+
+    submit_result = ops.branch_manager.submit_branch(repo_root, current_branch)
+    if isinstance(submit_result, SubmitBranchError):
+        error_verb = "submit" if ops.branch_manager.is_graphite_managed() else "push"
+        yield CompletionEvent(
+            QuickSubmitError(
+                success=False,
+                error_type="submit-failed",
+                message=f"Failed to {error_verb}: {submit_result.message}",
+            )
+        )
+        return
+
+    # Step 5: Get PR URL after successful submit
+    yield ProgressEvent("Getting PR URL...")
+    pr_url: str | None = None
+    if current_branch:
+        pr_details = ops.github.get_pr_for_branch(repo_root, current_branch)
+        if not isinstance(pr_details, PRNotFound):
+            pr_url = pr_details.url
+
+    # Success
+    msg = (
+        "Changes submitted successfully"
+        if committed
+        else "No new changes, submitted existing commits"
+    )
+    yield CompletionEvent(
+        QuickSubmitSuccess(
+            success=True,
+            staged_changes=has_changes,
+            committed=committed,
+            message=msg,
+            pr_url=pr_url,
+        )
+    )

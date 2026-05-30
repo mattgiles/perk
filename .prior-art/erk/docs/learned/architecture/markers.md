@@ -1,0 +1,59 @@
+---
+title: Marker System
+read_when:
+  - "creating worktree state tracking"
+  - "adding friction before destructive operations"
+  - "implementing pending learn workflow"
+last_audited: "2026-02-16 14:20 PT"
+audit_result: edited
+---
+
+# Marker System
+
+Markers are empty files in `.erk/scratch/__erk_markers/` that signal worktree state conditions.
+
+## Purpose
+
+Markers provide friction before destructive operations. They persist across sessions and block actions until explicitly cleared.
+
+## Current Markers
+
+| Marker          | Created By | Cleared By                            | Purpose                                          |
+| --------------- | ---------- | ------------------------------------- | ------------------------------------------------ |
+| `pending-learn` | `erk land` | `/erk:learn`, `create-learn-plan` CLI | Block worktree deletion until insights extracted |
+
+## API
+
+Located in `packages/erk-shared/src/erk_shared/scratch/markers.py`:
+
+- `create_marker(worktree_path, marker_name)` - Create marker file
+- `marker_exists(worktree_path, marker_name)` - Check if marker exists
+- `delete_marker(worktree_path, marker_name)` - Delete marker if exists
+- `get_marker_path(worktree_path, marker_name)` - Get path to marker file
+
+Constants:
+
+- `PENDING_LEARN_MARKER = "pending-learn"`
+
+## Usage Pattern
+
+1. **Create marker** when starting an operation that requires follow-up
+2. **Check marker** before destructive operations (e.g., worktree deletion)
+3. **Delete marker** when follow-up is complete
+
+## Example: Pending Learn Flow
+
+1. `erk land` merges PR → creates `pending-learn` marker
+2. User tries `erk wt delete` → blocked with "run learn first" message
+3. User runs `/erk:learn` or `erk exec create-learn-plan` → marker deleted
+4. User can now delete worktree
+
+## Storage Location
+
+Markers are stored as empty files in:
+
+```
+<worktree>/.erk/scratch/__erk_markers/<marker-name>
+```
+
+The `__erk_markers/` directory is created automatically when needed.

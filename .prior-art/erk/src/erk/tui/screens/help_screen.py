@@ -1,0 +1,147 @@
+"""Modal screen showing keyboard shortcuts."""
+
+from __future__ import annotations
+
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Vertical
+from textual.events import Key
+from textual.screen import ModalScreen
+from textual.widgets import Label
+
+from erk.tui.views.types import ViewMode
+
+
+class HelpScreen(ModalScreen):
+    """Modal screen showing keyboard shortcuts."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("q", "dismiss", "Close"),
+        Binding("?", "dismiss", "Close"),
+    ]
+
+    DEFAULT_CSS = """
+    HelpScreen {
+        align: center middle;
+    }
+
+    #help-dialog {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        background: $surface;
+        border: solid $primary;
+        padding: 1 2;
+    }
+
+    #help-title {
+        text-style: bold;
+        text-align: center;
+        margin-bottom: 1;
+        width: 100%;
+    }
+
+    .help-section {
+        margin-top: 1;
+    }
+
+    .help-section-title {
+        text-style: bold;
+        color: $primary;
+    }
+
+    .help-binding {
+        margin-left: 2;
+    }
+    """
+
+    def __init__(self, *, view_mode: ViewMode) -> None:
+        """Initialize help screen.
+
+        Args:
+            view_mode: Current view mode, controls which shortcuts are shown
+        """
+        super().__init__()
+        self._view_mode = view_mode
+
+    def _is_objectives_view(self) -> bool:
+        return self._view_mode == ViewMode.OBJECTIVES
+
+    def _is_runs_view(self) -> bool:
+        return self._view_mode == ViewMode.RUNS
+
+    def compose(self) -> ComposeResult:
+        """Create help dialog content."""
+        is_objectives = self._is_objectives_view()
+        is_runs = self._is_runs_view()
+
+        with Vertical(id="help-dialog"):
+            yield Label("erk dash - Keyboard Shortcuts", id="help-title")
+
+            with Vertical(classes="help-section"):
+                yield Label("Views", classes="help-section-title")
+                yield Label("1       Plans view", classes="help-binding")
+                yield Label("2       Learn view", classes="help-binding")
+                yield Label("3       Objectives view", classes="help-binding")
+                yield Label("4       Runs view", classes="help-binding")
+                yield Label("←/→     Switch views", classes="help-binding")
+
+            with Vertical(classes="help-section"):
+                yield Label("Navigation", classes="help-section-title")
+                yield Label("↑/k     Move cursor up", classes="help-binding")
+                yield Label("↓/j     Move cursor down", classes="help-binding")
+                yield Label("Home    Jump to first row", classes="help-binding")
+                yield Label("End     Jump to last row", classes="help-binding")
+
+            with Vertical(classes="help-section"):
+                yield Label("Actions", classes="help-section-title")
+                if is_runs:
+                    yield Label("p       Open PR in browser", classes="help-binding")
+                    yield Label("n       Open CI run in browser", classes="help-binding")
+                elif is_objectives:
+                    yield Label("Enter   View objective details", classes="help-binding")
+                    yield Label("Ctrl+P  Commands (opens detail modal)", classes="help-binding")
+                    yield Label("v       View objective text", classes="help-binding")
+                    yield Label("p       Open objective in browser", classes="help-binding")
+                    yield Label("b       View objective nodes", classes="help-binding")
+                else:
+                    yield Label("Enter   View plan details", classes="help-binding")
+                    yield Label("Ctrl+P  Commands (opens detail modal)", classes="help-binding")
+                    yield Label("v       View plan text", classes="help-binding")
+                    yield Label("p       Open PR in browser", classes="help-binding")
+                    yield Label("n       Open CI run in browser", classes="help-binding")
+                    yield Label("i       Show implement command", classes="help-binding")
+                    yield Label("c       View unresolved comments", classes="help-binding")
+                    yield Label("h       View failing checks", classes="help-binding")
+                if not is_runs:
+                    yield Label("l       Launch actions menu", classes="help-binding")
+                    yield Label("x       Dispatch one-shot prompt", classes="help-binding")
+
+            with Vertical(classes="help-section"):
+                yield Label("Filter & Sort", classes="help-section-title")
+                yield Label("/       Start filter mode", classes="help-binding")
+                yield Label("a       Toggle all users / my plans", classes="help-binding")
+                if not is_objectives and not is_runs:
+                    yield Label("t       Filter to Graphite stack", classes="help-binding")
+                    yield Label("o       Filter to objective plans", classes="help-binding")
+                yield Label("Esc     Clear filter / exit filter", classes="help-binding")
+                yield Label("Enter   Return focus to table", classes="help-binding")
+                if not is_runs:
+                    yield Label("s       Toggle sort mode", classes="help-binding")
+
+            with Vertical(classes="help-section"):
+                yield Label("General", classes="help-section-title")
+                yield Label("r       Refresh data", classes="help-binding")
+                yield Label("?       Show this help", classes="help-binding")
+                yield Label("q/Esc   Quit", classes="help-binding")
+
+            yield Label("")
+            yield Label("Press any key to close", id="help-footer")
+
+    def on_key(self, event: Key) -> None:
+        """Consume all keys; dismiss on keys not handled by bindings."""
+        event.prevent_default()
+        event.stop()
+        if event.key in ("escape", "q", "question_mark"):
+            self.dismiss()

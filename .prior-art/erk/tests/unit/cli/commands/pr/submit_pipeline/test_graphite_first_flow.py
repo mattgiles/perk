@@ -1,0 +1,405 @@
+"""Unit tests for _graphite_first_flow pipeline step."""
+
+from pathlib import Path
+
+from erk.cli.commands.pr.submit_pipeline import (
+    SubmitError,
+    SubmitState,
+    _graphite_first_flow,
+)
+from erk_shared.context.types import GlobalConfig
+from erk_shared.gateway.git.abc import BranchDivergence
+from erk_shared.gateway.github.types import PRDetails
+from tests.fakes.gateway.git import FakeGit
+from tests.fakes.gateway.github import FakeLocalGitHub
+from tests.fakes.gateway.graphite import FakeGraphite
+from tests.test_utils.test_context import context_for_test
+
+
+def _make_state(
+    *,
+    cwd: Path,
+    repo_root: Path | None = None,
+    branch_name: str = "feature",
+    parent_branch: str = "main",
+    trunk_branch: str = "main",
+    use_graphite: bool = True,
+    force: bool = False,
+    debug: bool = False,
+    session_id: str = "test-session",
+    pr_id: str | None = None,
+    pr_number: int | None = None,
+    pr_url: str | None = None,
+    was_created: bool = False,
+    base_branch: str | None = None,
+    graphite_url: str | None = None,
+    diff_file: Path | None = None,
+    plan_context: None = None,
+    title: str | None = None,
+    body: str | None = None,
+) -> SubmitState:
+    return SubmitState(
+        cwd=cwd,
+        repo_root=repo_root if repo_root is not None else cwd,
+        branch_name=branch_name,
+        parent_branch=parent_branch,
+        trunk_branch=trunk_branch,
+        use_graphite=use_graphite,
+        force=force,
+        debug=debug,
+        session_id=session_id,
+        skip_description=False,
+        quiet=False,
+        pr_id=pr_id,
+        pr_number=pr_number,
+        pr_url=pr_url,
+        was_created=was_created,
+        base_branch=base_branch,
+        graphite_url=graphite_url,
+        diff_file=diff_file,
+        plan_context=plan_context,
+        title=title,
+        body=body,
+        existing_pr_body="",
+        graphite_is_authed=True,
+        graphite_branch_tracked=True,
+    )
+
+
+def _pr_details(
+    *,
+    number: int = 42,
+    branch: str = "feature",
+) -> PRDetails:
+    return PRDetails(
+        number=number,
+        url=f"https://github.com/owner/repo/pull/{number}",
+        title="Test PR",
+        body="",
+        state="OPEN",
+        base_ref_name="main",
+        head_ref_name=branch,
+        mergeable="MERGEABLE",
+        merge_state_status="CLEAN",
+        is_draft=False,
+        is_cross_repository=False,
+        owner="owner",
+        repo="repo",
+    )
+
+
+def test_submit_failure_returns_error(tmp_path: Path) -> None:
+    """SubmitError(error_type='graphite_submit_failed') on RuntimeError."""
+    fake_graphite = FakeGraphite(
+        submit_stack_raises=RuntimeError("gt submit failed"),
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        graphite=fake_graphite,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitError)
+    assert result.error_type == "graphite_submit_failed"
+
+
+def test_restack_error_returns_actionable_message(tmp_path: Path) -> None:
+    """SubmitError(error_type='graphite_restack_required') when restack needed."""
+    fake_graphite = FakeGraphite(
+        submit_stack_raises=RuntimeError(
+            "gt submit failed (exit code 1): "
+            "ERROR: You must restack and resolve conflicts with gt restack before submitting."
+        ),
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        graphite=fake_graphite,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitError)
+    assert result.error_type == "graphite_restack_required"
+    assert "gt restack" in result.message
+    assert "erk pr submit" in result.message
+
+
+def test_pr_not_found_after_submit_returns_error(tmp_path: Path) -> None:
+    """SubmitError(error_type='pr_not_found') when no PR after gt submit."""
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub()  # No PRs configured
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitError)
+    assert result.error_type == "pr_not_found"
+
+
+def test_success(tmp_path: Path) -> None:
+    """PR number + graphite URL + was_created=True on success."""
+    pr = _pr_details(number=42, branch="feature")
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub(
+        prs_by_branch={"feature": pr},
+    )
+    fake_git = FakeGit(
+        remote_urls={(tmp_path, "origin"): "git@github.com:owner/repo.git"},
+        repository_roots={tmp_path: tmp_path},
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitState)
+    assert result.pr_number == 42
+    assert result.was_created is True
+    assert result.graphite_url is not None
+    assert "graphite" in result.graphite_url
+
+
+def test_plan_impl_auto_forces_on_divergence(tmp_path: Path) -> None:
+    """Plan impl branch (pr_id set) auto-forces when behind remote; no error returned."""
+    pr = _pr_details(number=42, branch="feature")
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub(
+        prs_by_branch={"feature": pr},
+    )
+    fake_git = FakeGit(
+        remote_urls={(tmp_path, "origin"): "git@github.com:owner/repo.git"},
+        repository_roots={tmp_path: tmp_path},
+        remote_refs={("origin", "feature"): "remote_sha_abc"},
+        branch_heads={"feature": "local_sha_xyz"},
+        branch_divergence={
+            (tmp_path, "feature", "origin"): BranchDivergence(is_diverged=True, ahead=3, behind=2)
+        },
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path, pr_id="7699")
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitState)
+    assert result.pr_number == 42
+
+
+def test_plnd_branch_prefix_auto_forces_on_divergence(tmp_path: Path) -> None:
+    """plnd/ branch prefix auto-forces even without pr_id (retry after cleanup)."""
+    branch = "plnd/delay-impl-context-cleanup"
+    pr = _pr_details(number=42, branch=branch)
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub(
+        prs_by_branch={branch: pr},
+    )
+    fake_git = FakeGit(
+        remote_urls={(tmp_path, "origin"): "git@github.com:owner/repo.git"},
+        repository_roots={tmp_path: tmp_path},
+        remote_refs={("origin", branch): "remote_sha_abc"},
+        branch_heads={branch: "local_sha_xyz"},
+        branch_divergence={
+            (tmp_path, branch, "origin"): BranchDivergence(is_diverged=True, ahead=3, behind=2)
+        },
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    # pr_id is None (cleanup already deleted .erk/impl-context/)
+    state = _make_state(cwd=tmp_path, branch_name=branch, pr_id=None)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitState)
+    assert result.pr_number == 42
+
+
+def test_matching_sha_skips_fetch(tmp_path: Path) -> None:
+    """When local and remote SHAs match, skip fetch and proceed to submit."""
+    pr = _pr_details(number=42, branch="feature")
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub(
+        prs_by_branch={"feature": pr},
+    )
+    same_sha = "abc123def456"
+    fake_git = FakeGit(
+        remote_urls={(tmp_path, "origin"): "git@github.com:owner/repo.git"},
+        repository_roots={tmp_path: tmp_path},
+        remote_refs={("origin", "feature"): same_sha},
+        branch_heads={"feature": same_sha},
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitState)
+    assert result.pr_number == 42
+    # Verify no fetch was performed (SHAs matched, fast-path taken)
+    assert fake_git.remote.fetched_branches == []
+
+
+def test_branch_not_on_remote_skips_divergence_check(tmp_path: Path) -> None:
+    """Branch absent from remote proceeds to gt submit without divergence check."""
+    pr = _pr_details(number=42, branch="feature")
+    fake_graphite = FakeGraphite()
+    fake_github = FakeLocalGitHub(
+        prs_by_branch={"feature": pr},
+    )
+    fake_git = FakeGit(
+        remote_urls={(tmp_path, "origin"): "git@github.com:owner/repo.git"},
+        repository_roots={tmp_path: tmp_path},
+        # remote_refs omitted: get_remote_ref returns None (branch not on remote)
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        github=fake_github,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitState)
+    assert result.pr_number == 42
+
+
+def test_non_plan_branch_errors_on_divergence(tmp_path: Path) -> None:
+    """Non-plan branch (no pr_id) still errors when behind remote."""
+    fake_git = FakeGit(
+        remote_refs={("origin", "feature"): "remote_sha_abc"},
+        branch_heads={"feature": "local_sha_xyz"},
+        branch_divergence={
+            (tmp_path, "feature", "origin"): BranchDivergence(is_diverged=True, ahead=1, behind=3)
+        },
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path, pr_id=None)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitError)
+    assert result.error_type == "remote_diverged"
+
+
+def test_branch_behind_remote_returns_error(tmp_path: Path) -> None:
+    """SubmitError(error_type='remote_diverged') when branch is behind remote."""
+    fake_graphite = FakeGraphite()
+    fake_git = FakeGit(
+        remote_refs={("origin", "feature"): "remote_sha_abc"},
+        branch_heads={"feature": "local_sha_xyz"},
+        branch_divergence={
+            (tmp_path, "feature", "origin"): BranchDivergence(is_diverged=False, ahead=0, behind=3)
+        },
+    )
+    global_config = GlobalConfig(
+        erk_root=Path("/test/erks"),
+        use_graphite=True,
+        shell_setup_complete=False,
+        github_planning=True,
+    )
+    ctx = context_for_test(
+        git=fake_git,
+        graphite=fake_graphite,
+        cwd=tmp_path,
+        global_config=global_config,
+    )
+    state = _make_state(cwd=tmp_path)
+
+    result = _graphite_first_flow(ctx, state)
+
+    assert isinstance(result, SubmitError)
+    assert result.error_type == "remote_diverged"
+    assert "behind" in result.message

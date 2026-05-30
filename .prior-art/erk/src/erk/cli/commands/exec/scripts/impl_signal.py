@@ -1,0 +1,454 @@
+"""Signal implementation events (started/ended/submitted) to GitHub.
+
+This exec command wraps the start/end/submit signaling operations:
+- "started": Posts start comment and marks implementation as started
+- "ended": Marks implementation as ended
+- "submitted": Sets lifecycle_stage to "impl" after PR submission
+
+Provides a single entry point for /erk:plan-implement to signal events
+with graceful failure (always exits 0 for || true pattern).
+
+Usage:
+    erk exec impl-signal started
+    erk exec impl-signal ended
+    erk exec impl-signal submitted
+
+Output:
+    JSON with success status or error information
+    Always exits with code 0 (graceful degradation for || true pattern)
+
+Exit Codes:
+    0: Always (even on error, to support || true pattern)
+
+Examples:
+    $ erk exec impl-signal started
+    {"success": true, "event": "started", "pr_number": 123}
+
+    $ erk exec impl-signal ended
+    {"success": true, "event": "ended", "pr_number": 123}
+
+    $ erk exec impl-signal submitted
+    {"success": true, "event": "submitted", "pr_number": 123}
+"""
+
+import getpass
+import json
+import subprocess
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+import click
+
+from erk_shared.context.helpers import (
+    require_claude_installation,
+    require_cwd,
+    require_git,
+    require_pr_backend,
+    require_repo_root,
+)
+from erk_shared.env import in_github_actions
+from erk_shared.gateway.github.metadata.core import render_erk_issue_event
+from erk_shared.impl_folder import (
+    read_plan_ref,
+    resolve_impl_dir,
+    write_local_run_state,
+)
+from erk_shared.pr_store.types import PrNotFound
+
+
+@dataclass(frozen=True)
+class SignalSuccess:
+    """Success response for signal command."""
+
+    success: bool
+    event: str
+    pr_number: int
+
+
+@dataclass(frozen=True)
+class SignalError:
+    """Error response for signal command."""
+
+    success: bool
+    event: str
+    error_type: str
+    message: str
+
+
+def _output_error(event: str, error_type: str, message: str) -> None:
+    """Output error JSON and exit gracefully."""
+    result = SignalError(
+        success=False,
+        event=event,
+        error_type=error_type,
+        message=message,
+    )
+    click.echo(json.dumps(asdict(result), indent=2))
+    raise SystemExit(0)
+
+
+def _delete_claude_plan_file(ctx: click.Context, session_id: str, cwd: Path) -> bool:
+    """Delete the Claude plan file for the given session.
+
+    This is called when implementation starts to clean up the plan file.
+    The plan content has already been saved to GitHub and snapshotted.
+
+    Args:
+        ctx: Click context for dependency injection.
+        session_id: The session ID to look up the plan slug.
+        cwd: Current working directory for hint.
+
+    Returns:
+        True if file was deleted, False if not found or error.
+    """
+    try:
+        installation = require_claude_installation(ctx)
+    except SystemExit:
+        return False
+
+    slugs = installation.extract_slugs_from_session(cwd, session_id)
+    if not slugs:
+        return False
+
+    plan_file = installation.get_plans_dir_path() / f"{slugs[-1]}.md"
+    if plan_file.exists():
+        plan_file.unlink()
+        return True
+    return False
+
+
+def _get_worktree_name() -> str | None:
+    """Get current worktree name from git worktree list."""
+    try:
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        current_dir = Path.cwd().resolve()
+        lines = result.stdout.strip().split("\n")
+
+        for line in lines:
+            if line.startswith("worktree "):
+                worktree_path = Path(line[len("worktree ") :])
+                if current_dir == worktree_path or current_dir.is_relative_to(worktree_path):
+                    return worktree_path.name
+
+        return None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _get_branch_name() -> str | None:
+    """Get current git branch name."""
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        branch = result.stdout.strip()
+        if branch:
+            return branch
+        return None
+    except subprocess.CalledProcessError:
+        return None
+
+
+def _signal_started(ctx: click.Context, session_id: str | None) -> None:
+    """Handle 'started' event - post comment and update metadata."""
+    event = "started"
+
+    # Validate session_id is provided and non-empty
+    if session_id is None or session_id.strip() == "":
+        _output_error(
+            event,
+            "session-id-required",
+            "Session ID required for impl-signal started. "
+            "Ensure ${CLAUDE_SESSION_ID} is available in the command context.",
+        )
+        return
+
+    # Get cwd from context
+    try:
+        cwd = require_cwd(ctx)
+        git = require_git(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Find impl directory via resolve_impl_dir
+    branch_name = git.branch.get_current_branch(cwd)
+    impl_dir = resolve_impl_dir(cwd, branch_name=branch_name)
+
+    # Read plan reference FIRST (doesn't require context)
+    plan_ref = read_plan_ref(impl_dir) if impl_dir is not None else None
+    if plan_ref is None or impl_dir is None:
+        _output_error(event, "no-plan-reference", "No PR reference found")
+        return
+
+    # Delete Claude plan file if session_id provided
+    # The plan has been saved to GitHub and snapshotted, so it's safe to delete
+    _delete_claude_plan_file(ctx, session_id, cwd)
+
+    # Now get context dependencies (after confirming we need them)
+    try:
+        repo_root = require_repo_root(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Get worktree and branch names
+    worktree_name = _get_worktree_name()
+    if worktree_name is None:
+        _output_error(event, "worktree-detection-failed", "Could not determine worktree name")
+        return
+
+    branch_name = _get_branch_name()
+    if branch_name is None:
+        _output_error(event, "branch-detection-failed", "Could not determine branch name")
+        return
+
+    # Capture metadata
+    timestamp = datetime.now(UTC).isoformat()
+    user = getpass.getuser()
+
+    # Write local state file first (fast, no network)
+    try:
+        write_local_run_state(
+            impl_dir=impl_dir,
+            last_event="started",
+            timestamp=timestamp,
+            user=user,
+            session_id=session_id,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        _output_error(event, "local-state-write-failed", f"Failed to write local state: {e}")
+        return
+
+    # Get ManagedPrBackend from context
+    try:
+        backend = require_pr_backend(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Build comment body
+    description = f"""**Worktree:** `{worktree_name}`
+**Branch:** `{branch_name}`"""
+
+    comment_body = render_erk_issue_event(
+        title="\U0001f680 Starting implementation",
+        metadata=None,
+        description=description,
+    )
+
+    # Build metadata dict
+    metadata: dict[str, object] = {
+        "worktree_name": worktree_name,
+        "branch_name": branch_name,
+        "lifecycle_stage": "impl",
+    }
+    if in_github_actions():
+        metadata["last_remote_impl_at"] = timestamp
+    else:
+        metadata["last_local_impl_at"] = timestamp
+        metadata["last_local_impl_event"] = "started"
+        metadata["last_local_impl_session"] = session_id
+        metadata["last_local_impl_user"] = user
+
+    # Post event (comment + metadata update) via ManagedPrBackend
+    try:
+        backend.post_event(
+            repo_root,
+            plan_ref.pr_id,
+            metadata=metadata,
+            comment=comment_body,
+        )
+    except RuntimeError as e:
+        _output_error(event, "github-api-failed", f"Failed to post event: {e}")
+        return
+
+    result = SignalSuccess(
+        success=True,
+        event=event,
+        pr_number=int(plan_ref.pr_id),
+    )
+    click.echo(json.dumps(asdict(result), indent=2))
+    raise SystemExit(0)
+
+
+def _signal_ended(ctx: click.Context, session_id: str | None) -> None:
+    """Handle 'ended' event - update metadata."""
+    event = "ended"
+
+    # Get cwd from context
+    try:
+        cwd = require_cwd(ctx)
+        git = require_git(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Find impl directory via resolve_impl_dir
+    branch_name = git.branch.get_current_branch(cwd)
+    impl_dir = resolve_impl_dir(cwd, branch_name=branch_name)
+
+    # Read plan reference FIRST (doesn't require context)
+    plan_ref = read_plan_ref(impl_dir) if impl_dir is not None else None
+    if plan_ref is None or impl_dir is None:
+        _output_error(event, "no-plan-reference", "No plan reference found")
+        return
+
+    # Now get context dependencies (after confirming we need them)
+    try:
+        repo_root = require_repo_root(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Capture metadata
+    timestamp = datetime.now(UTC).isoformat()
+    user = getpass.getuser()
+
+    # Write local state file first
+    try:
+        write_local_run_state(
+            impl_dir=impl_dir,
+            last_event="ended",
+            timestamp=timestamp,
+            user=user,
+            session_id=session_id,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        _output_error(event, "local-state-write-failed", f"Failed to write local state: {e}")
+        return
+
+    # Get ManagedPrBackend from context
+    try:
+        backend = require_pr_backend(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Build metadata dict
+    metadata: dict[str, object] = {}
+    if in_github_actions():
+        metadata["last_remote_impl_at"] = timestamp
+    else:
+        metadata["last_local_impl_at"] = timestamp
+        metadata["last_local_impl_event"] = "ended"
+        metadata["last_local_impl_session"] = session_id
+        metadata["last_local_impl_user"] = user
+
+    # Update metadata via ManagedPrBackend (no comment for ended)
+    try:
+        backend.update_metadata(repo_root, plan_ref.pr_id, metadata)
+    except RuntimeError as e:
+        _output_error(event, "github-api-failed", f"Failed to update metadata: {e}")
+        return
+
+    result = SignalSuccess(
+        success=True,
+        event=event,
+        pr_number=int(plan_ref.pr_id),
+    )
+    click.echo(json.dumps(asdict(result), indent=2))
+    raise SystemExit(0)
+
+
+def _signal_submitted(ctx: click.Context, session_id: str | None) -> None:
+    """Handle 'submitted' event - set lifecycle_stage to impl."""
+    event = "submitted"
+
+    # Get cwd from context
+    try:
+        cwd = require_cwd(ctx)
+        git = require_git(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Find impl directory via resolve_impl_dir
+    branch_name = git.branch.get_current_branch(cwd)
+    impl_dir = resolve_impl_dir(cwd, branch_name=branch_name)
+
+    # Read plan reference
+    plan_ref = read_plan_ref(impl_dir) if impl_dir is not None else None
+    if plan_ref is None:
+        _output_error(event, "no-plan-reference", "No PR reference found")
+        return
+
+    # Get repo root
+    try:
+        repo_root = require_repo_root(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Get ManagedPrBackend from context
+    try:
+        backend = require_pr_backend(ctx)
+    except SystemExit:
+        _output_error(event, "context-not-initialized", "Context not initialized")
+        return
+
+    # Build metadata dict with lifecycle_stage transition
+    metadata: dict[str, object] = {
+        "lifecycle_stage": "impl",
+    }
+
+    # LBYL: Check plan exists before updating
+    plan_result = backend.get_managed_pr(repo_root, plan_ref.pr_id)
+    if isinstance(plan_result, PrNotFound):
+        _output_error(event, "plan-not-found", f"PR #{plan_ref.pr_id} not found")
+        return
+
+    # Update metadata via ManagedPrBackend (no comment needed — the PR is already visible)
+    try:
+        backend.update_metadata(repo_root, plan_ref.pr_id, metadata)
+    except RuntimeError as e:
+        _output_error(event, "github-api-failed", f"Failed to update metadata: {e}")
+        return
+
+    result = SignalSuccess(
+        success=True,
+        event=event,
+        pr_number=int(plan_ref.pr_id),
+    )
+    click.echo(json.dumps(asdict(result), indent=2))
+    raise SystemExit(0)
+
+
+@click.command(name="impl-signal")
+@click.argument("event", type=click.Choice(["started", "ended", "submitted"]))
+@click.option(
+    "--session-id",
+    default=None,
+    help="Session ID for PR file deletion on 'started' event",
+)
+@click.pass_context
+def impl_signal(ctx: click.Context, event: str, session_id: str | None) -> None:
+    """Signal implementation events to GitHub.
+
+    EVENT can be 'started', 'ended', or 'submitted'.
+
+    'started' posts a start comment and updates plan metadata.
+    'ended' updates plan metadata with ended event.
+    'submitted' sets lifecycle_stage to "impl" after PR submission.
+
+    When --session-id is provided on 'started', also deletes the Claude plan file
+    (the content has been saved to GitHub and snapshotted).
+
+    Always exits with code 0 for graceful degradation (|| true pattern).
+    """
+    if event == "started":
+        _signal_started(ctx, session_id)
+    elif event == "ended":
+        _signal_ended(ctx, session_id)
+    else:
+        _signal_submitted(ctx, session_id)

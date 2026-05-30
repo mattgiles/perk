@@ -1,0 +1,293 @@
+"""Tests for objective update behavior in erk land-execute command.
+
+After migrating objective update into land-execute, --objective-number
+triggers the objective update inline (after successful merge). Without
+the flag, no Claude calls are made.
+"""
+
+from datetime import UTC, datetime
+
+from click.testing import CliRunner
+
+from erk.cli.cli import cli
+from erk.core.repo_discovery import RepoContext
+from erk_shared.gateway.github.issues.types import IssueInfo
+from erk_shared.gateway.github.types import PRDetails, PullRequestInfo
+from erk_shared.gateway.graphite.types import BranchMetadata
+from tests.fakes.gateway.git import FakeGit
+from tests.fakes.gateway.github import FakeLocalGitHub
+from tests.fakes.gateway.github_issues import FakeGitHubIssues
+from tests.fakes.gateway.graphite import FakeGraphite
+from tests.fakes.tests.prompt_executor import FakePromptExecutor
+from tests.test_utils.env_helpers import erk_inmem_env
+from tests.test_utils.plan_helpers import format_plan_header_body_for_test
+
+
+def _create_plan_issue_with_objective(objective_number: int) -> IssueInfo:
+    """Create a plan issue with objective_issue in plan-header metadata."""
+    body = format_plan_header_body_for_test(
+        created_at=datetime.now(UTC).isoformat(),
+        created_by="testuser",
+        objective_issue=objective_number,
+    )
+    return IssueInfo(
+        number=42,
+        title="P42: Test Plan",
+        body=body,
+        state="OPEN",
+        url="https://github.com/owner/repo/issues/42",
+        labels=["erk-pr"],
+        assignees=[],
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        author="testuser",
+    )
+
+
+def test_land_execute_triggers_objective_update() -> None:
+    """Test that land-execute triggers objective update when --objective-number is passed.
+
+    The objective update runs inline after the merge succeeds, calling Claude
+    to update the linked objective.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_branch = "P42-test-feature"
+        feature_worktree_path = repo_dir / "worktrees" / feature_branch
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", [feature_branch], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "main",
+                feature_worktree_path: feature_branch,
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_worktree_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_worktree_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk(
+                    "main", children=[feature_branch], commit_sha="abc123"
+                ),
+                feature_branch: BranchMetadata.branch(feature_branch, "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                feature_branch: PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Test Feature",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Test Feature",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name=feature_branch,
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        plan_issue = _create_plan_issue_with_objective(objective_number=100)
+        issues_ops = FakeGitHubIssues(username="testuser", issues={42: plan_issue})
+
+        executor = FakePromptExecutor()
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+            prompt_executor=executor,
+        )
+
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                f"--branch={feature_branch}",
+                f"--worktree-path={feature_worktree_path}",
+                "--objective-number=100",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+
+        # land-execute should call the prompt executor for objective update
+        assert len(executor.executed_commands) == 1
+        cmd = executor.executed_commands[0][0]
+        assert "/erk:system:objective-update-with-landed-pr" in cmd
+        assert "--objective 100" in cmd
+        assert "--pr 123" in cmd
+        assert f"--branch {feature_branch}" in cmd
+
+        # Regression: worktree_path must be main repo root (env.cwd), not the feature
+        # worktree path that gets deleted by land-execute. land_execute.py computes
+        # main_repo_root via get_git_common_dir() before the pipeline deletes the worktree.
+        # git_common_dirs maps env.cwd → env.git_dir, so common_dir.parent == env.cwd.
+        worktree_path_used = executor.executed_commands[0][1]
+        assert worktree_path_used == env.cwd, (
+            f"Expected main repo root {env.cwd!r}, got {worktree_path_used!r}. "
+            "worktree_path must be derived from get_git_common_dir(), "
+            "not the feature worktree path."
+        )
+        assert worktree_path_used != feature_worktree_path, (
+            "worktree_path must not be the feature worktree path, "
+            "which is deleted during land-execute."
+        )
+
+        # Should show objective update messages
+        assert "Linked to Objective #100" in result.output
+        assert "Starting objective update..." in result.output
+
+
+def test_land_execute_succeeds_without_objective_number() -> None:
+    """Test that land-execute succeeds without --objective-number.
+
+    When no objective number is provided, no Claude calls are made.
+    """
+    runner = CliRunner()
+    with erk_inmem_env(runner) as env:
+        repo_dir = env.setup_repo_structure()
+        feature_branch = "P42-test-feature"
+        feature_worktree_path = repo_dir / "worktrees" / feature_branch
+
+        git_ops = FakeGit(
+            worktrees=env.build_worktrees("main", [feature_branch], repo_dir=repo_dir),
+            current_branches={
+                env.cwd: "main",
+                feature_worktree_path: feature_branch,
+            },
+            default_branches={env.cwd: "main"},
+            git_common_dirs={env.cwd: env.git_dir, feature_worktree_path: env.git_dir},
+            repository_roots={env.cwd: env.cwd, feature_worktree_path: env.cwd},
+            file_statuses={env.cwd: ([], [], [])},
+        )
+
+        graphite_ops = FakeGraphite(
+            branches={
+                "main": BranchMetadata.trunk(
+                    "main", children=[feature_branch], commit_sha="abc123"
+                ),
+                feature_branch: BranchMetadata.branch(feature_branch, "main", commit_sha="def456"),
+            }
+        )
+
+        github_ops = FakeLocalGitHub(
+            prs={
+                feature_branch: PullRequestInfo(
+                    number=123,
+                    state="OPEN",
+                    url="https://github.com/owner/repo/pull/123",
+                    is_draft=False,
+                    title="Test Feature",
+                    checks_passing=None,
+                    owner="owner",
+                    repo="repo",
+                    has_conflicts=None,
+                ),
+            },
+            pr_details={
+                123: PRDetails(
+                    number=123,
+                    url="https://github.com/owner/repo/pull/123",
+                    title="Test Feature",
+                    body="PR body",
+                    state="OPEN",
+                    is_draft=False,
+                    base_ref_name="main",
+                    head_ref_name=feature_branch,
+                    is_cross_repository=False,
+                    mergeable="MERGEABLE",
+                    merge_state_status="CLEAN",
+                    owner="owner",
+                    repo="repo",
+                )
+            },
+            pr_bases={123: "main"},
+            merge_should_succeed=True,
+        )
+
+        plan_issue = _create_plan_issue_with_objective(objective_number=100)
+        issues_ops = FakeGitHubIssues(username="testuser", issues={42: plan_issue})
+
+        executor = FakePromptExecutor()
+
+        repo = RepoContext(
+            root=env.cwd,
+            repo_name=env.cwd.name,
+            repo_dir=repo_dir,
+            worktrees_dir=repo_dir / "worktrees",
+            pool_json_path=repo_dir / "pool.json",
+        )
+
+        test_ctx = env.build_context(
+            git=git_ops,
+            graphite=graphite_ops,
+            github=github_ops,
+            repo=repo,
+            use_graphite=True,
+            issues=issues_ops,
+            prompt_executor=executor,
+        )
+
+        # No --objective-number — no Claude calls expected
+        result = runner.invoke(
+            cli,
+            [
+                "exec",
+                "land-execute",
+                "--pr-number=123",
+                f"--branch={feature_branch}",
+                f"--worktree-path={feature_worktree_path}",
+                "--use-graphite",
+                "--script",
+            ],
+            obj=test_ctx,
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0
+        # No Claude calls when objective_number is not provided
+        assert len(executor.executed_commands) == 0
+        assert "Linked to Objective" not in result.output

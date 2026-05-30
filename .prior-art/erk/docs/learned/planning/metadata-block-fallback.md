@@ -1,0 +1,75 @@
+---
+title: Plan Content Extraction Fallback
+last_audited: "2026-02-17 00:00 PT"
+audit_result: clean
+read_when:
+  - "extracting plan content from GitHub issue comments"
+  - "debugging 'no plan content found' errors in replan or plan-implement"
+  - "working with older erk-prs that lack metadata blocks"
+tripwires:
+  - action: "assuming plan content is in the issue body"
+    warning: "Schema v2 stores plan content in the FIRST COMMENT, not the issue body. The body contains only the plan-header metadata block. See extract_plan_from_comment() for the extraction logic."
+  - action: "checking only one location when extracting plan content"
+    warning: "Always check both the first comment (plan-body metadata block) and the issue body before reporting 'no plan content found'. The replan command documents this explicitly in Step 4a."
+  - action: "using extract_metadata_prefix() or extract_plan_header_block() for metadata extraction"
+    warning: "These functions are deleted. Use find_metadata_block() from packages/erk-shared/src/erk_shared/gateway/github/metadata/core.py for extraction and render_metadata_block() for rendering."
+  - action: "using PLAN_CONTENT_SEPARATOR for new code"
+    warning: "Metadata blocks are now self-delimiting via HTML comment markers (<!-- erk:metadata-block:{key} -->). PLAN_CONTENT_SEPARATOR is retained for backward compatibility only — new code must not use it."
+  - action: "assuming metadata is at the top of a PR body"
+    warning: "PR body metadata position changed from top to bottom. Do not assume metadata is at the start of the body."
+---
+
+# Plan Content Extraction Fallback
+
+Plans use a two-location storage design with backward-compatible fallback. Understanding why content lives where it does prevents agents from looking in the wrong place and reporting false "no content" errors.
+
+## Why Two Locations Exist
+
+Schema v2 plans split content across two GitHub API objects for a deliberate reason: **fast querying vs. full content**.
+
+| Location      | What it stores                                                | Why                                                                                                                        |
+| ------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Issue body    | `plan-header` metadata block (YAML)                           | Compact structured data for batch queries — worktree name, dispatch status, timestamps. Never contains plan text.          |
+| First comment | `plan-body` metadata block (plan markdown inside `<details>`) | Full plan content. Separating it from the body means listing/filtering issues doesn't require downloading large plan text. |
+
+<!-- Source: erk_shared/plan_store/create_plan_draft_pr.py, create_plan_draft_pr -->
+
+The `create_plan_draft_pr()` function in `erk_shared/plan_store/create_plan_draft_pr.py` orchestrates this: it creates a draft PR with a metadata-only body, then explicitly adds the first comment with the plan content. The comment is not auto-created by GitHub — erk creates it via `add_comment()` and records the `plan_comment_id` back into the issue body for direct lookup.
+
+## The Fallback Chain
+
+<!-- Source: erk_shared/gateway/github/metadata/plan_header.py, extract_plan_from_comment -->
+
+`extract_plan_from_comment()` in `plan_header.py` implements a two-format fallback within the first comment:
+
+1. **New format (primary)**: Look for `<!-- erk:metadata-block:plan-body -->` markers, then extract content from the `<details>` block inside
+2. **Old format (fallback)**: Look for `<!-- erk:plan-content -->` / `<!-- /erk:plan-content -->` markers
+
+The replan command (`/erk:replan`, Step 4a) adds an additional layer: if no plan content is found in the first comment at all, check the issue body directly. This handles legacy issues that predate the body/comment split entirely.
+
+## Three Eras of Plans
+
+The fallback exists because the plan storage format evolved through three eras:
+
+| Era                       | Storage location    | Markers                                                                  | Example             |
+| ------------------------- | ------------------- | ------------------------------------------------------------------------ | ------------------- |
+| **Pre-metadata**          | Issue body directly | None (raw markdown)                                                      | Earliest issues     |
+| **v1 metadata**           | First comment       | `<!-- erk:plan-content -->`                                              | Transitional format |
+| **v2 metadata**           | First comment       | `<!-- erk:metadata-block:plan-body -->` with `<details>`                 | Plans               |
+| **v4 metadata** (current) | PR body / issues    | Self-delimiting `<!-- erk:metadata-block:{key} -->` HTML comment markers | All new plans       |
+
+v4 metadata blocks are self-delimiting via HTML comment markers. Extraction uses `find_metadata_block()` and rendering uses `render_metadata_block()` from `packages/erk-shared/src/erk_shared/gateway/github/metadata/core.py`. The `PLAN_CONTENT_SEPARATOR` constant is retained for backward compatibility only — new code should not use it.
+
+Each extraction layer handles one transition, and together they cover the full history.
+
+## Anti-Patterns
+
+**Only checking one location and failing immediately** — The most common agent mistake. An agent fetches the issue body, sees YAML metadata instead of plan content, and reports "no plan found." The plan is in the first comment, not the body.
+
+**Assuming `plan_comment_id` is always set** — Older plans may not have this field in the plan-header. When it's missing, fall back to fetching the first comment via the GitHub API (e.g., `gh pr view --comments`).
+
+**Ignoring the `<details>` wrapper** — The plan-body block wraps content in a `<details open>` tag for GitHub rendering. Extracting the raw block body without stripping the `<details>` wrapper will include HTML tags in the plan text.
+
+## Related Documentation
+
+- `/erk:replan` command — Step 4a documents the full fallback chain agents should follow

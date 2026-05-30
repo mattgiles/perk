@@ -1,0 +1,51 @@
+"""Objective list service abstraction - ABC for fetching objective list data.
+
+Symmetric with PrListService but encapsulates the knowledge that objectives
+are GitHub issues with the 'erk-objective' label. No labels parameter is exposed.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+from erk_shared.core.pr_list_service import PrListData
+from erk_shared.gateway.github.types import GitHubRepoLocation, IssueFilterState
+
+if TYPE_CHECKING:
+    from erk_shared.gateway.http.abc import HttpClient
+
+
+class ObjectiveListService(ABC):
+    """Abstract interface for fetching objective list data.
+
+    Unlike PrListService, this has no labels parameter — the implementation
+    knows that objectives use the 'erk-objective' label internally.
+    """
+
+    @abstractmethod
+    def get_objective_list_data(
+        self,
+        *,
+        location: GitHubRepoLocation,
+        state: IssueFilterState = "open",
+        limit: int | None = None,
+        skip_workflow_runs: bool = False,
+        creator: str | None = None,
+        exclude_labels: list[str] | None = None,
+        http_client: HttpClient,
+    ) -> PrListData:
+        """Fetch all data needed for objective listing.
+
+        Args:
+            location: GitHub repository location (local root + repo identity)
+            state: Filter by state ("open" or "closed")
+            limit: Maximum number of objectives to return (None for no limit)
+            skip_workflow_runs: If True, skip fetching workflow runs (for performance)
+            creator: Filter by creator username
+            exclude_labels: Labels to exclude from results
+
+        Returns:
+            PrListData containing objectives as plans, PR linkages, and workflow runs
+        """
+        ...

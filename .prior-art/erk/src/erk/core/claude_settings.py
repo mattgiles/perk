@@ -1,0 +1,554 @@
+"""Pure functions for Claude Code settings management.
+
+This module provides functions to read and modify Claude Code settings,
+specifically for managing permissions in the repo's .claude/settings.json.
+"""
+
+import json
+import os
+from collections import defaultdict
+from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+# The permission pattern that allows Claude to run erk commands without prompting
+ERK_PERMISSION = "Bash(erk:*)"
+
+# Hook commands for erk integration
+# These commands check if erk is available before running, gracefully exiting 0 if not.
+# This prevents "command not found" errors when erk is uninstalled or not in PATH.
+ERK_USER_PROMPT_HOOK_COMMAND = (
+    "command -v erk >/dev/null 2>&1 || exit 0; "
+    "ERK_HOOK_ID=user-prompt-hook erk exec user-prompt-hook"
+)
+ERK_EXIT_PLAN_HOOK_COMMAND = (
+    "command -v erk >/dev/null 2>&1 || exit 0; "
+    "ERK_HOOK_ID=exit-plan-mode-hook erk exec exit-plan-mode-hook"
+)
+
+# Statusline command - can be overridden via ERK_STATUSLINE_COMMAND env var for dev mode
+ERK_STATUSLINE_COMMAND = "uvx erk-statusline"
+
+# Ruff format command for PostToolUse hook
+ERK_RUFF_FORMAT_HOOK_COMMAND = (
+    '[[ "${file_path}" == *.py ]] && uv run ruff format "${file_path}" || true'
+)
+
+
+def get_erk_statusline_command() -> str:
+    """Get the statusline command, checking env var for dev mode override.
+
+    Returns:
+        ERK_STATUSLINE_COMMAND env var if set, otherwise "uvx erk-statusline".
+    """
+    return os.environ.get("ERK_STATUSLINE_COMMAND", ERK_STATUSLINE_COMMAND)
+
+
+@dataclass(frozen=True)
+class NoBackupCreated:
+    """Sentinel indicating no backup was created (file didn't exist)."""
+
+
+def get_repo_claude_settings_path(repo_root: Path) -> Path:
+    """Return the path to the repo's Claude settings file.
+
+    Args:
+        repo_root: Path to the repository root
+
+    Returns:
+        Path to {repo_root}/.claude/settings.json
+    """
+    return repo_root / ".claude" / "settings.json"
+
+
+def has_erk_permission(settings: dict) -> bool:
+    """Check if erk permission is configured in Claude settings.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if Bash(erk:*) permission exists in permissions.allow list
+    """
+    permissions = settings.get("permissions", {})
+    allow_list = permissions.get("allow", [])
+    return ERK_PERMISSION in allow_list
+
+
+def has_user_prompt_hook(settings: Mapping[str, Any]) -> bool:
+    """Check if erk UserPromptSubmit hook is configured with current command.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if the erk UserPromptSubmit hook is configured with the CURRENT command
+    """
+    hooks = settings.get("hooks", {})
+    user_prompt_hooks = hooks.get("UserPromptSubmit", [])
+    for entry in user_prompt_hooks:
+        for hook in entry.get("hooks", []):
+            if hook.get("command") == ERK_USER_PROMPT_HOOK_COMMAND:
+                return True
+    return False
+
+
+def has_exit_plan_hook(settings: Mapping[str, Any]) -> bool:
+    """Check if erk ExitPlanMode hook is configured with current command.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if the erk ExitPlanMode PreToolUse hook is configured with the CURRENT command
+    """
+    hooks = settings.get("hooks", {})
+    pre_tool_hooks = hooks.get("PreToolUse", [])
+    for entry in pre_tool_hooks:
+        if entry.get("matcher") == "ExitPlanMode":
+            for hook in entry.get("hooks", []):
+                if hook.get("command") == ERK_EXIT_PLAN_HOOK_COMMAND:
+                    return True
+    return False
+
+
+def has_erk_hook_by_marker(
+    settings: Mapping[str, Any],
+    *,
+    hook_type: str,
+    marker: str,
+    matcher: str | None,
+) -> bool:
+    """Check if an erk hook is configured using the ERK_HOOK_ID marker.
+
+    This detects any erk-managed hook, regardless of the exact command version.
+    Used for capability detection to recognize old hooks that need updating.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+        hook_type: The hook type (e.g., "UserPromptSubmit", "PreToolUse")
+        marker: The marker to search for in the command (e.g., "ERK_HOOK_ID=user-prompt-hook")
+        matcher: Optional matcher value to match (e.g., "ExitPlanMode")
+
+    Returns:
+        True if a hook with the marker is found
+    """
+    hooks = settings.get("hooks", {})
+    hook_entries = hooks.get(hook_type, [])
+    for entry in hook_entries:
+        # If matcher is specified, check it
+        if matcher is not None and entry.get("matcher") != matcher:
+            continue
+        for hook in entry.get("hooks", []):
+            command = hook.get("command", "")
+            if marker in command:
+                return True
+    return False
+
+
+def _is_erk_managed_hook(command: str) -> bool:
+    """Check if a hook command is erk-managed (contains ERK_HOOK_ID=).
+
+    Args:
+        command: The hook command string
+
+    Returns:
+        True if the command contains the ERK_HOOK_ID marker
+    """
+    return "ERK_HOOK_ID=" in command
+
+
+def _is_erk_managed_hook_entry(entry: Mapping[str, Any]) -> bool:
+    """Check if a hook entry contains any erk-managed hooks.
+
+    Args:
+        entry: A hook entry with "matcher" and "hooks" keys
+
+    Returns:
+        True if any hook in the entry is erk-managed
+    """
+    for hook in entry.get("hooks", []):
+        if _is_erk_managed_hook(hook.get("command", "")):
+            return True
+    return False
+
+
+def add_erk_hooks(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a new settings dict with erk hooks added/replaced.
+
+    This is a pure function that doesn't modify the input.
+    Replaces existing erk hooks (identified by ERK_HOOK_ID marker) and adds
+    current versions, while preserving non-erk hooks.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with current erk hooks
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    # Use defaultdict for cleaner hook list initialization
+    hooks: defaultdict[str, list] = defaultdict(list, new_settings.get("hooks", {}))
+
+    # Filter out existing erk hooks from UserPromptSubmit, then add current
+    user_prompt_hooks = hooks.get("UserPromptSubmit", [])
+    hooks["UserPromptSubmit"] = [
+        entry for entry in user_prompt_hooks if not _is_erk_managed_hook_entry(entry)
+    ]
+    hooks["UserPromptSubmit"].append(
+        {
+            "matcher": "*",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": ERK_USER_PROMPT_HOOK_COMMAND,
+                }
+            ],
+        }
+    )
+
+    # Filter out existing erk ExitPlanMode hooks from PreToolUse, then add current
+    pre_tool_hooks = hooks.get("PreToolUse", [])
+    hooks["PreToolUse"] = [
+        entry
+        for entry in pre_tool_hooks
+        if not (entry.get("matcher") == "ExitPlanMode" and _is_erk_managed_hook_entry(entry))
+    ]
+    hooks["PreToolUse"].append(
+        {
+            "matcher": "ExitPlanMode",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": ERK_EXIT_PLAN_HOOK_COMMAND,
+                }
+            ],
+        }
+    )
+
+    new_settings["hooks"] = dict(hooks)
+    return new_settings
+
+
+def add_erk_permission(settings: dict) -> dict:
+    """Return a new settings dict with erk permission added.
+
+    This is a pure function that doesn't modify the input.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with Bash(erk:*) added to permissions.allow
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    # Ensure permissions.allow exists
+    if "permissions" not in new_settings:
+        new_settings["permissions"] = {}
+    if "allow" not in new_settings["permissions"]:
+        new_settings["permissions"]["allow"] = []
+
+    # Add permission if not present
+    if ERK_PERMISSION not in new_settings["permissions"]["allow"]:
+        new_settings["permissions"]["allow"].append(ERK_PERMISSION)
+
+    return new_settings
+
+
+def read_claude_settings(settings_path: Path) -> dict | None:
+    """Read and parse Claude settings from disk.
+
+    Args:
+        settings_path: Path to settings.json file
+
+    Returns:
+        Parsed settings dict, or None if file doesn't exist
+
+    Raises:
+        json.JSONDecodeError: If file contains invalid JSON
+        OSError: If file cannot be read
+    """
+    if not settings_path.exists():
+        return None
+
+    content = settings_path.read_text(encoding="utf-8")
+    return json.loads(content)
+
+
+def write_claude_settings(settings_path: Path, settings: dict) -> Path | NoBackupCreated:
+    """Write Claude settings to disk.
+
+    Creates a backup of the existing file before writing (if it exists).
+
+    Args:
+        settings_path: Path to settings.json file
+        settings: Settings dict to write
+
+    Returns:
+        Path to backup file if created, NoBackupCreated sentinel otherwise.
+
+    Raises:
+        PermissionError: If unable to write to file
+        OSError: If unable to write to file
+    """
+    # Create backup of existing file (if it exists)
+    backup_result: Path | NoBackupCreated
+    if settings_path.exists():
+        backup_path = settings_path.with_suffix(".json.bak")
+        backup_path.write_bytes(settings_path.read_bytes())
+        backup_result = backup_path
+    else:
+        backup_result = NoBackupCreated()
+
+    # Ensure parent directory exists
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write with pretty formatting to match Claude's style
+    content = json.dumps(settings, indent=2)
+    settings_path.write_text(content, encoding="utf-8")
+
+    return backup_result
+
+
+@dataclass(frozen=True)
+class StatuslineConfig:
+    """Represents the current statusline configuration."""
+
+    type: str
+    command: str
+
+
+@dataclass(frozen=True)
+class StatuslineNotConfigured:
+    """Sentinel indicating statusline is not configured."""
+
+
+def has_statusline_configured(settings: dict) -> bool:
+    """Check if statusLine is configured in Claude settings.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if statusLine configuration exists
+    """
+    return "statusLine" in settings
+
+
+def get_statusline_config(settings: dict) -> StatuslineConfig | StatuslineNotConfigured:
+    """Get the current statusline configuration from settings.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        StatuslineConfig if configured, StatuslineNotConfigured otherwise
+    """
+    statusline = settings.get("statusLine")
+    if statusline is None:
+        return StatuslineNotConfigured()
+
+    statusline_type = statusline.get("type")
+    command = statusline.get("command")
+
+    if statusline_type is None or command is None:
+        return StatuslineNotConfigured()
+
+    return StatuslineConfig(type=statusline_type, command=command)
+
+
+def has_erk_statusline(settings: dict) -> bool:
+    """Check if erk-statusline is already configured.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if statusLine is configured with a command containing "erk-statusline"
+    """
+    config = get_statusline_config(settings)
+    if isinstance(config, StatuslineNotConfigured):
+        return False
+    # Accept any command containing "erk-statusline" (with or without uvx prefix)
+    return "erk-statusline" in config.command
+
+
+def add_erk_statusline(settings: dict) -> dict:
+    """Return a new settings dict with erk-statusline configured.
+
+    This is a pure function that doesn't modify the input.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with statusLine configured
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    new_settings["statusLine"] = {
+        "type": "command",
+        "command": get_erk_statusline_command(),
+    }
+
+    return new_settings
+
+
+def has_ruff_format_hook(settings: Mapping[str, Any]) -> bool:
+    """Check if ruff format PostToolUse hook is configured.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        True if a PostToolUse hook with Write|Edit matcher and ruff format command exists
+    """
+    hooks = settings.get("hooks", {})
+    post_tool_hooks = hooks.get("PostToolUse", [])
+    for entry in post_tool_hooks:
+        if entry.get("matcher") == "Write|Edit":
+            for hook in entry.get("hooks", []):
+                command = hook.get("command", "")
+                if "ruff format" in command:
+                    return True
+    return False
+
+
+def add_ruff_format_hook(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a new settings dict with ruff format PostToolUse hook added.
+
+    This is a pure function that doesn't modify the input.
+    Adds the hook while preserving existing settings.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with ruff format PostToolUse hook added
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    # Use defaultdict for cleaner hook list initialization
+    hooks: defaultdict[str, list] = defaultdict(list, new_settings.get("hooks", {}))
+
+    # Add PostToolUse hook if missing
+    if not has_ruff_format_hook(settings):
+        hooks["PostToolUse"].append(
+            {
+                "matcher": "Write|Edit",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ERK_RUFF_FORMAT_HOOK_COMMAND,
+                    }
+                ],
+            }
+        )
+
+    new_settings["hooks"] = dict(hooks)
+    return new_settings
+
+
+def remove_erk_statusline(settings: dict) -> dict:
+    """Return a new settings dict with statusLine removed.
+
+    This is a pure function that doesn't modify the input.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with statusLine key removed
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    # Remove statusLine if present
+    if "statusLine" in new_settings:
+        del new_settings["statusLine"]
+
+    return new_settings
+
+
+def remove_ruff_format_hook(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a new settings dict with ruff format hook removed.
+
+    This is a pure function that doesn't modify the input.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with ruff format hook removed from PostToolUse
+    """
+    # Deep copy to avoid mutating input
+    new_settings: dict[str, Any] = json.loads(json.dumps(settings))
+
+    hooks = new_settings.get("hooks", {})
+    post_tool_hooks = hooks.get("PostToolUse", [])
+
+    # Filter out the ruff format hook
+    new_post_tool_hooks = []
+    for entry in post_tool_hooks:
+        if entry.get("matcher") == "Write|Edit":
+            # Check if this entry contains ruff format command
+            has_ruff = False
+            for hook in entry.get("hooks", []):
+                if "ruff format" in hook.get("command", ""):
+                    has_ruff = True
+                    break
+            if has_ruff:
+                continue
+        new_post_tool_hooks.append(entry)
+
+    if new_post_tool_hooks:
+        hooks["PostToolUse"] = new_post_tool_hooks
+    elif "PostToolUse" in hooks:
+        del hooks["PostToolUse"]
+
+    if hooks:
+        new_settings["hooks"] = hooks
+    elif "hooks" in new_settings:
+        del new_settings["hooks"]
+
+    return new_settings
+
+
+def remove_erk_permission(settings: dict) -> dict:
+    """Return a new settings dict with Bash(erk:*) permission removed.
+
+    This is a pure function that doesn't modify the input.
+
+    Args:
+        settings: Parsed Claude settings dictionary
+
+    Returns:
+        New settings dict with Bash(erk:*) removed from permissions.allow
+    """
+    # Deep copy to avoid mutating input
+    new_settings = json.loads(json.dumps(settings))
+
+    permissions = new_settings.get("permissions", {})
+    allow_list = permissions.get("allow", [])
+
+    if ERK_PERMISSION in allow_list:
+        allow_list = [p for p in allow_list if p != ERK_PERMISSION]
+
+    if allow_list:
+        permissions["allow"] = allow_list
+    elif "allow" in permissions:
+        del permissions["allow"]
+
+    if permissions:
+        new_settings["permissions"] = permissions
+    elif "permissions" in new_settings:
+        del new_settings["permissions"]
+
+    return new_settings
