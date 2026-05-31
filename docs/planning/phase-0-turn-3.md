@@ -4,7 +4,7 @@ Detailed execution plan for **T3** of [phase-0-plan.md](./phase-0-plan.md). T3 b
 read/write helpers** for the two non-GitHub state tiers — the `.pi/workflow/` **cache** (tier-2,
 both planes) and the `perk:workflow-state` **session entry** (tier-3, extension) — plus the
 `run_id`/`PERK_RUN_ID` plumbing that links them. It implements the contracts T2 locked
-([`shared/contracts.md`](../shared/contracts.md) §8.1–§8.3) with **zero workflow semantics** on
+([`shared/contracts.md`](../../shared/contracts.md) §8.1–§8.3) with **zero workflow semantics** on
 top. This is the substrate T4's launch primitive and every Phase-1 stage handler will call.
 
 > **Scope discipline.** T3 builds **state-tiering primitives only**: ULID mint/derive, the
@@ -62,7 +62,7 @@ load-bearing:
   the `cache.*` / `session.workflow-state` vocabulary are the T2-locked source of truth.
 - **Source decisions:** `Q1` (single `perk:workflow-state` entry, per-field LWW), `Q2`
   (`.pi/workflow/` layout + ULID `run_id` + `PERK_RUN_ID` channel), `Q3` (tiered verified
-  linkage). These were resolved in [foundation-open-questions.md](./foundation-open-questions.md).
+  linkage). These were resolved in [foundation-open-questions.md](../foundation-open-questions.md).
 - **Pi mechanics (confirmed against pi--best-practices.md §3–§4, §8 and the installed SDK docs):**
   `pi.appendEntry(customType, data)` persists a custom entry that does **not** enter LLM context;
   rebuild by scanning `ctx.sessionManager.getBranch()` for
@@ -205,7 +205,7 @@ absent (not an exception); `mark_handoff_consumed` is idempotent and sets `consu
 (defaulting `{run_id}` plus any provided fields), print the bare run_id on **stdout**.
 `perk state show [--run-id <id>]` → with an id, dump that run's handoff (incl. `consumed`),
 markers, and scratch listing; without, list known runs. Thin adapters over `run_id.py`/`cache.py`,
-per [python-cli-guidelines.md](./python-cli-guidelines.md) (human → stderr via `user_output`,
+per [python-cli-guidelines.md](../python-cli-guidelines.md) (human → stderr via `user_output`,
 data → stdout via `machine_output`).
 *Accept:* `RID=$(perk state new-run --handoff '{"mode":"read-only"}')` prints a ULID and writes
 `handoff/<RID>.json`.

@@ -1,8 +1,8 @@
 # Phase 0 Plan — Skeleton + dogfood substrate (borrow)
 
-This decomposes **[ROADMAP.md](./ROADMAP.md) § Phase 0** into landable work units ("turns").
+This decomposes **[ROADMAP.md](../ROADMAP.md) § Phase 0** into landable work units ("turns").
 It assumes the locked foundational decisions and the Q1–Q13 resolutions in
-[foundation-open-questions.md](./foundation-open-questions.md); references below point at the
+[foundation-open-questions.md](../foundation-open-questions.md); references below point at the
 decision (`foundational #N`) or question (`QN`) that governs a deliverable.
 
 **What Phase 0 delivers.** A `perk init`-scaffolded, `perk doctor`-healthy repo carrying: the

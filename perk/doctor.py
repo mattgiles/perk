@@ -151,15 +151,17 @@ def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
         group = _MANAGED_GROUP.get(mc.name, "repository")
         try:
             drift = mc.converge(False)
-        except UserFacingCliError as exc:
-            # No silent pass: an unverifiable managed piece fails loudly, never reads as ok.
+        except (UserFacingCliError, OSError) as exc:
+            # No silent pass: an unverifiable managed piece (malformed file, or one we cannot
+            # even read) fails loudly with the reason in `detail`, never reads as a silent ok.
+            detail = exc.format_message() if isinstance(exc, UserFacingCliError) else str(exc)
             checks.append(
                 Check(
                     mc.name,
                     group,
                     "fail",
                     f"{mc.name} unverifiable",
-                    exc.format_message(),
+                    detail,
                     "Fix the file, then re-run 'perk init'.",
                 )
             )
@@ -309,7 +311,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     repairs, then re-verifies so the exit code reflects the *post-fix* state. doctor's fixes are
     non-destructive (re-converge managed blocks; seed *missing* config only) so it never prompts.
     """
-    self_repo = init._is_self_repo(root)
+    self_repo = init.is_self_repo(root)
     checks = _build_checks(root, self_repo, verify=verify)
     fixed: list[str] = []
     if fix:

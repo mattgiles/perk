@@ -197,7 +197,7 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
 perk version: {__version__}"""
 
 
-def _is_self_repo(root: Path) -> bool:
+def is_self_repo(root: Path) -> bool:
     """True if ``root`` is perk's own source tree (``[tool.perk] self = true``)."""
     pyproject = root / "pyproject.toml"
     if not pyproject.is_file():
@@ -453,7 +453,7 @@ def run_init(
                 "missing_tool", f"Missing or outdated required tool(s): {missing}.", checks
             )
 
-    self_repo = _is_self_repo(root)
+    self_repo = is_self_repo(root)
     changes: list[str] = []
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))

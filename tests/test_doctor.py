@@ -6,7 +6,10 @@ Three layers (phase-0-turn-6 §6.f / §10.7):
 - **coherence guard**: every required capability has a doctor check (the D2 SSOT, on coverage).
 """
 
+import os
 import shutil
+
+import pytest
 
 from perk import capabilities, init
 from perk.cli.commands import doctor_cmd
@@ -134,6 +137,22 @@ def test_no_silent_pass_on_unverifiable_check(git_repo):
     report = run_doctor(git_repo, verify=False)
     settings = next(c for c in report.checks if c.name == "settings-wiring")
     assert settings.status == "fail"  # un-evaluable -> fail, never a silent ok
+
+
+def test_unreadable_managed_file_is_fail_not_crash(git_repo):
+    _scaffold(git_repo)
+    agents = git_repo / "AGENTS.md"
+    agents.chmod(0o000)
+    # Skip-guard: root (and some CI) can read through a 0o000 mode, so the boundary never trips.
+    if os.access(agents, os.R_OK):
+        agents.chmod(0o644)
+        pytest.skip("cannot revoke read access (likely running as root)")
+    try:
+        report = run_doctor(git_repo, verify=False)  # must not raise
+    finally:
+        agents.chmod(0o644)
+    agents_block = next(c for c in report.checks if c.name == "agents-block")
+    assert agents_block.status == "fail"  # un-readable -> fail, never a crash
 
 
 def test_self_vs_consumer_dual_mode(git_repo):

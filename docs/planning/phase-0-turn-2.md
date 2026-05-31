@@ -1,7 +1,7 @@
 # Phase 0 · Turn 2 — Author & lock the shared contracts
 
 Detailed execution plan for **T2** of [phase-0-plan.md](./phase-0-plan.md). T2 turns the
-Q1–Q13 decisions (see [foundation-open-questions.md](./foundation-open-questions.md)) into
+Q1–Q13 decisions (see [foundation-open-questions.md](../foundation-open-questions.md)) into
 **concrete, parseable files in `shared/`** and makes "lock before building" executable via a
 **self-check that runs on both planes**. It is the first turn that *may* be authored in borrowed
 plan mode (the T1 crossover is green).
@@ -168,7 +168,7 @@ fixture.
 A `perk registry` group with `check` (run the validator; human summary to stderr; non-zero exit +
 `UserFacingCliError` on issues; optional `--json` for CI) and `show` (dump the parsed registry —
 a dev/doctor convenience, **not** an agent data path). Thin adapters over `perk/registry.py`, per
-[python-cli-guidelines.md](./python-cli-guidelines.md).
+[python-cli-guidelines.md](../python-cli-guidelines.md).
 *Accept:* hard-gate check 1.
 
 ### T2.e — TS loader + sentinel extension (`extension/registry.ts`, `index.ts`)

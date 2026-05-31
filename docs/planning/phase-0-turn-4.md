@@ -1,7 +1,7 @@
 # Phase 0 · Turn 4 — CLI exterior core (config, worktrees, launch, registry→subcommands)
 
 Detailed execution plan for **T4** of [phase-0-plan.md](./phase-0-plan.md). T4 builds the
-session **exterior** ([cli-vs-pi.md](./cli-vs-pi.md) §2.2): the TOML config loader, the
+session **exterior** ([cli-vs-pi.md](../cli-vs-pi.md) §2.2): the TOML config loader, the
 registry-generated `perk <stage>` subcommands, the worktree lifecycle, and the **process-launch
 primitive** that closes the loop T3 opened — the shell mints a `run_id`, launches `pi`, and the
 T3 extension claims it. It also extends `perk init` to scaffold config + converge `.gitignore`.

@@ -18,3 +18,34 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
 
 perk version: 0.0.1
 <!-- END perk managed -->
+
+## Developing perk
+
+*Conventions for working **on** perk itself (distinct from the managed block above, which is for
+repos **using** perk and is owned by `perk init` — never hand-edit between its markers).*
+
+- **Two planes, one contract.** The Python `perk` CLI is the session **exterior** (scaffolding,
+  worktrees, run-id minting, launching `pi`); the TypeScript extension is the **interior**
+  (in-session stage transitions + state). Anything both planes must agree on lives in `shared/`
+  (the stage registry + `contracts.md`) and is read directly by each — no codegen. Put logic in the
+  plane that owns its lifecycle; reach across only through `shared/`.
+- **Verify-gate discipline.** Every turn ships a `scripts/verify-tN.sh` hard gate of runnable,
+  CI-robust checks; `just verify` runs them cumulatively and `just ci` must stay green. Each phase
+  ends on a **dogfood gate** — perk must be able to drive the next phase before that phase starts.
+- **Per-turn doc + §-outcomes.** Plan a turn (decisions + prior-art pass) in
+  `docs/planning/phase-N-turn-M.md` **before** implementing; after it lands, record what *actually*
+  got built (deviations, refinements, deferrals) in that doc's final “outcomes” section. Plan bodies
+  are historical records once written — reconcile via outcomes, don't rewrite history.
+- **Amend the contract, don't drift.** If an implementation changes cross-plane *behavior*, amend
+  `shared/contracts.md` in the **same turn**.
+- **`init` converges forward; `doctor --fix` repairs.** New desired state goes into `init`'s
+  idempotent convergence; one-off/legacy repairs go into `doctor --fix` — keep `init` a clean
+  forward path, never a pile of version branches.
+- **Don't author fiction for unbuilt components.** Lock *shapes* (the registry's stage graph, the
+  contract specs) but leave drift-prone detail (per-stage `requires`/`reads`/`writes` values) empty
+  until the handler exists. Flag deferrals explicitly rather than silently omitting.
+- **dignified-python is the Python standard** (see `.agents/skills/dignified-python/`): modern type
+  syntax, no `from __future__ import annotations` (3.13), pathlib, explicit `check=`/`timeout=` on
+  every `subprocess.run` routed through one wrapper, error boundaries that report (never silent).
+- **Two pinned toolchains, wired through `just`.** Python = uv + ruff + ty; TypeScript = npm + Biome
+  + tsc. Use `uv run` / `uvx` (never bare `python`/`pip`); scope `ruff` to `perk tests`.
