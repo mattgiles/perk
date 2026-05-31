@@ -5,3 +5,18 @@
 /.claude/skills/
 /.agents/cache/
 # END skills managed runtime artifacts
+
+# dev / build artifacts
+.venv/
+__pycache__/
+*.egg-info/
+dist/
+build/
+node_modules/
+*.tgz
+.pi/workflow/.perk-loaded
+
+# BEGIN perk managed
+/.pi/npm/
+/.pi/git/
+# END perk managed

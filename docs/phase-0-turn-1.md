@@ -343,3 +343,43 @@ The five hard-gate checks in §9 pass via `scripts/verify-t1.sh` on a fresh clon
 pass; `perk init` is idempotent and owns all Pi wiring; both artifacts physically bundle
 `shared/`. The crossover smoke is recorded (pass or deferred). T1 lands; T2 can begin — and, if
 the crossover passed, T2 may be authored in borrowed plan mode.
+
+---
+
+## 14. T1 outcomes (recorded after implementation)
+
+**Status: implemented; hard gate ALL PASS (stable ×3); crossover smoke GREEN.**
+
+**Spike (T1.0) findings — all green:**
+- `pi -e <ext>` loads an extension; **`session_start` fires in print mode with `hasUI=false`**,
+  and an env-gated sentinel write is a reliable scriptable load proof.
+- A **local-path package** entry `".."` in `.pi/settings.json` loads perk's own package via its
+  `pi` manifest (dev wiring confirmed).
+- `shared/` resolves via `../shared` from the extension (TS) and via force-include/sibling
+  fallback (Python) — in both editable-dev and built artifacts.
+- **Borrowed `npm:` packages auto-install under mise with no `npmCommand`** ("added … in 2s");
+  all five borrowed names exist on npm (`@tombell/pi-plan` 0.0.3, `@juicesharp/rpiv-todo` 1.16.1,
+  `@tombell/pi-diff` 0.0.3, `@tombell/pi-status` 0.0.5, `pi-powerline-footer` 0.5.6).
+
+**Choices locked (§5):** `@perk/pi` + PyPI `perk`, version `0.0.1`, **hatchling**, Python `>=3.11`,
+dev wiring = local-path `".."` package, status bar = `@tombell/pi-status`, self-detection =
+`[tool.perk] self = true` in `pyproject.toml`, load proof = `PERK_SELFCHECK` env-gated sentinel.
+
+**§3 correction confirmed.** No agent-stuff-style "list-twice" manifest is needed: `shared/` is
+bundled *data* and borrowed packages are independent `npm:` entries. The real dev-vs-installed
+work was **self-vs-consumer wiring** + a **per-plane `shared/` resolver**, both implemented.
+phase-0-plan.md's T1 "dual-path manifest" bullet has been updated to match.
+
+**Gotchas (for later turns' tooling):**
+- macOS has **no `timeout`** — use a background-kill watchdog, and only for `pi` (which can
+  hang); `uv build`/`npm pack` self-terminate and must not be watchdog-wrapped.
+- `unzip -l … | grep -q` under `set -o pipefail` is **nondeterministic** (grep closes the pipe on
+  match → unzip dies with SIGPIPE/141 → pipefail fails the check). Use Python `zipfile`/`tarfile`
+  membership for artifact checks instead.
+- Pre-existing env quirk: a stray `~/.pi/agent/settings.json.lock` file emits a benign warning on
+  every `pi` launch; not ours, not blocking.
+
+**Still open (registry/publish, not gating):** `@perk/pi` and PyPI `perk` name *availability* was
+not claimed (nothing published in T1); npm publish + PyPI release tooling is a later concern.
+
+**Verify:** `bash scripts/verify-t1.sh` (5/5 PASS) and `pytest` (4 passed).

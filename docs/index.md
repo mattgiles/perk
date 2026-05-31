@@ -37,6 +37,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 
 | Doc | What it is |
 |---|---|
+| [python-cli-guidelines.md](./python-cli-guidelines.md) | House style for perk's **Click**-based Python CLI: the three-layer command pattern, context DI, option/flag conventions, two-tier validation, `UserFacingCliError`, `\b` help text, human-vs-machine output, group structure, and testing. Distilled from the erk prior-art. |
 | [cli-vs-pi.md](./cli-vs-pi.md) | The CLI/extension separation: **boundary = the session; authority follows the actor.** The CLI owns the exterior, the extension owns the interior; they coordinate only through durable state, process launch, and a shared static schema. Defines **stage parity** (warm/cold-local/cold-remote doors from one stage registry). |
 
 ## Explainers (interactive HTML)

@@ -78,11 +78,13 @@ the **minimal `perk init`** so that *all* Pi-extension wiring is owned by `init`
 - `shared/` directory (placeholder for now) + **build-time bundling** into both artifacts:
   wheel `package-data` for Python, npm `files` (or a prepublish copy step) for the extension —
   so runtime never depends on repo layout (`Q12`).
-- **Dev-vs-installed resource manifest** (agent-stuff §2): the extension's `package.json` `pi`
-  field must resolve **both** in-repo (workspace-relative paths) **and** when installed as a
-  dependency (`node_modules/…` paths), so the package perk develops *is* the package it ships and
-  `perk init` installs. This dual-path manifest is the concrete mechanism behind the crossover and
-  the **highest-risk unknown in Phase 0**.
+- **Dev-vs-installed wiring** (corrected & confirmed in T1 — see phase-0-turn-1.md §3/§14;
+  supersedes an earlier "dual-path manifest" framing). perk needs **no** agent-stuff-style
+  list-twice manifest: `shared/` is bundled *data* (not a Pi resource) and borrowed packages are
+  independent `npm:` entries. The real work is (a) **self-vs-consumer extension wiring** — `init`
+  lists perk's own package as a local path (`".."`) in perk's own repo, `npm:@perk/pi` in a
+  consumer — and (b) a **`shared/` resolver per plane** (installed bundle → editable repo-sibling
+  fallback). This was the highest-risk unknown; it is now validated end-to-end.
 - A **minimal, idempotent `perk init`** that owns the Pi wiring (the init spine begins here):
   write/update `.pi/settings.json` to load perk's own (no-op) extension via local install;
   install the **borrowed default set** (`@tombell/pi-plan`, `@juicesharp/rpiv-todo`,
