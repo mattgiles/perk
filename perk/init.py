@@ -12,10 +12,11 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 
 import json
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk import __version__, capabilities, env, git, github
+from perk import __version__, cache, capabilities, env, git, github
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 from perk.env import EnvCheck
@@ -225,10 +226,8 @@ def _desired_packages(self_repo: bool) -> list[str]:
     return [own, *BORROWED_PACKAGES]
 
 
-def _converge_settings(root: Path, self_repo: bool, changes: list[str]) -> None:
-    pi_dir = root / ".pi"
-    pi_dir.mkdir(parents=True, exist_ok=True)
-    settings_path = pi_dir / "settings.json"
+def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
+    settings_path = root / ".pi" / "settings.json"
 
     old_text = settings_path.read_text(encoding="utf-8") if settings_path.is_file() else None
     try:
@@ -270,21 +269,33 @@ def _converge_settings(root: Path, self_repo: bool, changes: list[str]) -> None:
 
     settings["packages"] = packages
     new_text = json.dumps(settings, indent=2) + "\n"
-    if new_text != old_text:
+    if new_text == old_text:
+        return []
+    if apply:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(new_text, encoding="utf-8")
-        changes.append(
-            f".pi/settings.json: added {', '.join(added)}"
-            if added
-            else ".pi/settings.json: normalized"
-        )
+    return [
+        f".pi/settings.json: added {', '.join(added)}" if added else ".pi/settings.json: normalized"
+    ]
 
 
-def _converge_workflow_dir(root: Path, changes: list[str]) -> None:
-    gitkeep = root / ".pi" / "workflow" / ".gitkeep"
-    if not gitkeep.is_file():
-        gitkeep.parent.mkdir(parents=True, exist_ok=True)
-        gitkeep.write_text("", encoding="utf-8")
-        changes.append(".pi/workflow/: created")
+def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
+    """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
+    (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
+    init creates it and ``perk doctor`` verifies the very same shape (D2)."""
+    workflow = root / ".pi" / "workflow"
+    gitkeep = workflow / ".gitkeep"
+    need_gitkeep = not gitkeep.is_file()
+    missing_subdirs = [sub for sub in cache.SUBDIRS if not (workflow / sub).is_dir()]
+    if not need_gitkeep and not missing_subdirs:
+        return []
+    if apply:
+        workflow.mkdir(parents=True, exist_ok=True)
+        if need_gitkeep:
+            gitkeep.write_text("", encoding="utf-8")
+        for sub in missing_subdirs:
+            (workflow / sub).mkdir(parents=True, exist_ok=True)
+    return [".pi/workflow/: created"]
 
 
 def _converge_config(
@@ -327,10 +338,10 @@ def _apply_managed_block(
     begin: str,
     end: str,
     inner: str,
-    changes: list[str],
     label: str,
     header_if_new: str = "",
-) -> None:
+    apply: bool = True,
+) -> list[str]:
     block = f"{begin}\n{inner.rstrip(chr(10))}\n{end}\n"
     old = path.read_text(encoding="utf-8") if path.is_file() else None
 
@@ -348,9 +359,66 @@ def _apply_managed_block(
         new = base + block
         verb = "created"
 
-    if new != old:
+    if new == old:
+        return []
+    if apply:
         path.write_text(new, encoding="utf-8")
-        changes.append(f"{label}: {verb}")
+    return [f"{label}: {verb}"]
+
+
+@dataclass(frozen=True)
+class ManagedConvergence:
+    """One structural managed piece, as a dry-run/apply convergence (the D2 SSOT).
+
+    ``run_init`` applies these (``apply=True``); ``perk doctor`` calls them with
+    ``apply=False`` to verify drift and ``apply=True`` to fix it. ``covers`` lists the
+    capability names this convergence verifies (the coherence guard asserts full coverage).
+    """
+
+    name: str
+    covers: tuple[str, ...]
+    converge: Callable[[bool], list[str]]
+
+
+def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence]:
+    """The shared structural convergences: ``init`` applies, ``doctor`` verifies/fixes."""
+    return [
+        ManagedConvergence(
+            "settings-wiring",
+            ("perk-extension", "borrowed-packages", "settings-wiring"),
+            lambda apply: _converge_settings(root, self_repo, apply=apply),
+        ),
+        ManagedConvergence(
+            "workflow-dir",
+            ("workflow-dir",),
+            lambda apply: _converge_workflow_dir(root, apply=apply),
+        ),
+        ManagedConvergence(
+            "gitignore-block",
+            ("gitignore-block",),
+            lambda apply: _apply_managed_block(
+                root / ".gitignore",
+                begin=GITIGNORE_BEGIN,
+                end=GITIGNORE_END,
+                inner=GITIGNORE_BODY,
+                label=".gitignore",
+                apply=apply,
+            ),
+        ),
+        ManagedConvergence(
+            "agents-block",
+            ("agents-block",),
+            lambda apply: _apply_managed_block(
+                root / "AGENTS.md",
+                begin=AGENTS_BEGIN,
+                end=AGENTS_END,
+                inner=_agents_inner(),
+                label="AGENTS.md",
+                header_if_new="# AGENTS\n",
+                apply=apply,
+            ),
+        ),
+    ]
 
 
 def run_init(
@@ -387,26 +455,9 @@ def run_init(
 
     self_repo = _is_self_repo(root)
     changes: list[str] = []
-    _converge_settings(root, self_repo, changes)
-    _converge_workflow_dir(root, changes)
+    for mc in managed_convergences(root, self_repo):
+        changes.extend(mc.converge(True))
     _converge_config(root, changes, force=force, interactive=interactive)
-    _apply_managed_block(
-        root / ".gitignore",
-        begin=GITIGNORE_BEGIN,
-        end=GITIGNORE_END,
-        inner=GITIGNORE_BODY,
-        changes=changes,
-        label=".gitignore",
-    )
-    _apply_managed_block(
-        root / "AGENTS.md",
-        begin=AGENTS_BEGIN,
-        end=AGENTS_END,
-        inner=_agents_inner(),
-        changes=changes,
-        label="AGENTS.md",
-        header_if_new="# AGENTS\n",
-    )
 
     github_report: GitHubReport | None = None
     if verify:

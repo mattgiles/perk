@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-_SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
+# The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
+SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
 
 def workflow_dir(root: Path) -> Path:
@@ -22,7 +23,7 @@ def workflow_dir(root: Path) -> Path:
 def ensure_layout(root: Path) -> Path:
     """Idempotently create the four ``.pi/workflow/`` subtrees; return the dir."""
     wd = workflow_dir(root)
-    for sub in _SUBDIRS:
+    for sub in SUBDIRS:
         (wd / sub).mkdir(parents=True, exist_ok=True)
     return wd
 

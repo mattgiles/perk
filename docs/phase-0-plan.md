@@ -280,6 +280,7 @@ done" is an explicit, visible gate rather than an implicit tail of T6.
 
 **Deliverables.**
 - Finalize `AGENTS.md` / conventions against what actually got built.
+- Bulk up `README.md` to reflect current state.
 - Demonstrate the gate end-to-end.
 
 **Acceptance gate (the ROADMAP's Phase-0 gate).** A later phase can be **planned in read-only

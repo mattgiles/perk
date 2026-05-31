@@ -220,5 +220,44 @@ machine run-handoff JSON. It is the Phase-0 dogfood on-ramp.
 
 **Capability inventory.** `perk/capabilities.py` is the declared SSOT of what `init` manages
 (required-vs-optional + self-vs-consumer scope). Phase 0 ships an all-required set; `doctor`
-(T6) reuses it for health-check filtering. The installed-optional state file + `Capability` ABC
-are deferred until the first *optional* capability exists.
+**(T6, implemented)** reuses it for health-check filtering (the inventory's `verify()` side). The
+installed-optional state file + `Capability` ABC are deferred until the first *optional*
+capability exists.
+
+---
+
+## §8.6 · The `doctor` machine surface (T6; cli-vs-pi §3.2)
+
+`perk doctor` is the **second** supervisor surface (the agent never parses it). It is `init`'s
+diagnostic twin: `init` converges *forward*, `doctor` **reports** coherence and `--fix` **repairs**
+drift. Managed-piece checks reuse `init`'s convergence helpers in **dry-run** (`apply=False`) — so
+init and doctor share one desired-state SSOT — and `--fix` runs the same helpers with `apply=True`.
+Shipped as a Click **group** (`invoke_without_command=True`) so the Phase-3 `doctor workflow`
+subgroup slots in without a breaking change.
+
+**Exit codes (report-don't-refuse, D5).** `0` healthy (warnings allowed) · `1` unhealthy (≥1
+failing check) · `2` `not_a_repo`. A **missing required tool is a failing check (exit 1)**, *not*
+exit 2 — doctor's job is to report tool problems, not refuse to run; only `not_a_repo` blocks.
+GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates** GitHub.
+
+**No silent pass.** A check that cannot be evaluated (a shell raised, a file is unreadable) reports
+`warn`/`info` with the reason in `detail` — never a silent `ok`.
+
+**`--json` object.**
+```
+{ success: bool,                         # the command ran (false only on not_a_repo)
+  healthy: bool,                         # no failing checks
+  self_repo: bool,                       # self (perk's own repo) vs consumer dual-mode
+  error_type: string|null,               # "not_a_repo" on the exit-2 path
+  message: string|null,
+  checks: [ { name, group, status, message, detail, remediation } ],   # status ∈ ok|warn|info|fail
+  summary: { passed: int, warnings: int, failed: int },
+  fixed: string[] }                      # repairs applied by --fix ([] otherwise)
+```
+
+**Groups.** `environment` (tools; missing = `fail`) · `github` (auth/access; non-fatal `warn`) ·
+`package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
+`registry` (the registry self-check) · `state` (the `.pi/workflow/` cache layout + handoff-blob
+integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
+always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
+group; else expand only its failures/warnings); `--verbose` expands every check.
