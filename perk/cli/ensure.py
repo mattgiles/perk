@@ -9,8 +9,6 @@ an actionable message. (Domain-specific checks that depend on git/GitHub state a
 as those gateways land in later turns.)
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import IO, Any, TypeVar
 

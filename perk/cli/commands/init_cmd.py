@@ -1,7 +1,5 @@
 """`perk init` — thin Click adapter over the convergent init operation (perk/init.py)."""
 
-from __future__ import annotations
-
 import click
 
 from perk.init import run_init

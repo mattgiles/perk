@@ -5,8 +5,15 @@ artifacts** (the Python wheel as package data `perk/_shared/`; the npm package u
 `shared/`). Each plane reads its *own* bundled copy at runtime — no dependency on
 repo layout (`Q12`).
 
-The contracts themselves are authored in **T2**: the stage registry
-(`registry.yaml`), the state-key vocabulary, the `.pi/workflow/` layout spec, the
-`PERK_RUN_ID` protocol, the `perk:workflow-state` schema, and the GitHub gateway
-contract. T1 only proves this directory **bundles and resolves** from both planes
-(`perk/_resources.py`, `extension/resources.ts`).
+Contents (authored in **T2**):
+
+- **`registry.yaml`** — the one *parsed* contract: the stage registry (descriptor
+  shape + the six MVP stages + graph) and the `state_keys` vocabulary. Read by both
+  planes (`perk/registry.py`, `extension/registry.ts`); validated by
+  `perk registry check`.
+- **`contracts.md`** — the four *prose* specs implemented once per plane: the
+  `.pi/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
+  schema, and the GitHub gateway contract.
+
+Resolution is proven by T1's per-plane resolvers (`perk/_resources.py`,
+`extension/resources.ts`): installed bundle → editable repo-sibling fallback.

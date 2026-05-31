@@ -44,9 +44,10 @@ test *args:
 build:
     uv build
 
-# the Phase-0 Turn-1 hard gate
+# the Phase-0 hard gates (all turns; cumulative)
 verify:
     bash scripts/verify-t1.sh
+    bash scripts/verify-t2.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

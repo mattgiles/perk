@@ -1,0 +1,127 @@
+# perk stage registry — the language-neutral contract both planes read (Q4/Q6).
+#
+# Authored once here, bundled into each build artifact (wheel -> perk/_shared/,
+# npm tarball -> shared/), and parsed directly by both planes at runtime: the
+# Python CLI generates its subcommands from it (T4); the TS extension drives its
+# in-session transitions from it (Phase 1+). No codegen step (Q6).
+#
+# T2 locks the descriptor *shape*, the stage *graph*, and the state-key
+# *vocabulary*. The drift-prone per-stage state I/O (`requires`/`reads`/`writes`)
+# is left empty and filled as each handler lands (Phase 1+) — locking the shape,
+# not authoring fiction about unbuilt stages.
+
+schema_version: 1
+
+# ---------------------------------------------------------------------------
+# State-key vocabulary (Q4). `requires`/`reads`/`writes` draw ONLY from these,
+# written as dotted "<tier>.<key>" strings (e.g. "github.plan"). The self-check
+# flattens this map to a set for membership validation.
+# ---------------------------------------------------------------------------
+state_keys:
+  # Tier 1 · GitHub — the canonical source of truth.
+  github:
+    - plan            # the plan issue (header + body)
+    - objective       # the objective issue (Phase 2)
+    - pr              # the pull request
+    - labels          # repo labels (e.g. perk:plan)
+    - comments        # discussion comments
+    - review-threads  # review threads (distinct API from comments)
+  # Tier 2 · .pi/workflow/ — the local cache (see contracts.md §8.1).
+  cache:
+    - plan            # materialized plan body cache
+    - plan-ref        # provider-agnostic plan->branch ref (see contracts.md §8.4)
+    - scratch         # per-run inter-process workflow files
+    - handoff         # pre-session CLI->extension cold-door state
+    - markers         # existence-based friction semaphores (e.g. pending-learn)
+  # Tier 3 · session entries — transient in-session state.
+  session:
+    - workflow-state  # the single `perk:workflow-state` record (contracts.md §8.3)
+
+# ---------------------------------------------------------------------------
+# Stages — the MVP loop (Q5): plan -> save -> implement -> submit -> land -> learn.
+#
+# Every field is locked EXCEPT `requires`/`reads`/`writes` (empty until handlers
+# land). `run_id` is uniform now (warm keeps, cold mints + records predecessor,
+# Q2); the field is kept because the shape is locked and future stages may differ.
+# `doors.cold_remote` is locked `false` across the MVP (remote-blocked; the
+# Phase-3 executor flips specific stages on) — a real registry-recorded constraint,
+# not merely "not built yet" (cli-vs-pi §4.5).
+# ---------------------------------------------------------------------------
+stages:
+  - id: plan
+    summary: Explore the codebase and draft a plan (read-only).
+    mode: read-only
+    worktree: none            # no implementation branch exists yet
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: plan             # slash = /plan (borrowed during the borrow window; perk-owned Phase 2)
+    requires: []
+    reads: []
+    writes: []
+    predecessors: []
+    successors: [save]
+
+  - id: save
+    summary: Persist the plan to GitHub; the read-only -> read-write boundary.
+    mode: read-write
+    worktree: none            # still no branch; save writes the plan issue + ref
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: save             # Phase 1 warm impl is the plan-mode terminating tool (erk's /plan-save)
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [plan]
+    successors: [implement]
+
+  - id: implement
+    summary: Do the work on a branch (requires fresh context; cold-only).
+    mode: read-write
+    worktree: create          # first stage that needs a branch/worktree (folds in erk's `prepare`)
+    doors: { warm: false, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: implement
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [save]
+    successors: [submit]
+
+  - id: submit
+    summary: Push the branch and open a draft PR.
+    mode: read-write
+    worktree: reuse
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: submit
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [implement]
+    successors: [land]
+
+  - id: land
+    summary: Merge the ready/approved PR and reconcile; sets the pending-learn marker.
+    mode: read-write
+    worktree: reuse
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: land
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [submit]
+    successors: [learn]
+
+  - id: learn
+    summary: Capture learnings from the landed run; clears the pending-learn marker.
+    mode: read-write
+    worktree: reuse           # pending-learn blocks worktree deletion until this runs (Q5)
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: learn
+    requires: []
+    reads: []
+    writes: []
+    predecessors: [land]
+    successors: []

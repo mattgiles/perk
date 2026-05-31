@@ -5,8 +5,6 @@ artifact (``Q12``). This resolver is the Python plane's single "where is shared/
 helper; the TS extension has its own twin (``extension/resources.ts``).
 """
 
-from __future__ import annotations
-
 from importlib import resources
 from pathlib import Path
 

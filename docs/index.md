@@ -17,6 +17,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 | [foundation-open-questions.md](./foundation-open-questions.md) | The thirteen questions (Q1–Q13) that had to be settled before Phase 0, each with options, rationale, and the **recorded resolution**. This is the *why* behind the ROADMAP's "Foundational decisions (locked)" section — read it when you need the reasoning behind a decision. |
 | [phase-0-plan.md](./phase-0-plan.md) | Phase 0 decomposed into seven landable turns (T1–T7), each with deliverables, an acceptance gate, and dependencies. The execution plan for the first phase. |
 | [phase-0-turn-1.md](./phase-0-turn-1.md) | Detailed, implementation-level plan for **T1** (monorepo skeleton + the minimal `perk init`): grounded Pi packaging facts, target repo layout, a de-risking spike, the `init` spec, and runnable acceptance checks. |
+| [phase-0-turn-2.md](./phase-0-turn-2.md) | Detailed, implementation-level plan for **T2** (author & lock the shared contracts): the `registry.yaml` shape + the six-stage table, the state-key vocabulary, the four `contracts.md` specs (`.pi/workflow/` layout, `PERK_RUN_ID`, `perk:workflow-state`, GitHub gateway), the both-planes self-check, and runnable acceptance checks. Folds in the seven prior-art revisions. |
 
 ## Research inputs (grounding; mostly stable)
 

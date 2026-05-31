@@ -7,8 +7,6 @@ Keeping them on separate streams lets a supervisor parse stdout while progress f
 to stderr uncorrupted.
 """
 
-from __future__ import annotations
-
 import sys
 
 import click

@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadRegistry } from "./registry";
 import { perkVersion, sharedDir } from "./resources";
 
 export default function (pi: ExtensionAPI) {
@@ -19,6 +20,15 @@ export default function (pi: ExtensionAPI) {
   } catch {
     sharedOk = false;
   }
+
+  // Parse-proof: the extension reads its OWN bundled registry.yaml (T2 gate).
+  let registryStages = -1;
+  try {
+    registryStages = loadRegistry().stages.length;
+  } catch {
+    registryStages = -1;
+  }
+  const registryOk = registryStages > 0;
 
   pi.on("session_start", async (_event, ctx) => {
     // Headless-fail-safe: rich UI only when there is a UI.
@@ -34,7 +44,8 @@ export default function (pi: ExtensionAPI) {
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         writeFileSync(
           join(dir, ".perk-loaded"),
-          `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; hasUI=${ctx.hasUI}\n`,
+          `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; ` +
+            `registry=${registryOk ? "ok" : "miss"} stages=${registryStages}; hasUI=${ctx.hasUI}\n`,
         );
       } catch {
         // never throw from a load probe

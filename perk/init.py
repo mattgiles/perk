@@ -10,8 +10,6 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 ``--json``, and the post-init handoff are T5; the TOML config scaffold is T4.
 """
 
-from __future__ import annotations
-
 import json
 import tomllib
 from pathlib import Path
