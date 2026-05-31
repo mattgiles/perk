@@ -13,6 +13,7 @@
   "files": [
     "extension/",
     "!extension/**/*.test.ts",
+    "!extension/testing/",
     "shared/",
     "README.md"
   ],
@@ -34,6 +35,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",
+    "@earendil-works/pi-ai": "0.78.0",
     "@earendil-works/pi-coding-agent": "0.78.0",
     "@types/node": "22.19.19",
     "typescript": "6.0.3"
