@@ -16,6 +16,7 @@ from pathlib import Path
 
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
+from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 from perk.output import user_output
 
 NPM_PACKAGE = "@perk/pi"
@@ -31,7 +32,39 @@ BORROWED_PACKAGES = [
 
 GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
-GITIGNORE_BODY = "/.pi/npm/\n/.pi/git/"
+# Pi install caches + perk's transient tier-2 cache subtrees + per-user config +
+# worktrees. The `.pi/workflow/` dir itself stays tracked (via .gitkeep); only the
+# transient subtrees/sentinels are ignored (contracts.md §8.1).
+GITIGNORE_BODY = "\n".join(
+    [
+        "/.pi/npm/",
+        "/.pi/git/",
+        f"/.pi/{LOCAL_CONFIG_FILENAME}",
+        "/.worktrees/",
+        "/.pi/workflow/.perk-loaded",
+        "/.pi/workflow/.perk-t3.json",
+        "/.pi/workflow/handoff/",
+        "/.pi/workflow/scratch/",
+        "/.pi/workflow/markers/",
+    ]
+)
+
+PERK_TOML_TEMPLATE = """\
+# perk project config (committed). Edit freely; per-user overrides go in
+# .pi/perk.local.toml (gitignored). The schema grows as perk does.
+
+[worktree]
+# Where `perk worktree create` and cold-door stages place worktrees.
+# Relative paths resolve against the repo root.
+root = ".worktrees"
+"""
+
+PERK_LOCAL_TOML_TEMPLATE = """\
+# perk per-user local overrides (gitignored). Mirrors .pi/perk.toml's shape; values
+# here win over the committed config. Example:
+#   [worktree]
+#   root = "/abs/path/to/worktrees"
+"""
 
 AGENTS_BEGIN = "<!-- BEGIN perk managed -->"
 AGENTS_END = "<!-- END perk managed -->"
@@ -145,6 +178,20 @@ def _converge_workflow_dir(root: Path, changes: list[str]) -> None:
         changes.append(".pi/workflow/: created")
 
 
+def _converge_config(root: Path, changes: list[str]) -> None:
+    """Scaffold the committed + local TOML config (seeded once; never overwritten)."""
+    pi_dir = root / ".pi"
+    pi_dir.mkdir(parents=True, exist_ok=True)
+    for name, template in (
+        (CONFIG_FILENAME, PERK_TOML_TEMPLATE),
+        (LOCAL_CONFIG_FILENAME, PERK_LOCAL_TOML_TEMPLATE),
+    ):
+        path = pi_dir / name
+        if not path.is_file():
+            path.write_text(template, encoding="utf-8")
+            changes.append(f".pi/{name}: created")
+
+
 def _apply_managed_block(
     path: Path,
     *,
@@ -184,6 +231,7 @@ def run_init(root: Path | None = None) -> int:
 
     _converge_settings(root, self_repo, changes)
     _converge_workflow_dir(root, changes)
+    _converge_config(root, changes)
     _apply_managed_block(
         root / ".gitignore",
         begin=GITIGNORE_BEGIN,

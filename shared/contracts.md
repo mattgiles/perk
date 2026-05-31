@@ -34,6 +34,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
 - Keyed by the perk-owned **`run_id`** (a ULID — see §8.2), never the Pi session id (which
   does not exist yet at cold-door launch time).
+- **Handoff blob:** `{ run_id, stage, mode, consumed }` (+ `pi_session_id` once claimed). The
+  CLI's cold launch (`perk <stage>`, T4) writes it; the extension claims it on `session_start`
+  and sets `consumed: true` (§8.2). `stage` is the target stage id — the launched session's
+  interior *handler* acts on it (Phase 1); T4's extension reads only `mode`/`run_id`.
 - **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` for runs whose
   terminal stage completed, or older than N days — surfaced later as a `doctor` check + a
   prune command (erk accumulated session dirs precisely because GC was undefined).

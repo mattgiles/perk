@@ -14,15 +14,15 @@ dist/
 build/
 node_modules/
 *.tgz
-# perk workflow cache — transient tier-2 subtrees are never committed (contracts.md §8.1).
-# (T4's `perk init` will move these into the managed block below.)
-.pi/workflow/.perk-loaded
-.pi/workflow/.perk-t3.json
-.pi/workflow/handoff/
-.pi/workflow/scratch/
-.pi/workflow/markers/
 
 # BEGIN perk managed
 /.pi/npm/
 /.pi/git/
+/.pi/perk.local.toml
+/.worktrees/
+/.pi/workflow/.perk-loaded
+/.pi/workflow/.perk-t3.json
+/.pi/workflow/handoff/
+/.pi/workflow/scratch/
+/.pi/workflow/markers/
 # END perk managed

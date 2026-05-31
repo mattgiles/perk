@@ -1,0 +1,7 @@
+# perk project config (committed). Edit freely; per-user overrides go in
+# .pi/perk.local.toml (gitignored). The schema grows as perk does.
+
+[worktree]
+# Where `perk worktree create` and cold-door stages place worktrees.
+# Relative paths resolve against the repo root.
+root = ".worktrees"
