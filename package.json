@@ -4,14 +4,26 @@
   "description": "perk Pi extension (session interior) for the plan-oriented workflow.",
   "license": "MIT",
   "keywords": ["pi-package", "pi-extension"],
+  "engines": { "node": ">=22" },
   "files": ["extension/", "shared/", "README.md"],
   "pi": {
     "extensions": ["./extension/index.ts"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check extension",
+    "format": "biome format --write extension"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-tui": "*",
     "typebox": "*"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@types/node": "22.19.19",
+    "typescript": "6.0.3"
   }
 }

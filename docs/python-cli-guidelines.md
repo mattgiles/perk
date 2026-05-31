@@ -6,8 +6,12 @@ command follows. They are distilled from the erk prior-art
 (`.prior-art/erk/docs/learned/cli/*`, `.prior-art/erk/docs/learned/architecture/click-*`),
 which paid for them in production.
 
-> Scope: this establishes Click as perk's CLI framework and the house style for it. The T1
-> `argparse` scaffold is a bootstrap stopgap and migrates to Click.
+> Status: **implemented.** perk's CLI was migrated from the T1 `argparse` scaffold to Click.
+> Live today: `perk/cli/` (the root group + `init`), `perk/cli/ensure.py`
+> (`UserFacingCliError` + `Ensure`), and `perk/output.py` (`user_output`/`machine_output`/
+> `user_confirm`). The DI context (`PerkContext` + `require_*()`, §2/§9) lands with the first
+> command that takes a git/GitHub dependency; no current command needs it. Tooling is uv-only
+> on Python 3.13 (see the repo `justfile`).
 
 ---
 

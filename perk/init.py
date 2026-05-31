@@ -117,7 +117,7 @@ def _converge_settings(root: Path, self_repo: bool, changes: list[str]) -> None:
     for want in _desired_packages(self_repo):
         if want.startswith("npm:"):
             name = _npm_name(want)
-            if name in have_npm:
+            if name is None or name in have_npm:
                 continue
             packages.append(want)
             have_npm.add(name)
@@ -133,7 +133,9 @@ def _converge_settings(root: Path, self_repo: bool, changes: list[str]) -> None:
     if new_text != old_text:
         settings_path.write_text(new_text, encoding="utf-8")
         changes.append(
-            f".pi/settings.json: added {', '.join(added)}" if added else ".pi/settings.json: normalized"
+            f".pi/settings.json: added {', '.join(added)}"
+            if added
+            else ".pi/settings.json: normalized"
         )
 
 

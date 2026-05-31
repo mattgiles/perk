@@ -5,8 +5,8 @@
 // dual-path manifest is needed (see docs/phase-0-turn-1.md §3).
 
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 function packageRoot(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "..");

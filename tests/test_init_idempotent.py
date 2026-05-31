@@ -62,9 +62,7 @@ def test_init_rejects_malformed_settings(tmp_path):
 
 
 def test_init_self_mode_uses_local_path(tmp_path):
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.perk]\nself = true\n', encoding="utf-8"
-    )
+    (tmp_path / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
     run_init(tmp_path)
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert ".." in packages

@@ -7,7 +7,7 @@ name = "perk"
 dynamic = ["version"]
 description = "Plan-oriented engineering workflow for Pi (the CLI exterior / session host)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 license = "MIT"
 authors = [{ name = "perk" }]
 dependencies = ["click>=8.1"]
@@ -15,8 +15,12 @@ dependencies = ["click>=8.1"]
 [project.scripts]
 perk = "perk.cli.cli:main"
 
-[project.optional-dependencies]
-dev = ["pytest>=8"]
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.15.15",
+    "ty>=0.0.1",
+]
 
 [tool.hatch.version]
 path = "perk/__init__.py"
@@ -34,3 +38,20 @@ only-include = ["perk", "shared", "README.md"]
 # perk's extension as a local-path package (dev) instead of the published npm package.
 [tool.perk]
 self = true
+
+[tool.ty.environment]
+python-version = "3.13"
+
+[tool.ty.src]
+# Only type-check perk's own code, never the vendored .prior-art/ tree.
+include = ["perk", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# Only lint/format perk's own code, never the vendored .prior-art/ tree.
+include = ["perk/**/*.py", "tests/**/*.py"]
+extend-exclude = [".prior-art"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

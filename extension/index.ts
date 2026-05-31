@@ -5,9 +5,9 @@
 // call guarded by `ctx.hasUI`). Workflow tools/commands/modes arrive in later
 // turns (see docs/phase-0-plan.md).
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { perkVersion, sharedDir } from "./resources";
 
 export default function (pi: ExtensionAPI) {

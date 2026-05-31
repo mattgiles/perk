@@ -17,10 +17,26 @@ A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the ses
 
 ## Develop
 
+Two pinned toolchains:
+
+- **Python** — [uv](https://docs.astral.sh/uv/) (3.13, pinned in `.python-version`),
+  [ruff](https://docs.astral.sh/ruff/) (lint/format), [ty](https://docs.astral.sh/ty/) (types).
+- **TypeScript** — npm (Node ≥ 22, `.npmrc`), [Biome](https://biomejs.dev/) (lint/format),
+  `tsc` (types).
+
+With [`just`](https://github.com/casey/just):
+
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"
-perk init            # idempotent; wires .pi/settings.json + workflow dirs
-pytest               # thin deterministic tests
-bash scripts/verify-t1.sh   # the T1 hard gate
+just setup        # uv sync + npm install
+just fmt          # ruff format + biome format
+just lint         # ruff check + biome check
+just typecheck    # ty + tsc
+just test         # pytest
+just verify       # the Phase-0 Turn-1 hard gate
+just ci           # setup + lint + typecheck + test
+just perk init    # run perk in the project env
 ```
+
+Without `just`: `uv run …` for Python (`uv run perk init`, `uv run pytest`,
+`uv run ruff check perk tests`, `uv run ty check`) and `npm run …` for TypeScript
+(`npm run lint`, `npm run typecheck`).
