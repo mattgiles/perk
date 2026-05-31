@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -6,24 +7,31 @@ from perk import __version__
 from perk.cli.cli import cli
 
 
+def _git_init(path: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
 def test_version_format():
     result = CliRunner().invoke(cli, ["--version"])
     assert result.exit_code == 0
     assert result.output.strip() == f"perk {__version__}"
 
 
-def test_init_via_cli(tmp_path):
+def test_init_via_cli(tmp_path, stub_env):
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path) as d:
+        _git_init(d)
         result = runner.invoke(cli, ["init"])
         assert result.exit_code == 0
         assert (Path(d) / ".pi" / "settings.json").is_file()
         assert (Path(d) / ".pi" / "workflow" / ".gitkeep").is_file()
+        assert (Path(d) / ".pi" / "workflow" / "post-init.md").is_file()
 
 
-def test_init_malformed_settings_errors_cleanly(tmp_path):
+def test_init_malformed_settings_errors_cleanly(tmp_path, stub_env):
     runner = CliRunner()
     with runner.isolated_filesystem(temp_dir=tmp_path) as d:
+        _git_init(d)
         pi = Path(d) / ".pi"
         pi.mkdir()
         (pi / "settings.json").write_text("{not json", encoding="utf-8")

@@ -21,8 +21,13 @@ class UserFacingCliError(click.ClickException):
     """An expected failure a user can trigger (bad input, missing file, precondition).
 
     Click intercepts it at every command level and exits 1; we override ``show`` only to
-    style the ``Error:`` prefix in red.
+    style the ``Error:`` prefix in red. The optional ``error_type`` is a stable code for the
+    supervisor ``--json`` surface (cli-vs-pi.md §3.2); human output ignores it.
     """
+
+    def __init__(self, message: str, *, error_type: str | None = None) -> None:
+        super().__init__(message)
+        self.error_type = error_type
 
     def show(self, file: IO[Any] | None = None) -> None:
         click.echo(click.style("Error: ", fg="red") + self.format_message(), err=True)

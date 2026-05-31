@@ -16,6 +16,11 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 > launch/`PERK_RUN_ID` emit in **T4**, the gateway verification ops in **T5** (Python) /
 > Phase 1 (TS). Gateway *mutation* ops are named here but **not authored** (payloads land in
 > Phase 1, when `/plan-save` knows their shape — `Q7`/`Q9`).
+>
+> **Status (T5):** the §8.4 **verification ops are implemented in the Python plane**
+> (`perk/github.py` — `check_auth` / `check_repo_access`, verification-only, never mutating);
+> the TS plane authors the same shapes in Phase 1. The §8.5 init machine-surface contract is
+> live (`perk init --json`).
 
 ---
 
@@ -142,14 +147,19 @@ verify both.
 ### Verification-only operations (Phase 0 — authored now, **no mutation**)
 
 These are all `init`/`doctor` needs in Phase 0 (`Q9`: verification-only; the first label is
-created lazily by `/plan-save` in Phase 1).
+created lazily by `/plan-save` in Phase 1). **Implemented in the Python plane (T5):**
+`perk/github.py` (typed dataclasses mirroring these shapes); the TS plane follows in Phase 1.
 
 ```
 check_auth()         -> { ok: bool, user: string|null, scopes: string[], error: string|null }
-                        # `gh auth status`; never mutates.
+                        # `gh auth status` (+ `gh api user`); never mutates.
 check_repo_access()  -> { ok: bool, repo: string|null, can_push: bool, error: string|null }
-                        # repo readable/writable for the authed user.
+                        # `gh repo view`; can_push from viewerPermission ∈ {WRITE,MAINTAIN,ADMIN}.
 ```
+
+`require_github(ctx)` is the **strict DI binding** for Phase-1+ commands (raises
+`UserFacingCliError` / `error_type: github_unauthed` when unauthed); `init`/`doctor` call the
+`check_*` ops directly to *report* (non-fatal — see §8.5).
 
 ### Mutation operations (named only — **payloads deferred to Phase 1**, Q7/Q9)
 
@@ -180,3 +190,35 @@ erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
 
 Only the *direction* is locked in Phase 0; the exact header/body schema and label taxonomy
 land with `/plan-save` in Phase 1.
+
+---
+
+## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
+
+`perk init` is a **supervisor surface**: human text → stderr, `--json` → stdout (one object),
+stable exit codes. The agent never parses it (it calls extension tools); the consumer is a
+process orchestrating sessions.
+
+**Exit codes.** `0` converged · `1` invalid input (`invalid_settings` / `invalid_config`) ·
+`2` environment-not-ready (`not_a_repo` / `missing_tool`). GitHub-unauthed is **non-fatal** in
+`init` (reported, exit 0); `github_unauthed` is reserved for the strict `require_github` path.
+
+**`--json` object.**
+```
+{ success: bool, mode: "self"|"consumer"|"unknown", error_type: string|null, message: string|null,
+  env:     [ { name, ok, detail, remediation } ],          # required-tooling checks
+  github:  { auth: { ok, user, scopes[], error },          # null when env-not-ready / verify skipped
+             repo: { ok, repo, can_push, error } },
+  capabilities: string[],                                  # the managed inventory (perk/capabilities.py)
+  changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
+  handoff: string|null }                                   # path to the post-init markdown on-ramp
+```
+
+The **post-init handoff** (`handoff`) is an *agent-readable* markdown at
+`.pi/workflow/post-init.md` (gitignored; regenerated each init) — distinct from the §8.1
+machine run-handoff JSON. It is the Phase-0 dogfood on-ramp.
+
+**Capability inventory.** `perk/capabilities.py` is the declared SSOT of what `init` manages
+(required-vs-optional + self-vs-consumer scope). Phase 0 ships an all-required set; `doctor`
+(T6) reuses it for health-check filtering. The installed-optional state file + `Capability` ABC
+are deferred until the first *optional* capability exists.

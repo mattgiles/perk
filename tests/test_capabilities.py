@@ -1,0 +1,13 @@
+from perk import capabilities
+
+
+def test_inventory_all_required_in_phase0():
+    assert capabilities.CAPABILITIES
+    assert all(c.required for c in capabilities.CAPABILITIES)
+    assert all(c.scope == "both" for c in capabilities.CAPABILITIES)
+
+
+def test_applicable_returns_full_set_either_way():
+    full = {c.name for c in capabilities.CAPABILITIES}
+    assert {c.name for c in capabilities.applicable(True)} == full
+    assert {c.name for c in capabilities.applicable(False)} == full

@@ -15,9 +15,10 @@ from typing import Self
 
 import click
 
-from perk import git
+from perk import git, github
 from perk.cli.ensure import UserFacingCliError
 from perk.config import Config, load_config
+from perk.github import AuthStatus
 
 
 @dataclass
@@ -85,3 +86,18 @@ def require_repo(ctx: click.Context) -> Path:
 def require_config(ctx: click.Context) -> Config:
     """The loaded perk config for this invocation."""
     return _perk(ctx).config()
+
+
+def require_github(ctx: click.Context) -> AuthStatus:
+    """Strict GitHub binding for Phase-1+ commands that *need* a working GitHub.
+
+    ``init``/``doctor`` instead call ``github.check_*`` directly to *report* (non-fatal).
+    """
+    _perk(ctx)  # ensure this is a properly-initialized perk command context
+    auth = github.check_auth()
+    if not auth.ok:
+        raise UserFacingCliError(
+            "GitHub not authenticated\nRun: gh auth login",
+            error_type="github_unauthed",
+        )
+    return auth

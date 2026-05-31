@@ -33,7 +33,7 @@ echo "  perk=$PERK_V  package.json=$PKG_V  perk.__version__=$PY_V"
 
 echo "== Check 2: perk init converges a consumer repo =="
 TMP="$(mktemp -d)"
-( cd "$TMP" && perk_run init >/dev/null 2>&1 )
+( cd "$TMP" && git init -q && perk_run init >/dev/null 2>&1 )
 S="$TMP/.pi/settings.json"
 if [ -f "$S" ] \
   && grep -q '@perk/pi' "$S" \
@@ -60,11 +60,11 @@ rm -f "$SENT"
 
 echo "== Check 4: perk init is idempotent (re-run = no-op) =="
 TMP="$(mktemp -d)"
-( cd "$TMP" && perk_run init >/dev/null 2>&1 )
-B="$(cd "$TMP" && find . -type f | sort | xargs shasum 2>/dev/null)"
+( cd "$TMP" && git init -q && perk_run init >/dev/null 2>&1 )
+B="$(cd "$TMP" && find . -type f -not -path './.git/*' | sort | xargs shasum 2>/dev/null)"
 OUT="$(cd "$TMP" && perk_run init 2>&1)"
-A="$(cd "$TMP" && find . -type f | sort | xargs shasum 2>/dev/null)"
-if [ "$B" = "$A" ] && echo "$OUT" | grep -q "already converged"; then
+A="$(cd "$TMP" && find . -type f -not -path './.git/*' | sort | xargs shasum 2>/dev/null)"
+if [ "$B" = "$A" ] && echo "$OUT" | grep -qi "already converged"; then
   pass "second run changed nothing and reported 'already converged'"
 else
   bad "init was not idempotent"

@@ -12,12 +12,15 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 
 import json
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
-from perk import __version__
+from perk import __version__, capabilities, env, git, github
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
-from perk.output import user_output
+from perk.env import EnvCheck
+from perk.github import AuthStatus, GitHubError, RepoAccess
+from perk.output import user_confirm
 
 NPM_PACKAGE = "@perk/pi"
 
@@ -43,6 +46,7 @@ GITIGNORE_BODY = "\n".join(
         "/.worktrees/",
         "/.pi/workflow/.perk-loaded",
         "/.pi/workflow/.perk-t3.json",
+        "/.pi/workflow/post-init.md",
         "/.pi/workflow/handoff/",
         "/.pi/workflow/scratch/",
         "/.pi/workflow/markers/",
@@ -65,6 +69,109 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 #   [worktree]
 #   root = "/abs/path/to/worktrees"
 """
+
+# The post-init handoff — an agent-readable markdown on-ramp (distinct from the T3/T4
+# machine run-handoff JSON). Regenerated each init; kept true to what's built.
+POST_INIT_TEMPLATE = """\
+# perk is initialized ({mode})
+
+This repo follows the **perk** plan-oriented workflow on Pi. Conventions live in `AGENTS.md`
+(the perk-managed block). `perk init` owns all Pi wiring and is safe to re-run.
+
+The spine `plan -> save -> implement -> submit -> land -> learn` is being built (Phase 1).
+
+**Cold-door launchers already exist:** `perk <stage> -- <pi args>` positions a worktree,
+mints a `run_id`, and launches a primed `pi` session (e.g. `perk plan`). The in-session
+stage *handlers* land in Phase 1.
+
+**Next:** when the Phase-1 spine lands, start a plan here — this repo is the dogfood
+substrate. Until then, `perk doctor` (T6) will report on this setup.
+"""
+
+
+@dataclass(frozen=True)
+class GitHubReport:
+    """The init-time GitHub readiness snapshot (verification-only)."""
+
+    auth: AuthStatus
+    repo: RepoAccess
+
+
+@dataclass(frozen=True)
+class InitReport:
+    """Structured result of a ``run_init`` (rendered human or ``--json`` by the command)."""
+
+    ok: bool
+    mode: str
+    env: list[EnvCheck]
+    changes: list[str]
+    github: GitHubReport | None
+    handoff: str | None
+    capabilities: tuple[str, ...] = ()
+    error_type: str | None = None
+    message: str | None = None
+
+    @property
+    def exit_code(self) -> int:
+        if self.ok:
+            return 0
+        if self.error_type in ("not_a_repo", "missing_tool"):
+            return 2
+        return 1
+
+    @classmethod
+    def env_failure(cls, error_type: str, message: str, checks: list[EnvCheck]) -> "InitReport":
+        return cls(
+            ok=False,
+            mode="unknown",
+            env=checks,
+            changes=[],
+            github=None,
+            handoff=None,
+            error_type=error_type,
+            message=message,
+        )
+
+
+def _env_to_dict(check: EnvCheck) -> dict[str, object]:
+    return {
+        "name": check.name,
+        "ok": check.ok,
+        "detail": check.detail,
+        "remediation": check.remediation,
+    }
+
+
+def report_to_dict(report: InitReport) -> dict[str, object]:
+    """Serialize an ``InitReport`` for the ``--json`` supervisor surface (cli-vs-pi §3.2)."""
+    gh = report.github
+    return {
+        "success": report.ok,
+        "mode": report.mode,
+        "error_type": report.error_type,
+        "message": report.message,
+        "env": [_env_to_dict(c) for c in report.env],
+        "github": None
+        if gh is None
+        else {
+            "auth": {
+                "ok": gh.auth.ok,
+                "user": gh.auth.user,
+                "scopes": list(gh.auth.scopes),
+                "error": gh.auth.error,
+            },
+            "repo": {
+                "ok": gh.repo.ok,
+                "repo": gh.repo.repo,
+                "can_push": gh.repo.can_push,
+                "error": gh.repo.error,
+            },
+        },
+        "capabilities": list(report.capabilities),
+        "changes": report.changes,
+        "handoff": report.handoff,
+    }
+
 
 AGENTS_BEGIN = "<!-- BEGIN perk managed -->"
 AGENTS_END = "<!-- END perk managed -->"
@@ -129,12 +236,14 @@ def _converge_settings(root: Path, self_repo: bool, changes: list[str]) -> None:
     except json.JSONDecodeError as exc:
         raise UserFacingCliError(
             f".pi/settings.json is not valid JSON ({exc})\n"
-            "Fix or remove it, then re-run 'perk init'."
+            "Fix or remove it, then re-run 'perk init'.",
+            error_type="invalid_settings",
         ) from exc
     if not isinstance(settings, dict):
         raise UserFacingCliError(
             ".pi/settings.json must contain a JSON object\n"
-            "Fix or remove it, then re-run 'perk init'."
+            "Fix or remove it, then re-run 'perk init'.",
+            error_type="invalid_settings",
         )
 
     packages = settings.get("packages")
@@ -178,8 +287,14 @@ def _converge_workflow_dir(root: Path, changes: list[str]) -> None:
         changes.append(".pi/workflow/: created")
 
 
-def _converge_config(root: Path, changes: list[str]) -> None:
-    """Scaffold the committed + local TOML config (seeded once; never overwritten)."""
+def _converge_config(
+    root: Path, changes: list[str], *, force: bool = False, interactive: bool = True
+) -> None:
+    """Scaffold the committed + local TOML config.
+
+    Seeded once; never overwritten — *unless* ``force`` re-seeds it back to the template
+    (confirmed when ``interactive``). This is the one mildly-destructive init op.
+    """
     pi_dir = root / ".pi"
     pi_dir.mkdir(parents=True, exist_ok=True)
     for name, template in (
@@ -190,6 +305,20 @@ def _converge_config(root: Path, changes: list[str]) -> None:
         if not path.is_file():
             path.write_text(template, encoding="utf-8")
             changes.append(f".pi/{name}: created")
+        elif force and path.read_text(encoding="utf-8") != template:
+            if interactive and not user_confirm(f"Re-seed .pi/{name} to defaults?", default=False):
+                continue
+            path.write_text(template, encoding="utf-8")
+            changes.append(f".pi/{name}: re-seeded")
+
+
+def _write_post_init(root: Path, self_repo: bool) -> str:
+    """Write the agent-readable post-init handoff; return its repo-relative path."""
+    path = root / ".pi" / "workflow" / "post-init.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = "self" if self_repo else "consumer"
+    path.write_text(POST_INIT_TEMPLATE.format(mode=mode), encoding="utf-8")
+    return str(path.relative_to(root))
 
 
 def _apply_managed_block(
@@ -224,14 +353,43 @@ def _apply_managed_block(
         changes.append(f"{label}: {verb}")
 
 
-def run_init(root: Path | None = None) -> int:
+def run_init(
+    root: Path | None = None,
+    *,
+    force: bool = False,
+    interactive: bool = True,
+    verify: bool = True,
+) -> InitReport:
+    """Converge the repo and return a structured report (rendered by the command layer).
+
+    Pipeline: verify env -> converge managed pieces -> verify GitHub (never mutate) ->
+    write the post-init handoff. Environment-not-ready short-circuits before convergence.
+
+    ``verify=False`` skips the **external** verification (repo/tooling/GitHub shells) and
+    runs pure convergence — the seam unit tests use so they don't depend on an installed,
+    authenticated toolchain. The CLI always verifies (default).
+    """
     root = (root or Path.cwd()).resolve()
+    checks: list[EnvCheck] = []
+    if verify:
+        checks = env.check_environment()
+        if git.repo_root(root) is None:
+            return InitReport.env_failure(
+                "not_a_repo",
+                "Not a git repository — run 'perk init' inside a git repository.",
+                checks,
+            )
+        if not env.required_tools_ok(checks):
+            missing = ", ".join(c.name for c in checks if not c.ok)
+            return InitReport.env_failure(
+                "missing_tool", f"Missing or outdated required tool(s): {missing}.", checks
+            )
+
     self_repo = _is_self_repo(root)
     changes: list[str] = []
-
     _converge_settings(root, self_repo, changes)
     _converge_workflow_dir(root, changes)
-    _converge_config(root, changes)
+    _converge_config(root, changes, force=force, interactive=interactive)
     _apply_managed_block(
         root / ".gitignore",
         begin=GITIGNORE_BEGIN,
@@ -250,11 +408,27 @@ def run_init(root: Path | None = None) -> int:
         header_if_new="# AGENTS\n",
     )
 
-    mode = "self" if self_repo else "consumer"
-    if changes:
-        user_output(f"perk init ({mode}): converged")
-        for change in changes:
-            user_output(f"  - {change}")
-    else:
-        user_output(f"perk init ({mode}): already converged")
-    return 0
+    github_report: GitHubReport | None = None
+    if verify:
+        # GitHub readiness is non-fatal (D3): a flaky/slow/broken `gh` (timeout or
+        # unparseable output -> GitHubError) must not crash init — file convergence has
+        # already succeeded. Degrade to an unauthed report and continue.
+        try:
+            auth = github.check_auth()
+            repo = github.check_repo_access(root) if auth.ok else RepoAccess.skipped()
+        except GitHubError as exc:
+            auth = AuthStatus(ok=False, user=None, scopes=(), error=str(exc))
+            repo = RepoAccess.skipped()
+        github_report = GitHubReport(auth=auth, repo=repo)
+    handoff = _write_post_init(root, self_repo)
+    managed = tuple(cap.name for cap in capabilities.applicable(self_repo))
+
+    return InitReport(
+        ok=True,
+        mode="self" if self_repo else "consumer",
+        env=checks,
+        changes=changes,
+        github=github_report,
+        handoff=handoff,
+        capabilities=managed,
+    )

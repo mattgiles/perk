@@ -92,7 +92,7 @@ GI="$(sed -n '/BEGIN perk managed/,/END perk managed/p' "$I/.gitignore" 2>/dev/n
 if [ -f "$I/.pi/perk.toml" ] && [ -f "$I/.pi/perk.local.toml" ] \
    && echo "$GI" | grep -q "perk.local.toml" && echo "$GI" | grep -q ".worktrees/" \
    && echo "$GI" | grep -q ".pi/workflow/markers/" \
-   && echo "$SECOND" | grep -q "already converged" \
+   && echo "$SECOND" | grep -qi "already converged" \
    && ( cd "$I" && git check-ignore -q .pi/perk.local.toml ); then
   pass "init wrote perk.toml + perk.local.toml; managed .gitignore converged; re-run no-op; local ignored"
 else
