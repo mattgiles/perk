@@ -36,9 +36,10 @@ typecheck:
     uv run ty check
     npm run typecheck
 
-# run the test suite
+# run the test suite (python: pytest, typescript: node:test)
 test *args:
     uv run pytest {{args}}
+    node --test extension/*.test.ts
 
 # build the python wheel + sdist
 build:
@@ -48,6 +49,7 @@ build:
 verify:
     bash scripts/verify-t1.sh
     bash scripts/verify-t2.sh
+    bash scripts/verify-t3.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

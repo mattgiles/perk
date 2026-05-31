@@ -1,0 +1,67 @@
+from perk.cache import (
+    clear_marker,
+    ensure_layout,
+    has_marker,
+    mark_handoff_consumed,
+    read_handoff,
+    read_scratch,
+    set_marker,
+    workflow_dir,
+    write_handoff,
+    write_scratch,
+)
+
+
+def test_ensure_layout_idempotent(tmp_path):
+    wd = ensure_layout(tmp_path)
+    assert wd == workflow_dir(tmp_path) == tmp_path / ".pi" / "workflow"
+    assert (wd / "scratch" / "runs").is_dir()
+    assert (wd / "handoff").is_dir()
+    assert (wd / "markers").is_dir()
+    ensure_layout(tmp_path)  # second run is a no-op (no error)
+
+
+def test_scratch_round_trip(tmp_path):
+    write_scratch(tmp_path, "RID", "diff.txt", "hello")
+    assert read_scratch(tmp_path, "RID", "diff.txt") == "hello"
+    assert read_scratch(tmp_path, "RID", "missing.txt") is None
+
+
+def test_handoff_round_trip_and_consume(tmp_path):
+    write_handoff(tmp_path, "RID", {"mode": "read-only"})
+    data = read_handoff(tmp_path, "RID")
+    assert data is not None
+    assert data["run_id"] == "RID"
+    assert data["mode"] == "read-only"
+    assert data["consumed"] is False
+
+    mark_handoff_consumed(tmp_path, "RID", pi_session_id="sess1")
+    consumed = read_handoff(tmp_path, "RID")
+    assert consumed is not None
+    assert consumed["consumed"] is True
+    assert consumed["pi_session_id"] == "sess1"
+
+    mark_handoff_consumed(tmp_path, "RID")  # idempotent
+    again = read_handoff(tmp_path, "RID")
+    assert again is not None and again["consumed"] is True
+
+
+def test_write_handoff_run_id_is_authoritative(tmp_path):
+    # A run_id in the data dict cannot override the keyed run_id.
+    write_handoff(tmp_path, "RID", {"run_id": "BOGUS", "mode": "implement"})
+    data = read_handoff(tmp_path, "RID")
+    assert data is not None and data["run_id"] == "RID"
+
+
+def test_read_and_consume_missing_handoff(tmp_path):
+    assert read_handoff(tmp_path, "nope") is None
+    mark_handoff_consumed(tmp_path, "nope")  # no error on absent handoff
+
+
+def test_markers(tmp_path):
+    assert not has_marker(tmp_path, "pending-learn")
+    set_marker(tmp_path, "pending-learn")
+    assert has_marker(tmp_path, "pending-learn")
+    clear_marker(tmp_path, "pending-learn")
+    assert not has_marker(tmp_path, "pending-learn")
+    clear_marker(tmp_path, "pending-learn")  # idempotent

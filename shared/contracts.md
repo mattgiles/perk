@@ -65,11 +65,18 @@ environment before `exec pi`; an initial message or `@file` would pollute LLM co
 4. mark the handoff **consumed**.
 
 **Fork ≠ branch (easy to get wrong).**
-- `/fork`, `/clone`, `ctx.newSession({ parentSession })` create a **new session file with a
-  `parentSession` header** (detectable via that header or the `session_before_fork` event,
-  pi §3/§8). → **derive a child-scoped id `<run_id>.<n>`** so the child's scratch is isolated
-  but traceable. Do **not** blindly inherit the env var (that would hand the parent's id to
-  the child).
+- A **fork** (`/fork`, `/clone`, `ctx.newSession({ parentSession })`, or a headless
+  `pi --fork`) creates a **new session file** that inherits the parent's entries — so the
+  parent's `perk:workflow-state` (hence its `run_id`) is present in the child's
+  `getBranch()`. **Detect a fork by the `run_id ↔ pi_session_id` mapping, not the
+  `session_start` reason:** a headless `pi --fork` arrives as `reason: "startup"` (not
+  `"fork"`) with no `previousSessionFile`, so reason-based detection is unreliable. On
+  `session_start`, compare the rebuilt entry's recorded `pi_session_id` to the **current**
+  session handle (the basename of `getSessionFile()`): **equal ⇒ reload** (keep the
+  `run_id`); **different ⇒ fork** — the `run_id` was inherited from another session, so
+  **derive a child-scoped id `<run_id>.<n>`**, record the parent as `predecessor`, and
+  isolate the child's scratch. Do **not** blindly inherit `PERK_RUN_ID` (that would hand the
+  parent's id to the child).
 - `/tree` branches **in place** (same file / UUID / process), so `PERK_RUN_ID` in the env
   survives and the `run_id` stays **stable**.
 
@@ -91,7 +98,8 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | field | type | meaning |
 |---|---|---|
 | `run_id` | string (ULID) | the perk run this session belongs to (§8.2) |
-| `pi_session_id` | string (UUID) | Pi's own session id (for `SessionManager.open`/`continueRecent`) |
+| `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
+| `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (Phase 2; null in MVP) |

@@ -12,6 +12,7 @@
   },
   "files": [
     "extension/",
+    "!extension/**/*.test.ts",
     "shared/",
     "README.md"
   ],

@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "yaml";
-import { sharedDir } from "./resources";
+import { sharedDir } from "./resources.ts";
 
 export interface RegistryStage {
   id: string;

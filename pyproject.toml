@@ -12,6 +12,7 @@ license = "MIT"
 authors = [{ name = "perk" }]
 dependencies = [
     "click>=8.1",
+    "python-ulid>=2.7,<3",
     "pyyaml>=6.0.3",
 ]
 
