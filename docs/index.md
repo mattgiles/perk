@@ -43,7 +43,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 
 | Doc | What it is |
 |---|---|
-| [pi--best-practices.md](./pi--best-practices.md) | The **authoritative** patterns, from Pi's own `examples/` and the SDK (plan-mode recipe, presets, subagent spawn, handoff, goal/loop/review controllers, `createAgentSession`/`SessionManager`). The templates perk follows. |
+| [pi-best-practices.md](./pi-best-practices.md) | The **authoritative** patterns, from Pi's own `examples/` and the SDK (plan-mode recipe, presets, subagent spawn, handoff, goal/loop/review controllers, `createAgentSession`/`SessionManager`). The templates perk follows. |
 | [agent-stuff-best-practices.md](./agent-stuff-best-practices.md) | Corroborating real-world patterns from `mitsuhiko/agent-stuff` (packaging idiom, structural command safety, `go-to-bed.ts`/`uv.ts`, `goal.ts` budget + completion-audit). Independent confirmation of the same bets. |
 
 ## Architecture / design principle
@@ -71,7 +71,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
   reshaped the ROADMAP's Phase-1 spine to `plan → save → implement → submit → land → learn`).
 - **cli-vs-pi.md** feeds the ROADMAP's stage-registry decision (#3) and the CLI/extension
   split throughout.
-- **PRIOR_ART / RESEARCH** are the source findings; **pi-- / agent-stuff best-practices** are
+- **PRIOR_ART / RESEARCH** are the source findings; **pi- / agent-stuff best-practices** are
   the build templates; the ROADMAP cites all four at the point each pattern is used.
 
 ## External references (not in this repo)

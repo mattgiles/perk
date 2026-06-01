@@ -59,7 +59,7 @@ and easy to get wrong:
   remote-blocked. So `cold_remote: false` in the MVP carries **real "remote-blocked" semantics**,
   not merely "the Phase-3 executor isn't built yet."
 
-Pi mechanics the contracts reference (confirmed in pi--best-practices.md §3–§4, §8; cited inline
+Pi mechanics the contracts reference (confirmed in pi-best-practices.md §3–§4, §8; cited inline
 in §8 below) are unchanged from what T1 verified — `appendEntry` + `getBranch()` scan, restore on
 `session_start` **and** `session_tree`, `parentSession`/`session_before_fork` for fork detection,
 the `PERK_RUN_ID` env channel.

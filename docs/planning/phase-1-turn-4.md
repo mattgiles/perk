@@ -5,7 +5,7 @@
 > (§2.3 hand-off, §4.1 door legality, §4.4 stage table, §4.5 local/remote), the Phase-0 launch
 > spine (`perk/launch.py`, `perk/cli/stages.py`, `perk/git.py`), the T2/T3 plan-ref tiers
 > (`perk/cache.py`, `extension/cache.ts`, the `session_start` reconciliation in
-> `extension/index.ts`), [pi--best-practices.md](../pi--best-practices.md) §7 (lifecycle gates),
+> `extension/index.ts`), [pi-best-practices.md](../pi-best-practices.md) §7 (lifecycle gates),
 > and the pi extension API (`session_before_switch`/`session_before_fork` →
 > `{ cancel?: boolean }`).
 >
@@ -71,7 +71,7 @@ green.
   **lifecycle gates** are "one primitive, reused across all stages," ported from erk's
   dirty-repo/commit-before-leaving checks, **fail-safe (block) when headless**. The in-process
   `ctx.newSession` warm fresh-context is **Phase 2**.
-- **[pi--best-practices.md](../pi--best-practices.md) §7:** `dirty-repo-guard.ts` — block
+- **[pi-best-practices.md](../pi-best-practices.md) §7:** `dirty-repo-guard.ts` — block
   switching/forking with uncommitted changes via `pi.exec("git", ["status","--porcelain"])`; **block
   by default headless**.
 - **Plan-ref contract (contracts §8.4):** the plan-ref is provider-agnostic

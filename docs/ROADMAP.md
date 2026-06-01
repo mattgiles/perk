@@ -6,7 +6,7 @@ A Pi-native rebuild of the erk plan-oriented engineering workflow, sequenced so 
 See [RESEARCH.md](./RESEARCH.md) for the full problem analysis and the Pi-native
 architecture rationale this roadmap is built on, [cli-vs-pi.md](./cli-vs-pi.md) for the
 CLI/extension split, and the two Pi pattern studies the phases below lean on:
-[pi--best-practices.md](./pi--best-practices.md) (the **authoritative** patterns from Pi's
+[pi-best-practices.md](./pi-best-practices.md) (the **authoritative** patterns from Pi's
 own `examples/`, including the SDK) and
 [agent-stuff-best-practices.md](./agent-stuff-best-practices.md) (idiomatic real-world
 patterns from `mitsuhiko/agent-stuff`). For how perk should use subagents, see
@@ -66,7 +66,7 @@ Two corollaries that shape the build:
 ## Implementation craft (cross-cutting)
 
 Two pattern studies ground the build: Pi's own `examples/`
-([pi--best-practices.md](./pi--best-practices.md)) are the **authoritative** templates, and
+([pi-best-practices.md](./pi-best-practices.md)) are the **authoritative** templates, and
 `mitsuhiko/agent-stuff` ([agent-stuff-best-practices.md](./agent-stuff-best-practices.md)) is
 the most mature real-world package that independently confirms the same bets. A few habits
 are non-negotiable constraints for *every* perk extension, not phase-specific niceties:

@@ -63,7 +63,7 @@ load-bearing:
 - **Source decisions:** `Q1` (single `perk:workflow-state` entry, per-field LWW), `Q2`
   (`.pi/workflow/` layout + ULID `run_id` + `PERK_RUN_ID` channel), `Q3` (tiered verified
   linkage). These were resolved in [foundation-open-questions.md](../foundation-open-questions.md).
-- **Pi mechanics (confirmed against pi--best-practices.md §3–§4, §8 and the installed SDK docs):**
+- **Pi mechanics (confirmed against pi-best-practices.md §3–§4, §8 and the installed SDK docs):**
   `pi.appendEntry(customType, data)` persists a custom entry that does **not** enter LLM context;
   rebuild by scanning `ctx.sessionManager.getBranch()` for
   `entry.type === "custom" && entry.customType === "perk:workflow-state"`; `session_start` carries
@@ -98,7 +98,7 @@ load-bearing:
    **2-process reload**; `pi --fork` enables a true **fork** test. Only `/tree` stays a unit test
    (interactive-only). This upgrades the gate from "live sentinel + unit tests" to "real reload +
    real fork + unit tests."
-6. **Custom entries vs tool-result `details` — the forking-safe nuance** (pi--best-practices
+6. **Custom entries vs tool-result `details` — the forking-safe nuance** (pi-best-practices
    §4/§13). The Pi reference guarantees **tool-result `details`** survive forking; it makes **no**
    such guarantee for `appendEntry` custom entries. `perk:workflow-state` deliberately uses
    `appendEntry` (it is not a tool's output, §8.3), so **fork-child derivation must not assume the
@@ -168,7 +168,7 @@ Before building real structure, prove headlessly: (a) `pi --session-dir T --sess
 survives process exit); (b) re-running with the same `--session-id` **resumes** and `getBranch()`
 returns the prior custom entry (with `PERK_RUN_ID` unset); (c) **decision fork** — does
 `pi --fork <file> -p …` fire `session_start` with `reason: "fork"` **and carry the parent's
-`appendEntry` custom entry into the child's `getBranch()`?** pi--best-practices §4 only guarantees
+`appendEntry` custom entry into the child's `getBranch()`?** pi-best-practices §4 only guarantees
 tool-result `details` survive forking, *not* custom entries — so if the parent's
 `perk:workflow-state` is **not** in the child branch, fork derivation reads the parent `run_id`
 from **`event.previousSessionFile`** instead (§8.3); (d) what **throwing from a `session_start`
@@ -310,7 +310,7 @@ markHandoffConsumed(cwd, rid, { piSessionId })        # consume only after the l
   are **strict** — durable, cross-process ⇒ read-back + correct ordering. Purely transient fields
   cheaply reconstructable next `session_start`/`session_tree` (e.g. `mode`) are
   **best-effort-with-logging** — a failure is **logged, never silently swallowed**.
-- **Headless-safe failure (pi--best-practices §7/§11):** the two hard errors above must **not** be
+- **Headless-safe failure (pi-best-practices §7/§11):** the two hard errors above must **not** be
   a bare `throw` from `session_start` (it can destabilize a headless session, e.g. the worker).
   Surface them loudly through a **non-UI channel** — `ctx.ui.notify` *only if* `ctx.hasUI`, **plus**
   a stderr line / an error marker the CLI/worker can observe — and leave the workflow-state
@@ -331,11 +331,11 @@ markHandoffConsumed(cwd, rid, { piSessionId })        # consume only after the l
 - **Fork / clone / `newSession({parentSession})`** → a **new session file**. Derive the child id in
   **`session_start` with `reason: "fork"`** — *not* in `session_before_fork`, which is a **cancel**
   gate (`{cancel:true}`) that fires *before the new session exists* (no `getBranch()` yet)
-  (pi--best-practices §3/§7). Read the parent `run_id` and **derive `<run_id>.<n>`** — *do not*
+  (pi-best-practices §3/§7). Read the parent `run_id` and **derive `<run_id>.<n>`** — *do not*
   blindly inherit `PERK_RUN_ID` (that would hand the parent's id to the child).
   - **Parent-`run_id` source (spike-verified, with fallback):** the Pi reference only guarantees
     tool-result **`details`** survive forking — it makes **no** such guarantee for `appendEntry`
-    custom entries (pi--best-practices §4). So **if** the child's `getBranch()` carries the parent's
+    custom entries (pi-best-practices §4). So **if** the child's `getBranch()` carries the parent's
     `perk:workflow-state`, read it there; **else** fall back to scanning **`event.previousSessionFile`**
     (present on `reason: "fork"`) for the parent's last `run_id`. The spike decides which path is
     live; the fallback is wired either way so fork derivation never silently mis-keys the child.
@@ -410,7 +410,7 @@ tsc + **pytest** + **node --test**) stays green.
 |---|---|---|
 | `appendEntry` doesn't flush before the watchdog kills `pi` (entry missing from JSONL) | med | the spike pins flush timing; give P1 a generous watchdog window + short prompt; if flakey, the extension can `getSessionFile()` and confirm the write, or the script polls the JSONL briefly |
 | Fork-target reference form (`--fork <id>` vs `<path>`) is finicky | med | spike it; prefer the **session file path** under `--session-dir` (deterministic) over a partial id |
-| `appendEntry` custom entries may **not** survive a fork into the child's `getBranch()` (only tool-result `details` are documented forking-safe, pi--bp §4) | med | spike-verify; fall back to scanning `event.previousSessionFile` for the parent `run_id` (§8.3) |
+| `appendEntry` custom entries may **not** survive a fork into the child's `getBranch()` (only tool-result `details` are documented forking-safe, pi-bp §4) | med | spike-verify; fall back to scanning `event.previousSessionFile` for the parent `run_id` (§8.3) |
 | A hard linkage error **thrown** from `session_start` destabilizes a **headless** session | med | surface headless-safe — `notify` only if `hasUI` + stderr/error-marker, not a bare `throw` (§8.1); spike what throwing does |
 | Wrong `python-ulid` package (`ulid-py` vs `python-ulid`) — both import `ulid` | low-med | pin **`python-ulid`** explicitly; `test_run_id.py` asserts the 26-char Crockford form + sortability, catching the wrong lib |
 | `node --test` type-stripping chokes on a TS construct | low | keep test files plain (`import type`, no enums/namespaces); spiked green on 22.19 |
@@ -435,7 +435,7 @@ tsc + **pytest** + **node --test**) stays green.
 - **Cache **GC** / prune command** — surfaced later as a `doctor` check (T6) + prune; T3 only
   writes `consumed: true` so GC has a signal.
 - **In-process session-swap rebinding** (`session.bindExtensions({})` + re-subscribing after a
-  runtime session replacement, pi--best-practices §2/§13#11) — **not a T3 concern**: T3's reload and
+  runtime session replacement, pi-best-practices §2/§13#11) — **not a T3 concern**: T3's reload and
   fork are *separate `pi` processes*, each with a clean `session_start` + fresh extension bind. The
   rebind discipline lands with **T4's launch / the Phase-3 SDK worker**.
 - **Config, worktrees, subcommand generation** — T4. **Gateway** — T5. **`doctor`** — T6.
@@ -494,7 +494,7 @@ Python cache helper; (4) `pytest` (run_id + cache, 11) and `node --test` (11) pa
   exactly why the contract stores `pi_session_id`, and it covers **both** interactive `/fork` and
   headless `--fork`.
 - **`appendEntry` custom entries DO survive a fork** into the child's `getBranch()` (the
-  decision-fork from the pi--best-practices §4 review resolved in favor of survival) — so the
+  decision-fork from the pi-best-practices §4 review resolved in favor of survival) — so the
   `event.previousSessionFile` **fallback was not needed** and is not wired. (`previousSessionFile`
   was `null` for CLI `--fork` anyway.)
 - **A `throw` from `session_start` is caught + logged by pi** (`Extension error (…): <msg>` to

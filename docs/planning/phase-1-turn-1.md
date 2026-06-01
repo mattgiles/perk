@@ -61,7 +61,7 @@ the new live test with no change.
   in-memory settings + a `DefaultResourceLoader` override; prove it against the T3 claim/fork through
   a live session, exercising the rebuild on **both** `session_start` and `session_tree`.* T1
   discharges that line verbatim.
-- **Pi mechanics (authoritative).** [pi--best-practices.md](../pi--best-practices.md) §2 (the SDK
+- **Pi mechanics (authoritative).** [pi-best-practices.md](../pi-best-practices.md) §2 (the SDK
   surface: `createAgentSession`, `SessionManager.inMemory()`,
   `SettingsManager.inMemory({ compaction:{enabled:false} })`, `DefaultResourceLoader` overrides) and
   §3–§4 (the event catalog: `session_start` rebuilds, `session_tree` rebuilds again). The
