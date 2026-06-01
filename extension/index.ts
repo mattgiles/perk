@@ -14,10 +14,13 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
+import { registerLand } from "./land.ts";
+import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
+import { registerSubmit } from "./submit.ts";
 import {
   type BranchEntry,
   decideClaim,
@@ -179,6 +182,13 @@ export default function (pi: ExtensionAPI) {
 
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement` (turn-4b).
   registerLifecycleGates(pi);
+
+  // Warm door: the `submit` tool + `/submit` command (turn-5a).
+  registerSubmit(pi);
+
+  // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
+  registerLand(pi);
+  registerLearn(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

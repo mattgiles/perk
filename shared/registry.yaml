@@ -94,9 +94,9 @@ stages:
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: submit
-    requires: []
-    reads: []
-    writes: []
+    requires: [cache.plan-ref]              # T5a: reads the active ref to derive the branch
+    reads: [cache.plan-ref, github.plan]    # T5a: ref -> branch; plan issue title for the PR
+    writes: [github.pr, github.plan]        # T5a: open the draft PR; populate staged branch/pr header
     predecessors: [implement]
     successors: [land]
 
@@ -107,9 +107,9 @@ stages:
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: land
-    requires: []
-    reads: []
-    writes: []
+    requires: [github.pr]                    # T5b: the PR to merge must exist
+    reads: [cache.plan-ref, github.pr]       # T5b: ref -> branch -> find the PR
+    writes: [github.pr, cache.markers]       # T5b: squash-merge; set pending-learn
     predecessors: [submit]
     successors: [learn]
 
@@ -120,8 +120,8 @@ stages:
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: learn
-    requires: []
-    reads: []
-    writes: []
+    requires: [cache.markers]                # T5b: pending-learn gates the worktree
+    reads: [cache.markers]                   # T5b: was it set?
+    writes: [cache.markers]                  # T5b: clear pending-learn (TS-only; no GitHub write)
     predecessors: [land]
     successors: []

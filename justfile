@@ -60,6 +60,9 @@ verify:
     bash scripts/verify-p1-t3.sh
     bash scripts/verify-p1-t4a.sh
     bash scripts/verify-p1-t4b.sh
+    bash scripts/verify-p1-t5a.sh
+    bash scripts/verify-p1-t5b.sh
+    bash scripts/verify-p1-t5c.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

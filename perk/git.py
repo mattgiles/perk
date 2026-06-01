@@ -56,6 +56,16 @@ def current_branch(repo: Path) -> str | None:
     return None if branch == "HEAD" else branch
 
 
+def push(cwd: Path, branch: str, *, set_upstream: bool = True) -> None:
+    """Push ``branch`` to ``origin`` from ``cwd`` (the worktree); ``GitError`` on failure."""
+    args = ["push"]
+    if set_upstream:
+        args += ["-u", "origin", branch]
+    else:
+        args += ["origin", branch]
+    _run(args, cwd=cwd)
+
+
 def worktree_add(repo: Path, path: Path, *, branch: str, create_branch: bool) -> None:
     """Add a worktree at ``path``; create ``branch`` off HEAD when ``create_branch``."""
     if create_branch:

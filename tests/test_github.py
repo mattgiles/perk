@@ -214,3 +214,242 @@ def _header(run_id: str) -> str:
     return plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id=run_id, created="t").to_data()
     )
+
+
+# --------------------------------------------------------------- PR lifecycle ops (T5a)
+
+
+class _GhDispatch:
+    """Route `gh` argv to a `_Proc` via (predicate, proc) handlers; record calls + body files."""
+
+    def __init__(self, handlers) -> None:
+        self.handlers = handlers
+        self.calls: list[list[str]] = []
+        self.body_files: list[str] = []
+
+    def __call__(self, args, **_):
+        gh = args[1:]
+        self.calls.append(gh)
+        for tok in gh:
+            if tok.startswith("body=@"):
+                self.body_files.append(Path(tok[len("body=@") :]).read_text(encoding="utf-8"))
+        for pred, proc in self.handlers:
+            if pred(gh):
+                return proc
+        return _Proc(1, stderr="unhandled: " + " ".join(gh))
+
+    def method_calls(self, method: str) -> int:
+        return sum(1 for c in self.calls if method in c)
+
+
+def _has(*tokens):
+    # substring match per token (gh endpoints are like "repos/{owner}/{repo}/pulls").
+    return lambda gh: all(any(t in tok for tok in gh) for t in tokens)
+
+
+def test_default_branch(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("repo", "view", "defaultBranchRef"), _Proc(0, "main\n"))]),
+    )
+    assert github.default_branch(ROOT) == "main"
+
+
+def test_find_pr_for_branch_prefers_open(monkeypatch):
+    pulls = [
+        {"number": 1, "html_url": "u/1", "state": "closed", "draft": False},
+        {"number": 2, "html_url": "u/2", "state": "open", "draft": True},
+    ]
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, json.dumps(pulls))),
+            ]
+        ),
+    )
+    pr = github.find_pr_for_branch(branch="plan-7", repo_root=ROOT)
+    assert pr is not None and pr.number == 2 and pr.is_draft and pr.state == "OPEN"
+
+
+def test_find_pr_for_branch_none(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, "[]")),
+            ]
+        ),
+    )
+    assert github.find_pr_for_branch(branch="plan-7", repo_root=ROOT) is None
+
+
+def test_create_pr_idempotent_returns_existing_no_post(monkeypatch):
+    existing = [{"number": 9, "html_url": "u/9", "state": "open", "draft": True}]
+    rec = _GhDispatch(
+        [
+            (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+            (_has("pulls", "GET"), _Proc(0, json.dumps(existing))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    pr = github.create_pr(head="plan-7", base="main", title="t", body="b", repo_root=ROOT)
+    assert pr.number == 9 and pr.existed is True
+    assert rec.method_calls("POST") == 0  # dedup short-circuits the create
+
+
+def test_create_pr_creates_when_none_uses_body_file(monkeypatch):
+    created = {"number": 10, "html_url": "u/10", "draft": True, "state": "open"}
+    rec = _GhDispatch(
+        [
+            (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+            (_has("pulls", "GET"), _Proc(0, "[]")),
+            (_has("pulls", "POST"), _Proc(0, json.dumps(created))),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    pr = github.create_pr(head="plan-7", base="main", title="t", body="PR-BODY", repo_root=ROOT)
+    assert pr.number == 10 and pr.existed is False and pr.is_draft
+    assert rec.body_files == ["PR-BODY"]  # body via file, never inline
+    assert all("body=PR-BODY" not in tok for c in rec.calls for tok in c)
+
+
+def test_update_plan_header_merges_fields(monkeypatch):
+    body = _header("01RID")
+    rec = _GhDispatch(
+        [
+            (_has("issues/123", ".body"), _Proc(0, body)),
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_plan_header(
+        issue=123, fields={"branch": "plan-123", "pr": "55"}, repo_root=ROOT
+    )
+    assert set(upd.fields_updated) == {"branch", "pr"} and upd.dry_run is False
+    # the PATCHed body carries the merged header
+    patched = rec.body_files[-1]
+    merged = plan.find_metadata_block(patched, plan.PLAN_HEADER_KEY)
+    assert merged is not None and merged["branch"] == "plan-123" and merged["pr"] == "55"
+    assert merged["run_id"] == "01RID"  # untouched fields preserved
+
+
+def test_update_plan_header_dry_run_does_not_patch(monkeypatch):
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, _header("01RID")))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_plan_header(
+        issue=123, fields={"branch": "plan-123"}, repo_root=ROOT, dry_run=True
+    )
+    assert upd.dry_run is True and rec.method_calls("PATCH") == 0
+
+
+def test_update_plan_header_rejects_unknown_field(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _header("01RID")))
+    with pytest.raises(github.GitHubError, match="unknown plan-header field"):
+        github.update_plan_header(issue=123, fields={"bogus": "x"}, repo_root=ROOT)
+
+
+def test_get_plan_planned_has_no_pr(monkeypatch):
+    issue = {"number": 7, "title": "T", "body": _header("01RID"), "state": "OPEN", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = github.get_plan(number=7, repo_root=ROOT)
+    assert state is not None and state.title == "T" and state.pr is None
+
+
+def test_get_plan_impl_fetches_pr(monkeypatch):
+    header = plan.PlanHeader(
+        run_id="01RID",
+        created="t",
+        lifecycle_stage=plan.LifecycleStage.IMPL,
+        branch="plan-7",
+        pr="55",
+    )
+    body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
+    issue = {"number": 7, "title": "T", "body": body, "state": "OPEN", "url": "u/7"}
+    pr = {"number": 55, "html_url": "u/pr/55", "draft": False, "state": "open"}
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("issue", "view"), _Proc(0, json.dumps(issue))),
+                (_has("pulls/55"), _Proc(0, json.dumps(pr))),
+            ]
+        ),
+    )
+    state = github.get_plan(number=7, repo_root=ROOT)
+    assert state is not None and state.pr is not None
+    assert state.pr.number == 55 and state.pr.state == "OPEN"
+
+
+def test_get_plan_not_found(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("issue", "view"), _Proc(1, stderr="GraphQL: Could not resolve (404)"))]),
+    )
+    assert github.get_plan(number=999, repo_root=ROOT) is None
+
+
+# --------------------------------------------------------------- land ops (T5b)
+
+
+def test_mark_pr_ready_succeeds(monkeypatch):
+    rec = _GhDispatch([(_has("pr", "ready"), _Proc(0))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    github.mark_pr_ready(number=42, repo_root=ROOT)  # no raise
+    assert any("ready" in c for c in rec.calls)
+
+
+def test_mark_pr_ready_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    github.mark_pr_ready(number=42, repo_root=ROOT, dry_run=True)
+
+
+def test_merge_pr_squash_success(monkeypatch):
+    rec = _GhDispatch([(_has("merge", "PUT"), _Proc(0, "{}"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    pr = github.merge_pr(number=42, repo_root=ROOT, commit_message="Closes #7")
+    assert pr.state == "MERGED" and pr.number == 42
+    # squash method + the closing commit message went through
+    assert any("merge_method=squash" in tok for c in rec.calls for tok in c)
+    assert any("commit_message=Closes #7" in tok for c in rec.calls for tok in c)
+
+
+def test_merge_pr_already_merged_is_success(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("merge", "PUT"), _Proc(1, stderr="HTTP 405: already merged"))]),
+    )
+    pr = github.merge_pr(number=42, repo_root=ROOT)
+    assert pr.state == "MERGED"  # idempotent
+
+
+def test_merge_pr_other_failure_raises(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("merge", "PUT"), _Proc(1, stderr="HTTP 409: conflict"))]),
+    )
+    with pytest.raises(github.GitHubError):
+        github.merge_pr(number=42, repo_root=ROOT)
+
+
+def test_merge_pr_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    pr = github.merge_pr(number=42, repo_root=ROOT, dry_run=True)
+    assert pr.state == "MERGED"

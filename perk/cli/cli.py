@@ -13,7 +13,10 @@ from perk import __version__
 from perk.cli.commands.doctor_cmd import doctor
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.plan_save_cmd import plan_save
+from perk.cli.commands.pr_land_cmd import pr_land
+from perk.cli.commands.pr_submit_cmd import pr_submit
 from perk.cli.commands.registry_cmd import registry
+from perk.cli.commands.resume_cmd import resume_cmd
 from perk.cli.commands.state_cmd import state
 from perk.cli.commands.worktree_cmd import worktree
 from perk.cli.context import PerkContext
@@ -33,6 +36,9 @@ def cli(ctx: click.Context) -> None:
 
 cli.add_command(init_perk)
 cli.add_command(plan_save)
+cli.add_command(pr_submit)
+cli.add_command(pr_land)
+cli.add_command(resume_cmd)
 cli.add_command(doctor)
 cli.add_command(registry)
 cli.add_command(state)

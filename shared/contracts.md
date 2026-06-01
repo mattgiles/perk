@@ -220,11 +220,41 @@ find_plan_issue{ run_id }                           -> PlanIssue | null
   the eventually-consistent search index), create-then-return (`Q3` establish-before-record).
 - **`perk:plan` label** is created lazily on first save.
 
+**Authored (P1.T5a — the submit path).** REST `gh api`; idempotent via the list endpoint:
+
+```
+default_branch()                                    -> string
+    # gh repo view --json defaultBranchRef (the PR base)
+find_pr_for_branch{ branch }                        -> PullRequest | null
+    # GET .../pulls?head=<owner>:<branch>&state=all (prefers an open PR)
+create_pr{ head, base, title, body, draft }         -> PullRequest{ number, url, is_draft, state, existed }
+    # POST .../pulls (-F body=@file); idempotent on head (find-then-create)
+update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_updated[], dry_run }
+    # GET issue body -> merge fields into the plan-header block -> PATCH .../issues/{n}
+    # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
+get_plan{ number }                                  -> PlanState{ number, url, title, header, pr } | null
+    # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read (T5c)
+```
+
+- **PR body (P1.T5a, minimal):** `Closes #<issue>` (so the squash-merge closes the plan) + a
+  `Plan: #<issue>` link + a **plain-text** `` `gh pr checkout <n>` `` footer (no HTML — erk's
+  tripwire). Full-plan re-embedding + AI body craft are Phase 2.
+
+**Authored (P1.T5b — the land path).** Idempotent; the caller checks PR state before merging:
+
+```
+mark_pr_ready{ number }                             -> void
+    # gh pr ready <n> — the ONE non-REST op (draft->ready is GraphQL-only); called only on a draft
+merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED)
+    # PUT .../pulls/{n}/merge (merge_method=squash); idempotent ("already merged" ⇒ success)
+```
+
+- **`Closes #<issue>`** rides in the PR body (T5a) so the squash-merge closes the plan issue;
+  `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
+  stored (Q8).
+
 **Still named-only (payloads deferred to their stage — authoring ahead is fiction):**
 
-- `update_plan_header` — staged field population (`branch`/`pr` at submit; `Q8` keeps
-  `lifecycle_stage` collapsing `planned → impl`, post-states derived from PR).
-- `create_pr` / `mark_pr_ready` / `merge_pr` — the `submit` → `land` path.
 - `resolve_review_threads` — the `address` loop (Phase 2).
   - **Known durable shape to keep when authored** (PRIOR_ART §5/§11): the payload is
     `[{ thread_id, comment }]` (objects, not a flat list). Review threads are a *distinct*
@@ -260,6 +290,13 @@ block; the full plan markdown lives in the `plan-body` first comment:
 (learn/objective) land with their stages. Query by a **single** label — GitHub label filters
 are AND-semantics.
 
+**The `pending-learn` semaphore (P1.T5b; Q2/Q5).** An existence-only `cache.markers` file
+(`.pi/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
+sets it** (after a successful merge), **`learn` clears it**. While present it signals the
+land→learn cycle is open and the worktree is not yet releasable (a future `worktree remove` /
+`doctor` honors it). `learn` is **thin and TS-only** this phase — it clears the marker; the
+agentic capture + a `perk:learn` label/issue is Phase 2.
+
 > **Status (P1.T2b):** the plan-ref is **materialized**. T2a emits it (`--json`); T2b persists
 > it as the `cache.plan-ref` file (`.pi/workflow/plan-ref.json`, written by the cold door,
 > read by both planes) and reconciles it into the `active_plan_ref` session field on
@@ -280,6 +317,37 @@ are AND-semantics.
 > `active_plan_ref` on `session_start` (§8.3) with no extension change. The plan-header's `branch`
 > field stays `null` until it is recorded at **submit** (T5a). `implement` reads `cache.plan-ref`
 > and writes `session.workflow-state` (the worktree link).
+>
+> **Status (P1.T5a) + the delegation decision.** The §8.4 opening's "one contract, implemented
+> **once per plane**" (a Python gateway *and* a TS gateway, same shapes) was a Phase-0 hypothesis.
+> **T3 deviated** (the warm `/plan-save` delegates to `perk plan-save` via `pi.exec`), and T5
+> **confirms delegation as the standing pattern for GitHub mutations**: the **Python gateway is
+> canonical**; the TS warm doors (`/submit`, and `/land` in T5b) **delegate** to thin Python workers
+> (`perk pr-submit`/`perk pr-land --json`) over the §3.2 machine-JSON channel — they do **not**
+> reimplement the writes. (Cache/session tiers keep their per-plane I/O — `cache.ts`/`cache.py` —
+> because those are *files*, not GitHub.) The "two gh gateways" idea is retired; there is **one
+> canonical Python GitHub gateway**. So **T5a** opens a **draft** PR (`Closes #<issue>` so the
+> squash-merge closes the plan), then `update_plan_header` populates the staged `branch=plan-<pr_id>`,
+> `pr=<number>`, `lifecycle_stage=impl`. `submit` reads `cache.plan-ref` + `github.plan` and writes
+> `github.pr` + `github.plan`.
+>
+> **Status (P1.T5b):** the **land path** is built. `land` (warm `/land` + cold `perk pr-land`)
+> marks the PR ready (if draft), **squash-merges** it (idempotent — `already merged` ⇒ success), and
+> sets the **`pending-learn`** marker; `learn` (warm `/learn`, TS-only) clears it. The cold worker
+> sets the marker on its real run; the warm door also sets it post-delegate (idempotent existence
+> file), so each plane's path is independently correct. `land` reads `cache.plan-ref` + `github.pr`
+> and writes `github.pr` + `cache.markers`; `learn` reads/writes `cache.markers`. Reconciliation
+> typing + the review/`address` loop + deep learn tooling stay Phase 2.
+>
+> **Status (P1.T5c):** `perk resume <plan>` is built — the cross-stage verb. It reads the plan via
+> `get_plan`, **reconstructs `cache.plan-ref`** from the GitHub state, derives the **current
+> actionable stage** (no PR → `implement`; PR open → `submit`; PR merged + `pending-learn` →
+> `learn`; merged + learned → nothing), then reuses T4a's `launch_stage` (idempotent worktree +
+> materialize + `exec pi`). `--dry-run`/`--json` resolve + print without launching (no ref write).
+> The resolution is a **pure, unit-tested** function (`perk/resume.py`). For `reuse` stages
+> (`submit`/`land`/`learn`) it assumes a **local** worktree; recreating one from a remote branch on
+> a fresh clone is Phase 2. This closes the spine: `plan → save → implement → submit → land →
+> learn`, resumable at any stage.
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

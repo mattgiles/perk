@@ -14,6 +14,11 @@ from typing import Any
 # The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
+# The land->learn semaphore (Q2 / Q5): `land` sets it, `learn` clears it; while present it
+# signals the worktree is not yet releasable. Single source of the name across planes (the TS
+# twin is `PENDING_LEARN` in extension/cache.ts).
+PENDING_LEARN = "pending-learn"
+
 
 def workflow_dir(root: Path) -> Path:
     """The ``.pi/workflow/`` directory under ``root``."""

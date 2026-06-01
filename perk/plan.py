@@ -28,6 +28,12 @@ PLAN_LABEL_DESCRIPTION = "perk plan issue"
 PLAN_HEADER_KEY = "plan-header"
 PLAN_BODY_KEY = "plan-body"
 
+# The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
+# the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
+PLAN_HEADER_FIELDS = frozenset(
+    {"run_id", "lifecycle_stage", "branch", "pr", "created", "objective_id"}
+)
+
 _OPEN = "<!-- perk:metadata-block:{key} -->"
 _CLOSE = "<!-- /perk:metadata-block:{key} -->"
 _FENCE = "```"
@@ -105,6 +111,22 @@ def render_metadata_block(key: str, data: dict[str, object]) -> str:
         f"</details>\n"
         f"{_CLOSE.format(key=key)}"
     )
+
+
+def replace_metadata_block(text: str, key: str, data: dict[str, object]) -> str:
+    """Replace an existing perk metadata block (by key) with a re-rendered one (inverse of
+    :func:`find_metadata_block`). Appends if the block is absent; a no-op if the open marker
+    exists but its close marker is missing (malformed — caller validates via
+    :func:`find_metadata_block`)."""
+    rendered = render_metadata_block(key, data)
+    start = text.find(_OPEN.format(key=key))
+    if start == -1:
+        return f"{text.rstrip()}\n\n{rendered}\n" if text.strip() else f"{rendered}\n"
+    close = _CLOSE.format(key=key)
+    end = text.find(close, start)
+    if end == -1:
+        return text
+    return text[:start] + rendered + text[end + len(close) :]
 
 
 def find_metadata_block(text: str, key: str) -> dict[str, object] | None:

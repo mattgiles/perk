@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from perk import plan
 
@@ -307,3 +308,288 @@ def add_issue_comment(
     if proc.returncode != 0:
         raise _failed(proc, f"failed to comment on issue #{issue}")
     return CommentResult(posted=True)
+
+
+# ===========================================================================
+# PR lifecycle ops (P1.T5 — submit/land/resume; contracts.md §8.4).
+#
+# Same conventions as the plan write: REST `gh api` over porcelain (the lone exception is
+# `mark_pr_ready` — there is no REST endpoint for draft->ready, so it shells `gh pr ready`,
+# which is GraphQL), bodies via file, idempotency via the list endpoint + find-then-return,
+# mutations raise / lookups return `... | None`.
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class PullRequest:
+    """A pull request. ``existed`` is True when found (idempotent), False when freshly created."""
+
+    number: int
+    url: str
+    is_draft: bool
+    state: str  # "OPEN" | "MERGED" | "CLOSED" (normalized)
+    existed: bool
+
+
+@dataclass(frozen=True)
+class PlanHeaderUpdate:
+    """The result of a staged ``plan-header`` field write."""
+
+    fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class PlanState:
+    """A plan issue's observable state (for ``perk resume``): the parsed header + PR (if any)."""
+
+    number: int
+    url: str
+    title: str
+    header: dict[str, object]
+    pr: PullRequest | None
+
+
+def _owner(repo_root: Path) -> str:
+    """The repo owner login (for the ``head=<owner>:<branch>`` PR list filter)."""
+    proc = _run(["repo", "view", "--json", "owner", "--jq", ".owner.login"], cwd=repo_root)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise _failed(proc, "failed to resolve repo owner")
+    return proc.stdout.strip()
+
+
+def _pr_state(pr: dict[str, Any]) -> str:
+    """Normalize a REST PR object's state into OPEN | MERGED | CLOSED."""
+    if pr.get("merged") is True or pr.get("merged_at"):
+        return "MERGED"
+    return "OPEN" if pr.get("state") == "open" else "CLOSED"
+
+
+def _pull_request(pr: dict[str, Any], *, existed: bool) -> PullRequest:
+    return PullRequest(
+        number=int(pr["number"]),
+        url=str(pr.get("html_url", "")),
+        is_draft=bool(pr.get("draft", False)),
+        state=_pr_state(pr),
+        existed=existed,
+    )
+
+
+def default_branch(repo_root: Path) -> str:
+    """The repo's default branch (the PR base). Raises ``GitHubError`` on failure."""
+    proc = _run(
+        ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise _failed(proc, "failed to resolve the default branch")
+    return proc.stdout.strip()
+
+
+def find_pr_for_branch(*, branch: str, repo_root: Path) -> PullRequest | None:
+    """Find a PR whose head is ``branch`` (idempotency lookup; list endpoint, all states).
+
+    Prefers an open PR (the submit-reuse case); raises on an infra failure, never masks it.
+    """
+    proc = _run(
+        [
+            "api",
+            "repos/{owner}/{repo}/pulls",
+            "-X",
+            "GET",
+            "-f",
+            f"head={_owner(repo_root)}:{branch}",
+            "-f",
+            "state=all",
+        ],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to list PRs for {branch!r}")
+    try:
+        items = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api pulls` output: {exc}") from exc
+    if not isinstance(items, list) or not items:
+        return None
+    chosen = next((p for p in items if p.get("state") == "open"), items[0])
+    return _pull_request(chosen, existed=True)
+
+
+def create_pr(
+    *,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    repo_root: Path,
+    draft: bool = True,
+    dry_run: bool = False,
+) -> PullRequest:
+    """Open a PR (REST, body via file). Idempotent: an existing PR for ``head`` is returned."""
+    if dry_run:
+        return PullRequest(number=0, url="(dry-run)", is_draft=draft, state="OPEN", existed=False)
+    existing = find_pr_for_branch(branch=head, repo_root=repo_root)
+    if existing is not None:
+        return existing
+    with _body_file(body) as body_path:
+        proc = _run(
+            [
+                "api",
+                "repos/{owner}/{repo}/pulls",
+                "-X",
+                "POST",
+                "-f",
+                f"title={title}",
+                "-f",
+                f"head={head}",
+                "-f",
+                f"base={base}",
+                "-F",
+                f"body=@{body_path}",
+                "-F",
+                f"draft={'true' if draft else 'false'}",
+                "--jq",
+                "{number: .number, html_url: .html_url, draft: .draft, state: .state}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, "failed to create PR")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api pulls` create output: {exc}") from exc
+    if not isinstance(data, dict):
+        raise GitHubError(f"unexpected create-PR payload: {data!r}")
+    return _pull_request(data, existed=False)
+
+
+def update_plan_header(
+    *, issue: int, fields: dict[str, object], repo_root: Path, dry_run: bool = False
+) -> PlanHeaderUpdate:
+    """Merge ``fields`` into the issue body's ``plan-header`` block and PATCH it (REST).
+
+    Rejects unknown header keys (LBYL on the schema). A dry run validates + composes only.
+    """
+    unknown = set(fields) - plan.PLAN_HEADER_FIELDS
+    if unknown:
+        raise GitHubError(f"unknown plan-header field(s): {sorted(unknown)}")
+    body = _get_issue_body(issue, repo_root)
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+    new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
+    if dry_run:
+        return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
+    with _body_file(new_body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/{issue}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update plan-header on #{issue}")
+    return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+
+def _get_issue_body(issue: int, repo_root: Path) -> str:
+    proc = _run(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}", "--jq", ".body"], cwd=repo_root
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to read issue #{issue}")
+    return proc.stdout
+
+
+def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
+    """Fetch a PR by number (REST). ``None`` if it does not exist; raises on infra failure."""
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}"], cwd=repo_root)
+    if proc.returncode != 0:
+        if "404" in (proc.stderr + proc.stdout):
+            return None
+        raise _failed(proc, f"failed to read PR #{number}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api pulls/{number}` output: {exc}") from exc
+    return _pull_request(data, existed=True)
+
+
+def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
+    """Read a plan issue's observable state (header + PR) for ``perk resume``.
+
+    ``None`` when the issue does not exist; raises ``GitHubError`` on an infra failure.
+    """
+    proc = _run(
+        ["issue", "view", str(number), "--json", "number,title,body,state,url"], cwd=repo_root
+    )
+    if proc.returncode != 0:
+        if "not found" in (proc.stderr + proc.stdout).lower() or "404" in (
+            proc.stderr + proc.stdout
+        ):
+            return None
+        raise _failed(proc, f"failed to read plan issue #{number}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    header = plan.find_metadata_block(str(data.get("body", "")), plan.PLAN_HEADER_KEY) or {}
+    pr_field = header.get("pr")
+    pr = (
+        get_pr(number=int(pr_field), repo_root=repo_root)
+        if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
+        else None
+    )
+    return PlanState(
+        number=int(data["number"]) if "number" in data else number,
+        url=str(data.get("url", "")),
+        title=str(data.get("title", "")),
+        header=header,
+        pr=pr,
+    )
+
+
+def mark_pr_ready(*, number: int, repo_root: Path, dry_run: bool = False) -> None:
+    """Mark a draft PR ready for review (the lone GraphQL op — there is no REST endpoint).
+
+    Called only on a draft PR (the worker checks `is_draft` first); raises on failure.
+    """
+    if dry_run:
+        return
+    proc = _run(["pr", "ready", str(number)], cwd=repo_root, timeout=_WRITE_TIMEOUT)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to mark PR #{number} ready")
+
+
+def merge_pr(
+    *, number: int, repo_root: Path, commit_message: str | None = None, dry_run: bool = False
+) -> PullRequest:
+    """Squash-merge a PR (REST `PUT .../merge`). Idempotent: an already-merged PR is success.
+
+    The caller checks `state != MERGED` before merging; the ``already merged`` net guards a race.
+    """
+    if dry_run:
+        return PullRequest(number=number, url="", is_draft=False, state="MERGED", existed=True)
+    args = [
+        "api",
+        f"repos/{{owner}}/{{repo}}/pulls/{number}/merge",
+        "-X",
+        "PUT",
+        "-f",
+        "merge_method=squash",
+    ]
+    if commit_message:
+        args += ["-f", f"commit_message={commit_message}"]
+    proc = _run(args, cwd=repo_root, timeout=_WRITE_TIMEOUT)
+    if proc.returncode == 0:
+        return PullRequest(number=number, url="", is_draft=False, state="MERGED", existed=True)
+    if "already merged" in (proc.stderr + proc.stdout).lower():
+        return PullRequest(number=number, url="", is_draft=False, state="MERGED", existed=True)
+    raise _failed(proc, f"failed to merge PR #{number}")

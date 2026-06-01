@@ -1,0 +1,117 @@
+import json
+import subprocess
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from perk import cache, git, github
+from perk.cli.cli import cli
+
+_REF = {
+    "provider": "github",
+    "pr_id": "7",
+    "url": "https://gh/o/r/issues/7",
+    "labels": ["perk:plan"],
+    "objective_id": None,
+}
+
+
+def _git_init(path: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+def _authed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
+    )
+
+
+def _stub_gh(monkeypatch, *, existed: bool = False) -> dict[str, object]:
+    """Stub the whole submit gateway path; record what the worker did."""
+    calls: dict[str, object] = {"pushed": False, "header": None}
+    monkeypatch.setattr(
+        github,
+        "get_plan",
+        lambda **k: github.PlanState(number=7, url="u/7", title="My Feature", header={}, pr=None),
+    )
+    monkeypatch.setattr(github, "default_branch", lambda root: "main")
+    monkeypatch.setattr(
+        github,
+        "create_pr",
+        lambda **k: github.PullRequest(
+            number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=existed
+        ),
+    )
+
+    def _update(**k):
+        calls["header"] = k["fields"]
+        return github.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
+
+    def _push(*a, **k):
+        calls["pushed"] = True
+
+    monkeypatch.setattr(github, "update_plan_header", _update)
+    monkeypatch.setattr(git, "push", _push)
+    return calls
+
+
+def _run(monkeypatch, args, *, write_ref=True):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        if write_ref:
+            cache.write_plan_ref(Path(d), _REF)
+        return runner.invoke(cli, args)
+
+
+def test_dry_run_is_offline_and_well_formed(monkeypatch):
+    # No gh stubs at all — a dry run must not shell anything.
+    result = _run(monkeypatch, ["pr-submit", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True and data["dry_run"] is True
+    assert data["branch"] == "plan-7" and data["issue"] == 7
+    assert data["pr"]["number"] == 0  # stub (no PR opened on a dry run)
+    assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
+
+
+def test_no_plan_ref_exits_1(monkeypatch):
+    result = _run(monkeypatch, ["pr-submit", "--dry-run", "--json"], write_ref=False)
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "no_plan_ref"
+
+
+def test_not_a_repo_exits_2(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem():  # no git init
+        result = runner.invoke(cli, ["pr-submit", "--dry-run", "--json"])
+    assert result.exit_code == 2
+    assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+def test_real_submit_opens_pr_and_updates_header(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["pr"]["number"] == 42 and data["pr"]["existed"] is False
+    assert calls["pushed"] is True
+    assert calls["header"] == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+
+
+def test_real_submit_idempotent_existing_pr(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch, existed=True)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["pr"]["existed"] is True
+
+
+def test_real_submit_plan_not_found_exits_1(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    monkeypatch.setattr(github, "get_plan", lambda **k: None)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "plan_not_found"

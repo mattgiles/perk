@@ -93,6 +93,9 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
 
 // --- markers (existence-only) ------------------------------------------------------------
 
+/** The land->learn semaphore (Q2/Q5); the TS twin of perk.cache.PENDING_LEARN. */
+export const PENDING_LEARN = "pending-learn";
+
 export function markerPath(cwd: string, name: string): string {
   return join(workflowDir(cwd), "markers", name);
 }
