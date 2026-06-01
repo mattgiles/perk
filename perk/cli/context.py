@@ -56,7 +56,8 @@ class PerkContext:
             self._repo_resolved = True
         if self._repo_root is None:
             raise UserFacingCliError(
-                "Not a git repository\nRun this command from inside a git repository."
+                "Not a git repository\nRun this command from inside a git repository.",
+                error_type="not_a_repo",
             )
         return self._repo_root
 

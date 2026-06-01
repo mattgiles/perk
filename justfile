@@ -55,6 +55,7 @@ verify:
     bash scripts/verify-t6.sh
     bash scripts/verify-t7.sh
     bash scripts/verify-p1-t1.sh
+    bash scripts/verify-p1-t2a.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

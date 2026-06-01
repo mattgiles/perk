@@ -21,6 +21,13 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 > (`perk/github.py` — `check_auth` / `check_repo_access`, verification-only, never mutating);
 > the TS plane authors the same shapes in Phase 1. The §8.5 init machine-surface contract is
 > live (`perk init --json`).
+>
+> **Status (P1.T2a):** the §8.4 **plan-write mutations are implemented in the Python plane**
+> (`perk/github.py` `create_label` / `create_plan_issue` / `add_issue_comment` /
+> `find_plan_issue` + `perk/plan.py` storage) — the **cold/worker** save door
+> (`perk plan-save`). The warm in-session twin (the TS `/plan-save` tool) is T3. Both planes
+> use **REST `gh api`** (never porcelain — porcelain's GraphQL has a separate, often-exhausted
+> rate-limit quota) and pass large bodies via `-F body=@file`.
 
 ---
 
@@ -161,14 +168,30 @@ check_repo_access()  -> { ok: bool, repo: string|null, can_push: bool, error: st
 `UserFacingCliError` / `error_type: github_unauthed` when unauthed); `init`/`doctor` call the
 `check_*` ops directly to *report* (non-fatal — see §8.5).
 
-### Mutation operations (named only — **payloads deferred to Phase 1**, Q7/Q9)
+### Mutation operations
 
-Listed so the surface is visible; **not authored** (authoring payloads for unbuilt stages is
-fiction). Each lands with its stage's handler:
+**Authored (P1.T2a — the plan write).** REST `gh api`; mutations **raise** on failure (the
+command boundary maps to `UserFacingCliError`), lookups return `… | null`:
 
-- `create_label` — lazily create `perk:plan` et al. (`/plan-save`, Phase 1).
-- `create_plan_issue` / `update_plan_header` — plan = issue with a queryable header (`Q7`,
-  `Q8`: stored `lifecycle_stage` collapses `planned → impl`; post-states derived from PR).
+```
+create_label{ name, color, description }            -> Label{ name, created }
+    # POST repos/{o}/{r}/labels; HTTP 422 ⇒ created:false (idempotent)
+create_plan_issue{ title, body, labels[], run_id }  -> PlanIssue{ number, url, existed }
+    # POST repos/{o}/{r}/issues (-F body=@file); idempotent on run_id
+add_issue_comment{ issue, body }                    -> CommentResult{ posted }
+    # POST repos/{o}/{r}/issues/{n}/comments (the plan-body first comment)
+find_plan_issue{ run_id }                           -> PlanIssue | null
+    # GET repos/{o}/{r}/issues?labels=perk:plan&state=open + header run_id match
+```
+
+- **Idempotency** is keyed on the header `run_id`, discovered via the **list** endpoint (not
+  the eventually-consistent search index), create-then-return (`Q3` establish-before-record).
+- **`perk:plan` label** is created lazily on first save.
+
+**Still named-only (payloads deferred to their stage — authoring ahead is fiction):**
+
+- `update_plan_header` — staged field population (`branch`/`pr` at submit; `Q8` keeps
+  `lifecycle_stage` collapsing `planned → impl`, post-states derived from PR).
 - `create_pr` / `mark_pr_ready` / `merge_pr` — the `submit` → `land` path.
 - `resolve_review_threads` — the `address` loop (Phase 2).
   - **Known durable shape to keep when authored** (PRIOR_ART §5/§11): the payload is
@@ -183,13 +206,28 @@ erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
 ```
 { provider: string,            # e.g. "github"
   pr_id: string,               # STRING (allows non-numeric ids like Jira "PROJ-123")
-  url: string,
-  labels: string[],
+  url: string,                 # during planning: the plan issue url/id; branch/pr staged null
+  labels: string[],            # ["perk:plan"]
   objective_id: string|null }  # Phase 2
 ```
 
-Only the *direction* is locked in Phase 0; the exact header/body schema and label taxonomy
-land with `/plan-save` in Phase 1.
+**Plan-header block (P1.T2a — the queryable metadata in the issue *body*).** The minimal
+observably-distinct set; rendered as a `perk:metadata-block:plan-header` collapsible YAML
+block; the full plan markdown lives in the `plan-body` first comment:
+
+```
+{ run_id: string,              # the §8.2 run that created the plan (idempotency key)
+  lifecycle_stage: string,     # "planned" (Q8: collapses planned→impl; post-states from PR)
+  branch: string|null,         # staged — populated at submit
+  pr: string|null,             # staged — populated at submit
+  created: string,             # ISO-8601 UTC
+  objective_id: string|null }  # Phase 2
+```
+
+**Label taxonomy (minimal, PRIOR_ART §2/§6):** one label `perk:plan` in the MVP; type labels
+(learn/objective) land with their stages. Query by a **single** label — GitHub label filters
+are AND-semantics. T2a **emits** the plan-ref (in `--json`); **T2b** materializes it into
+`cache.plan-ref` and the session linkage.
 
 ---
 

@@ -70,7 +70,7 @@ stages:
     command: save             # Phase 1 warm impl is the plan-mode terminating tool (erk's /plan-save)
     requires: []
     reads: []
-    writes: []
+    writes: [github.plan]     # T2a: `perk plan-save` creates the plan issue (cache.plan-ref -> T2b)
     predecessors: [plan]
     successors: [implement]
 
