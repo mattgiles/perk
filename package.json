@@ -15,11 +15,15 @@
     "!extension/**/*.test.ts",
     "!extension/testing/",
     "shared/",
+    "skills/",
     "README.md"
   ],
   "pi": {
     "extensions": [
       "./extension/index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "scripts": {

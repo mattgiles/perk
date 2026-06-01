@@ -14,6 +14,7 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
+import { registerPlanSave } from "./planSave.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import {
@@ -171,6 +172,9 @@ export default function (pi: ExtensionAPI) {
       writeT3Sentinel(ctx.cwd, "tree", state);
     }
   });
+
+  // Warm door: the `plan_save` tool + `/plan-save` command (turn-3).
+  registerPlanSave(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

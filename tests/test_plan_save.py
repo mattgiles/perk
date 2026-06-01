@@ -62,7 +62,11 @@ def test_plan_save_json_shape(monkeypatch):
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["success"] is True
-    assert payload["issue"] == {"number": 123, "url": "https://gh/o/r/issues/123"}
+    assert payload["issue"] == {
+        "number": 123,
+        "url": "https://gh/o/r/issues/123",
+        "existed": False,
+    }
     assert payload["plan_ref"]["provider"] == "github"
     assert payload["plan_ref"]["pr_id"] == "123"  # string
     assert payload["cached"] is True

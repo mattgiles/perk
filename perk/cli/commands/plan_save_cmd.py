@@ -172,7 +172,11 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "success": True,
         "error_type": None,
         "message": None,
-        "issue": {"number": result.issue.number, "url": result.issue.url},
+        "issue": {
+            "number": result.issue.number,
+            "url": result.issue.url,
+            "existed": result.issue.existed,  # warm /plan-save surfaces this in details (T3)
+        },
         "plan_ref": result.plan_ref.to_data(),
         "cached": result.cached,
         "dry_run": result.dry_run,

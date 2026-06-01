@@ -153,6 +153,12 @@ duplicate and a fork keeps the inherited ref), with a **strict read-back** (loud
 non-fatal on mismatch, headless-safe). `session_tree` re-reads nothing — the per-field LWW
 rebuild already restores `active_plan_ref`, so branch navigation preserves it.
 
+**Warm `/plan-save` direct linkage (T3):** the in-session warm door appends `active_plan_ref`
+**directly** after a successful save (same strict read-back, idempotent by `(provider, pr_id)`),
+so the live session is linked without waiting for the next `session_start`. Both writers feed the
+same LWW field; a warm append makes the next reload's reconciliation a no-op. This makes the warm
+`save` stage a direct writer of `session.workflow-state`.
+
 State key (registry vocabulary): `session.workflow-state`.
 
 ---
@@ -245,7 +251,14 @@ are AND-semantics.
 > **Status (P1.T2b):** the plan-ref is **materialized**. T2a emits it (`--json`); T2b persists
 > it as the `cache.plan-ref` file (`.pi/workflow/plan-ref.json`, written by the cold door,
 > read by both planes) and reconciles it into the `active_plan_ref` session field on
-> `session_start` (§8.3). `save.writes` is now `[github.plan, cache.plan-ref]`.
+> `session_start` (§8.3).
+>
+> **Status (P1.T3):** the **warm door** is built. The in-session `plan_save` tool + `/plan-save`
+> command **wrap** this cold `--json` write (via process launch + the §3.2 machine-JSON surface —
+> **not** a TS reimplementation): they delegate to `perk plan-save --json`, then append
+> `active_plan_ref` to link the live session. This is the read-only → read-write boundary; the
+> plan→implement transition is the **cold door** (T4, fresh context). `save.writes` is now
+> `[github.plan, cache.plan-ref, session.workflow-state]`.
 
 ---
 

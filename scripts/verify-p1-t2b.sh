@@ -43,10 +43,10 @@ echo "== Check 4: registry save stage writes [github.plan, cache.plan-ref] =="
 if py_run -c "
 from perk.registry import load_registry
 save = next(s for s in load_registry().stages if s.id == 'save')
-import sys; sys.exit(0 if save.writes == ['github.plan', 'cache.plan-ref'] else 1)"; then
-  pass "save.writes == [github.plan, cache.plan-ref]; registry self-check holds"
+import sys; sys.exit(0 if {'github.plan', 'cache.plan-ref'} <= set(save.writes) else 1)"; then
+  pass "save.writes includes [github.plan, cache.plan-ref]; registry self-check holds"
 else
-  bad "registry save.writes not [github.plan, cache.plan-ref]"
+  bad "registry save.writes missing github.plan/cache.plan-ref"
 fi
 
 echo "== Check 5: fresh init gitignores plan-ref.json (idempotent) =="

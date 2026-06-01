@@ -12,7 +12,14 @@
 //   F5 keep via session.reload()                 -> reload() re-emits session_start
 //   F6 fork via a planted session .jsonl         -> plantSession()
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@earendil-works/pi-ai";
@@ -55,6 +62,11 @@ export interface PerkSession {
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
   invokeCommand(name: string): Promise<void>;
+  /** Invoke a registered tool's `execute` directly with a synthesized ctx (turn-3 §3.5 S3). */
+  invokeTool(
+    name: string,
+    params: unknown,
+  ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
   /** Re-emit `session_start` (reason "reload"); optional env overrides applied first. */
   reload(env?: Record<string, string | undefined>): Promise<void>;
   /** Dispose the session and restore process.env. */
@@ -87,13 +99,13 @@ export function scaffoldRepo(opts: { handoff?: { runId: string; mode?: string } 
 export function plantSession(
   cwd: string,
   states: Partial<WorkflowState>[],
-  opts: { fileName?: string } = {},
+  opts: { fileName?: string; assistantText?: string } = {},
 ): string {
   const fileName = opts.fileName ?? "planted-parent.jsonl";
   const path = join(cwd, fileName);
   const now = new Date().toISOString();
   const header = { type: "session", version: 3, id: "planted", timestamp: now, cwd };
-  const entries = states.map((data, i) => ({
+  const entries: Record<string, unknown>[] = states.map((data, i) => ({
     type: "custom",
     id: `c${i}`,
     parentId: i === 0 ? null : `c${i - 1}`,
@@ -101,7 +113,33 @@ export function plantSession(
     customType: "perk:workflow-state",
     data,
   }));
+  // Optional trailing assistant message (for /plan-save's extractPlanMarkdown).
+  if (opts.assistantText !== undefined) {
+    entries.push({
+      type: "message",
+      id: "m0",
+      parentId: entries.length ? `c${entries.length - 1}` : null,
+      timestamp: now,
+      message: { role: "assistant", content: [{ type: "text", text: opts.assistantText }] },
+    });
+  }
   writeFileSync(path, `${[header, ...entries].map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
+  return path;
+}
+
+/**
+ * Write an executable fake `perk` (for PERK_BIN): on `plan-save`, prints `stdout` and exits
+ * `code`. Lets the warm-door tests exercise the real `pi.exec` delegation path fully offline.
+ */
+export function fakePerk(cwd: string, opts: { stdout: string; code?: number }): string {
+  const path = join(cwd, "fake-perk.sh");
+  const body = opts.stdout.replace(/'/g, "'\\''");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bash\nprintf '%s' '${body}'\nexit ${opts.code ?? 0}\n`,
+    "utf8",
+  );
+  chmodSync(path, 0o755);
   return path;
 }
 
@@ -188,6 +226,29 @@ export async function loadPerkSession(opts: {
     async invokeCommand(name: string) {
       await session.prompt(`/${name}`);
       await tick();
+    },
+    async invokeTool(name: string, params: unknown) {
+      const tool = session.extensionRunner
+        .getAllRegisteredTools()
+        .find((t) => t.definition.name === name);
+      if (!tool) throw new Error(`tool not registered: ${name}`);
+      const ctx = {
+        cwd,
+        hasUI: headful,
+        ui: headfulUIContext(notifies),
+        sessionManager: session.sessionManager,
+        signal: undefined,
+        isIdle: () => true,
+      } as unknown as Parameters<typeof tool.definition.execute>[4];
+      const result = await tool.definition.execute(
+        `tc-${name}`,
+        params as never,
+        undefined,
+        undefined,
+        ctx,
+      );
+      await tick();
+      return result as { content: { text?: string }[]; details: unknown; terminate?: boolean };
     },
     async reload(env?: Record<string, string | undefined>) {
       if (env) applyEnv(env, savedEnv);

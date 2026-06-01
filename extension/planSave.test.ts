@@ -1,0 +1,176 @@
+// P1.T3 — live warm-door tests (turn-3 §10). Drive a REAL bound AgentSession via the T1 harness
+// and prove the cache.plan-ref delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
+// for the GitHub write, so no LLM / network / gh / Python is invoked. The pure extractPlanMarkdown
+// twin is unit-tested separately below.
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { extractPlanMarkdown } from "./planSave.ts";
+import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+
+const PLAN_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "42",
+    url: "https://gh/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: null,
+  },
+  cached: true,
+  dry_run: false,
+});
+
+const PLAN_MD = "# Add retry\n\n## Summary\nAdd retry to the gateway.\n";
+
+function countLinks(branch: readonly unknown[]): number {
+  return branch.filter((entry) => {
+    const e = entry as { type?: string; customType?: string; data?: Record<string, unknown> };
+    return (
+      e.type === "custom" &&
+      e.customType === WORKFLOW_STATE_TYPE &&
+      e.data?.active_plan_ref !== undefined
+    );
+  }).length;
+}
+
+test("tool: plan_save delegates, links the session, and terminates", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(result.terminate, true, "save terminates the turn");
+    const details = result.details as {
+      ok: boolean;
+      plan_ref?: { pr_id?: string };
+      cached?: boolean;
+    };
+    assert.equal(details.ok, true);
+    assert.equal(details.plan_ref?.pr_id, "42");
+    assert.equal(details.cached, true);
+    assert.match(result.content[0]?.text ?? "", /#42/);
+    // the live session is linked (the warm append lands on the branch; the sentinel is a
+    // session_start/session_tree artifact and is intentionally not rewritten by the tool).
+    assert.equal((h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id, "42");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a second save with the same ref does not duplicate the linkage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(countLinks(h.session.sessionManager.getBranch()), 1, "idempotent: one link entry");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: /plan-save extracts the proposed plan and saves it", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText:
+      "Here is the plan:\n\n<proposed_plan>\n# Add retry\n\n## Summary\nRetry it.\n</proposed_plan>",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeCommand("plan-save");
+    assert.equal((h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id, "42");
+    assert.ok(
+      h.notifies.some((n) => /#42/.test(n)),
+      "a confirmation was notified",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: /plan-save with no proposed plan is loud but non-fatal", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: "/nonexistent" } });
+  try {
+    await h.invokeCommand("plan-save"); // no assistant message planted -> no plan
+    assert.equal(h.workflowState().active_plan_ref ?? null, null, "nothing linked");
+    assert.ok(
+      h.notifies.some((n) => /no plan to save/i.test(n)),
+      "warned about the missing plan",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a missing perk binary fails loud, appends no linkage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_BIN: "/nonexistent/perk-xyz" },
+  });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.notEqual(result.terminate, true);
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a non-zero exit / garbage stdout fails loud, no linkage", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: "not json", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal((result.details as { ok: boolean }).ok, false);
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- extractPlanMarkdown (pure unit) ----------------------------------------------------
+
+test("extractPlanMarkdown: prefers a <proposed_plan> block from the latest assistant message", () => {
+  const entries = [
+    { type: "message", message: { role: "user", content: "do it" } },
+    {
+      type: "message",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "ok <proposed_plan>\n# T\nbody\n</proposed_plan> done" }],
+      },
+    },
+  ];
+  assert.equal(extractPlanMarkdown(entries), "# T\nbody");
+});
+
+test("extractPlanMarkdown: falls back to the whole latest assistant text; null when absent", () => {
+  assert.equal(
+    extractPlanMarkdown([
+      { type: "message", message: { role: "assistant", content: "# Plain plan" } },
+    ]),
+    "# Plain plan",
+  );
+  assert.equal(
+    extractPlanMarkdown([{ type: "message", message: { role: "user", content: "hi" } }]),
+    null,
+  );
+  assert.equal(extractPlanMarkdown([]), null);
+});
