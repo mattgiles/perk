@@ -14,6 +14,7 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
+import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
@@ -175,6 +176,9 @@ export default function (pi: ExtensionAPI) {
 
   // Warm door: the `plan_save` tool + `/plan-save` command (turn-3).
   registerPlanSave(pi);
+
+  // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement` (turn-4b).
+  registerLifecycleGates(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

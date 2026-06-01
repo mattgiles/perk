@@ -161,6 +161,18 @@ same LWW field; a warm append makes the next reload's reconciliation a no-op. Th
 
 State key (registry vocabulary): `session.workflow-state`.
 
+**Session-lifecycle gates (T4b).** The interior guards `session_before_switch` /
+`session_before_fork` with a **dirty-repo check** (`git status --porcelain` via `pi.exec`),
+**scoped to active perk workflows** (`active_plan_ref != null` — perk never interferes with
+non-perk forks/switches). A dirty tree in an active workflow returns `{ cancel: true }` with a
+loud message (notify if UI, else stderr) — **fail-safe-headless** (it cancels in both modes; there
+is no proceed-anyway in Phase 1). A clean tree, or any transition outside a workflow, is allowed
+(returns `undefined`); if `git status` itself fails (e.g. not a repo) the gate allows (it is a
+hygiene guard, not a repo validator). The warm `/implement` command is a **guard-only** twin that
+*enforces* `implement.doors.warm: false`: inside an impl context (read-write mode + a linked
+plan-ref) it acknowledges "continue"; otherwise it refuses and points to the cold door `perk
+implement`. The proceed-anyway confirm dialog + `git-checkpoint` stash-on-turn are Phase 2.
+
 ---
 
 ## §8.4 · The GitHub gateway contract (Q9/Q10)
@@ -259,8 +271,15 @@ are AND-semantics.
 > `active_plan_ref` to link the live session. This is the read-only → read-write boundary; the
 > plan→implement transition is the **cold door** (T4, fresh context). `save.writes` is now
 > `[github.plan, cache.plan-ref, session.workflow-state]`.
-
----
+>
+> **Status (P1.T4a):** the **cold door** consumes the plan-ref. `perk implement` (no positional —
+> the *active* ref; arbitrary `#N` is `perk resume`, T5c) reads `cache.plan-ref` from the repo root,
+> **derives a deterministic worktree/branch name `plan-<pr_id>`** (`pr_id` stays a string), creates
+> the worktree **idempotently** (an existing one is reused — resume), and **materializes the
+> handoff + plan-ref into the worktree** so the launched `pi` (cwd = worktree) reconciles
+> `active_plan_ref` on `session_start` (§8.3) with no extension change. The plan-header's `branch`
+> field stays `null` until it is recorded at **submit** (T5a). `implement` reads `cache.plan-ref`
+> and writes `session.workflow-state` (the worktree link).
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

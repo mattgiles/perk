@@ -12,6 +12,7 @@
 //   F5 keep via session.reload()                 -> reload() re-emits session_start
 //   F6 fork via a planted session .jsonl         -> plantSession()
 
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -67,6 +68,12 @@ export interface PerkSession {
     name: string,
     params: unknown,
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
+  /** Fire a lifecycle event (session_before_fork / session_before_switch) and return its result. */
+  emitLifecycle(
+    event:
+      | { type: "session_before_fork"; entryId: string; position: "before" | "at" }
+      | { type: "session_before_switch"; reason: "new" | "resume"; targetSessionFile?: string },
+  ): Promise<{ cancel?: boolean } | undefined>;
   /** Re-emit `session_start` (reason "reload"); optional env overrides applied first. */
   reload(env?: Record<string, string | undefined>): Promise<void>;
   /** Dispose the session and restore process.env. */
@@ -125,6 +132,25 @@ export function plantSession(
   }
   writeFileSync(path, `${[header, ...entries].map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
   return path;
+}
+
+/**
+ * `git init` a scaffold into a real repo with one seed commit; when `dirty`, leave an uncommitted
+ * file so the dirty-repo lifecycle gate (turn-4b) fires. Test-only (uses execFileSync).
+ */
+export function gitInit(cwd: string, opts: { dirty: boolean }): void {
+  const g = (...args: string[]) => execFileSync("git", args, { cwd, stdio: "ignore" });
+  g("init", "-q");
+  g("config", "user.email", "t@example.com");
+  g("config", "user.name", "perk tests");
+  // Mirror a real perk repo: the workflow cache is gitignored, and pi session files live in the
+  // agent dir (not the repo tree) — the harness plants a `.jsonl` in cwd for convenience, so ignore
+  // it too. Net: only real source edits (e.g. uncommitted.txt) dirty the tree.
+  writeFileSync(join(cwd, ".gitignore"), "/.pi/workflow/\n*.jsonl\nfake-perk.sh\n", "utf8");
+  writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
+  g("add", "-A");
+  g("commit", "-qm", "seed");
+  if (opts.dirty) writeFileSync(join(cwd, "uncommitted.txt"), "dirty\n", "utf8");
 }
 
 /**
@@ -249,6 +275,11 @@ export async function loadPerkSession(opts: {
       );
       await tick();
       return result as { content: { text?: string }[]; details: unknown; terminate?: boolean };
+    },
+    async emitLifecycle(event) {
+      const result = await session.extensionRunner.emit(event as never);
+      await tick();
+      return result as { cancel?: boolean } | undefined;
     },
     async reload(env?: Record<string, string | undefined>) {
       if (env) applyEnv(env, savedEnv);

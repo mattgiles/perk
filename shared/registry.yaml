@@ -81,9 +81,9 @@ stages:
     doors: { warm: false, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: implement
-    requires: []
-    reads: []
-    writes: []
+    requires: [cache.plan-ref]   # T4: cold door derives plan-<pr_id> from the active ref
+    reads: [cache.plan-ref]      # T4: positions the worktree from the ref (agent reads github.plan)
+    writes: [session.workflow-state]  # T4: the worktree session links active_plan_ref on session_start
     predecessors: [save]
     successors: [submit]
 

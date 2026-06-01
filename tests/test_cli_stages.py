@@ -26,10 +26,11 @@ def test_remote_door_blocked():
     assert "remote target is Phase 3" in result.output
 
 
-def test_implement_requires_worktree():
+def test_implement_requires_plan_ref():
+    # T4a: implement derives the worktree from the active plan-ref; with none, it asks for a plan.
     result = CliRunner().invoke(cli, ["implement"], obj=_ctx(Path("/repo")))
     assert result.exit_code == 1
-    assert "needs a worktree" in result.output
+    assert "needs a saved plan" in result.output
 
 
 def test_worktree_create_list_remove(git_repo):

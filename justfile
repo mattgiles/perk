@@ -58,6 +58,8 @@ verify:
     bash scripts/verify-p1-t2a.sh
     bash scripts/verify-p1-t2b.sh
     bash scripts/verify-p1-t3.sh
+    bash scripts/verify-p1-t4a.sh
+    bash scripts/verify-p1-t4b.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:
