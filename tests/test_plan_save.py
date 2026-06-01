@@ -65,7 +65,39 @@ def test_plan_save_json_shape(monkeypatch):
     assert payload["issue"] == {"number": 123, "url": "https://gh/o/r/issues/123"}
     assert payload["plan_ref"]["provider"] == "github"
     assert payload["plan_ref"]["pr_id"] == "123"  # string
+    assert payload["cached"] is True
     assert payload["dry_run"] is False
+
+
+def test_plan_save_writes_cache_plan_ref(monkeypatch):
+    # A real save persists the cache.plan-ref pointer (turn-2b §7).
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md"])
+        assert result.exit_code == 0
+        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+    assert ref == {
+        "provider": "github",
+        "pr_id": "123",
+        "url": "https://gh/o/r/issues/123",
+        "labels": ["perk:plan"],
+        "objective_id": None,
+    }
+
+
+def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md", "--dry-run", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["cached"] is False
+        assert not (Path(d) / ".pi" / "workflow" / "plan-ref.json").exists()
 
 
 def test_plan_save_unauthed_exit_1(monkeypatch):

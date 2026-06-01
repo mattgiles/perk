@@ -3,11 +3,14 @@ from perk.cache import (
     ensure_layout,
     has_marker,
     mark_handoff_consumed,
+    plan_ref_path,
     read_handoff,
+    read_plan_ref,
     read_scratch,
     set_marker,
     workflow_dir,
     write_handoff,
+    write_plan_ref,
     write_scratch,
 )
 
@@ -56,6 +59,20 @@ def test_write_handoff_run_id_is_authoritative(tmp_path):
 def test_read_and_consume_missing_handoff(tmp_path):
     assert read_handoff(tmp_path, "nope") is None
     mark_handoff_consumed(tmp_path, "nope")  # no error on absent handoff
+
+
+def test_plan_ref_round_trip(tmp_path):
+    assert read_plan_ref(tmp_path) is None  # absent -> None (branchable)
+    ref = {
+        "provider": "github",
+        "pr_id": "42",
+        "url": "https://github.com/o/r/issues/42",
+        "labels": ["perk:plan"],
+        "objective_id": None,
+    }
+    path = write_plan_ref(tmp_path, ref)
+    assert path == plan_ref_path(tmp_path) == workflow_dir(tmp_path) / "plan-ref.json"
+    assert read_plan_ref(tmp_path) == ref
 
 
 def test_markers(tmp_path):

@@ -96,6 +96,30 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
     handoff_path(root, run_id).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+# --- plan-ref: the active plan->branch ref pointer (plan-ref.json) -----------------------
+
+
+def plan_ref_path(root: Path) -> Path:
+    """The ``cache.plan-ref`` pointer file (the local mirror of the canonical GitHub plan)."""
+    return workflow_dir(root) / "plan-ref.json"
+
+
+def write_plan_ref(root: Path, data: dict[str, Any]) -> Path:
+    """Write the provider-agnostic plan ref (§8.4) to ``plan-ref.json``; return its path."""
+    path = plan_ref_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def read_plan_ref(root: Path) -> dict[str, Any] | None:
+    """Read the plan ref, or ``None`` if it does not exist."""
+    path = plan_ref_path(root)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------
 
 

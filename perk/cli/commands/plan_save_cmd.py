@@ -14,7 +14,7 @@ from pathlib import Path
 
 import click
 
-from perk import github, plan
+from perk import cache, github, plan
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -31,6 +31,7 @@ class PlanSaveResult:
     issue_body: str
     body_comment: str
     dry_run: bool
+    cached: bool  # the plan-ref was written to .pi/workflow/plan-ref.json (real save only)
 
 
 @click.command("plan-save")
@@ -152,12 +153,17 @@ def _plan_save_impl(
     plan_ref = plan.PlanRef(
         provider="github", pr_id=str(issue.number), url=issue.url, labels=(plan.PLAN_LABEL,)
     )
+    # Persist the ref as the cache.plan-ref pointer (turn-2b §7): the next session's
+    # reconciliation links it, and `implement` reads it. A dry run writes nothing.
+    if not dry_run:
+        cache.write_plan_ref(repo_root, plan_ref.to_data())
     return PlanSaveResult(
         issue=issue,
         plan_ref=plan_ref,
         issue_body=issue_body,
         body_comment=body_comment,
         dry_run=dry_run,
+        cached=not dry_run,
     )
 
 
@@ -168,6 +174,7 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "message": None,
         "issue": {"number": result.issue.number, "url": result.issue.url},
         "plan_ref": result.plan_ref.to_data(),
+        "cached": result.cached,
         "dry_run": result.dry_run,
     }
 

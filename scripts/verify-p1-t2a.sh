@@ -63,8 +63,8 @@ if perk_in "$W" registry check >/dev/null 2>&1 \
    && py_run -c "
 from perk.registry import load_registry
 save = next(s for s in load_registry().stages if s.id == 'save')
-import sys; sys.exit(0 if save.writes == ['github.plan'] else 1)"; then
-  pass "registry self-check passes; save.writes == [github.plan]"
+import sys; sys.exit(0 if 'github.plan' in save.writes else 1)"; then
+  pass "registry self-check passes; save.writes includes github.plan"
 else
   bad "registry save.writes not filled / self-check failed"
 fi

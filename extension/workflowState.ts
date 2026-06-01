@@ -4,7 +4,7 @@
 // unit-testable under `node --test`. The reconstruction discipline (scan getBranch on
 // session_start AND session_tree, per-field LWW) and the verified-linkage claim (Q3) live here.
 
-import { listRunIds } from "./cache.ts";
+import { listRunIds, type PlanRef } from "./cache.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
@@ -13,7 +13,7 @@ export interface WorkflowState {
   pi_session_id?: string;
   mode?: string;
   predecessor?: string;
-  active_plan_ref?: unknown;
+  active_plan_ref?: PlanRef | null;
   active_objective?: string | null;
   last_review_batch?: unknown;
 }
@@ -38,6 +38,20 @@ export function rebuildWorkflowState(entries: readonly BranchEntry[]): WorkflowS
     }
   }
   return state as WorkflowState;
+}
+
+/**
+ * Equality by identity (provider + pr_id) — the plan-ref dedup key (turn-2b D4). Two refs to
+ * the same plan are equal even if other fields drift; absent compares equal only to absent.
+ */
+export function planRefsEqual(
+  a: PlanRef | null | undefined,
+  b: PlanRef | null | undefined,
+): boolean {
+  if (a === null || a === undefined || b === null || b === undefined) {
+    return (a === null || a === undefined) && (b === null || b === undefined);
+  }
+  return a.provider === b.provider && a.pr_id === b.pr_id;
 }
 
 /**

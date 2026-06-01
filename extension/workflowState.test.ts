@@ -3,10 +3,12 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { PlanRef } from "./cache.ts";
 import {
   type BranchEntry,
   decideClaim,
   deriveForkRunId,
+  planRefsEqual,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
@@ -14,6 +16,25 @@ import {
 function ws(data: Record<string, unknown>): BranchEntry {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
 }
+
+test("planRefsEqual: identity by (provider, pr_id); null only equals null", () => {
+  const ref = (provider: string, pr_id: string): PlanRef => ({
+    provider,
+    pr_id,
+    url: `x/${pr_id}`,
+    labels: [],
+    objective_id: null,
+  });
+  assert.equal(
+    planRefsEqual(ref("github", "42"), { ...ref("github", "42"), url: "different" }),
+    true,
+  );
+  assert.equal(planRefsEqual(ref("github", "42"), ref("github", "43")), false);
+  assert.equal(planRefsEqual(ref("github", "42"), ref("jira", "42")), false);
+  assert.equal(planRefsEqual(null, null), true);
+  assert.equal(planRefsEqual(undefined, null), true);
+  assert.equal(planRefsEqual(ref("github", "42"), null), false);
+});
 
 test("rebuild: per-field last-write-wins, non-perk entries ignored", () => {
   const state = rebuildWorkflowState([

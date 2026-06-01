@@ -65,6 +65,32 @@ export function listRunIds(cwd: string): string[] {
     .map((entry) => entry.name);
 }
 
+// --- plan-ref: the active plan->branch ref pointer (plan-ref.json) -----------------------
+
+/** The provider-agnostic plan ref (contracts.md §8.4); the TS twin of perk.plan.PlanRef. */
+export interface PlanRef {
+  provider: string;
+  pr_id: string;
+  url: string;
+  labels: string[];
+  objective_id: string | null;
+}
+
+export function planRefPath(cwd: string): string {
+  return join(workflowDir(cwd), "plan-ref.json");
+}
+
+export function readPlanRef(cwd: string): PlanRef | null {
+  const path = planRefPath(cwd);
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, "utf8")) as PlanRef;
+}
+
+export function writePlanRef(cwd: string, ref: PlanRef): void {
+  mkdirSync(workflowDir(cwd), { recursive: true });
+  writeFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`, "utf8");
+}
+
 // --- markers (existence-only) ------------------------------------------------------------
 
 export function markerPath(cwd: string, name: string): string {

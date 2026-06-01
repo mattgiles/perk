@@ -7,12 +7,19 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch, markHandoffConsumed, readHandoff, setMarker } from "./cache.ts";
+import {
+  ensureRunScratch,
+  markHandoffConsumed,
+  readHandoff,
+  readPlanRef,
+  setMarker,
+} from "./cache.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import {
   type BranchEntry,
   decideClaim,
+  planRefsEqual,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
@@ -33,6 +40,7 @@ function writeT3Sentinel(cwd: string, source: string, state: WorkflowState): voi
         mode: state.mode ?? null,
         predecessor: state.predecessor ?? null,
         pi_session_id: state.pi_session_id ?? null,
+        active_plan_ref: state.active_plan_ref ?? null,
       })}\n`,
       "utf8",
     );
@@ -112,6 +120,26 @@ export default function (pi: ExtensionAPI) {
       };
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
+    }
+
+    // Plan-ref linkage (turn-2b §6): reconcile the cache.plan-ref file into active_plan_ref
+    // — idempotent by (provider, pr_id), strict read-back, headless-safe. Runs after the
+    // run_id claim so the run is settled first; the two append independent LWW fields.
+    const cachedRef = readPlanRef(ctx.cwd);
+    if (cachedRef !== null) {
+      const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
+      if (planRefsEqual(linked, cachedRef)) {
+        resolved = { ...resolved, active_plan_ref: linked };
+      } else {
+        pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: cachedRef });
+        if (
+          planRefsEqual(rebuildWorkflowState(branchEntries()).active_plan_ref ?? null, cachedRef)
+        ) {
+          resolved = { ...resolved, active_plan_ref: cachedRef };
+        } else {
+          reportError(`plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`);
+        }
+      }
     }
 
     if (ctx.hasUI) {

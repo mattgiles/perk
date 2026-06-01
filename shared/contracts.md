@@ -39,6 +39,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ```
 .pi/workflow/
 ├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
+├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
 └── markers/                # existence-based friction semaphores (e.g. pending-learn)
@@ -54,7 +55,13 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   terminal stage completed, or older than N days — surfaced later as a `doctor` check + a
   prune command (erk accumulated session dirs precisely because GC was undefined).
 - `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
-  locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries.
+  locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
+  `/.pi/workflow/plan-ref.json` — a local mirror; the canonical plan lives in GitHub).
+- **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
+  written verbatim. One active ref per checkout/worktree (`.pi/workflow/` is per-checkout). The
+  **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
+  on `session_start` to reconcile `active_plan_ref` (§8.3). The cross-plane contract is the
+  *file* (`perk/cache.py` ↔ `extension/cache.ts`), not a shared module.
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
 `cache.handoff`, `cache.markers`.
@@ -138,6 +145,13 @@ previous execution don't resurrect.
 are **strict** (durable/cross-process → read-back + correct ordering); purely transient
 fields cheaply reconstructable on the next `session_start`/`session_tree` are
 best-effort-with-logging (never silently swallowed).
+
+**`active_plan_ref` reconciliation (T2b):** on `session_start`, after the run_id claim, the
+extension reads `cache.plan-ref` and appends `active_plan_ref` **iff** the rebuilt value
+does not already match the file — **idempotent by `(provider, pr_id)`** (so reloads don't
+duplicate and a fork keeps the inherited ref), with a **strict read-back** (loud-but-
+non-fatal on mismatch, headless-safe). `session_tree` re-reads nothing — the per-field LWW
+rebuild already restores `active_plan_ref`, so branch navigation preserves it.
 
 State key (registry vocabulary): `session.workflow-state`.
 
@@ -226,8 +240,12 @@ block; the full plan markdown lives in the `plan-body` first comment:
 
 **Label taxonomy (minimal, PRIOR_ART §2/§6):** one label `perk:plan` in the MVP; type labels
 (learn/objective) land with their stages. Query by a **single** label — GitHub label filters
-are AND-semantics. T2a **emits** the plan-ref (in `--json`); **T2b** materializes it into
-`cache.plan-ref` and the session linkage.
+are AND-semantics.
+
+> **Status (P1.T2b):** the plan-ref is **materialized**. T2a emits it (`--json`); T2b persists
+> it as the `cache.plan-ref` file (`.pi/workflow/plan-ref.json`, written by the cold door,
+> read by both planes) and reconciles it into the `active_plan_ref` session field on
+> `session_start` (§8.3). `save.writes` is now `[github.plan, cache.plan-ref]`.
 
 ---
 

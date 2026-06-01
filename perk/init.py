@@ -48,6 +48,7 @@ GITIGNORE_BODY = "\n".join(
         "/.pi/workflow/.perk-loaded",
         "/.pi/workflow/.perk-t3.json",
         "/.pi/workflow/post-init.md",
+        "/.pi/workflow/plan-ref.json",
         "/.pi/workflow/handoff/",
         "/.pi/workflow/scratch/",
         "/.pi/workflow/markers/",

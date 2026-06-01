@@ -27,7 +27,9 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@tombell/pi-status" in packages
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
-    assert "/.pi/npm/" in (tmp_path / ".gitignore").read_text()
+    gitignore = (tmp_path / ".gitignore").read_text()
+    assert "/.pi/npm/" in gitignore
+    assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
     assert "perk conventions" in (tmp_path / "AGENTS.md").read_text()
 
     # Idempotency: a second run changes nothing on disk.

@@ -8,8 +8,13 @@ import {
   handoffPath,
   hasMarker,
   markHandoffConsumed,
+  type PlanRef,
+  planRefPath,
   readHandoff,
+  readPlanRef,
   setMarker,
+  workflowDir,
+  writePlanRef,
 } from "./cache.ts";
 
 function tmp(): string {
@@ -38,6 +43,21 @@ test("handoff: read + consume round-trip in the shape cache.py writes", () => {
   const after = readHandoff(dir, "RID");
   assert.equal(after?.consumed, true);
   assert.equal(after?.pi_session_id, "sess1");
+});
+
+test("plan-ref: missing returns null; write + read round-trip in the shape cache.py writes", () => {
+  const dir = tmp();
+  assert.equal(readPlanRef(dir), null);
+  const ref: PlanRef = {
+    provider: "github",
+    pr_id: "42",
+    url: "https://github.com/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: null,
+  };
+  writePlanRef(dir, ref);
+  assert.equal(planRefPath(dir), join(workflowDir(dir), "plan-ref.json"));
+  assert.deepEqual(readPlanRef(dir), ref);
 });
 
 test("markers: set / has / clear (idempotent)", () => {

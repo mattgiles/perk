@@ -25,7 +25,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { workflowDir } from "../cache.ts";
+import { type PlanRef, workflowDir } from "../cache.ts";
 import perk from "../index.ts";
 import { type BranchEntry, rebuildWorkflowState, type WorkflowState } from "../workflowState.ts";
 
@@ -36,6 +36,7 @@ export interface Sentinel {
   mode: string | null;
   predecessor: string | null;
   pi_session_id: string | null;
+  active_plan_ref: PlanRef | null;
 }
 
 export interface PerkSession {
