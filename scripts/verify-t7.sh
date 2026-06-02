@@ -58,9 +58,9 @@ else
 fi
 
 echo "== Check 4: dogfood artifact (Phase-1 plan) =="
-P="docs/phase-1-plan.md"
+P="docs/planning/phase-1-plan.md"
 if [ -f "$P" ] && grep -qiE "phase 1" "$P" && grep -qiE "acceptance gate" "$P" && [ "$(wc -l < "$P")" -gt 40 ]; then
-  pass "docs/phase-1-plan.md present + non-trivial (objective + gate + decomposition)"
+  pass "docs/planning/phase-1-plan.md present + non-trivial (objective + gate + decomposition)"
 else
   bad "Phase-1 plan missing or trivial"
 fi
