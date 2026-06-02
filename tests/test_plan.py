@@ -98,7 +98,7 @@ def test_derive_title_ignores_hash_inside_code_fence():
         "Here is the plan.\n\n"
         "```toml\n"
         "# Add only if you want format-on-commit too:\n"
-        "id = \"ruff-check\"\n"
+        'id = "ruff-check"\n'
         "```\n"
     )
     assert plan.derive_title(md) == "perk plan"  # no real H1 -> fallback, not the fenced comment
