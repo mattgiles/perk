@@ -89,7 +89,8 @@ export function implementHandoffPrompt(ref: PlanRef): string {
  */
 function registerImplementGuard(pi: ExtensionAPI): void {
   pi.registerCommand("implement", {
-    description: "Refresh implement context (in-worktree handoff); cross-worktree is `perk implement`.",
+    description:
+      "Refresh implement context (in-worktree handoff); cross-worktree is `perk implement`.",
     handler: async (_args, ctx) => {
       const state = rebuildWorkflowState(branchOf(ctx));
       const ref = state.active_plan_ref;
