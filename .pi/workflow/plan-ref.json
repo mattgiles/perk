@@ -1,9 +1,0 @@
-{
-  "provider": "github",
-  "pr_id": "3",
-  "url": "https://github.com/mattgiles/perk/issues/3",
-  "labels": [
-    "perk:plan"
-  ],
-  "objective_id": null
-}
