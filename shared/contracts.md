@@ -168,10 +168,26 @@ non-perk forks/switches). A dirty tree in an active workflow returns `{ cancel: 
 loud message (notify if UI, else stderr) — **fail-safe-headless** (it cancels in both modes; there
 is no proceed-anyway in Phase 1). A clean tree, or any transition outside a workflow, is allowed
 (returns `undefined`); if `git status` itself fails (e.g. not a repo) the gate allows (it is a
-hygiene guard, not a repo validator). The warm `/implement` command is a **guard-only** twin that
-*enforces* `implement.doors.warm: false`: inside an impl context (read-write mode + a linked
-plan-ref) it acknowledges "continue"; otherwise it refuses and points to the cold door `perk
-implement`. The proceed-anyway confirm dialog + `git-checkpoint` stash-on-turn are Phase 2.
+hygiene guard, not a repo validator). The warm `/implement` command
+*enforces* `implement.doors.warm: false` for the **cross-worktree** transition: outside an impl
+context it refuses and points to the cold door `perk implement`. The proceed-anyway confirm dialog
++ `git-checkpoint` stash-on-turn are Phase 2.
+
+**Warm `/implement` in-worktree handoff (P2.T2b).** `implement.doors.warm` stays **`false`** — the
+plan→implement *stage transition* is cold-only because **no extension-reachable session API can
+change cwd** (the `ExtensionCommandContext` surface exposes `newSession`/`switchSession`, neither of
+which takes a cwd; `cwdOverride` lives only on the lower `SessionManager.open`, out of reach
+in-session — D2). What T2b adds is the in-process twin of the cold door usable **inside** an active
+impl worktree (same cwd): when `/implement` runs in an impl context (read-write + a linked
+`active_plan_ref`), it offers a lossless `ctx.newSession` fresh-context handoff seeded (via
+`withSession` → `sendUserMessage`) with the plan-read priming (`implementHandoffPrompt`, the
+in-session twin of `perk/launch.py`'s `_initial_prompt`: read the plan from its canonical source,
+implement, `/submit` — carry the plan forward, never summarize it). Model-visible output is capped
+(a single short confirmation; the durable state is the worktree's materialized plan-ref + the plan
+issue). Dirty-tree hygiene is gated **manually** in the handler (a `newSession` session-replace may
+bypass the `session_before_*` gate, so the handler re-checks `git status --porcelain` and refuses on
+a dirty tree), fail-safe-headless. This is a **context refresh, not a stage transition** — the
+registry's `implement.doors.warm: false` is unchanged.
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):

@@ -63,6 +63,15 @@ export interface PerkSession {
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
   invokeCommand(name: string): Promise<void>;
+  /**
+   * Invoke a registered command's handler directly with a synthesized command context whose
+   * `newSession` is recorded (it does NOT create a real session). Returns the captured handoff:
+   * the `newSession` options seen + any messages the `withSession` callback seeded.
+   */
+  runCommandHandler(
+    name: string,
+    args?: string,
+  ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
   /** Invoke a registered tool's `execute` directly with a synthesized ctx (turn-3 §3.5 S3). */
   invokeTool(
     name: string,
@@ -278,6 +287,44 @@ export async function loadPerkSession(opts: {
     async invokeCommand(name: string) {
       await session.prompt(`/${name}`);
       await tick();
+    },
+    async runCommandHandler(name: string, args = "") {
+      const cmd = session.extensionRunner
+        .getRegisteredCommands()
+        .find((c) => c.invocationName === name);
+      if (!cmd) throw new Error(`command not registered: ${name}`);
+      const newSessionCalls: { parentSession?: string }[] = [];
+      const seeded: string[] = [];
+      const replaced = {
+        async sendUserMessage(content: unknown) {
+          seeded.push(typeof content === "string" ? content : JSON.stringify(content));
+        },
+        async sendMessage(message: { content?: unknown }) {
+          seeded.push(
+            typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+          );
+        },
+      };
+      const ctx = {
+        cwd,
+        hasUI: headful,
+        ui: headfulUIContext(notifies),
+        sessionManager: session.sessionManager,
+        signal: undefined,
+        isIdle: () => true,
+        async waitForIdle() {},
+        async newSession(options?: {
+          parentSession?: string;
+          withSession?: (c: unknown) => Promise<void>;
+        }) {
+          newSessionCalls.push({ parentSession: options?.parentSession });
+          if (options?.withSession) await options.withSession(replaced);
+          return { cancelled: false };
+        },
+      } as unknown as Parameters<typeof cmd.handler>[1];
+      await cmd.handler(args, ctx);
+      await tick();
+      return { newSessionCalls, seeded };
     },
     async invokeTool(name: string, params: unknown) {
       const tool = session.extensionRunner
