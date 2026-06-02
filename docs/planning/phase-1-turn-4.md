@@ -1,7 +1,7 @@
 # Phase 1 · Turn 4 — `perk implement` (the cold door) + session-lifecycle gates
 
 > Detailed, implementation-level plan for **P1.T4**. Grounded in
-> [phase-1-plan.md](../phase-1-plan.md) (the T4 section), [cli-vs-pi.md](../cli-vs-pi.md)
+> [phase-1-plan.md](../docs/phase-1-plan.md) (the T4 section), [cli-vs-pi.md](../cli-vs-pi.md)
 > (§2.3 hand-off, §4.1 door legality, §4.4 stage table, §4.5 local/remote), the Phase-0 launch
 > spine (`perk/launch.py`, `perk/cli/stages.py`, `perk/git.py`), the T2/T3 plan-ref tiers
 > (`perk/cache.py`, `extension/cache.ts`, the `session_start` reconciliation in
@@ -67,7 +67,7 @@ green.
   hands off, then done.** §4.4: cold `perk implement` does *prepare + launch*; warm `/implement`
   *assumes the worktree is already current*. §4.5: the cold door is parameterized by target —
   `--remote` stays blocked (Phase 3).
-- **[phase-1-plan.md](../phase-1-plan.md) T4:** primary transition is the **CLI cold door**;
+- **[phase-1-plan.md](../docs/phase-1-plan.md) T4:** primary transition is the **CLI cold door**;
   **lifecycle gates** are "one primitive, reused across all stages," ported from erk's
   dirty-repo/commit-before-leaving checks, **fail-safe (block) when headless**. The in-process
   `ctx.newSession` warm fresh-context is **Phase 2**.

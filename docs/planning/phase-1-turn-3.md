@@ -1,6 +1,6 @@
 # Phase 1 · Turn 3 — `/plan-save` (the warm terminating door) + the planning skill
 
-Detailed execution plan for **P1.T3** of [phase-1-plan.md](../phase-1-plan.md). T2a built the GitHub
+Detailed execution plan for **P1.T3** of [phase-1-plan.md](../docs/phase-1-plan.md). T2a built the GitHub
 plan write (Python cold door) and T2b made the ref durable + session-linked. T3 adds the **in-session
 warm door**: the `plan_save` terminating tool (and a `/plan-save` command twin) that **wraps** T2's
 storage from inside a live `pi` session, plus the **planning skill** that encodes plan-authoring
@@ -57,7 +57,7 @@ plan authoring in a skill, keeping the save tool purely mechanical (inference ho
 
 ## 2. Grounding & doc lineage (what governs T3)
 
-- **The phase plan.** [phase-1-plan.md](../phase-1-plan.md) §P1.T3: the in-session **warm door**
+- **The phase plan.** [phase-1-plan.md](../docs/phase-1-plan.md) §P1.T3: the in-session **warm door**
   wrapping T2's storage (the read-only → read-write boundary); **terminating tool** (`terminate:
   true`) so the turn ends on save; cache-mutating tools `executionMode: "sequential"` to avoid
   `.pi/workflow/` races; **dual-surface return** (`content` for the model + `details` structured,

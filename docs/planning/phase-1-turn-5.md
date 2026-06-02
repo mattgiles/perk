@@ -1,7 +1,7 @@
 # Phase 1 · Turn 5 — PR lifecycle (`/submit`, `/land` + `/learn`, `perk resume`)
 
 > Detailed, implementation-level plan for **P1.T5**. Grounded in
-> [phase-1-plan.md](../phase-1-plan.md) (the T5 section), [cli-vs-pi.md](../cli-vs-pi.md)
+> [phase-1-plan.md](../docs/phase-1-plan.md) (the T5 section), [cli-vs-pi.md](../cli-vs-pi.md)
 > (§2.3 hand-off, §3.2 supervisor surface, §4.1 door legality), the T2a write conventions
 > (`perk/github.py` — REST `gh api`, body-via-file, `run_id` idempotency, `GitHubError →
 > UserFacingCliError`), the metadata-block engine (`perk/plan.py` — `PlanHeader` with **staged**
@@ -68,7 +68,7 @@ Three verify gates run **fully offline** (no `pi` model turn, no network — `gh
 
 ## 2. Grounding & doc lineage (what governs T5)
 
-- **[phase-1-plan.md](../phase-1-plan.md) T5:** three thin handlers + the resume verb, cohesive at
+- **[phase-1-plan.md](../docs/phase-1-plan.md) T5:** three thin handlers + the resume verb, cohesive at
   build time (all thin GitHub ops + marker moves), separated only at runtime by review/CI. T5a
   reuses T2a's write conventions; T5b's `/land` sets the `pending-learn` semaphore and `/learn`
   clears it; T5c is completable here because by T5 every stage exists. Defer body craft, `pr check`,

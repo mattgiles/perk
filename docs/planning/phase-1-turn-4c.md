@@ -18,7 +18,7 @@ Driving the prek dogfood plan through the loop, `perk implement` failed two ways
   agent to read and implement the plan** — it just waited. This hit `perk resume` too (same
   `launch_stage`). *This was the actual blocker.*
 - **Bug 2 — no plan positional.** `perk implement 1` forwarded `1` to `pi` as a **stray prompt**
-  (T4a's D2 made implement read the *active* ref only). But [phase-1-plan.md](../phase-1-plan.md)
+  (T4a's D2 made implement read the *active* ref only). But [phase-1-plan.md](../docs/phase-1-plan.md)
   §P1.T4 specified `perk implement <plan>` — so **D2 was the deviation**, and `perk implement N` is
   the natural verb. The user confirmed this is the intent.
 

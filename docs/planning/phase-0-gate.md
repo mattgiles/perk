@@ -42,7 +42,7 @@ Run on a fresh throwaway repo:
 3. **`pi` launchable** — `pi` is on PATH; `perk plan --dry-run` resolves a primed launch
    (`{"success": true, "stage": "plan", "argv": ["pi"], ...}`) with **no side effects** (no
    worktree created).
-4. **Dogfood artifact** — `docs/phase-1-plan.md` is present and non-trivial.
+4. **Dogfood artifact** — `docs/docs/phase-1-plan.md` is present and non-trivial.
 5. **Gate record** — this file exists and asserts the gate met.
 6. **T7 code change green** — `tests/test_doctor.py` passes (the no-silent-pass + `is_self_repo`
    changes).
@@ -55,7 +55,7 @@ healthy, and launchable** — the automatable half of the gate.
 The interactive half (a human operator launching `pi`, entering read-only plan mode, watching the
 live todo overlay track planning sub-tasks, and authoring the plan as the session output) is, by
 nature, **not CI-automatable**. Its proof is the artifact it produces:
-[`docs/phase-1-plan.md`](../phase-1-plan.md) — the **Phase-1 plan, authored on this
+[`docs/docs/phase-1-plan.md`](../docs/phase-1-plan.md) — the **Phase-1 plan, authored on this
 scaffold**. Because perk-owned `/plan-save` does not land until Phase 1, the plan was saved by hand
 at the end of the session — the **borrow-then-own seam working as designed**, not a gap.
 

@@ -15,7 +15,7 @@
 
 ## 1. Objective & the gate
 
-**The gate (verbatim, from [phase-1-plan.md](../phase-1-plan.md) §"Acceptance gate"):**
+**The gate (verbatim, from [phase-1-plan.md](../docs/phase-1-plan.md) §"Acceptance gate"):**
 
 > **perk ships perk.** A real change to perk is **authored and saved as a perk plan, then
 > implemented, submitted, landed, and learned-from through perk's own thin loop** — end to end, on
@@ -33,7 +33,7 @@ reconciliation edits, two docs). The loop's mechanics are already built; T6 *use
 
 ## 2. Grounding & doc lineage (what governs T6)
 
-- **[phase-1-plan.md](../phase-1-plan.md) §P1.T6** — "Drive a real perk change through the whole loop
+- **[phase-1-plan.md](../docs/phase-1-plan.md) §P1.T6** — "Drive a real perk change through the whole loop
   on perk's own repo; record the run as the gate. Reconcile `AGENTS.md`/README/contracts against what
   got built; confirm the registry's per-stage state-I/O is now filled for the spine."
 - **[phase-0-gate.md](./phase-0-gate.md)** — the structural precedent: gate verbatim → how it maps to
@@ -308,7 +308,7 @@ Mirrors `phase-0-gate.md`:
 
 ## 10. Out of scope (Phase 2+)
 
-Quoted from [phase-1-plan.md](../phase-1-plan.md) §"Explicitly deferred", recorded here so the
+Quoted from [phase-1-plan.md](../docs/phase-1-plan.md) §"Explicitly deferred", recorded here so the
 boundary is a *choice*: perk-owned plan mode + the tool-gating primitive; objectives, the CI
 executor, the review/`address` loop, feedback classification; PR-body two-target craft / `pr check`
 / draft→ready nuance / reconciliation typing / deep learn tooling; the end-to-end **worker** tests

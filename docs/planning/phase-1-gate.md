@@ -4,7 +4,7 @@
 > end-to-end demonstration of the ROADMAP's Phase-1 acceptance gate — **perk shipped perk** — on
 > perk's own repo. Authored in T6 (see [phase-1-turn-6.md](./phase-1-turn-6.md)), after the live run.
 
-## The gate (verbatim, from [phase-1-plan.md](../phase-1-plan.md) §"Acceptance gate")
+## The gate (verbatim, from [phase-1-plan.md](../docs/phase-1-plan.md) §"Acceptance gate")
 
 > **perk ships perk.** A real change to perk is **authored and saved as a perk plan, then
 > implemented, submitted, landed, and learned-from through perk's own thin loop** — end to end, on
@@ -89,7 +89,7 @@ for a second pin) — the dogfood realizing the plan with judgment, as intended.
 
 ## Phase 1 deferral boundary (what Phase 1 did *not* ship)
 
-Quoted from [phase-1-plan.md](../phase-1-plan.md) §"Explicitly deferred", so the boundary is a
+Quoted from [phase-1-plan.md](../docs/phase-1-plan.md) §"Explicitly deferred", so the boundary is a
 *choice*: perk-owned plan mode + the tool-gating primitive (removes the `pi-plan` coupling; makes
 save the read-only→read-write gesture); objectives, the CI executor, the review/`address` loop,
 feedback classification; PR-body two-target craft, `pr check`, draft→ready nuance, reconciliation

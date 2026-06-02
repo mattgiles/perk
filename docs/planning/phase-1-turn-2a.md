@@ -1,6 +1,6 @@
 # Phase 1 · Turn 2a — GitHub plan write (the Python/worker half)
 
-Detailed execution plan for **P1.T2a** of [phase-1-plan.md](../phase-1-plan.md). T2a builds the
+Detailed execution plan for **P1.T2a** of [phase-1-plan.md](../docs/phase-1-plan.md). T2a builds the
 **first GitHub *mutation*** in perk (Phase 0's gateway was read/verify only): the **cold/worker
 door** that creates a plan as a GitHub issue with the **header/body split**, and — more durably — it
 **establishes the write-safety conventions** (`--dry-run`, idempotency, error-translation) that
@@ -54,7 +54,7 @@ extension never shells `perk` (confirmed: it shells nothing today).
 
 ## 2. Grounding & doc lineage (what governs T2a)
 
-- **The phase plan.** [phase-1-plan.md](../phase-1-plan.md) §P1.T2 → **T2a**: *create the plan issue
+- **The phase plan.** [phase-1-plan.md](../docs/phase-1-plan.md) §P1.T2 → **T2a**: *create the plan issue
   with the header/body split (foundational #2 / PRIOR_ART §2); establish the gateway's write-safety
   conventions — `--dry-run`, idempotency, error-translation — that submit/land reuse; the first
   GitHub mutation; the first real `PerkContext` + `require_github` consumer; write ops follow the

@@ -31,7 +31,7 @@ down (the borrowed crossover scaffolding, `init.py:BORROWED_PACKAGES`):
 
 So the dogfood flow is: **launch `pi` in the perk repo (plan mode — read-only over the codebase),
 explore Phase-1 requirements with the todo overlay tracking the planning sub-tasks live, and produce
-`docs/planning/phase-1-plan.md` as the session output.** perk-owned `/plan-save` does not land until
+`docs/planning/docs/phase-1-plan.md` as the session output.** perk-owned `/plan-save` does not land until
 Phase 1, so the plan is saved by hand at the end — that is the **borrow-then-own seam working as
 designed**, not a gap.
 
@@ -90,7 +90,7 @@ chase our tail: T7 plans the checkpoint; the checkpoint produces the Phase-1 pla
 | `AGENTS.md` | CHANGED | D5: add the human-authored "developing perk" conventions section (above/below the managed block). |
 | `docs/phase-0-turn-1.md` → `docs/planning/phase-0-turn-1.md` (and 2,3,4) | MOVED | D1b: finish the `docs/planning/` reorg; fix `./`→`../` links inside the moved docs. |
 | `docs/index.md` | CHANGED | D1b: repoint turn-1..4 links to `./planning/…`; add the turn-7 + phase-1-plan + phase-0-gate entries. |
-| `docs/planning/phase-1-plan.md` | NEW | D3: the dogfood artifact — Phase-1 decomposition authored in plan mode. |
+| `docs/planning/docs/phase-1-plan.md` | NEW | D3: the dogfood artifact — Phase-1 decomposition authored in plan mode. |
 | `docs/phase-0-gate.md` | NEW | D2: the gate record — what was run/observed end-to-end; the "Phase 0 is done" boundary. |
 | `scripts/verify-t7.sh` | NEW | D2: the automatable *preconditions* of the gate. |
 | `justfile` | CHANGED | `verify` runs t1..t7. |
@@ -107,7 +107,7 @@ already reconcile them; they are historical records, not living specs — D1c).
   (`OSError` broadening + `is_self_repo` promotion) and **(b)** the `docs/planning/` reorg; **(c)**
   leave the turn-4/5/6 plan-body drift (the §15 outcomes reconcile it — don't rewrite history).
 - **D2 — "Demonstrate the gate" = three artifacts.** `scripts/verify-t7.sh` (automatable
-  preconditions), `docs/planning/phase-1-plan.md` (living proof), and `docs/phase-0-gate.md` (the
+  preconditions), `docs/planning/docs/phase-1-plan.md` (living proof), and `docs/phase-0-gate.md` (the
   end-to-end gate record, its own file).
 - **D3 — Phase-1 plan at phase-decomposition granularity.** Objective, acceptance gate, a turn
   decomposition (T1..Tn), dependencies, deferrals — **not** full per-turn docs. The drift-prone
@@ -173,7 +173,7 @@ overlay observed → Phase-1 plan produced), what the borrowed packages *actuall
 flag, resolved), the Phase-0 deferral list (quoted from `phase-0-plan.md`), and the explicit
 assertion **"Phase 0 gate met."** This is the visible boundary.
 
-### T7.f — The dogfood artifact `docs/planning/phase-1-plan.md` (D3)
+### T7.f — The dogfood artifact `docs/planning/docs/phase-1-plan.md` (D3)
 Authored in the scaffolded plan mode (the demonstration itself). Phase-decomposition granularity: the
 Phase-1 objective + acceptance gate, the turn breakdown for the workflow spine handlers + the SDK
 command/extension test harness, dependencies, and deferrals. Per-stage state-I/O stays deferred.
@@ -196,7 +196,7 @@ demonstration possible; the interactive proof is captured in `docs/phase-0-gate.
    `@perk/pi` self entry — and `perk doctor` reports the `settings-wiring` check `ok`.
 3. **`pi` launchable.** `pi` is on PATH (the plan-mode host exists); `perk plan --dry-run` resolves a
    primed launch (read-only stage; side-effect-free).
-4. **Dogfood artifact exists.** `docs/planning/phase-1-plan.md` is present and non-trivial (has the
+4. **Dogfood artifact exists.** `docs/planning/docs/phase-1-plan.md` is present and non-trivial (has the
    Phase-1 objective + a turn decomposition).
 5. **Gate record exists.** `docs/phase-0-gate.md` is present and asserts the gate is met.
 6. **Cumulative gates still green.** `bash scripts/verify-t{1..6}.sh` all PASS (T7 changed code in
@@ -254,7 +254,7 @@ demonstration (R1) is recorded in `docs/phase-0-gate.md`, not deferred.
 - [ ] T7.d: `AGENTS.md` has the "developing perk" conventions section (managed block untouched).
 - [ ] T7.e: `docs/phase-0-gate.md` records the end-to-end demonstration and asserts the gate met
       (incl. the resolved §1 honesty flag).
-- [ ] T7.f: `docs/planning/phase-1-plan.md` exists at phase-decomposition granularity, authored on the
+- [ ] T7.f: `docs/planning/docs/phase-1-plan.md` exists at phase-decomposition granularity, authored on the
       scaffold.
 - [ ] T7.g: `scripts/verify-t7.sh` passes; `just verify` runs t1..t7; `just ci` green.
 - [ ] Tree staged-clean and ready for per-turn commits (T7 does not commit).
@@ -291,7 +291,7 @@ node:test).** The full record is [`docs/planning/phase-0-gate.md`](./phase-0-gat
 - **T7.e** — `docs/phase-0-gate.md` records the mapping, the resolved honesty flag, the automatable
   preconditions, the reproduce-the-interactive-demo steps, the Phase-0 deferral boundary, and the
   **“Phase 0 gate met”** verdict.
-- **T7.f** — `docs/planning/phase-1-plan.md` authored at phase-decomposition granularity (objective,
+- **T7.f** — `docs/planning/docs/phase-1-plan.md` authored at phase-decomposition granularity (objective,
   the dogfood acceptance gate, a six-turn spine breakdown P1.T1–T6, dependencies, deferrals);
   per-stage state-I/O stays deferred per turn.
 - **T7.g** — `scripts/verify-t7.sh` (6 precondition checks, all PASS); `just verify` runs t1..t7.

@@ -1,6 +1,6 @@
 # Phase 1 · Turn 1 — The session test harness (de-risk first)
 
-Detailed execution plan for **P1.T1** of [phase-1-plan.md](../phase-1-plan.md). T1 builds the
+Detailed execution plan for **P1.T1** of [phase-1-plan.md](../docs/phase-1-plan.md). T1 builds the
 **command/extension test substrate**: a small TypeScript harness that drives a **real `pi`
 `AgentSession`** through the SDK with the perk extension bound, so every later Phase-1 turn can
 verify its interior end-to-end instead of only as isolated pure functions. The "real first target"
@@ -56,7 +56,7 @@ the new live test with no change.
 
 ## 2. Grounding & doc lineage (what governs T1)
 
-- **The phase plan.** [phase-1-plan.md](../phase-1-plan.md) §P1.T1: *spike then build the
+- **The phase plan.** [phase-1-plan.md](../docs/phase-1-plan.md) §P1.T1: *spike then build the
   command/extension substrate on the SDK + `SessionManager.inMemory()`; determinism + isolation via
   in-memory settings + a `DefaultResourceLoader` override; prove it against the T3 claim/fork through
   a live session, exercising the rebuild on **both** `session_start` and `session_tree`.* T1
@@ -303,7 +303,7 @@ change (test infra only, as scoped).
 
 **Tree at handoff:** staged-clean for the user to commit — new files `extension/testing/harness.ts`,
 `extension/sessionLifecycle.test.ts`, `scripts/verify-p1-t1.sh`, `docs/planning/phase-1-turn-1.md`;
-modified `package.json`, `package-lock.json`, `justfile`, `docs/index.md`, `docs/phase-1-plan.md`.
+modified `package.json`, `package-lock.json`, `justfile`, `docs/index.md`, `docs/docs/phase-1-plan.md`.
 
 **Unblocks T2:** plan-storage handlers can now be verified through a live session via the harness
 (`loadPerkSession` + `plantSession` + tool/command invocation), the deferred LLM-in-the-loop surface

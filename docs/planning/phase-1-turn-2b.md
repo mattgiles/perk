@@ -1,6 +1,6 @@
 # Phase 1 · Turn 2b — Plan ref (materialize `cache.plan-ref` + the session linkage)
 
-Detailed execution plan for **P1.T2b** of [phase-1-plan.md](../phase-1-plan.md). T2a **emits** the
+Detailed execution plan for **P1.T2b** of [phase-1-plan.md](../docs/phase-1-plan.md). T2a **emits** the
 provider-agnostic plan-ref but persists nothing local. T2b makes the ref **durable and
 discoverable** in the two complementary places the rest of the spine reads
 ([contracts.md](../../shared/contracts.md) §8.1/§8.3/§8.4): the **`cache.plan-ref` file** (the local
@@ -60,7 +60,7 @@ navigation — the foundation `implement`/`submit`/`resume` all read.
 
 ## 2. Grounding & doc lineage (what governs T2b)
 
-- **The phase plan.** [phase-1-plan.md](../phase-1-plan.md) §P1.T2 → **T2b**: *materialize the
+- **The phase plan.** [phase-1-plan.md](../docs/phase-1-plan.md) §P1.T2 → **T2b**: *materialize the
   provider-agnostic plan ref in `.pi/workflow/` (contracts §8.4) — canonical copy in GitHub,
   transient linkage in the session `appendEntry`, idempotent on the Pi session id; the transient
   linkage is rebuilt on both `session_start` and `session_tree` with last-write-wins, so it survives
