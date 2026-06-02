@@ -1,7 +1,10 @@
 # Configuration for `prek` (a fast, drop-in pre-commit reimplementation).
 # See https://prek.j178.dev — run `prek install` (folded into `just setup`) to wire the
 # git pre-commit shim. The ruff env is built by prek itself via the remote ruff-pre-commit
-# repo, so the hook never depends on a system/`.venv` ruff being on PATH.
+# repo, so the hooks never depend on a system/`.venv` ruff being on PATH.
+# Two hooks are wired and their stances differ deliberately: `ruff-check` reports (never
+# mutates); `ruff-format` reformats staged Python and fails the commit if it changed
+# anything (re-stage + re-commit).
 #:schema https://www.schemastore.org/prek.json
 
 [[repos]]
@@ -10,7 +13,10 @@ repo = "https://github.com/astral-sh/ruff-pre-commit"
 # can bump this, but it won't read pyproject.toml — keep the two aligned by hand.
 rev = "v0.15.15"
 hooks = [
-    # Plain lint check (no --fix, no format): the hook reports, it does not mutate files.
+    # Plain lint check (no --fix, no format): this hook reports, it does not mutate files.
     # ruff auto-discovers pyproject.toml; --config is explicit but redundant.
     { id = "ruff-check", types_or = ["python", "pyi"], args = ["--config", "pyproject.toml"] },
+    # Format check that mutates: reformats staged Python and fails the commit if it changed
+    # anything (the dev re-stages and commits). Keeps formatting out of the CI iteration loop.
+    { id = "ruff-format", types_or = ["python", "pyi"], args = ["--config", "pyproject.toml"] },
 ]

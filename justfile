@@ -8,7 +8,7 @@ default:
 # install both toolchains: python env (uv) + node dev deps (npm) + git hooks (prek)
 setup: sync install hooks
 
-# install the prek git pre-commit shim (ruff lint hook; see prek.toml)
+# install the prek git pre-commit shim (ruff lint + format hooks; see prek.toml)
 hooks:
     prek install
 
@@ -74,6 +74,7 @@ verify:
     bash scripts/verify-p2-t2a.sh
     bash scripts/verify-p2-t2b.sh
     bash scripts/verify-p2-t2c.sh
+    bash scripts/verify-p2-t3.sh
     bash scripts/verify-p2-t4.sh
 
 # run perk in the project env, e.g. `just perk init`
