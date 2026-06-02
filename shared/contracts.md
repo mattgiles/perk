@@ -189,6 +189,25 @@ bypass the `session_before_*` gate, so the handler re-checks `git status --porce
 a dirty tree), fail-safe-headless. This is a **context refresh, not a stage transition** — the
 registry's `implement.doors.warm: false` is unchanged.
 
+**Checkpoints (P2.T2c).** Implementation progress is tracked in a **dedicated `perk:checkpoint`**
+session entry (D3) — kept OFF the `perk:workflow-state` record because progress is high-churn (an
+append every advancing `turn_end`), and a separate entry avoids LWW-append smell on the shared
+record. The interior (`extension/checkpoints.ts`) seeds an ordered step list from the plan body's
+`## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
+active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
+entry). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
+present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
+optional `## Steps` section as the forward path. State is **rebuilt on `session_start` AND
+`session_tree`**; `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
+appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
+**scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]` is
+re-folded only from assistant messages **after** it (stale `[DONE:n]` from a previous execution
+cannot resurrect a step). Status surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by
+`ctx.hasUI`** (headless never touches rich UI); `/checkpoints` lists progress (notify when UI, else
+stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
+`perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` is **not** retired
+here — P2.T12 retires it, conditional on this seam landing.
+
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
 (1) restricts the active tool set to `["read", "grep", "find", "ls", "bash"]` via

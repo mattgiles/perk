@@ -14,6 +14,7 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
+import { registerCheckpoints } from "./checkpoints.ts";
 import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
@@ -215,6 +216,11 @@ export default function (pi: ExtensionAPI) {
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
+
+  // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
+  // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
+  // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
+  registerCheckpoints(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

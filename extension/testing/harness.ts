@@ -170,6 +170,35 @@ export function plantSession(
 }
 
 /**
+ * Plant a session `.jsonl` from a flat list of entry specs (custom entries + assistant messages,
+ * in order). Lets tests build interleaved sequences (e.g. a `perk:checkpoint` seed followed by
+ * assistant turns carrying `[DONE:n]`). Returns the file path; basename is the session id.
+ */
+export function plantRawSession(
+  cwd: string,
+  specs: ({ custom: { type: string; data: unknown } } | { assistant: string })[],
+  opts: { fileName?: string } = {},
+): string {
+  const fileName = opts.fileName ?? "planted-raw.jsonl";
+  const path = join(cwd, fileName);
+  const now = new Date().toISOString();
+  const header = { type: "session", version: 3, id: "planted", timestamp: now, cwd };
+  const entries: Record<string, unknown>[] = specs.map((spec, i) => {
+    const base = { id: `e${i}`, parentId: i === 0 ? null : `e${i - 1}`, timestamp: now };
+    if ("custom" in spec) {
+      return { ...base, type: "custom", customType: spec.custom.type, data: spec.custom.data };
+    }
+    return {
+      ...base,
+      type: "message",
+      message: { role: "assistant", content: [{ type: "text", text: spec.assistant }] },
+    };
+  });
+  writeFileSync(path, `${[header, ...entries].map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
+  return path;
+}
+
+/**
  * `git init` a scaffold into a real repo with one seed commit; when `dirty`, leave an uncommitted
  * file so the dirty-repo lifecycle gate (turn-4b) fires. Test-only (uses execFileSync).
  */

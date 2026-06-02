@@ -91,6 +91,23 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
   writeFileSync(planRefPath(cwd), `${JSON.stringify(ref, null, 2)}\n`, "utf8");
 }
 
+// --- plan body cache (`cache.plan`) ------------------------------------------------------
+
+/**
+ * The materialized plan-body cache (`cache.plan`, contracts §8.1). No handler writes it yet
+ * (checkpoints seed from it when present and stay inert otherwise, P2.T2c); the reader is added now
+ * so the seam exists. A future turn that materializes the plan body will write this path.
+ */
+export function planBodyPath(cwd: string): string {
+  return join(workflowDir(cwd), "plan.md");
+}
+
+export function readPlanBody(cwd: string): string | null {
+  const path = planBodyPath(cwd);
+  if (!existsSync(path)) return null;
+  return readFileSync(path, "utf8");
+}
+
 // --- markers (existence-only) ------------------------------------------------------------
 
 /** The land->learn semaphore (Q2/Q5); the TS twin of perk.cache.PENDING_LEARN. */
