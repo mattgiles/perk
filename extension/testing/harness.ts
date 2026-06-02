@@ -63,6 +63,15 @@ export interface PerkSession {
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
   invokeCommand(name: string): Promise<void>;
+  /**
+   * Invoke a registered command's handler directly with a synthesized command context whose
+   * `newSession` is recorded (it does NOT create a real session). Returns the captured handoff:
+   * the `newSession` options seen + any messages the `withSession` callback seeded.
+   */
+  runCommandHandler(
+    name: string,
+    args?: string,
+  ): Promise<{ newSessionCalls: { parentSession?: string }[]; seeded: string[] }>;
   /** Invoke a registered tool's `execute` directly with a synthesized ctx (turn-3 §3.5 S3). */
   invokeTool(
     name: string,
@@ -73,12 +82,18 @@ export interface PerkSession {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ block?: boolean; reason?: string } | undefined>;
+  /** Fire `before_agent_start`; returns the injected custom messages (customType + content). */
+  emitBeforeAgentStart(): Promise<{ customType?: string; content?: unknown }[]>;
+  /** Run messages through the `context` filter chain; returns the surviving messages. */
+  emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   /** Fire a lifecycle event (session_before_fork / session_before_switch) and return its result. */
   emitLifecycle(
     event:
       | { type: "session_before_fork"; entryId: string; position: "before" | "at" }
       | { type: "session_before_switch"; reason: "new" | "resume"; targetSessionFile?: string },
   ): Promise<{ cancel?: boolean } | undefined>;
+  /** Set a registered CLI flag value (simulates `pi --<name>`); take effect on the next reload. */
+  setFlag(name: string, value: boolean | string): void;
   /** Re-emit `session_start` (reason "reload"); optional env overrides applied first. */
   reload(env?: Record<string, string | undefined>): Promise<void>;
   /** Dispose the session and restore process.env. */
@@ -150,6 +165,35 @@ export function plantSession(
       message: { role: "assistant", content: [{ type: "text", text: opts.assistantText }] },
     });
   }
+  writeFileSync(path, `${[header, ...entries].map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
+  return path;
+}
+
+/**
+ * Plant a session `.jsonl` from a flat list of entry specs (custom entries + assistant messages,
+ * in order). Lets tests build interleaved sequences (e.g. a `perk:checkpoint` seed followed by
+ * assistant turns carrying `[DONE:n]`). Returns the file path; basename is the session id.
+ */
+export function plantRawSession(
+  cwd: string,
+  specs: ({ custom: { type: string; data: unknown } } | { assistant: string })[],
+  opts: { fileName?: string } = {},
+): string {
+  const fileName = opts.fileName ?? "planted-raw.jsonl";
+  const path = join(cwd, fileName);
+  const now = new Date().toISOString();
+  const header = { type: "session", version: 3, id: "planted", timestamp: now, cwd };
+  const entries: Record<string, unknown>[] = specs.map((spec, i) => {
+    const base = { id: `e${i}`, parentId: i === 0 ? null : `e${i - 1}`, timestamp: now };
+    if ("custom" in spec) {
+      return { ...base, type: "custom", customType: spec.custom.type, data: spec.custom.data };
+    }
+    return {
+      ...base,
+      type: "message",
+      message: { role: "assistant", content: [{ type: "text", text: spec.assistant }] },
+    };
+  });
   writeFileSync(path, `${[header, ...entries].map((e) => JSON.stringify(e)).join("\n")}\n`, "utf8");
   return path;
 }
@@ -273,6 +317,44 @@ export async function loadPerkSession(opts: {
       await session.prompt(`/${name}`);
       await tick();
     },
+    async runCommandHandler(name: string, args = "") {
+      const cmd = session.extensionRunner
+        .getRegisteredCommands()
+        .find((c) => c.invocationName === name);
+      if (!cmd) throw new Error(`command not registered: ${name}`);
+      const newSessionCalls: { parentSession?: string }[] = [];
+      const seeded: string[] = [];
+      const replaced = {
+        async sendUserMessage(content: unknown) {
+          seeded.push(typeof content === "string" ? content : JSON.stringify(content));
+        },
+        async sendMessage(message: { content?: unknown }) {
+          seeded.push(
+            typeof message.content === "string" ? message.content : JSON.stringify(message.content),
+          );
+        },
+      };
+      const ctx = {
+        cwd,
+        hasUI: headful,
+        ui: headfulUIContext(notifies),
+        sessionManager: session.sessionManager,
+        signal: undefined,
+        isIdle: () => true,
+        async waitForIdle() {},
+        async newSession(options?: {
+          parentSession?: string;
+          withSession?: (c: unknown) => Promise<void>;
+        }) {
+          newSessionCalls.push({ parentSession: options?.parentSession });
+          if (options?.withSession) await options.withSession(replaced);
+          return { cancelled: false };
+        },
+      } as unknown as Parameters<typeof cmd.handler>[1];
+      await cmd.handler(args, ctx);
+      await tick();
+      return { newSessionCalls, seeded };
+    },
     async invokeTool(name: string, params: unknown) {
       const tool = session.extensionRunner
         .getAllRegisteredTools()
@@ -306,10 +388,38 @@ export async function loadPerkSession(opts: {
       await tick();
       return result as { block?: boolean; reason?: string } | undefined;
     },
+    async emitBeforeAgentStart() {
+      const runner = session.extensionRunner as unknown as {
+        emitBeforeAgentStart: (
+          prompt: string,
+          images: undefined,
+          systemPrompt: string,
+          systemPromptOptions: unknown,
+        ) => Promise<{ messages?: { customType?: string; content?: unknown }[] } | undefined>;
+      };
+      const result = await runner.emitBeforeAgentStart("", undefined, "", {} as never);
+      await tick();
+      return result?.messages ?? [];
+    },
+    async emitContext(messages) {
+      const runner = session.extensionRunner as unknown as {
+        emitContext: (m: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
+      };
+      const result = await runner.emitContext(messages as never);
+      await tick();
+      return result as Record<string, unknown>[];
+    },
     async emitLifecycle(event) {
       const result = await session.extensionRunner.emit(event as never);
       await tick();
       return result as { cancel?: boolean } | undefined;
+    },
+    setFlag(name: string, value: boolean | string) {
+      (
+        session.extensionRunner as unknown as {
+          setFlagValue: (n: string, v: boolean | string) => void;
+        }
+      ).setFlagValue(name, value);
     },
     async reload(env?: Record<string, string | undefined>) {
       if (env) applyEnv(env, savedEnv);

@@ -168,10 +168,51 @@ non-perk forks/switches). A dirty tree in an active workflow returns `{ cancel: 
 loud message (notify if UI, else stderr) — **fail-safe-headless** (it cancels in both modes; there
 is no proceed-anyway in Phase 1). A clean tree, or any transition outside a workflow, is allowed
 (returns `undefined`); if `git status` itself fails (e.g. not a repo) the gate allows (it is a
-hygiene guard, not a repo validator). The warm `/implement` command is a **guard-only** twin that
-*enforces* `implement.doors.warm: false`: inside an impl context (read-write mode + a linked
-plan-ref) it acknowledges "continue"; otherwise it refuses and points to the cold door `perk
-implement`. The proceed-anyway confirm dialog + `git-checkpoint` stash-on-turn are Phase 2.
+hygiene guard, not a repo validator). The warm `/implement` command
+*enforces* `implement.doors.warm: false` for the **cross-worktree** transition: outside an impl
+context it refuses and points to the cold door `perk implement`. The proceed-anyway confirm dialog
++ `git-checkpoint` stash-on-turn are Phase 2.
+
+**Warm `/implement` in-worktree handoff (P2.T2b).** `implement.doors.warm` stays **`false`** — the
+plan→implement *stage transition* is cold-only because **no extension-reachable session API can
+change cwd** (the `ExtensionCommandContext` surface exposes `newSession`/`switchSession`, neither of
+which takes a cwd; `cwdOverride` lives only on the lower `SessionManager.open`, out of reach
+in-session — D2). What T2b adds is the in-process twin of the cold door usable **inside** an active
+impl worktree (same cwd): when `/implement` runs in an impl context (read-write + a linked
+`active_plan_ref`), it offers a lossless `ctx.newSession` fresh-context handoff seeded (via
+`withSession` → `sendUserMessage`) with the plan-read priming (`implementHandoffPrompt`, the
+in-session twin of `perk/launch.py`'s `_initial_prompt`: read the plan from its canonical source,
+implement, `/submit` — carry the plan forward, never summarize it). Model-visible output is capped
+(a single short confirmation; the durable state is the worktree's materialized plan-ref + the plan
+issue). Dirty-tree hygiene is gated **manually** in the handler (a `newSession` session-replace may
+bypass the `session_before_*` gate, so the handler re-checks `git status --porcelain` and refuses on
+a dirty tree), fail-safe-headless. This is a **context refresh, not a stage transition** — the
+registry's `implement.doors.warm: false` is unchanged.
+
+**Checkpoints (P2.T2c).** Implementation progress is tracked in a **dedicated `perk:checkpoint`**
+session entry (D3) — kept OFF the `perk:workflow-state` record because progress is high-churn (an
+append every advancing `turn_end`), and a separate entry avoids LWW-append smell on the shared
+record. The interior (`extension/checkpoints.ts`) seeds an ordered step list from the plan body's
+`## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
+active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
+entry). The `cache.plan` body (`.pi/workflow/plan.md`) is **materialized by the Python cold door**:
+`perk implement` (`launch._materialize_plan_body`) fetches the plan body from GitHub
+(`github.get_plan_body` → the `plan-body` block in the issue's first comment, parsed by
+`plan.extract_plan_body`) and writes it into the worktree alongside the plan-ref + handoff
+(best-effort + loud-but-non-fatal — an unreachable body just yields inert checkpoints, never a failed
+launch). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
+present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
+optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
+(`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start` AND
+`session_tree`**; `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
+appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
+**scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]` is
+re-folded only from assistant messages **after** it (stale `[DONE:n]` from a previous execution
+cannot resurrect a step). Status surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by
+`ctx.hasUI`** (headless never touches rich UI); `/checkpoints` lists progress (notify when UI, else
+stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
+`perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` is **not** retired
+here — P2.T12 retires it, conditional on this seam landing.
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
@@ -189,6 +230,25 @@ gate (the sync is skipped), and `tool_call` blocks on any internal error. `mode`
 best-effort transient (no strict read-back). The `enter(ctx?)`/`exit(ctx?)` surface
 (append `mode` + flip the gate) is the API the perk-owned plan mode (T2) and the read-only CI
 executor (T5) consume; this primitive ships no `/plan` ownership and adds no registry stage.
+
+**Perk-owned plan mode (P2.T2a).** `mode` is now perk-owned **end-to-end** — the borrowed
+`@tombell/pi-plan` package is retired (removed from `init.py`'s `BORROWED_PACKAGES` and
+`.pi/settings.json`). The interior (`extension/planMode.ts`) owns the toggle surface over T1's gate:
+a `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`
+(perk adds **no** parallel enforcement — T1 is the single read-only authority). It also injects a
+hidden plan-authoring prompt layer under its own `perk:plan-context` customType (keyed off the
+read-only gate; stripped from `context` when off — the same hygiene T1 applies to
+`perk:mode-context`), optionally extended by a `[workflow] plan_authoring` addendum read from
+`.pi/perk.toml` + `perk.local.toml` (`extension/config.ts`, the TS twin of `perk/config.py`'s
+overlay). `isPlanModeActive` (in `extension/planSave.ts`) now reads perk's own `mode == "read-only"`
+(the P1.T3b `plan-mode-state` soft coupling is gone). The `plan_save` **tool** is structurally
+unreachable while read-only (T1's allowlist excludes it), so there is no auto-exit on the tool path;
+the `/plan-save` **command** *can* run while read-only and, on a successful save, calls
+`gating.exit()` — save marks the read-only → read-write boundary in one gesture (D1a). perk does
+**not** adopt plan-mode's in-session "execution mode" flip: it separates plan (read-only session)
+from implement (cold-door fresh worktree session); `[DONE:n]` checkpoints live in the implement
+session (T2c). The `plan` registry stage now records `writes: [session.workflow-state]` (the
+`/plan` enter/exit `mode` append).
 
 ---
 

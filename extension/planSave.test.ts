@@ -145,11 +145,11 @@ test("tool: a non-zero exit / garbage stdout fails loud, no linkage", async () =
   }
 });
 
-test("command: /plan-save refuses while plan mode is active (fail-fast guard)", async () => {
+test("command: /plan-save saves while read-only, then auto-exits the gate (D1a)", async () => {
   const cwd = scaffoldRepo();
-  const bin = fakePerk(cwd, { stdout: PLAN_JSON }); // would succeed if the guard let it through
-  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
-    planMode: true,
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  // Read-only mode active -> the command crosses the boundary: save, then exit to read-write.
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }], {
     assistantText: "# Add retry\n\n## Summary\nRetry it.\n",
   });
   const h = await loadPerkSession({
@@ -158,12 +158,15 @@ test("command: /plan-save refuses while plan mode is active (fail-fast guard)", 
     sessionManager: SessionManager.open(file),
   });
   try {
+    assert.equal(h.workflowState().mode, "read-only", "starts read-only");
     await h.invokeCommand("plan-save");
-    assert.equal(h.workflowState().active_plan_ref ?? null, null, "nothing saved in plan mode");
-    assert.ok(
-      h.notifies.some((n) => /plan mode is active/i.test(n)),
-      "refused with a plan-mode message",
+    // Saved (linked) AND auto-exited the read-only gate in one gesture.
+    assert.equal(
+      (h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id,
+      "42",
+      "plan saved + linked",
     );
+    assert.equal(h.workflowState().mode, "read-write", "auto-exited to read-write on success");
   } finally {
     h.dispose();
   }
@@ -171,19 +174,18 @@ test("command: /plan-save refuses while plan mode is active (fail-fast guard)", 
 
 // --- isPlanModeActive (pure unit) -------------------------------------------------------
 
-test("isPlanModeActive: reads the latest plan-mode-state entry (LWW); ignores other types", () => {
-  const pm = (enabled: boolean): BranchEntry => ({
+test("isPlanModeActive: reads perk's own read-only mode (not the retired plan-mode-state)", () => {
+  const mode = (m: string): BranchEntry => ({
     type: "custom",
-    customType: "plan-mode-state",
-    data: { enabled },
+    customType: "perk:workflow-state",
+    data: { mode: m },
   });
   assert.equal(isPlanModeActive([]), false);
-  assert.equal(isPlanModeActive([pm(true)]), true);
-  assert.equal(isPlanModeActive([pm(true), pm(false)]), false); // latest wins
+  assert.equal(isPlanModeActive([mode("read-only")]), true);
+  assert.equal(isPlanModeActive([mode("read-only"), mode("read-write")]), false); // latest wins
+  // The retired pi-plan signal is now ignored entirely.
   assert.equal(
-    isPlanModeActive([
-      { type: "custom", customType: "perk:workflow-state", data: { enabled: true } },
-    ]),
+    isPlanModeActive([{ type: "custom", customType: "plan-mode-state", data: { enabled: true } }]),
     false,
   );
 });

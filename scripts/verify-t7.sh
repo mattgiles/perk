@@ -35,14 +35,14 @@ echo "== Check 2: borrowed substrate wired =="
 if py_run -c "
 import json
 pkgs = json.load(open('$W/.pi/settings.json'))['packages']
-need = ['npm:@tombell/pi-plan', 'npm:@juicesharp/rpiv-todo', 'npm:@tombell/pi-diff', 'npm:@tombell/pi-status']
+need = ['npm:@juicesharp/rpiv-todo', 'npm:@tombell/pi-diff', 'npm:@tombell/pi-status']  # @tombell/pi-plan retired in P2.T2a (perk owns plan mode)
 missing = [p for p in need if p not in pkgs]
 self = [p for p in pkgs if p.startswith('npm:@perk/pi') or p == '..' or p.startswith('..')]
 assert not missing, f'missing {missing}'
 assert self, 'no @perk/pi self entry'
 " 2>/dev/null \
    && echo "$J" | py_run -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if next(c for c in d['checks'] if c['name']=='settings-wiring')['status']=='ok' else 1)"; then
-  pass "all four borrowed packages + @perk/pi present; settings-wiring ok"
+  pass "all borrowed packages + @perk/pi present; settings-wiring ok"
 else
   bad "borrowed substrate not fully wired"
 fi

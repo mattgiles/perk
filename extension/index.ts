@@ -14,9 +14,11 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
+import { registerCheckpoints } from "./checkpoints.ts";
 import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
+import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
@@ -61,6 +63,11 @@ export default function (pi: ExtensionAPI) {
   // P2.T1 — the read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface T2/T5 consume.
   const gating = registerToolGating(pi);
+
+  // P2.T2a — perk-owned plan mode: the `/plan` + Ctrl+Alt+P + `--plan` toggle surface over T1's
+  // gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
+  // borrowed `@tombell/pi-plan` is retired).
+  registerPlanMode(pi, gating);
   let sharedOk = false;
   try {
     sharedDir();
@@ -196,8 +203,9 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Warm door: the `plan_save` tool + `/plan-save` command (turn-3).
-  registerPlanSave(pi);
+  // Warm door: the `plan_save` tool + `/plan-save` command (turn-3). Takes `gating` for D1a:
+  // a successful command-path save exits read-only mode (the read-only → read-write boundary).
+  registerPlanSave(pi, gating);
 
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement` (turn-4b).
   registerLifecycleGates(pi);
@@ -208,6 +216,11 @@ export default function (pi: ExtensionAPI) {
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
+
+  // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
+  // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
+  // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
+  registerCheckpoints(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

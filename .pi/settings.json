@@ -1,7 +1,6 @@
 {
   "packages": [
     "..",
-    "npm:@tombell/pi-plan",
     "npm:@juicesharp/rpiv-todo",
     "npm:@tombell/pi-diff",
     "npm:@tombell/pi-status"

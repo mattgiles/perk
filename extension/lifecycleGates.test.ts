@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
-import { gateDecision } from "./lifecycleGates.ts";
+import { gateDecision, implementHandoffPrompt } from "./lifecycleGates.ts";
 import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import type { WorkflowState } from "./workflowState.ts";
 
@@ -130,15 +130,61 @@ test("/implement: outside an impl worktree -> refuses, points to the cold door",
   }
 });
 
-test("/implement: inside an impl worktree -> acknowledges continue", async () => {
-  const cwd = scaffoldRepo();
-  const file = plantSession(cwd, [ACTIVE]);
-  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+test("implementHandoffPrompt: carries the plan forward (read it; never summarize)", () => {
+  const prompt = implementHandoffPrompt(REF);
+  assert.match(prompt, /implementing perk plan github #42/);
+  assert.match(prompt, /gh issue view 42 --comments/);
+  assert.match(prompt, /\/submit/);
+  // A non-github provider falls back to opening the url.
+  const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
+  assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
+});
+
+test("/implement: inside a clean impl worktree -> seeded ctx.newSession handoff (output capped)", async () => {
+  const h = await loadOverGit(scaffoldRepo(), [ACTIVE], { dirty: false });
   try {
-    await h.invokeCommand("implement");
+    const { newSessionCalls, seeded } = await h.runCommandHandler("implement");
+    assert.equal(newSessionCalls.length, 1, "newSession invoked once");
+    assert.equal(seeded.length, 1, "exactly one priming message seeded");
+    assert.match(seeded[0] ?? "", /implementing perk plan github #42/, "plan-read priming seeded");
+    // Model-visible output is capped: a single short confirmation notify, not the plan body.
     assert.ok(
-      h.notifies.some((n) => /already implementing/.test(n)),
-      "acknowledged continue",
+      h.notifies.some((n) => /fresh implement session started for plan #42/.test(n)),
+      "capped confirmation surfaced",
+    );
+    assert.ok(
+      !h.notifies.some((n) => /gh issue view/.test(n)),
+      "the plan body is not echoed into model-visible output",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/implement: dirty impl worktree -> refuses the handoff (no newSession)", async () => {
+  const h = await loadOverGit(scaffoldRepo(), [ACTIVE], { dirty: true });
+  try {
+    const { newSessionCalls } = await h.runCommandHandler("implement");
+    assert.equal(newSessionCalls.length, 0, "no handoff on a dirty tree");
+    assert.ok(
+      h.notifies.some((n) => /uncommitted changes/.test(n)),
+      "refused with a dirty-tree message",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/implement: outside an impl worktree via handler -> no newSession, points cold", async () => {
+  const h = await loadOverGit(scaffoldRepo(), [{ run_id: "01RID", mode: "read-write" }], {
+    dirty: false,
+  });
+  try {
+    const { newSessionCalls } = await h.runCommandHandler("implement");
+    assert.equal(newSessionCalls.length, 0, "no handoff outside an impl context");
+    assert.ok(
+      h.notifies.some((n) => /cold-only/.test(n)),
+      "pointed at the cold door",
     );
   } finally {
     h.dispose();

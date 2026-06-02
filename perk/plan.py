@@ -172,6 +172,30 @@ def render_plan_body(plan_markdown: str) -> str:
     )
 
 
+def extract_plan_body(text: str) -> str | None:
+    """Extract the verbatim plan markdown from a ``plan-body`` block (inverse of
+    :func:`render_plan_body`). ``text`` is an issue body or a comment body. ``None`` when the block
+    is absent or malformed. Used to materialize the plan body for in-session checkpoints (P2.T2c).
+    """
+    start = text.find(_OPEN.format(key=PLAN_BODY_KEY))
+    if start == -1:
+        return None
+    end = text.find(_CLOSE.format(key=PLAN_BODY_KEY), start)
+    if end == -1:
+        return None
+    segment = text[start:end]
+    summary = f"<details><summary><code>{PLAN_BODY_KEY}</code></summary>"
+    inner_start = segment.find(summary)
+    if inner_start == -1:
+        return None
+    inner_start += len(summary)
+    inner_end = segment.rfind("</details>")
+    if inner_end == -1 or inner_end < inner_start:
+        return None
+    body = segment[inner_start:inner_end].strip()
+    return body or None
+
+
 # ----------------------------------------------------------------------- helpers
 
 

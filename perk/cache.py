@@ -125,6 +125,20 @@ def read_plan_ref(root: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def plan_body_path(root: Path) -> Path:
+    """The ``cache.plan`` materialized plan-body file (twin of the TS ``planBodyPath``)."""
+    return workflow_dir(root) / "plan.md"
+
+
+def write_plan_body(root: Path, body: str) -> Path:
+    """Materialize the plan body markdown to ``plan.md`` (so in-session checkpoints can seed from
+    its ``## Steps`` list, P2.T2c); return its path."""
+    path = plan_body_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+    return path
+
+
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------
 
 

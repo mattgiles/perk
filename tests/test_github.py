@@ -453,3 +453,30 @@ def test_merge_pr_dry_run_does_not_shell(monkeypatch):
     monkeypatch.setattr(subprocess, "run", boom)
     pr = github.merge_pr(number=42, repo_root=ROOT, dry_run=True)
     assert pr.state == "MERGED"
+
+
+def test_get_plan_body_extracts_from_first_comment(monkeypatch):
+    markdown = "# Add retry\n\n## Steps\n1. Add helper\n2. Wire it in\n"
+    comment_body = plan.render_plan_body(markdown)
+    payload = json.dumps(
+        {"body": "<!-- perk:metadata-block:plan-header -->", "comments": [{"body": comment_body}]}
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, payload))
+    assert github.get_plan_body(number=42, repo_root=ROOT) == markdown.strip()
+
+
+def test_get_plan_body_none_when_no_block(monkeypatch):
+    payload = json.dumps({"body": "just a header", "comments": []})
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, payload))
+    assert github.get_plan_body(number=42, repo_root=ROOT) is None
+
+
+def test_get_plan_body_missing_issue_returns_none(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(1, stderr="not found"))
+    assert github.get_plan_body(number=999, repo_root=ROOT) is None
+
+
+def test_get_plan_body_infra_failure_raises(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(1, stderr="HTTP 500"))
+    with pytest.raises(github.GitHubError):
+        github.get_plan_body(number=42, repo_root=ROOT)

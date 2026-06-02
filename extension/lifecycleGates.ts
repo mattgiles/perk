@@ -9,11 +9,19 @@
 // extensionRunner.emit({type,...}) and their { cancel } result round-trips; the handler's
 // pi.exec("git",["status","--porcelain"],{cwd}) resolves the session cwd.
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import type { PlanRef } from "./cache.ts";
 import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
 
 const DIRTY_MESSAGE =
   "perk: uncommitted changes — commit or stash before switching/forking this stage.";
+const HANDOFF_DIRTY_MESSAGE =
+  "perk: uncommitted changes — commit before a fresh-context /implement handoff (the plan is the " +
+  "only artifact that crosses the boundary).";
 
 /**
  * Pure gate policy (D6): cancel a transition only inside an active perk workflow whose tree is
@@ -52,21 +60,84 @@ async function guardTransition(
 }
 
 /**
- * The guard-only warm `/implement` (D7). Never performs the plan→implement transition — it makes
- * `implement.doors.warm: false` enforced at the surface: continue if already implementing, else
- * point at the cold door. (Impl context ≈ read-write mode + a linked plan-ref.)
+ * The plan-read priming seed for a fresh implement session (P2.T2b). The in-session twin of
+ * `perk/launch.py`'s `_initial_prompt`: carry the plan FORWARD (read it from its canonical source),
+ * never summarize it — the plan is the only artifact that crosses the boundary (erk
+ * context-preservation-prompting / impl-context). Pure → unit-testable offline.
+ */
+export function implementHandoffPrompt(ref: PlanRef): string {
+  const readCmd =
+    ref.provider === "github" ? `gh issue view ${ref.pr_id} --comments` : `open ${ref.url}`;
+  return (
+    `You are implementing perk plan ${ref.provider} #${ref.pr_id} (${ref.url}) on this branch.\n\n` +
+    `First, read the full plan:\n    ${readCmd}\n\n` +
+    "Then implement it here. Work in focused steps and keep the tree committable. When the " +
+    "implementation is complete and committed, open the pull request with the /submit command."
+  );
+}
+
+/**
+ * The warm `/implement` (D7 + P2.T2b). It still NEVER performs the cross-worktree plan→implement
+ * transition (that is structurally the Python cold door's job — no extension session API can change
+ * cwd; D2). Outside an impl context it refuses and points at `perk implement`. INSIDE an active
+ * impl worktree (read-write + a linked plan-ref) it offers the in-process twin of the cold door: a
+ * lossless `ctx.newSession` fresh-context handoff seeded with the plan-read priming (the plan, and
+ * the worktree's materialized plan-ref, are the durable state — model-visible output stays capped).
+ * Dirty-tree hygiene is gated manually here (belt-and-suspenders: `newSession` is a session-replace,
+ * not a fork/switch, so it may bypass the P1.T4b `session_before_*` gate — we refuse on a dirty tree
+ * either way), fail-safe-headless.
  */
 function registerImplementGuard(pi: ExtensionAPI): void {
   pi.registerCommand("implement", {
-    description: "Implement requires fresh context — use the cold door `perk implement`.",
+    description:
+      "Refresh implement context (in-worktree handoff); cross-worktree is `perk implement`.",
     handler: async (_args, ctx) => {
       const state = rebuildWorkflowState(branchOf(ctx));
-      const inImpl = state.mode === "read-write" && state.active_plan_ref != null;
-      const message = inImpl
-        ? "perk: already implementing — continue in this session."
-        : "perk: /implement is cold-only — run `perk implement` from a shell for fresh context.";
-      if (ctx.hasUI) ctx.ui.notify(message, inImpl ? "info" : "warning");
-      else console.error(message);
+      const ref = state.active_plan_ref;
+      const inImpl = state.mode === "read-write" && ref != null;
+      if (!inImpl) {
+        const message =
+          "perk: /implement is cold-only here — run `perk implement` from a shell for fresh context.";
+        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+        else console.error(message);
+        return;
+      }
+
+      // Dirty-tree gate (manual; see the doc comment). Refuse the handoff with uncommitted work.
+      const status = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
+      if (status.code === 0 && status.stdout.trim().length > 0) {
+        if (ctx.hasUI) ctx.ui.notify(HANDOFF_DIRTY_MESSAGE, "warning");
+        else console.error(HANDOFF_DIRTY_MESSAGE);
+        return;
+      }
+
+      const commandCtx = ctx as ExtensionCommandContext;
+      if (typeof commandCtx.newSession !== "function") {
+        const message = "perk: a fresh-context /implement handoff needs an interactive session.";
+        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+        else console.error(message);
+        return;
+      }
+
+      const prompt = implementHandoffPrompt(ref as PlanRef);
+      const parentSession = ctx.sessionManager.getSessionFile() ?? undefined;
+      const result = await commandCtx.newSession({
+        parentSession,
+        withSession: async (fresh) => {
+          await fresh.sendUserMessage(prompt);
+        },
+      });
+
+      // Verify + cap model-visible output (the full state lives in the worktree + the plan issue).
+      if (result.cancelled) {
+        const message = "perk: /implement handoff cancelled — staying in this session.";
+        if (ctx.hasUI) ctx.ui.notify(message, "info");
+        else console.error(message);
+        return;
+      }
+      const ok = `perk: fresh implement session started for plan #${(ref as PlanRef).pr_id} — the plan is carried forward, not summarized.`;
+      if (ctx.hasUI) ctx.ui.notify(ok, "info");
+      else console.error(ok);
     },
   });
 }
