@@ -37,7 +37,8 @@ TMP="$(mktemp -d)"
 S="$TMP/.pi/settings.json"
 if [ -f "$S" ] \
   && grep -q '@perk/pi' "$S" \
-  && grep -q '@tombell/pi-plan' "$S" \
+  && grep -q '@tombell/pi-status' "$S" \
+  && ! grep -q '@tombell/pi-plan' "$S" \
   && [ -f "$TMP/.pi/workflow/.gitkeep" ] \
   && grep -q '/.pi/npm/' "$TMP/.gitignore" \
   && grep -q 'perk conventions' "$TMP/AGENTS.md"; then
