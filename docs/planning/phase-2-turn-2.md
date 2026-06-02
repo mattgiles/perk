@@ -44,7 +44,11 @@ is GitHub plan issue **#5**. This doc records the prior-art pass and the **outco
   command auto-exits the gate on success (D1a).
 - **`extension/lifecycleGates.ts`** — the deepened warm `/implement` (in-worktree `newSession`
   handoff) + `implementHandoffPrompt`.
-- **`extension/cache.ts`** — `readPlanBody`/`planBodyPath` (the `cache.plan` body tier).
+- **`extension/cache.ts`** — `readPlanBody`/`planBodyPath` (the `cache.plan` body tier, TS reader).
+- **`perk/plan.py` + `perk/github.py` + `perk/cache.py` + `perk/launch.py`** — the plan-body
+  writer: `extract_plan_body` (inverse of `render_plan_body`), `get_plan_body` (issue + comments),
+  `write_plan_body`/`plan_body_path`, and `launch._materialize_plan_body` wired into the implement
+  cold door's materialize step.
 - **`extension/index.ts`** — wires `registerPlanMode` + `registerCheckpoints`; passes `gating` to
   `registerPlanSave`.
 - **`perk/init.py` + `.pi/settings.json`** — drop `@tombell/pi-plan` from the borrowed set.
@@ -81,13 +85,19 @@ Built as planned across the three seams. Notes / refinements:
   `false` — the cross-worktree jump is structurally cold-only (D2: no extension session API changes
   cwd). Added a `runCommandHandler` harness helper that records `newSession` + seeded messages so
   the handoff is asserted offline without creating a real session.
-- **T2c — checkpoints seed from `cache.plan`, inert until it's materialized.** No handler writes the
-  `cache.plan` body yet, so in practice checkpoints are inert today (matching D4 for prose plans);
-  `readPlanBody`/`planBodyPath` add the reader seam now. The rebuild uses the **scan-after-marker**
-  discipline against the latest `perk:checkpoint` entry. `@juicesharp/rpiv-todo` is **not** retired
-  here (P2.T12, conditional on this seam).
-- **Follow-ups flagged (unchanged from the plan):** dynamic `resources_discover` skill/prompt
-  contribution (config); a `cache.plan` body materializer for live checkpoints; a perk-owned
-  "update an already-saved plan" door (`plan_save` is idempotent — revising a saved plan currently
-  means editing the GitHub issue by hand; eventual owner is a `plan_save`-update path or P2.T7b's
-  `/address` Plan File Mode).
+- **T2c — the `cache.plan` data source is wired end-to-end (gap closed in-turn).** Plan #5 said
+  "seed from the plan body's `## Steps`" but never specified *materializing* that body; the first
+  implementation pass left `readPlanBody` reading a file nothing wrote (checkpoints would have been
+  inert for **every** plan, not just prose ones). Closed by materializing the body in the Python
+  cold door's existing materialize step: `perk implement` (`launch._materialize_plan_body`) fetches
+  the `plan-body` block (`github.get_plan_body` → the issue's first comment →
+  `plan.extract_plan_body`) and writes `.pi/workflow/plan.md` into the worktree, best-effort +
+  loud-but-non-fatal (an unreachable body yields inert checkpoints, never a failed launch). The
+  cross-plane contract is the **file** (`cache.plan`): Python writes it, TS reads it. The rebuild
+  uses the **scan-after-marker** discipline against the latest `perk:checkpoint` entry.
+  `@juicesharp/rpiv-todo` is **not** retired here (P2.T12, conditional on this seam).
+- **Follow-ups flagged:** dynamic `resources_discover` skill/prompt contribution (config); a
+  perk-owned "update an already-saved plan" door (`plan_save` is idempotent — revising a saved plan
+  currently means editing the GitHub issue by hand; eventual owner is a `plan_save`-update path or
+  P2.T7b's `/address` Plan File Mode). (The `cache.plan` body materializer, originally a deferral,
+  was **closed in this turn** — see the T2c note above.)

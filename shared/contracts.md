@@ -195,9 +195,15 @@ append every advancing `turn_end`), and a separate entry avoids LWW-append smell
 record. The interior (`extension/checkpoints.ts`) seeds an ordered step list from the plan body's
 `## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
 active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
-entry). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
+entry). The `cache.plan` body (`.pi/workflow/plan.md`) is **materialized by the Python cold door**:
+`perk implement` (`launch._materialize_plan_body`) fetches the plan body from GitHub
+(`github.get_plan_body` → the `plan-body` block in the issue's first comment, parsed by
+`plan.extract_plan_body`) and writes it into the worktree alongside the plan-ref + handoff
+(best-effort + loud-but-non-fatal — an unreachable body just yields inert checkpoints, never a failed
+launch). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
 present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
-optional `## Steps` section as the forward path. State is **rebuilt on `session_start` AND
+optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
+(`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start` AND
 `session_tree`**; `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
 appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
 **scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]` is

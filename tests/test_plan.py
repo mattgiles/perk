@@ -58,6 +58,20 @@ def test_render_plan_body_keeps_markdown_verbatim():
     assert "<!-- perk:metadata-block:plan-body -->" in body
 
 
+def test_extract_plan_body_round_trips_render():
+    markdown = "# Add retry\n\n## Steps\n1. Add helper\n2. Wire it in\n"
+    comment = plan.render_plan_body(markdown)
+    # The block may be embedded in a larger comment body.
+    wrapped = f"some preamble\n\n{comment}\n\ntrailing text\n"
+    assert plan.extract_plan_body(wrapped) == markdown.strip()
+
+
+def test_extract_plan_body_absent_or_malformed_is_none():
+    assert plan.extract_plan_body("no block here") is None
+    # Open marker without a close marker -> malformed -> None.
+    assert plan.extract_plan_body("<!-- perk:metadata-block:plan-body -->\n<details>") is None
+
+
 def test_extract_run_id_from_header():
     rendered = plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id="01RID", created="t").to_data()

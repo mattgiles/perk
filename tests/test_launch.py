@@ -125,6 +125,8 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     execs: list[tuple[str, list[str]]] = []
     monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: execs.append((f, list(a))))
+    # Don't shell gh in this real-git integration test (the plan-body fetch is its own test).
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
 
     def _run() -> None:
         launch_stage(
@@ -157,6 +159,58 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     _run()
     assert len(execs) == 2  # launched again
     assert wt.is_dir()
+
+
+def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch):
+    """P2.T2c: the cold door caches the plan body into the worktree so in-session checkpoints can
+    seed from its `## Steps` list."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: None)
+    markdown = "# Add retry\n\n## Steps\n1. Add helper\n2. Wire it in\n"
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: markdown)
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = config.worktree_root / "plan-42"
+    assert cache.plan_body_path(wt).read_text(encoding="utf-8").strip() == markdown.strip()
+
+
+def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys):
+    """A GitHub failure fetching the body never blocks the launch (checkpoints stay inert)."""
+    from perk.github import GitHubError
+
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: execs.append(f))
+
+    def boom(**_k):
+        raise GitHubError("gh unreachable")
+
+    monkeypatch.setattr("perk.launch.github.get_plan_body", boom)
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = config.worktree_root / "plan-42"
+    assert execs == ["pi"], "launch still proceeded"
+    assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
+    assert "could not fetch plan #42 body" in capsys.readouterr().err
 
 
 def test_dry_run_has_no_side_effects(tmp_path, capsys):

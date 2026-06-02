@@ -15,10 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, git, run_id
+from perk import cache, git, github, run_id
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
 from perk.git import GitError
+from perk.github import GitHubError
 from perk.output import machine_output, user_output
 from perk.registry import Stage
 
@@ -155,6 +156,33 @@ def launch_stage(
     cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode})
     if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
         cache.write_plan_ref(wt, resolved.plan_ref)
+    # P2.T2c: materialize the plan body into the worktree so in-session checkpoints can seed from
+    # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
+    # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
+    if stage.worktree != "none":
+        _materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
     env = {**os.environ, "PERK_RUN_ID": rid}
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
+
+
+def _materialize_plan_body(
+    repo_root: Path, worktree: Path, plan_ref: dict[str, Any] | None
+) -> None:
+    """Fetch the plan body from its canonical source and cache it into the worktree (P2.T2c).
+
+    Best-effort: a non-github provider, a non-numeric id, or any GitHub failure is reported but
+    never blocks the launch (checkpoints simply stay inert). Honest, not silent.
+    """
+    if plan_ref is None or str(plan_ref.get("provider")) != "github":
+        return
+    pr_id = str(plan_ref.get("pr_id", "")).strip()
+    if not pr_id.isdigit():
+        return
+    try:
+        body = github.get_plan_body(number=int(pr_id), repo_root=repo_root)
+    except GitHubError as exc:
+        user_output(f"  (checkpoints: could not fetch plan #{pr_id} body — {exc})")
+        return
+    if body:
+        cache.write_plan_body(worktree, body)

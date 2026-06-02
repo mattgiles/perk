@@ -554,6 +554,33 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
     )
 
 
+def get_plan_body(*, number: int, repo_root: Path) -> str | None:
+    """Fetch a plan issue's verbatim plan markdown (the ``plan-body`` block lives in the first
+    comment; the issue body holds only the header). ``None`` when the issue or block is absent;
+    raises ``GitHubError`` on an infra failure. Used to materialize the plan body for in-session
+    checkpoints (P2.T2c).
+    """
+    proc = _run(["issue", "view", str(number), "--json", "body,comments"], cwd=repo_root)
+    if proc.returncode != 0:
+        haystack = (proc.stderr + proc.stdout).lower()
+        if "not found" in haystack or "404" in haystack:
+            return None
+        raise _failed(proc, f"failed to read plan issue #{number}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    candidates = [str(data.get("body", ""))]
+    comments = data.get("comments")
+    if isinstance(comments, list):
+        candidates.extend(str(c.get("body", "")) for c in comments if isinstance(c, dict))
+    for text in candidates:
+        body = plan.extract_plan_body(text)
+        if body:
+            return body
+    return None
+
+
 def mark_pr_ready(*, number: int, repo_root: Path, dry_run: bool = False) -> None:
     """Mark a draft PR ready for review (the lone GraphQL op — there is no REST endpoint).
 

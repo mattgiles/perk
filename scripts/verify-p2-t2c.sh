@@ -6,6 +6,8 @@
 #   2. checkpoints wired: registerCheckpoints in index.ts; a dedicated `perk:checkpoint` entry (D3);
 #      rebuilt on session_start AND session_tree; advanced on turn_end
 #   3. the `perk-plan` skill documents the optional `## Steps` list (so checkpoints have a format)
+#   4. the data source is WIRED end-to-end: the Python cold door materializes the plan body into
+#      the worktree's `cache.plan` (`.pi/workflow/plan.md`) that the TS reader seeds from
 set -uo pipefail
 cd "$(dirname "$0")/.."
 fail=0
@@ -38,6 +40,22 @@ if grep -q '## Steps' skills/perk-plan/SKILL.md \
   pass "perk-plan skill documents `## Steps` as the checkpoint format"
 else
   bad "perk-plan skill missing the `## Steps` documentation"
+fi
+
+echo "== Check 4: the plan-body data source is wired end-to-end (cold door -> cache.plan) =="
+if grep -q '_materialize_plan_body' perk/launch.py \
+   && grep -q 'def get_plan_body' perk/github.py \
+   && grep -q 'def write_plan_body' perk/cache.py \
+   && grep -q 'def extract_plan_body' perk/plan.py \
+   && grep -q 'readPlanBody(ctx.cwd)' extension/checkpoints.ts; then
+  pass "launch materializes the plan body into cache.plan; checkpoints.ts seeds from it"
+else
+  bad "the plan-body data source is not wired (checkpoints would never seed in production)"
+fi
+if uv run pytest tests/test_launch.py -k plan_body -q >/tmp/perk-p2t2c-py.log 2>&1; then
+  pass "launch plan-body materialization tests green ($(grep -Eo '[0-9]+ passed' /tmp/perk-p2t2c-py.log | head -1))"
+else
+  bad "launch plan-body tests failed (see /tmp/perk-p2t2c-py.log)"; tail -20 /tmp/perk-p2t2c-py.log
 fi
 
 echo
