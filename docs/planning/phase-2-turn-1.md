@@ -46,7 +46,8 @@ unit tests:
 
 1. **`setActiveTools` allowlist** — `READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash"]`,
    with **snapshot-then-restore**: snapshot `pi.getActiveTools()` only on off→on; on on→off,
-   restore the snapshot (falling back to a read-write default if none).
+   restore the snapshot (falling back to the full `pi.getAllTools()` set if none — never a
+   hardcoded list, so perk's custom tools survive).
 2. **`tool_call` bash sub-allowlist** — when active, `{ block: true, reason }` on a
    non-allowlisted `bash` command (pure `isReadOnlyBashCommand`), and **defensively** on `edit` /
    `write` (the allowlist already removes them from the model's tool set, but the `tool_call`

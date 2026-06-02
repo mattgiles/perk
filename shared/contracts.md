@@ -177,7 +177,9 @@ implement`. The proceed-anyway confirm dialog + `git-checkpoint` stash-on-turn a
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
 (1) restricts the active tool set to `["read", "grep", "find", "ls", "bash"]` via
 `pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
-transition; restore it on on→off, falling back to a read-write default); (2) blocks `edit`/`write`
+transition; restore it on on→off, falling back to the **full** configured tool set
+`pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
+(2) blocks `edit`/`write`
 and non-allowlisted `bash` commands at `tool_call` with `{ block: true, reason }` (a perk-owned
 copy of plan-mode's destructive/safe regex tables); (3) injects a hidden `[READ-ONLY MODE]`
 context at `before_agent_start` and **strips** that marker from `context` when off. The allowlist

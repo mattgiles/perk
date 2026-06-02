@@ -14,9 +14,6 @@ import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 /** Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS). */
 export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash"];
 
-/** Default tool set restored when no pre-gate snapshot exists (mirrors plan-mode's NORMAL_MODE). */
-const READ_WRITE_TOOLS = ["read", "bash", "edit", "write"];
-
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
 const READ_ONLY_MARKER = "[READ-ONLY MODE]";
@@ -163,8 +160,11 @@ export function registerToolGating(pi: ExtensionAPI): ToolGating {
       snapshot = pi.getActiveTools();
       pi.setActiveTools(READ_ONLY_TOOLS);
     } else if (!next && active) {
-      // on → off: restore the pre-gate snapshot (or a read-write default if none).
-      pi.setActiveTools(snapshot ?? READ_WRITE_TOOLS);
+      // on → off: restore the pre-gate snapshot. If none exists (near-unreachable — the off→on
+      // branch always snapshots first), fall back to the FULL configured tool set
+      // (pi.getAllTools()) like plan-mode, never a hardcoded list that would silently drop
+      // grep/find/ls and perk's custom tools (plan_save/submit/land/learn).
+      pi.setActiveTools(snapshot ?? pi.getAllTools().map((t) => t.name));
       snapshot = null;
     }
     active = next;
