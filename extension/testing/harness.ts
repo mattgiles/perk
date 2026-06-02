@@ -73,12 +73,18 @@ export interface PerkSession {
     toolName: string,
     input: Record<string, unknown>,
   ): Promise<{ block?: boolean; reason?: string } | undefined>;
+  /** Fire `before_agent_start`; returns the injected custom messages (customType + content). */
+  emitBeforeAgentStart(): Promise<{ customType?: string; content?: unknown }[]>;
+  /** Run messages through the `context` filter chain; returns the surviving messages. */
+  emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   /** Fire a lifecycle event (session_before_fork / session_before_switch) and return its result. */
   emitLifecycle(
     event:
       | { type: "session_before_fork"; entryId: string; position: "before" | "at" }
       | { type: "session_before_switch"; reason: "new" | "resume"; targetSessionFile?: string },
   ): Promise<{ cancel?: boolean } | undefined>;
+  /** Set a registered CLI flag value (simulates `pi --<name>`); take effect on the next reload. */
+  setFlag(name: string, value: boolean | string): void;
   /** Re-emit `session_start` (reason "reload"); optional env overrides applied first. */
   reload(env?: Record<string, string | undefined>): Promise<void>;
   /** Dispose the session and restore process.env. */
@@ -306,10 +312,38 @@ export async function loadPerkSession(opts: {
       await tick();
       return result as { block?: boolean; reason?: string } | undefined;
     },
+    async emitBeforeAgentStart() {
+      const runner = session.extensionRunner as unknown as {
+        emitBeforeAgentStart: (
+          prompt: string,
+          images: undefined,
+          systemPrompt: string,
+          systemPromptOptions: unknown,
+        ) => Promise<{ messages?: { customType?: string; content?: unknown }[] } | undefined>;
+      };
+      const result = await runner.emitBeforeAgentStart("", undefined, "", {} as never);
+      await tick();
+      return result?.messages ?? [];
+    },
+    async emitContext(messages) {
+      const runner = session.extensionRunner as unknown as {
+        emitContext: (m: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
+      };
+      const result = await runner.emitContext(messages as never);
+      await tick();
+      return result as Record<string, unknown>[];
+    },
     async emitLifecycle(event) {
       const result = await session.extensionRunner.emit(event as never);
       await tick();
       return result as { cancel?: boolean } | undefined;
+    },
+    setFlag(name: string, value: boolean | string) {
+      (
+        session.extensionRunner as unknown as {
+          setFlagValue: (n: string, v: boolean | string) => void;
+        }
+      ).setFlagValue(name, value);
     },
     async reload(env?: Record<string, string | undefined>) {
       if (env) applyEnv(env, savedEnv);

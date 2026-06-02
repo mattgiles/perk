@@ -190,6 +190,25 @@ best-effort transient (no strict read-back). The `enter(ctx?)`/`exit(ctx?)` surf
 (append `mode` + flip the gate) is the API the perk-owned plan mode (T2) and the read-only CI
 executor (T5) consume; this primitive ships no `/plan` ownership and adds no registry stage.
 
+**Perk-owned plan mode (P2.T2a).** `mode` is now perk-owned **end-to-end** — the borrowed
+`@tombell/pi-plan` package is retired (removed from `init.py`'s `BORROWED_PACKAGES` and
+`.pi/settings.json`). The interior (`extension/planMode.ts`) owns the toggle surface over T1's gate:
+a `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`
+(perk adds **no** parallel enforcement — T1 is the single read-only authority). It also injects a
+hidden plan-authoring prompt layer under its own `perk:plan-context` customType (keyed off the
+read-only gate; stripped from `context` when off — the same hygiene T1 applies to
+`perk:mode-context`), optionally extended by a `[workflow] plan_authoring` addendum read from
+`.pi/perk.toml` + `perk.local.toml` (`extension/config.ts`, the TS twin of `perk/config.py`'s
+overlay). `isPlanModeActive` (in `extension/planSave.ts`) now reads perk's own `mode == "read-only"`
+(the P1.T3b `plan-mode-state` soft coupling is gone). The `plan_save` **tool** is structurally
+unreachable while read-only (T1's allowlist excludes it), so there is no auto-exit on the tool path;
+the `/plan-save` **command** *can* run while read-only and, on a successful save, calls
+`gating.exit()` — save marks the read-only → read-write boundary in one gesture (D1a). perk does
+**not** adopt plan-mode's in-session "execution mode" flip: it separates plan (read-only session)
+from implement (cold-door fresh worktree session); `[DONE:n]` checkpoints live in the implement
+session (T2c). The `plan` registry stage now records `writes: [session.workflow-state]` (the
+`/plan` enter/exit `mode` append).
+
 ---
 
 ## §8.4 · The GitHub gateway contract (Q9/Q10)

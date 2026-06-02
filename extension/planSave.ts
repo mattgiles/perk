@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
+import type { ToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
   planRefsEqual,
@@ -46,20 +47,13 @@ interface PlanSaveJson {
 }
 
 /**
- * Detect the borrowed `@tombell/pi-plan` plan mode from its own persisted signal: it appends a
- * `plan-mode-state` custom entry `{ enabled }` on every toggle (and restores from it on
- * session_start). We read the latest such entry (LWW, survives fork/branch) — the lowest-coupling
- * way to know plan mode is on. (A soft coupling to a borrowed package's entry type; removed in
- * Phase 2 when perk owns plan mode.)
+ * Whether perk-owned plan mode is active — read from perk's OWN signal, the `read-only` `mode` of
+ * `perk:workflow-state` (the structural tool gate, P2.T1). This retires the P1.T3b soft coupling to
+ * `@tombell/pi-plan`'s `plan-mode-state` entry: perk now owns plan mode (`/plan` toggles
+ * `gating.enter`/`exit`, which append `mode`), so the gate's own field is the source of truth.
  */
 export function isPlanModeActive(branch: readonly BranchEntry[]): boolean {
-  for (let i = branch.length - 1; i >= 0; i--) {
-    const e = branch[i];
-    if (e?.type === "custom" && e.customType === "plan-mode-state") {
-      return (e.data as { enabled?: unknown } | undefined)?.enabled === true;
-    }
-  }
-  return false;
+  return rebuildWorkflowState(branch).mode === "read-only";
 }
 
 function textOf(content: unknown): string {
@@ -119,16 +113,10 @@ export async function savePlan(
   if (!plan) return fail("no plan markdown to save (propose a plan first)", "invalid_input");
 
   const branch = (): BranchEntry[] => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
-  // Fail fast in plan mode: the `plan_save` tool is hidden by pi-plan, and the `/plan-save`
-  // command would otherwise scrape conversation as the "plan". perk cannot cleanly exit pi-plan
-  // (it owns that state), so we refuse and tell the user to exit it themselves.
-  if (isPlanModeActive(branch())) {
-    return fail(
-      "plan mode is active — exit it with /plan, then save (or, once it's off, call the plan_save " +
-        "tool with the finalized plan)",
-      "plan_mode_active",
-    );
-  }
+  // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable while
+  // read-only (T1's allowlist excludes it), so reaching savePlan via the tool means the gate is
+  // already off; the `/plan-save` COMMAND is allowed to run while read-only and the command handler
+  // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
   const perkBin = process.env.PERK_BIN ?? "perk";
 
@@ -196,7 +184,7 @@ const TOOL_GUIDELINES = [
 ];
 
 /** Register the warm door: the `plan_save` tool (canonical) + the `/plan-save` command twin. */
-export function registerPlanSave(pi: ExtensionAPI): void {
+export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
   pi.registerTool({
     name: "plan_save",
     label: "Save plan",
@@ -239,7 +227,14 @@ export function registerPlanSave(pi: ExtensionAPI): void {
         return;
       }
       const title = args.trim() || undefined;
+      // D1a: the command may run while read-only; on a successful save, exit the gate so save marks
+      // the read-only → read-write boundary in one gesture. (The tool path never does this — it is
+      // structurally unreachable while read-only.)
+      const wasReadOnly = gating.isActive();
       const result = await savePlan(pi, ctx, { plan, title });
+      if (result.details.ok && wasReadOnly) {
+        gating.exit(ctx);
+      }
       if (ctx.hasUI) {
         ctx.ui.notify(
           result.content[0]?.text ?? "plan-save done",

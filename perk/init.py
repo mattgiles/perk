@@ -26,9 +26,9 @@ from perk.output import user_confirm
 NPM_PACKAGE = "@perk/pi"
 
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
-# auto-installs them on the next launch.
+# auto-installs them on the next launch. `@tombell/pi-plan` was retired in P2.T2a
+# (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
 BORROWED_PACKAGES = [
-    "npm:@tombell/pi-plan",
     "npm:@juicesharp/rpiv-todo",
     "npm:@tombell/pi-diff",
     "npm:@tombell/pi-status",

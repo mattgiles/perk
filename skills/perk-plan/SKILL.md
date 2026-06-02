@@ -21,9 +21,10 @@ hides custom tools, the flow is:
 3. Call **`plan_save`** with the complete plan markdown (and an optional `title`).
 
 The `/plan-save` **command** is a fallback that scrapes your most recent message as the plan; it is
-fragile (it can't tell a clean plan from conversation), and it **refuses to run while plan mode is
-active** (it would otherwise save chatter). Prefer the tool. There is no tag or marker convention to
-use — just author a clean plan and hand it to the tool.
+fragile (it can't tell a clean plan from conversation). It *can* run while plan mode is active, and
+on a successful save it **automatically exits plan mode** (the read-only → read-write boundary in
+one gesture). Prefer the tool. There is no tag or marker convention to use — just author a clean plan
+and hand it to the tool.
 
 ## Structure
 
@@ -44,6 +45,19 @@ How the change is verified (commands, new/updated tests, the acceptance gate).
 ## Assumptions
 Decisions taken and constraints relied on — so the executor inherits the reasoning, not just the steps.
 ```
+
+### Optional: a `## Steps` list for checkpoints
+
+If the work decomposes into discrete, ordered steps, add a `## Steps` section with a **numbered
+list** (`1.`, `2.`, …). When present, perk seeds **checkpoints** from it during implementation and
+tracks progress as your responses emit `[DONE:n]` markers:
+
+    ## Steps
+    1. First step description
+    2. Second step description
+    3. ...
+
+Omit it for prose-only plans — checkpoints simply stay inert (no crash, no nagging).
 
 Keep it concise and human- *and* agent-digestible. Resolve every open choice **before** saving — a
 saved plan must leave **no decisions to the implementer** (no "should I…?" residue).

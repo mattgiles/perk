@@ -23,8 +23,8 @@ def test_init_converges_and_is_idempotent(tmp_path):
     settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
     packages = settings["packages"]
     assert f"npm:@perk/pi@{__version__}" in packages
-    assert "npm:@tombell/pi-plan" in packages
     assert "npm:@tombell/pi-status" in packages
+    assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
