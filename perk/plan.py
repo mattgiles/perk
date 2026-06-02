@@ -185,11 +185,26 @@ def extract_run_id(issue_body: str) -> str | None:
 
 
 def derive_title(plan_markdown: str, *, fallback: str = "perk plan") -> str:
-    """The plan title — the first ``# `` heading, else ``fallback``."""
+    """The plan title — the first real ATX ``# `` heading **outside any fenced code block**,
+    else ``fallback``.
+
+    Fenced ```` ``` ````/``~~~`` blocks are skipped so a ``#`` inside a code sample cannot be
+    mistaken for the title (a real dogfood failure: a TOML ``# comment`` became the plan title).
+    A heading is recognized only with 0-3 spaces of indent (CommonMark); 4+ is a code line.
+    """
+    fence: str | None = None
     for line in plan_markdown.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# "):
-            return stripped[2:].strip() or fallback
+        stripped = line.lstrip(" ")
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = marker if fence is None else (None if marker == fence else fence)
+            continue
+        if fence is not None:
+            continue  # inside a code fence — a leading `#` here is not a heading
+        if len(line) - len(stripped) <= 3 and stripped.startswith("# "):
+            title = stripped[2:].strip()
+            if title:
+                return title
     return fallback
 
 

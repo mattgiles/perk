@@ -359,6 +359,17 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > (`submit`/`land`/`learn`) it assumes a **local** worktree; recreating one from a remote branch on
 > a fresh clone is Phase 2. This closes the spine: `plan → save → implement → submit → land →
 > learn`, resumable at any stage.
+>
+> **Status (P1.T6 — the Phase-1 gate; + T4c/T3b corrections).** The spine is **closed end-to-end and
+> dogfooded** — perk shipped a real change (`prek` + a ruff hook) through its own loop on its own
+> repo (plan #1 → PR #2 merged → learned; `perk resume 1` reports "nothing to resume"). The gate run
+> is recorded in [`phase-1-gate.md`](../docs/planning/phase-1-gate.md). Two dogfood-surfaced fixes
+> converged forward: **T4c** — `perk implement [PLAN]` takes a plan arg and `launch_stage` **primes**
+> the implement session (it launched bare/idle before); **T3b** — `save` fails fast while plan mode
+> is active and the `plan_save` tool (explicit `plan` param) is the canonical save (the borrowed
+> `pi-plan` emits no structured plan, so the `<proposed_plan>` scrape was dropped). Neither changed
+> any stage's state-I/O. The registry per-stage `requires`/`reads`/`writes` + `doors` are filled for
+> all six spine stages.
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

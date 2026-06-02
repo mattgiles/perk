@@ -6,9 +6,24 @@ description: Authoring a perk implementation plan before saving it with the plan
 # Authoring a perk plan
 
 A perk plan is the **canonical, decision-complete record** of a change. You author it (in plan
-mode, read-only), then `plan_save` / `/plan-save` stores it **verbatim** to GitHub. The save tool is
-purely mechanical — **all the judgment lives here**. Write the plan so an executor (a future session,
-or another engineer) with **zero prior context** can implement it without guessing.
+mode, read-only), then save it **verbatim** to GitHub. The save step is purely mechanical — **all
+the judgment lives here**. Write the plan so an executor (a future session, or another engineer)
+with **zero prior context** can implement it without guessing.
+
+## Saving: exit plan mode, then call the `plan_save` tool
+
+The **robust** save path is the `plan_save` **tool** — you pass the finalized plan markdown in its
+`plan` parameter, so the exact plan is stored (no guessing what "the plan" was). Because plan mode
+hides custom tools, the flow is:
+
+1. Explore read-only and converge on the plan (`/plan` on).
+2. **Disable plan mode** (`/plan` off) so the `plan_save` tool becomes available.
+3. Call **`plan_save`** with the complete plan markdown (and an optional `title`).
+
+The `/plan-save` **command** is a fallback that scrapes your most recent message as the plan; it is
+fragile (it can't tell a clean plan from conversation), and it **refuses to run while plan mode is
+active** (it would otherwise save chatter). Prefer the tool. There is no tag or marker convention to
+use — just author a clean plan and hand it to the tool.
 
 ## Structure
 

@@ -76,3 +76,24 @@ def test_extract_run_id_absent_or_empty_is_none():
 def test_derive_title_uses_first_heading_else_fallback():
     assert plan.derive_title("# Real Title\n\nbody") == "Real Title"
     assert plan.derive_title("no heading here") == "perk plan"
+
+
+def test_derive_title_ignores_hash_inside_code_fence():
+    # The P1.T6 dogfood failure: a TOML `# comment` inside a ```toml block became the title.
+    md = (
+        "Here is the plan.\n\n"
+        "```toml\n"
+        "# Add only if you want format-on-commit too:\n"
+        "id = \"ruff-check\"\n"
+        "```\n"
+    )
+    assert plan.derive_title(md) == "perk plan"  # no real H1 -> fallback, not the fenced comment
+
+
+def test_derive_title_prefers_real_h1_over_fenced_hash():
+    md = "# Add prek hook\n\n```sh\n# not a title\n```\n"
+    assert plan.derive_title(md) == "Add prek hook"
+
+
+def test_derive_title_ignores_indented_code_hash():
+    assert plan.derive_title("    # four-space code, not a heading\n") == "perk plan"

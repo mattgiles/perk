@@ -45,7 +45,22 @@ interface PlanSaveJson {
   cached?: boolean;
 }
 
-const PROPOSED_PLAN = /<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/i;
+/**
+ * Detect the borrowed `@tombell/pi-plan` plan mode from its own persisted signal: it appends a
+ * `plan-mode-state` custom entry `{ enabled }` on every toggle (and restores from it on
+ * session_start). We read the latest such entry (LWW, survives fork/branch) — the lowest-coupling
+ * way to know plan mode is on. (A soft coupling to a borrowed package's entry type; removed in
+ * Phase 2 when perk owns plan mode.)
+ */
+export function isPlanModeActive(branch: readonly BranchEntry[]): boolean {
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const e = branch[i];
+    if (e?.type === "custom" && e.customType === "plan-mode-state") {
+      return (e.data as { enabled?: unknown } | undefined)?.enabled === true;
+    }
+  }
+  return false;
+}
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
@@ -60,9 +75,11 @@ function textOf(content: unknown): string {
 }
 
 /**
- * Best-effort, deterministic: the latest assistant message's plan markdown — its
- * `<proposed_plan>…</proposed_plan>` block if present, else the whole message — or null.
- * Keeps plan *judgment* in the skill and *extraction* mechanical (the command's plan source).
+ * Best-effort, deterministic: the whole text of the latest assistant message, or null. This is the
+ * `/plan-save` **command**'s fallback plan source and is inherently fragile (it cannot tell a clean
+ * plan from conversation). The robust path is the `plan_save` *tool*, where the model hands the
+ * finalized plan over via the `plan` parameter. (There is no tag/marker convention to extract — the
+ * borrowed plan-mode package emits no structured plan, only free-form prose.)
  */
 export function extractPlanMarkdown(entries: readonly unknown[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -70,8 +87,7 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
     if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
     const text = textOf(entry.message.content).trim();
     if (!text) continue;
-    const block = PROPOSED_PLAN.exec(text);
-    return block?.[1]?.trim() ?? text;
+    return text;
   }
   return null;
 }
@@ -103,6 +119,16 @@ export async function savePlan(
   if (!plan) return fail("no plan markdown to save (propose a plan first)", "invalid_input");
 
   const branch = (): BranchEntry[] => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+  // Fail fast in plan mode: the `plan_save` tool is hidden by pi-plan, and the `/plan-save`
+  // command would otherwise scrape conversation as the "plan". perk cannot cleanly exit pi-plan
+  // (it owns that state), so we refuse and tell the user to exit it themselves.
+  if (isPlanModeActive(branch())) {
+    return fail(
+      "plan mode is active — exit it with /plan, then save (or, once it's off, call the plan_save " +
+        "tool with the finalized plan)",
+      "plan_mode_active",
+    );
+  }
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
   const perkBin = process.env.PERK_BIN ?? "perk";
 

@@ -6,8 +6,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { extractPlanMarkdown } from "./planSave.ts";
+import { extractPlanMarkdown, isPlanModeActive } from "./planSave.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import type { BranchEntry } from "./workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 const PLAN_JSON = JSON.stringify({
@@ -80,8 +81,7 @@ test("command: /plan-save extracts the proposed plan and saves it", async () => 
   const cwd = scaffoldRepo();
   const bin = fakePerk(cwd, { stdout: PLAN_JSON });
   const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
-    assistantText:
-      "Here is the plan:\n\n<proposed_plan>\n# Add retry\n\n## Summary\nRetry it.\n</proposed_plan>",
+    assistantText: "# Add retry\n\n## Summary\nRetry it.\n",
   });
   const h = await loadPerkSession({
     cwd,
@@ -145,23 +145,64 @@ test("tool: a non-zero exit / garbage stdout fails loud, no linkage", async () =
   }
 });
 
+test("command: /plan-save refuses while plan mode is active (fail-fast guard)", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON }); // would succeed if the guard let it through
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    planMode: true,
+    assistantText: "# Add retry\n\n## Summary\nRetry it.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeCommand("plan-save");
+    assert.equal(h.workflowState().active_plan_ref ?? null, null, "nothing saved in plan mode");
+    assert.ok(
+      h.notifies.some((n) => /plan mode is active/i.test(n)),
+      "refused with a plan-mode message",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- isPlanModeActive (pure unit) -------------------------------------------------------
+
+test("isPlanModeActive: reads the latest plan-mode-state entry (LWW); ignores other types", () => {
+  const pm = (enabled: boolean): BranchEntry => ({
+    type: "custom",
+    customType: "plan-mode-state",
+    data: { enabled },
+  });
+  assert.equal(isPlanModeActive([]), false);
+  assert.equal(isPlanModeActive([pm(true)]), true);
+  assert.equal(isPlanModeActive([pm(true), pm(false)]), false); // latest wins
+  assert.equal(
+    isPlanModeActive([
+      { type: "custom", customType: "perk:workflow-state", data: { enabled: true } },
+    ]),
+    false,
+  );
+});
+
 // --- extractPlanMarkdown (pure unit) ----------------------------------------------------
 
-test("extractPlanMarkdown: prefers a <proposed_plan> block from the latest assistant message", () => {
+test("extractPlanMarkdown: returns the whole text of the latest assistant message (no marker)", () => {
   const entries = [
     { type: "message", message: { role: "user", content: "do it" } },
     {
       type: "message",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "ok <proposed_plan>\n# T\nbody\n</proposed_plan> done" }],
-      },
+      message: { role: "assistant", content: [{ type: "text", text: "# T\nbody" }] },
     },
   ];
+  // No `<proposed_plan>` convention exists (pi-plan emits none) — the command takes the whole text.
   assert.equal(extractPlanMarkdown(entries), "# T\nbody");
 });
 
-test("extractPlanMarkdown: falls back to the whole latest assistant text; null when absent", () => {
+test("extractPlanMarkdown: the whole latest assistant text; null when absent", () => {
   assert.equal(
     extractPlanMarkdown([
       { type: "message", message: { role: "assistant", content: "# Plain plan" } },

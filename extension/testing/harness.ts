@@ -106,7 +106,7 @@ export function scaffoldRepo(opts: { handoff?: { runId: string; mode?: string } 
 export function plantSession(
   cwd: string,
   states: Partial<WorkflowState>[],
-  opts: { fileName?: string; assistantText?: string } = {},
+  opts: { fileName?: string; assistantText?: string; planMode?: boolean } = {},
 ): string {
   const fileName = opts.fileName ?? "planted-parent.jsonl";
   const path = join(cwd, fileName);
@@ -120,12 +120,27 @@ export function plantSession(
     customType: "perk:workflow-state",
     data,
   }));
+  const lastId = (): string | null => {
+    const last = entries.at(-1);
+    return last ? (last.id as string) : null;
+  };
+  // Optional borrowed pi-plan state entry (for the /plan-save fail-fast guard).
+  if (opts.planMode !== undefined) {
+    entries.push({
+      type: "custom",
+      id: "pm0",
+      parentId: lastId(),
+      timestamp: now,
+      customType: "plan-mode-state",
+      data: { enabled: opts.planMode },
+    });
+  }
   // Optional trailing assistant message (for /plan-save's extractPlanMarkdown).
   if (opts.assistantText !== undefined) {
     entries.push({
       type: "message",
       id: "m0",
-      parentId: entries.length ? `c${entries.length - 1}` : null,
+      parentId: lastId(),
       timestamp: now,
       message: { role: "assistant", content: [{ type: "text", text: opts.assistantText }] },
     });

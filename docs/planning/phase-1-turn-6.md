@@ -163,24 +163,25 @@ uv run perk plan        # launches pi primed for the read-only plan stage
 ```
 In the session:
 - `/plan` → enter read-only plan mode (borrowed `@tombell/pi-plan`); explore the codebase read-only.
-- Converge with the model on the prek plan — target shape is §4.2 (objective; decisions: **local hook
-  over `uv run ruff`** + **plain check**; acceptance; durable anchors, no line numbers).
-- Have the model emit the final plan as its **latest message wrapped in
-  `<proposed_plan>…</proposed_plan>`** (so the save command extracts exactly the plan).
-▶ Report: the authored plan (the `<proposed_plan>` block).
+- Converge with the model on the prek plan — target shape is §4.2 (objective; decisions; acceptance;
+  durable anchors, no line numbers). The model writes a **clean plan** (a `#` H1 + sections, per the
+  `perk-plan` skill) — no special tags (there is **no** `<proposed_plan>` convention; pi-plan emits
+  no structured plan).
+▶ Report: the authored plan.
 
-**Step 2 — save (warm door, same session).** Persist the authored plan in-session:
-- Run the **`/plan-save` command** (its twin — plan mode hides custom *tools*, so use the command,
-  which reads your latest assistant message; T3). It delegates to `perk plan-save --json` (with the
-  session's `run_id`), creates the GitHub issue, links the session, and **terminates the turn**.
+**Step 2 — save (the `plan_save` tool; same session).** The robust save hands the finalized plan to
+the tool directly:
+- **Disable plan mode** (`/plan` off) so the `plan_save` tool becomes available (pi-plan hides custom
+  tools while plan mode is on — see [phase-1-turn-3b.md](./phase-1-turn-3b.md)).
+- The model calls **`plan_save`** with the full plan markdown (+ optional `title`). It delegates to
+  `perk plan-save --json` (with the session's `run_id`), creates the GitHub issue, links the session,
+  and **terminates the turn**.
 - Expect a `Saved plan #N → <url>` notification; `.pi/workflow/plan-ref.json` written.
 ▶ Report: **issue #N**, the issue URL, the save `details` (ok / issue / plan_ref / cached).
 
-> **Optional cold parity (2b for save):** from a bash shell, re-run the worker idempotently —
-> `uv run perk plan-save --plan-file <plan.md> --run-id <session-run_id> --json` → expect
-> `issue.existed = true`. Low-value vs the submit/land parity (both save doors call the *identical*
-> worker), so skip unless you want it; the cold worker is already proven by the offline `--dry-run`
-> gate + the T3 harness.
+> **`/plan-save` command (fallback):** scrapes your latest message as the plan and **refuses while
+> plan mode is active** (T3b). Prefer the tool. The cold worker `perk plan-save --plan-file … --json`
+> is the scriptable/supervisor twin (idempotent on `run_id`).
 
 **Step 3 — implement (interactive `pi` session).**
 ```bash
@@ -329,7 +330,38 @@ fresh context. T6 adds nothing here — it only *uses* the spine and records the
 - [ ] `just verify` (t1–t7 + p1-t1…p1-t6) and `just ci` green.
 - [ ] This doc's §12 outcomes filled.
 
-## 12. Outcomes (recorded on landing)
+## 12. Outcomes (landed — gate met)
 
-*(filled after the live run reports back — the real PR #/issue #, any friction surfaced, deviations
-from this runbook, and the verify/reconciliation as-built.)*
+**The live run (perk shipped perk).** The prek change rode the whole loop on `mattgiles/perk`:
+plan **issue [#1](https://github.com/mattgiles/perk/issues/1)** (CLOSED) → `plan-1` worktree → draft
+**PR [#2](https://github.com/mattgiles/perk/pull/2)** → squash-merge `4acee9d` (`Closes #1`) →
+`pending-learn` set then cleared. Closed-loop proof: `perk resume 1 --dry-run` → *"plan #1 is merged
+and learned — nothing to resume."* Full record: [phase-1-gate.md](./phase-1-gate.md).
+
+**Two real bugs the dogfood surfaced — fixed forward (the gate's real value):**
+- **[T4c](./phase-1-turn-4c.md)** — `perk implement` launched a **bare, idle `pi`** (no priming —
+  "does nothing") and forwarded a stray plan positional to pi. Fixed: `launch_stage` primes the
+  implement session; `perk implement [PLAN]` accepts an issue number.
+- **[T3b](./phase-1-turn-3b.md)** — `/plan-save` saved **conversation** as the plan and a fenced
+  TOML `#` comment became the title; root cause: `<proposed_plan>` was **perk-invented, not native**
+  to `pi-plan`. Fixed: the `plan_save` tool is canonical; fail-fast in plan mode; `derive_title`
+  skips fenced `#`.
+
+**Deviations from this plan (recorded, not hidden):**
+- **The dogfood change shipped via the remote `astral-sh/ruff-pre-commit` repo** (PATH-free, second
+  pin in lockstep) rather than §4.2's `local`+`uv run` hook — a defensible call the implement
+  session made (PATH-independence over single-source). Plain check ✓.
+- **`verify-p1-t6.sh` as-built verifies the *payload*** (prek.toml validity, ruff rev ↔ floor
+  lockstep, `just setup` wiring), not the spine-preconditions §7 envisioned — those are covered by
+  the cumulative gates (`verify-p1-t4a/t4c/t5a/t5b` resolve the spine offline + assert registry I/O).
+  The two collided on the filename because the change authored its own turn doc + gate during the run.
+- **Door coverage (2b):** the loop closed end-to-end through the doors; the warm doors are
+  harness-proven (T3/T5a/b) and the cold workers offline-gate + unit proven, but the live run was not
+  instrumented to confirm *both* doors fired per stage — claimed only as designed/proven, not as a
+  live A/B.
+- **Branch-protection friction flag** did not bite: PR #2 self-merged (no required review).
+
+**Reconciliation landed:** README (Phase-0 → Phase-1-complete status + the full command surface +
+warm doors + the `just verify` line), AGENTS (verify-`<turn>` naming + the Phase-1 gate pointer),
+contracts §8.4 (closing "Status (P1.T6)" note), `docs/index.md` (turn-3b/4c/6 + gate entries),
+`phase-1-gate.md` written. `just verify` — **all 19 gates PASS**; `just ci` green.
