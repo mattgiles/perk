@@ -59,7 +59,7 @@ def resume_cmd(
         repo_root = require_repo(ctx)
         require_github(ctx)  # resume always reads GitHub (the dry run resolves via a read)
         config = require_config(ctx)
-        number = _parse_plan_id(plan)
+        number = parse_plan_id(plan)
         state = github.get_plan(number=number, repo_root=repo_root)
         if state is None:
             raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
@@ -102,7 +102,7 @@ def resume_cmd(
     )
 
 
-def _parse_plan_id(plan: str) -> int:
+def parse_plan_id(plan: str) -> int:
     """A GitHub plan id is a positive issue number; accept ``42`` or ``#42``.
 
     The ``int`` parse is the authoritative test (not a ``str.isdigit`` pre-check, which accepts

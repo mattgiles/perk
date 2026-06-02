@@ -318,6 +318,17 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > field stays `null` until it is recorded at **submit** (T5a). `implement` reads `cache.plan-ref`
 > and writes `session.workflow-state` (the worktree link).
 >
+> **Status (P1.T4c) — implement gains a plan arg + session priming.** The Phase-1 dogfood run
+> surfaced two cold-door gaps and corrected them forward (T4a's no-positional D2 was the deviation
+> from phase-1-plan §P1.T4's `perk implement <plan>`): (1) **`perk implement [PLAN]`** is now a
+> *dedicated* command — an optional issue number (`perk implement 42`) resolves the plan via
+> `github.get_plan`, writes it as the active `cache.plan-ref` (mirroring `perk resume`), then
+> launches; omitting it uses the active ref (the T4a behavior). (2) The launcher **primes the
+> implement session** — `launch_stage` passes an initial prompt to `pi` (read the plan via
+> `gh issue view <n> --comments`, implement on the branch, `/submit` when committed) so the session
+> starts working instead of opening idle. Only the `implement` stage is primed; `plan` stays
+> user-driven. No registry I/O change (still `reads:[cache.plan-ref]`, `writes:[session.workflow-state]`).
+>
 > **Status (P1.T5a) + the delegation decision.** The §8.4 opening's "one contract, implemented
 > **once per plane**" (a Python gateway *and* a TS gateway, same shapes) was a Phase-0 hypothesis.
 > **T3 deviated** (the warm `/plan-save` delegates to `perk plan-save` via `pi.exec`), and T5

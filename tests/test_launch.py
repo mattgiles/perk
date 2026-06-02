@@ -6,7 +6,12 @@ import pytest
 from perk import cache
 from perk.cli.ensure import UserFacingCliError
 from perk.config import Config
-from perk.launch import launch_stage, resolve_plan_worktree_name, resolve_worktree
+from perk.launch import (
+    _initial_prompt,
+    launch_stage,
+    resolve_plan_worktree_name,
+    resolve_worktree,
+)
 from perk.registry import Stage, load_registry
 
 _PLAN_REF = {
@@ -95,8 +100,20 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert data["stage"] == "implement"
     assert data["worktree"].endswith("/plan-42")
     assert data["plan_ref"] == _PLAN_REF
+    # Bug 1 (P1.T4c): the implement launch is primed — argv carries the initial prompt.
+    assert data["argv"][0] == "pi"
+    assert len(data["argv"]) == 2
+    assert "gh issue view 42 --comments" in data["argv"][1]
     # dry run is side-effect-free: no worktree, no handoff
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
+
+
+def test_initial_prompt_only_primes_implement():
+    """P1.T4c Bug 1: only the implement stage is primed; other stages launch unprimed."""
+    impl = _initial_prompt(_stage("implement"), _PLAN_REF)
+    assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
+    assert _initial_prompt(_stage("plan"), _PLAN_REF) is None
+    assert _initial_prompt(_stage("implement"), None) is None
 
 
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):

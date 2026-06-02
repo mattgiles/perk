@@ -86,6 +86,25 @@ def resolve_worktree(
     return ResolvedWorktree(path=path, plan_ref=plan_ref)
 
 
+def _initial_prompt(stage: Stage, plan_ref: dict[str, Any] | None) -> str | None:
+    """The first message ``pi`` is launched with, so the session *starts working* rather than
+    opening idle (P1.T4c, Bug 1). Only the ``implement`` stage is primed in Phase 1: read the plan,
+    then implement on this branch and ``/submit`` when done. ``None`` (no prompt) for other stages
+    — e.g. ``plan`` is user-driven exploration."""
+    if stage.id != "implement" or plan_ref is None:
+        return None
+    provider = str(plan_ref.get("provider", ""))
+    pr_id = str(plan_ref.get("pr_id", ""))
+    url = str(plan_ref.get("url", ""))
+    read_cmd = f"gh issue view {pr_id} --comments" if provider == "github" else f"open {url}"
+    return (
+        f"You are implementing perk plan {provider} #{pr_id} ({url}) on this branch.\n\n"
+        f"First, read the full plan:\n    {read_cmd}\n\n"
+        "Then implement it here. Work in focused steps and keep the tree committable. When the "
+        "implementation is complete and committed, open the pull request with the /submit command."
+    )
+
+
 def launch_stage(
     *,
     repo_root: Path,
@@ -112,7 +131,10 @@ def launch_stage(
     )
     wt = resolved.path
     rid = run_id.mint()
-    argv = ["pi", *pi_args]
+    # Prime the session (Bug 1): when --worktree is given the derived ref is absent, so fall back
+    # to the repo-root active ref for the prompt.
+    prompt = _initial_prompt(stage, resolved.plan_ref or cache.read_plan_ref(repo_root))
+    argv = ["pi", *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
         user_output(f"would launch stage '{stage.id}' in {wt}")

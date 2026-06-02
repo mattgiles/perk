@@ -500,9 +500,7 @@ def update_plan_header(
 
 
 def _get_issue_body(issue: int, repo_root: Path) -> str:
-    proc = _run(
-        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}", "--jq", ".body"], cwd=repo_root
-    )
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/issues/{issue}", "--jq", ".body"], cwd=repo_root)
     if proc.returncode != 0:
         raise _failed(proc, f"failed to read issue #{issue}")
     return proc.stdout

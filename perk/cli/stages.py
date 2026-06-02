@@ -12,6 +12,9 @@ from perk.cli.context import require_config, require_repo
 from perk.launch import launch_stage
 from perk.registry import RegistryError, Stage, load_registry
 
+# Stages with a dedicated, hand-written command (skipped by the generic generator below).
+DEDICATED_STAGES: frozenset[str] = frozenset({"implement"})  # perk/cli/commands/implement_cmd.py
+
 
 def _make_stage_command(stage: Stage) -> click.Command:
     @click.command(
@@ -59,4 +62,6 @@ def register_stage_commands(cli: click.Group) -> None:
     except (RegistryError, FileNotFoundError):
         return  # a broken registry must not brick the CLI; `registry check` diagnoses it
     for stage in registry.stages:
+        if stage.id in DEDICATED_STAGES:
+            continue  # a dedicated command is registered explicitly (e.g. `implement`)
         cli.add_command(_make_stage_command(stage))
