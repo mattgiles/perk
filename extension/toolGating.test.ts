@@ -19,6 +19,9 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "find . -name '*.ts'",
     "wc -l file",
     "sed -n '1,10p' file",
+    "cat x 2>&1", // fd duplication is not a file write
+    "grep foo bar 2>&1",
+    "ls -la 1>&2",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -31,6 +34,7 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "cp a b",
     "echo hi > file.txt", // redirection write
     "cat a >> file.txt", // append redirection
+    "cat a &> file.txt", // &> writes both streams to a file (still destructive)
     "git commit -m wip",
     "git push origin main",
     "npm install left-pad",

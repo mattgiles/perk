@@ -124,7 +124,11 @@ const SAFE_PATTERNS = [
  * AND must not match any destructive pattern (destructive wins). Pure → unit-testable offline.
  */
 export function isReadOnlyBashCommand(command: string): boolean {
-  const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
+  // File-descriptor duplications (`2>&1`, `>&2`, `1>&2`) are not file writes — neutralize them so
+  // the redirect-detection pattern doesn't false-positive on the `>` they contain. `&>file`
+  // (writes both streams to a file) is deliberately NOT carved out: it stays destructive.
+  const withoutFdRedirects = command.replace(/\d*>&\d+/g, " ");
+  const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(withoutFdRedirects));
   const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
   return !isDestructive && isSafe;
 }
