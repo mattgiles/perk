@@ -123,7 +123,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `run_id` | string (ULID) | the perk run this session belongs to (§8.2) |
 | `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
-| `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) |
+| `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (P2.T1, see below) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (Phase 2; null in MVP) |
 | `last_review_batch` | object \| null | the last processed review batch (Phase 2; null in MVP) |
@@ -172,6 +172,23 @@ hygiene guard, not a repo validator). The warm `/implement` command is a **guard
 *enforces* `implement.doors.warm: false`: inside an impl context (read-write mode + a linked
 plan-ref) it acknowledges "continue"; otherwise it refuses and points to the cold door `perk
 implement`. The proceed-anyway confirm dialog + `git-checkpoint` stash-on-turn are Phase 2.
+
+**Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
+prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
+(1) restricts the active tool set to `["read", "grep", "find", "ls", "bash"]` via
+`pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
+transition; restore it on on→off, falling back to the **full** configured tool set
+`pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
+(2) blocks `edit`/`write`
+and non-allowlisted `bash` commands at `tool_call` with `{ block: true, reason }` (a perk-owned
+copy of plan-mode's destructive/safe regex tables); (3) injects a hidden `[READ-ONLY MODE]`
+context at `before_agent_start` and **strips** that marker from `context` when off. The allowlist
+is **restored on both `session_start` and `session_tree`** (re-sync from the rebuilt `mode`).
+**Fail-closed:** the in-memory gate flag drives `tool_call`; a failed state-rebuild never opens the
+gate (the sync is skipped), and `tool_call` blocks on any internal error. `mode` writes are
+best-effort transient (no strict read-back). The `enter(ctx?)`/`exit(ctx?)` surface
+(append `mode` + flip the gate) is the API the perk-owned plan mode (T2) and the read-only CI
+executor (T5) consume; this primitive ships no `/plan` ownership and adds no registry stage.
 
 ---
 

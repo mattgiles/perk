@@ -70,6 +70,7 @@ verify:
     bash scripts/verify-p1-t5b.sh
     bash scripts/verify-p1-t5c.sh
     bash scripts/verify-p1-t6.sh
+    bash scripts/verify-p2-t1.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

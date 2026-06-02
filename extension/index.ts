@@ -21,6 +21,7 @@ import { registerPlanSave } from "./planSave.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSubmit } from "./submit.ts";
+import { registerToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
   decideClaim,
@@ -56,6 +57,10 @@ function writeT3Sentinel(cwd: string, source: string, state: WorkflowState): voi
 
 export default function (pi: ExtensionAPI) {
   const version = perkVersion();
+
+  // P2.T1 — the read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
+  // both session_start AND session_tree below. enter/exit are the surface T2/T5 consume.
+  const gating = registerToolGating(pi);
   let sharedOk = false;
   try {
     sharedDir();
@@ -147,6 +152,14 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
+    // Reapply the read-only allowlist from the resolved mode. Fail-closed: if the sync throws,
+    // leave the gate as-is (a failed sync never opens it).
+    try {
+      gating.syncFromState(resolved.mode);
+    } catch (error) {
+      console.error(`perk: tool-gating sync failed on session_start — ${error}`);
+    }
+
     if (ctx.hasUI) {
       ctx.ui.notify(`perk ${version} loaded`, "info");
     }
@@ -172,6 +185,12 @@ export default function (pi: ExtensionAPI) {
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
     const state = rebuildWorkflowState(ctx.sessionManager.getBranch() as unknown as BranchEntry[]);
+    // Non-negotiable: re-sync the gate on tree navigation too (mode is per-field LWW). Fail-closed.
+    try {
+      gating.syncFromState(state.mode);
+    } catch (error) {
+      console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
+    }
     if (process.env.PERK_SELFCHECK) {
       writeT3Sentinel(ctx.cwd, "tree", state);
     }

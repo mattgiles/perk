@@ -68,6 +68,11 @@ export interface PerkSession {
     name: string,
     params: unknown,
   ): Promise<{ content: { text?: string }[]; details: unknown; terminate?: boolean }>;
+  /** Fire a `tool_call` event through the runner; returns the gating verdict (block/reason). */
+  emitToolCall(
+    toolName: string,
+    input: Record<string, unknown>,
+  ): Promise<{ block?: boolean; reason?: string } | undefined>;
   /** Fire a lifecycle event (session_before_fork / session_before_switch) and return its result. */
   emitLifecycle(
     event:
@@ -290,6 +295,16 @@ export async function loadPerkSession(opts: {
       );
       await tick();
       return result as { content: { text?: string }[]; details: unknown; terminate?: boolean };
+    },
+    async emitToolCall(toolName, input) {
+      const result = await session.extensionRunner.emitToolCall({
+        type: "tool_call",
+        toolCallId: `tc-${toolName}`,
+        toolName,
+        input,
+      } as never);
+      await tick();
+      return result as { block?: boolean; reason?: string } | undefined;
     },
     async emitLifecycle(event) {
       const result = await session.extensionRunner.emit(event as never);
