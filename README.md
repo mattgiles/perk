@@ -82,7 +82,7 @@ Two pinned toolchains:
 With [`just`](https://github.com/casey/just):
 
 ```bash
-just setup        # uv sync + npm install
+just setup        # uv sync + npm install + prek install (git hooks)
 just fmt          # ruff format + biome format
 just lint         # ruff check + biome check
 just typecheck    # ty + tsc
@@ -91,6 +91,11 @@ just verify       # the cumulative Phase-0 hard gates (t1..t7)
 just ci           # setup + lint + typecheck + test
 just perk init    # run perk in the project env
 ```
+
+`just setup` also runs `just hooks` (`prek install`), wiring a [prek](https://prek.j178.dev)
+pre-commit hook that runs `ruff check` on staged Python (config in `prek.toml`; the ruff
+env is built by prek from the remote ruff-pre-commit repo, so it never depends on a
+system/`.venv` ruff). Re-run `just hooks` after a fresh clone.
 
 Without `just`: `uv run …` for Python (`uv run perk init`, `uv run pytest`,
 `uv run ruff check perk tests`, `uv run ty check`) and `npm run …` for TypeScript

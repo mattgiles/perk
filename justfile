@@ -5,8 +5,12 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# install both toolchains: python env (uv) + node dev deps (npm)
-setup: sync install
+# install both toolchains: python env (uv) + node dev deps (npm) + git hooks (prek)
+setup: sync install hooks
+
+# install the prek git pre-commit shim (ruff lint hook; see prek.toml)
+hooks:
+    prek install
 
 # create/refresh the python env (3.13) + deps + dev group
 sync:
@@ -63,6 +67,7 @@ verify:
     bash scripts/verify-p1-t5a.sh
     bash scripts/verify-p1-t5b.sh
     bash scripts/verify-p1-t5c.sh
+    bash scripts/verify-p1-t6.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:
