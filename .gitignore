@@ -24,6 +24,7 @@ node_modules/
 /.pi/workflow/.perk-t3.json
 /.pi/workflow/post-init.md
 /.pi/workflow/plan-ref.json
+/.pi/workflow/plan.md
 /.pi/workflow/handoff/
 /.pi/workflow/scratch/
 /.pi/workflow/markers/

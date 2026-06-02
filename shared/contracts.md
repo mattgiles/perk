@@ -250,6 +250,38 @@ from implement (cold-door fresh worktree session); `[DONE:n]` checkpoints live i
 session (T2c). The `plan` registry stage now records `writes: [session.workflow-state]` (the
 `/plan` enter/exit `mode` append).
 
+**In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
+deterministic, fully-isolated read-only child spun at the SDK level (`extension/readOnlySession.ts`,
+interior/TS-only). This is the **shared handoff contract** both context-isolation primitives honor
+(T4 in-process here; T6 the spawned shape later), so its shape is locked now and T6 conforms.
+
+- **SDK read-only via `createReadOnlySession`.** The child's allowlist is
+  `SDK_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"]` — **no `bash`**, stricter than T1's
+  in-session `READ_ONLY_TOOLS` (a separate constant, not a reuse). T5 composes its own allowlist
+  when it needs a gated test-runner command.
+- **Isolation = `DefaultResourceLoader` `no*` flags + the tools allowlist** — **not**
+  `extensionFactories: []` (that is already the default and controls only inline factories; it does
+  **not** stop `loader.reload()` from resolving the project's `.pi/settings.json` packages and
+  loading perk's own extension into the child). The child loader sets
+  `noExtensions/noSkills/noPromptTemplates/noThemes/noContextFiles`, so **no perk machinery loads
+  into the child** and the path stays offline/deterministic. A custom loader is **reloaded by the
+  caller** (`await loader.reload()` before `createAgentSession`); `agentDir` is a throwaway temp dir
+  (a locked-down child loads nothing from it). The read-only guarantee is **structural** —
+  provable offline via `getActiveToolNames()` with no `prompt()`.
+- **The handoff contract (`runReadOnlyChild`).** Cap the **model-visible** output
+  (`DEFAULT_MODEL_VISIBLE_CAP = 50 KiB`, UTF-8-byte-safe, overridable), keep the **full** result in
+  a **verified** scratch file (`write → verify → pass-path`), and return **double-delivery**: compact
+  `prose` for the human + a `structured` block for the orchestrator (which T5 places in a tool's
+  forking-safe `details`). **Route-don't-relay** is enforced structurally — the raw output never
+  enters the parent; only a path/summary does (`scratchPath`). **Fail loud + fail closed:** never
+  throws to the parent — on any error (session-create/task throw, failed scratch-verify, or abort)
+  it returns `{ success: false, scratchPath: null }` with the error in **both** `prose` and
+  `structured.error`. Offline-testability is a hard requirement: the session-running step is behind
+  an injectable `runTask` dependency so the cap/scratch/verify/double-delivery machinery is exercised
+  with no model turn.
+- **Substrate only.** No registry stage, no door change, no cross-CLI behavior. The consumer is the
+  read-only CI executor (T5).
+
 ---
 
 ## §8.4 · The GitHub gateway contract (Q9/Q10)
