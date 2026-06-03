@@ -29,6 +29,8 @@ class PrSubmitResult:
     branch: str
     issue: int
     header_update: github.PlanHeaderUpdate
+    plan_embedded: bool
+    pr_checked: bool
     dry_run: bool
 
 
@@ -96,6 +98,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             branch=branch,
             issue=issue,
             header_update=github.PlanHeaderUpdate(fields_updated=_HEADER_FIELDS, dry_run=True),
+            plan_embedded=False,
+            pr_checked=False,
             dry_run=True,
         )
 
@@ -105,14 +109,26 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     base = github.default_branch(repo_root)
     git.push(repo_root, branch)
 
+    # Best-effort plan embed (D3): fetch the verbatim plan markdown; None (no block / fetch
+    # failure) -> no embed, no raise. The PR number is unknown until create_pr returns, so the
+    # checkout footer is appended in a second update_pr_body pass (D2 — create-then-update).
+    plan_body = _safe_plan_body(issue=issue, repo_root=repo_root)
     pr = github.create_pr(
         head=branch,
         base=base,
         title=state.title,
-        body=_compose_pr_body(issue=issue),
+        body=_compose_pr_body(issue=issue, plan_body=plan_body),
         repo_root=repo_root,
         draft=True,
     )
+    full_body = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
+    github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
+    # Post-write self-check (D5): exactly what catches the issue-numbered-footer bug.
+    errors = github.validate_pr_body(full_body, pr_number=pr.number)
+    if errors:
+        raise UserFacingCliError(
+            "PR body check failed:\n  " + "\n  ".join(errors), error_type="pr_check_failed"
+        )
     header_update = github.update_plan_header(
         issue=issue,
         repo_root=repo_root,
@@ -123,17 +139,43 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
         },
     )
     return PrSubmitResult(
-        pr=pr, branch=branch, issue=issue, header_update=header_update, dry_run=False
+        pr=pr,
+        branch=branch,
+        issue=issue,
+        header_update=header_update,
+        plan_embedded=plan_body is not None,
+        pr_checked=True,
+        dry_run=False,
     )
 
 
-def _compose_pr_body(*, issue: int) -> str:
-    """The Phase-1 minimal PR body (P1.T5a D2): closing keyword + plan link + plain checkout footer.
+def _safe_plan_body(*, issue: int, repo_root: Path) -> str | None:
+    """Fetch the verbatim plan markdown for the `<details>` embed (D3). Best-effort: any GitHub
+    failure degrades to `None` (no embed) rather than sinking the submit."""
+    try:
+        return github.get_plan_body(number=issue, repo_root=repo_root)
+    except GitHubError:
+        return None
 
-    No HTML `<details>` (erk tripwire: breaks checkout-footer validation); full-plan re-embedding
-    is Phase 2.
+
+def _compose_pr_body(
+    *, issue: int, plan_body: str | None = None, pr_number: int | None = None
+) -> str:
+    """Compose the GitHub PR body (P2.T8a, D2/D3/D4): closing keyword + plan link + a best-effort
+    `<details>` embed of the verbatim plan + the checkout footer.
+
+    The two-target split (D4): this HTML-enhanced body goes ONLY into the GitHub PR body (the
+    `<details>` embed is fine here). The **footer** (not the embed) must stay a plain-backtick line
+    carrying the **PR** number `gh pr checkout <pr_number>` — the issue number fails
+    `validate_pr_body` (the create-then-update fix for the latent issue-numbered-footer bug). The
+    squash commit message is the OTHER target (plain text), set at land.
     """
-    return f"Closes #{issue}\n\nPlan: #{issue}\n\n`gh pr checkout {issue}`\n"
+    parts = [f"Closes #{issue}", f"Plan: #{issue}"]
+    if plan_body:
+        parts.append(f"<details><summary>Plan #{issue}</summary>\n\n{plan_body}\n\n</details>")
+    if pr_number is not None:
+        parts.append(f"`gh pr checkout {pr_number}`")
+    return "\n\n".join(parts) + "\n"
 
 
 def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
@@ -150,6 +192,8 @@ def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
         "branch": result.branch,
         "issue": result.issue,
         "plan_header": {"fields_updated": list(result.header_update.fields_updated)},
+        "plan_embedded": result.plan_embedded,
+        "pr_checked": result.pr_checked,
         "dry_run": result.dry_run,
     }
 
@@ -161,11 +205,12 @@ def _render_human(result: PrSubmitResult) -> None:
         user_output(f"  would set plan-header: {', '.join(result.header_update.fields_updated)}")
         return
     verb = "Found existing" if result.pr.existed else "Opened draft"
+    embed = "plan embedded" if result.plan_embedded else "no plan embed"
     user_output(
         click.style("✓ ", fg="green")
         + f"{verb} PR "
         + click.style(f"#{result.pr.number}", fg="cyan")
-        + f" → {result.pr.url}"
+        + f" → {result.pr.url} ({embed}; footer checked)"
     )
 
 

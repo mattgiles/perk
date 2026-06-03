@@ -470,6 +470,40 @@ resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ s
 
 - **Batch shape (PRIOR_ART §5/§11):** `[{ thread_id, comment }]` (objects, not a flat list).
 
+**Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
+in `perk pr-submit` via **create-then-update** (the checkout footer needs the PR number, unknown
+until `create_pr` returns), which also fixes a latent correctness bug (the Phase-1 footer carried
+the **issue** number, not the PR's — erk's single most common agent mistake):
+
+```
+update_pr_body{ number, body }                      -> PrBodyUpdate{ number, dry_run }
+    # PATCH .../pulls/{n} (-F body=@file); mirrors update_plan_header (PR body, not issue body).
+    # Re-writes the full body WITH the plain-backtick `gh pr checkout <pr_number>` footer once the
+    # PR number is known. Idempotent (overwrites).
+get_pr_body{ number }                               -> string | null
+    # GET .../pulls/{n} --jq .body; the read `perk pr-check` re-validates against.
+validate_pr_body(body, *, pr_number)                -> string[]   (empty == valid)
+    # PURE (no gh). Footer-scoped ONLY (the <details> embed is explicitly fine): the footer must be
+    # present, plain-backtick (not HTML-wrapped), and carry the PR number (word-boundary: #12 ≠
+    # …checkout 123). This is the self-check that catches the issue-numbered-footer bug.
+```
+
+- **The two-target split (D4).** The HTML-enhanced body — a best-effort `<details>` embed of the
+  verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
+  **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
+  target: plain text, set at land (T8b) so HTML never leaks into `git log`.
+- **`pr check` (D5).** `perk pr-submit` runs `validate_pr_body` as a **post-write self-check** and
+  **raises** (`error_type: pr_check_failed`) on failure. A thin `perk pr-check --json` (active
+  plan-ref → find PR → `get_pr_body` → `validate_pr_body`) is the supervisor surface (exit 0 valid /
+  1 invalid·op-failure / 2 not-a-repo).
+- **Draft → ready is a deliberate gesture (D6).** Submit keeps the PR **draft**; perk does **not**
+  auto-publish (unlike erk's `finalize_pr`). The new `perk pr-ready` (warm `/ready`, `extension/
+  ready.ts`) is the explicit review gate — `mark_pr_ready` if draft, idempotent. Land's
+  mark-ready-if-draft stays a safety net. **Correction:** perk plans are GitHub *issues*, not repo
+  files, so erk's plan-file-diff completion heuristic does **not** map — the explicit draft→ready
+  transition is the gate, and no plan-file-diff detector is built (never infer completion from PR
+  open/closed state alone).
+
 ### Plan-ref payload (provider-agnostic; full schema → Phase 1)
 
 `active_plan_ref` / `cache.plan-ref` is **provider-agnostic** from day one (PRIOR_ART §2 —
@@ -580,6 +614,15 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > `pi-plan` emits no structured plan, so the `<proposed_plan>` scrape was dropped). Neither changed
 > any stage's state-I/O. The registry per-stage `requires`/`reads`/`writes` + `doors` are filled for
 > all six spine stages.
+>
+> **Status (P2.T8a):** the **submit body is deepened + the issue-numbered-footer bug is fixed**.
+> `perk pr-submit` composes an HTML-enhanced GitHub PR body (best-effort verbatim-plan `<details>`
+> embed via `get_plan_body`) and appends the checkout footer via **create-then-update**
+> (`update_pr_body`) carrying the **PR** number, then runs `validate_pr_body` as a post-write
+> self-check (`pr_check_failed` on failure). A thin `perk pr-check --json` is the supervisor surface.
+> Submit keeps the PR **draft**; the new `perk pr-ready` (warm `/ready`) is the deliberate review
+> gate. The two-target split is explicit: HTML in the GitHub body, plain text in the squash commit
+> (deepened at T8b). `submit`'s registry I/O is unchanged.
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

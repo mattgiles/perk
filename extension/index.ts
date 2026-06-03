@@ -22,6 +22,7 @@ import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
+import { registerReady } from "./ready.ts";
 import { loadRegistry } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSubmit } from "./submit.ts";
@@ -214,6 +215,9 @@ export default function (pi: ExtensionAPI) {
 
   // Warm door: the `submit` tool + `/submit` command (turn-5a).
   registerSubmit(pi);
+
+  // P2.T8a — the warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
+  registerReady(pi);
 
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);

@@ -10,6 +10,7 @@ The TS extension authors the *same* operation names + payload shapes in Phase 1,
 """
 
 import json
+import re
 import subprocess
 import tempfile
 from collections.abc import Iterator
@@ -340,6 +341,14 @@ class PlanHeaderUpdate:
 
 
 @dataclass(frozen=True)
+class PrBodyUpdate:
+    """The result of a PR-body re-write (P2.T8a — the create-then-update footer write)."""
+
+    number: int
+    dry_run: bool
+
+
+@dataclass(frozen=True)
 class PlanState:
     """A plan issue's observable state (for ``perk resume``): the parsed header + PR (if any)."""
 
@@ -518,6 +527,76 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
     except json.JSONDecodeError as exc:
         raise GitHubError(f"unparseable `gh api pulls/{number}` output: {exc}") from exc
     return _pull_request(data, existed=True)
+
+
+def get_pr_body(*, number: int, repo_root: Path) -> str | None:
+    """Fetch a PR's body markdown (REST). ``None`` if the PR does not exist; raises on infra
+    failure. Used by ``perk pr-check`` to re-validate the live checkout footer (P2.T8a)."""
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".body"], cwd=repo_root)
+    if proc.returncode != 0:
+        if "404" in (proc.stderr + proc.stdout):
+            return None
+        raise _failed(proc, f"failed to read PR #{number} body")
+    return proc.stdout
+
+
+def update_pr_body(
+    *, number: int, body: str, repo_root: Path, dry_run: bool = False
+) -> PrBodyUpdate:
+    """Re-write a PR's body (REST ``PATCH .../pulls/{n}``, body via file; mirrors
+    :func:`update_plan_header`). P2.T8a's create-then-update footer write: the checkout footer
+    needs the **PR** number, unknown until ``create_pr`` returns. Idempotent (overwrites). The PR
+    body is distinct from the issue body -- no collision with ``update_plan_header``."""
+    if dry_run:
+        return PrBodyUpdate(number=number, dry_run=True)
+    with _body_file(body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/pulls/{number}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update PR #{number} body")
+    return PrBodyUpdate(number=number, dry_run=False)
+
+
+_CHECKOUT_RE = re.compile(r"gh pr checkout\s+(\d+)")
+_PLAIN_FOOTER_RE = re.compile(r"`gh pr checkout\s+(\d+)`")
+_HTML_FOOTER_RE = re.compile(r"<code>[^<]*gh pr checkout", re.IGNORECASE)
+
+
+def validate_pr_body(body: str, *, pr_number: int) -> tuple[str, ...]:
+    """Validate the PR body's checkout footer (P2.T8a, D5). Empty tuple == valid.
+
+    **Footer-scoped only** -- the ``<details>`` plan embed is explicitly fine; the footer must be
+    a plain-backtick `` `gh pr checkout <pr_number>` `` line carrying the **PR** number (not the
+    issue number -- erk's single most common agent mistake). The three checks:
+
+    1. the checkout footer is present,
+    2. it carries the correct PR number (word-boundary: ``#12`` != ``...checkout 123``),
+    3. it is plain backtick, not wrapped in HTML (``<code>...</code>`` breaks supervisor copy).
+    """
+    all_numbers = _CHECKOUT_RE.findall(body)
+    if not all_numbers:
+        return (f"checkout footer missing (expected `gh pr checkout {pr_number}`)",)
+    errors: list[str] = []
+    html_wrapped = bool(_HTML_FOOTER_RE.search(body))
+    if html_wrapped:
+        errors.append("checkout footer must be a plain-backtick line, not HTML-wrapped")
+    plain_numbers = _PLAIN_FOOTER_RE.findall(body)
+    if str(pr_number) not in plain_numbers:
+        if str(pr_number) not in all_numbers:
+            errors.append(f"checkout footer carries the wrong number (expected PR #{pr_number})")
+        elif not html_wrapped:
+            errors.append("checkout footer is present but not a plain-backtick line")
+    return tuple(errors)
 
 
 def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
