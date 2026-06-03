@@ -253,7 +253,9 @@ def _subagent_engine_check() -> Check:
         "ok",
         "borrowed pi-subagents engine + perk-owned agent defs",
         "presence owned by settings-wiring; defs dir owned by subagent-agents; "
-        "the live-spawn smoke is deferred to Phase 3 `doctor workflow`.",
+        "perk agents are namespaced (package: perk) and invoked by explicit perk.* name "
+        "(e.g. perk.review-classifier); legacy .agents/skills/*/SKILL.md surface as stray agents "
+        "(benign — never invoked); the live-spawn smoke is deferred to Phase 3 `doctor workflow`.",
     )
 
 

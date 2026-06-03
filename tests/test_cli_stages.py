@@ -16,7 +16,7 @@ def _ctx(repo: Path) -> PerkContext:
 def test_all_stages_are_generated():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for stage_id in ("plan", "save", "implement", "submit", "land", "learn"):
+    for stage_id in ("plan", "save", "implement", "submit", "address", "land", "learn"):
         assert stage_id in result.output
 
 
