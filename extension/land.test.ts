@@ -56,6 +56,59 @@ test("tool: a failing land does not set pending-learn (soft fail)", async () => 
   }
 });
 
+const LAND_JSON_WITH_OBJECTIVE = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  pr: { number: 42, state: "MERGED" },
+  branch: "plan-7",
+  issue: 7,
+  pending_learn: true,
+  dry_run: false,
+  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
+});
+
+test("tool: land surfaces the objective node-done + /objective-reconcile nudge", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: LAND_JSON_WITH_OBJECTIVE });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Objective #5 node\(s\) 1\.2 marked done/);
+    assert.match(text, /\/objective-reconcile #5/);
+    const details = result.details as { objective?: { nodes_marked: string[] } };
+    assert.deepEqual(details.objective?.nodes_marked, ["1.2"]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: land with a skipped objective adds no nudge", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const skipped = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    branch: "plan-7",
+    issue: 7,
+    pending_learn: true,
+    dry_run: false,
+    objective: { number: null, nodes_marked: [], skipped_reason: "no_objective_link" },
+  });
+  const bin = fakePerk(cwd, { stdout: skipped });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const text = result.content[0]?.text ?? "";
+    assert.doesNotMatch(text, /objective-reconcile/);
+    assert.equal((result.details as { ok: boolean }).ok, true);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/land command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: LAND_JSON });

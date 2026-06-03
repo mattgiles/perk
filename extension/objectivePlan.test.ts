@@ -8,7 +8,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { buildObjectiveNodeArgs, isNonTrivialAudit, MIN_AUDIT_LENGTH } from "./objectivePlan.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { writePlanRef } from "./cache.ts";
+import {
+  buildObjectiveNodeArgs,
+  isNonTrivialAudit,
+  MIN_AUDIT_LENGTH,
+  resolveReconcileObjective,
+} from "./objectivePlan.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 const OK_JSON = JSON.stringify({
@@ -229,8 +236,140 @@ test("buildObjectiveNodeArgs: shapes", () => {
     buildObjectiveNodeArgs({ objective: 7, node: "1.2", status: "in_progress", pr: "#9" }),
     ["objective", "node", "7", "--node", "1.2", "--status", "in_progress", "--pr", "#9", "--json"],
   );
-  // neither status nor pr -> structurally invalid.
+  // neither status nor pr nor description -> structurally invalid.
   assert.equal(buildObjectiveNodeArgs({ objective: 7, node: "1.2" }), null);
+});
+
+test("buildObjectiveNodeArgs: description alone is valid (P2.T11)", () => {
+  assert.deepEqual(
+    buildObjectiveNodeArgs({ objective: 7, node: "1.2", description: "reconciled scope" }),
+    ["objective", "node", "7", "--node", "1.2", "--description", "reconciled scope", "--json"],
+  );
+  // description with status + pr -> all three pushed in order.
+  assert.deepEqual(
+    buildObjectiveNodeArgs({
+      objective: 7,
+      node: "1.2",
+      status: "done",
+      pr: "#9",
+      description: "d",
+    }),
+    [
+      "objective",
+      "node",
+      "7",
+      "--node",
+      "1.2",
+      "--status",
+      "done",
+      "--pr",
+      "#9",
+      "--description",
+      "d",
+      "--json",
+    ],
+  );
+});
+
+// --- P2.T11b: reconcile_objective tool + /objective-reconcile -----------------------------
+
+const RECONCILE_OK = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  objective: 5,
+  updated: true,
+});
+
+test("tool: reconcile_objective writes scratch + builds --body argv, never throws", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: RECONCILE_OK, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("reconcile_objective", {
+      objective: 5,
+      prose: "New reconciled prose.",
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    const argv = readArgv(argvFile);
+    assert.equal(argv[0], "objective");
+    assert.equal(argv[1], "reconcile");
+    assert.equal(argv[2], "5");
+    assert.ok(argv.includes("--json"));
+    const bodyIdx = argv.indexOf("--body");
+    assert.ok(bodyIdx > 0, "--body present");
+    const bodyPath = argv[bodyIdx + 1] ?? "";
+    assert.equal(readFileSync(bodyPath, "utf8"), "New reconciled prose.");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: reconcile_objective failing worker fails loud-but-soft (no throw)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("reconcile_objective", { objective: 5, prose: "x" });
+    assert.equal((result.details as { ok: boolean }).ok, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-reconcile registers", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.ok(h.registeredCommands().includes("objective-reconcile"));
+  } finally {
+    h.dispose();
+  }
+});
+
+// resolveReconcileObjective three-tier resolution (pure; minimal ctx, no model turn).
+function reconcileCtx(cwd: string): ExtensionContext {
+  return {
+    cwd,
+    sessionManager: { getBranch: () => [] },
+  } as unknown as ExtensionContext;
+}
+
+test("resolveReconcileObjective: arg wins (first tier)", () => {
+  const cwd = scaffoldRepo();
+  assert.equal(resolveReconcileObjective("5", reconcileCtx(cwd)), "5");
+  assert.equal(resolveReconcileObjective("#5", reconcileCtx(cwd)), "5");
+});
+
+test("resolveReconcileObjective: plan_ref.objective_id (third tier)", () => {
+  const cwd = scaffoldRepo();
+  writePlanRef(cwd, {
+    provider: "github",
+    pr_id: "7",
+    url: "u/7",
+    labels: ["perk:plan"],
+    objective_id: "42",
+  });
+  // no arg, no active objective -> falls through to the plan-ref.
+  assert.equal(resolveReconcileObjective("", reconcileCtx(cwd)), "42");
+});
+
+test("resolveReconcileObjective: null when nothing resolves", () => {
+  const cwd = scaffoldRepo();
+  assert.equal(resolveReconcileObjective("", reconcileCtx(cwd)), null);
+});
+
+test("resolveReconcileObjective: null when plan-ref has no objective_id", () => {
+  const cwd = scaffoldRepo();
+  writePlanRef(cwd, {
+    provider: "github",
+    pr_id: "7",
+    url: "u/7",
+    labels: ["perk:plan"],
+    objective_id: null,
+  });
+  assert.equal(resolveReconcileObjective("", reconcileCtx(cwd)), null);
 });
 
 test("isNonTrivialAudit: the trim().length >= MIN_AUDIT_LENGTH predicate", () => {

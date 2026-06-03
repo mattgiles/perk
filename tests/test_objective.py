@@ -181,3 +181,51 @@ def test_objective_header_to_data():
         and data["objective_comment_id"] == 5
         and data["status"] == "active"
     )
+
+
+# --- P2.T11: nodes_for_pr + reconcilable splice + render_body_comment markers --------------
+
+
+def test_nodes_for_pr_matches_canonical_forms():
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.DONE, pr="#6"),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, pr="7"),
+        o.ObjectiveNode(id="1.3", description="C", status=N.PENDING, pr=None),
+    ]
+    assert [n.id for n in o.nodes_for_pr(nodes, "#6")] == ["1.1"]
+    assert [n.id for n in o.nodes_for_pr(nodes, 6)] == ["1.1"]
+    assert [n.id for n in o.nodes_for_pr(nodes, "6")] == ["1.1"]
+    # node stored "7" matches "#7"/7
+    assert [n.id for n in o.nodes_for_pr(nodes, "#7")] == ["1.2"]
+    assert o.nodes_for_pr(nodes, "999") == []
+
+
+def test_render_body_comment_emits_reconcilable_markers():
+    nodes = _nodes()
+    empty = o.render_body_comment(nodes)
+    assert o.OBJECTIVE_RECONCILABLE_MARKER_START in empty
+    assert o.OBJECTIVE_RECONCILABLE_MARKER_END in empty
+    full = o.render_body_comment(nodes, prose="Some prose here.")
+    assert "Some prose here." in full
+    # prose sits inside the reconcilable markers
+    start = full.index(o.OBJECTIVE_RECONCILABLE_MARKER_START)
+    end = full.index(o.OBJECTIVE_RECONCILABLE_MARKER_END)
+    assert start < full.index("Some prose here.") < end
+
+
+def test_replace_reconcilable_section_splices_and_preserves():
+    comment = o.render_body_comment(_nodes(), prose="Old prose.")
+    # append an Immutable note below the closing marker
+    comment = comment + "\n## Immutable history\nnever touch this\n"
+    out = o.replace_reconcilable_section(comment, "New prose.")
+    assert out is not None
+    assert "New prose." in out and "Old prose." not in out
+    # the Mechanical table block above is preserved
+    assert o.ROADMAP_TABLE_MARKER_START in out
+    assert "| 1.1 |" in out
+    # the Immutable note below is preserved
+    assert "never touch this" in out
+
+
+def test_replace_reconcilable_section_none_when_markers_absent():
+    assert o.replace_reconcilable_section("no markers here", "x") is None

@@ -50,6 +50,14 @@ OBJECTIVE_HEADER_FIELDS = frozenset({"run_id", "created", "objective_comment_id"
 ROADMAP_TABLE_MARKER_START = "<!-- perk:roadmap-table -->"
 ROADMAP_TABLE_MARKER_END = "<!-- /perk:roadmap-table -->"
 
+# The Reconcilable-prose markers (P2.T11). The objective-body comment is three section types:
+# Mechanical (the marker-bounded roadmap table, re-rendered from frontmatter), Reconcilable (the
+# prose inside THESE markers — the only region post-merge reconciliation rewrites), and Immutable
+# (anything below the closing marker — historical notes, never touched). The Reconcilable region is
+# structurally Immutable-safe: `replace_reconcilable_section` can only rewrite between the markers.
+OBJECTIVE_RECONCILABLE_MARKER_START = "<!-- perk:objective-reconcilable -->"
+OBJECTIVE_RECONCILABLE_MARKER_END = "<!-- /perk:objective-reconcilable -->"
+
 _METADATA_OPEN = "<!-- perk:metadata-block:{key} -->"
 
 
@@ -319,6 +327,22 @@ def update_node(
     return updated if found else None
 
 
+def canonical_pr(pr_number: str | int) -> str:
+    """Normalize a PR/plan number to the canonical ``"#<n>"`` form (strip a leading ``#``)."""
+    return "#" + str(pr_number).lstrip("#")
+
+
+def nodes_for_pr(nodes: list[ObjectiveNode], pr_number: str | int) -> list[ObjectiveNode]:
+    """Return all nodes whose ``pr`` backlink equals ``pr_number`` (canonicalized to ``"#<n>"``).
+
+    Pure + offline. Matches ``"#6"`` / ``6`` / ``"6"`` interchangeably; ignores non-matching nodes
+    and nodes with no ``pr``. This is the deterministic node↔plan match the land path consumes to
+    auto-mark backlinked node(s) ``done`` after a merge.
+    """
+    target = canonical_pr(pr_number)
+    return [node for node in nodes if node.pr is not None and canonical_pr(node.pr) == target]
+
+
 def add_node(
     nodes: list[ObjectiveNode],
     *,
@@ -478,14 +502,51 @@ def render_roadmap_table(nodes: list[ObjectiveNode], *, body: str = "") -> str:
 
 
 def render_body_comment(nodes: list[ObjectiveNode], *, prose: str = "") -> str:
-    """Render the ``objective-body`` comment content: marker-bounded rendered table + prose."""
+    """Render the ``objective-body`` comment content: the marker-bounded rendered table (Mechanical)
+    followed by the marker-bounded Reconcilable prose region.
+
+    Every objective carries the Reconcilable markers — even with empty ``prose`` the (empty) marker
+    pair is emitted so post-merge reconciliation always has a splice target. Anything appended below
+    the closing Reconcilable marker is Immutable by construction.
+    """
     table = render_roadmap_table(nodes)
     block = (
         f"{ROADMAP_TABLE_MARKER_START}\n{table}\n{ROADMAP_TABLE_MARKER_END}"
         if table
         else f"{ROADMAP_TABLE_MARKER_START}\n_(no roadmap nodes yet)_\n{ROADMAP_TABLE_MARKER_END}"
     )
-    return f"{block}\n\n{prose.strip()}".rstrip() + "\n" if prose.strip() else block + "\n"
+    prose_body = prose.strip()
+    reconcilable = (
+        f"{OBJECTIVE_RECONCILABLE_MARKER_START}\n{prose_body}\n{OBJECTIVE_RECONCILABLE_MARKER_END}"
+        if prose_body
+        else f"{OBJECTIVE_RECONCILABLE_MARKER_START}\n{OBJECTIVE_RECONCILABLE_MARKER_END}"
+    )
+    return f"{block}\n\n{reconcilable}\n"
+
+
+def replace_reconcilable_section(comment_body: str, new_prose: str) -> str | None:
+    """Splice ``new_prose`` between the Reconcilable markers in an ``objective-body`` comment,
+    preserving everything outside (the Mechanical table block above, any Immutable notes below).
+    Returns the updated comment, or ``None`` if the Reconcilable markers are absent (objectives
+    created before P2.T11).
+
+    Pure + offline. Structurally Immutable-safe: only the marker-bounded region is rewritten.
+    """
+    start = comment_body.find(OBJECTIVE_RECONCILABLE_MARKER_START)
+    if start == -1:
+        return None
+    end = comment_body.find(OBJECTIVE_RECONCILABLE_MARKER_END, start)
+    if end == -1:
+        return None
+    prose_body = new_prose.strip()
+    inner = f"\n{prose_body}\n" if prose_body else "\n"
+    return (
+        comment_body[:start]
+        + OBJECTIVE_RECONCILABLE_MARKER_START
+        + inner
+        + OBJECTIVE_RECONCILABLE_MARKER_END
+        + comment_body[end + len(OBJECTIVE_RECONCILABLE_MARKER_END) :]
+    )
 
 
 def rerender_body_table(comment_body: str, nodes: list[ObjectiveNode]) -> str | None:

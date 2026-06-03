@@ -424,6 +424,16 @@ class ObjectiveNodeUpdate:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class ObjectiveBodyUpdate:
+    """The result of an ``update_objective_body`` write (the Reconcilable prose splice, P2.T11)."""
+
+    number: int
+    comment_id: int | None
+    updated: bool
+    dry_run: bool
+
+
 def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | None:
     """Find an open ``perk:objective`` issue whose ``objective-header`` ``run_id`` matches.
 
@@ -684,6 +694,38 @@ def update_objective_node(
     return ObjectiveNodeUpdate(
         number=number, node_id=node_id, comment_updated=comment_updated, dry_run=False
     )
+
+
+def update_objective_body(
+    *, number: int, prose: str, repo_root: Path, dry_run: bool = False
+) -> ObjectiveBodyUpdate:
+    """Reconcile the objective-body comment's Reconcilable prose region (P2.T11).
+
+    Reads the issue body's ``objective-header`` for ``objective_comment_id``, fetches the
+    ``objective-body`` comment, splices ``prose`` between the Reconcilable markers (the Mechanical
+    table block and any Immutable notes are untouched — structurally enforced by
+    :func:`objective.replace_reconcilable_section`), and PATCHes the comment.
+
+    Raises ``GitHubError`` when the objective has no body comment or the comment lacks the
+    Reconcilable region (objectives created before P2.T11). A dry run composes only (no PATCH).
+    """
+    body = _get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    comment_id = header.get("objective_comment_id")
+    if not isinstance(comment_id, int):
+        raise GitHubError(f"objective #{number} has no body comment")
+    comment_body = _get_comment_body(comment_id, repo_root)
+    if comment_body is None:
+        raise GitHubError(f"objective #{number} has no body comment")
+    spliced = objective.replace_reconcilable_section(comment_body, prose)
+    if spliced is None:
+        raise GitHubError(f"objective #{number} body comment has no reconcilable region")
+    if dry_run:
+        return ObjectiveBodyUpdate(
+            number=number, comment_id=comment_id, updated=False, dry_run=True
+        )
+    _patch_comment_body(comment_id, spliced, repo_root)
+    return ObjectiveBodyUpdate(number=number, comment_id=comment_id, updated=True, dry_run=False)
 
 
 # ===========================================================================
