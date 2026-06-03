@@ -210,6 +210,65 @@ def test_find_plan_issue_match_and_no_match(monkeypatch):
     assert github.find_plan_issue(run_id="01RID", repo_root=ROOT) is None
 
 
+# --- learn issue (P2.T8b) -------------------------------------------------------------------
+
+
+def _learn_header(run_id: str, plan_number: int = 7) -> str:
+    return plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY, {"run_id": run_id, "created": "t", "plan": plan_number}
+    )
+
+
+def test_find_learn_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch):
+    # The D10 regression: a list carrying the PLAN issue (same run_id, but its run_id lives in the
+    # plan-header block) must NOT match find_learn_issue (which reads the learn-header block). This
+    # is exactly what stops /learn from treating the plan issue as the learn issue.
+    plan_issue = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(plan_issue)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.find_learn_issue(run_id="01RID", repo_root=ROOT) is None
+    # ...and the lookup is label-scoped to perk:learn.
+    assert any("labels=perk:learn" in tok for c in rec.calls for tok in c)
+
+
+def test_find_learn_issue_matches_a_learn_issue_with_the_run_id(monkeypatch):
+    learn_issue = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(learn_issue)))
+    )
+    found = github.find_learn_issue(run_id="01RID", repo_root=ROOT)
+    assert found is not None and found.number == 99
+
+
+def test_create_learn_issue_idempotent_returns_existing_no_create(monkeypatch):
+    existing = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_learn_issue(
+        title="Learnings: X", body="b", repo_root=ROOT, run_id="01RID", plan_number=7
+    )
+    assert issue.number == 99 and issue.existed is True
+    assert not rec.posted()  # dedup short-circuits before the label create + issue POST
+
+
+def test_create_learn_issue_creates_with_label_and_header(monkeypatch):
+    # No existing learn issue -> lazy-create the perk:learn label, then POST the issue with the
+    # learn-header rendered into the body so a later find_learn_issue can match.
+    rec = _GhRecorder(
+        get=_Proc(0, stdout="[]"),
+        post=_Proc(0, stdout=json.dumps({"number": 100, "url": "u/100"})),
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_learn_issue(
+        title="Learnings: X", body="captured body", repo_root=ROOT, run_id="01RID", plan_number=7
+    )
+    assert issue.number == 100 and issue.existed is False
+    assert any("name=perk:learn" in tok for c in rec.calls for tok in c)  # lazy label create
+    body = rec.body_files[-1]
+    assert plan.extract_run_id(body, header_key=plan.LEARN_HEADER_KEY) == "01RID"
+    assert "captured body" in body
+
+
 def _header(run_id: str) -> str:
     return plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id=run_id, created="t").to_data()

@@ -25,8 +25,16 @@ PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
 PLAN_LABEL_DESCRIPTION = "perk plan issue"
 
+# The learn issue (P2.T8b): a `perk:learn`-labelled knowledge-capture issue, created by `/learn`
+# from agent-captured learnings. Distinct label + header key so its idempotency finder cannot
+# collide with the plan issue (which shares the same `run_id` under the `warm: keep` learn stage).
+LEARN_LABEL = "perk:learn"
+LEARN_LABEL_COLOR = "8250df"  # GitHub purple
+LEARN_LABEL_DESCRIPTION = "perk learn issue"
+
 PLAN_HEADER_KEY = "plan-header"
 PLAN_BODY_KEY = "plan-body"
+LEARN_HEADER_KEY = "learn-header"  # carries { run_id, created, plan } in the learn issue body
 
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
@@ -199,9 +207,13 @@ def extract_plan_body(text: str) -> str | None:
 # ----------------------------------------------------------------------- helpers
 
 
-def extract_run_id(issue_body: str) -> str | None:
-    """The ``run_id`` in an issue body's ``plan-header`` (for idempotency). None if absent."""
-    block = find_metadata_block(issue_body, PLAN_HEADER_KEY)
+def extract_run_id(issue_body: str, *, header_key: str = PLAN_HEADER_KEY) -> str | None:
+    """The ``run_id`` in an issue body's metadata block (for idempotency). None if absent.
+
+    ``header_key`` defaults to ``plan-header`` (the plan issue); the learn issue passes
+    ``learn-header`` so its run_id is read from its OWN block (P2.T8b — the label-scoped finder).
+    """
+    block = find_metadata_block(issue_body, header_key)
     if block is None:
         return None
     run_id = block.get("run_id")

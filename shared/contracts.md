@@ -448,6 +448,38 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
   stored (Q8).
 
+**Authored (P2.T8b — deep `/land` + `/learn`).** Land deepens the squash commit message; learn
+graduates from a thin marker-clear into a real knowledge-capture pass:
+
+```
+find_learn_issue{ run_id }                          -> PlanIssue | null
+    # GET .../issues?labels=perk:learn&state=open + learn-header run_id match. LABEL-SCOPED to
+    # perk:learn (+ the learn-header block) so it CANNOT return the plan issue, which shares the
+    # plan's run_id under the warm:keep learn stage. Implemented by parameterizing find_plan_issue
+    # with label/header_key (the perk:plan/plan-header defaults preserved — no caller changes).
+create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url, existed }
+    # lazy create_label("perk:learn"); idempotent via find_learn_issue (NOT find_plan_issue);
+    # renders a learn-header block { run_id, created, plan } into the body so the finder matches.
+```
+
+- **Deepened squash commit message (D8).** Land now passes `merge_pr(commit_message=)` =
+  plain `"<plan title>\n\nCloses #<issue>"` (`get_plan(...).title`, fallback `Closes #<issue>` on an
+  empty title). Plain text only — the second of the **two PR targets** (the GitHub HTML body, T8a,
+  is the other); HTML never leaks into `git log`.
+- **`/learn` (D10).** The `learn-capture` worker (`perk learn-capture --json --body <file>`) reads
+  the agent-captured learnings markdown from a run-scoped scratch file (the stdin-less worker
+  pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), and
+  clears `pending-learn`. The warm `/learn` (`extension/learn.ts`) takes an optional `summary`:
+  present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
+  (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
+  `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
+- **Reconciliation typing (D9 — vocabulary established; only Mechanical applied).** Three section
+  types on land: **Mechanical** (command-updated, deterministic — this turn: `pending-learn` +
+  the plain squash commit message); **Reconcilable** (LLM-updated post-merge — *deferred to T11*);
+  **Immutable** (never touched). The merged state is **PR-derived and not stored** (Q8), so land
+  authors no new stored field. Objective-node reconciliation is **deferred to T11** (flagged, not
+  silently omitted).
+
 **Authored (P2.T7 — the `/address` review loop).** Review threads + their resolution are
 **GraphQL-only** (REST has no `isResolved`, no `resolveReviewThread`/`addPullRequestReviewThreadReply`);
 discussion comments stay REST. The GraphQL shapes are verbatim from erk (the durable prior art). The
@@ -623,6 +655,17 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > Submit keeps the PR **draft**; the new `perk pr-ready` (warm `/ready`) is the deliberate review
 > gate. The two-target split is explicit: HTML in the GitHub body, plain text in the squash commit
 > (deepened at T8b). `submit`'s registry I/O is unchanged.
+>
+> **Status (P2.T8b):** `/land` + `/learn` are **deepened**. Land's squash commit message is now
+> plain `"<plan title>\n\nCloses #N"` (fallback on empty title) — the second of the two PR targets.
+> `/learn` graduates to a real knowledge-capture pass: with a `summary` it creates a `perk:learn`
+> issue (idempotent via the **`perk:learn`-scoped `find_learn_issue`** — label + `learn-header`
+> block, so it never matches the plan issue) + a back-link comment, then clears `pending-learn`;
+> without one it stays the thin marker-clear. `learn` reads `[cache.markers, cache.plan-ref]` and
+> writes `[cache.markers, github.learn, github.comments]` (the new `github.learn` key). The
+> reconciliation-typing vocabulary (Mechanical/Reconcilable/Immutable) is established; only the
+> deterministic **Mechanical** type is applied this turn (Reconcilable + objective reconciliation are
+> deferred to T11).
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

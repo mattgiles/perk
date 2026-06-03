@@ -1,13 +1,23 @@
-// P1.T5b — the warm `/learn` door (turn-5 §7, D4). Thin and TS-only: it clears the `pending-learn`
-// semaphore, closing the land→learn cycle so the worktree is releasable. No GitHub write, no Python
-// worker this phase (the agentic capture + a `perk:learn` label/issue is Phase 2). Never throws.
+// P2.T8b — the deepened warm `/learn` door (D10). Graduates the Phase-1 thin marker-clear into a
+// real knowledge-capture pass: when a `summary` is given, write it to a run-scoped scratch file and
+// DELEGATE to `perk learn-capture --json --body <path>` (D1 — GitHub writes canonical in Python),
+// which creates a `perk:learn` issue + clears `pending-learn`; then mirror the marker-clear
+// in-session (idempotent). With no `summary`, stay the thin TS-only marker-clear (graceful — no
+// empty issue). Never throws (soft `details.ok`).
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { clearMarker, hasMarker, PENDING_LEARN } from "./cache.ts";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { clearMarker, ensureRunScratch, hasMarker, PENDING_LEARN } from "./cache.ts";
+import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
 
 export interface LearnDetails {
   ok: boolean;
   was_pending: boolean;
+  captured?: boolean;
+  learn_issue?: { number: number; url: string; existed: boolean };
+  error?: string;
+  error_type?: string;
 }
 
 export interface LearnResult {
@@ -16,22 +26,148 @@ export interface LearnResult {
   terminate?: boolean;
 }
 
+/** The `perk learn-capture --json` shape (the contract the warm door consumes). */
+interface LearnCaptureJson {
+  success: boolean;
+  error_type: string | null;
+  message: string | null;
+  learn_issue?: { number: number; url: string; existed: boolean };
+  pending_cleared?: boolean;
+}
+
+/** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
+function activeRunId(ctx: ExtensionContext): string {
+  try {
+    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const runId = rebuildWorkflowState(branch).run_id;
+    if (typeof runId === "string" && runId.length > 0) return runId;
+  } catch {
+    // fall through to a stamp
+  }
+  return `learn-${Date.now()}`;
+}
+
 /** Clear `pending-learn` (idempotent — a no-op if it was not set). Reports whether it was set. */
-export function learnDone(ctx: ExtensionContext): LearnResult {
+function clearPending(ctx: ExtensionContext): { wasPending: boolean } {
   const wasPending = hasMarker(ctx.cwd, PENDING_LEARN);
   clearMarker(ctx.cwd, PENDING_LEARN);
-  const text = wasPending
-    ? "Cleared pending-learn — the worktree is releasable."
-    : "No pending-learn set — nothing to clear.";
+  return { wasPending };
+}
+
+/**
+ * The single learn implementation both surfaces call. With a `summary`, delegate the capture to the
+ * Python cold door (then mirror the marker-clear); without one, stay the thin marker-clear. Returns
+ * a soft result (never throws).
+ */
+export async function learnDone(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  summary?: string,
+): Promise<LearnResult> {
+  const trimmed = (summary ?? "").trim();
+
+  // No summary: the thin, graceful path — just clear the marker (no empty issue).
+  if (trimmed.length === 0) {
+    const { wasPending } = clearPending(ctx);
+    const text = wasPending
+      ? "Cleared pending-learn — the worktree is releasable. (No summary given; no learn issue created.)"
+      : "No pending-learn set — nothing to clear.";
+    return {
+      content: [{ type: "text", text }],
+      details: { ok: true, was_pending: wasPending, captured: false },
+      terminate: true,
+    };
+  }
+
+  const reportError = (message: string): void => {
+    const full = `perk: learn — ${message}`;
+    if (ctx.hasUI) ctx.ui.notify(full, "error");
+    console.error(full);
+  };
+
+  // Stage the captured learnings to a run-scoped scratch file (pi.exec has no stdin channel).
+  let bodyPath: string;
+  try {
+    const dir = ensureRunScratch(ctx.cwd, activeRunId(ctx));
+    bodyPath = join(dir, `learn-${Date.now()}.md`);
+    writeFileSync(bodyPath, `${trimmed}\n`, "utf8");
+  } catch (err) {
+    reportError(`could not stage the learnings: ${String(err)}`);
+    return {
+      content: [{ type: "text", text: `learn failed: could not stage the learnings` }],
+      details: { ok: false, was_pending: false, error_type: "scratch_failed" },
+    };
+  }
+
+  const perkBin = process.env.PERK_BIN ?? "perk";
+  let res: ExecResult;
+  try {
+    res = await pi.exec(perkBin, ["learn-capture", "--json", "--body", bodyPath], {
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+    });
+  } catch (err) {
+    reportError(`could not run '${perkBin}': ${String(err)}`);
+    return {
+      content: [{ type: "text", text: `learn failed: could not run '${perkBin}'` }],
+      details: { ok: false, was_pending: false, error_type: "exec_failed" },
+    };
+  }
+
+  if (res.killed || res.code !== 0) {
+    const tail = res.stderr.trim();
+    reportError(
+      tail
+        ? `perk learn-capture failed (exit ${res.code}): ${tail}`
+        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
+    );
+    return {
+      content: [{ type: "text", text: `learn failed (exit ${res.code})` }],
+      details: { ok: false, was_pending: false, error_type: "exec_failed" },
+    };
+  }
+
+  let parsed: LearnCaptureJson;
+  try {
+    parsed = JSON.parse(res.stdout) as LearnCaptureJson;
+  } catch {
+    reportError("perk learn-capture returned unparseable JSON");
+    return {
+      content: [{ type: "text", text: "learn failed: unparseable worker output" }],
+      details: { ok: false, was_pending: false, error_type: "bad_output" },
+    };
+  }
+  if (!parsed.success || !parsed.learn_issue) {
+    reportError(parsed.message ?? "perk learn-capture reported failure");
+    return {
+      content: [{ type: "text", text: parsed.message ?? "learn capture failed" }],
+      details: { ok: false, was_pending: false, error_type: parsed.error_type ?? "github_error" },
+    };
+  }
+
+  // Mirror the marker-clear in-session (idempotent; the worker also cleared it on disk).
+  const { wasPending } = clearPending(ctx);
+  const verb = parsed.learn_issue.existed ? "Found existing" : "Created";
   return {
-    content: [{ type: "text", text }],
-    details: { ok: true, was_pending: wasPending },
+    content: [
+      {
+        type: "text",
+        text: `${verb} learn issue #${parsed.learn_issue.number}; pending-learn cleared.`,
+      },
+    ],
+    details: {
+      ok: true,
+      was_pending: wasPending,
+      captured: true,
+      learn_issue: parsed.learn_issue,
+    },
     terminate: true,
   };
 }
 
 const TOOL_GUIDELINES = [
-  "Call learn after a plan has landed and you have captured its learnings; it clears pending-learn so the worktree can be released.",
+  "Call learn after a plan has landed; pass a `summary` of the durable learnings to capture them in a perk:learn issue (and clear pending-learn). Omit `summary` to just clear the marker.",
+  "The summary is captured verbatim — write the learnings as markdown (what changed vs. the plan, deviations, residual risks).",
 ];
 
 /** Register the warm door: the `learn` terminating tool + the `/learn` command twin. */
@@ -40,22 +176,40 @@ export function registerLearn(pi: ExtensionAPI): void {
     name: "learn",
     label: "Finish learn",
     description:
-      "Clear the pending-learn semaphore after capturing learnings from a landed plan, releasing " +
-      "the worktree. Terminating: ends the turn.",
-    promptSnippet: "Clear pending-learn to release the worktree (terminates the turn)",
+      "Capture learnings from a landed plan into a perk:learn issue (pass `summary`), then clear " +
+      "the pending-learn semaphore and release the worktree. Omit `summary` to only clear the marker. " +
+      "Terminating: ends the turn.",
+    promptSnippet:
+      "Capture learnings (optional summary) and clear pending-learn (terminates the turn)",
     promptGuidelines: TOOL_GUIDELINES,
     executionMode: "sequential",
-    parameters: { type: "object", additionalProperties: false, properties: {} },
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return learnDone(ctx);
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: {
+          type: "string",
+          description: "Markdown learnings to capture in a perk:learn issue. Omit to only clear.",
+        },
+      },
+    },
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const summary = (params as { summary?: string } | undefined)?.summary;
+      return learnDone(pi, ctx, summary);
     },
   });
 
   pi.registerCommand("learn", {
-    description: "Clear pending-learn to release the worktree (land → learn).",
-    handler: async (_args, ctx) => {
-      const result = learnDone(ctx);
-      if (ctx.hasUI) ctx.ui.notify(result.content[0]?.text ?? "learn done", "info");
+    description:
+      "Capture learnings (pass text) and clear pending-learn, or clear only (land → learn).",
+    handler: async (args, ctx) => {
+      const result = await learnDone(pi, ctx, args);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          result.content[0]?.text ?? "learn done",
+          result.details.ok ? "info" : "error",
+        );
+      }
     },
   });
 }

@@ -57,8 +57,10 @@ from perk.registry import load_registry
 stages = {s.id: s for s in load_registry().stages}
 land, learn = stages['land'], stages['learn']
 import sys
+# P2.T8b relaxed learn.writes from equality to membership (learn now also writes github.learn +
+# github.comments — the deepened knowledge-capture pass).
 ok = ('github.pr' in land.writes and 'cache.markers' in land.writes
-      and learn.writes == ['cache.markers'] and 'cache.markers' in learn.requires)
+      and 'cache.markers' in learn.writes and 'cache.markers' in learn.requires)
 sys.exit(0 if ok else 1)"; then
   pass "registry self-check passes; land writes github.pr+cache.markers, learn writes cache.markers"
 else

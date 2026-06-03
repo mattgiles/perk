@@ -102,10 +102,28 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         if pr.is_draft:
             github.mark_pr_ready(number=pr.number, repo_root=repo_root)
         pr = github.merge_pr(
-            number=pr.number, repo_root=repo_root, commit_message=f"Closes #{issue}"
+            number=pr.number,
+            repo_root=repo_root,
+            commit_message=_squash_commit_message(issue=issue, repo_root=repo_root),
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
     return PrLandResult(pr=pr, branch=branch, issue=issue, pending_learn=True, dry_run=False)
+
+
+def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
+    """The deepened squash commit message (P2.T8b, D8): plain ``"<plan title>\\n\\nCloses #N"``.
+
+    This is the second of the two PR targets (the GitHub HTML body is the other, T8a) — plain text
+    only, so no HTML leaks into ``git log``. Best-effort title fetch: a missing/empty title (or any
+    GitHub read failure) falls back to the bare ``Closes #N``.
+    """
+    closes = f"Closes #{issue}"
+    try:
+        state = github.get_plan(number=issue, repo_root=repo_root)
+    except GitHubError:
+        return closes
+    title = state.title.strip() if state is not None else ""
+    return f"{title}\n\n{closes}" if title else closes
 
 
 def _result_to_dict(result: PrLandResult) -> dict[str, object]:

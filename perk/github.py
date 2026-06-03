@@ -207,11 +207,21 @@ def create_label(
     raise _failed(proc, f"failed to create label {name!r}")
 
 
-def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
-    """Find an open ``perk:plan`` issue whose header ``run_id`` matches (idempotency lookup).
+def find_plan_issue(
+    *,
+    run_id: str,
+    repo_root: Path,
+    label: str = plan.PLAN_LABEL,
+    header_key: str = plan.PLAN_HEADER_KEY,
+) -> PlanIssue | None:
+    """Find an open ``label``-scoped issue whose metadata-block ``run_id`` matches (idempotency).
 
     Uses the **list** endpoint (not the eventually-consistent search index). Returns None for
     no match; raises ``GitHubError`` on an infra/query failure (never masks the error as None).
+
+    Parameterized by ``label``/``header_key`` (P2.T8b): the defaults find the ``perk:plan`` issue
+    (``plan-header``); ``find_learn_issue`` passes ``perk:learn``/``learn-header`` so the learn
+    lookup is **label-scoped** and cannot match the plan issue (which shares the same ``run_id``).
     """
     proc = _run(
         [
@@ -220,7 +230,7 @@ def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
             "-X",
             "GET",
             "-f",
-            f"labels={plan.PLAN_LABEL}",
+            f"labels={label}",
             "-f",
             "state=open",
         ],
@@ -238,11 +248,65 @@ def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
         if not isinstance(issue, dict):
             continue
         body = issue.get("body")
-        if isinstance(body, str) and plan.extract_run_id(body) == run_id:
+        if isinstance(body, str) and plan.extract_run_id(body, header_key=header_key) == run_id:
             return PlanIssue(
                 number=int(issue["number"]), url=str(issue.get("html_url", "")), existed=True
             )
     return None
+
+
+def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
+    """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches (P2.T8b).
+
+    The label-scoped twin of ``find_plan_issue``: scoped to ``perk:learn`` + the ``learn-header``
+    block so it never returns the plan issue (which shares the plan's ``run_id`` under the
+    ``warm: keep`` learn stage). Returns None for no match; raises on an infra failure.
+    """
+    return find_plan_issue(
+        run_id=run_id,
+        repo_root=repo_root,
+        label=plan.LEARN_LABEL,
+        header_key=plan.LEARN_HEADER_KEY,
+    )
+
+
+def create_learn_issue(
+    *,
+    title: str,
+    body: str,
+    repo_root: Path,
+    run_id: str | None,
+    plan_number: int,
+    dry_run: bool = False,
+) -> PlanIssue:
+    """Create the ``perk:learn`` knowledge-capture issue (P2.T8b, D10). Mirrors
+    ``create_plan_issue`` but: lazily creates the ``perk:learn`` label, is **idempotent via
+    ``find_learn_issue``** (not ``find_plan_issue``), and renders a ``learn-header`` block into the
+    body so the finder can match. Raises ``GitHubError`` on failure."""
+    if dry_run:
+        return PlanIssue(number=0, url="(dry-run)", existed=False)
+    if run_id:
+        existing = find_learn_issue(run_id=run_id, repo_root=repo_root)
+        if existing is not None:
+            return existing
+    create_label(
+        plan.LEARN_LABEL,
+        color=plan.LEARN_LABEL_COLOR,
+        description=plan.LEARN_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    header = plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY,
+        {"run_id": run_id, "created": plan.now_iso(), "plan": plan_number},
+    )
+    full_body = f"{header}\n\n{body.strip()}\n"
+    return create_plan_issue(
+        title=title,
+        body=full_body,
+        repo_root=repo_root,
+        run_id=None,  # idempotency already handled above via find_learn_issue
+        labels=(plan.LEARN_LABEL,),
+    )
 
 
 def create_plan_issue(

@@ -26,6 +26,7 @@ state_keys:
     - labels          # repo labels (e.g. perk:plan)
     - comments        # discussion comments
     - review-threads  # review threads (distinct API from comments)
+    - learn           # the perk:learn knowledge-capture issue (P2.T8b)
   # Tier 2 · .pi/workflow/ — the local cache (see contracts.md §8.1).
   cache:
     - plan            # materialized plan body cache
@@ -135,8 +136,11 @@ stages:
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: learn
-    requires: [cache.markers]                # T5b: pending-learn gates the worktree
-    reads: [cache.markers]                   # T5b: was it set?
-    writes: [cache.markers]                  # T5b: clear pending-learn (TS-only; no GitHub write)
+    # P2.T8b: deepened from a thin marker-clear into a real knowledge-capture pass — with a
+    # summary, create a perk:learn issue (idempotent via the perk:learn-scoped find_learn_issue) +
+    # back-link comment, then clear pending-learn; without one, the thin marker-clear (no issue).
+    requires: [cache.markers]                # pending-learn gates the worktree
+    reads: [cache.markers, cache.plan-ref]   # was it set? + the plan ref -> issue number/run_id
+    writes: [cache.markers, github.learn, github.comments]  # clear marker; create learn issue + back-link
     predecessors: [land]
     successors: []
