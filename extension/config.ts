@@ -18,6 +18,8 @@ const LOCAL_CONFIG_FILENAME = "perk.local.toml";
 export interface PerkConfig {
   /** Optional project-supplied plan-authoring addendum (`[workflow] plan_authoring = "..."`). */
   planAuthoring?: string;
+  /** The `[ci]` named-checks map (`name = "shell command"`); the executor (P2.T5) consumes it. */
+  ci?: Record<string, string>;
 }
 
 /** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
@@ -129,5 +131,6 @@ export function loadPerkConfig(cwd: string): PerkConfig {
   return {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
+    ci: merged.ci ?? {},
   };
 }

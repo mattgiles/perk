@@ -86,7 +86,10 @@ objective turns (T9–T11) perk is authoring its own remaining work *as objectiv
 The dependency spine has a keystone and two roots. **T1 (gating primitive)** is the keystone —
 plan mode (T2) and the CI executor (T5) both consume it. The two **context-isolation shapes** are
 roots: the in-process session (T4) feeds the CI executor (T5); the spawned engine (T6) feeds
-`/address` (T7). **T3** (formatting), **T8a/b** (PR depth), and the **T8c** CLI/config slice are
+`/address` (T7). _(T5 outcome: the CI executor consumes T4's **handoff contract/helpers**
+(`capForModel` + scratch + double-delivery + fail-closed), not its session runner — running a
+configured check is mechanics, not judgment, so there is no LLM turn; `runReadOnlyChild`'s first
+real consumer is the deferred cheap-model triage variant / T6-adjacent spawned work.)_ **T3** (formatting), **T8a/b** (PR depth), and the **T8c** CLI/config slice are
 independent of the gating arc. **Objectives (T9–T11)** come last by design — they need a real
 plan→land pipeline to prove the plans they emit are useful (ROADMAP open #4). **T12** is the gate.
 The borrowed-engine arc (T6/T7/T10) rests on the **planning-pass spike** above, not a mid-phase turn.
