@@ -1,6 +1,7 @@
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from click.testing import CliRunner
 
@@ -20,8 +21,8 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, bool]:
-    calls = {"commented": False}
+def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
+    calls: dict[str, object] = {"commented": False, "updated": None}
     monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
     monkeypatch.setattr(
         github,
@@ -33,7 +34,14 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, bool]:
         calls["commented"] = True
         return github.CommentResult(posted=True)
 
+    def _update(**k):
+        calls["updated"] = k
+        return github.PlanUpdate(
+            number=k["number"], body_updated=True, title_updated=True, dry_run=False
+        )
+
     monkeypatch.setattr(github, "add_issue_comment", _comment)
+    monkeypatch.setattr(github, "update_plan_issue", _update)
     return calls
 
 
@@ -188,10 +196,37 @@ def test_plan_save_github_error_exit_1(monkeypatch):
     assert json.loads(result.stdout)["error_type"] == "github_error"
 
 
-def test_plan_save_idempotent_no_comment(monkeypatch):
+def test_plan_save_resave_updates_in_place(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch, existed=True)
     result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md"])
     assert result.exit_code == 0
-    assert "Found existing" in result.output
-    assert calls["commented"] is False  # existing issue -> no duplicate comment
+    assert "Updated" in result.output
+    assert calls["commented"] is False  # existing issue -> no add_issue_comment dup
+    # The upsert path PATCHes the existing issue with the re-derived title + body.
+    updated = calls["updated"]
+    assert isinstance(updated, dict)
+    kwargs = cast("dict[str, object]", updated)
+    assert kwargs["number"] == 123
+    assert kwargs["title"] == "My Feature"  # re-derived from the plan H1
+    assert "Do the thing." in str(kwargs["body_comment"])
+
+
+def test_plan_save_resave_json_reports_updated(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch, existed=True)
+    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["updated"] is True
+    assert payload["issue"]["existed"] is True
+    assert payload["cached"] is True
+
+
+def test_plan_save_fresh_create_reports_not_updated(monkeypatch):
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    payload = json.loads(result.stdout)
+    assert payload["updated"] is False
+    assert payload["cached"] is True

@@ -29,7 +29,40 @@ const PLAN_JSON = JSON.stringify({
   dry_run: false,
 });
 
+const PLAN_RESAVE_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { number: 42, url: "https://gh/o/r/issues/42", existed: true },
+  plan_ref: {
+    provider: "github",
+    pr_id: "42",
+    url: "https://gh/o/r/issues/42",
+    labels: ["perk:plan"],
+    objective_id: null,
+  },
+  cached: true,
+  updated: true,
+  dry_run: false,
+});
+
 const PLAN_MD = "# Add retry\n\n## Summary\nAdd retry to the gateway.\n";
+
+test("tool: plan_save re-save surfaces Updated + details.updated", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_RESAVE_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as { ok: boolean; updated?: boolean; existed?: boolean | null };
+    assert.equal(details.ok, true);
+    assert.equal(details.updated, true);
+    assert.equal(details.existed, true);
+    assert.match(result.content[0]?.text ?? "", /Updated plan #42/);
+  } finally {
+    h.dispose();
+  }
+});
 
 function countLinks(branch: readonly unknown[]): number {
   return branch.filter((entry) => {
