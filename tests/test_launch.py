@@ -10,6 +10,7 @@ from perk.launch import (
     _initial_prompt,
     launch_stage,
     resolve_plan_worktree_name,
+    resolve_target,
     resolve_worktree,
 )
 from perk.registry import Stage, load_registry
@@ -233,8 +234,30 @@ def test_dry_run_has_no_side_effects(tmp_path, capsys):
     assert not (tmp_path / ".pi" / "workflow" / "handoff").exists()
 
 
-def test_remote_is_blocked(tmp_path):
-    with pytest.raises(UserFacingCliError, match="remote target is Phase 3"):
+# --- T8c: the launch target resolver --------------------------------------------------
+
+
+def test_resolve_target_none_is_local():
+    target = resolve_target(_stage("plan"), None)
+    assert target.is_remote is False and target.runner is None
+
+
+def test_resolve_target_remote_on_local_only_stage_is_blocked():
+    # plan is cold_remote:false -> remote_blocked.
+    with pytest.raises(UserFacingCliError) as exc:
+        resolve_target(_stage("plan"), "")
+    assert exc.value.error_type == "remote_blocked"
+
+
+@pytest.mark.parametrize("stage_id", ["implement", "address"])
+def test_resolve_target_remote_on_drivable_stage_resolves(stage_id):
+    # implement + address are cold_remote:true (P2.T8c) -> a remote Target (no raise).
+    target = resolve_target(_stage(stage_id), "ci-large")
+    assert target.is_remote is True and target.runner == "ci-large"
+
+
+def test_remote_blocked_stage_raises_in_launch(tmp_path):
+    with pytest.raises(UserFacingCliError) as exc:
         launch_stage(
             repo_root=tmp_path,
             config=_config(tmp_path),
@@ -244,3 +267,25 @@ def test_remote_is_blocked(tmp_path):
             remote="",
             pi_args=[],
         )
+    assert exc.value.error_type == "remote_blocked"
+
+
+def test_remote_drivable_stage_surfaces_then_exits_not_driven(tmp_path, capsys):
+    # implement is cold_remote:true: launch surfaces the descriptor (json) then exits not-driven.
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    with pytest.raises(UserFacingCliError) as exc:
+        launch_stage(
+            repo_root=tmp_path,
+            config=_config(tmp_path),
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=True,
+            remote="ci-large",
+            pi_args=[],
+        )
+    assert exc.value.error_type == "remote_not_driven"
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["error_type"] == "remote_not_driven"
+    assert payload["stage"] == "implement"
+    assert payload["target"]["runner"] == "ci-large"
+    assert payload["target"]["plan_ref"]["pr_id"] == "42"

@@ -21,9 +21,40 @@ def test_all_stages_are_generated():
 
 
 def test_remote_door_blocked():
+    # plan is cold_remote:false (P2.T8c) -> local-only.
     result = CliRunner().invoke(cli, ["plan", "--remote"], obj=_ctx(Path("/repo")))
     assert result.exit_code == 1
-    assert "remote target is Phase 3" in result.output
+    assert "local-only" in result.output
+
+
+def test_implement_remote_resolves_then_exits_not_driven(git_repo):
+    # implement is cold_remote:true (P2.T8c): --remote resolves a remote target descriptor (stdout
+    # json) and exits remote_not_driven; it does NOT drive the (unbuilt) Phase-3 worker.
+    import json
+
+    from perk import cache
+
+    cache.write_plan_ref(
+        git_repo,
+        {
+            "provider": "github",
+            "pr_id": "42",
+            "url": "u/42",
+            "labels": ["perk:plan"],
+            "objective_id": None,
+        },
+    )
+    result = CliRunner().invoke(cli, ["implement", "--remote", "--dry-run"], obj=_ctx(git_repo))
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["error_type"] == "remote_not_driven" and payload["stage"] == "implement"
+
+
+def test_plan_local_dry_run_still_launches(git_repo):
+    # No --remote: the local path is unchanged (dry-run prints the launch plan, exits 0).
+    result = CliRunner().invoke(cli, ["plan", "--dry-run"], obj=_ctx(git_repo))
+    assert result.exit_code == 0
+    assert "would launch stage 'plan'" in result.output
 
 
 def test_implement_requires_plan_ref():

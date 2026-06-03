@@ -35,7 +35,7 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
     default=None,
     is_flag=False,
     flag_value="",
-    help="Run on a remote runner (Phase 3; currently blocked).",
+    help="Local (default) or a remote runner; remote dispatch is driven by the Phase-3 worker.",
 )
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context

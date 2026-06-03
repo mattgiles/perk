@@ -32,6 +32,56 @@ class ResolvedWorktree:
     plan_ref: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class Target:
+    """Where a stage runs (P2.T8c): local (exec ``pi`` here) or a remote runner. The output of the
+    pure :func:`resolve_target` step."""
+
+    is_remote: bool
+    runner: str | None = None  # the remote runner ref ("" => the default runner); None when local
+
+
+@dataclass(frozen=True)
+class RemoteTarget:
+    """A resolved remote-runner descriptor (P2.T8c, D12): the runner ref + the run_id→plan linkage.
+
+    The seam the Phase-3 worker reuses. This turn **resolves and surfaces** it (in ``--dry-run`` /
+    ``--json``) but does **not** drive it (no persisted intent, no runner trigger) — Phase 2 builds
+    and resolves the target; Phase 3 drives it.
+    """
+
+    runner: str
+    run_id: str
+    plan_ref: dict[str, Any] | None
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "runner": self.runner or "(default)",
+            "run_id": self.run_id,
+            "plan_ref": self.plan_ref,
+        }
+
+
+def resolve_target(stage: Stage, remote: str | None) -> Target:
+    """Resolve a stage's run target (P2.T8c, D12). Pure + unit-testable.
+
+    - ``remote is None`` → **local** (today's behavior).
+    - ``remote`` set on a ``cold_remote:false`` stage → ``UserFacingCliError`` (``remote_blocked``).
+    - ``remote`` set on a ``cold_remote:true`` stage → a remote ``Target`` (the descriptor is
+      enriched with the run_id→plan linkage by :func:`launch_stage`, which then exits
+      ``remote_not_driven`` — the Phase-3 worker is the consumer, not built here).
+    """
+    if remote is None:
+        return Target(is_remote=False)
+    if stage.doors.get("cold_remote") is not True:
+        raise UserFacingCliError(
+            f"stage '{stage.id}' is local-only (cold_remote:false)\n"
+            "Run without --remote for a local session.",
+            error_type="remote_blocked",
+        )
+    return Target(is_remote=True, runner=remote)
+
+
 def resolve_plan_worktree_name(plan_ref: dict[str, Any]) -> str:
     """Deterministic, re-derivable worktree/branch name for a plan (D1).
 
@@ -144,11 +194,9 @@ def launch_stage(
     pi_args: list[str],
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``."""
-    if remote is not None:
-        raise UserFacingCliError(
-            f"remote target is Phase 3 — '{stage.id}' is cold_remote-blocked\n"
-            "Run without --remote for a local session."
-        )
+    target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
+    if target.is_remote:
+        _surface_remote_target(stage, target, repo_root)  # surfaces + exits `remote_not_driven`
     Ensure.invariant(
         stage.doors.get("cold_local") is True,
         f"Stage '{stage.id}' has no cold-local door.",
@@ -191,6 +239,40 @@ def launch_stage(
     env = {**os.environ, "PERK_RUN_ID": rid}
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
+
+
+def _surface_remote_target(stage: Stage, target: Target, repo_root: Path) -> None:
+    """Resolve + surface the remote descriptor (the Phase-3 seam), then exit ``remote_not_driven``.
+
+    No side effects beyond minting a run_id for the descriptor: no worktree, no handoff, no
+    persisted intent, no runner trigger (the Phase-3 consumer is not built — no fiction). It is
+    emitted on stdout (the ``--json`` supervisor surface) before the stable exit.
+    """
+    descriptor = RemoteTarget(
+        runner=target.runner or "",
+        run_id=run_id.mint(),
+        plan_ref=cache.read_plan_ref(repo_root),
+    )
+    runner_label = descriptor.runner or "(default)"
+    user_output(
+        f"resolved remote target for stage '{stage.id}' (runner={runner_label}); "
+        "the Phase-3 worker drives it"
+    )
+    machine_output(
+        json.dumps(
+            {
+                "success": False,
+                "error_type": "remote_not_driven",
+                "stage": stage.id,
+                "target": descriptor.to_data(),
+                "message": "remote target resolved; the Phase-3 worker drives it",
+            }
+        )
+    )
+    raise UserFacingCliError(
+        "remote target resolved; the Phase-3 worker drives it",
+        error_type="remote_not_driven",
+    )
 
 
 def _materialize_plan_body(

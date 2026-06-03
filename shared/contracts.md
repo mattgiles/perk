@@ -666,6 +666,19 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > reconciliation-typing vocabulary (Mechanical/Reconcilable/Immutable) is established; only the
 > deterministic **Mechanical** type is applied this turn (Reconcilable + objective reconciliation are
 > deferred to T11).
+>
+> **Status (P2.T8c — the CLI plumbing slice).** The `--remote` stub graduates to a real **target
+> resolver** (`launch.resolve_target(stage, remote) -> Target`, pure + unit-tested): `None` → local
+> (unchanged); a `cold_remote:false` stage → `UserFacingCliError`/`remote_blocked`; a
+> `cold_remote:true` stage → a `RemoteTarget` descriptor (runner ref + run_id→plan linkage) surfaced
+> in `--dry-run`/`--json`, then a stable `UserFacingCliError`/`remote_not_driven` exit (it does **not**
+> persist intent or trigger a runner — the Phase-3 consumer is not built, cli-vs-pi §4.5). The
+> registry now records `doors.cold_remote: true` on **`implement` + `address`** (the agentic,
+> headless-runnable stages a Phase-3 CI worker drives) and `false` on the other five — the reused
+> seam = resolver + validated registry doors + the `--json` target descriptor. **Phase 2 builds and
+> resolves the target; Phase 3 drives it.** The `--remote` help text on the three launchers is
+> reconciled from "Phase 3; currently blocked" to "Local (default) or a remote runner; remote
+> dispatch is driven by the Phase-3 worker."
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

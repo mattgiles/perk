@@ -44,9 +44,13 @@ state_keys:
 # Every field is locked EXCEPT `requires`/`reads`/`writes` (empty until handlers
 # land). `run_id` is uniform now (warm keeps, cold mints + records predecessor,
 # Q2); the field is kept because the shape is locked and future stages may differ.
-# `doors.cold_remote` is locked `false` across the MVP (remote-blocked; the
-# Phase-3 executor flips specific stages on) — a real registry-recorded constraint,
-# not merely "not built yet" (cli-vs-pi §4.5).
+# `doors.cold_remote` records which stages a remote runner may run (cli-vs-pi §4.5) —
+# a real registry-recorded constraint, not merely "not built yet". P2.T8c flips it
+# `true` on `implement` + `address` (the agentic, headless-runnable stages a Phase-3 CI
+# worker drives); `plan`/`save` need interactive local exploration and
+# `submit`/`land`/`learn` are quick deterministic ops, so they stay `false`. Phase 2
+# *builds + resolves* the target (the resolver + this door + the --json descriptor);
+# Phase 3 *drives* it. Revisable in Phase 3.
 # ---------------------------------------------------------------------------
 stages:
   - id: plan
@@ -79,7 +83,7 @@ stages:
     summary: Do the work on a branch (requires fresh context; cold-only).
     mode: read-write
     worktree: create          # first stage that needs a branch/worktree (folds in erk's `prepare`)
-    doors: { warm: false, cold_local: true, cold_remote: false }
+    doors: { warm: false, cold_local: true, cold_remote: true }  # P2.T8c: a Phase-3 CI worker can run it
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: implement
     requires: [cache.plan-ref]   # T4: cold door derives plan-<pr_id> from the active ref
@@ -105,7 +109,7 @@ stages:
     summary: Classify PR review feedback (isolated child) and resolve the threads.
     mode: read-write
     worktree: reuse
-    doors: { warm: true, cold_local: true, cold_remote: false }
+    doors: { warm: true, cold_local: true, cold_remote: true }  # P2.T8c: a Phase-3 CI worker can run it
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
     command: address
     # P2.T7: a spawned read-only child (borrowed pi-subagents) fetches + classifies feedback;

@@ -295,6 +295,16 @@ exactly, a host/orchestration concern the CLI owns. Two lessons carried from erk
   state, so a later cold resume or a supervisor can correlate the run with its plan. This
   is the same "coordinate through artifacts" rule from §3.
 
+> **Status (P2.T8c) — the resolver + registered targets are built; the runner is not.** The cold
+> door's target parameterization is now real: `perk/launch.py` `resolve_target(stage, remote)` is a
+> pure step returning a **local** or **remote** `Target`, with the legal targets recorded per stage
+> in the registry (`doors.cold_remote: true` on `implement` + `address`; `false` on
+> `plan`/`save`/`submit`/`land`/`learn`). A `--remote` launch on a drivable stage **resolves and
+> surfaces** a `RemoteTarget` descriptor (runner ref + run_id→plan linkage) over the `--json`
+> supervisor channel, then exits with a stable `remote_not_driven` — it does **not** yet persist
+> intent or trigger a runner. **Phase 2 builds and resolves the target; the Phase-3 worker drives
+> it** (and is the consumer that writes the linkage metadata above).
+
 ---
 
 ## 5. The payoff
