@@ -188,6 +188,32 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
 No model-facing bounded transition tools are added here — the `objective-plan` stage, the plan
 factory, and the "fire only when…" tools are **T10**.
 
+**Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
+of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
+- **`/objective-plan [<number>] [--node ID]`** — the warm entry: resolve the objective (arg, else
+  `active_objective` from the rebuilt `perk:workflow-state`) and `pi.sendUserMessage(...)` the
+  factory guidance to start the loop (mirrors `/address`). Headless-safe.
+- **`objective_node` tool** — the BOUNDED model-facing transition. It **delegates** the mutation to
+  the Python cold door (`perk objective node`, canonical mutations in Python) and **never throws**
+  (soft `details.ok`, mirrors `resolve_review_threads`). Params `{ objective, node, status?, pr?,
+  audit? }`; exec args are built **conditionally** (matching T9's optional `--status`/`--pr` —
+  `--status ""` is a Click error, so it is omitted when no status change): a **`pr`-only backlink**
+  (`pr` present, `status` absent) → `["objective","node",N,"--node",id,"--pr",pr,"--json"]` (no
+  `--status`, no audit); a **status change** adds `["--status",status]` (and `--pr` only if also
+  given). A call with **neither `status` nor `pr`** is refused (`bad_input`, no exec).
+- **Completion-audit gate (model-path-only).** When `status === "done"` the tool requires a
+  **non-trivial `audit`** and refuses otherwise (`audit_required`, **no exec**). Non-trivial **iff**
+  `audit` is a string whose value **after `.trim()` is ≥ 40 characters**. This is a property of the
+  **model-facing boundary**, NOT an invariant on the node-`done` state: the canonical cold CLI
+  (`perk objective node --status done`, human/CI) has **no** audit gate, and **T11's auto-on-merge
+  node-done deliberately sets `done` without an audit**. Both are intentional non-audited paths — the
+  refusal protects the model's path only. The "are we done?" judgment text (prompt-to-artifact
+  checklist; treat uncertainty as not-done) lives in the `perk-objective-plan` skill.
+- **The node↔plan link.** plan→objective is carried by the plan header/ref `objective_id` (threaded
+  through `perk plan-save --objective-id` + the `plan_save` tool's `objective_id` param);
+  objective→plan by the node's `pr` field (the `objective_node` tool's `pr`-only backlink). T11's
+  reconciliation-on-land consumes both.
+
 **Session-lifecycle gates (T4b).** The interior guards `session_before_switch` /
 `session_before_fork` with a **dirty-repo check** (`git status --porcelain` via `pi.exec`),
 **scoped to active perk workflows** (`active_plan_ref != null` — perk never interferes with
@@ -756,8 +782,34 @@ column** — `update_node` takes `status` verbatim or preserves it; setting `pr`
 `/objective-plan` consumes). All supervisor surfaces (`--json` → stdout, human → stderr, exit
 `0`/`1`/`2`). The objective issues are pure REST (issues + comments), no GraphQL.
 
-State key (registry vocabulary): `github.objective` (live since P2.T9 storage; its **stage** is
-T10).
+State key (registry vocabulary): `github.objective` (live since P2.T9 storage; its **stage** —
+`objective-plan` — exists since P2.T10).
+
+### Authored (P2.T10 — the objective plan factory)
+
+The objective **transition** layer on top of T9's mechanics — the plan factory + the node↔plan link.
+
+- **`objective-plan` registry stage + cold door.** A new stage (`mode: read-only`, `worktree:
+  none`, `doors.cold_remote: false`) inserted as the **single initial** before `plan`
+  (`objective-plan → plan`); `requires/reads: [github.objective]`, `writes: [github.objective,
+  session.workflow-state]`. Its cold door is a **dedicated** command (`DEDICATED_STAGES`),
+  `perk objective-plan [NUMBER] [--node ID]` (the generic launcher cannot select a node): it
+  requires an explicit NUMBER (a cold session has no `active_objective`), selects the next actionable
+  node (or `--node`), marks it `planning` (`update_objective_node`), and launches a read-only
+  plan-mode session seeded with the node (via `launch_stage(prompt_override=…)`). Supervisor surface
+  (`--json`/exits `0`/`1`/`2`); error types `objective_required`/`objective_not_found`/
+  `no_actionable_node`/`remote_blocked`.
+- **`launch_stage(prompt_override=…)`.** A minimal seam: when given, the override is the seeded
+  initial prompt instead of the stage-derived `_initial_prompt` (objective-plan has no plan-ref, so
+  `_initial_prompt` returns `None`). All existing callers pass `None`, unaffected.
+- **`--objective-id` thread.** `perk plan-save --objective-id N` (and the warm `plan_save` tool's
+  `objective_id` param) populate `plan.PlanHeader.objective_id` + `plan.PlanRef.objective_id` (both
+  fields already existed). This persists the plan→objective direction; non-objective plans omit it.
+- **Node mutations stay canonical Python.** The `objective_node` model tool delegates to
+  `perk objective node` — there is **no audit gate at the CLI layer** (the audit refusal is the
+  model-facing tool boundary only, §8.3). Whole-objective rollup-to-`done` (`update_objective_header`
+  via a CLI) is **deferred** (T10's completion-audit unit is the node); auto-on-merge node-done is
+  **T11**.
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

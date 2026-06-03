@@ -192,8 +192,15 @@ def launch_stage(
     dry_run: bool,
     remote: str | None,
     pi_args: list[str],
+    prompt_override: str | None = None,
 ) -> None:
-    """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``."""
+    """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
+
+    ``prompt_override`` (P2.T10): when given, it is the seeded initial prompt instead of the
+    stage-derived ``_initial_prompt`` — the dedicated ``perk objective-plan`` command supplies a
+    node-seeded prompt (objective-plan has no plan-ref, so ``_initial_prompt`` returns ``None``).
+    All existing callers pass ``None`` and are unaffected.
+    """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
         _surface_remote_target(stage, target, repo_root)  # surfaces + exits `remote_not_driven`
@@ -208,8 +215,10 @@ def launch_stage(
     wt = resolved.path
     rid = run_id.mint()
     # Prime the session (Bug 1): when --worktree is given the derived ref is absent, so fall back
-    # to the repo-root active ref for the prompt.
-    prompt = _initial_prompt(stage, resolved.plan_ref or cache.read_plan_ref(repo_root))
+    # to the repo-root active ref for the prompt. A `prompt_override` (P2.T10) wins outright.
+    prompt = prompt_override
+    if prompt is None:
+        prompt = _initial_prompt(stage, resolved.plan_ref or cache.read_plan_ref(repo_root))
     argv = ["pi", *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written

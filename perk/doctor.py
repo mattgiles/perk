@@ -239,22 +239,25 @@ def _registry_check() -> Check:
     return Check("registry", "registry", "ok", f"registry valid ({len(reg.stages)} stages)")
 
 
-def _subagent_engine_check() -> Check:
+def _subagent_engine_check(root: Path) -> Check:
     """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
 
-    Purely a constant pointer — it reads no settings or filesystem and **does not** re-derive
-    package/dir drift (that is owned by `settings-wiring` for the `npm:pi-subagents` entry and by
-    `subagent-agents` for `.pi/agents/`). Status `ok` keeps a healthy repo's summary clean; the
-    detail carries the honesty note that the live-spawn smoke is a Phase-3 deferral.
+    Enumerates the committed perk-owned agent defs (`.pi/agents/*.md`) for the detail — package/dir
+    drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and `subagent-agents`
+    (`.pi/agents/`). Status `ok` keeps a healthy repo's summary clean; the detail carries the
+    honesty note that the live-spawn smoke is a Phase-3 deferral.
     """
+    agents_dir = root / ".pi" / "agents"
+    names = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    listing = ", ".join(f"perk.{n}" for n in names) if names else "(none)"
     return Check(
         "subagent-engine",
         "package",
         "ok",
         "borrowed pi-subagents engine + perk-owned agent defs",
         "presence owned by settings-wiring; defs dir owned by subagent-agents; "
-        "perk agents are namespaced (package: perk) and invoked by explicit perk.* name "
-        "(e.g. perk.review-classifier); legacy .agents/skills/*/SKILL.md surface as stray agents "
+        "perk agents are namespaced (package: perk) and invoked by explicit perk.* name; "
+        f"committed defs: {listing}; legacy .agents/skills/*/SKILL.md surface as stray agents "
         "(benign — never invoked); the live-spawn smoke is deferred to Phase 3 `doctor workflow`.",
     )
 
@@ -289,7 +292,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
-    checks.append(_subagent_engine_check())
+    checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     return checks
 
