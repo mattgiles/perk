@@ -237,7 +237,7 @@ perk-developing-perk is coherent.
 Then adopt the curated default set as **borrowed scaffolding**:
 
 - `@tombell/pi-plan` — instant read-only planning mode (`/plan`, `Ctrl+Alt+P`, `--plan`).
-- `@juicesharp/rpiv-todo` — checklist overlay surviving `/reload` and compaction.
+- `@juicesharp/rpiv-todo` — checklist overlay surviving `/reload` and compaction (superseded by perk-owned `perk:checkpoint`, retired P2.T12).
 - `@tombell/pi-diff` + a status bar (`@tombell/pi-status` or `pi-powerline-footer`).
 
 **CLI slice.** Stand up the **`perk` CLI exterior** (the session host — see
@@ -483,7 +483,7 @@ into Mechanical (command-updated), Reconcilable (LLM-updated post-merge), and Im
 
 **Dogfood gate:** perk now drives its *full* workflow on itself — objectives select the next
 plan, the read-only CI executor iterates, reviews are classified and resolved, and objective
-prose reconciles after landing. `rpiv-todo` checklists can be retired in favor of perk-owned
+prose reconciles after landing. `rpiv-todo` checklists are retired (P2.T12) in favor of perk-owned
 checkpoints; the borrow→own internalization is largely complete.
 
 ### Phase 3 — Headless worker, queue, migration, tests (own autonomy)
@@ -530,7 +530,7 @@ the Phase 2 cold doors run by a process instead of a human.
 | Borrowed | Internalize? | Why |
 |---|---|---|
 | `@tombell/pi-plan` (Phase 0) | Phase 2 (decide: keep-wrap vs own) | Internalizing plan mode needs the gating primitive (Phase 2) and ties it to plan-save / GitHub state; the thin loop (Phase 1) keeps borrowing it |
-| `@juicesharp/rpiv-todo` (Phase 0) | Phase 2 (→ perk checkpoints) or keep | Don't fake todos; once perk owns implement phases, checkpoints belong to perk |
+| `@juicesharp/rpiv-todo` (Phase 0) | **Retired P2.T12** (Phase 2 → perk checkpoints) | Don't fake todos; perk now owns implement phases via the `perk:checkpoint` seam |
 | `@tombell/pi-diff`, status bar (Phase 0) | Likely **keep** | Additive UX, no workflow authority — no reason to rebuild |
 | `pi-subagents` (Phase 2) | **Keep the engine, own the defs** | Principled, headless-clean delegation engine behind a thin seam (open decision #6); internalize a minimal spawn primitive only if weight / determinism / headless costs prove out |
 

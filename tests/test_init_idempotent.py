@@ -25,6 +25,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert f"npm:@perk/pi@{__version__}" in packages
     assert "npm:@tombell/pi-status" in packages
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
+    assert "npm:@juicesharp/rpiv-todo" not in packages  # P2.T12: perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # P2.T6: borrowed spawned-delegation engine
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
