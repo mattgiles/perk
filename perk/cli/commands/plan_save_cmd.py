@@ -32,6 +32,7 @@ class PlanSaveResult:
     body_comment: str
     dry_run: bool
     cached: bool  # the plan-ref was written to .pi/workflow/plan-ref.json (real save only)
+    updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
 
 
 @click.command("plan-save")
@@ -152,12 +153,24 @@ def _plan_save_impl(
         run_id=run_id,
         dry_run=dry_run,
     )
-    # Only attach the plan-body comment when we freshly created the issue (idempotent re-save
-    # returns the existing one untouched; a dry run shells nothing).
-    if not issue.existed and not dry_run:
-        github.add_issue_comment(
-            issue=issue.number, body=body_comment, repo_root=repo_root, dry_run=dry_run
-        )
+    # `create_plan_issue` is idempotent on run_id: a fresh create returns existed=False, a re-save
+    # returns the existing issue. On a fresh create we post the plan-body comment; on a re-save we
+    # upsert the existing issue in place (PATCH the plan-body comment + the title). A dry run shells
+    # nothing. The anti-duplicate guarantee is preserved — never a second issue per run_id.
+    updated = False
+    if not dry_run:
+        if issue.existed:
+            github.update_plan_issue(
+                number=issue.number,
+                title=resolved_title,
+                body_comment=body_comment,
+                repo_root=repo_root,
+            )
+            updated = True
+        else:
+            github.add_issue_comment(
+                issue=issue.number, body=body_comment, repo_root=repo_root, dry_run=dry_run
+            )
 
     plan_ref = plan.PlanRef(
         provider="github",
@@ -177,6 +190,7 @@ def _plan_save_impl(
         body_comment=body_comment,
         dry_run=dry_run,
         cached=not dry_run,
+        updated=updated,
     )
 
 
@@ -192,6 +206,7 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         },
         "plan_ref": result.plan_ref.to_data(),
         "cached": result.cached,
+        "updated": result.updated,
         "dry_run": result.dry_run,
     }
 
@@ -204,7 +219,7 @@ def _render_human(result: PlanSaveResult) -> None:
         user_output(click.style("── plan-body comment ──", fg="bright_black"))
         user_output(result.body_comment)
         return
-    verb = "Found existing" if result.issue.existed else "Saved"
+    verb = "Updated" if result.issue.existed else "Saved"
     user_output(
         click.style("✓ ", fg="green")
         + f"{verb} plan "

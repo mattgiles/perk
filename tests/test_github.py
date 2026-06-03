@@ -413,6 +413,76 @@ def test_update_plan_header_rejects_unknown_field(monkeypatch):
         github.update_plan_header(issue=123, fields={"bogus": "x"}, repo_root=ROOT)
 
 
+# ---------------------------------------------------- plan upsert (re-save, P2.T13)
+
+
+def _comment_list(*bodies: str) -> str:
+    return json.dumps([{"id": 100 + i, "body": b} for i, b in enumerate(bodies)])
+
+
+def test_find_plan_body_comment_id_returns_matching_id(monkeypatch):
+    listing = _comment_list("just chatter", plan.render_plan_body("# P\n\nbody"))
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
+    )
+    assert github._find_plan_body_comment_id(123, ROOT) == 101
+
+
+def test_find_plan_body_comment_id_none_when_no_match(monkeypatch):
+    listing = _comment_list("nothing here", "still nothing")
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
+    )
+    assert github._find_plan_body_comment_id(123, ROOT) is None
+
+
+def test_update_plan_issue_patches_comment_and_title(monkeypatch):
+    listing = _comment_list(plan.render_plan_body("# Old\n\nold body"))
+    rec = _GhDispatch(
+        [
+            (_has("issues/123/comments"), _Proc(0, listing)),
+            (_has("issues/comments/100", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", "PATCH", "title="), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_plan_issue(
+        number=123,
+        title="New Title",
+        body_comment=plan.render_plan_body("# New\n\nnew body"),
+        repo_root=ROOT,
+    )
+    assert upd.body_updated is True and upd.title_updated is True and upd.dry_run is False
+    assert "new body" in rec.body_files[-1]  # the comment PATCH carried the new body
+    title_patch = next(c for c in rec.calls if "PATCH" in c and any("title=" in t for t in c))
+    assert "title=New Title" in title_patch
+
+
+def test_update_plan_issue_falls_back_to_fresh_comment(monkeypatch):
+    listing = _comment_list("no plan-body block here")
+    rec = _GhDispatch(
+        [
+            (_has("issues/123/comments", "POST"), _Proc(0, "{}")),
+            (_has("issues/123/comments"), _Proc(0, listing)),
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_plan_issue(number=123, title="T", body_comment="BODY", repo_root=ROOT)
+    assert upd.body_updated is False  # no plan-body comment -> fresh POST fallback
+    assert rec.method_calls("POST") == 1
+
+
+def test_update_plan_issue_dry_run_does_not_shell(monkeypatch):
+    rec = _GhDispatch([])
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_plan_issue(
+        number=123, title="T", body_comment="B", repo_root=ROOT, dry_run=True
+    )
+    assert upd.dry_run is True and upd.body_updated is False and upd.title_updated is False
+    assert rec.calls == []
+
+
 def test_get_plan_planned_has_no_pr(monkeypatch):
     issue = {"number": 7, "title": "T", "body": _header("01RID"), "state": "OPEN", "url": "u/7"}
     monkeypatch.setattr(

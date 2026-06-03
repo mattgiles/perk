@@ -25,6 +25,7 @@ export interface PlanSaveDetails {
   plan_ref?: PlanRef;
   cached?: boolean;
   existed?: boolean | null;
+  updated?: boolean;
   error?: string;
   error_type?: string;
 }
@@ -44,6 +45,7 @@ interface PlanSaveJson {
   issue?: { number: number; url: string; existed?: boolean };
   plan_ref?: PlanRef;
   cached?: boolean;
+  updated?: boolean;
 }
 
 /**
@@ -168,14 +170,16 @@ export async function savePlan(
     }
   }
 
+  const verb = parsed.issue.existed ? "Updated" : "Saved";
   return {
-    content: [{ type: "text", text: `Saved plan #${ref.pr_id} → ${ref.url}` }],
+    content: [{ type: "text", text: `${verb} plan #${ref.pr_id} → ${ref.url}` }],
     details: {
       ok: true,
       issue: { number: parsed.issue.number, url: parsed.issue.url },
       plan_ref: ref,
       cached: parsed.cached ?? false,
       existed: parsed.issue.existed ?? null,
+      updated: parsed.updated ?? false,
     },
     terminate: true,
   };

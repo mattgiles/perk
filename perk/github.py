@@ -155,6 +155,20 @@ class CommentResult:
     posted: bool
 
 
+@dataclass(frozen=True)
+class PlanUpdate:
+    """The result of an in-place ``update_plan_issue`` upsert (re-save path).
+
+    ``body_updated`` is True when the existing ``plan-body`` comment was PATCHed; False when no
+    such comment was found and a fresh one was POSTed instead (legacy fallback) or on a dry run.
+    """
+
+    number: int
+    body_updated: bool
+    title_updated: bool
+    dry_run: bool
+
+
 @contextmanager
 def _body_file(content: str) -> Iterator[str]:
     """Write ``content`` to a temp file for ``-F body=@<path>`` (never inline). Cleaned up."""
@@ -930,6 +944,71 @@ def _get_issue_body(issue: int, repo_root: Path) -> str:
     if proc.returncode != 0:
         raise _failed(proc, f"failed to read issue #{issue}")
     return proc.stdout
+
+
+def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
+    """Find the integer id of the issue comment carrying the ``plan-body`` block (REST list).
+
+    perk does not store the plan-body comment id, so the re-save path discovers it by marker
+    (mirrors :func:`get_plan_body`). The REST list returns an **integer** ``id`` usable for the
+    comment-PATCH endpoint (the GraphQL node id from ``gh issue view`` is not). ``None`` when no
+    comment matches (legacy issue / comment missing)."""
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"], cwd=repo_root)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to list comments on issue #{issue}")
+    try:
+        raw = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable issue comments output: {exc}") from exc
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict) or "id" not in c:
+            continue
+        if plan.extract_plan_body(str(c.get("body", ""))) is not None:
+            return int(c["id"])
+    return None
+
+
+def update_plan_issue(
+    *,
+    number: int,
+    title: str,
+    body_comment: str,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> PlanUpdate:
+    """Upsert an existing plan issue in place (the idempotent re-save path; contracts.md §8.4).
+
+    PATCHes the ``plan-body`` comment with the revised markdown and PATCHes the issue title from
+    the (possibly revised) plan H1. The anti-duplicate guarantee stays in ``create_plan_issue``;
+    this only rewrites the existing issue's content. Legacy issues missing the ``plan-body``
+    comment get a fresh comment POSTed (``body_updated`` False) so the plan body is never stranded.
+    """
+    if dry_run:
+        return PlanUpdate(number=number, body_updated=False, title_updated=False, dry_run=True)
+
+    comment_id = _find_plan_body_comment_id(number, repo_root)
+    if comment_id is not None:
+        _patch_comment_body(comment_id, body_comment, repo_root)
+        body_updated = True
+    else:
+        add_issue_comment(issue=number, body=body_comment, repo_root=repo_root)
+        body_updated = False
+
+    proc = _run(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{number}",
+            "-X",
+            "PATCH",
+            "-f",
+            f"title={title}",
+        ],
+        cwd=repo_root,
+        timeout=_WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update plan issue #{number} title")
+    return PlanUpdate(number=number, body_updated=body_updated, title_updated=True, dry_run=False)
 
 
 def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:

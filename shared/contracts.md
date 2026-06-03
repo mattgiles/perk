@@ -486,6 +486,23 @@ find_plan_issue{ run_id }                           -> PlanIssue | null
 - **Idempotency** is keyed on the header `run_id`, discovered via the **list** endpoint (not
   the eventually-consistent search index), create-then-return (`Q3` establish-before-record).
 - **`perk:plan` label** is created lazily on first save.
+- **`perk plan-save` is an upsert keyed on `run_id` (P2.T13).** The *first* save with a `run_id`
+  creates the issue and posts the `plan-body` comment; a *re-save* with the same `run_id` updates
+  the existing issue **in place** instead of no-opping — `create_plan_issue` still dedups (never a
+  second issue per `run_id`), then `update_plan_issue{ number, title, body_comment }` PATCHes the
+  `plan-body` comment with the revised markdown and PATCHes the issue **title** from the (possibly
+  revised) plan H1. The comment is found by marker (REST comment list → first body containing the
+  `plan-body` block; perk stores no comment id), which also repairs legacy plan issues; a missing
+  comment falls back to a fresh POST so the body is never stranded. The anti-duplicate guarantee is
+  preserved. `--json` carries a top-level `updated` (true on re-save, false on fresh create);
+  `cached` stays true on every real save. The warm `/plan-save` surfaces `details.updated` and an
+  "Updated plan #N" message on the re-save path.
+
+```
+update_plan_issue{ number, title, body_comment }    -> PlanUpdate{ number, body_updated, title_updated, dry_run }
+    # find the plan-body comment by marker -> PATCH .../issues/comments/{id} (-F body=@file)
+    #   (fallback: POST a fresh comment, body_updated:false) ; PATCH .../issues/{n} (-f title=)
+```
 
 **Authored (P1.T5a — the submit path).** REST `gh api`; idempotent via the list endpoint:
 
