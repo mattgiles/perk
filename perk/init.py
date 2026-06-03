@@ -28,12 +28,13 @@ NPM_PACKAGE = "@perk/pi"
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired in P2.T2a
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
+# `@juicesharp/rpiv-todo` was retired in P2.T12 (perk now owns implement-progress via
+# perk-owned checkpoints, the `perk:checkpoint` entry seeded from the plan body, T2c).
 # `pi-subagents` is the borrowed *spawned delegation engine* (P2.T6): perk takes the
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
 # `ctx.hasUI`-clean (children run `--mode json -p`).
 BORROWED_PACKAGES = [
-    "npm:@juicesharp/rpiv-todo",
     "npm:@tombell/pi-diff",
     "npm:@tombell/pi-status",
     "npm:pi-subagents",
@@ -85,14 +86,15 @@ POST_INIT_TEMPLATE = """\
 This repo follows the **perk** plan-oriented workflow on Pi. Conventions live in `AGENTS.md`
 (the perk-managed block). `perk init` owns all Pi wiring and is safe to re-run.
 
-The spine `plan -> save -> implement -> submit -> land -> learn` is being built (Phase 1).
+The spine `plan -> save -> implement -> submit -> land -> learn` is **closed and deepened**
+(Phase 2 complete): perk-owned plan mode + tool-gating, a read-only CI executor, the
+`/address` review loop, and objectives as plan factories. `objective-plan` is the new initial
+node (select the next actionable objective node, emit a bounded plan); `/address` sits between
+`submit` and `land` (classify review feedback, resolve threads).
 
-**Cold-door launchers already exist:** `perk <stage> -- <pi args>` positions a worktree,
-mints a `run_id`, and launches a primed `pi` session (e.g. `perk plan`). The in-session
-stage *handlers* land in Phase 1.
-
-**Next:** when the Phase-1 spine lands, start a plan here — this repo is the dogfood
-substrate. Until then, `perk doctor` (T6) will report on this setup.
+**Start here:** `perk plan` (or `perk objective-plan` to drive from an objective roadmap)
+mints a `run_id`, positions a worktree, and launches a primed `pi` session. `perk resume`
+resolves any plan to its current actionable stage. `perk doctor` reports on this setup.
 """
 
 

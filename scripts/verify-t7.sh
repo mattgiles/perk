@@ -35,7 +35,7 @@ echo "== Check 2: borrowed substrate wired =="
 if py_run -c "
 import json
 pkgs = json.load(open('$W/.pi/settings.json'))['packages']
-need = ['npm:@juicesharp/rpiv-todo', 'npm:@tombell/pi-diff', 'npm:@tombell/pi-status']  # @tombell/pi-plan retired in P2.T2a (perk owns plan mode)
+need = ['npm:@tombell/pi-diff', 'npm:@tombell/pi-status']  # @tombell/pi-plan retired in P2.T2a; rpiv-todo retired in P2.T12 (perk owns checkpoints)
 missing = [p for p in need if p not in pkgs]
 self = [p for p in pkgs if p.startswith('npm:@perk/pi') or p == '..' or p.startswith('..')]
 assert not missing, f'missing {missing}'

@@ -4,12 +4,15 @@ A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the ses
 *exterior*) plus a TypeScript Pi extension (the session *interior*), sequenced so that
 **perk bootstraps itself**.
 
-> Status: **Phase 1 complete.** The in-session workflow **spine** (`plan → save → implement
-> → submit → land → learn`) is closed end-to-end and **dogfooded — perk ships perk** (see
-> [docs/planning/phase-1-gate.md](docs/planning/phase-1-gate.md)); any plan is resumable at
-> its current stage via `perk resume`. Phase 2 deepens the loop (perk-owned plan mode,
-> objectives, CI + the review/address loop). See [docs/index.md](docs/index.md) for the full
-> plan and [docs/ROADMAP.md](docs/ROADMAP.md) for the phasing.
+> Status: **Phase 2 complete.** The in-session workflow **spine** (`plan → save → implement
+> → submit → land → learn`) is closed *and deepened* — perk-owned plan mode + structural
+> tool-gating, a post-edit formatter, in-process + spawned context-isolation, a read-only CI
+> executor, the `/address` review loop, deepened submit/land/learn, and objectives as plan
+> factories + reconciliation — all **dogfooded on perk's own repo** (see
+> [docs/planning/phase-2-gate.md](docs/planning/phase-2-gate.md)); any plan is resumable at
+> its current stage via `perk resume`. Phase 3 adds the headless worker + queue. See
+> [docs/index.md](docs/index.md) for the full plan and [docs/ROADMAP.md](docs/ROADMAP.md) for
+> the phasing.
 
 ## What perk is
 
@@ -47,26 +50,32 @@ is verified but never required (it is reported, never fatal).
 | --- | --- |
 | `perk init` | Scaffold/converge a repo for perk: `.pi/settings.json` packages, the `.pi/workflow/` cache layout, `.gitignore` + `AGENTS.md` managed blocks, and `.pi/perk.toml` config. Idempotent. `--json`/`--force`. |
 | `perk doctor` | Diagnose the managed setup (six grouped checks); `--fix` repairs known drift; `--json` + stable exit codes for supervisors; `-v` expands the condensed view. |
-| `perk plan \| submit \| land \| learn` | Stage **launchers**: mint a `run_id` and `exec` a primed `pi` session for that stage (the in-session *handlers* live in the extension). `--dry-run` resolves a launch without side effects. |
+| `perk plan \| submit \| address \| land \| learn` | Stage **launchers**: mint a `run_id` and `exec` a primed `pi` session for that stage (the in-session *handlers* live in the extension). `--dry-run` resolves a launch without side effects. |
 | `perk implement [PLAN]` | Materialize the plan's worktree/branch and launch a fresh `pi` **primed to implement it**. Optional issue number selects a specific plan; omit it to use the active saved plan. |
-| `perk plan-save` / `pr-submit` / `pr-land` | The cold/worker GitHub doors (the in-session twins are the `plan_save` / `submit` / `land` tools): create the plan issue, open the draft PR, and squash-merge it. `--json` + `--dry-run`. |
+| `perk objective-plan` | The **plan factory**: select the next actionable objective node (dependency-graph `next`), optionally explore it read-only, and emit a bounded plan through the `plan → save` spine. The new initial node of the deepened graph. |
+| `perk objective create/show/node/next/reconcile` | Manage **objectives** (multi-plan roadmaps as GitHub issues): create an objective + its roadmap nodes, show it, advance a node's status, pick the next actionable node, and reconcile its prose against a merged diff. |
+| `perk plan-save` / `pr-submit` / `pr-check` / `pr-ready` / `pr-land` | The cold/worker GitHub doors (the in-session twins are the `plan_save` / `submit` / `land` tools): create the plan issue, open + run CI on + flip-ready + squash-merge the draft PR. `--json` + `--dry-run`. |
+| `perk pr-feedback` / `pr-resolve-threads` / `learn-capture` | The `/address` review-loop workers (classify PR feedback, reply-then-resolve threads) and the `/learn` capture worker. |
 | `perk resume <plan>` | Resolve any plan to its current actionable stage (no PR → implement, open → submit, merged+pending-learn → learn) and launch it. |
 | `perk worktree create/list/remove` | Manage git worktrees under the configured root. |
 | `perk state` / `perk registry` | Inspect the local `.pi/workflow/` cache + run ids; inspect/validate the shared stage registry. |
 
-The in-session **warm doors** (the perk extension): `/plan-save`, `/submit`, `/land`, `/learn`
-(+ the `plan_save`/`submit`/`land`/`learn` tools), cross-stage lifecycle gates, and a guard-only
-`/implement`.
+The in-session **warm doors** (the perk extension): `/plan`, `/plan-save`, `/implement`, `/submit`,
+`/ready`, `/address`, `/land`, `/learn`, `/checkpoints`, `/objective-plan`, `/objective-reconcile`
+(+ the `plan_save`/`submit`/`land`/`learn`/`resolve_review_threads`/`objective_node`/`reconcile_objective`
+tools), and cross-stage lifecycle gates.
 
 ## Where this is going
 
-Phases 0–1 ship the **scaffolding** and the **thin loop**, still on the **borrow-then-own**
-substrate: init borrows mature community Pi packages (plan mode, a todo overlay, a statusline,
-diff review) while perk-owned pieces land. **Phase 2** deepens the loop *through* it — perk-owned
-plan mode + the tool-gating primitive (retiring the borrowed `pi-plan`), objectives, the CI
-executor, and the review/`address` loop. The phasing, dogfood gates, and locked decisions live in
-[docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans (and the Phase-1
-[gate record](docs/planning/phase-1-gate.md)) live in [docs/planning/](docs/planning/).
+Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** on the
+**borrow-then-own** substrate. Phase 2 internalized the borrowed pieces: perk now owns plan mode
+(retiring `@tombell/pi-plan`, P2.T2a) **and** implement-progress checkpoints (retiring
+`@juicesharp/rpiv-todo`, P2.T12). The surviving borrows are `@tombell/pi-diff`, the
+`@tombell/pi-status` statusline, and the `pi-subagents` **engine** (behind perk's thin seam — perk
+owns the agent definitions). **Phase 3** adds the headless worker + queue (autonomy). The phasing,
+dogfood gates, and locked decisions live in [docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans (and
+the [Phase-1](docs/planning/phase-1-gate.md) / [Phase-2](docs/planning/phase-2-gate.md) gate
+records) live in [docs/planning/](docs/planning/).
 
 ## Layout
 
@@ -93,7 +102,7 @@ just fmt          # ruff format + biome format
 just lint         # ruff check + biome check
 just typecheck    # ty + tsc
 just test         # pytest
-just verify       # the cumulative hard gates (Phase 0 + Phase 1)
+just verify       # the cumulative hard gates (Phase 0 + Phase 1 + Phase 2)
 just ci           # setup + lint + typecheck + test
 just perk init    # run perk in the project env
 ```

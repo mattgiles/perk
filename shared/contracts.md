@@ -282,8 +282,9 @@ re-folded only from assistant messages **after** it (stale `[DONE:n]` from a pre
 cannot resurrect a step). Status surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by
 `ctx.hasUI`** (headless never touches rich UI); `/checkpoints` lists progress (notify when UI, else
 stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
-`perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` is **not** retired
-here — P2.T12 retires it, conditional on this seam landing.
+`perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` **is** retired in
+P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
+implement-progress overlay via this perk-owned `perk:checkpoint` seam.
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
