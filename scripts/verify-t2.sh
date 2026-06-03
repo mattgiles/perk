@@ -25,7 +25,7 @@ run_to() {
 echo "== Check 1: Python plane validates the bundled registry =="
 OUT="$(perk_run registry check 2>&1)"; rc=$?
 echo "  $OUT"
-if [ "$rc" = 0 ] && echo "$OUT" | grep -q "6 stages" && echo "$OUT" | grep -q "graph consistent"; then
+if [ "$rc" = 0 ] && echo "$OUT" | grep -q "7 stages" && echo "$OUT" | grep -q "graph consistent"; then
   pass "perk registry check OK"
 else
   bad "perk registry check failed (rc=$rc)"
@@ -35,7 +35,7 @@ echo "== Check 2: TS plane parses its bundled registry (scriptable proof) =="
 SENT="$ROOT/.pi/workflow/.perk-loaded"
 rm -f "$SENT"; mkdir -p "$ROOT/.pi/workflow"
 PERK_SELFCHECK=1 run_to 30 pi -e ./extension/index.ts -p --no-session --no-tools "reply ok" >/dev/null 2>&1
-if [ -f "$SENT" ] && grep -q "registry=ok stages=6" "$SENT"; then
+if [ -f "$SENT" ] && grep -q "registry=ok stages=7" "$SENT"; then
   pass "extension parsed registry: $(cat "$SENT" | tr -d '\n')"
 else
   bad "no registry parse proof (sentinel: $(cat "$SENT" 2>/dev/null | tr -d '\n'))"

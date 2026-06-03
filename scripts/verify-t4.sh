@@ -35,7 +35,7 @@ else
   bad "stage subcommands not generated"
 fi
 REMOTE="$(perk_in "$W" plan --remote 2>&1)"; rc=$?
-if [ "$rc" != 0 ] && echo "$REMOTE" | grep -q "Phase 3"; then
+if [ "$rc" != 0 ] && echo "$REMOTE" | grep -q "local-only"; then
   pass "perk plan --remote blocked ($(echo "$REMOTE" | head -1))"
 else
   bad "perk plan --remote did not block (rc=$rc)"

@@ -210,6 +210,65 @@ def test_find_plan_issue_match_and_no_match(monkeypatch):
     assert github.find_plan_issue(run_id="01RID", repo_root=ROOT) is None
 
 
+# --- learn issue (P2.T8b) -------------------------------------------------------------------
+
+
+def _learn_header(run_id: str, plan_number: int = 7) -> str:
+    return plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY, {"run_id": run_id, "created": "t", "plan": plan_number}
+    )
+
+
+def test_find_learn_issue_is_label_scoped_and_ignores_the_plan_issue(monkeypatch):
+    # The D10 regression: a list carrying the PLAN issue (same run_id, but its run_id lives in the
+    # plan-header block) must NOT match find_learn_issue (which reads the learn-header block). This
+    # is exactly what stops /learn from treating the plan issue as the learn issue.
+    plan_issue = [{"number": 7, "html_url": "u/7", "body": _header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(plan_issue)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.find_learn_issue(run_id="01RID", repo_root=ROOT) is None
+    # ...and the lookup is label-scoped to perk:learn.
+    assert any("labels=perk:learn" in tok for c in rec.calls for tok in c)
+
+
+def test_find_learn_issue_matches_a_learn_issue_with_the_run_id(monkeypatch):
+    learn_issue = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
+    monkeypatch.setattr(
+        subprocess, "run", _GhRecorder(get=_Proc(0, stdout=json.dumps(learn_issue)))
+    )
+    found = github.find_learn_issue(run_id="01RID", repo_root=ROOT)
+    assert found is not None and found.number == 99
+
+
+def test_create_learn_issue_idempotent_returns_existing_no_create(monkeypatch):
+    existing = [{"number": 99, "html_url": "u/99", "body": _learn_header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_learn_issue(
+        title="Learnings: X", body="b", repo_root=ROOT, run_id="01RID", plan_number=7
+    )
+    assert issue.number == 99 and issue.existed is True
+    assert not rec.posted()  # dedup short-circuits before the label create + issue POST
+
+
+def test_create_learn_issue_creates_with_label_and_header(monkeypatch):
+    # No existing learn issue -> lazy-create the perk:learn label, then POST the issue with the
+    # learn-header rendered into the body so a later find_learn_issue can match.
+    rec = _GhRecorder(
+        get=_Proc(0, stdout="[]"),
+        post=_Proc(0, stdout=json.dumps({"number": 100, "url": "u/100"})),
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_learn_issue(
+        title="Learnings: X", body="captured body", repo_root=ROOT, run_id="01RID", plan_number=7
+    )
+    assert issue.number == 100 and issue.existed is False
+    assert any("name=perk:learn" in tok for c in rec.calls for tok in c)  # lazy label create
+    body = rec.body_files[-1]
+    assert plan.extract_run_id(body, header_key=plan.LEARN_HEADER_KEY) == "01RID"
+    assert "captured body" in body
+
+
 def _header(run_id: str) -> str:
     return plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id=run_id, created="t").to_data()
@@ -480,6 +539,83 @@ def test_get_plan_body_infra_failure_raises(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(1, stderr="HTTP 500"))
     with pytest.raises(github.GitHubError):
         github.get_plan_body(number=42, repo_root=ROOT)
+
+
+# --- PR body craft (P2.T8a) -----------------------------------------------------------------
+
+
+def test_update_pr_body_patches_via_file(monkeypatch):
+    rec = _GhDispatch([(_has("pulls/42", "PATCH"), _Proc(0, "{}"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    upd = github.update_pr_body(number=42, body="NEW-BODY", repo_root=ROOT)
+    assert upd.number == 42 and upd.dry_run is False
+    assert rec.body_files == ["NEW-BODY"]  # body via file, never inline
+    assert all("body=NEW-BODY" not in tok for c in rec.calls for tok in c)
+
+
+def test_update_pr_body_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert github.update_pr_body(number=42, body="x", repo_root=ROOT, dry_run=True).dry_run
+
+
+def test_update_pr_body_failure_raises(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("pulls/42", "PATCH"), _Proc(1, stderr="HTTP 422"))])
+    )
+    with pytest.raises(github.GitHubError):
+        github.update_pr_body(number=42, body="x", repo_root=ROOT)
+
+
+def test_get_pr_body_returns_body(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(0, "PR BODY TEXT"))
+    assert github.get_pr_body(number=42, repo_root=ROOT) == "PR BODY TEXT"
+
+
+def test_get_pr_body_missing_returns_none(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: _Proc(1, stderr="HTTP 404"))
+    assert github.get_pr_body(number=999, repo_root=ROOT) is None
+
+
+def test_validate_pr_body_valid_footer_passes():
+    body = "Closes #7\n\nPlan: #7\n\n`gh pr checkout 42`\n"
+    assert github.validate_pr_body(body, pr_number=42) == ()
+
+
+def test_validate_pr_body_issue_number_footer_fails():
+    # The regression test: the latent issue-numbered-footer bug (footer carries #7, not the PR #42).
+    body = "Closes #7\n\n`gh pr checkout 7`\n"
+    errors = github.validate_pr_body(body, pr_number=42)
+    assert errors and any("wrong number" in e for e in errors)
+
+
+def test_validate_pr_body_word_boundary():
+    # `42` must not match `checkout 123` (word-boundary, not substring).
+    body = "`gh pr checkout 123`\n"
+    errors = github.validate_pr_body(body, pr_number=12)
+    assert errors and any("wrong number" in e for e in errors)
+
+
+def test_validate_pr_body_html_wrapped_fails():
+    body = "Closes #7\n\n<code>gh pr checkout 42</code>\n"
+    errors = github.validate_pr_body(body, pr_number=42)
+    assert errors and any("plain-backtick" in e for e in errors)
+
+
+def test_validate_pr_body_missing_footer_fails():
+    errors = github.validate_pr_body("Closes #7\n\nPlan: #7\n", pr_number=42)
+    assert errors and any("missing" in e for e in errors)
+
+
+def test_validate_pr_body_html_details_embed_is_fine():
+    # The <details> plan embed is explicitly fine; only the footer is validated.
+    body = (
+        "Closes #7\n\n<details><summary>Plan #7</summary>\n\n# Plan\n\n</details>\n\n"
+        "`gh pr checkout 42`\n"
+    )
+    assert github.validate_pr_body(body, pr_number=42) == ()
 
 
 # --- review feedback (P2.T7) ----------------------------------------------------------------

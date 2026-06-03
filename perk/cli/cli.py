@@ -13,9 +13,12 @@ from perk import __version__
 from perk.cli.commands.doctor_cmd import doctor
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
+from perk.cli.commands.learn_capture_cmd import learn_capture
 from perk.cli.commands.plan_save_cmd import plan_save
+from perk.cli.commands.pr_check_cmd import pr_check
 from perk.cli.commands.pr_feedback_cmd import pr_feedback
 from perk.cli.commands.pr_land_cmd import pr_land
+from perk.cli.commands.pr_ready_cmd import pr_ready
 from perk.cli.commands.pr_resolve_threads_cmd import pr_resolve_threads
 from perk.cli.commands.pr_submit_cmd import pr_submit
 from perk.cli.commands.registry_cmd import registry
@@ -40,7 +43,10 @@ def cli(ctx: click.Context) -> None:
 cli.add_command(init_perk)
 cli.add_command(plan_save)
 cli.add_command(pr_submit)
+cli.add_command(pr_check)
+cli.add_command(pr_ready)
 cli.add_command(pr_land)
+cli.add_command(learn_capture)
 cli.add_command(pr_feedback)
 cli.add_command(pr_resolve_threads)
 cli.add_command(resume_cmd)

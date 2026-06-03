@@ -26,14 +26,17 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _stub_gh(monkeypatch, *, existed: bool = False) -> dict[str, object]:
+def _stub_gh(
+    monkeypatch, *, existed: bool = False, plan_body: str | None = None
+) -> dict[str, object]:
     """Stub the whole submit gateway path; record what the worker did."""
-    calls: dict[str, object] = {"pushed": False, "header": None}
+    calls: dict[str, object] = {"pushed": False, "header": None, "pr_body": None}
     monkeypatch.setattr(
         github,
         "get_plan",
         lambda **k: github.PlanState(number=7, url="u/7", title="My Feature", header={}, pr=None),
     )
+    monkeypatch.setattr(github, "get_plan_body", lambda **k: plan_body)
     monkeypatch.setattr(github, "default_branch", lambda root: "main")
     monkeypatch.setattr(
         github,
@@ -47,10 +50,15 @@ def _stub_gh(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         calls["header"] = k["fields"]
         return github.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
 
+    def _update_body(**k):
+        calls["pr_body"] = k["body"]
+        return github.PrBodyUpdate(number=k["number"], dry_run=False)
+
     def _push(*a, **k):
         calls["pushed"] = True
 
     monkeypatch.setattr(github, "update_plan_header", _update)
+    monkeypatch.setattr(github, "update_pr_body", _update_body)
     monkeypatch.setattr(git, "push", _push)
     return calls
 
@@ -98,6 +106,22 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
     assert data["pr"]["number"] == 42 and data["pr"]["existed"] is False
     assert calls["pushed"] is True
     assert calls["header"] == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+    # The footer carries the PR number (42), not the issue number (7) — the create-then-update fix.
+    assert "`gh pr checkout 42`" in str(calls["pr_body"])
+    assert "`gh pr checkout 7`" not in str(calls["pr_body"])
+    assert data["pr_checked"] is True and data["plan_embedded"] is False
+
+
+def test_real_submit_embeds_plan_when_available(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch, plan_body="# My Plan\n\nbody text")
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["plan_embedded"] is True
+    body = str(calls["pr_body"])
+    assert "<details><summary>Plan #7</summary>" in body and "# My Plan" in body
+    assert "`gh pr checkout 42`" in body  # footer stays plain even with the HTML embed
 
 
 def test_real_submit_idempotent_existing_pr(monkeypatch):

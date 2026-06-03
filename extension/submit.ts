@@ -12,6 +12,7 @@ export interface SubmitDetails {
   pr?: { number: number; url: string; is_draft: boolean; existed: boolean };
   branch?: string;
   issue?: number;
+  plan_embedded?: boolean;
   error?: string;
   error_type?: string;
 }
@@ -30,6 +31,7 @@ interface PrSubmitJson {
   pr?: { number: number; url: string; is_draft: boolean; existed: boolean };
   branch?: string;
   issue?: number;
+  plan_embedded?: boolean;
 }
 
 /**
@@ -83,9 +85,18 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   }
 
   const verb = parsed.pr.existed ? "Found existing" : "Opened draft";
+  const embed = parsed.plan_embedded ? "plan embedded" : "no plan embed";
   return {
-    content: [{ type: "text", text: `${verb} PR #${parsed.pr.number} → ${parsed.pr.url}` }],
-    details: { ok: true, pr: parsed.pr, branch: parsed.branch, issue: parsed.issue },
+    content: [
+      { type: "text", text: `${verb} PR #${parsed.pr.number} → ${parsed.pr.url} (${embed})` },
+    ],
+    details: {
+      ok: true,
+      pr: parsed.pr,
+      branch: parsed.branch,
+      issue: parsed.issue,
+      plan_embedded: parsed.plan_embedded,
+    },
     terminate: true,
   };
 }

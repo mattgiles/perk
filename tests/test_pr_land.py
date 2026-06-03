@@ -26,8 +26,10 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _stub_land(monkeypatch, *, draft: bool, merged: bool = False) -> dict[str, object]:
-    calls: dict[str, object] = {"readied": False, "merged": False}
+def _stub_land(
+    monkeypatch, *, draft: bool, merged: bool = False, title: str = "My Feature"
+) -> dict[str, object]:
+    calls: dict[str, object] = {"readied": False, "merged": False, "commit_message": None}
     state = "MERGED" if merged else "OPEN"
     monkeypatch.setattr(
         github,
@@ -36,12 +38,18 @@ def _stub_land(monkeypatch, *, draft: bool, merged: bool = False) -> dict[str, o
             number=42, url="u/pr/42", is_draft=draft, state=state, existed=True
         ),
     )
+    monkeypatch.setattr(
+        github,
+        "get_plan",
+        lambda **k: github.PlanState(number=7, url="u/7", title=title, header={}, pr=None),
+    )
 
     def _ready(**k):
         calls["readied"] = True
 
     def _merge(**k):
         calls["merged"] = True
+        calls["commit_message"] = k.get("commit_message")
         return github.PullRequest(
             number=42, url="u/pr/42", is_draft=False, state="MERGED", existed=True
         )
@@ -99,7 +107,21 @@ def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
         data = json.loads(result.output)
         assert data["pr"]["state"] == "MERGED" and data["pending_learn"] is True
         assert calls["readied"] is True and calls["merged"] is True
+        # P2.T8b: the squash commit is plain `title + Closes #N` (no HTML leaks into git log).
+        assert calls["commit_message"] == "My Feature\n\nCloses #7"
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+def test_real_land_empty_title_falls_back_to_closes(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        calls = _stub_land(monkeypatch, draft=False, title="")
+        result = runner.invoke(cli, ["pr-land", "--json"])
+        assert result.exit_code == 0
+        assert calls["commit_message"] == "Closes #7"
 
 
 def test_real_land_ready_pr_skips_mark_ready(monkeypatch):

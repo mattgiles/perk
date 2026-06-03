@@ -10,6 +10,7 @@ The TS extension authors the *same* operation names + payload shapes in Phase 1,
 """
 
 import json
+import re
 import subprocess
 import tempfile
 from collections.abc import Iterator
@@ -206,11 +207,21 @@ def create_label(
     raise _failed(proc, f"failed to create label {name!r}")
 
 
-def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
-    """Find an open ``perk:plan`` issue whose header ``run_id`` matches (idempotency lookup).
+def find_plan_issue(
+    *,
+    run_id: str,
+    repo_root: Path,
+    label: str = plan.PLAN_LABEL,
+    header_key: str = plan.PLAN_HEADER_KEY,
+) -> PlanIssue | None:
+    """Find an open ``label``-scoped issue whose metadata-block ``run_id`` matches (idempotency).
 
     Uses the **list** endpoint (not the eventually-consistent search index). Returns None for
     no match; raises ``GitHubError`` on an infra/query failure (never masks the error as None).
+
+    Parameterized by ``label``/``header_key`` (P2.T8b): the defaults find the ``perk:plan`` issue
+    (``plan-header``); ``find_learn_issue`` passes ``perk:learn``/``learn-header`` so the learn
+    lookup is **label-scoped** and cannot match the plan issue (which shares the same ``run_id``).
     """
     proc = _run(
         [
@@ -219,7 +230,7 @@ def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
             "-X",
             "GET",
             "-f",
-            f"labels={plan.PLAN_LABEL}",
+            f"labels={label}",
             "-f",
             "state=open",
         ],
@@ -237,11 +248,65 @@ def find_plan_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
         if not isinstance(issue, dict):
             continue
         body = issue.get("body")
-        if isinstance(body, str) and plan.extract_run_id(body) == run_id:
+        if isinstance(body, str) and plan.extract_run_id(body, header_key=header_key) == run_id:
             return PlanIssue(
                 number=int(issue["number"]), url=str(issue.get("html_url", "")), existed=True
             )
     return None
+
+
+def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
+    """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches (P2.T8b).
+
+    The label-scoped twin of ``find_plan_issue``: scoped to ``perk:learn`` + the ``learn-header``
+    block so it never returns the plan issue (which shares the plan's ``run_id`` under the
+    ``warm: keep`` learn stage). Returns None for no match; raises on an infra failure.
+    """
+    return find_plan_issue(
+        run_id=run_id,
+        repo_root=repo_root,
+        label=plan.LEARN_LABEL,
+        header_key=plan.LEARN_HEADER_KEY,
+    )
+
+
+def create_learn_issue(
+    *,
+    title: str,
+    body: str,
+    repo_root: Path,
+    run_id: str | None,
+    plan_number: int,
+    dry_run: bool = False,
+) -> PlanIssue:
+    """Create the ``perk:learn`` knowledge-capture issue (P2.T8b, D10). Mirrors
+    ``create_plan_issue`` but: lazily creates the ``perk:learn`` label, is **idempotent via
+    ``find_learn_issue``** (not ``find_plan_issue``), and renders a ``learn-header`` block into the
+    body so the finder can match. Raises ``GitHubError`` on failure."""
+    if dry_run:
+        return PlanIssue(number=0, url="(dry-run)", existed=False)
+    if run_id:
+        existing = find_learn_issue(run_id=run_id, repo_root=repo_root)
+        if existing is not None:
+            return existing
+    create_label(
+        plan.LEARN_LABEL,
+        color=plan.LEARN_LABEL_COLOR,
+        description=plan.LEARN_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    header = plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY,
+        {"run_id": run_id, "created": plan.now_iso(), "plan": plan_number},
+    )
+    full_body = f"{header}\n\n{body.strip()}\n"
+    return create_plan_issue(
+        title=title,
+        body=full_body,
+        repo_root=repo_root,
+        run_id=None,  # idempotency already handled above via find_learn_issue
+        labels=(plan.LEARN_LABEL,),
+    )
 
 
 def create_plan_issue(
@@ -336,6 +401,14 @@ class PlanHeaderUpdate:
     """The result of a staged ``plan-header`` field write."""
 
     fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class PrBodyUpdate:
+    """The result of a PR-body re-write (P2.T8a — the create-then-update footer write)."""
+
+    number: int
     dry_run: bool
 
 
@@ -518,6 +591,76 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
     except json.JSONDecodeError as exc:
         raise GitHubError(f"unparseable `gh api pulls/{number}` output: {exc}") from exc
     return _pull_request(data, existed=True)
+
+
+def get_pr_body(*, number: int, repo_root: Path) -> str | None:
+    """Fetch a PR's body markdown (REST). ``None`` if the PR does not exist; raises on infra
+    failure. Used by ``perk pr-check`` to re-validate the live checkout footer (P2.T8a)."""
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".body"], cwd=repo_root)
+    if proc.returncode != 0:
+        if "404" in (proc.stderr + proc.stdout):
+            return None
+        raise _failed(proc, f"failed to read PR #{number} body")
+    return proc.stdout
+
+
+def update_pr_body(
+    *, number: int, body: str, repo_root: Path, dry_run: bool = False
+) -> PrBodyUpdate:
+    """Re-write a PR's body (REST ``PATCH .../pulls/{n}``, body via file; mirrors
+    :func:`update_plan_header`). P2.T8a's create-then-update footer write: the checkout footer
+    needs the **PR** number, unknown until ``create_pr`` returns. Idempotent (overwrites). The PR
+    body is distinct from the issue body -- no collision with ``update_plan_header``."""
+    if dry_run:
+        return PrBodyUpdate(number=number, dry_run=True)
+    with _body_file(body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/pulls/{number}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update PR #{number} body")
+    return PrBodyUpdate(number=number, dry_run=False)
+
+
+_CHECKOUT_RE = re.compile(r"gh pr checkout\s+(\d+)")
+_PLAIN_FOOTER_RE = re.compile(r"`gh pr checkout\s+(\d+)`")
+_HTML_FOOTER_RE = re.compile(r"<code>[^<]*gh pr checkout", re.IGNORECASE)
+
+
+def validate_pr_body(body: str, *, pr_number: int) -> tuple[str, ...]:
+    """Validate the PR body's checkout footer (P2.T8a, D5). Empty tuple == valid.
+
+    **Footer-scoped only** -- the ``<details>`` plan embed is explicitly fine; the footer must be
+    a plain-backtick `` `gh pr checkout <pr_number>` `` line carrying the **PR** number (not the
+    issue number -- erk's single most common agent mistake). The three checks:
+
+    1. the checkout footer is present,
+    2. it carries the correct PR number (word-boundary: ``#12`` != ``...checkout 123``),
+    3. it is plain backtick, not wrapped in HTML (``<code>...</code>`` breaks supervisor copy).
+    """
+    all_numbers = _CHECKOUT_RE.findall(body)
+    if not all_numbers:
+        return (f"checkout footer missing (expected `gh pr checkout {pr_number}`)",)
+    errors: list[str] = []
+    html_wrapped = bool(_HTML_FOOTER_RE.search(body))
+    if html_wrapped:
+        errors.append("checkout footer must be a plain-backtick line, not HTML-wrapped")
+    plain_numbers = _PLAIN_FOOTER_RE.findall(body)
+    if str(pr_number) not in plain_numbers:
+        if str(pr_number) not in all_numbers:
+            errors.append(f"checkout footer carries the wrong number (expected PR #{pr_number})")
+        elif not html_wrapped:
+            errors.append("checkout footer is present but not a plain-backtick line")
+    return tuple(errors)
 
 
 def get_plan(*, number: int, repo_root: Path) -> PlanState | None:

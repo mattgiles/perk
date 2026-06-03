@@ -79,6 +79,9 @@ verify:
     bash scripts/verify-p2-t5.sh
     bash scripts/verify-p2-t6.sh
     bash scripts/verify-p2-t7.sh
+    bash scripts/verify-p2-t8a.sh
+    bash scripts/verify-p2-t8b.sh
+    bash scripts/verify-p2-t8c.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

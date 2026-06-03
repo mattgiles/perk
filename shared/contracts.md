@@ -448,6 +448,38 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
   stored (Q8).
 
+**Authored (P2.T8b — deep `/land` + `/learn`).** Land deepens the squash commit message; learn
+graduates from a thin marker-clear into a real knowledge-capture pass:
+
+```
+find_learn_issue{ run_id }                          -> PlanIssue | null
+    # GET .../issues?labels=perk:learn&state=open + learn-header run_id match. LABEL-SCOPED to
+    # perk:learn (+ the learn-header block) so it CANNOT return the plan issue, which shares the
+    # plan's run_id under the warm:keep learn stage. Implemented by parameterizing find_plan_issue
+    # with label/header_key (the perk:plan/plan-header defaults preserved — no caller changes).
+create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url, existed }
+    # lazy create_label("perk:learn"); idempotent via find_learn_issue (NOT find_plan_issue);
+    # renders a learn-header block { run_id, created, plan } into the body so the finder matches.
+```
+
+- **Deepened squash commit message (D8).** Land now passes `merge_pr(commit_message=)` =
+  plain `"<plan title>\n\nCloses #<issue>"` (`get_plan(...).title`, fallback `Closes #<issue>` on an
+  empty title). Plain text only — the second of the **two PR targets** (the GitHub HTML body, T8a,
+  is the other); HTML never leaks into `git log`.
+- **`/learn` (D10).** The `learn-capture` worker (`perk learn-capture --json --body <file>`) reads
+  the agent-captured learnings markdown from a run-scoped scratch file (the stdin-less worker
+  pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), and
+  clears `pending-learn`. The warm `/learn` (`extension/learn.ts`) takes an optional `summary`:
+  present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
+  (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
+  `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
+- **Reconciliation typing (D9 — vocabulary established; only Mechanical applied).** Three section
+  types on land: **Mechanical** (command-updated, deterministic — this turn: `pending-learn` +
+  the plain squash commit message); **Reconcilable** (LLM-updated post-merge — *deferred to T11*);
+  **Immutable** (never touched). The merged state is **PR-derived and not stored** (Q8), so land
+  authors no new stored field. Objective-node reconciliation is **deferred to T11** (flagged, not
+  silently omitted).
+
 **Authored (P2.T7 — the `/address` review loop).** Review threads + their resolution are
 **GraphQL-only** (REST has no `isResolved`, no `resolveReviewThread`/`addPullRequestReviewThreadReply`);
 discussion comments stay REST. The GraphQL shapes are verbatim from erk (the durable prior art). The
@@ -469,6 +501,40 @@ resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ s
 ```
 
 - **Batch shape (PRIOR_ART §5/§11):** `[{ thread_id, comment }]` (objects, not a flat list).
+
+**Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
+in `perk pr-submit` via **create-then-update** (the checkout footer needs the PR number, unknown
+until `create_pr` returns), which also fixes a latent correctness bug (the Phase-1 footer carried
+the **issue** number, not the PR's — erk's single most common agent mistake):
+
+```
+update_pr_body{ number, body }                      -> PrBodyUpdate{ number, dry_run }
+    # PATCH .../pulls/{n} (-F body=@file); mirrors update_plan_header (PR body, not issue body).
+    # Re-writes the full body WITH the plain-backtick `gh pr checkout <pr_number>` footer once the
+    # PR number is known. Idempotent (overwrites).
+get_pr_body{ number }                               -> string | null
+    # GET .../pulls/{n} --jq .body; the read `perk pr-check` re-validates against.
+validate_pr_body(body, *, pr_number)                -> string[]   (empty == valid)
+    # PURE (no gh). Footer-scoped ONLY (the <details> embed is explicitly fine): the footer must be
+    # present, plain-backtick (not HTML-wrapped), and carry the PR number (word-boundary: #12 ≠
+    # …checkout 123). This is the self-check that catches the issue-numbered-footer bug.
+```
+
+- **The two-target split (D4).** The HTML-enhanced body — a best-effort `<details>` embed of the
+  verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
+  **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
+  target: plain text, set at land (T8b) so HTML never leaks into `git log`.
+- **`pr check` (D5).** `perk pr-submit` runs `validate_pr_body` as a **post-write self-check** and
+  **raises** (`error_type: pr_check_failed`) on failure. A thin `perk pr-check --json` (active
+  plan-ref → find PR → `get_pr_body` → `validate_pr_body`) is the supervisor surface (exit 0 valid /
+  1 invalid·op-failure / 2 not-a-repo).
+- **Draft → ready is a deliberate gesture (D6).** Submit keeps the PR **draft**; perk does **not**
+  auto-publish (unlike erk's `finalize_pr`). The new `perk pr-ready` (warm `/ready`, `extension/
+  ready.ts`) is the explicit review gate — `mark_pr_ready` if draft, idempotent. Land's
+  mark-ready-if-draft stays a safety net. **Correction:** perk plans are GitHub *issues*, not repo
+  files, so erk's plan-file-diff completion heuristic does **not** map — the explicit draft→ready
+  transition is the gate, and no plan-file-diff detector is built (never infer completion from PR
+  open/closed state alone).
 
 ### Plan-ref payload (provider-agnostic; full schema → Phase 1)
 
@@ -580,6 +646,39 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > `pi-plan` emits no structured plan, so the `<proposed_plan>` scrape was dropped). Neither changed
 > any stage's state-I/O. The registry per-stage `requires`/`reads`/`writes` + `doors` are filled for
 > all six spine stages.
+>
+> **Status (P2.T8a):** the **submit body is deepened + the issue-numbered-footer bug is fixed**.
+> `perk pr-submit` composes an HTML-enhanced GitHub PR body (best-effort verbatim-plan `<details>`
+> embed via `get_plan_body`) and appends the checkout footer via **create-then-update**
+> (`update_pr_body`) carrying the **PR** number, then runs `validate_pr_body` as a post-write
+> self-check (`pr_check_failed` on failure). A thin `perk pr-check --json` is the supervisor surface.
+> Submit keeps the PR **draft**; the new `perk pr-ready` (warm `/ready`) is the deliberate review
+> gate. The two-target split is explicit: HTML in the GitHub body, plain text in the squash commit
+> (deepened at T8b). `submit`'s registry I/O is unchanged.
+>
+> **Status (P2.T8b):** `/land` + `/learn` are **deepened**. Land's squash commit message is now
+> plain `"<plan title>\n\nCloses #N"` (fallback on empty title) — the second of the two PR targets.
+> `/learn` graduates to a real knowledge-capture pass: with a `summary` it creates a `perk:learn`
+> issue (idempotent via the **`perk:learn`-scoped `find_learn_issue`** — label + `learn-header`
+> block, so it never matches the plan issue) + a back-link comment, then clears `pending-learn`;
+> without one it stays the thin marker-clear. `learn` reads `[cache.markers, cache.plan-ref]` and
+> writes `[cache.markers, github.learn, github.comments]` (the new `github.learn` key). The
+> reconciliation-typing vocabulary (Mechanical/Reconcilable/Immutable) is established; only the
+> deterministic **Mechanical** type is applied this turn (Reconcilable + objective reconciliation are
+> deferred to T11).
+>
+> **Status (P2.T8c — the CLI plumbing slice).** The `--remote` stub graduates to a real **target
+> resolver** (`launch.resolve_target(stage, remote) -> Target`, pure + unit-tested): `None` → local
+> (unchanged); a `cold_remote:false` stage → `UserFacingCliError`/`remote_blocked`; a
+> `cold_remote:true` stage → a `RemoteTarget` descriptor (runner ref + run_id→plan linkage) surfaced
+> in `--dry-run`/`--json`, then a stable `UserFacingCliError`/`remote_not_driven` exit (it does **not**
+> persist intent or trigger a runner — the Phase-3 consumer is not built, cli-vs-pi §4.5). The
+> registry now records `doors.cold_remote: true` on **`implement` + `address`** (the agentic,
+> headless-runnable stages a Phase-3 CI worker drives) and `false` on the other five — the reused
+> seam = resolver + validated registry doors + the `--json` target descriptor. **Phase 2 builds and
+> resolves the target; Phase 3 drives it.** The `--remote` help text on the three launchers is
+> reconciled from "Phase 3; currently blocked" to "Local (default) or a remote runner; remote
+> dispatch is driven by the Phase-3 worker."
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 
