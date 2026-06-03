@@ -25,8 +25,11 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert f"npm:@perk/pi@{__version__}" in packages
     assert "npm:@tombell/pi-status" in packages
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
+    assert "npm:pi-subagents" in packages  # P2.T6: borrowed spawned-delegation engine
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
+    # P2.T6: perk-owned agent-definitions home (committed; T7 populates it).
+    assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
     assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
