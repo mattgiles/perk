@@ -21,6 +21,7 @@ import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerObjective } from "./objective.ts";
+import { registerObjectivePlan } from "./objectivePlan.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
@@ -242,6 +243,11 @@ export default function (pi: ExtensionAPI) {
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
   registerObjective(pi);
+
+  // P2.T10 — the objective plan factory's warm transition surface: the `objective_node` bounded
+  // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
+  // `/objective-plan` command (select the next node and author a bounded plan).
+  registerObjectivePlan(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

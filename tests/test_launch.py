@@ -109,6 +109,25 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
 
 
+def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
+    # P2.T10: prompt_override wins over _initial_prompt (objective-plan has no plan-ref, so
+    # _initial_prompt would be None). The seeded prompt lands as the launch argv.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("objective-plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        prompt_override="SEED PROMPT for node 2.3",
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["stage"] == "objective-plan"
+    assert data["argv"][0] == "pi"
+    assert data["argv"][-1] == "SEED PROMPT for node 2.3"
+
+
 def test_initial_prompt_primes_implement_and_address():
     """P1.T4c Bug 1 + P2.T7: implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF)

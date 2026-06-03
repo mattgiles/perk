@@ -47,6 +47,12 @@ class PlanSaveResult:
 )
 @click.option("--title", default=None, help="Issue title (defaults to the plan's first heading).")
 @click.option(
+    "--objective-id",
+    "objective_id",
+    default=None,
+    help="Link the plan to an objective (the plan→objective direction; P2.T10).",
+)
+@click.option(
     "--dry-run", "dry_run", is_flag=True, help="Compose and print without touching GitHub."
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -57,6 +63,7 @@ def plan_save(
     plan_file: Path | None,
     run_id: str | None,
     title: str | None,
+    objective_id: str | None,
     dry_run: bool,
     as_json: bool,
 ) -> None:
@@ -79,6 +86,7 @@ def plan_save(
             plan_file=plan_file,
             run_id=resolved_run_id,
             title=title,
+            objective_id=objective_id,
             dry_run=dry_run,
         )
     except GitHubError as exc:
@@ -110,6 +118,7 @@ def _plan_save_impl(
     plan_file: Path | None,
     run_id: str | None,
     title: str | None,
+    objective_id: str | None = None,
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
@@ -125,7 +134,7 @@ def _plan_save_impl(
         raise UserFacingCliError(f"Plan file is empty: {plan_file}", error_type="invalid_input")
 
     resolved_title = title or plan.derive_title(plan_markdown)
-    header = plan.PlanHeader(run_id=run_id or "", created=plan.now_iso())
+    header = plan.PlanHeader(run_id=run_id or "", created=plan.now_iso(), objective_id=objective_id)
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
 
@@ -151,7 +160,11 @@ def _plan_save_impl(
         )
 
     plan_ref = plan.PlanRef(
-        provider="github", pr_id=str(issue.number), url=issue.url, labels=(plan.PLAN_LABEL,)
+        provider="github",
+        pr_id=str(issue.number),
+        url=issue.url,
+        labels=(plan.PLAN_LABEL,),
+        objective_id=objective_id,
     )
     # Persist the ref as the cache.plan-ref pointer (turn-2b §7): the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.

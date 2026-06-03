@@ -83,6 +83,7 @@ verify:
     bash scripts/verify-p2-t8b.sh
     bash scripts/verify-p2-t8c.sh
     bash scripts/verify-p2-t9.sh
+    bash scripts/verify-p2-t10.sh
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:

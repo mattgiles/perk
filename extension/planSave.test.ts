@@ -4,6 +4,8 @@
 // twin is unit-tested separately below.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { extractPlanMarkdown, isPlanModeActive } from "./planSave.ts";
@@ -59,6 +61,37 @@ test("tool: plan_save delegates, links the session, and terminates", async () =>
     // the live session is linked (the warm append lands on the branch; the sentinel is a
     // session_start/session_tree artifact and is intentionally not rewritten by the tool).
     assert.equal((h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id, "42");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, objective_id: "7" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(
+      argv.includes("--objective-id") && argv[argv.indexOf("--objective-id") + 1] === "7",
+      `--objective-id 7 was delegated (got ${JSON.stringify(argv)})`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save without objective_id omits --objective-id", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(!argv.includes("--objective-id"), "standalone plan omits --objective-id");
   } finally {
     h.dispose();
   }

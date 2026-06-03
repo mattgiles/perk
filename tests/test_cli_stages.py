@@ -16,8 +16,28 @@ def _ctx(repo: Path) -> PerkContext:
 def test_all_stages_are_generated():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for stage_id in ("plan", "save", "implement", "submit", "address", "land", "learn"):
+    for stage_id in (
+        "objective-plan",
+        "plan",
+        "save",
+        "implement",
+        "submit",
+        "address",
+        "land",
+        "learn",
+    ):
         assert stage_id in result.output
+
+
+def test_objective_plan_is_dedicated_not_generic():
+    # P2.T10: objective-plan is a dedicated command (in DEDICATED_STAGES), skipped by the generic
+    # generator — so it carries its own positional NUMBER arg, not the generic launcher shape.
+    from perk.cli.stages import DEDICATED_STAGES
+
+    assert "objective-plan" in DEDICATED_STAGES
+    result = CliRunner().invoke(cli, ["objective-plan", "--help"])
+    assert result.exit_code == 0
+    assert "NUMBER" in result.output  # the dedicated command's positional arg
 
 
 def test_remote_door_blocked():

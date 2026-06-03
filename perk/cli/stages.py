@@ -13,7 +13,12 @@ from perk.launch import launch_stage
 from perk.registry import RegistryError, Stage, load_registry
 
 # Stages with a dedicated, hand-written command (skipped by the generic generator below).
-DEDICATED_STAGES: frozenset[str] = frozenset({"implement"})  # perk/cli/commands/implement_cmd.py
+DEDICATED_STAGES: frozenset[str] = frozenset(
+    {
+        "implement",  # perk/cli/commands/implement_cmd.py
+        "objective-plan",  # perk/cli/commands/objective_plan_cmd.py (P2.T10)
+    }
+)
 
 
 def _make_stage_command(stage: Stage) -> click.Command:

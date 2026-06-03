@@ -15,6 +15,7 @@ from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn_capture_cmd import learn_capture
 from perk.cli.commands.objective_cmd import objective_group
+from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan_save_cmd import plan_save
 from perk.cli.commands.pr_check_cmd import pr_check
 from perk.cli.commands.pr_feedback_cmd import pr_feedback
@@ -58,6 +59,8 @@ cli.add_command(registry)
 cli.add_command(state)
 cli.add_command(worktree)
 cli.add_command(objective_group)
+cli.add_command(objective_plan)
+# objective-plan is registered above; register_stage_commands skips it (DEDICATED_STAGES).
 register_stage_commands(cli)
 
 

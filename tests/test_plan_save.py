@@ -93,6 +93,29 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
     }
 
 
+def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
+    # P2.T10: --objective-id populates the plan header block AND the cache.plan-ref.
+    _authed(monkeypatch)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+
+    def _create(**k):
+        captured["body"] = k["body"]
+        return github.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
+
+    monkeypatch.setattr(github, "create_plan_issue", _create)
+    monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md", "--objective-id", "7"])
+        assert result.exit_code == 0, result.output
+        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+    assert "objective_id: '7'" in captured["body"]
+    assert ref["objective_id"] == "7"
+
+
 def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

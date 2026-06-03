@@ -94,7 +94,7 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
 export async function savePlan(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: { plan: string; title?: string },
+  opts: { plan: string; title?: string; objectiveId?: string },
 ): Promise<SaveResult> {
   const reportError = (message: string): void => {
     const full = `perk: plan-save — ${message}`;
@@ -127,6 +127,9 @@ export async function savePlan(
     writeFileSync(planFile, plan, "utf8");
     const args = ["plan-save", "--plan-file", planFile, "--json"];
     if (runId) args.push("--run-id", runId);
+    // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
+    // number; non-objective plans omit it (unchanged behavior).
+    if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
     // pi.exec returns (does not throw) on spawn/non-zero exit — see turn-3 §3.5 S2.
     res = await pi.exec(perkBin, args, { cwd: ctx.cwd, signal: ctx.signal });
   } finally {
@@ -207,11 +210,21 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
           type: "string",
           description: "Optional issue title (defaults to the plan's first heading).",
         },
+        objective_id: {
+          type: "string",
+          description:
+            "Optional objective issue number to link this plan to (the objective plan factory " +
+            "passes the active objective; omit for a standalone plan).",
+        },
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { plan, title } = params as { plan: string; title?: string };
-      return savePlan(pi, ctx, { plan, title });
+      const { plan, title, objective_id } = params as {
+        plan: string;
+        title?: string;
+        objective_id?: string;
+      };
+      return savePlan(pi, ctx, { plan, title, objectiveId: objective_id });
     },
   });
 

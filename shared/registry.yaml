@@ -53,6 +53,19 @@ state_keys:
 # Phase 3 *drives* it. Revisable in Phase 3.
 # ---------------------------------------------------------------------------
 stages:
+  - id: objective-plan
+    summary: Select the next objective node and author a bounded plan (read-only).
+    mode: read-only
+    worktree: none            # interactive planning, like plan — no branch yet
+    doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local exploration
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: objective-plan   # P2.T10: dedicated cold door (perk objective-plan) + /objective-plan
+    requires: [github.objective]                        # an objective issue must exist
+    reads: [github.objective]                           # roadmap nodes + next-node selection
+    writes: [github.objective, session.workflow-state]  # mark node planning; set active_objective
+    predecessors: []
+    successors: [plan]
+
   - id: plan
     summary: Explore the codebase and draft a plan (read-only).
     mode: read-only
@@ -63,7 +76,7 @@ stages:
     requires: []
     reads: []
     writes: [session.workflow-state]  # P2.T2a: /plan enter/exit appends `mode` (read-only/read-write)
-    predecessors: []
+    predecessors: [objective-plan]    # P2.T10: objective-plan is the new single initial
     successors: [save]
 
   - id: save
