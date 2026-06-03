@@ -126,7 +126,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (P2.T1, see below) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id (Phase 2; null in MVP) |
-| `last_review_batch` | object \| null | the last processed review batch (Phase 2; null in MVP) |
+| `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
@@ -333,7 +333,37 @@ T7 `/address`).
 - **Roster control deferred to T7.** `subagents.disableBuiltins` + the `.agents/`-recursion-collision
   mitigation (perk's `.agents/skills/*/SKILL.md` would otherwise be discovered as stray agents) land
   with the first agent.
-- **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6) has outgrown "the
+**Review loop (`/address`, P2.T7).** perk's review-handling stage is **classify-then-act**, and the
+first consumer of the T6 spawned-delegation engine. It adds the `address` stage to the registry
+(`submit → address → land`; `mode: read-write`, `worktree: reuse`; per-stage I/O now filled —
+`requires: [github.pr]`, reads the plan-ref + PR + review-threads + comments, writes review-threads
++ comments + PR + workflow-state).
+
+- **Classify in an isolated child.** The verbose feedback fetch + classification runs in a **spawned
+  read-only child** (the borrowed `pi-subagents` engine running perk's `perk.review-classifier`
+  agent). The child itself runs `perk pr-feedback --json`, so the raw GitHub JSON **never transits
+  the parent** (route-don't-relay). It honors the **same handoff contract** as the T4/T6 amendments
+  (double-delivery: a compact prose table + a structured block; untrusted-text wrapping; fail-closed)
+  and returns `{ pr, review_threads[], discussion_comments[], counts }`.
+- **Act = parent.** Only **actionable** items get changes; the parent edits in its own read-write
+  turn. The fix is **never delegated** (the three never-delegate boundaries: judgment, the fix,
+  durable writes).
+- **Resolve = one batched op.** The warm `resolve_review_threads` tool writes `[{thread_id, comment}]`
+  to a run-scoped scratch file and delegates to `perk pr-resolve-threads` (D1), then appends
+  `last_review_batch` to workflow-state (now in **live use**; shape above).
+- **Plan File Mode.** When the PR's only diff is the plan file, feedback is reinterpreted as edits to
+  the plan *text*, not code to implement (parent judgment; captured in the `perk-address` skill).
+- **Untrusted text.** All fetched GitHub text is wrapped `<untrusted_review>…</untrusted_review>` and
+  treated as DATA, not instructions (the model T5's `<untrusted_ci_output>` established).
+- **Resolved T6 deferrals.** `subagents.disableBuiltins` is **not** set (builtins like `scout` are
+  reused later; disabling now is premature). The `.agents/`-recursion collision (perk's
+  `.agents/skills/*/SKILL.md` surface as stray agents) is mitigated by **namespacing** (every perk
+  agent def sets `package: perk`) + **explicit-name invocation** (`perk.review-classifier`), not by
+  suppressing the borrowed engine's legacy scan; the stray skill agents are benign (never invoked).
+  The cheap-model tiering value is realized: the classifier uses `anthropic/claude-haiku-4-5` with a
+  `claude-sonnet-4-5` fallback (overridable via `subagents.agentOverrides`).
+
+- **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
   workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
   dedicated "context-isolation" section is a **deferred** doc refactor — T6 files as a sibling here to
   preserve cohesion now.
@@ -418,12 +448,27 @@ merge_pr{ number, commit_message? }                 -> PullRequest (state MERGED
   `commit_message` repeats it belt-and-suspenders. Post-merge state is **derived from PR**, never
   stored (Q8).
 
-**Still named-only (payloads deferred to their stage — authoring ahead is fiction):**
+**Authored (P2.T7 — the `/address` review loop).** Review threads + their resolution are
+**GraphQL-only** (REST has no `isResolved`, no `resolveReviewThread`/`addPullRequestReviewThreadReply`);
+discussion comments stay REST. The GraphQL shapes are verbatim from erk (the durable prior art). The
+read **raises** on infra failure; the resolve captures **per-item** failures into its result (one bad
+thread does not sink the batch) but still raises on a hard infra failure (gh missing / timeout):
 
-- `resolve_review_threads` — the `address` loop (Phase 2).
-  - **Known durable shape to keep when authored** (PRIOR_ART §5/§11): the payload is
-    `[{ thread_id, comment }]` (objects, not a flat list). Review threads are a *distinct*
-    GitHub API from discussion comments — counted separately.
+```
+get_pr_feedback{ pr_number }                        -> PrFeedback{ pr_number, review_threads[], discussion_comments[], reviews[] }
+    # review threads + PR-level reviews via `gh api graphql`; discussion comments via REST
+    # GET .../issues/{n}/comments. The three sources are kept SEPARATE (counted apart) — review
+    # threads (inline, with a resolvable thread_id) are a distinct API from discussion comments.
+    # Read-only; what the spawned `perk.review-classifier` child runs (via `perk pr-feedback`).
+resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ success, results[] }
+    # for each item: optional reply (addPullRequestReviewThreadReply) THEN resolveReviewThread,
+    # both GraphQL. results[] is per-item {thread_id, success, comment_added, error}; top-level
+    # success = all resolved. An already-resolved thread re-resolves to success (idempotent).
+    # The warm TS twin writes the batch to a run-scoped scratch file (pi.exec has no stdin) and
+    # delegates via `perk pr-resolve-threads --json --batch <path>`.
+```
+
+- **Batch shape (PRIOR_ART §5/§11):** `[{ thread_id, comment }]` (objects, not a flat list).
 
 ### Plan-ref payload (provider-agnostic; full schema → Phase 1)
 

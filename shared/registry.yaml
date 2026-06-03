@@ -98,6 +98,21 @@ stages:
     reads: [cache.plan-ref, github.plan]    # T5a: ref -> branch; plan issue title for the PR
     writes: [github.pr, github.plan]        # T5a: open the draft PR; populate staged branch/pr header
     predecessors: [implement]
+    successors: [address]
+
+  - id: address
+    summary: Classify PR review feedback (isolated child) and resolve the threads.
+    mode: read-write
+    worktree: reuse
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: address
+    # P2.T7: a spawned read-only child (borrowed pi-subagents) fetches + classifies feedback;
+    # the parent fixes only actionable items and batch-resolves the threads (`resolve_review_threads`).
+    requires: [github.pr]                                          # the PR whose feedback we address
+    reads: [cache.plan-ref, github.pr, github.review-threads, github.comments]
+    writes: [github.review-threads, github.comments, github.pr, session.workflow-state]
+    predecessors: [submit]
     successors: [land]
 
   - id: land
@@ -110,7 +125,7 @@ stages:
     requires: [github.pr]                    # T5b: the PR to merge must exist
     reads: [cache.plan-ref, github.pr]       # T5b: ref -> branch -> find the PR
     writes: [github.pr, cache.markers]       # T5b: squash-merge; set pending-learn
-    predecessors: [submit]
+    predecessors: [address]
     successors: [learn]
 
   - id: learn

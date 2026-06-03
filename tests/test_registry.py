@@ -64,10 +64,22 @@ def test_real_registry_is_valid():
         "save",
         "implement",
         "submit",
+        "address",
         "land",
         "learn",
     ]
     assert validate(registry) == []
+
+
+def test_address_is_linear_between_submit_and_land():
+    # P2.T7: submit -> address -> land (single initial, single terminal, symmetric edges).
+    registry = load_registry()
+    by_id = {s.id: s for s in registry.stages}
+    assert by_id["submit"].successors == ["address"]
+    assert by_id["address"].predecessors == ["submit"]
+    assert by_id["address"].successors == ["land"]
+    assert by_id["land"].predecessors == ["address"]
+    assert by_id["address"].mode == "read-write" and by_id["address"].worktree == "reuse"
 
 
 def test_good_fixture_is_valid(tmp_path):

@@ -7,6 +7,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerAddress } from "./address.ts";
 import {
   ensureRunScratch,
   markHandoffConsumed,
@@ -217,6 +218,11 @@ export default function (pi: ExtensionAPI) {
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
+
+  // P2.T7 — the warm `/address` review loop: the `resolve_review_threads` tool + `/address`
+  // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
+  // spawned child; the parent fixes actionable items and batch-resolves the threads).
+  registerAddress(pi);
 
   // P2.T5 — the read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

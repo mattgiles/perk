@@ -108,12 +108,15 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
 
 
-def test_initial_prompt_only_primes_implement():
-    """P1.T4c Bug 1: only the implement stage is primed; other stages launch unprimed."""
+def test_initial_prompt_primes_implement_and_address():
+    """P1.T4c Bug 1 + P2.T7: implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
+    addr = _initial_prompt(_stage("address"), _PLAN_REF)
+    assert addr is not None and "perk-address" in addr and "review-classifier" in addr
     assert _initial_prompt(_stage("plan"), _PLAN_REF) is None
     assert _initial_prompt(_stage("implement"), None) is None
+    assert _initial_prompt(_stage("address"), None) is None
 
 
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):
