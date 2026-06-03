@@ -15,6 +15,7 @@ import {
   setMarker,
 } from "./cache.ts";
 import { registerCheckpoints } from "./checkpoints.ts";
+import { registerCiExecutor } from "./ciExecutor.ts";
 import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
@@ -216,6 +217,10 @@ export default function (pi: ExtensionAPI) {
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
+
+  // P2.T5 — the read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
+  // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
+  registerCiExecutor(pi);
 
   // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/

@@ -5,3 +5,11 @@
 # Where `perk worktree create` and cold-door stages place worktrees.
 # Relative paths resolve against the repo root.
 root = ".worktrees"
+
+# perk's own dogfood CI checks (P2.T5). The `run_ci` tool / `/ci` command run these named checks
+# and REPORT pass/fail — they never edit or fix. Project-supplied CI is untrusted: an interactive
+# session prompts to confirm (per-session latch), and headless runs need `--allow-project-ci`.
+[ci]
+lint = "just lint"
+typecheck = "just typecheck"
+test = "just test"
