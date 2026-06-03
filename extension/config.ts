@@ -20,6 +20,12 @@ export interface PerkConfig {
   planAuthoring?: string;
   /** The `[ci]` named-checks map (`name = "shell command"`); the executor (P2.T5) consumes it. */
   ci?: Record<string, string>;
+  /**
+   * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
+   * threshold compaction while an objective is active (P2.T9). Because the TOML subset reads only
+   * string values, it must be written as a quoted string (e.g. `compact_threshold = "0.8"`).
+   */
+  objectiveCompactThreshold?: number;
 }
 
 /** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
@@ -128,9 +134,16 @@ export function loadPerkConfig(cwd: string): PerkConfig {
   }
 
   const planAuthoring = merged.workflow?.plan_authoring;
+  const rawThreshold = merged.objective?.compact_threshold;
+  const parsedThreshold = rawThreshold != null ? Number.parseFloat(rawThreshold) : Number.NaN;
+  const objectiveCompactThreshold =
+    Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 1
+      ? parsedThreshold
+      : undefined;
   return {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
     ci: merged.ci ?? {},
+    objectiveCompactThreshold,
   };
 }

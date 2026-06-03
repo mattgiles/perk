@@ -125,7 +125,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (P2.T1, see below) |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
-| `active_objective` | string \| null | the active objective id (Phase 2; null in MVP) |
+| `active_objective` | string \| null | the active objective id; **live since P2.T9** (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
@@ -160,6 +160,33 @@ same LWW field; a warm append makes the next reload's reconciliation a no-op. Th
 `save` stage a direct writer of `session.workflow-state`.
 
 State key (registry vocabulary): `session.workflow-state`.
+
+**Objective budget + compaction (P2.T9).** With `active_objective` now live, the TS substrate
+(`extension/objective.ts`, `registerObjective`) adds three pieces, all **inert when no objective
+is active** and **never throwing** (logged-not-thrown, like checkpoints):
+- **`/objective [<id>|clear]`** — `<id>` appends `{ active_objective: <id> }` to
+  `perk:workflow-state` (LWW field) **and** seeds a dedicated `perk:objective-budget` activation
+  marker `{ objective_id, activated_at: <ISO> }`; `clear` appends `{ active_objective: null }`; no
+  arg shows the current objective + budget line. The dedicated `perk:objective-budget` entry keeps
+  high-churn budget data **off** the shared `perk:workflow-state` record (mirrors checkpoints'
+  dedicated entry).
+- **Budget accounting** — a stateless rebuild (the `goal.ts` pattern): scan the branch for
+  `role === "assistant"` messages **after** the latest `perk:objective-budget` marker, summing
+  `max(0, usage.input) + max(0, usage.output)`; elapsed = `now − activated_at`. Surfaced via
+  `ctx.ui.setStatus`/`setWidget` **guarded by `ctx.hasUI`**; rebuilt on `session_start`,
+  `session_tree`, **and** `agent_end` (survives reload/branch/compaction for free). Pure helpers
+  (`sumAssistantTokens` / `formatBudgetLine` / `findBudgetMarker` / `rebuildBudget`) are
+  offline-tested.
+- **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
+  when `active_objective != null`**, read `ctx.getContextUsage()` and call `ctx.compact({…})` when
+  usage crosses a threshold (default `0.8`; overridable via `[objective] compact_threshold` in
+  `.pi/perk.toml`, read through `extension/config.ts` — written as a **quoted** value because the
+  TOML subset reads only strings). The decision is the pure `shouldCompact(usage, threshold)`;
+  compaction is best-effort (`onError` logs and continues). The custom cheaper-model
+  `session_before_compact` summary is **deferred** — T9 ships the simpler `ctx.compact` trigger.
+
+No model-facing bounded transition tools are added here — the `objective-plan` stage, the plan
+factory, and the "fire only when…" tools are **T10**.
 
 **Session-lifecycle gates (T4b).** The interior guards `session_before_switch` /
 `session_before_fork` with a **dirty-repo check** (`git status --porcelain` via `pi.exec`),
@@ -562,9 +589,10 @@ block; the full plan markdown lives in the `plan-body` first comment:
   objective_id: string|null }  # Phase 2
 ```
 
-**Label taxonomy (minimal, PRIOR_ART §2/§6):** one label `perk:plan` in the MVP; type labels
-(learn/objective) land with their stages. Query by a **single** label — GitHub label filters
-are AND-semantics.
+**Label taxonomy (minimal, PRIOR_ART §2/§6):** `perk:plan` (green `1f883d`), `perk:learn` (purple
+`8250df`), and — since P2.T9 — `perk:objective` (indigo `5319e7`, description "perk objective
+issue"), each **lazily created** by its gateway create-op on first use (perk never seeds labels in
+`init`). Query by a **single** label — GitHub label filters are AND-semantics.
 
 **The `pending-learn` semaphore (P1.T5b; Q2/Q5).** An existence-only `cache.markers` file
 (`.pi/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
@@ -679,6 +707,57 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > resolves the target; Phase 3 drives it.** The `--remote` help text on the three launchers is
 > reconciled from "Phase 3; currently blocked" to "Local (default) or a remote runner; remote
 > dispatch is driven by the Phase-3 worker."
+
+### Authored (P2.T9 — objective storage + mechanics)
+
+The **objective layer's deterministic foundation** — a long-running goal that *generates* bounded
+plans (PRIOR_ART §3). The pure mechanics live in `perk/objective.py` (the `plan.py` twin, reusing
+its block engine); the GitHub writes live in `perk/github.py`; the cold-door workers are the
+`perk objective` group. **No registry stage and no model-facing tools** — those are T10.
+
+**Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
+- `objective-header` (issue body) — compact, queryable: `{ run_id, created,
+  objective_comment_id, status }` (`status` is the explicit objective-level rollup, e.g.
+  `"active"`; `objective_comment_id` is backfilled in the two-step create).
+- `objective-roadmap` (issue body) — the **canonical** flat-node YAML frontmatter:
+  `{ schema_version: "1", nodes: [ { id, slug, description, status, pr, depends_on?, comment? } ] }`.
+  Phase membership is derived from the **ID prefix** (`"1.2" → phase 1`, `"2A.1" → phase 2A`); phase
+  *names* are not stored (extracted from `### Phase N: name` headers when rendering). `depends_on`
+  is `null`/absent (infer sequential deps) vs `[]` (explicitly none). The `depends_on`/`comment`
+  columns are omitted from the serialization unless some node specifies them.
+- `objective-body` (first comment) — the human-readable rendered roadmap table (marker-bounded by
+  `<!-- perk:roadmap-table -->`, deterministically re-rendered from the frontmatter) + prose.
+
+**Explicit-status-only (foundation open #3).** A node's `status` is **never inferred from a PR
+column** — `update_node` takes `status` verbatim or preserves it; setting `pr` never changes
+`status`. This is the deliberate departure from erk's two-tier infer-from-PR model.
+
+**Gateway ops (canonical Python plane; same idempotency + two-step pattern as plan/learn):**
+- `find_objective_issue(*, run_id, repo_root) -> ObjectiveIssue | None` — label-scoped to
+  `perk:objective` + the `objective-header` block (delegates to the parameterized `find_plan_issue`).
+- `create_objective_issue(*, title, body, repo_root, run_id, status="active", dry_run=False) ->
+  ObjectiveIssue` — the **two-step** create: idempotency check → lazy `perk:objective` label →
+  compose body (`objective-header` with `objective_comment_id: null` + `objective-roadmap`) → POST
+  issue → POST `objective-body` comment (capturing its id) → **backfill** `objective_comment_id`
+  into the header.
+- `get_objective(*, number, repo_root) -> ObjectiveState | None` — parse header + roadmap nodes;
+  `None` if absent, raises on infra failure / invalid roadmap.
+- `update_objective_node(*, number, node_id, status=None, pr=None, description=None, repo_root,
+  dry_run=False) -> ObjectiveNodeUpdate` — re-render the authoritative `objective-roadmap` block in
+  the issue body **and** the rendered table in the `objective-body` comment (best-effort); raises if
+  the node is not found.
+- `update_objective_header(*, number, fields, repo_root, dry_run=False) -> ObjectiveHeaderUpdate` —
+  the `update_plan_header` twin (read-merge-PATCH), rejecting unknown keys (LBYL on
+  `OBJECTIVE_HEADER_FIELDS`).
+
+**Cold-door workers (`perk objective …` — a dev/CI/T10 surface, not an agent affordance):**
+`create --body @FILE [--title]`, `show NUMBER`, `node NUMBER --node ID [--status][--pr][--description]`,
+`next NUMBER` (the dependency-graph `build_graph(nodes).next_node()` selection T10's
+`/objective-plan` consumes). All supervisor surfaces (`--json` → stdout, human → stderr, exit
+`0`/`1`/`2`). The objective issues are pure REST (issues + comments), no GraphQL.
+
+State key (registry vocabulary): `github.objective` (live since P2.T9 storage; its **stage** is
+T10).
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

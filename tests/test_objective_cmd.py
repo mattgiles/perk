@@ -1,0 +1,168 @@
+import json
+import subprocess
+from pathlib import Path
+
+from click.testing import CliRunner
+
+from perk import github, objective
+from perk.cli.cli import cli
+
+N = objective.NodeStatus
+
+
+def _git_init(path: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+
+
+def _authed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
+    )
+
+
+def _nodes():
+    return (
+        objective.ObjectiveNode(id="1.1", description="A", status=N.DONE),
+        objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+    )
+
+
+def _invoke(args, *, body=None):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        full = list(args)
+        if body is not None:
+            bf = Path(d) / "obj.md"
+            bf.write_text(body, encoding="utf-8")
+            full = [*full, "--body", str(bf)]
+        return runner.invoke(cli, full)
+
+
+def test_create_json(monkeypatch):
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=42, url="u/42", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    result = _invoke(["objective", "create", "--json"], body="# Ship it\n\nprose")
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True and payload["objective"]["number"] == 42
+    assert captured["title"] == "Ship it"  # derived from the body heading
+
+
+def test_create_empty_body_invalid(monkeypatch):
+    _authed(monkeypatch)
+    result = _invoke(["objective", "create", "--json"], body="   ")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "empty_body"
+
+
+def test_create_invalid_roadmap(monkeypatch):
+    _authed(monkeypatch)
+    from perk.plan import render_metadata_block
+
+    bad = render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY,
+        {"schema_version": "1", "nodes": [{"id": "1.1", "description": "x", "status": "bogus"}]},
+    )
+    result = _invoke(["objective", "create", "--json"], body=f"# Obj\n\n{bad}")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_roadmap"
+
+
+def test_show_json(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: github.ObjectiveState(
+            number=42, url="u/42", title="Obj", header={"run_id": "01RID"}, nodes=_nodes()
+        ),
+    )
+    result = _invoke(["objective", "show", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["summary"]["total"] == 2
+    assert payload["next_node"]["id"] == "1.2"
+    assert payload["all_complete"] is False
+
+
+def test_show_not_found(monkeypatch):
+    monkeypatch.setattr(github, "get_objective", lambda **k: None)
+    result = _invoke(["objective", "show", "99", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "objective_not_found"
+
+
+def test_node_json(monkeypatch):
+    _authed(monkeypatch)
+    captured = {}
+
+    def _update(**k):
+        captured.update(k)
+        return github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "update_objective_node", _update)
+    result = _invoke(
+        [
+            "objective",
+            "node",
+            "42",
+            "--node",
+            "1.2",
+            "--status",
+            "in_progress",
+            "--pr",
+            "#9",
+            "--json",
+        ]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True and payload["node"] == "1.2"
+    assert captured["status"] is N.IN_PROGRESS and captured["pr"] == "#9"
+
+
+def test_node_not_found_maps_error(monkeypatch):
+    _authed(monkeypatch)
+
+    def _update(**k):
+        raise github.GitHubError("objective node '9.9' not found on #42")
+
+    monkeypatch.setattr(github, "update_objective_node", _update)
+    result = _invoke(["objective", "node", "42", "--node", "9.9", "--status", "done", "--json"])
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "node_not_found"
+
+
+def test_next_json(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: github.ObjectiveState(
+            number=42, url="u/42", title="Obj", header={}, nodes=_nodes()
+        ),
+    )
+    result = _invoke(["objective", "next", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["next_node"]["id"] == "1.2"
+
+
+def test_not_a_repo_exit_2(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem():  # no git init -> not a repo
+        result = runner.invoke(cli, ["objective", "show", "1", "--json"])
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "not_a_repo"

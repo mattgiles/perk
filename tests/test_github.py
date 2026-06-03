@@ -5,7 +5,7 @@ from pathlib import Path
 import click
 import pytest
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.cli.context import PerkContext, require_github
 from perk.cli.ensure import UserFacingCliError
 
@@ -783,3 +783,178 @@ def test_resolve_review_threads_dry_run_does_not_shell(monkeypatch):
         batch=[{"thread_id": "PRRT_1", "comment": "x"}], repo_root=ROOT, dry_run=True
     )
     assert result.success is True and result.results[0].comment_added is True
+
+
+# --------------------------------------------------------------- objective ops (P2.T9)
+
+
+def _obj_header(run_id: str, comment_id=None) -> str:
+    return plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY,
+        objective.ObjectiveHeader(
+            run_id=run_id, created="t", objective_comment_id=comment_id
+        ).to_data(),
+    )
+
+
+def _obj_roadmap(nodes) -> str:
+    return plan.render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(nodes)
+    )
+
+
+def _obj_body(run_id, nodes, comment_id=None) -> str:
+    return f"{_obj_header(run_id, comment_id)}\n\n{_obj_roadmap(nodes)}\n"
+
+
+def test_find_objective_issue_label_scoped(monkeypatch):
+    issues = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    found = github.find_objective_issue(run_id="01RID", repo_root=ROOT)
+    assert found is not None and found.number == 5 and found.existed is True
+    assert any("labels=perk:objective" in tok for c in rec.calls for tok in c)
+
+
+def test_create_objective_issue_idempotent(monkeypatch):
+    existing = [{"number": 5, "html_url": "u/5", "body": _obj_header("01RID")}]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(existing)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_objective_issue(
+        title="Obj", body="# Obj\n\nprose", repo_root=ROOT, run_id="01RID"
+    )
+    assert issue.number == 5 and issue.existed is True
+    assert not rec.posted()  # dedup short-circuits before any write
+
+
+def test_create_objective_issue_two_step(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    roadmap = _obj_roadmap(nodes)
+    body = f"# My objective\n\n{roadmap}\n"
+    rec = _GhDispatch(
+        [
+            (_has("repos/{owner}/{repo}/labels", "POST"), _Proc(0)),  # lazy label create
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),  # body comment
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (
+                _has("issues/200", ".body"),
+                _Proc(0, _obj_body("01RID", nodes)),
+            ),  # header backfill read
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            (_has("issues", "GET"), _Proc(0, "[]")),  # idempotency find -> none
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    issue = github.create_objective_issue(
+        title="My objective", body=body, repo_root=ROOT, run_id="01RID"
+    )
+    assert issue.number == 200 and issue.existed is False
+    # the perk:objective label was lazily created
+    assert any("name=perk:objective" in tok for c in rec.calls for tok in c)
+    # the comment-id backfill PATCHed the header with objective_comment_id=555
+    patched = rec.body_files[-1]
+    header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["objective_comment_id"] == 555
+
+
+def test_create_objective_issue_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    issue = github.create_objective_issue(
+        title="t", body="# t", repo_root=ROOT, run_id="01RID", dry_run=True
+    )
+    assert issue.number == 0 and issue.existed is False
+
+
+def test_get_objective_parses_header_and_nodes(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE),
+        objective.ObjectiveNode(id="1.2", description="B", status=objective.NodeStatus.PENDING),
+    ]
+    issue = {
+        "number": 5,
+        "title": "Obj",
+        "body": _obj_body("01RID", nodes, comment_id=9),
+        "url": "u/5",
+    }
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = github.get_objective(number=5, repo_root=ROOT)
+    assert state is not None and state.title == "Obj"
+    assert [n.id for n in state.nodes] == ["1.1", "1.2"]
+    assert state.header["objective_comment_id"] == 9
+
+
+def test_get_objective_not_found(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(1, stderr="not found"))])
+    )
+    assert github.get_objective(number=404, repo_root=ROOT) is None
+
+
+def test_update_objective_node_updates_body_and_comment(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+        objective.ObjectiveNode(id="1.2", description="B", status=objective.NodeStatus.PENDING),
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    comment_body = objective.render_body_comment(nodes, prose="prose here")
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/555", ".body"), _Proc(0, comment_body)),
+            (_has("issues/comments/555", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.update_objective_node(
+        number=123, node_id="1.2", status=objective.NodeStatus.IN_PROGRESS, pr="#9", repo_root=ROOT
+    )
+    assert result.comment_updated is True and result.dry_run is False
+    # the PATCHed roadmap shows 1.2 in_progress with pr #9 (explicit status, not inferred)
+    body_patch = rec.body_files[0]
+    parsed, _ = objective.parse_roadmap_nodes(body_patch)
+    n = next(x for x in parsed if x.id == "1.2")
+    assert n.status is objective.NodeStatus.IN_PROGRESS and n.pr == "#9"
+
+
+def test_update_objective_node_not_found_raises(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    )
+    with pytest.raises(github.GitHubError, match="not found"):
+        github.update_objective_node(
+            number=123, node_id="9.9", status=objective.NodeStatus.DONE, repo_root=ROOT
+        )
+
+
+def test_update_objective_node_dry_run_does_not_patch(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.update_objective_node(
+        number=123, node_id="1.1", status=objective.NodeStatus.DONE, repo_root=ROOT, dry_run=True
+    )
+    assert result.dry_run is True and rec.method_calls("PATCH") == 0
+
+
+def test_update_objective_header_rejects_unknown_field(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
+    with pytest.raises(github.GitHubError, match="unknown objective-header field"):
+        github.update_objective_header(number=5, fields={"bogus": "x"}, repo_root=ROOT)
