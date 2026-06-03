@@ -20,6 +20,7 @@ import { registerCiExecutor } from "./ciExecutor.ts";
 import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
+import { registerObjective } from "./objective.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
@@ -236,6 +237,11 @@ export default function (pi: ExtensionAPI) {
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
   // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
   registerCheckpoints(pi);
+
+  // P2.T9 — the objective substrate: `/objective` set/clear, budget accounting, threshold
+  // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
+  // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
+  registerObjective(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import plan
+from perk import objective, plan
 
 _PUSH_PERMISSIONS = frozenset({"WRITE", "MAINTAIN", "ADMIN"})
 
@@ -373,6 +373,317 @@ def add_issue_comment(
     if proc.returncode != 0:
         raise _failed(proc, f"failed to comment on issue #{issue}")
     return CommentResult(posted=True)
+
+
+# ===========================================================================
+# Objective ops (P2.T9 — objective storage + mechanics; contracts.md §8.4).
+#
+# Mirrors the plan/learn idempotency + two-step create exactly: REST `gh api`, bodies via file,
+# idempotency keyed on the header `run_id` via the LIST endpoint (label-scoped to
+# `perk:objective`), the `perk:objective` label created lazily, mutations RAISE / lookups return
+# `... | None`. The objective body holds two blocks (`objective-header` + `objective-roadmap`); the
+# first comment holds the rendered table (`objective-body`). Status is explicit-only (open #3).
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class ObjectiveIssue:
+    """An objective issue. ``existed`` is True when returned by idempotent dedup."""
+
+    number: int
+    url: str
+    existed: bool
+
+
+@dataclass(frozen=True)
+class ObjectiveState:
+    """An objective's observable state: header + roadmap nodes (``perk objective show``)."""
+
+    number: int
+    url: str
+    title: str
+    header: dict[str, object]
+    nodes: tuple[objective.ObjectiveNode, ...]
+
+
+@dataclass(frozen=True)
+class ObjectiveHeaderUpdate:
+    """The result of a staged ``objective-header`` field write."""
+
+    fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class ObjectiveNodeUpdate:
+    """The result of an ``update_objective_node`` write (body + comment both re-rendered)."""
+
+    number: int
+    node_id: str
+    comment_updated: bool
+    dry_run: bool
+
+
+def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | None:
+    """Find an open ``perk:objective`` issue whose ``objective-header`` ``run_id`` matches.
+
+    The label-scoped twin of ``find_plan_issue`` (delegates to the parameterized finder); returns
+    None for no match, raises on an infra failure.
+    """
+    found = find_plan_issue(
+        run_id=run_id,
+        repo_root=repo_root,
+        label=objective.OBJECTIVE_LABEL,
+        header_key=objective.OBJECTIVE_HEADER_KEY,
+    )
+    if found is None:
+        return None
+    return ObjectiveIssue(number=found.number, url=found.url, existed=True)
+
+
+def _post_comment_with_id(*, issue: int, body: str, repo_root: Path) -> int:
+    """Post a comment and return its numeric id (REST, body via file). Raises on failure."""
+    with _body_file(body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
+                "-X",
+                "POST",
+                "-F",
+                f"body=@{body_path}",
+                "--jq",
+                "{id: .id}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to post objective body comment on #{issue}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable comment-create output: {exc}") from exc
+    if not isinstance(data, dict) or "id" not in data:
+        raise GitHubError(f"unexpected comment-create payload: {data!r}")
+    return int(data["id"])
+
+
+def create_objective_issue(
+    *,
+    title: str,
+    body: str,
+    repo_root: Path,
+    run_id: str,
+    status: str = "active",
+    dry_run: bool = False,
+) -> ObjectiveIssue:
+    """Create the ``perk:objective`` issue (the two-step create). ``body`` is the authored
+    objective markdown; any embedded roadmap nodes are parsed from it. Idempotent on ``run_id``;
+    raises ``GitHubError`` on failure.
+
+    Steps: (1) idempotency check; (2) lazily create the ``perk:objective`` label; (3) compose the
+    issue body = ``objective-header`` (``objective_comment_id: null``) + ``objective-roadmap``
+    blocks; (4) POST the issue; (5) post the ``objective-body`` comment (rendered table + prose),
+    capturing its id; (6) backfill ``objective_comment_id`` into the header.
+    """
+    if dry_run:
+        return ObjectiveIssue(number=0, url="(dry-run)", existed=False)
+
+    existing = find_objective_issue(run_id=run_id, repo_root=repo_root)
+    if existing is not None:
+        return existing
+
+    nodes, errors = objective.parse_roadmap_nodes(body)
+    if errors:
+        raise GitHubError("invalid objective roadmap: " + "; ".join(errors))
+
+    create_label(
+        objective.OBJECTIVE_LABEL,
+        color=objective.OBJECTIVE_LABEL_COLOR,
+        description=objective.OBJECTIVE_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+
+    header = objective.ObjectiveHeader(
+        run_id=run_id, created=plan.now_iso(), objective_comment_id=None, status=status
+    )
+    header_block = plan.render_metadata_block(objective.OBJECTIVE_HEADER_KEY, header.to_data())
+    roadmap_block = plan.render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(nodes)
+    )
+    issue_body = f"{header_block}\n\n{roadmap_block}\n"
+
+    created = create_plan_issue(
+        title=title,
+        body=issue_body,
+        repo_root=repo_root,
+        run_id=None,  # idempotency already handled above
+        labels=(objective.OBJECTIVE_LABEL,),
+    )
+
+    comment_body = objective.render_body_comment(nodes, prose=body.strip())
+    comment_id = _post_comment_with_id(issue=created.number, body=comment_body, repo_root=repo_root)
+    update_objective_header(
+        number=created.number,
+        fields={"objective_comment_id": comment_id},
+        repo_root=repo_root,
+    )
+    return ObjectiveIssue(number=created.number, url=created.url, existed=False)
+
+
+def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:
+    """Read an objective issue's state (header + roadmap nodes). ``None`` when absent; raises on
+    an infra failure."""
+    proc = _run(["issue", "view", str(number), "--json", "number,title,body,url"], cwd=repo_root)
+    if proc.returncode != 0:
+        haystack = (proc.stderr + proc.stdout).lower()
+        if "not found" in haystack or "404" in haystack:
+            return None
+        raise _failed(proc, f"failed to read objective issue #{number}")
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    body = str(data.get("body", ""))
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    nodes, errors = objective.parse_roadmap_nodes(body)
+    if errors:
+        raise GitHubError(f"invalid objective roadmap on #{number}: " + "; ".join(errors))
+    return ObjectiveState(
+        number=int(data["number"]) if "number" in data else number,
+        url=str(data.get("url", "")),
+        title=str(data.get("title", "")),
+        header=header,
+        nodes=tuple(nodes),
+    )
+
+
+def update_objective_header(
+    *, number: int, fields: dict[str, object], repo_root: Path, dry_run: bool = False
+) -> ObjectiveHeaderUpdate:
+    """Merge ``fields`` into the issue body's ``objective-header`` block and PATCH it (REST).
+
+    Rejects unknown header keys (LBYL). A dry run validates + composes only.
+    """
+    unknown = set(fields) - objective.OBJECTIVE_HEADER_FIELDS
+    if unknown:
+        raise GitHubError(f"unknown objective-header field(s): {sorted(unknown)}")
+    body = _get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+    new_body = plan.replace_metadata_block(
+        body, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
+    )
+    if dry_run:
+        return ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
+    with _body_file(new_body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/{number}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update objective-header on #{number}")
+    return ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+
+def _get_comment_body(comment_id: int, repo_root: Path) -> str | None:
+    proc = _run(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}", "--jq", ".body"],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0:
+        if "404" in (proc.stderr + proc.stdout):
+            return None
+        raise _failed(proc, f"failed to read comment #{comment_id}")
+    return proc.stdout
+
+
+def _patch_comment_body(comment_id: int, body: str, repo_root: Path) -> None:
+    with _body_file(body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update comment #{comment_id}")
+
+
+def update_objective_node(
+    *,
+    number: int,
+    node_id: str,
+    status: objective.NodeStatus | None = None,
+    pr: str | None = None,
+    description: str | None = None,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> ObjectiveNodeUpdate:
+    """Update one roadmap node (explicit-status-only): re-render the ``objective-roadmap`` block
+    in the issue body (authoritative) AND the rendered table in the ``objective-body`` comment.
+
+    Raises ``GitHubError`` if the node is not found or the roadmap is invalid; the comment
+    re-render is best-effort (the frontmatter is the source of truth).
+    """
+    body = _get_issue_body(number, repo_root)
+    nodes, errors = objective.parse_roadmap_nodes(body)
+    if errors:
+        raise GitHubError("invalid objective roadmap: " + "; ".join(errors))
+    updated = objective.update_node(nodes, node_id, status=status, pr=pr, description=description)
+    if updated is None:
+        raise GitHubError(f"objective node {node_id!r} not found on #{number}")
+    if dry_run:
+        return ObjectiveNodeUpdate(
+            number=number, node_id=node_id, comment_updated=False, dry_run=True
+        )
+
+    new_body = plan.replace_metadata_block(
+        body, objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(updated)
+    )
+    with _body_file(new_body) as body_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/{number}",
+                "-X",
+                "PATCH",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to update objective roadmap on #{number}")
+
+    comment_updated = False
+    header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY) or {}
+    comment_id = header.get("objective_comment_id")
+    if isinstance(comment_id, int):
+        comment_body = _get_comment_body(comment_id, repo_root)
+        if comment_body is not None:
+            rerendered = objective.rerender_body_table(comment_body, updated)
+            if rerendered is not None:
+                _patch_comment_body(comment_id, rerendered, repo_root)
+                comment_updated = True
+    return ObjectiveNodeUpdate(
+        number=number, node_id=node_id, comment_updated=comment_updated, dry_run=False
+    )
 
 
 # ===========================================================================

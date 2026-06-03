@@ -21,7 +21,7 @@ state_keys:
   # Tier 1 · GitHub — the canonical source of truth.
   github:
     - plan            # the plan issue (header + body)
-    - objective       # the objective issue (Phase 2)
+    - objective       # the objective issue (storage + mechanics live in P2.T9; its stage in T10)
     - pr              # the pull request
     - labels          # repo labels (e.g. perk:plan)
     - comments        # discussion comments
