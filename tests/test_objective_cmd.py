@@ -166,3 +166,60 @@ def test_not_a_repo_exit_2(monkeypatch):
     assert result.exit_code == 2
     payload = json.loads(result.output)
     assert payload["error_type"] == "not_a_repo"
+
+
+# --- P2.T11b: objective reconcile worker ---------------------------------------------------
+
+
+def test_reconcile_dry_run_composes_without_writing(monkeypatch):
+    captured = {}
+
+    def _update(**k):
+        captured.update(k)
+        return github.ObjectiveBodyUpdate(
+            number=k["number"], comment_id=99, updated=False, dry_run=True
+        )
+
+    monkeypatch.setattr(github, "update_objective_body", _update)
+    result = _invoke(["objective", "reconcile", "5", "--dry-run", "--json"], body="New prose.")
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True and payload["updated"] is False
+    assert payload["dry_run"] is True and captured["dry_run"] is True
+    assert captured["prose"] == "New prose."
+
+
+def test_reconcile_missing_target_maps_to_reconcile_target_missing(monkeypatch):
+    _authed(monkeypatch)
+
+    def _update(**k):
+        raise github.GitHubError("objective #5 has no body comment")
+
+    monkeypatch.setattr(github, "update_objective_body", _update)
+    result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "reconcile_target_missing"
+
+
+def test_reconcile_no_region_maps_to_reconcile_target_missing(monkeypatch):
+    _authed(monkeypatch)
+
+    def _update(**k):
+        raise github.GitHubError("objective #5 body comment has no reconcilable region")
+
+    monkeypatch.setattr(github, "update_objective_body", _update)
+    result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "reconcile_target_missing"
+
+
+def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
+    _authed(monkeypatch)
+
+    def _update(**k):
+        raise github.GitHubError("gh timed out")
+
+    monkeypatch.setattr(github, "update_objective_body", _update)
+    result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "github_error"

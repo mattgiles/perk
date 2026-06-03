@@ -103,6 +103,14 @@ def test_address_is_linear_between_submit_and_land():
     assert by_id["address"].mode == "read-write" and by_id["address"].worktree == "reuse"
 
 
+def test_land_io_includes_github_objective():
+    # P2.T11a: the mechanical auto-on-merge node-done reads + writes github.objective.
+    registry = load_registry()
+    land = {s.id: s for s in registry.stages}["land"]
+    assert "github.objective" in land.reads
+    assert "github.objective" in land.writes
+
+
 def test_good_fixture_is_valid(tmp_path):
     assert validate(load_registry(_write(tmp_path, GOOD))) == []
 

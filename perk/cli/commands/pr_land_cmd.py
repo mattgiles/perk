@@ -9,12 +9,13 @@ Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failur
 """
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from perk import cache, github, launch
+from perk import cache, github, launch, objective
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -24,12 +25,27 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
+class ObjectiveLandUpdate:
+    """The mechanical auto-on-merge node-done outcome (P2.T11a).
+
+    ``objective`` is the linked objective number (``None`` when no link / unparseable).
+    ``nodes_marked`` is the ids the merge marked ``done``. ``skipped_reason`` records why nothing
+    was marked (or an error string) — the land result is **never** affected by this step.
+    """
+
+    objective: int | None
+    nodes_marked: tuple[str, ...]
+    skipped_reason: str | None
+
+
+@dataclass(frozen=True)
 class PrLandResult:
     pr: github.PullRequest
     branch: str
     issue: int
     pending_learn: bool
     dry_run: bool
+    objective: ObjectiveLandUpdate
 
 
 @click.command("pr-land")
@@ -91,6 +107,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             issue=issue,
             pending_learn=False,  # a dry run sets no marker
             dry_run=True,
+            objective=ObjectiveLandUpdate(None, (), "dry_run"),
         )
 
     pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
@@ -107,7 +124,58 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             commit_message=_squash_commit_message(issue=issue, repo_root=repo_root),
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
-    return PrLandResult(pr=pr, branch=branch, issue=issue, pending_learn=True, dry_run=False)
+    obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
+    return PrLandResult(
+        pr=pr,
+        branch=branch,
+        issue=issue,
+        pending_learn=True,
+        dry_run=False,
+        objective=obj_update,
+    )
+
+
+def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> ObjectiveLandUpdate:
+    """Mechanical auto-on-merge node-done (P2.T11a): mark the objective node(s) backlinked to the
+    just-merged plan ``done``.
+
+    **Fail-open + non-audited by design.** The merge already succeeded; objective tracking is
+    secondary and retryable, so this NEVER raises and NEVER changes the land result — any failure is
+    logged loud-but-non-fatal to stderr and captured as a ``skipped_reason``. The auto node-done is
+    deliberately set without an audit (the audit gate protects the model-facing tool path only).
+    """
+    raw = plan_ref.get("objective_id")
+    if not raw:
+        return ObjectiveLandUpdate(None, (), "no_objective_link")
+    try:
+        number = int(str(raw).lstrip("#"))
+    except ValueError:
+        return ObjectiveLandUpdate(None, (), "bad_objective_id")
+    try:
+        state = github.get_objective(number=number, repo_root=repo_root)
+        if state is None:
+            return ObjectiveLandUpdate(number, (), "objective_not_found")
+        targets = objective.nodes_for_pr(list(state.nodes), str(plan_ref["pr_id"]))
+        if not targets:
+            return ObjectiveLandUpdate(number, (), "no_linked_node")
+        marked: list[str] = []
+        for node in targets:
+            if node.status in objective.TERMINAL:
+                continue
+            github.update_objective_node(
+                number=number,
+                node_id=node.id,
+                status=objective.NodeStatus.DONE,
+                repo_root=repo_root,
+            )
+            marked.append(node.id)
+        return ObjectiveLandUpdate(number, tuple(marked), None)
+    except Exception as exc:  # fail-open: objective tracking never blocks landing
+        print(
+            f"perk pr-land: objective reconciliation skipped (non-fatal): {exc}",
+            file=sys.stderr,
+        )
+        return ObjectiveLandUpdate(number, (), f"error: {exc}")
 
 
 def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
@@ -136,6 +204,11 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
         "issue": result.issue,
         "pending_learn": result.pending_learn,
         "dry_run": result.dry_run,
+        "objective": {
+            "number": result.objective.objective,
+            "nodes_marked": list(result.objective.nodes_marked),
+            "skipped_reason": result.objective.skipped_reason,
+        },
     }
 
 
@@ -151,6 +224,9 @@ def _render_human(result: PrLandResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + " (squash-merged); pending-learn set"
     )
+    if result.objective.nodes_marked:
+        nodes = ", ".join(result.objective.nodes_marked)
+        user_output(f"  objective #{result.objective.objective}: marked node(s) {nodes} done")
 
 
 def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:

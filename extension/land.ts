@@ -6,12 +6,19 @@
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
 
+export interface ObjectiveLandUpdate {
+  number: number | null;
+  nodes_marked: string[];
+  skipped_reason: string | null;
+}
+
 export interface LandDetails {
   ok: boolean;
   pr?: { number: number; state: string };
   branch?: string;
   issue?: number;
   pending_learn?: boolean;
+  objective?: ObjectiveLandUpdate;
   error?: string;
   error_type?: string;
 }
@@ -30,6 +37,7 @@ interface PrLandJson {
   branch?: string;
   issue?: number;
   pending_learn?: boolean;
+  objective?: ObjectiveLandUpdate;
 }
 
 /**
@@ -84,16 +92,25 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   // Set the semaphore for the in-session path (idempotent; the worker also set it on disk).
   setMarker(ctx.cwd, PENDING_LEARN);
 
+  const lines = [`Landed PR #${parsed.pr.number}; run /learn to release the worktree.`];
+  const obj = parsed.objective;
+  if (obj?.nodes_marked.length && obj.number !== null) {
+    // A copy-pasteable nudge into the reconcile pass (this terminating tool starts no model turn).
+    lines.push(
+      `Objective #${obj.number} node(s) ${obj.nodes_marked.join(", ")} marked done — run ` +
+        `/objective-reconcile #${obj.number} to reconcile the roadmap prose against the diff.`,
+    );
+  }
+
   return {
-    content: [
-      { type: "text", text: `Landed PR #${parsed.pr.number}; run /learn to release the worktree.` },
-    ],
+    content: [{ type: "text", text: lines.join("\n") }],
     details: {
       ok: true,
       pr: parsed.pr,
       branch: parsed.branch,
       issue: parsed.issue,
       pending_learn: true,
+      objective: parsed.objective,
     },
     terminate: true,
   };

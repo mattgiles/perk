@@ -4,8 +4,14 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, github
+from perk import cache, github, objective
 from perk.cli.cli import cli
+from perk.cli.commands.pr_land_cmd import (
+    ObjectiveLandUpdate,
+    PrLandResult,
+    _reconcile_objective_on_land,
+    _result_to_dict,
+)
 
 _REF = {
     "provider": "github",
@@ -149,6 +155,124 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
         assert calls["readied"] is False and calls["merged"] is False
         assert json.loads(result.output)["pending_learn"] is True
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+# --- P2.T11a: mechanical auto-on-merge node-done --------------------------------------------
+
+
+def _objective_state(nodes: list[objective.ObjectiveNode]) -> github.ObjectiveState:
+    return github.ObjectiveState(number=5, url="u/5", title="Obj", header={}, nodes=tuple(nodes))
+
+
+def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
+    return objective.ObjectiveNode(id=node_id, description=node_id, status=status, pr=pr)
+
+
+def test_reconcile_on_land_no_objective_link():
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": None, "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(None, (), "no_objective_link")
+
+
+def test_reconcile_on_land_bad_objective_id():
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "not-a-number", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(None, (), "bad_objective_id")
+
+
+def test_reconcile_on_land_objective_not_found(monkeypatch):
+    monkeypatch.setattr(github, "get_objective", lambda **k: None)
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(5, (), "objective_not_found")
+
+
+def test_reconcile_on_land_no_linked_node(monkeypatch):
+    monkeypatch.setattr(
+        github, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
+    )
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(5, (), "no_linked_node")
+
+
+def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
+    marked: list[str] = []
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: _objective_state([_node("1.1", pr="#7"), _node("1.2", pr="#99")]),
+    )
+
+    def _update(**k):
+        assert k["status"] == objective.NodeStatus.DONE
+        marked.append(k["node_id"])
+        return github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "update_objective_node", _update)
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(5, ("1.1",), None)
+    assert marked == ["1.1"]
+
+
+def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: _objective_state([_node("1.1", pr="#7", status=objective.NodeStatus.DONE)]),
+    )
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out == ObjectiveLandUpdate(5, (), None)
+
+
+def test_reconcile_on_land_is_fail_open(monkeypatch):
+    def _boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(github, "get_objective", _boom)
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out.objective == 5 and out.nodes_marked == ()
+    assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
+
+
+def test_result_to_dict_carries_objective():
+    result = PrLandResult(
+        pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
+        branch="plan-7",
+        issue=7,
+        pending_learn=True,
+        dry_run=False,
+        objective=ObjectiveLandUpdate(5, ("1.1",), None),
+    )
+    data = _result_to_dict(result)
+    assert data["objective"] == {"number": 5, "nodes_marked": ["1.1"], "skipped_reason": None}
+
+
+def test_dry_run_objective_is_inert():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), {**_REF, "objective_id": "5"})
+        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["objective"] == {
+            "number": None,
+            "nodes_marked": [],
+            "skipped_reason": "dry_run",
+        }
 
 
 def test_real_land_no_pr_exits_1(monkeypatch):

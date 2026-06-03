@@ -214,6 +214,24 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
   objective→plan by the node's `pr` field (the `objective_node` tool's `pr`-only backlink). T11's
   reconciliation-on-land consumes both.
 
+**Objective reconciliation after landing (P2.T11).** When a PR linked to an objective node merges,
+the roadmap reconciles against what actually landed — two seams matching the D9 Mechanical/
+Reconcilable/Immutable typing:
+- **Mechanical (on land).** The land path auto-marks the backlinked node(s) `done` — fail-open and
+  non-audited (the audit gate is the model-tool boundary only). The warm `/land` surfaces the marked
+  node(s) and a copy-pasteable `/objective-reconcile #<n>` nudge (no auto model turn).
+- **Reconcilable (warm, post-merge).** `/objective-reconcile [<number>]` resolves the objective via
+  a **three-tier** lookup — arg → `active_objective` → `readPlanRef(cwd).objective_id` (the
+  just-landed objective sitting in the plan-ref, so the post-land path works even when the user
+  never ran `/objective`) — then `pi.sendUserMessage(...)` the reconcile guidance (mirrors
+  `/objective-plan`; headless-safe). The `reconcile_objective` tool (`{ objective, prose }`) writes
+  the prose to a run-scoped scratch file and delegates to `perk objective reconcile … --body <path>`
+  (never throws); it rewrites ONLY the marker-bounded Reconcilable prose region (the roadmap table +
+  Immutable notes are structurally never touched). The `objective_node` tool gains a `description?`
+  param (node scope/naming reconciliation) — `buildObjectiveNodeArgs` relaxes its structural refusal
+  so a `description`-only call is valid; the `status:"done"` audit gate is unchanged. The judgment
+  text lives in the `perk-objective-reconcile` skill.
+
 **Session-lifecycle gates (T4b).** The interior guards `session_before_switch` /
 `session_before_fork` with a **dirty-repo check** (`git status --porcelain` via `pi.exec`),
 **scoped to active perk workflows** (`active_plan_ref != null` — perk never interferes with
@@ -526,12 +544,13 @@ create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url
   present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
   (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
   `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
-- **Reconciliation typing (D9 — vocabulary established; only Mechanical applied).** Three section
-  types on land: **Mechanical** (command-updated, deterministic — this turn: `pending-learn` +
-  the plain squash commit message); **Reconcilable** (LLM-updated post-merge — *deferred to T11*);
-  **Immutable** (never touched). The merged state is **PR-derived and not stored** (Q8), so land
-  authors no new stored field. Objective-node reconciliation is **deferred to T11** (flagged, not
-  silently omitted).
+- **Reconciliation typing (D9 — vocabulary established; Reconcilable + objective reconciliation
+  implemented in P2.T11).** Three section types on land: **Mechanical** (command-updated,
+  deterministic — T8b: `pending-learn` + the plain squash commit message; **P2.T11a**: the
+  auto-on-merge node-done); **Reconcilable** (LLM-updated post-merge — **implemented in P2.T11**,
+  see the P2.T11 subsection below); **Immutable** (never touched). The merged state is **PR-derived
+  and not stored** (Q8), so land authors no new stored field. Objective-node reconciliation is
+  **implemented in P2.T11** (the auto-on-merge node-done + the warm `/objective-reconcile` pass).
 
 **Authored (P2.T7 — the `/address` review loop).** Review threads + their resolution are
 **GraphQL-only** (REST has no `isResolved`, no `resolveReviewThread`/`addPullRequestReviewThreadReply`);
@@ -719,7 +738,7 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > writes `[cache.markers, github.learn, github.comments]` (the new `github.learn` key). The
 > reconciliation-typing vocabulary (Mechanical/Reconcilable/Immutable) is established; only the
 > deterministic **Mechanical** type is applied this turn (Reconcilable + objective reconciliation are
-> deferred to T11).
+> **implemented in P2.T11** — see the P2.T11 subsection of §8.4).
 >
 > **Status (P2.T8c — the CLI plumbing slice).** The `--remote` stub graduates to a real **target
 > resolver** (`launch.resolve_target(stage, remote) -> Target`, pure + unit-tested): `None` → local
@@ -810,6 +829,64 @@ The objective **transition** layer on top of T9's mechanics — the plan factory
   model-facing tool boundary only, §8.3). Whole-objective rollup-to-`done` (`update_objective_header`
   via a CLI) is **deferred** (T10's completion-audit unit is the node); auto-on-merge node-done is
   **T11**.
+
+### Authored (P2.T11 — objective reconciliation after landing)
+
+Close the objective loop: when a PR linked to an objective node merges, the roadmap reconciles
+against what was *actually* built. Two seams (PRIOR_ART §3), matching the D9 section-boundary typing:
+
+**T11a — Mechanical (deterministic, on land).** The cold land path (`perk pr-land`) auto-marks the
+objective node(s) backlinked to the just-merged plan `done` — **fail-open** (the merge already
+succeeded; objective tracking must never block landing) and **deliberately non-audited** (per the
+T10 §8.3 note, the audit gate protects the model-facing tool path only).
+- `objective.nodes_for_pr(nodes, pr_number) -> [ObjectiveNode]` (pure) — returns nodes whose `pr`
+  backlink matches `pr_number` canonicalized to `"#<n>"` (`"#6"` / `6` / `"6"` interchangeably).
+- `pr_land_cmd._reconcile_objective_on_land(*, plan_ref, repo_root) -> ObjectiveLandUpdate`
+  (`{ objective, nodes_marked, skipped_reason }`) — best-effort, **never raises**: it parses
+  `plan_ref.objective_id` (`skipped_reason` ∈ `no_objective_link` / `bad_objective_id` /
+  `objective_not_found` / `no_linked_node`, or `error: <exc>` on any failure, logged loud-but-non-fatal
+  to stderr), then `update_objective_node(... status=DONE)` for each non-terminal matched node. Called
+  in `_pr_land_impl`'s **non-dry-run** branch only, **after** `set_marker(PENDING_LEARN)`; the
+  dry-run branch sets an inert `ObjectiveLandUpdate(None, (), "dry_run")` and stays fully offline.
+  `_result_to_dict` always emits `"objective": { number, nodes_marked, skipped_reason }`;
+  `_render_human` adds an `objective #N: marked node(s) X done` line when non-empty.
+- The warm `extension/land.ts` surfaces `objective.nodes_marked` and appends a **copy-pasteable**
+  `/objective-reconcile #<n>` nudge to the success text (no auto model turn from this terminating
+  tool); the merge itself is unchanged.
+- The `land` stage I/O gains `github.objective` in both `reads` (the node lookup) and `writes` (the
+  mechanical node-done).
+
+**T11b — Reconcilable (LLM judgment, post-merge, warm).** A `/objective-reconcile` surface +
+`perk-objective-reconcile` skill drive the model to reconcile stale objective **prose** (and node
+descriptions) against the real diff. The objective-body prose is a marker-bounded **Reconcilable**
+region; everything outside it (the Mechanical roadmap table, any Immutable notes below) is
+**structurally** protected.
+- `objective.OBJECTIVE_RECONCILABLE_MARKER_START/_END` + `replace_reconcilable_section(comment_body,
+  new_prose) -> str | None` (pure; splices between the markers, preserving the table block above +
+  Immutable notes below; `None` when markers absent). `render_body_comment(nodes, *, prose="")` now
+  wraps prose in the Reconcilable markers — even empty prose emits the (empty) marker pair so every
+  objective has a splice target; objectives created before P2.T11 (no markers) yield a clean
+  `reconcile_target_missing` rather than a clobber.
+- `github.update_objective_body(*, number, prose, repo_root, dry_run=False) -> ObjectiveBodyUpdate`
+  (`{ number, comment_id, updated, dry_run }`) — reads the `objective-header` `objective_comment_id`,
+  fetches the comment, `replace_reconcilable_section`, PATCHes it; raises `GitHubError` (`no body
+  comment` / `no reconcilable region`) on a missing target. The table block + Immutable prose are
+  never touched (structural Immutable-safety).
+- `perk objective reconcile NUMBER --body @FILE [--dry-run] [--json]` — the cold worker (stdin-less
+  file-arg pattern, mirroring `learn-capture`); maps the two missing-target `GitHubError`s to a
+  stable `reconcile_target_missing`, other infra to `github_error`. Node-description reconciliation
+  reuses the existing `objective node --description` (no new flag).
+- `extension/objectivePlan.ts` gains: a `description?` param on the `objective_node` tool
+  (`buildObjectiveNodeArgs` pushes `--description` and **relaxes** the structural refusal so a call
+  carrying only `description` is valid — a deliberate, flagged extension of T10's contract; the
+  `status:"done"` audit gate is unchanged); a `reconcile_objective` warm tool
+  (`{ objective, prose }` → run-scoped scratch file → `perk objective reconcile … --body <path>`,
+  never throws); and a `/objective-reconcile [<number>] [--pr <plan>]` command with **three-tier
+  objective resolution** (arg → `active_objective` → `readPlanRef(cwd).objective_id` — so the
+  post-land path works in the landing session even when `active_objective` is unset).
+- The judgment layer is `skills/perk-objective-reconcile/SKILL.md`: PR diff + `objective show` as
+  untrusted DATA; the Mechanical/Reconcilable/Immutable boundary; the contradiction taxonomy; skip
+  if nothing is stale; never-delegate judgment + durable writes.
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

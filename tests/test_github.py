@@ -954,6 +954,73 @@ def test_update_objective_node_dry_run_does_not_patch(monkeypatch):
     assert result.dry_run is True and rec.method_calls("PATCH") == 0
 
 
+def test_update_objective_body_splices_reconcilable_region(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=777)
+    comment_body = objective.render_body_comment(nodes, prose="Old prose.")
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/777", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/comments/777", ".body"), _Proc(0, comment_body)),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.update_objective_body(number=123, prose="New prose.", repo_root=ROOT)
+    assert result.updated is True and result.comment_id == 777 and result.dry_run is False
+    patched = rec.body_files[-1]
+    assert "New prose." in patched and "Old prose." not in patched
+    # the Mechanical table block is preserved
+    assert objective.ROADMAP_TABLE_MARKER_START in patched
+
+
+def test_update_objective_body_dry_run_does_not_patch(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=777)
+    comment_body = objective.render_body_comment(nodes, prose="Old prose.")
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/777", ".body"), _Proc(0, comment_body)),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.update_objective_body(
+        number=123, prose="New prose.", repo_root=ROOT, dry_run=True
+    )
+    assert result.updated is False and result.dry_run is True
+    assert rec.method_calls("PATCH") == 0
+
+
+def test_update_objective_body_no_comment_raises(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=None)  # no objective_comment_id
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    )
+    with pytest.raises(github.GitHubError, match="no body comment"):
+        github.update_objective_body(number=123, prose="x", repo_root=ROOT)
+
+
+def test_update_objective_body_no_region_raises(monkeypatch):
+    nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
+    issue_body = _obj_body("01RID", nodes, comment_id=777)
+    # a pre-T11 comment with no reconcilable markers
+    legacy_comment = "<!-- perk:roadmap-table -->\ntable\n<!-- /perk:roadmap-table -->\n\nprose"
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("issues/comments/777", ".body"), _Proc(0, legacy_comment)),
+                (_has("issues/123", ".body"), _Proc(0, issue_body)),
+            ]
+        ),
+    )
+    with pytest.raises(github.GitHubError, match="no reconcilable region"):
+        github.update_objective_body(number=123, prose="x", repo_root=ROOT)
+
+
 def test_update_objective_header_rejects_unknown_field(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
     with pytest.raises(github.GitHubError, match="unknown objective-header field"):
