@@ -239,6 +239,24 @@ def _registry_check() -> Check:
     return Check("registry", "registry", "ok", f"registry valid ({len(reg.stages)} stages)")
 
 
+def _subagent_engine_check() -> Check:
+    """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
+
+    Purely a constant pointer — it reads no settings or filesystem and **does not** re-derive
+    package/dir drift (that is owned by `settings-wiring` for the `npm:pi-subagents` entry and by
+    `subagent-agents` for `.pi/agents/`). Status `ok` keeps a healthy repo's summary clean; the
+    detail carries the honesty note that the live-spawn smoke is a Phase-3 deferral.
+    """
+    return Check(
+        "subagent-engine",
+        "package",
+        "ok",
+        "borrowed pi-subagents engine + perk-owned agent defs",
+        "presence owned by settings-wiring; defs dir owned by subagent-agents; "
+        "the live-spawn smoke is deferred to Phase 3 `doctor workflow`.",
+    )
+
+
 def _bad_handoffs(workflow_dir: Path) -> list[str]:
     handoff_dir = workflow_dir / "handoff"
     if not handoff_dir.is_dir():
@@ -269,6 +287,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
+    checks.append(_subagent_engine_check())
     checks.append(_cache_check(root))
     return checks
 

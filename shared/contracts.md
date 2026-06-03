@@ -304,6 +304,40 @@ The executor **never edits or fixes**: it is a stateless oracle, and the parent 
   per check; report `passed = checks.every(c => c.passed)`.
 - **Interior/TS-only.** No registry stage, no door change (`doors.cold_remote` unchanged).
 
+**Spawned delegation engine seam (P2.T6).** perk's *second* context-isolation shape is a **spawned**
+read-only child engine, stood up by **borrowing the `pi-subagents` engine** behind a thin seam rather
+than building a spawn primitive. T6 is substrate only (no registry stage, no in-session TS consumer,
+no perk-authored agent definitions, no roster/model-tier config — those land with the first consumer,
+T7 `/address`).
+
+- **Borrow boundary.** perk borrows the `pi-subagents` *engine* (its `subagent` tool + spawn/handoff
+  machinery); perk **owns** the agent definitions, chains, and acceptance wiring. perk authors **no**
+  `subagent` tool of its own — the "one `subagent` tool" is the borrowed one.
+- **Defs location.** perk-owned agent definitions live in **`.pi/agents/`** (committed; scaffolded by
+  `perk init` with a `.gitkeep`, *not* gitignored — perk owns and commits its defs). `pi-subagents`
+  discovers them as project agents (`agentScope` default `both`).
+- **Handoff reuse.** Spawned children honor the **same handoff contract as the P2.T4 amendment above**
+  (cap-model-visible-output, full result in a verified scratch file, double-delivery of compact prose
+  + a structured block, route-don't-relay, fail-closed) — the shared contract both context-isolation
+  primitives honor (T4 in-process; T6 spawned).
+- **Never-delegate boundaries** (`erk-subagent-usage.md`): judgment, user interaction, and
+  durable-state writes stay with the parent; spawned children do bounded, ideally read-only,
+  mechanical work.
+- **Model tiering convention (locked, value deferred to T7).** perk agent defs set a **cheap model** in
+  frontmatter for mechanical child work; the parent keeps the top-tier model.
+- **Standing signal vs spike vs live smoke.** `perk doctor`'s `settings-wiring` (the `npm:pi-subagents`
+  package entry) + `subagent-agents` (the `.pi/agents/` defs dir) own drift; the **informational**
+  `subagent-engine` check is a constant pointer carrying the seam shape and never re-derives that
+  drift. The **open-#6 spike** (recorded in the turn outcomes) settles "runs cleanly headlessly"; the
+  **live "runs under the worker" smoke is deferred to Phase 3 `doctor workflow`**.
+- **Roster control deferred to T7.** `subagents.disableBuiltins` + the `.agents/`-recursion-collision
+  mitigation (perk's `.agents/skills/*/SKILL.md` would otherwise be discovered as stray agents) land
+  with the first agent.
+- **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6) has outgrown "the
+  workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
+  dedicated "context-isolation" section is a **deferred** doc refactor — T6 files as a sibling here to
+  preserve cohesion now.
+
 ---
 
 ## §8.4 · The GitHub gateway contract (Q9/Q10)

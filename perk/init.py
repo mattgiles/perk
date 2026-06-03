@@ -28,10 +28,15 @@ NPM_PACKAGE = "@perk/pi"
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired in P2.T2a
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
+# `pi-subagents` is the borrowed *spawned delegation engine* (P2.T6): perk takes the
+# engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
+# agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
+# `ctx.hasUI`-clean (children run `--mode json -p`).
 BORROWED_PACKAGES = [
     "npm:@juicesharp/rpiv-todo",
     "npm:@tombell/pi-diff",
     "npm:@tombell/pi-status",
+    "npm:pi-subagents",
 ]
 
 GITIGNORE_BEGIN = "# BEGIN perk managed"
@@ -299,6 +304,21 @@ def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
     return [".pi/workflow/: created"]
 
 
+def _converge_subagent_agents(root: Path, *, apply: bool = True) -> list[str]:
+    """Converge the perk-owned agent-definitions home (`.pi/agents/`) for the borrowed
+    `pi-subagents` engine (P2.T6). perk *owns and commits* its agent defs, so the dir ships
+    with a committed `.gitkeep`; T7 drops the first real def in it. This is substrate only —
+    no perk agent definition is authored here."""
+    agents = root / ".pi" / "agents"
+    gitkeep = agents / ".gitkeep"
+    if gitkeep.is_file():
+        return []
+    if apply:
+        agents.mkdir(parents=True, exist_ok=True)
+        gitkeep.write_text("", encoding="utf-8")
+    return [".pi/agents/: created"]
+
+
 def _converge_config(
     root: Path, changes: list[str], *, force: bool = False, interactive: bool = True
 ) -> None:
@@ -393,6 +413,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
             "workflow-dir",
             ("workflow-dir",),
             lambda apply: _converge_workflow_dir(root, apply=apply),
+        ),
+        ManagedConvergence(
+            "subagent-agents",
+            ("subagent-engine",),
+            lambda apply: _converge_subagent_agents(root, apply=apply),
         ),
         ManagedConvergence(
             "gitignore-block",

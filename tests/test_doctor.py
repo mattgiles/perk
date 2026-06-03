@@ -90,6 +90,29 @@ def test_healthy_after_init(git_repo):
     assert "environment" not in groups and "github" not in groups  # external shells skipped
 
 
+def test_subagent_engine_signal_and_defs_dir(git_repo):
+    # P2.T6: the constant informational pointer is `ok`, and the defs-dir convergence is `ok`
+    # on a freshly-converged repo.
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    engine = next(c for c in report.checks if c.name == "subagent-engine")
+    assert engine.status == "ok" and engine.group == "package"
+    defs = next(c for c in report.checks if c.name == "subagent-agents")
+    assert defs.status == "ok"
+
+
+def test_missing_agents_dir_is_fail_only_on_owning_check(git_repo):
+    # Removing `.pi/agents/` fails the owning `subagent-agents` convergence, NOT the
+    # informational `subagent-engine` pointer (no duplicate drift). `--fix` re-creates it.
+    _scaffold(git_repo)
+    shutil.rmtree(git_repo / ".pi" / "agents")
+    report = run_doctor(git_repo, verify=False)
+    assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
+    assert next(c for c in report.checks if c.name == "subagent-engine").status == "ok"
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert (git_repo / ".pi" / "agents" / ".gitkeep").is_file() and fixed.healthy
+
+
 def test_drift_detected_and_fixed_idempotently(git_repo):
     _scaffold(git_repo)
     (git_repo / ".gitignore").write_text("node_modules/\n", encoding="utf-8")  # clobber the block

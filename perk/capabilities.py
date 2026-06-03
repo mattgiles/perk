@@ -30,7 +30,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("perk-extension", "perk's own Pi extension", required=True, scope="both"),
     Capability(
         "borrowed-packages",
-        "crossover scaffolding (plan/diff/status/todo)",
+        "crossover scaffolding (diff/status/todo + subagents engine)",
         required=True,
         scope="both",
     ),
@@ -39,6 +39,12 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability("config", ".pi/perk.toml + perk.local.toml", required=True, scope="both"),
     Capability("gitignore-block", "managed .gitignore entries", required=True, scope="both"),
     Capability("agents-block", "managed AGENTS.md conventions", required=True, scope="both"),
+    Capability(
+        "subagent-engine",
+        "borrowed pi-subagents delegation engine + perk-owned agent defs",
+        required=True,
+        scope="both",
+    ),
 )
 
 
