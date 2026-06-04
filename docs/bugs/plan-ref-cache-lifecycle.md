@@ -1,6 +1,6 @@
 # Bug: Root plan-ref cache leaks stale plan context into fresh planning sessions
 
-**Status:** confirmed, design pending
+**Status:** resolved (#43 — TS-only stage-gated reconciliation; no clearing, no registry/Python change)
 **Surfaced:** after PR #41 / plan #40, when a later `perk plan` appeared to resume stale context.
 **Severity:** workflow confusion. A fresh read-only planning session can look bound to an old saved
 plan.
@@ -49,31 +49,38 @@ history. It supports workflows like:
 The implementation worktree's plan-ref is the workflow binding. The root plan-ref is only the
 current selector.
 
-## Proposed direction
+## Resolution (#43)
 
-Fresh main-worktree planning stages should not inherit stale root `cache.plan-ref`.
+Fixed **TS-only**, by stage-gating the extension's `session_start` reconciliation — **no clearing**,
+no `registry.yaml` change, no Python change.
 
-A likely fix:
+- The extension reconciles `cache.plan-ref` → `active_plan_ref` **only when the launched stage
+  consumes the ref** (its registry `requires`/`reads` list `cache.plan-ref`). That is exactly the
+  worktree binding stages (`implement`/`submit`/`address`/`land`/`learn`); the root `worktree: none`
+  stages (`plan`/`objective-plan`/`save`) do not consume it and so never inherit the stale root
+  selector.
+- The launched stage is read from the run's **handoff** blob (`stage`): `claim`/`keep` sessions have
+  a settled run; `fork`/`none` carry no launched stage and never re-read the file.
+- Already-linked sessions, fork-inherited refs, and tree navigation are preserved via the LWW
+  rebuild (the file is never re-read for those paths). Registry-missing stays permissive when a
+  stage is present, to keep implement linkage working.
+- **Why not clear the selector?** Gating alone fixes the symptom and satisfies all five regression
+  items; clearing at `plan` would break no-arg `perk implement` resuming the last save. The selector
+  self-heals at the next `save`.
 
-- On real cold launches for stages that do not read `cache.plan-ref` and run in the main worktree,
-  clear the root selector before `exec pi`. This includes `plan`, `objective-plan`, and likely
-  `save`.
-- Do not clear the selector on dry run.
-- Do not clear the selector for `implement`, `submit`, `address`, `land`, or `learn`.
-- Gate extension `session_start` reconciliation so it only imports `cache.plan-ref` when the
-  launched stage actually requires or reads `cache.plan-ref`.
-- Preserve LWW rebuild behavior for already-linked sessions and tree navigation.
+Key code: `extension/registry.ts` (`stageConsumesPlanRef`), `extension/workflowState.ts`
+(`resolveRunStage`), `extension/index.ts` (the stage-gated reconciliation block); contract amended in
+`shared/contracts.md` §8.1 (selector/binding duality) + §8.3 (stage-gated reconciliation).
 
-## Open questions
+## Resolved open questions
 
-- Should `perk plan` always clear root `plan-ref.json`, or should it only skip reconciliation while
-  leaving the selector available for no-arg `perk implement`?
-- Is clearing at `plan` enough, or should cold `save` also clear stale refs before a new plan is
-  saved?
-- Do we need a first-class "resume planning" flow for an existing saved plan, distinct from
-  `perk resume <plan>` routing to the next implementation stage?
-- Should the contract rename or further clarify `cache.plan-ref` as selector state, or is a contract
-  amendment enough?
+- **`perk plan` clear vs skip reconciliation?** Skip reconciliation; leave the selector available for
+  no-arg `perk implement`. No clearing.
+- **Should cold `save` also clear stale refs?** No — `save` rewrites the selector anyway; gating is
+  sufficient.
+- **First-class "resume planning" flow?** Out of scope — a separate feature, not needed for this fix.
+- **Rename/clarify `cache.plan-ref` as selector state?** A contract amendment (§8.1 duality) is
+  enough; no rename.
 
 ## Regression test shape
 
