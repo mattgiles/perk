@@ -5,6 +5,7 @@ priming prompt (Bug 1) is covered in test_launch.py. `github.get_plan` + `launch
 are stubbed (no GitHub, no `exec pi`), mirroring test_resume.py.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -66,6 +67,9 @@ def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
         assert result.exit_code == 0, result.output
         assert "plan-7" in result.output  # the resolved worktree name (stdout JSON + stderr human)
         assert not cache.plan_ref_path(Path(d)).exists()  # side-effect-free
+        # The plan-id dry-run JSON carries the resolved base (null here: no remote on this repo).
+        payload = json.loads(result.output.splitlines()[0])
+        assert "base" in payload and payload["base"] is None
 
 
 def test_implement_plan_not_found_exits_1(monkeypatch):

@@ -1,4 +1,12 @@
+import subprocess
+
 from perk import git
+
+
+def _sha(repo, ref: str = "HEAD") -> str:
+    return subprocess.run(
+        ["git", "rev-parse", ref], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
 
 
 def test_repo_root_inside_and_outside(git_repo, tmp_path_factory):
@@ -21,8 +29,6 @@ def test_worktree_lifecycle(git_repo):
 
 
 def _git(cwd, *args: str) -> str:
-    import subprocess
-
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
     ).stdout
@@ -75,3 +81,47 @@ def test_is_dirty(tmp_path):
     assert git.is_dirty(work) is False
     (work / "g.txt").write_text("new\n", encoding="utf-8")
     assert git.is_dirty(work) is True
+
+
+# --- origin-aware create base helpers ---------------------------------------------------
+
+
+def test_detect_trunk_branch_from_origin_head(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.detect_trunk_branch(clone) == "main"
+
+
+def test_detect_trunk_branch_local_fallback(git_repo):
+    # No remote at all: falls back to the existing local head (default branch may be main/master).
+    head = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    expected = head if head in ("main", "master") else "main"
+    assert git.detect_trunk_branch(git_repo) == expected
+
+
+def test_remote_ref_exists(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.remote_ref_exists(clone, "origin/main") is True
+    assert git.remote_ref_exists(clone, "origin/absent") is False
+
+
+def test_fetch_brings_origin_up_to_date(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    advanced = advance()
+    assert _sha(clone, "origin/main") != advanced  # behind until fetch
+    git.fetch(clone)
+    assert _sha(clone, "origin/main") == advanced
+
+
+def test_worktree_add_with_base(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    advanced = advance()
+    git.fetch(clone)
+    wt = clone / ".worktrees" / "based"
+    git.worktree_add(clone, wt, branch="based", create_branch=True, base="origin/main")
+    assert _sha(wt) == advanced

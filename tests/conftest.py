@@ -43,3 +43,52 @@ def git_repo(tmp_path):
     g("add", ".")
     g("commit", "-qm", "init")
     return tmp_path
+
+
+@pytest.fixture
+def git_repo_with_remote(tmp_path):
+    """A clone with a local **bare** remote (``origin``), offline-testable.
+
+    Returns ``(clone, remote, advance_origin)`` where ``advance_origin()`` pushes a fresh
+    commit to ``origin/<trunk>`` from a side checkout so the clone falls behind until it
+    fetches. The clone has ``origin/HEAD`` set so ``detect_trunk_branch`` resolves the trunk.
+    """
+    remote = tmp_path / "remote.git"
+    seed = tmp_path / "seed"
+    clone = tmp_path / "clone"
+
+    def g(cwd, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
+        ).stdout
+
+    subprocess.run(
+        ["git", "init", "-q", "--bare", "-b", "main", str(remote)],
+        check=True,
+        capture_output=True,
+    )
+    # Seed the remote's main with one commit.
+    subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True, capture_output=True)
+    g(seed, "config", "user.email", "t@example.com")
+    g(seed, "config", "user.name", "perk tests")
+    (seed / "f.txt").write_text("hi\n", encoding="utf-8")
+    g(seed, "add", ".")
+    g(seed, "commit", "-qm", "init")
+    g(seed, "remote", "add", "origin", str(remote))
+    g(seed, "push", "-q", "-u", "origin", "main")
+
+    # Clone it (origin + origin/HEAD set automatically).
+    subprocess.run(["git", "clone", "-q", str(remote), str(clone)], check=True, capture_output=True)
+    g(clone, "config", "user.email", "t@example.com")
+    g(clone, "config", "user.name", "perk tests")
+
+    def advance_origin() -> str:
+        """Push a new commit to origin/main (from the seed checkout); returns its sha."""
+        g(seed, "pull", "-q", "origin", "main")
+        (seed / "f.txt").write_text("advanced\n", encoding="utf-8")
+        g(seed, "add", ".")
+        g(seed, "commit", "-qm", "advance")
+        g(seed, "push", "-q", "origin", "main")
+        return g(seed, "rev-parse", "HEAD").strip()
+
+    return clone, remote, advance_origin

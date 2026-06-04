@@ -15,6 +15,7 @@ renders `UserFacingCliError`), not-a-repo via `require_repo`.
 """
 
 import json
+from pathlib import Path
 
 import click
 
@@ -47,6 +48,11 @@ def _implement_stage() -> Stage:
     flag_value="",
     help="Local (default) or a remote runner; remote dispatch is driven by the Phase-3 worker.",
 )
+@click.option(
+    "--base",
+    default=None,
+    help="Branch off this ref instead of origin/<trunk> (e.g. for stacking on an unlanded branch).",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def implement(
@@ -56,6 +62,7 @@ def implement(
     worktree: str | None,
     dry_run: bool,
     remote: str | None,
+    base: str | None,
     pi_args: tuple[str, ...],
 ) -> None:
     """Do the work on a branch (requires fresh context; cold-only).
@@ -85,6 +92,7 @@ def implement(
             dry_run=dry_run,
             remote=remote,
             pi_args=list(pi_args),
+            base=base,
         )
         return
 
@@ -101,7 +109,7 @@ def implement(
     worktree_name = launch.resolve_plan_worktree_name(ref)
 
     if dry_run:
-        _render_dry_run(number, worktree_name, ref)
+        _render_dry_run(repo_root, number, worktree_name, ref, base)
         return
 
     # Select #N as the active plan (mirrors `perk resume`), then launch (worktree derived + the
@@ -115,10 +123,16 @@ def implement(
         dry_run=False,
         remote=remote,
         pi_args=list(pi_args),
+        base=base,
     )
 
 
-def _render_dry_run(number: int, worktree: str, ref: dict[str, object]) -> None:
+def _render_dry_run(
+    repo_root: Path, number: int, worktree: str, ref: dict[str, object], base: str | None
+) -> None:
+    # No worktree exists yet on a fresh plan, so resolve the base the same way the active-ref
+    # dry-run create does (local refs only, no fetch) to keep the two dry-run JSONs consistent.
+    resolved_base = launch.resolve_base(repo_root, worktree, base)
     machine_output(
         json.dumps(
             {
@@ -127,6 +141,7 @@ def _render_dry_run(number: int, worktree: str, ref: dict[str, object]) -> None:
                 "plan": number,
                 "worktree": worktree,
                 "plan_ref": ref,
+                "base": resolved_base,
                 "dry_run": True,
             }
         )
