@@ -55,6 +55,62 @@ def test_create_json(monkeypatch):
     assert captured["title"] == "Ship it"  # derived from the body heading
 
 
+def test_create_structured_roadmap_passes_nodes(monkeypatch):
+    # P3.T2: --roadmap <json> is parsed into ObjectiveNodes and handed to create_objective_issue;
+    # the agent never hand-writes roadmap YAML in the body.
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "first"},
+            {"id": "1.2", "description": "second", "depends_on": ["1.1"]},
+        ]
+    )
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
+    assert result.exit_code == 0, result.output
+    nodes = captured["roadmap_nodes"]
+    assert [n.id for n in nodes] == ["1.1", "1.2"]
+    assert nodes[1].depends_on == ("1.1",)
+
+
+def test_create_structured_roadmap_invalid(monkeypatch):
+    # A structurally invalid --roadmap node is rejected as invalid_roadmap before any write.
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "create_objective_issue",
+        lambda **k: github.ObjectiveIssue(number=1, url="u/1", existed=False),
+    )
+    bad = json.dumps([{"id": "1.1", "description": "x", "status": "bogus"}])
+    result = _invoke(["objective", "create", "--json", "--roadmap", bad], body="# Obj\n\nprose")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_roadmap"
+
+
+def test_create_malformed_roadmap_json(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "create_objective_issue",
+        lambda **k: github.ObjectiveIssue(number=1, url="u/1", existed=False),
+    )
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", "{not json"], body="# Obj\n\nprose"
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_roadmap"
+
+
 def test_create_empty_body_invalid(monkeypatch):
     _authed(monkeypatch)
     result = _invoke(["objective", "create", "--json"], body="   ")

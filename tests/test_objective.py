@@ -41,6 +41,31 @@ def test_parse_three_cases_no_block_valid_invalid():
     assert nodes == [] and errors and "status" in errors[0]
 
 
+def test_parse_structured_roadmap_list_and_mapping_and_invalid():
+    # Bare list of nodes -> wrapped with the current schema + validated. `status` is OPTIONAL on the
+    # structured path (defaults to pending); id + description are the only required fields.
+    nodes, errors = o.parse_structured_roadmap(
+        [{"id": "1.1", "description": "a"}, {"id": "1.2", "description": "b", "status": "done"}]
+    )
+    assert errors == []
+    assert [n.id for n in nodes] == ["1.1", "1.2"]
+    assert nodes[0].status is N.PENDING and nodes[1].status is N.DONE
+    # A node missing `description` (a required field) is rejected.
+    bad, berrors = o.parse_structured_roadmap([{"id": "1.1"}])
+    assert bad == [] and berrors
+    # None / empty -> roadmap-free.
+    assert o.parse_structured_roadmap(None) == ([], [])
+    assert o.parse_structured_roadmap([]) == ([], [])
+    # A full {schema_version, nodes} mapping is accepted as-is.
+    nodes2, errors2 = o.parse_structured_roadmap(
+        {"schema_version": "1", "nodes": [{"id": "1.1", "description": "a", "status": "pending"}]}
+    )
+    assert errors2 == [] and [n.id for n in nodes2] == ["1.1"]
+    # A non-list/non-mapping is rejected.
+    nodes3, errors3 = o.parse_structured_roadmap("oops")
+    assert nodes3 == [] and errors3
+
+
 def test_parse_rejects_wrong_schema_version():
     block = render_metadata_block(
         o.OBJECTIVE_ROADMAP_KEY,

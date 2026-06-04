@@ -18,7 +18,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { loadPerkConfig } from "./config.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import type { ToolGating } from "./toolGating.ts";
+import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The plan-authoring context customType (distinct from T1's `perk:mode-context`). */
 export const PLAN_CONTEXT_TYPE = "perk:plan-context";
@@ -102,9 +104,14 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     }
   });
 
-  // Inject the plan-authoring context while the read-only gate is active (display:false).
+  // Inject the plan-authoring context while the read-only gate is active (display:false). The one
+  // exception: an objective-author session is ALSO read-only, but objectiveAuthor.ts injects its
+  // own authoring context there — so plan mode defers when the launched stage is objective-author
+  // (the coupling break: plan-authoring context is no longer keyed off the bare read-only gate).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!gating.isActive()) return;
+    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    if (rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE) return;
     return {
       message: {
         customType: PLAN_CONTEXT_TYPE,

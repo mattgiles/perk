@@ -12,6 +12,7 @@ selection — what T10's ``/objective-plan`` consumes).
 """
 
 import json
+import os
 from pathlib import Path
 
 import click
@@ -60,11 +61,27 @@ def _node_to_dict(node: objective.ObjectiveNode) -> dict[str, object]:
     help="Path to the authored objective markdown (may embed a roadmap).",
 )
 @click.option("--title", "title", default=None, help="Objective title (else derived from body).")
+@click.option(
+    "--roadmap",
+    "roadmap_json",
+    default=None,
+    help="Structured roadmap as a JSON array of nodes (preferred over embedding YAML in --body).",
+)
+@click.option(
+    "--run-id", "run_id_arg", default=None, help="Correlation run id (defaults to $PERK_RUN_ID)."
+)
 @click.option("--dry-run", "dry_run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def objective_create(
-    ctx: click.Context, *, body_path: Path, title: str | None, dry_run: bool, as_json: bool
+    ctx: click.Context,
+    *,
+    body_path: Path,
+    title: str | None,
+    roadmap_json: str | None,
+    run_id_arg: str | None,
+    dry_run: bool,
+    as_json: bool,
 ) -> None:
     """Mint a run_id and create the perk:objective issue from authored markdown."""
     try:
@@ -74,18 +91,31 @@ def objective_create(
         body_text = body_path.read_text(encoding="utf-8").strip()
         if not body_text:
             raise UserFacingCliError("Objective body is empty", error_type="empty_body")
-        # Validate any embedded roadmap up front (clear error before any write).
-        _nodes, errors = objective.parse_roadmap_nodes(body_text)
+        # Resolve the roadmap: a structured --roadmap JSON wins (the agent path, never hand-written
+        # YAML); otherwise validate any roadmap embedded in the body (the legacy cold-CLI path).
+        roadmap_nodes: list[objective.ObjectiveNode] | None = None
+        if roadmap_json is not None:
+            try:
+                raw = json.loads(roadmap_json)
+            except json.JSONDecodeError as exc:
+                raise UserFacingCliError(
+                    f"Invalid --roadmap JSON: {exc}", error_type="invalid_roadmap"
+                ) from exc
+            roadmap_nodes, errors = objective.parse_structured_roadmap(raw)
+        else:
+            _nodes, errors = objective.parse_roadmap_nodes(body_text)
         if errors:
             raise UserFacingCliError(
                 "Invalid objective roadmap: " + "; ".join(errors), error_type="invalid_roadmap"
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
+        resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()
         issue = github.create_objective_issue(
             title=resolved_title,
             body=body_text,
             repo_root=repo_root,
-            run_id=run_id.mint(),
+            run_id=resolved_run_id,
+            roadmap_nodes=roadmap_nodes,
             dry_run=dry_run,
         )
     except GitHubError as exc:

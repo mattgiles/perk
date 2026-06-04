@@ -11,6 +11,8 @@ export interface Handoff {
   run_id: string;
   consumed: boolean;
   mode?: string;
+  /** The registry stage id the cold launch primed (e.g. `objective-author`). */
+  stage?: string;
   pi_session_id?: string;
   [key: string]: unknown;
 }
