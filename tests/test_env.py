@@ -3,7 +3,7 @@ from perk.env import EnvCheck, check_environment, required_tools_ok
 
 
 def test_check_environment_covers_required_tools():
-    assert {c.name for c in check_environment()} == {"git", "gh", "node", "pi"}
+    assert {c.name for c in check_environment()} == {"git", "gh", "node", "pi", "skills"}
 
 
 def test_required_tools_ok():

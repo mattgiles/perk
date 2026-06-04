@@ -71,6 +71,7 @@ def check_environment() -> list[EnvCheck]:
         _check_tool("gh", "Install the GitHub CLI (https://cli.github.com)."),
         _check_node(),
         _check_tool("pi", "Install Pi (the coding agent perk drives)."),
+        _check_tool("skills", "Install the skills CLI (https://github.com/mattgiles/skills)."),
     ]
 
 

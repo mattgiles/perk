@@ -11,6 +11,9 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 """
 
 import json
+import os
+import shutil
+import subprocess
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -39,6 +42,24 @@ BORROWED_PACKAGES = [
     "npm:@tombell/pi-status",
     "npm:pi-subagents",
 ]
+
+# The canonical perk skill names (directory names under `skills/`). This list is the SSOT
+# for the skills-CLI manifest fragment; update it here when perk skills are added/removed.
+PERK_SKILLS: tuple[str, ...] = (
+    "perk-address",
+    "perk-implement",
+    "perk-learn",
+    "perk-learn-docs",
+    "perk-objective-plan",
+    "perk-objective-reconcile",
+    "perk-plan",
+)
+
+# perk manages a *slice* of the skills-CLI manifest (its own skills) via a committed fragment
+# in the standard `.d/` convention, leaving the main `.agents/manifest.yaml` user-editable.
+PERK_SKILLS_MANIFEST_DIR = ".agents/manifest.d"
+PERK_SKILLS_MANIFEST_FILENAME = "perk.yaml"
+PERK_GITHUB_URL = "https://github.com/mattgiles/perk"
 
 GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
@@ -308,6 +329,96 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     ]
 
 
+def _desired_skills_manifest(self_repo: bool) -> str:
+    """The YAML content of the perk-managed manifest fragment.
+
+    The source ref pins to a tag (``v{__version__}``) for consumers and tracks ``main`` in
+    perk's own tree — mirroring how ``_desired_packages`` pins the git package entry.
+    """
+    ref = "main" if self_repo else f"v{__version__}"
+    skills_block = "\n".join(f"  - source: perk\n    name: {name}" for name in PERK_SKILLS)
+    return (
+        "# Managed by perk init — do not edit by hand.\n"
+        "sources:\n"
+        "  perk:\n"
+        f"    url: {PERK_GITHUB_URL}\n"
+        f"    ref: {ref}\n"
+        "skills:\n"
+        f"{skills_block}\n"
+    )
+
+
+def _converge_skills_manifest(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
+    """Converge the committed skills-CLI manifest fragment (`.agents/manifest.d/perk.yaml`).
+
+    Like every managed convergence: ``init`` applies it, ``perk doctor`` dry-runs it for drift
+    and ``--fix`` re-applies it. The fragment is a *committed declaration* (not transient state),
+    so it is never gitignored. The user's own `.agents/manifest.yaml` is left untouched.
+    """
+    fragment_path = root / PERK_SKILLS_MANIFEST_DIR / PERK_SKILLS_MANIFEST_FILENAME
+    desired = _desired_skills_manifest(self_repo)
+    current = fragment_path.read_text(encoding="utf-8") if fragment_path.is_file() else None
+    if current == desired:
+        return []
+    if apply:
+        fragment_path.parent.mkdir(parents=True, exist_ok=True)
+        fragment_path.write_text(desired, encoding="utf-8")
+    verb = "created" if current is None else "updated"
+    return [f"{PERK_SKILLS_MANIFEST_DIR}/{PERK_SKILLS_MANIFEST_FILENAME}: {verb}"]
+
+
+def _skill_link_state(root: Path) -> dict[str, str]:
+    """Snapshot the `.agents/skills/` link set as ``{name: symlink-target}`` (target ``""`` for
+    non-symlinks / unreadable). Used to detect whether a `skills sync` actually changed state,
+    so init's change-reporting stays idempotent (a converged repo re-runs clean)."""
+    skills_dir = root / ".agents" / "skills"
+    if not skills_dir.is_dir():
+        return {}
+    state: dict[str, str] = {}
+    for entry in sorted(skills_dir.iterdir()):
+        try:
+            state[entry.name] = os.readlink(entry) if entry.is_symlink() else ""
+        except OSError:
+            state[entry.name] = ""
+    return state
+
+
+def _sync_skills(root: Path, changes: list[str]) -> None:
+    """Materialize the declared skills via the skills CLI (consumer repos, ``verify`` only).
+
+    Best-effort + non-fatal, exactly like the GitHub readiness probe (D3): a missing or failing
+    ``skills`` never blocks init — file convergence (incl. the perk fragment) has already
+    succeeded. ``skills init`` is idempotent (no-op once initialized); ``skills sync`` enforces
+    the declared state by (re)linking ``.agents/skills/*``. A ``changes`` entry is appended only
+    when the link set actually changes, so a converged repo reports no churn.
+    """
+    if shutil.which("skills") is None:
+        return
+    before = _skill_link_state(root)
+    try:
+        # Idempotent local-state scaffold (manifest + local config + gitignore block).
+        subprocess.run(
+            ["skills", "init", "--cache=local"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["skills", "sync"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if _skill_link_state(root) != before:
+        changes.append(".agents/skills/: synchronized via skills sync")
+
+
 def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
     """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
     (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
@@ -443,6 +554,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
             lambda apply: _converge_subagent_agents(root, apply=apply),
         ),
         ManagedConvergence(
+            "skills-manifest",
+            ("skills-manifest",),
+            lambda apply: _converge_skills_manifest(root, self_repo, apply=apply),
+        ),
+        ManagedConvergence(
             "gitignore-block",
             ("gitignore-block",),
             lambda apply: _apply_managed_block(
@@ -507,6 +623,11 @@ def run_init(
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
     _converge_config(root, changes, force=force, interactive=interactive)
+    # Materialize the declared skills under the covers (consumer repos only; perk's own tree
+    # loads `skills/perk-*` via the `..` Pi package, so a sync there would only duplicate links).
+    # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
+    if verify and not self_repo:
+        _sync_skills(root, changes)
 
     github_report: GitHubReport | None = None
     if verify:

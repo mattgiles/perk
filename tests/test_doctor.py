@@ -155,6 +155,26 @@ def test_legacy_tracked_plan_md_is_repaired(git_repo):
     assert again.healthy and again.fixed == []  # repair is idempotent
 
 
+def test_skills_manifest_drift_detected_and_fixed(git_repo):
+    # The committed manifest fragment is a managed convergence: tampering is drift, and `--fix`
+    # re-converges it idempotently (grouped under "skills").
+    _scaffold(git_repo)
+    fragment = git_repo / ".agents" / "manifest.d" / "perk.yaml"
+    assert fragment.is_file()
+    report = run_doctor(git_repo, verify=False)
+    skills_check = next(c for c in report.checks if c.name == "skills-manifest")
+    assert skills_check.status == "ok" and skills_check.group == "skills"
+
+    fragment.write_text("# clobbered\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    assert "skills-manifest" in {c.name for c in report.checks if c.status == "fail"}
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy and fixed.fixed
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == []  # fix is idempotent
+
+
 def test_missing_workflow_subdir_is_fixed(git_repo):
     _scaffold(git_repo)
     shutil.rmtree(git_repo / ".pi" / "workflow" / "handoff")
