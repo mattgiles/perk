@@ -30,6 +30,7 @@ import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
+import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
@@ -45,7 +46,12 @@ import {
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
 
-function writeT3Sentinel(cwd: string, source: string, state: WorkflowState): void {
+function writeT3Sentinel(
+  cwd: string,
+  source: string,
+  state: WorkflowState,
+  runMode: string | null,
+): void {
   try {
     const dir = join(cwd, ".pi", "workflow");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -53,8 +59,12 @@ function writeT3Sentinel(cwd: string, source: string, state: WorkflowState): voi
       join(dir, ".perk-t3.json"),
       `${JSON.stringify({
         source,
+        // The launch *workflow* mode (read-only/read-write) — drives tool gating.
         run_id: state.run_id ?? null,
         mode: state.mode ?? null,
+        // The Pi *run* mode (tui/rpc/json/print) — observability `hasUI` can't express. Distinct
+        // from the workflow `mode` above; recorded straight from `ctx.mode`.
+        run_mode: runMode,
         predecessor: state.predecessor ?? null,
         pi_session_id: state.pi_session_id ?? null,
         active_plan_ref: state.active_plan_ref ?? null,
@@ -217,7 +227,7 @@ export default function (pi: ExtensionAPI) {
           `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; ` +
             `registry=${registryOk ? "ok" : "miss"} stages=${registryStages}; hasUI=${ctx.hasUI}\n`,
         );
-        writeT3Sentinel(ctx.cwd, decision.source, resolved);
+        writeT3Sentinel(ctx.cwd, decision.source, resolved, ctx.mode ?? null);
         setMarker(ctx.cwd, T3_MARKER); // cross-plane cache write (gate check 3)
       } catch {
         // never throw from a load probe
@@ -235,7 +245,7 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_tree — ${error}`);
     }
     if (process.env.PERK_SELFCHECK) {
-      writeT3Sentinel(ctx.cwd, "tree", state);
+      writeT3Sentinel(ctx.cwd, "tree", state, ctx.mode ?? null);
     }
   });
 
@@ -289,13 +299,8 @@ export default function (pi: ExtensionAPI) {
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
   registerLearnDocs(pi);
 
-  pi.registerCommand("perk-selfcheck", {
-    description: "Report that the perk extension is loaded.",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(
-        `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}`,
-        sharedOk ? "info" : "warning",
-      );
-    },
-  });
+  // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
+  // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block
+  // reached `contextFiles`). doctor checks disk; selfcheck checks the prompt.
+  registerSelfcheck(pi, { version, sharedOk });
 }
