@@ -205,7 +205,12 @@ def _implement_prompt(plan_ref: dict[str, Any]) -> str:
         f"You are implementing perk plan {provider} #{pr_id} ({url}) on this branch.\n\n"
         f"First, read the full plan:\n    {read_cmd}\n\n"
         "Then implement it here. Work in focused steps and keep the tree committable. When the "
-        "implementation is complete and committed, open the pull request with the /submit command."
+        "implementation is complete and committed, open the pull request with the /submit "
+        "command.\n\n"
+        "Follow the perk-implement skill. Progress markers: when the plan has a `## Steps` list, "
+        "emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is "
+        "COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) these markers "
+        "are no-ops, so don't invent step numbers."
     )
 
 

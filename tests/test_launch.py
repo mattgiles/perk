@@ -135,6 +135,8 @@ def test_initial_prompt_primes_implement_and_address():
     """P1.T4c Bug 1 + P2.T7: implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
+    # The implement prompt teaches the marker protocol + points at the perk-implement skill.
+    assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF)
     assert addr is not None and "perk-address" in addr and "review-classifier" in addr
     assert _initial_prompt(_stage("plan"), _PLAN_REF) is None

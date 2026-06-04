@@ -13,7 +13,7 @@
 // `ctx.ui.setStatus`/`setWidget` guarded by `ctx.hasUI` (headless-safe); `/checkpoints` lists it.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { readPlanBody } from "./cache.ts";
+import { readHandoff, readPlanBody } from "./cache.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { rebuildWorkflowState } from "./workflowState.ts";
 
@@ -28,6 +28,8 @@ export interface CheckpointStep {
 
 export interface CheckpointState {
   steps: CheckpointStep[];
+  /** The in-progress step number (derived from `[WIP:n]` + completion), or `null`. */
+  current: number | null;
 }
 
 /** A step list with no items is "inert" — no `## Steps` was found in the plan body. */
@@ -55,6 +57,40 @@ export function markCompletedSteps(text: string, steps: CheckpointStep[]): numbe
     if (item) item.completed = true;
   }
   return done.length;
+}
+
+/** Extract `[WIP:n]` step numbers from a block of text (case-insensitive). */
+export function extractWipSteps(text: string): number[] {
+  const steps: number[] = [];
+  for (const match of text.matchAll(/\[WIP:(\d+)\]/gi)) {
+    const step = Number(match[1]);
+    if (Number.isFinite(step)) steps.push(step);
+  }
+  return steps;
+}
+
+/** The last `[WIP:n]` in `text` whose step exists and is not completed, else `null`. */
+export function latestWipStep(text: string, steps: CheckpointStep[]): number | null {
+  const wips = extractWipSteps(text);
+  for (let i = wips.length - 1; i >= 0; i--) {
+    const n = wips[i] as number;
+    const item = steps.find((s) => s.step === n);
+    if (item && !item.completed) return n;
+  }
+  return null;
+}
+
+/**
+ * Derive the in-progress step: `preferred` if it names an existing incomplete step; else the
+ * lowest-numbered incomplete step; else `null` (all complete / no steps).
+ */
+export function computeCurrent(steps: CheckpointStep[], preferred: number | null): number | null {
+  if (preferred != null) {
+    const item = steps.find((s) => s.step === preferred);
+    if (item && !item.completed) return preferred;
+  }
+  const lowest = steps.filter((s) => !s.completed).sort((a, b) => a.step - b.step)[0];
+  return lowest ? lowest.step : null;
 }
 
 /**
@@ -126,36 +162,76 @@ export function rebuildCheckpoint(branch: readonly BranchEntry[]): CheckpointSta
       break;
     }
   }
-  if (seed === null) return { steps: [] };
+  if (seed === null) return { steps: [], current: null };
 
   const after: string[] = [];
   for (let i = markerIdx + 1; i < branch.length; i++) {
     const text = isAssistantText(branch[i] as never);
     if (text) after.push(text);
   }
-  markCompletedSteps(after.join("\n"), seed);
-  return { steps: seed };
+  const afterText = after.join("\n");
+  markCompletedSteps(afterText, seed);
+  const current = computeCurrent(seed, latestWipStep(afterText, seed));
+  return { steps: seed, current };
 }
 
 // --- the controller -----------------------------------------------------------------------------
 
 function progressLine(state: CheckpointState): string {
   const done = state.steps.filter((s) => s.completed).length;
-  return `${done}/${state.steps.length}`;
+  const base = `${done}/${state.steps.length}`;
+  return state.current != null ? `${base} · ▶${state.current}` : base;
+}
+
+/** The glyph for a step: ☑ completed, ▶ the current step, ☐ otherwise. */
+function stepGlyph(state: CheckpointState, s: CheckpointStep): string {
+  if (s.completed) return "☑";
+  if (s.step === state.current) return "▶";
+  return "☐";
+}
+
+/** A coarse descriptor of the active plan when there is no `## Steps` checklist (the prose path). */
+interface CoarseDescriptor {
+  stage: string;
+  planId: string;
+}
+
+function coarseDescriptor(
+  ctx: ExtensionContext,
+  branch: readonly BranchEntry[],
+): CoarseDescriptor | null {
+  const wf = rebuildWorkflowState(branch);
+  if (wf.active_plan_ref == null) return null;
+  const stageRaw = wf.run_id != null ? readHandoff(ctx.cwd, wf.run_id)?.stage : undefined;
+  const stage = typeof stageRaw === "string" && stageRaw ? stageRaw : "active";
+  return { stage, planId: wf.active_plan_ref.pr_id };
 }
 
 /** Surface progress in the UI (guarded — headless never touches setStatus/setWidget). */
-function renderStatus(ctx: ExtensionContext, state: CheckpointState): void {
+function renderStatus(
+  ctx: ExtensionContext,
+  state: CheckpointState,
+  branch: readonly BranchEntry[],
+): void {
   if (!ctx.hasUI) return;
   if (isInert(state)) {
-    ctx.ui.setStatus("perk-checkpoints", undefined);
-    ctx.ui.setWidget("perk-checkpoints", undefined);
+    // Coarse fallback: an active prose plan (no `## Steps`) still surfaces SOMETHING.
+    const coarse = coarseDescriptor(ctx, branch);
+    if (coarse) {
+      ctx.ui.setStatus("perk-checkpoints", `📋 ${coarse.stage}`);
+      ctx.ui.setWidget("perk-checkpoints", [
+        `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`,
+      ]);
+    } else {
+      ctx.ui.setStatus("perk-checkpoints", undefined);
+      ctx.ui.setWidget("perk-checkpoints", undefined);
+    }
     return;
   }
   ctx.ui.setStatus("perk-checkpoints", `📋 ${progressLine(state)}`);
   ctx.ui.setWidget(
     "perk-checkpoints",
-    state.steps.map((s) => `${s.completed ? "☑" : "☐"} ${s.step}. ${s.text}`),
+    state.steps.map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`),
   );
 }
 
@@ -180,11 +256,11 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         const steps = active ? extractSteps(readPlanBody(ctx.cwd)) : [];
         if (steps.length > 0) {
           pi.appendEntry(CHECKPOINT_TYPE, { steps });
-          renderStatus(ctx, { steps });
+          renderStatus(ctx, { steps, current: computeCurrent(steps, null) }, branch);
           return;
         }
       }
-      renderStatus(ctx, existing);
+      renderStatus(ctx, existing, branch);
     } catch (error) {
       console.error(`perk: checkpoint seed/rebuild failed on session_start — ${error}`);
     }
@@ -192,7 +268,8 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
 
   pi.on("session_tree", async (_event, ctx) => {
     try {
-      renderStatus(ctx, rebuildCheckpoint(branchOf(ctx)));
+      const branch = branchOf(ctx);
+      renderStatus(ctx, rebuildCheckpoint(branch), branch);
     } catch (error) {
       console.error(`perk: checkpoint rebuild failed on session_tree — ${error}`);
     }
@@ -200,15 +277,30 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
 
   pi.on("turn_end", async (event, ctx) => {
     try {
-      const state = rebuildCheckpoint(branchOf(ctx));
-      if (isInert(state)) return; // nothing to track
+      const branch = branchOf(ctx);
+      const state = rebuildCheckpoint(branch);
+      if (isInert(state)) {
+        // Coarse path: an active prose plan still surfaces a status (no entry to advance).
+        renderStatus(ctx, state, branch);
+        return;
+      }
       const text = isAssistantText(event.message as never);
-      if (text === null) return;
-      if (markCompletedSteps(text, state.steps) > 0) {
+      if (text === null) {
+        renderStatus(ctx, state, branch);
+        return;
+      }
+      const advanced = markCompletedSteps(text, state.steps) > 0;
+      // A WIP declared THIS turn wins; otherwise preserve the prior `current` (unless it completed).
+      state.current = computeCurrent(
+        state.steps,
+        latestWipStep(text, state.steps) ?? state.current,
+      );
+      if (advanced) {
         // Persist the advanced completion as a new marker entry (carries completion forward).
         pi.appendEntry(CHECKPOINT_TYPE, { steps: state.steps });
-        renderStatus(ctx, state);
       }
+      // Always re-render: `current` can change without completion advancing.
+      renderStatus(ctx, state, branch);
     } catch (error) {
       console.error(`perk: checkpoint advance failed on turn_end — ${error}`);
     }
@@ -221,7 +313,7 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
       const message = isInert(state)
         ? "perk: no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
         : `perk checkpoints (${progressLine(state)}):\n${state.steps
-            .map((s) => `${s.completed ? "✓" : "○"} ${s.step}. ${s.text}`)
+            .map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`)
             .join("\n")}`;
       if (ctx.hasUI) ctx.ui.notify(message, "info");
       else console.error(message);
