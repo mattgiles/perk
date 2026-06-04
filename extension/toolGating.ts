@@ -117,6 +117,9 @@ const SAFE_PATTERNS = [
   /^\s*fd\b/,
   /^\s*bat\b/,
   /^\s*eza\b/,
+  // perk's own read-only objective queries (show/next + their s/n aliases). The trailing \b keeps
+  // the `n` alias from matching the mutating `node` subcommand; create/node/reconcile stay blocked.
+  /^\s*perk\s+(objective|obj)\s+(show|s|next|n)\b/i,
 ];
 
 /**

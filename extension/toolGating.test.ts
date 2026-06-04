@@ -22,6 +22,11 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "cat x 2>&1", // fd duplication is not a file write
     "grep foo bar 2>&1",
     "ls -la 1>&2",
+    "perk objective show", // perk's read-only objective queries
+    "perk objective next",
+    "perk obj show 42",
+    "perk objective s", // s/n aliases
+    "perk obj n",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -42,6 +47,11 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "chmod +x script.sh",
     "some-unknown-binary --flag", // not in the safe table at all
     "git status && rm file", // destructive wins over a safe prefix
+    "perk objective create foo", // mutating objective subcommands stay blocked
+    "perk objective node 1.1",
+    "perk objective reconcile",
+    "perk init", // would allow scaffolding writes
+    "perk obj node 2.3", // the `n` alias must not match `node`
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }
