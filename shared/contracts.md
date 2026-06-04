@@ -571,6 +571,19 @@ create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url
   present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
   (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
   `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
+
+  **P2.T17 — learn is now ACTIVE (primed launch + guided warm door).** The capture mechanism above
+  is unchanged; what's added is the *driver*. The `learn` cold launch is **primed** (`launch.py`
+  `_learn_prompt`): the session opens already investigating the landed change (read the plan +
+  derive the merged PR from the `plan-<pr_id>` head branch) and is told to call the `learn` tool
+  with synthesized learnings. The warm **bare `/learn`** (interactive) **injects `perk-learn`
+  guidance** via `pi.sendUserMessage` instead of silently clearing the marker (the agent clears it
+  by calling the `learn` tool); **`/learn skip`** preserves the pure marker-clear and **`/learn
+  <text>`** still captures verbatim; **headless** bare `/learn` stays the safe marker-clear
+  (can't drive a turn). The **`perk-learn` skill** is the judgment layer both surfaces point at.
+  No new gateway op — the existing `learn` tool / `learn-capture` worker remain the durable-write
+  path. **Tier 3** (session-material bundling on land, multi-agent session/diff/docs analysis, the
+  `docs/learned/*.md` documentation-plan loop) remains **deferred** to its own objective node.
 - **Reconciliation typing (D9 — vocabulary established; Reconcilable + objective reconciliation
   implemented in P2.T11).** Three section types on land: **Mechanical** (command-updated,
   deterministic — T8b: `pending-learn` + the plain squash commit message; **P2.T11a**: the
