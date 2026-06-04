@@ -1,162 +1,80 @@
-I've verified the bug doc against the code. Every claim holds: `git.push` (`perk/git.py:59`) is plain with no force; `_pr_submit_impl` (`perk/cli/commands/pr_submit_cmd.py`) calls `git.push(repo_root, branch)` unconditionally; `find_pr_for_branch`/`create_pr` are idempotent; there's **no** `is_dirty`/`status`/`fetch` helper anywhere in `perk/`. One correction to fold in: the bug doc's fix #5 calls for `scripts/verify-*.sh`, but `AGENTS.md` now mandates pytest/node:test for regression coverage (no bespoke verify scripts; `scripts/` doesn't even exist).
-
-Here is the finalized plan.
+I don't have the `plan_save`/`/plan off` tools exposed in this session, so here is the finalized, decision-complete plan for you to save.
 
 ---
 
-# Plan: fix re-`/submit` on rewritten history (force-with-lease re-push + commit-first guard)
+# Plan: Neutralize pi's stale-lockfile startup warning at perk's launch chokepoint
 
-## Problem & status (verified)
+## Problem / Status
+Every `perk` command that launches pi (`perk implement`, `resume`, `objective-plan`, etc.) prints:
 
-Re-`/submit` works only for *appended* commits. When the plan branch's history is **rewritten** (amend / squash / rebase) — the common case after addressing feedback, and the *guaranteed* case once the stale-base bug is fixed by rebasing onto `origin/main` — the push is rejected non-fast-forward and `perk pr-submit` dies with a raw `GitError`. Secondarily, a dirty worktree silently fails to update the PR (only the committed ref is pushed).
+```
+Warning: (startup session lookup, global settings) ENOTDIR: not a directory, rmdir '/Users/<user>/.pi/agent/settings.json.lock'
+```
 
-Verified against current code:
-- `perk/git.py` — `push(cwd, branch, *, set_upstream=True)` runs `git push [-u] origin <branch>` with **no force, no divergence handling**. There is **no `fetch`, no `status`/`is_dirty`, no `PushRejectedError`** in this module.
-- `perk/cli/commands/pr_submit_cmd.py` — `_pr_submit_impl` calls `git.push(repo_root, branch)` unconditionally; the top-level handler maps `git.GitError` → `error_type="git_error"` with `message="git push failed\n{exc}"` (raw stderr). No dirty-tree check.
-- `perk/github.py` — `find_pr_for_branch` (`:829`, `state=all`, prefers open) + `create_pr` are idempotent, so PR detection/reuse already works. `default_branch` (`:818`) resolves the base. **These are not the bug** and must not change.
-- `extension/submit.ts` — `submitPr` delegates to `perk pr-submit --json`, never reimplements GitHub writes (D1). It surfaces `error`/`error_type` from the worker JSON. The guard must live in the worker, not be duplicated here.
+This is **harmless** (the launch proceeds) but fires on every launch.
 
-## Key design insight (resolves the open `--force-with-lease` question)
+### Root cause (verified)
+- pi locks its global settings at startup using `proper-lockfile`:
+  - `dist/core/settings-manager.js` → `FileSettingsStorage.acquireLockSyncWithRetry` → `lockfile.lockSync(path, {realpath:false})`.
+  - `main.js:423-425`: `getAgentDir()` → `SettingsManager.create(cwd, agentDir)` → at startup `reportDiagnostics(collectSettingsDiagnostics(startupSettingsManager, "startup session lookup"))`.
+- `proper-lockfile` acquires a lock by **`mkdir`-ing a directory** named `<file>.lock` (`node_modules/proper-lockfile/lib/lockfile.js`, `acquireLock`: `options.fs.mkdir(lockfilePath, ...)`; `getLockFile` returns `` `${file}.lock` ``). A held lock is therefore **always a directory**.
+- When a stale **regular file** sits at `settings.json.lock`: `mkdir` → `EEXIST`; pi judges it stale by mtime; `removeLock` calls `options.fs.rmdir(...)` → **`ENOTDIR`** because the path is a file, not a directory.
+- The error is captured via `SettingsManager.recordError` (`settings-manager.js:292-294`), drained by `drainErrors` (line ~376), and rendered yellow by `reportDiagnostics` (`main.js:64-70`).
 
-The bug doc flags an open question: `--force-with-lease` can fail in worktrees where the remote-tracking ref is stale, "may need a `git fetch` first." **This does not apply to perk's submit path, and no fetch is needed**, because:
+### Why fix it in perk (not pi)
+perk launches pi through a **single chokepoint**: `os.execvpe("pi", argv, env)` at `perk/launch.py:303` inside `launch_stage`. perk cannot patch pi, but it can clean the stale lock immediately before exec. The cleanup is provably safe: a *legitimately held* `proper-lockfile` lock is a **directory**, so removing only **non-directory** lock paths can never clobber a live lock.
 
-- perk plan branches (`plan-<n>`) are **perk-owned and single-author** — one worktree implements one plan.
-- The **first** submit pushes with `git push -u origin <branch>`, which sets the remote-tracking ref `refs/remotes/origin/<branch>` to exactly what we pushed.
-- On a later re-submit after a local rewrite, `--force-with-lease` (implicit, no explicit value) compares origin against that remote-tracking ref. Since only this worktree pushes this branch, the ref still reflects current origin → the lease **passes for our own rewrite** and correctly **rejects if origin moved unexpectedly** (the safety we want) — with **no fetch**.
-- `--force-with-lease` on a brand-new branch (no remote ref yet) is a **no-op** — the push creates the ref normally. So it is safe to apply uniformly on the submit push.
-
-Therefore: **always use `--force-with-lease` on the submit push, no fetch, no escalation logic.** This keeps first-push behavior (decision #2), fixes rewrites (decision #1), and preserves teammate safety.
-
-Out of scope / noted: a *fresh-clone resume* (branch exists on origin but this worktree never pushed it, so its remote-tracking ref is absent/stale) could hit a `stale info` lease failure. Contracts already place remote-branch resume in **Phase 2** ("recreating one from a remote branch on a fresh clone is Phase 2"). When that lands it can add a targeted `git fetch origin <branch>` before the lease. Mention this in the contract amendment; do not build it now.
-
-Coupling: this fix is **independent of and lands before/independently of** the stale-base/rebase fix (`implement-branches-off-stale-local.md`). It is correct on its own; the stale-base fix merely makes divergent re-submits routine.
+## Decisions (all resolved)
+1. **Fix location:** `launch_stage` in `perk/launch.py`, on the real launch path only (after `dry_run` has already returned), immediately before `os.chdir(wt)` / `os.execvpe(...)`.
+2. **Safety predicate:** remove a lock path **iff it is not a directory** (`Path.is_dir()` is False). A directory = live lock → never touched. A regular file / symlink-to-file / other = stale artifact → removed. `unlink(missing_ok=True)` handles the absent case.
+3. **Which locks:** the two agent-dir locks pi takes — `settings.json.lock` and `auth.json.lock` — under pi's **global agent dir**. Project-scope locks (`<worktree>/.pi/settings.json.lock`) are **out of scope**: launched worktrees get a fresh `.pi/` and the observed bug is global; note this deferral explicitly, do not author for it.
+4. **Agent-dir resolution (mirror pi exactly):** `config.js getAgentDir()` reads env var `PI_CODING_AGENT_DIR` (= `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`, `APP_NAME="pi"`), else `homedir()/.pi/agent` (`CONFIG_DIR_NAME=".pi"`). Replicate: `os.environ["PI_CODING_AGENT_DIR"]` (expanduser) else `Path.home()/".pi"/"agent"`.
+5. **Failure handling:** best-effort and **non-fatal** — a sweep failure must never block a launch. Wrap in `try/except OSError`. The error boundary is honored by the fact that *if* the stale lock survives, pi prints its own diagnostic (the status-quo warning) — that is the surfaced report. Document this rationale in the docstring so it isn't read as a silent swallow.
+6. **No doctor check.** The warning is a launch-time symptom on global state; `doctor` operates on the repo root, so a doctor fix would not prevent the next-launch warning. Keep the fix solely at the launch chokepoint. (Note this as a considered-and-rejected alternative, not a deferral that needs follow-up.)
 
 ## Changes
 
-### 1. `perk/git.py` — add `force` to `push`, add a `PushRejectedError`
-
-- Add an exception subclass next to `GitError`:
+### `perk/launch.py`
+- Add module-level constant near the top-of-module helpers:
   ```python
-  class PushRejectedError(GitError):
-      """A push was rejected as non-fast-forward / failed the --force-with-lease check."""
+  # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
+  # (atomic mkdir). A stale regular *file* at one of these paths makes pi's startup rmdir fail
+  # with ENOTDIR and print a "(startup session lookup, global settings)" warning on every launch.
+  _PI_AGENT_LOCK_FILES = ("settings.json.lock", "auth.json.lock")
   ```
-- Add `force: bool = False` to `push`:
-  ```python
-  def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = False) -> None:
-      args = ["push"]
-      if force:
-          args.append("--force-with-lease")
-      if set_upstream:
-          args += ["-u", "origin", branch]
-      else:
-          args += ["origin", branch]
-      _run(args, cwd=cwd)
-  ```
-- Make `push` translate a rejection into `PushRejectedError` instead of a bare `GitError`. Because `_run` raises `GitError` on non-zero, wrap the call in `push` (not in `_run`, which is shared): catch `GitError`, and if its message matches a rejection signature, re-raise as `PushRejectedError`. Match case-insensitively on any of: `non-fast-forward`, `[rejected]`, `stale info`, `failed to push some refs`. Otherwise re-raise the original `GitError`.
+- Add `_pi_agent_dir() -> Path` mirroring pi's `getAgentDir()`: return `Path(os.environ["PI_CODING_AGENT_DIR"]).expanduser()` if that env var is set and non-empty, else `Path.home() / ".pi" / "agent"`.
+- Add `_sweep_stale_pi_agent_locks(agent_dir: Path) -> None`:
+  - For each name in `_PI_AGENT_LOCK_FILES`, let `lock = agent_dir / name`.
+  - `try: ` if `not lock.is_dir()` then `lock.unlink(missing_ok=True)`; `except OSError: pass`.
+  - Docstring states: removes only non-directory lock paths (a directory is a live `proper-lockfile` lock); best-effort/non-fatal because pi will surface its own diagnostic if the stale lock survives.
+- In `launch_stage`, on the real launch path (after the `if dry_run:` block returns, alongside the existing `env = {**os.environ, "PERK_RUN_ID": rid}` line, before `os.chdir(wt)`): call `_sweep_stale_pi_agent_locks(_pi_agent_dir())`.
 
-  ```python
-  _REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to push some refs")
-  ...
-  try:
-      _run(args, cwd=cwd)
-  except GitError as exc:
-      msg = str(exc).lower()
-      if any(m in msg for m in _REJECT_MARKERS):
-          raise PushRejectedError(str(exc)) from exc
-      raise
-  ```
+### `tests/test_launch.py`
+Add unit tests (pure, `tmp_path`-based; follow the existing `monkeypatch.setattr("perk.launch.os.execvpe", ...)` pattern already used at lines ~153/196/221/327):
+1. `_sweep_stale_pi_agent_locks` removes a regular `settings.json.lock` **file** (and `auth.json.lock`).
+2. It **leaves a `settings.json.lock` directory untouched** (create the dir; assert it still exists) — the live-lock safety guarantee.
+3. No-op when the lock paths are absent (no exception).
+4. Swallows `OSError` (e.g. monkeypatch `Path.unlink` to raise `PermissionError`; assert no propagation).
+5. `_pi_agent_dir()` honors `PI_CODING_AGENT_DIR` (set via `monkeypatch.setenv`, incl. a `~`-prefixed value → expanduser) and falls back to `~/.pi/agent` when unset.
+6. Integration: `launch_stage` calls the sweep before exec — monkeypatch `perk.launch._pi_agent_dir` to a `tmp_path` agent dir seeded with a stale `settings.json.lock` file, monkeypatch `os.execvpe` to a no-op recorder, run a non-dry-run `launch_stage` (reuse the `git_repo` fixture + plan-ref setup from `test_implement_materializes_worktree_and_is_idempotent`), and assert the stale file is gone and exec was reached.
 
-### 2. `perk/git.py` — add a dirty-tree probe
+## Per-turn doc (project convention)
+Before implementing, create `docs/planning/phase-2-turn-15.md` (next sequential turn after `phase-2-turn-14.md`) capturing: the decision set above + the prior-art pass (pi `proper-lockfile` mechanism). After landing, fill its **outcomes** section with any deviations.
 
-Add a helper used by the commit-first guard (no such helper exists today):
-```python
-def is_dirty(cwd: Path) -> bool:
-    """True if the worktree at ``cwd`` has uncommitted changes (tracked or untracked)."""
-    return bool(_run(["status", "--porcelain"], cwd=cwd).strip())
-```
-(Matches the contracts' `git status --porcelain` dirty-check idiom referenced for `session_before_fork`.)
+## Codebase evidence
+- `perk/launch.py:303` — sole `os.execvpe("pi", ...)` chokepoint (grep confirmed only one occurrence).
+- `perk/launch.py:301-303` — `env = {**os.environ, "PERK_RUN_ID": rid}` / `os.chdir(wt)` / `os.execvpe` insertion site.
+- `dist/core/settings-manager.js` `acquireLockSyncWithRetry` / `withLock` (lines ~51-104) — pi's lock acquisition.
+- `node_modules/proper-lockfile/lib/lockfile.js` `getLockFile` (line 11), `acquireLock` `mkdir` (line ~57), `removeLock` `rmdir` (line ~88) — directory-based locking + the failing `rmdir`.
+- `dist/main.js:58-70, 423-425` — `collectSettingsDiagnostics` / `reportDiagnostics` and the `"startup session lookup"` call producing the exact warning string.
+- `dist/config.js:369-391` — `ENV_AGENT_DIR = "PI_CODING_AGENT_DIR"`, `getAgentDir()` env-or-`~/.pi/agent` resolution to mirror.
+- `tests/test_launch.py` — existing `os.execvpe` monkeypatch + `git_repo` fixture pattern to reuse.
+- Observed artifact: `~/.pi/agent/settings.json.lock` is a 0-byte regular file dated Mar 3 (stale).
 
-### 3. `perk/cli/commands/pr_submit_cmd.py` — guard, force, and map rejection
-
-In `_pr_submit_impl`, **before** `git.push`:
-- **Commit-first guard.** After resolving `branch`/`issue` and confirming not-dry-run, check `git.is_dirty(repo_root)`; if dirty, raise:
-  ```python
-  raise UserFacingCliError(
-      "Uncommitted changes in this worktree\n"
-      "Commit your changes before submitting — uncommitted work isn't pushed.",
-      error_type="dirty_tree",
-  )
-  ```
-  (`UserFacingCliError` is already imported and already routed to exit 1 with its `error_type`.)
-- **Force the re-push.** Change the call to:
-  ```python
-  git.push(repo_root, branch, force=True)
-  ```
-  (Auto-force is safe and correct per the design insight — perk-owned plan branch, `--force-with-lease`, no-op on first push.)
-
-In the top-level `pr_submit` handler's `except` chain:
-- Add an `except git.PushRejectedError as exc:` arm **before** the existing `except git.GitError`, mapping to a stable, actionable error:
-  ```python
-  except git.PushRejectedError as exc:
-      _fail(
-          ctx, as_json=as_json, error_type="push_rejected",
-          message=(
-              "Push rejected — the remote branch moved unexpectedly.\n"
-              "Fetch/rebase onto the latest origin and re-submit.\n" + str(exc)
-          ),
-      )
-      return
-  ```
-  Keep the existing `except git.GitError` arm (`error_type="git_error"`) as the fallback for non-rejection git failures.
-
-`extension/submit.ts` needs **no change** — it already forwards `error`/`error_type` from the worker JSON; `dirty_tree` and `push_rejected` flow through `details.error_type` and the user-facing message automatically.
-
-### 4. Update tool guidelines wording (optional, low-risk)
-
-In `extension/submit.ts`, the `TOOL_GUIDELINES` already say "Call submit only after the implementation is committed." The worker now *enforces* this; no edit required, but the existing guideline is now accurate (leave as-is).
-
-## Tests (the gate — pytest, per AGENTS.md, **not** `scripts/verify-*.sh`)
-
-> Correction to the bug doc: fix #5 proposed `scripts/verify-*.sh` with a fake-git harness. `AGENTS.md` now mandates regression coverage live in the pytest / node:test suites run by `just test` / gated by `just ci`; `scripts/` does not exist. Use real-git tests (strongest, matches the empirical repro) and existing monkeypatch stubs.
-
-### `tests/test_git.py` — real bare-remote rewrite repro (new tests)
-
-Use a local **bare** repo as `origin` (no network). Pattern:
-- Build a fixture: init a work repo with one commit, `git init --bare` a remote dir, `git remote add origin <bare>`, then `git.push(work, "plan-x")` (first push, plain — succeeds, sets upstream).
-- **Test first push is plain & succeeds:** assert `git.push(work, branch)` (default `force=False`) succeeds against a fresh bare remote.
-- **Test rewrite + plain push is rejected:** `git commit --amend`, then `git.push(work, branch, force=False)` raises `git.PushRejectedError` (the empirical repro).
-- **Test rewrite + force-with-lease succeeds:** after the same amend, `git.push(work, branch, force=True)` succeeds and the bare remote's `plan-x` now points at the amended commit (assert via `git --git-dir=<bare> rev-parse plan-x`).
-- **Test `is_dirty`:** clean tree → `False`; create/modify an unstaged file → `True`.
-
-### `tests/test_pr_submit.py` — guard, push args, rejection mapping (extend existing)
-
-The existing `_stub_gh` stubs `git.push` as a recorder. Extend:
-- **Dirty-tree refusal:** monkeypatch `git.is_dirty` → `True`; run `pr-submit --json`; assert exit 1 and `error_type == "dirty_tree"`, and that `calls["pushed"]` is `False` (guard fires before push). (Default the existing happy-path stubs to `git.is_dirty` → `False`.)
-- **Submit force-pushes:** change `_push` stub to capture kwargs; assert the worker calls `git.push(..., force=True)` on the normal submit path.
-- **`push_rejected` mapping:** monkeypatch `git.push` to raise `git.PushRejectedError("... non-fast-forward ...")`; run; assert exit 1 and `error_type == "push_rejected"` with the actionable message (not raw `git_error`).
-- Keep existing tests green (they only assert `pushed is True` / header / body — add `git.is_dirty` → `False` to the shared stub so they don't trip the new guard).
-
-## Contract amendment (same turn)
-
-Amend `shared/contracts.md` in the **submit section** (around the P2.T8a submit block, near lines 595–630 / the `pr-submit` narrative at ~700–748):
-- State that `perk pr-submit` **force-pushes the perk-owned plan branch with `--force-with-lease`** (auto-force; no-op on first push), because plan branches are single-author and expected to diverge after amend/squash/rebase.
-- State the **commit-first guard**: submit refuses on a dirty worktree (`error_type: dirty_tree`) — uncommitted work isn't pushed.
-- State the new stable `error_type: push_rejected` mapping for non-fast-forward / lease failures (actionable message, not raw git stderr).
-- Note the **Phase-2 caveat**: a fresh-clone resume (remote branch with no local remote-tracking ref) may need a `git fetch origin <branch>` before the lease; deferred with remote-resume.
-
-## Out of scope / explicitly deferred
-- The stale-base/rebase fix (`implement-branches-off-stale-local.md`) and `git.fetch` — separate bug; this fix is correct without it.
-- Fresh-clone remote-resume lease handling — Phase 2.
-- Any change to `find_pr_for_branch` / `create_pr` (already idempotent) or to the warm `extension/submit.ts` delegation.
-
-## Execution order
-1. `perk/git.py`: `PushRejectedError`, `force` param + rejection mapping, `is_dirty`.
-2. `tests/test_git.py`: bare-remote repro tests.
-3. `perk/cli/commands/pr_submit_cmd.py`: dirty guard, `force=True`, `push_rejected` arm.
-4. `tests/test_pr_submit.py`: guard / force-args / rejection-mapping tests + stub `is_dirty=False`.
-5. `shared/contracts.md`: submit-section amendment.
-6. `just ci` green.
+## Out of scope / deferrals
+- Project-scope (`<worktree>/.pi/settings.json.lock`) sweeping — not the observed failure; flag, don't build.
+- No `perk doctor` check (rejected: doesn't prevent the next-launch warning; see Decision 6).
 
 ---
 
-Note: I'm in read-only mode and the `plan_save` tool / `/plan off` aren't available to me here — toggle plan mode off and invoke `plan_save` with the markdown above (or tell me and I'll proceed once the tool is available).
+**Immediate workaround** you can run right now (outside read-only mode): `rm ~/.pi/agent/settings.json.lock` — that silences it until/unless it recurs; the plan above makes the fix permanent and portable.

@@ -23,6 +23,41 @@ from perk.github import GitHubError
 from perk.output import machine_output, user_output
 from perk.registry import Stage
 
+# pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
+# (atomic mkdir). A stale regular *file* at one of these paths makes pi's startup rmdir fail
+# with ENOTDIR and print a "(startup session lookup, global settings)" warning on every launch.
+_PI_AGENT_LOCK_FILES = ("settings.json.lock", "auth.json.lock")
+
+
+def _pi_agent_dir() -> Path:
+    """Mirror pi's ``config.js getAgentDir()``: ``PI_CODING_AGENT_DIR`` env var if set/non-empty,
+    else ``~/.pi/agent``."""
+    env = os.environ.get("PI_CODING_AGENT_DIR")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".pi" / "agent"
+
+
+def _sweep_stale_pi_agent_locks(agent_dir: Path) -> None:
+    """Remove stale pi agent-dir lockfiles before exec'ing pi.
+
+    Only removes a lock path when it is **not a directory**: a directory is a *live*
+    ``proper-lockfile`` lock (held via atomic ``mkdir``), so a non-directory at that path can
+    only be a stale artifact and can never clobber a held lock. Best-effort and non-fatal — a
+    sweep failure must never block a launch; if a stale lock survives, pi surfaces its own
+    startup diagnostic (the status-quo warning), so this is a report-not-swallow boundary.
+
+    Project-scope locks (``<worktree>/.pi/settings.json.lock``) are out of scope: launched
+    worktrees get a fresh ``.pi/`` and the observed bug is on pi's global agent dir.
+    """
+    for name in _PI_AGENT_LOCK_FILES:
+        lock = agent_dir / name
+        try:
+            if not lock.is_dir():
+                lock.unlink(missing_ok=True)
+        except OSError:
+            pass
+
 
 @dataclass(frozen=True)
 class ResolvedWorktree:
@@ -304,6 +339,7 @@ def launch_stage(
     if stage.worktree != "none":
         _materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
     env = {**os.environ, "PERK_RUN_ID": rid}
+    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 
