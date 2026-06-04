@@ -193,6 +193,19 @@ def test_initial_prompt_primes_implement_and_address():
     assert _initial_prompt(_stage("address"), None) is None
 
 
+def test_initial_prompt_primes_learn():
+    """P2.T17: the learn stage is primed — it names the perk-learn skill, derives the merged PR
+    from the plan-<pr_id> head branch, and stays unprimed without a plan-ref."""
+    learn = _initial_prompt(_stage("learn"), _PLAN_REF)
+    assert learn is not None
+    assert "perk-learn" in learn
+    assert "plan-42" in learn  # the derived head branch (pr_id is the plan-issue number)
+    assert "gh pr list --head plan-42" in learn
+    assert "learn` tool" in learn  # drives the durable capture path
+    assert "/learn skip" in learn
+    assert _initial_prompt(_stage("learn"), None) is None
+
+
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):
     """Real-git integration (D4/D5): implement creates plan-<pr_id> + branch, materializes
     handoff + plan-ref into it, and reuses the worktree on a second run."""

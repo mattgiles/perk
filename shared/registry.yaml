@@ -156,6 +156,9 @@ stages:
     # P2.T8b: deepened from a thin marker-clear into a real knowledge-capture pass — with a
     # summary, create a perk:learn issue (idempotent via the perk:learn-scoped find_learn_issue) +
     # back-link comment, then clear pending-learn; without one, the thin marker-clear (no issue).
+    # P2.T17: now launches PRIMED (launch.py _learn_prompt) — the cold session opens investigating
+    # the landed change; bare warm /learn injects perk-learn guidance (interactive). No new I/O
+    # keys (no new gateway op) — the existing learn tool / learn-capture worker still persist.
     requires: [cache.markers]                # pending-learn gates the worktree
     reads: [cache.markers, cache.plan-ref]   # was it set? + the plan ref -> issue number/run_id
     writes: [cache.markers, github.learn, github.comments]  # clear marker; create learn issue + back-link

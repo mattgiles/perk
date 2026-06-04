@@ -4,8 +4,17 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
-import { markerPath, PENDING_LEARN, setMarker } from "./cache.ts";
+import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "./cache.ts";
+import { learnGuidance } from "./learn.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
+
+const PLAN_REF = {
+  provider: "github",
+  pr_id: "42",
+  url: "https://gh/o/r/issues/42",
+  labels: ["perk:plan"],
+  objective_id: null,
+};
 
 const CAPTURE_JSON = JSON.stringify({
   success: true,
@@ -48,16 +57,65 @@ test("tool: learn is idempotent when nothing is pending", async () => {
   }
 });
 
-test("/learn command: clears the marker", async () => {
+test("/learn skip: clears the marker only", async () => {
   const cwd = scaffoldRepo();
   setMarker(cwd, PENDING_LEARN);
   const h = await loadPerkSession({ cwd });
   try {
-    await h.invokeCommand("learn");
-    assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "command cleared pending-learn");
+    await h.runCommandHandler("learn", "skip");
+    assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "/learn skip cleared pending-learn");
   } finally {
     h.dispose();
   }
+});
+
+test("/learn (bare, headless): stays the safe marker-clear", async () => {
+  const cwd = scaffoldRepo();
+  setMarker(cwd, PENDING_LEARN);
+  const h = await loadPerkSession({ cwd, headful: false });
+  try {
+    await h.runCommandHandler("learn", "");
+    assert.ok(
+      !existsSync(markerPath(cwd, PENDING_LEARN)),
+      "headless bare /learn cleared pending-learn (can't drive a turn)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/learn (bare, interactive): injects guidance and keeps the marker", async () => {
+  const cwd = scaffoldRepo();
+  setMarker(cwd, PENDING_LEARN);
+  writePlanRef(cwd, PLAN_REF);
+  const h = await loadPerkSession({ cwd });
+  try {
+    await h.runCommandHandler("learn", "");
+    // The agent clears the marker by calling the `learn` tool — the command must NOT clear it.
+    assert.ok(
+      existsSync(markerPath(cwd, PENDING_LEARN)),
+      "bare /learn left pending-learn for the capture pass",
+    );
+    assert.ok(
+      h.notifies.some((n) => n.includes("investigate the landed change")),
+      "notified the capture workflow",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("learnGuidance names the skill and derives the head branch from the plan-ref", () => {
+  const withRef = learnGuidance(PLAN_REF);
+  assert.match(withRef, /perk-learn/);
+  assert.match(withRef, /plan-42/);
+  assert.match(withRef, /gh pr list --head plan-42/);
+  assert.match(withRef, /`learn` tool/);
+  assert.match(withRef, /\/learn skip/);
+  // Without a plan-ref it still names the skill and the tool (no branch derivation).
+  const noRef = learnGuidance(null);
+  assert.match(noRef, /perk-learn/);
+  assert.match(noRef, /`learn` tool/);
 });
 
 test("tool: learn with a summary delegates capture, surfaces the issue, and clears", async () => {
