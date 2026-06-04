@@ -1,11 +1,14 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from perk import cache
+from perk import git as git_mod
 from perk.cli.ensure import UserFacingCliError
 from perk.config import Config
+from perk.git import GitError
 from perk.launch import (
     _initial_prompt,
     launch_stage,
@@ -308,3 +311,163 @@ def test_remote_drivable_stage_surfaces_then_exits_not_driven(tmp_path, capsys):
     assert payload["stage"] == "implement"
     assert payload["target"]["runner"] == "ci-large"
     assert payload["target"]["plan_ref"]["pr_id"] == "42"
+
+
+# --- origin-aware create base ---------------------------------------------------------
+
+
+def _sha(repo, ref="HEAD"):
+    return subprocess.run(
+        ["git", "rev-parse", ref], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _no_exec(monkeypatch):
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+
+
+def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote, monkeypatch):
+    """Materialize-create fetches origin and bases the new branch on origin/<trunk>, not the
+    stale local HEAD."""
+    clone, _remote, advance = git_repo_with_remote
+    advanced = advance()  # origin/main is now ahead of the clone's local HEAD
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = clone / ".worktrees" / "plan-42"
+    assert _sha(wt) == advanced  # based off freshly-fetched origin/main, not stale local HEAD
+
+
+def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+    fetches: list[Path] = []
+    real_fetch = git_mod.fetch
+    monkeypatch.setattr(
+        "perk.launch.git.fetch", lambda repo, **k: (fetches.append(repo), real_fetch(repo, **k))[1]
+    )
+
+    def _run():
+        launch_stage(
+            repo_root=clone,
+            config=Config(worktree_root=clone / ".worktrees"),
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=False,
+            remote=None,
+            pi_args=[],
+        )
+
+    _run()
+    assert len(fetches) == 1  # create fetched once
+    _run()  # path now exists -> reuse
+    assert len(fetches) == 1  # reuse did not fetch again
+
+
+def test_offline_fetch_failure_warns_and_falls_back(git_repo_with_remote, monkeypatch, capsys):
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+
+    def boom(repo, **k):
+        raise GitError("offline")
+
+    monkeypatch.setattr("perk.launch.git.fetch", boom)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = clone / ".worktrees" / "plan-42"
+    assert wt.is_dir()  # still created
+    assert "STALE" in capsys.readouterr().err  # loud warning
+    # based off last-known origin/main
+    assert _sha(wt) == _sha(clone, "origin/main")
+
+
+def test_remote_branch_exists_bases_off_tracking(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    # Create origin/plan-42 pointing at a distinct commit on the remote.
+    subprocess.run(["git", "branch", "plan-42", "main"], cwd=clone, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "push", "-q", "origin", "plan-42"], cwd=clone, check=True, capture_output=True
+    )
+    subprocess.run(["git", "branch", "-D", "plan-42"], cwd=clone, check=True, capture_output=True)
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+    bases: list[str | None] = []
+    real_add = git_mod.worktree_add
+    monkeypatch.setattr(
+        "perk.launch.git.worktree_add",
+        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
+    )
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert bases == ["origin/plan-42"]
+
+
+def test_base_override_is_used_verbatim(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+    bases: list[str | None] = []
+    real_add = git_mod.worktree_add
+    monkeypatch.setattr(
+        "perk.launch.git.worktree_add",
+        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
+    )
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        base="main",
+    )
+    assert bases == ["main"]  # verbatim, no origin/<trunk> override
+
+
+def test_dry_run_surfaces_base_without_fetching(git_repo_with_remote, monkeypatch, capsys):
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+
+    def fail_if_called(*a, **k):
+        raise AssertionError("dry-run must not fetch")
+
+    monkeypatch.setattr("perk.launch.git.fetch", fail_if_called)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["base"] == "origin/main"
+    assert not (clone / ".worktrees" / "plan-42").exists()

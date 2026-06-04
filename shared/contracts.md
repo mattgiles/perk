@@ -699,6 +699,18 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > field stays `null` until it is recorded at **submit** (T5a). `implement` reads `cache.plan-ref`
 > and writes `session.workflow-state` (the worktree link).
 >
+> **Status (origin-aware create base).** On **create** (not reuse), `perk implement` does a
+> **best-effort `git fetch origin`** and bases the new `plan-<pr_id>` branch on **`origin/<trunk>`**
+> (trunk via `git symbolic-ref refs/remotes/origin/HEAD`, fallback `main`/`master`, final `main`) —
+> so work starts on up-to-date trunk, not stale local HEAD. If the plan's branch already exists on
+> the remote it bases off **`origin/<branch>`** (tracking the resumed/remote branch). A
+> **`--base <ref>` override wins verbatim** (deliberate stacking on an unlanded branch, even a
+> non-origin ref). An **offline fetch failure is non-fatal but warns loudly** and falls back to the
+> last-known origin ref (or local HEAD when there is no remote — `base: null`). The
+> **reuse/resume** path (an existing worktree) never fetches or re-bases (D4). `--dry-run`/`--json`
+> surfaces the resolved start-point as a `base` field (resolved from local refs, no fetch). No
+> registry I/O change.
+>
 > **Status (P1.T4c) — implement gains a plan arg + session priming.** The Phase-1 dogfood run
 > surfaced two cold-door gaps and corrected them forward (T4a's no-positional D2 was the deviation
 > from phase-1-plan §P1.T4's `perk implement <plan>`): (1) **`perk implement [PLAN]`** is now a

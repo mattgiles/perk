@@ -30,6 +30,7 @@ class ResolvedWorktree:
 
     path: Path
     plan_ref: dict[str, Any] | None
+    base: str | None = None  # the start-point the create path used (None => off local HEAD)
 
 
 @dataclass(frozen=True)
@@ -96,8 +97,46 @@ def resolve_plan_worktree_name(plan_ref: dict[str, Any]) -> str:
     return f"plan-{pr_id}"
 
 
+def resolve_base(repo_root: Path, name: str, base_override: str | None) -> str | None:
+    """The start-point ref a freshly-created ``plan-<pr_id>`` branch should base off (D: origin-
+    aware create). Reads **local** refs only (no network) so it is dry-run-safe; the caller
+    fetches first on the materialize path so a fresh ``origin/*`` is visible here.
+
+    Precedence: an explicit ``--base`` wins verbatim (deliberate stacking, even on a non-origin
+    ref); else track an existing ``origin/<name>`` (resumed/remote plan); else base off
+    ``origin/<trunk>`` when it exists; else ``None`` (no usable origin ref — fall back to local
+    HEAD, e.g. no remote).
+    """
+    if base_override is not None:
+        return base_override
+    if git.remote_ref_exists(repo_root, f"origin/{name}"):
+        return f"origin/{name}"
+    trunk = git.detect_trunk_branch(repo_root)
+    if git.remote_ref_exists(repo_root, f"origin/{trunk}"):
+        return f"origin/{trunk}"
+    return None
+
+
+def _fetch_best_effort(repo_root: Path) -> None:
+    """Fetch ``origin`` before basing a new branch; an offline failure is **non-fatal but warns
+    loudly** (silent-off-stale-local is the bug this guards against)."""
+    try:
+        git.fetch(repo_root)
+    except GitError as exc:
+        user_output(
+            f"⚠ could not fetch origin ({exc}); basing this branch on the LAST-KNOWN origin ref "
+            "— it may be STALE. Connect and re-run, or pass --base, to start from up-to-date trunk."
+        )
+
+
 def resolve_worktree(
-    *, repo_root: Path, config: Config, stage: Stage, worktree: str | None, materialize: bool
+    *,
+    repo_root: Path,
+    config: Config,
+    stage: Stage,
+    worktree: str | None,
+    materialize: bool,
+    base: str | None = None,
 ) -> ResolvedWorktree:
     """Resolve the worktree this stage runs in (validating); create it only when
     ``materialize`` (i.e. not a dry run). ``create`` reuses an existing worktree (D4)."""
@@ -121,20 +160,27 @@ def resolve_worktree(
         f"Invalid worktree name '{name}' — no path separators.",
     )
     path = config.worktree_root / name
+    resolved_base: str | None = None
     if stage.worktree == "create":
         if path.exists():
-            pass  # D4: idempotent reuse (resume) — do not re-create or error
+            pass  # D4: idempotent reuse (resume) — do not fetch, re-base, re-create, or error
         elif materialize:
+            _fetch_best_effort(repo_root)  # network sync first so a fresh origin/* is seen
+            resolved_base = resolve_base(repo_root, name, base)
             try:
-                git.worktree_add(repo_root, path, branch=name, create_branch=True)
+                git.worktree_add(
+                    repo_root, path, branch=name, create_branch=True, base=resolved_base
+                )
             except GitError as exc:
                 raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
+        else:  # dry-run create: resolve the base from local refs only (no fetch, no create)
+            resolved_base = resolve_base(repo_root, name, base)
     else:  # reuse
         Ensure.path_exists(
             path,
             f"Worktree not found: {path}\nRun 'perk implement' first.",
         )
-    return ResolvedWorktree(path=path, plan_ref=plan_ref)
+    return ResolvedWorktree(path=path, plan_ref=plan_ref, base=resolved_base)
 
 
 def _initial_prompt(stage: Stage, plan_ref: dict[str, Any] | None) -> str | None:
@@ -193,6 +239,7 @@ def launch_stage(
     remote: str | None,
     pi_args: list[str],
     prompt_override: str | None = None,
+    base: str | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -210,7 +257,12 @@ def launch_stage(
     )
 
     resolved = resolve_worktree(
-        repo_root=repo_root, config=config, stage=stage, worktree=worktree, materialize=not dry_run
+        repo_root=repo_root,
+        config=config,
+        stage=stage,
+        worktree=worktree,
+        materialize=not dry_run,
+        base=base,
     )
     wt = resolved.path
     rid = run_id.mint()
@@ -230,6 +282,7 @@ def launch_stage(
             "worktree": str(wt),
             "run_id": rid,
             "argv": argv,
+            "base": resolved.base,
         }
         if resolved.plan_ref is not None:
             payload["plan_ref"] = resolved.plan_ref
