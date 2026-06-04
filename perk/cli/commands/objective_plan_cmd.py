@@ -20,6 +20,7 @@ import json
 import click
 
 from perk import github, launch, objective
+from perk.cli.alias import alias
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -70,6 +71,7 @@ def _seed_prompt(number: int, node: objective.ObjectiveNode, title: str) -> str:
     )
 
 
+@alias("oplan")
 @click.command("objective-plan", context_settings={"ignore_unknown_options": True})
 @click.argument("number", required=False, default=None, type=int)
 @click.option(

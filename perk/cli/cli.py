@@ -10,6 +10,7 @@ from pathlib import Path
 import click
 
 from perk import __version__
+from perk.cli.alias import AliasGroup, register_with_aliases
 from perk.cli.commands.doctor_cmd import doctor
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
@@ -31,7 +32,7 @@ from perk.cli.context import PerkContext
 from perk.cli.stages import register_stage_commands
 
 
-@click.group()
+@click.group(cls=AliasGroup)
 @click.version_option(__version__, prog_name="perk", message="%(prog)s %(version)s")
 @click.pass_context
 def cli(ctx: click.Context) -> None:
@@ -43,23 +44,23 @@ def cli(ctx: click.Context) -> None:
 
 
 cli.add_command(init_perk)
-cli.add_command(plan_save)
+register_with_aliases(cli, plan_save)
 cli.add_command(pr_submit)
 cli.add_command(pr_check)
 cli.add_command(pr_ready)
 cli.add_command(pr_land)
-cli.add_command(learn_capture)
+register_with_aliases(cli, learn_capture)
 cli.add_command(pr_feedback)
 cli.add_command(pr_resolve_threads)
-cli.add_command(resume_cmd)
-cli.add_command(implement)
+register_with_aliases(cli, resume_cmd)
+register_with_aliases(cli, implement)
 cli.add_command(doctor)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
-cli.add_command(registry)
-cli.add_command(state)
-cli.add_command(worktree)
-cli.add_command(objective_group)
-cli.add_command(objective_plan)
+register_with_aliases(cli, registry)
+register_with_aliases(cli, state)
+register_with_aliases(cli, worktree)
+register_with_aliases(cli, objective_group)
+register_with_aliases(cli, objective_plan)
 # objective-plan is registered above; register_stage_commands skips it (DEDICATED_STAGES).
 register_stage_commands(cli)
 

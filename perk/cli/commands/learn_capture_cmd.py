@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 
 from perk import cache, github
+from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -32,6 +33,7 @@ class LearnCaptureResult:
     dry_run: bool
 
 
+@alias("lc")
 @click.command("learn-capture")
 @click.option(
     "--body",
