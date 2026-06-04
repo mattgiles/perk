@@ -39,6 +39,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ```
 .pi/workflow/
 ├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
+├── plan.md                 # cache.plan: the materialized plan body (transient per-worktree mirror)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
@@ -56,12 +57,24 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   prune command (erk accumulated session dirs precisely because GC was undefined).
 - `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
   locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
-  `/.pi/workflow/plan-ref.json` — a local mirror; the canonical plan lives in GitHub).
+  `/.pi/workflow/plan-ref.json` and `/.pi/workflow/plan.md` — local mirrors; the canonical plan
+  lives in GitHub). The materialized `plan.md` body is transient and must never be tracked;
+  `perk doctor --fix` untracks a legacy-committed copy and drops any stray ungrouped ignore line
+  (#43).
 - **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
   written verbatim. One active ref per checkout/worktree (`.pi/workflow/` is per-checkout). The
   **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
   on `session_start` to reconcile `active_plan_ref` (§8.3). The cross-plane contract is the
   *file* (`perk/cache.py` ↔ `extension/cache.ts`), not a shared module.
+  - **Selector vs binding duality (#43).** The file plays **two roles by checkout**. In the
+    **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
+    consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
+    `save`) run here. In a **`plan-<N>` worktree** it is the durable **binding** — "this
+    worktree IS implementing plan #N" — materialized by the implement cold door; the worktree
+    stages (`implement`/`submit`/`address`/`land`/`learn`) run here. The selector is *not*
+    canonical history (GitHub is); it self-heals at the next `save`. The extension must never
+    let a stale **root selector** leak into a fresh planning session — hence the stage-gated
+    reconciliation in §8.3.
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
 `cache.handoff`, `cache.markers`.
@@ -146,12 +159,26 @@ are **strict** (durable/cross-process → read-back + correct ordering); purely 
 fields cheaply reconstructable on the next `session_start`/`session_tree` are
 best-effort-with-logging (never silently swallowed).
 
-**`active_plan_ref` reconciliation (T2b):** on `session_start`, after the run_id claim, the
-extension reads `cache.plan-ref` and appends `active_plan_ref` **iff** the rebuilt value
-does not already match the file — **idempotent by `(provider, pr_id)`** (so reloads don't
-duplicate and a fork keeps the inherited ref), with a **strict read-back** (loud-but-
-non-fatal on mismatch, headless-safe). `session_tree` re-reads nothing — the per-field LWW
-rebuild already restores `active_plan_ref`, so branch navigation preserves it.
+**`active_plan_ref` reconciliation (T2b, stage-gated #43):** on `session_start`, after the
+run_id claim, the extension reconciles `cache.plan-ref` into `active_plan_ref` — but **only
+when the launched stage *consumes* the ref**, i.e. the stage's registry `requires`/`reads`
+list `cache.plan-ref`. That is exactly the worktree binding stages
+(`implement`/`submit`/`address`/`land`/`learn`); the root `worktree: none` stages
+(`plan`/`objective-plan`/`save`) do **not** consume it, so a fresh planning session never
+inherits the stale **root selector** (§8.1's duality). The launched stage is read from the
+run's **handoff** blob (`stage`); only a settled run has one — `claim` (cold) reads it from
+the claimed run, `keep` (reload) from the kept run, and `fork`/`none` carry **no launched
+stage** (so they never re-read the file, relying on the LWW rebuild). When the stage does
+consume the ref, the extension appends `active_plan_ref` **iff** the rebuilt value does not
+already match the file — **idempotent by `(provider, pr_id)`** (so reloads don't duplicate
+and a fork keeps the inherited ref), with a **strict read-back** (loud-but-non-fatal on
+mismatch, headless-safe). When it does not consume the ref, an already-linked
+`active_plan_ref` is still **preserved** via the LWW rebuild, but the file is never read.
+`session_tree` re-reads nothing — the per-field LWW rebuild already restores
+`active_plan_ref`, so branch navigation preserves it. The registry is the gate's source of
+truth; if it fails to load, reconciliation stays **permissive** when a launched stage is
+present (to preserve implement linkage). **No clearing** of the selector anywhere — gating
+alone fixes the leak, and the Python plane is untouched.
 
 **Warm `/plan-save` direct linkage (T3):** the in-session warm door appends `active_plan_ref`
 **directly** after a successful save (same strict read-back, idempotent by `(provider, pr_id)`),

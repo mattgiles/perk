@@ -34,6 +34,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
     assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
+    assert "/.pi/workflow/plan.md" in gitignore  # cache.plan materialized body (transient, #43)
     assert "perk conventions" in (tmp_path / "AGENTS.md").read_text()
 
     # Idempotency: a second run changes nothing on disk.

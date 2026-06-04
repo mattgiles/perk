@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import cache, capabilities, env, github, init, registry
+from perk import cache, capabilities, env, git, github, init, registry
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.github import GitHubError
@@ -299,9 +299,58 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
 
 # --- fixes ----------------------------------------------------------------------------------
 
+
+def _strip_ungrouped_ignore_line(text: str, line: str) -> str:
+    """Drop standalone ``line`` occurrences that sit OUTSIDE the perk-managed block.
+
+    `init` now owns the line *inside* the managed block; an identical hand-added line outside it
+    is a stray duplicate. Lines within `# BEGIN/END perk managed` are preserved untouched.
+    """
+    out: list[str] = []
+    inside = False
+    for raw in text.splitlines(keepends=True):
+        stripped = raw.strip()
+        if stripped == init.GITIGNORE_BEGIN:
+            inside = True
+        elif stripped == init.GITIGNORE_END:
+            inside = False
+        elif not inside and stripped == line:
+            continue
+        out.append(raw)
+    return "".join(out)
+
+
+def _untrack_materialized_plan_cache(root: Path) -> list[str]:
+    """Repair the legacy tracked `cache.plan` body + its stray ungrouped `.gitignore` line.
+
+    `.pi/workflow/plan.md` is a transient materialized cache (contracts.md §8.1) — it must be
+    gitignored (now in the managed block) and never tracked. Early repos committed it and
+    hand-added an ungrouped `/.pi/workflow/plan.md` ignore line *outside* the managed block.
+    This forward-only repair removes the stray line and `git rm --cached`s the file; it is a
+    no-op (returns `[]`) once converged, so `--fix` stays idempotent.
+    """
+    changes: list[str] = []
+    rel = ".pi/workflow/plan.md"
+    gitignore = root / ".gitignore"
+    if gitignore.is_file():
+        text = gitignore.read_text(encoding="utf-8")
+        pruned = _strip_ungrouped_ignore_line(text, f"/{rel}")
+        if pruned != text:
+            gitignore.write_text(pruned, encoding="utf-8")
+            changes.append(".gitignore: removed stray /.pi/workflow/plan.md (now managed)")
+    if git.is_tracked(root, rel):
+        try:
+            git.rm_cached(root, rel)
+            changes.append(".pi/workflow/plan.md: untracked (transient cache.plan body)")
+        except git.GitError:
+            pass
+    return changes
+
+
 # The legacy/one-off migration seam (erk's `init --upgrade` repairs, perk's home for them).
-# Empty in Phase 0: perk has no prior versions to migrate, and we author no fictional repairs.
-_MIGRATIONS: tuple[Callable[[Path], list[str]], ...] = ()
+# Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
+# cache file). Each must be idempotent: a no-op (`[]`) once the repo is converged.
+_MIGRATIONS: tuple[Callable[[Path], list[str]], ...] = (_untrack_materialized_plan_cache,)
 
 
 def _fix_config(root: Path) -> list[str]:

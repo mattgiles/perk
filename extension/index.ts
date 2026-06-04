@@ -25,7 +25,7 @@ import { registerObjectivePlan } from "./objectivePlan.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
-import { loadRegistry } from "./registry.ts";
+import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSubmit } from "./submit.ts";
 import { registerToolGating } from "./toolGating.ts";
@@ -34,6 +34,7 @@ import {
   decideClaim,
   planRefsEqual,
   rebuildWorkflowState,
+  resolveRunStage,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
 } from "./workflowState.ts";
@@ -81,10 +82,13 @@ export default function (pi: ExtensionAPI) {
     sharedOk = false;
   }
 
+  let registry: Registry | null = null;
   let registryStages = -1;
   try {
-    registryStages = loadRegistry().stages.length;
+    registry = loadRegistry();
+    registryStages = registry.stages.length;
   } catch {
+    registry = null;
     registryStages = -1;
   }
   const registryOk = registryStages > 0;
@@ -144,24 +148,41 @@ export default function (pi: ExtensionAPI) {
       resolved = data;
     }
 
-    // Plan-ref linkage (turn-2b §6): reconcile the cache.plan-ref file into active_plan_ref
-    // — idempotent by (provider, pr_id), strict read-back, headless-safe. Runs after the
+    // Plan-ref linkage (turn-2b §6, stage-gated #43): reconcile the cache.plan-ref file into
+    // active_plan_ref — but ONLY when the launched stage *consumes* the ref (its registry
+    // `requires`/`reads` list `cache.plan-ref`). That is the worktree binding stages
+    // (implement/submit/address/land/learn); the root `worktree: none` stages
+    // (plan/objective-plan/save) must NOT inherit the root *selector* into a fresh planning
+    // session. Idempotent by (provider, pr_id), strict read-back, headless-safe. Runs after the
     // run_id claim so the run is settled first; the two append independent LWW fields.
-    const cachedRef = readPlanRef(ctx.cwd);
-    if (cachedRef !== null) {
-      const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
-      if (planRefsEqual(linked, cachedRef)) {
-        resolved = { ...resolved, active_plan_ref: linked };
-      } else {
-        pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: cachedRef });
-        if (
-          planRefsEqual(rebuildWorkflowState(branchEntries()).active_plan_ref ?? null, cachedRef)
-        ) {
-          resolved = { ...resolved, active_plan_ref: cachedRef };
+    // Reload/fork/tree (no launched stage) rely on the LWW rebuild — never re-read the file.
+    const linked = rebuildWorkflowState(branchEntries()).active_plan_ref ?? null;
+    const runStage = resolveRunStage(decision, ctx.cwd);
+    // Registry-missing is permissive when a stage is present, to preserve implement linkage.
+    const consumesPlanRef =
+      runStage !== null && (registry === null || stageConsumesPlanRef(registry, runStage));
+    if (consumesPlanRef) {
+      const cachedRef = readPlanRef(ctx.cwd);
+      if (cachedRef !== null) {
+        if (planRefsEqual(linked, cachedRef)) {
+          resolved = { ...resolved, active_plan_ref: linked };
         } else {
-          reportError(`plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`);
+          pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: cachedRef });
+          if (
+            planRefsEqual(rebuildWorkflowState(branchEntries()).active_plan_ref ?? null, cachedRef)
+          ) {
+            resolved = { ...resolved, active_plan_ref: cachedRef };
+          } else {
+            reportError(`plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`);
+          }
         }
+      } else if (linked !== null) {
+        resolved = { ...resolved, active_plan_ref: linked };
       }
+    } else if (linked !== null) {
+      // Non-consuming stage (or no launched stage): preserve any already-linked ref via LWW,
+      // but NEVER read the cache file — the root selector must not leak in.
+      resolved = { ...resolved, active_plan_ref: linked };
     }
 
     // Reapply the read-only allowlist from the resolved mode. Fail-closed: if the sync throws,

@@ -53,6 +53,20 @@ def repo_root(cwd: Path) -> Path | None:
     return Path(out.strip())
 
 
+def is_tracked(repo: Path, path: Path | str) -> bool:
+    """Whether ``path`` (relative to ``repo``) is tracked in the index. Offline; never raises."""
+    try:
+        out = _run(["ls-files", "--", str(path)], cwd=repo)
+    except GitError:
+        return False
+    return bool(out.strip())
+
+
+def rm_cached(repo: Path, path: Path | str) -> None:
+    """Stop tracking ``path`` without deleting the working-tree file (``git rm --cached``)."""
+    _run(["rm", "--cached", "--quiet", "--", str(path)], cwd=repo)
+
+
 def current_branch(repo: Path) -> str | None:
     """The current branch name, or ``None`` if detached."""
     try:

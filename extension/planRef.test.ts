@@ -31,7 +31,7 @@ function countPlanRefLinks(branch: readonly unknown[]): number {
 }
 
 test("link: a cached plan-ref is reconciled into active_plan_ref on session_start", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
   writePlanRef(cwd, REF);
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
@@ -43,7 +43,7 @@ test("link: a cached plan-ref is reconciled into active_plan_ref on session_star
 });
 
 test("no-dup reload: a second session_start does not re-append the same ref", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
   writePlanRef(cwd, REF);
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
@@ -62,7 +62,7 @@ test("no-dup reload: a second session_start does not re-append the same ref", as
 });
 
 test("session_tree: branch navigation preserves active_plan_ref via the LWW rebuild", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
   writePlanRef(cwd, REF);
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
@@ -79,6 +79,38 @@ test("session_tree: branch navigation preserves active_plan_ref via the LWW rebu
     assert.equal(h.sentinel()?.source, "tree");
     // Back at the leaf: the rebuild restored the ref without re-reading the cache file.
     assert.deepEqual(h.sentinel()?.active_plan_ref, REF);
+  } finally {
+    h.dispose();
+  }
+});
+
+// Regression (#43): the root `cache.plan-ref` *selector* must NOT leak into a fresh planning
+// session. The root `worktree: none` stages (plan/objective-plan/save) do not consume the ref
+// (registry `requires`/`reads`), so session_start must not reconcile it into active_plan_ref.
+for (const stage of ["plan", "objective-plan", "save"]) {
+  test(`gate: a ${stage} session does not inherit the root plan-ref selector`, async () => {
+    const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage } });
+    writePlanRef(cwd, REF);
+    const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+    try {
+      // The run is still claimed (run_id linkage is independent of plan-ref reconciliation)…
+      assert.equal(h.workflowState().run_id, "01RID");
+      // …but the stale root selector never becomes active_plan_ref.
+      assert.equal(h.workflowState().active_plan_ref ?? null, null);
+      assert.equal(countPlanRefLinks(h.session.sessionManager.getBranch()), 0);
+    } finally {
+      h.dispose();
+    }
+  });
+}
+
+test("gate: a bare session (no handoff, no PERK_RUN_ID) never reads the plan-ref file", async () => {
+  const cwd = scaffoldRepo();
+  writePlanRef(cwd, REF);
+  const h = await loadPerkSession({ cwd });
+  try {
+    assert.equal(h.workflowState().active_plan_ref ?? null, null);
+    assert.equal(countPlanRefLinks(h.session.sessionManager.getBranch()), 0);
   } finally {
     h.dispose();
   }

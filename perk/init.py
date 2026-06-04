@@ -44,7 +44,8 @@ GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
 # Pi install caches + perk's transient tier-2 cache subtrees + per-user config +
 # worktrees. The `.pi/workflow/` dir itself stays tracked (via .gitkeep); only the
-# transient subtrees/sentinels are ignored (contracts.md §8.1).
+# transient subtrees/sentinels are ignored (contracts.md §8.1) — including the
+# materialized `cache.plan` body (`plan.md`), a per-worktree mirror of the GitHub plan.
 GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
@@ -54,6 +55,7 @@ GITIGNORE_BODY = "\n".join(
         "/.pi/workflow/.perk-loaded",
         "/.pi/workflow/.perk-t3.json",
         "/.pi/workflow/post-init.md",
+        "/.pi/workflow/plan.md",
         "/.pi/workflow/plan-ref.json",
         "/.pi/workflow/handoff/",
         "/.pi/workflow/scratch/",

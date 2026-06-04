@@ -1,17 +1,30 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { PlanRef } from "./cache.ts";
+import { handoffPath, type PlanRef, workflowDir } from "./cache.ts";
 import {
   type BranchEntry,
   decideClaim,
   deriveForkRunId,
   planRefsEqual,
   rebuildWorkflowState,
+  resolveRunStage,
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
+
+/** Plant a handoff blob (optionally carrying `stage`) for resolveRunStage tests. */
+function plantHandoff(runId: string, stage?: string): string {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-stage-"));
+  mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
+  writeFileSync(
+    handoffPath(cwd, runId),
+    `${JSON.stringify({ run_id: runId, consumed: false, stage }, null, 2)}\n`,
+    "utf8",
+  );
+  return cwd;
+}
 
 function ws(data: Record<string, unknown>): BranchEntry {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
@@ -96,6 +109,58 @@ test("decideClaim: fork when run_id was inherited from a different session", () 
     assert.equal(d.parentRunId, "01RID");
     assert.equal(d.childRunId, "01RID.1");
   }
+});
+
+test("resolveRunStage: claim reads the stage from the run's handoff", () => {
+  const cwd = plantHandoff("01RID", "implement");
+  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", cwd });
+  assert.equal(resolveRunStage(d, cwd), "implement");
+});
+
+test("resolveRunStage: claim with a stage-less handoff is null", () => {
+  const cwd = plantHandoff("01RID");
+  const d = decideClaim({ state: {}, currentSessionId: "s1", envRunId: "01RID", cwd });
+  assert.equal(d.action, "claim");
+  assert.equal(resolveRunStage(d, cwd), null);
+});
+
+test("resolveRunStage: keep reads the stage from the kept run's handoff", () => {
+  const cwd = plantHandoff("01RID", "submit");
+  const d = decideClaim({
+    state: { run_id: "01RID", pi_session_id: "s1" },
+    currentSessionId: "s1",
+    envRunId: null,
+    cwd,
+  });
+  assert.equal(d.action, "keep");
+  assert.equal(resolveRunStage(d, cwd), "submit");
+});
+
+test("resolveRunStage: keep with no handoff file is null", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-stage-"));
+  const d = decideClaim({
+    state: { run_id: "01RID", pi_session_id: "s1" },
+    currentSessionId: "s1",
+    envRunId: null,
+    cwd,
+  });
+  assert.equal(d.action, "keep");
+  assert.equal(resolveRunStage(d, cwd), null);
+});
+
+test("resolveRunStage: fork and none carry no launched stage", () => {
+  const cwd = plantHandoff("01RID", "implement");
+  const fork = decideClaim({
+    state: { run_id: "01RID", pi_session_id: "parent" },
+    currentSessionId: "child",
+    envRunId: null,
+    cwd,
+  });
+  assert.equal(fork.action, "fork");
+  assert.equal(resolveRunStage(fork, cwd), null);
+  const none = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, cwd });
+  assert.equal(none.action, "none");
+  assert.equal(resolveRunStage(none, cwd), null);
 });
 
 test("deriveForkRunId: increments past existing siblings", () => {

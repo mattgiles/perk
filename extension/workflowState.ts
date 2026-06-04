@@ -4,7 +4,7 @@
 // unit-testable under `node --test`. The reconstruction discipline (scan getBranch on
 // session_start AND session_tree, per-field LWW) and the verified-linkage claim (Q3) live here.
 
-import { listRunIds, type PlanRef } from "./cache.ts";
+import { listRunIds, type PlanRef, readHandoff } from "./cache.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
@@ -89,6 +89,24 @@ export type ClaimDecision =
  * carries a `run_id` whose recorded `pi_session_id` differs from the current session, the id
  * was inherited across a fork → derive a child; if it matches (or is absent), it's a reload.
  */
+/**
+ * The registry stage id the launched run is acting on, read from its handoff blob, or null.
+ * Only `claim` (cold) and `keep` (reload) sessions have a settled run whose handoff records a
+ * `stage`; `fork` and `none` carry no launched stage (LWW restores their state instead). The
+ * stage gates whether `session_start` reconciles `cache.plan-ref` into `active_plan_ref`.
+ */
+export function resolveRunStage(decision: ClaimDecision, cwd: string): string | null {
+  const runId =
+    decision.action === "claim"
+      ? decision.runId
+      : decision.action === "keep"
+        ? decision.state.run_id
+        : null;
+  if (runId === undefined || runId === null) return null;
+  const stage = readHandoff(cwd, runId)?.stage;
+  return typeof stage === "string" && stage !== "" ? stage : null;
+}
+
 export function decideClaim(args: {
   state: WorkflowState;
   currentSessionId: string | null;

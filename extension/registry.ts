@@ -17,11 +17,30 @@ export interface RegistryStage {
   doors: Record<string, boolean>;
   predecessors: string[];
   successors: string[];
+  requires?: string[];
+  reads?: string[];
+  writes?: string[];
 }
 
 export interface Registry {
   schemaVersion: number;
   stages: RegistryStage[];
+}
+
+/** The registry state-key for the active plan->branch ref (contracts.md §8.1/§8.4). */
+export const PLAN_REF_STATE_KEY = "cache.plan-ref";
+
+/**
+ * Whether a stage *consumes* the plan-ref selector — i.e. its `requires ∪ reads` lists
+ * `cache.plan-ref`. The worktree stages (implement/submit/address/land/learn) do; the
+ * root `worktree: none` stages (plan/objective-plan/save) do not. An unknown stage id is
+ * treated as non-consuming (false).
+ */
+export function stageConsumesPlanRef(registry: Registry, stageId: string): boolean {
+  const stage = registry.stages.find((s) => s.id === stageId);
+  if (stage === undefined) return false;
+  const keys = [...(stage.requires ?? []), ...(stage.reads ?? [])];
+  return keys.includes(PLAN_REF_STATE_KEY);
 }
 
 /** Parse the bundled `registry.yaml`. Throws on a missing file or unexpected shape. */
