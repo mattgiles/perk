@@ -53,45 +53,6 @@ test *args:
 build:
     uv build
 
-# the Phase-0 hard gates (all turns; cumulative)
-verify:
-    bash scripts/verify-t1.sh
-    bash scripts/verify-t2.sh
-    bash scripts/verify-t3.sh
-    bash scripts/verify-t4.sh
-    bash scripts/verify-t5.sh
-    bash scripts/verify-t6.sh
-    bash scripts/verify-t7.sh
-    bash scripts/verify-p1-t1.sh
-    bash scripts/verify-p1-t2a.sh
-    bash scripts/verify-p1-t2b.sh
-    bash scripts/verify-p1-t3.sh
-    bash scripts/verify-p1-t3b.sh
-    bash scripts/verify-p1-t4a.sh
-    bash scripts/verify-p1-t4b.sh
-    bash scripts/verify-p1-t4c.sh
-    bash scripts/verify-p1-t5a.sh
-    bash scripts/verify-p1-t5b.sh
-    bash scripts/verify-p1-t5c.sh
-    bash scripts/verify-p1-t6.sh
-    bash scripts/verify-p2-t1.sh
-    bash scripts/verify-p2-t2a.sh
-    bash scripts/verify-p2-t2b.sh
-    bash scripts/verify-p2-t2c.sh
-    bash scripts/verify-p2-t3.sh
-    bash scripts/verify-p2-t4.sh
-    bash scripts/verify-p2-t5.sh
-    bash scripts/verify-p2-t6.sh
-    bash scripts/verify-p2-t7.sh
-    bash scripts/verify-p2-t8a.sh
-    bash scripts/verify-p2-t8b.sh
-    bash scripts/verify-p2-t8c.sh
-    bash scripts/verify-p2-t9.sh
-    bash scripts/verify-p2-t10.sh
-    bash scripts/verify-p2-t11.sh
-    bash scripts/verify-p2-t12.sh
-    bash scripts/verify-p2-t13.sh
-
 # run perk in the project env, e.g. `just perk init`
 perk *args:
     uv run perk {{args}}

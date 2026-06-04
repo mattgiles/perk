@@ -177,8 +177,7 @@ just install-cli  # just the `perk` CLI on PATH (editable: tracks this clone)
 just fmt          # ruff format + biome format
 just lint         # ruff check + biome check
 just typecheck    # ty + tsc
-just test         # pytest
-just verify       # the cumulative hard gates (Phase 0 + Phase 1 + Phase 2)
+just test         # pytest + node:test (the regression gate)
 just ci           # setup + lint + typecheck + test
 ```
 
