@@ -54,6 +54,17 @@ def pr_submit(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
     except GitHubError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=f"PR submit failed\n{exc}")
         return
+    except git.PushRejectedError as exc:
+        _fail(
+            ctx,
+            as_json=as_json,
+            error_type="push_rejected",
+            message=(
+                "Push rejected — the remote branch moved unexpectedly.\n"
+                "Fetch/rebase onto the latest origin and re-submit.\n" + str(exc)
+            ),
+        )
+        return
     except git.GitError as exc:
         _fail(ctx, as_json=as_json, error_type="git_error", message=f"git push failed\n{exc}")
         return
@@ -106,8 +117,16 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     state = github.get_plan(number=issue, repo_root=repo_root)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
+    if git.is_dirty(repo_root):
+        raise UserFacingCliError(
+            "Uncommitted changes in this worktree\n"
+            "Commit your changes before submitting — uncommitted work isn't pushed.",
+            error_type="dirty_tree",
+        )
     base = github.default_branch(repo_root)
-    git.push(repo_root, branch)
+    # Auto-force (--force-with-lease): perk plan branches are single-author and expected to
+    # diverge after amend/squash/rebase; a no-op on the first push.
+    git.push(repo_root, branch, force=True)
 
     # Best-effort plan embed (D3): fetch the verbatim plan markdown; None (no block / fetch
     # failure) -> no embed, no raise. The PR number is unknown until create_pr returns, so the

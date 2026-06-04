@@ -24,6 +24,13 @@ class GitError(Exception):
     """A git command exited non-zero (translated to ``UserFacingCliError`` at the boundary)."""
 
 
+class PushRejectedError(GitError):
+    """A push was rejected as non-fast-forward / failed the ``--force-with-lease`` check."""
+
+
+_REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to push some refs")
+
+
 def _run(args: list[str], *, cwd: Path | None = None) -> str:
     # check=False: we inspect returncode ourselves to raise a domain GitError with stderr.
     try:
@@ -56,14 +63,33 @@ def current_branch(repo: Path) -> str | None:
     return None if branch == "HEAD" else branch
 
 
-def push(cwd: Path, branch: str, *, set_upstream: bool = True) -> None:
-    """Push ``branch`` to ``origin`` from ``cwd`` (the worktree); ``GitError`` on failure."""
+def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = False) -> None:
+    """Push ``branch`` to ``origin`` from ``cwd`` (the worktree).
+
+    With ``force`` the push uses ``--force-with-lease`` (a no-op on a brand-new branch; it
+    replaces a rewritten history safely on a perk-owned single-author plan branch). A
+    non-fast-forward / lease rejection raises ``PushRejectedError``; other git failures raise
+    ``GitError``.
+    """
     args = ["push"]
+    if force:
+        args.append("--force-with-lease")
     if set_upstream:
         args += ["-u", "origin", branch]
     else:
         args += ["origin", branch]
-    _run(args, cwd=cwd)
+    try:
+        _run(args, cwd=cwd)
+    except GitError as exc:
+        msg = str(exc).lower()
+        if any(marker in msg for marker in _REJECT_MARKERS):
+            raise PushRejectedError(str(exc)) from exc
+        raise
+
+
+def is_dirty(cwd: Path) -> bool:
+    """True if the worktree at ``cwd`` has uncommitted changes (tracked or untracked)."""
+    return bool(_run(["status", "--porcelain"], cwd=cwd).strip())
 
 
 def worktree_add(repo: Path, path: Path, *, branch: str, create_branch: bool) -> None:
