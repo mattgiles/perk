@@ -11,6 +11,8 @@ from perk.config import Config
 from perk.git import GitError
 from perk.launch import (
     _initial_prompt,
+    _pi_agent_dir,
+    _sweep_stale_pi_agent_locks,
     launch_stage,
     resolve_plan_worktree_name,
     resolve_target,
@@ -33,6 +35,53 @@ def _stage(stage_id: str) -> Stage:
 
 def _config(tmp_path) -> Config:
     return Config(worktree_root=tmp_path / ".worktrees")
+
+
+def test_sweep_removes_stale_lock_files(tmp_path):
+    """A stale regular *file* at each agent-dir lock path is removed."""
+    for name in ("settings.json.lock", "auth.json.lock"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    _sweep_stale_pi_agent_locks(tmp_path)
+    assert not (tmp_path / "settings.json.lock").exists()
+    assert not (tmp_path / "auth.json.lock").exists()
+
+
+def test_sweep_leaves_live_lock_directory(tmp_path):
+    """A directory is a *live* proper-lockfile lock — never touched (the safety guarantee)."""
+    (tmp_path / "settings.json.lock").mkdir()
+    _sweep_stale_pi_agent_locks(tmp_path)
+    assert (tmp_path / "settings.json.lock").is_dir()
+
+
+def test_sweep_is_noop_when_absent(tmp_path):
+    """No lock paths present — no exception."""
+    _sweep_stale_pi_agent_locks(tmp_path)  # must not raise
+
+
+def test_sweep_swallows_oserror(tmp_path, monkeypatch):
+    """A removal OSError never propagates (best-effort/non-fatal)."""
+    (tmp_path / "settings.json.lock").write_text("", encoding="utf-8")
+
+    def _boom(self, *a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "unlink", _boom)
+    _sweep_stale_pi_agent_locks(tmp_path)  # must not raise
+
+
+def test_pi_agent_dir_honors_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path / "custom"))
+    assert _pi_agent_dir() == tmp_path / "custom"
+
+
+def test_pi_agent_dir_env_expanduser(monkeypatch):
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", "~/somewhere")
+    assert _pi_agent_dir() == Path.home() / "somewhere"
+
+
+def test_pi_agent_dir_falls_back_to_home(monkeypatch):
+    monkeypatch.delenv("PI_CODING_AGENT_DIR", raising=False)
+    assert _pi_agent_dir() == Path.home() / ".pi" / "agent"
 
 
 def test_resolve_worktree_none_is_repo_root(tmp_path):
@@ -187,6 +236,34 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     _run()
     assert len(execs) == 2  # launched again
     assert wt.is_dir()
+
+
+def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
+    """Integration: the real launch path sweeps the stale agent-dir lock before exec'ing pi."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    stale = agent_dir / "settings.json.lock"
+    stale.write_text("", encoding="utf-8")
+
+    execs: list[str] = []
+    monkeypatch.setattr("perk.launch._pi_agent_dir", lambda: agent_dir)
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert not stale.exists()  # swept before exec
+    assert execs == ["pi"]  # exec was reached
 
 
 def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch):
