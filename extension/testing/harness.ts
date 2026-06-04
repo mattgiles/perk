@@ -51,6 +51,10 @@ export interface PerkSession {
   readonly session: AgentSession;
   /** Captured `ui.notify` calls (headful only). */
   readonly notifies: readonly string[];
+  /** Captured `ui.setStatus(slot, value)` calls (headful only). */
+  readonly statuses: readonly { slot: string; value: string | undefined }[];
+  /** Captured `ui.setWidget(slot, value)` calls (headful only). */
+  readonly widgets: readonly { slot: string; value: string[] | undefined }[];
   /** The PERK_SELFCHECK sentinel, or null if not yet written. */
   sentinel(): Sentinel | null;
   /** Rebuild `perk:workflow-state` from the live session branch. */
@@ -104,14 +108,16 @@ const TICK_MS = 50;
 const tick = () => new Promise((resolve) => setTimeout(resolve, TICK_MS));
 
 /** Create a temp cwd with a minimal `.pi/workflow/` scaffold (+ optional handoff). */
-export function scaffoldRepo(opts: { handoff?: { runId: string; mode?: string } } = {}): string {
+export function scaffoldRepo(
+  opts: { handoff?: { runId: string; mode?: string; stage?: string } } = {},
+): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-cwd-"));
   mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
   if (opts.handoff) {
-    const { runId, mode } = opts.handoff;
+    const { runId, mode, stage } = opts.handoff;
     writeFileSync(
       join(workflowDir(cwd), "handoff", `${runId}.json`),
-      `${JSON.stringify({ run_id: runId, consumed: false, mode }, null, 2)}\n`,
+      `${JSON.stringify({ run_id: runId, consumed: false, mode, stage }, null, 2)}\n`,
       "utf8",
     );
   }
@@ -241,14 +247,22 @@ export function fakePerk(
   return path;
 }
 
-function headfulUIContext(notifies: string[]): ExtensionUIContext {
-  // Minimal context: the extension only calls notify; the runtime touches setStatus/setWidget.
+function headfulUIContext(
+  notifies: string[],
+  statuses: { slot: string; value: string | undefined }[] = [],
+  widgets: { slot: string; value: string[] | undefined }[] = [],
+): ExtensionUIContext {
+  // Minimal context: records notify + setStatus/setWidget so tests can assert rendered UI.
   return {
     notify: (message: string) => {
       notifies.push(message);
     },
-    setStatus: () => {},
-    setWidget: () => {},
+    setStatus: (slot: string, value: string | undefined) => {
+      statuses.push({ slot, value });
+    },
+    setWidget: (slot: string, value: string[] | undefined) => {
+      widgets.push({ slot, value });
+    },
   } as unknown as ExtensionUIContext;
 }
 
@@ -280,6 +294,8 @@ export async function loadPerkSession(opts: {
   applyEnv({ PERK_SELFCHECK: "1", ...(opts.env ?? {}) }, savedEnv);
 
   const notifies: string[] = [];
+  const statuses: { slot: string; value: string | undefined }[] = [];
+  const widgets: { slot: string; value: string[] | undefined }[] = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
   await loader.reload();
   const model = getModel("anthropic", "claude-sonnet-4-5") ?? undefined;
@@ -296,7 +312,7 @@ export async function loadPerkSession(opts: {
   });
 
   await session.bindExtensions({
-    uiContext: headful ? headfulUIContext(notifies) : undefined,
+    uiContext: headful ? headfulUIContext(notifies, statuses, widgets) : undefined,
     // Surface (don't swallow) extension-handler failures; a real bug also fails downstream asserts.
     onError: (err) => console.error(`perk harness: extension error in ${err.event}: ${err.error}`),
   });
@@ -308,6 +324,8 @@ export async function loadPerkSession(opts: {
   return {
     session,
     notifies,
+    statuses,
+    widgets,
     sentinel() {
       const path = join(workflowDir(cwd), ".perk-t3.json");
       if (!existsSync(path)) return null;

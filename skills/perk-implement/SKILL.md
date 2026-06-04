@@ -1,0 +1,35 @@
+---
+name: perk-implement
+description: Implementing a perk plan in the implement stage — read the plan, work in focused steps, emit [WIP:n]/[DONE:n] progress markers when the plan has a `## Steps` list, then open the PR with /submit. Use when implementing a perk plan on a worktree branch.
+---
+
+# Implementing a perk plan (the implement stage)
+
+The implement stage is where a saved perk plan becomes code on its own worktree branch. The flow is
+simple and you own all of it:
+
+1. **Read the full plan** first (the launch prompt gives you the exact command, e.g.
+   `gh issue view <n> --comments`). The plan body is the contract — implement *that*, not a
+   reinterpretation.
+2. **Work in focused steps** and keep the tree committable — commit as coherent units land.
+3. **Open the PR** with `/submit` once the implementation is complete and committed.
+
+## Progress markers (the checkpoint protocol)
+
+perk tracks implementation progress with two inline markers you emit in your normal turn text:
+
+- `[WIP:n]` — emit when you **start** work on checkpoint step *n*.
+- `[DONE:n]` — emit when step *n* is **complete**.
+
+Checkpoints surface this in the status bar: a `📋 done/total · ▶n` summary and a per-step checklist
+(`☑` completed, `▶` the current step, `☐` pending). The current (`▶`) step is derived from your
+latest live `[WIP:n]`, falling back to the lowest incomplete step; completion always wins (`▶` never
+shows on a completed step).
+
+**Step numbers come from the plan's `## Steps` list** — the numbered list under that heading is the
+only source of valid step numbers. Emit markers that match those numbers.
+
+**Prose plans have no checkpoints.** If the plan has no `## Steps` list, checkpoints are inert: the
+markers are harmless no-ops, so **don't invent step numbers**. The status bar instead shows a coarse
+stage label for the active plan. Whether you get fine-grained checkpoints is the planner's choice
+(they decide whether to include a `## Steps` list).

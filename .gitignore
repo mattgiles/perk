@@ -28,3 +28,4 @@ node_modules/
 /.pi/workflow/scratch/
 /.pi/workflow/markers/
 # END perk managed
+/.pi/workflow/plan.md

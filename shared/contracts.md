@@ -277,11 +277,20 @@ optional `## Steps` section as the forward path. Cross-plane contract: the **fil
 (`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start` AND
 `session_tree`**; `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
 appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
-**scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]` is
-re-folded only from assistant messages **after** it (stale `[DONE:n]` from a previous execution
-cannot resurrect a step). Status surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by
-`ctx.hasUI`** (headless never touches rich UI); `/checkpoints` lists progress (notify when UI, else
-stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
+**scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]`/
+`[WIP:n]` are re-folded only from assistant messages **after** it (stale markers from a previous
+execution cannot resurrect a step). An **in-progress (`current`) step** is derived (not persisted):
+the latest live `[WIP:n]` after the marker whose step exists and is incomplete, falling back to the
+lowest incomplete step, else `null`; completion always wins (`▶` never renders on a completed step).
+Status renders `📋 done/total` plus ` · ▶n` when current; widget/`/checkpoints` lines use `☑`
+completed / `▶` current / `☐` pending. The **marker protocol is taught to the implement session**
+via `_implement_prompt` (the launch prompt) + the **`perk-implement` skill**, so the implementer
+knows to emit `[WIP:n]`/`[DONE:n]`. **Coarse fallback (P2.T15):** when no `## Steps` checklist exists
+but a plan is active, the status bar shows `📋 <stage>` (the stage label from the handoff,
+`readHandoff(cwd, run_id).stage`, falling back to `"active"`) with a single widget line noting the
+plan is prose — so an active plan never goes dark; with no active plan, status/widget clear. Status
+surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by `ctx.hasUI`** (headless never touches rich
+UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
 `perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` **is** retired in
 P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
 implement-progress overlay via this perk-owned `perk:checkpoint` seam.

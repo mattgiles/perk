@@ -10,8 +10,10 @@ import { type PlanRef, planBodyPath } from "./cache.ts";
 import {
   CHECKPOINT_TYPE,
   type CheckpointStep,
+  computeCurrent,
   extractDoneSteps,
   extractSteps,
+  extractWipSteps,
   isInert,
   markCompletedSteps,
   rebuildCheckpoint,
@@ -76,8 +78,56 @@ test("extractDoneSteps + markCompletedSteps", () => {
   assert.equal(steps[0]?.completed, false);
 });
 
+test("extractWipSteps: parses `[WIP:n]` case-insensitive", () => {
+  assert.deepEqual(extractWipSteps("start [WIP:2] then [wip:3]"), [2, 3]);
+  assert.deepEqual(extractWipSteps("no markers"), []);
+});
+
+test("computeCurrent: preferred-if-incomplete, else lowest incomplete, else null", () => {
+  const steps: CheckpointStep[] = [
+    { step: 1, text: "one", completed: true },
+    { step: 2, text: "two", completed: false },
+    { step: 3, text: "three", completed: false },
+  ];
+  assert.equal(computeCurrent(steps, 3), 3, "preferred incomplete step honored");
+  assert.equal(computeCurrent(steps, 1), 2, "preferred completed -> lowest incomplete");
+  assert.equal(computeCurrent(steps, null), 2, "no preference -> lowest incomplete");
+  const allDone = steps.map((s) => ({ ...s, completed: true }));
+  assert.equal(computeCurrent(allDone, null), null, "all complete -> null");
+});
+
 test("rebuildCheckpoint: inert with no checkpoint entry", () => {
-  assert.ok(isInert(rebuildCheckpoint([])));
+  const built = rebuildCheckpoint([]);
+  assert.ok(isInert(built));
+  assert.equal(built.current, null);
+});
+
+test("rebuildCheckpoint: derives `current` from WIP/completion (scan-after-marker)", () => {
+  const seed = () =>
+    ({
+      type: "custom",
+      customType: CHECKPOINT_TYPE,
+      data: {
+        steps: [
+          { step: 1, text: "one", completed: false },
+          { step: 2, text: "two", completed: false },
+          { step: 3, text: "three", completed: false },
+        ],
+      },
+    }) as never;
+  const assistant = (content: string) =>
+    ({ type: "message", message: { role: "assistant", content } }) as never;
+
+  // explicit `[WIP:2]` after the marker -> current === 2
+  assert.equal(rebuildCheckpoint([seed(), assistant("start [WIP:2]")]).current, 2);
+  // no WIP -> lowest incomplete (1)
+  assert.equal(rebuildCheckpoint([seed(), assistant("working")]).current, 1);
+  // WIP pointing at a completed step -> falls back to lowest incomplete (2)
+  assert.equal(rebuildCheckpoint([seed(), assistant("done [DONE:1] then [WIP:1]")]).current, 2);
+  // all complete -> current === null
+  assert.equal(rebuildCheckpoint([seed(), assistant("[DONE:1] [DONE:2] [DONE:3]")]).current, null);
+  // a `[WIP:3]` BEFORE the marker is ignored; lowest incomplete wins (1)
+  assert.equal(rebuildCheckpoint([assistant("stale [WIP:3]"), seed(), assistant("go")]).current, 1);
 });
 
 test("rebuildCheckpoint: scan-after-marker ignores stale [DONE:n] before the seed", () => {
@@ -156,6 +206,36 @@ test("rebuild restored on session_tree across a seeded checkpoint", async () => 
       atSeed.steps.every((s) => !s.completed),
       true,
     );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("coarse fallback: active prose plan sets `📋 <stage>` status; no plan clears", async () => {
+  // Active plan-ref + a handoff carrying a stage, but NO `## Steps` body -> coarse status.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), "# T\n\n## Summary\nProse only.\n", "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const last = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    assert.ok(last?.value?.startsWith("📋 implement"), `coarse status set: ${last?.value}`);
+    const widget = h.widgets.filter((w) => w.slot === "perk-checkpoints").at(-1);
+    assert.ok(widget?.value?.[0]?.includes("prose plan"), "widget explains prose plan");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("coarse fallback: no active plan clears status + widget", async () => {
+  const cwd = scaffoldRepo();
+  writeFileSync(planBodyPath(cwd), "# T\n\n## Summary\nProse only.\n", "utf8");
+  // No workflow-state entries -> no active plan.
+  const file = plantSession(cwd, []);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const last = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    assert.equal(last?.value, undefined, "status cleared with no active plan");
   } finally {
     h.dispose();
   }

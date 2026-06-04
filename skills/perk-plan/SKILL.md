@@ -50,14 +50,17 @@ Decisions taken and constraints relied on — so the executor inherits the reaso
 
 If the work decomposes into discrete, ordered steps, add a `## Steps` section with a **numbered
 list** (`1.`, `2.`, …). When present, perk seeds **checkpoints** from it during implementation and
-tracks progress as your responses emit `[DONE:n]` markers:
+tracks progress as the implement session emits `[WIP:n]` (started step n) and `[DONE:n]` (completed
+step n) markers:
 
     ## Steps
     1. First step description
     2. Second step description
     3. ...
 
-Omit it for prose-only plans — checkpoints simply stay inert (no crash, no nagging).
+Genuinely multi-step work **should** include a `## Steps` list — you (the planner) control whether
+the implementer gets fine-grained checkpoints. Omit it for prose-only plans — checkpoints stay inert
+(no crash, no nagging; the implement status bar instead shows a coarse stage label).
 
 Keep it concise and human- *and* agent-digestible. Resolve every open choice **before** saving — a
 saved plan must leave **no decisions to the implementer** (no "should I…?" residue).
