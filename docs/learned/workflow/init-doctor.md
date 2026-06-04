@@ -1,6 +1,6 @@
 ---
-title: init/doctor division and gitignore untrack pattern
-read_when: You are adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, or extending perk init's managed gitignore block.
+title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
+read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, or extending perk init's managed gitignore block.
 ---
 
 # `init` / `doctor` division
@@ -14,6 +14,33 @@ read_when: You are adding a new transient file, fixing a tracked-but-should-be-i
 
 Keep `init` a clean forward path — never a pile of version branches. New desired state goes into
 `init`'s `converge()`; one-off/legacy repairs go into `doctor`'s `_MIGRATIONS`.
+
+## Managed convergence is the SSOT for doctor checks — never hand-author a check
+
+A **managed convergence** (`init.ManagedConvergence`, listed by `init.managed_convergences()`) is
+one structural piece expressed as a single dry-run/apply function: `init` calls it with
+`apply=True` to converge; `doctor` calls it with `apply=False` to detect drift and `apply=True`
+to `--fix`. `doctor._managed_checks` **auto-generates exactly one `Check` per convergence** (the
+convergence `name` becomes the check name). Verification *and* `--fix` come for free —
+`doctor._apply_fixes` iterates the same convergences.
+
+So to add any new managed piece (the recipe is **three edits**, never a bespoke check):
+
+1. Add a `ManagedConvergence` in `init.managed_convergences()` — its `name` becomes the doctor
+   check name; `covers` lists the capability names it verifies.
+2. Add the matching `Capability` in `perk/capabilities.py` (referenced by the convergence's
+   `covers`).
+3. Optionally add a `name → render-group` entry in `doctor._MANAGED_GROUP` (purely cosmetic
+   grouping; absent ⇒ falls back to `"repository"`).
+
+**Do NOT hand-write a check in some `_build_checks`-style function** — that produces a *duplicate*
+check for the same piece. The skills-manifest work (#56) was originally planned with a bespoke
+`_skills_manifest_check`; that was wrong against this architecture and was dropped for the
+three-edit recipe.
+
+The coherence guard `test_every_required_capability_has_a_doctor_check`
+(`tests/test_doctor.py`) enforces convergence↔capability parity: every dry-run convergence has a
+check, and no applicable capability is left uncovered.
 
 ## Gitignore untrack pattern
 
@@ -32,6 +59,18 @@ The proper two-plane fix:
 to the managed gitignore block in `init.py` (alongside `plan-ref.json`, `handoff/`, `scratch/`,
 `markers/`).
 
+## `report.changes` must reflect real filesystem deltas (idempotency)
+
+Anything appended to `InitReport.changes` must be a **genuine delta**, never "an action was
+attempted". The load-bearing invariant `test_cli_idempotent_second_run`
+(`tests/test_init_t5.py`) asserts a second `perk init` on a converged repo reports
+`changes == []`. A convergence that always appends a change on success breaks it.
+
+The pattern for any side-effecting step (e.g. shelling out to an external CLI): **snapshot before
+and after, append only on difference.** `_sync_skills` snapshots the `.agents/skills/` symlink set
+(`_skill_link_state`: name → target) before and after running `skills sync`, and appends a change
+only when the set actually changed.
+
 ## Doctor migration idempotency rule
 
 `_MIGRATIONS` run **unconditionally on every `--fix`** (not gated on a failing check), so each
@@ -40,6 +79,10 @@ the `again.fixed == []` idempotency tests.
 
 ## Cross-references
 
-- `perk/init.py` — `GITIGNORE_BODY`, `converge()`
-- `perk/doctor.py` — `_MIGRATIONS`
+- `perk/init.py` — `GITIGNORE_BODY`, `converge()`, `ManagedConvergence`, `managed_convergences()`,
+  `_skill_link_state`, `_sync_skills`
+- `perk/doctor.py` — `_MIGRATIONS`, `_managed_checks`, `_MANAGED_GROUP`, `_apply_fixes`
+- `perk/capabilities.py` — `Capability`, `applicable()`
 - `perk/git.py` — `is_tracked`, `rm_cached`
+- `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
+- `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
