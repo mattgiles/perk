@@ -61,6 +61,24 @@ def test_init_preserves_user_settings(tmp_path):
     )  # perk entry added
 
 
+def test_init_migrates_legacy_npm_perk_entry(tmp_path):
+    # A repo wired by an earlier perk init carries the stale `npm:@perk/pi` entry that
+    # Pi can't install (never published). init must strip it (forward convergence) and
+    # replace it with the git URL, without touching the user's own entries.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["npm:@perk/pi@0.0.0", "npm:@me/custom"]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert not any(p.startswith("npm:@perk/pi") for p in packages)  # legacy entry stripped
+    assert f"git:github.com/mattgiles/perk@v{__version__}" in packages  # git entry added
+    assert "npm:@me/custom" in packages  # user entry preserved
+
+
 def test_init_rejects_malformed_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
