@@ -37,11 +37,20 @@ import { type PlanRef, workflowDir } from "../cache.ts";
 import perk from "../index.ts";
 import { type BranchEntry, rebuildWorkflowState, type WorkflowState } from "../workflowState.ts";
 
+/**
+ * Pi's run-mode union. Mirrors `@earendil-works/pi-coding-agent`'s `ExtensionMode` (which the
+ * package re-exports only from a deep path, not the root entry), so we restate it here.
+ */
+type ExtensionMode = "tui" | "rpc" | "json" | "print";
+
 /** The `.perk-t3.json` sentinel the extension writes under PERK_SELFCHECK. */
 export interface Sentinel {
   source: string;
   run_id: string | null;
+  /** Workflow mode (read-only/read-write) — drives tool gating. */
   mode: string | null;
+  /** Pi run mode (tui/rpc/json/print) — recorded from `ctx.mode`. */
+  run_mode: string | null;
   predecessor: string | null;
   pi_session_id: string | null;
   active_plan_ref: PlanRef | null;
@@ -286,6 +295,8 @@ export async function loadPerkSession(opts: {
   env?: Record<string, string | undefined>;
   sessionManager?: SessionManager;
   headful?: boolean;
+  /** Pi run mode forwarded to `bindExtensions` (drives `ctx.mode`). Defaults to Pi's "print". */
+  mode?: ExtensionMode;
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -313,6 +324,8 @@ export async function loadPerkSession(opts: {
 
   await session.bindExtensions({
     uiContext: headful ? headfulUIContext(notifies, statuses, widgets) : undefined,
+    // Forward the Pi run mode so `ctx.mode` (and the `run_mode` sentinel) is observable.
+    mode: opts.mode,
     // Surface (don't swallow) extension-handler failures; a real bug also fails downstream asserts.
     onError: (err) => console.error(`perk harness: extension error in ${err.event}: ${err.error}`),
   });
@@ -363,10 +376,20 @@ export async function loadPerkSession(opts: {
       const ctx = {
         cwd,
         hasUI: headful,
+        mode: (opts.mode ?? "print") as ExtensionMode,
         ui: headfulUIContext(notifies),
         sessionManager: session.sessionManager,
         signal: undefined,
         isIdle: () => true,
+        // Command contexts expose the live system-prompt construction options. The synthesized
+        // stub forwards the real bound session's options so selfcheck-style probes work offline.
+        getSystemPromptOptions: () =>
+          (
+            session as unknown as {
+              getSystemPromptOptions?: () => unknown;
+              _baseSystemPromptOptions?: unknown;
+            }
+          )._baseSystemPromptOptions ?? { cwd },
         async waitForIdle() {},
         async newSession(options?: {
           parentSession?: string;
@@ -389,6 +412,7 @@ export async function loadPerkSession(opts: {
       const ctx = {
         cwd,
         hasUI: headful,
+        mode: (opts.mode ?? "print") as ExtensionMode,
         ui: headfulUIContext(notifies),
         sessionManager: session.sessionManager,
         signal: undefined,

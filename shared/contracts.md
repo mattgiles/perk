@@ -1152,3 +1152,29 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
+
+---
+
+## §8.7 · Cross-plane session-context markers (the selfcheck verifier)
+
+Two pieces of session context are converged by one plane and **read back** by the other, so the
+literal markers are a cross-plane contract:
+
+- **`<!-- BEGIN perk managed -->`** — the managed `AGENTS.md` block. `perk init` (Python plane)
+  writes it; Pi loads `AGENTS.md` into `contextFiles`; the extension's `/perk-selfcheck` (TS plane,
+  `extension/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
+  carries this marker. Changing the literal in `perk/init.py` **must** update
+  `MANAGED_AGENTS_MARKER` in `extension/selfcheck.ts` in the same turn.
+- **`.pi/APPEND_SYSTEM.md`** — the ambient routing index (maintained by `/learn-docs`, never
+  `init`). Pi joins it into `appendSystemPrompt`; selfcheck confirms the on-disk content reached the
+  prompt verbatim (a trimmed-substring probe).
+
+The division of labor: **`perk doctor` checks the disk** (files converged); **`/perk-selfcheck`
+checks the prompt** (the converged context actually reached the model via Pi's
+`getSystemPromptOptions()`, available only on a command context). selfcheck logs only derived
+booleans/counts — never the raw prompt text (the options expose the full system prompt).
+
+The `.pi/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
+`ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/
+`read-write`) that drives tool gating. `run_mode` is observability `ctx.hasUI` (a binary) can't
+express; it is written from `ctx.mode` on both `session_start` and `session_tree`.
