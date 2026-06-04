@@ -30,7 +30,12 @@ def _stub_gh(
     monkeypatch, *, existed: bool = False, plan_body: str | None = None
 ) -> dict[str, object]:
     """Stub the whole submit gateway path; record what the worker did."""
-    calls: dict[str, object] = {"pushed": False, "header": None, "pr_body": None}
+    calls: dict[str, object] = {
+        "pushed": False,
+        "push_kwargs": None,
+        "header": None,
+        "pr_body": None,
+    }
     monkeypatch.setattr(
         github,
         "get_plan",
@@ -56,10 +61,12 @@ def _stub_gh(
 
     def _push(*a, **k):
         calls["pushed"] = True
+        calls["push_kwargs"] = k
 
     monkeypatch.setattr(github, "update_plan_header", _update)
     monkeypatch.setattr(github, "update_pr_body", _update_body)
     monkeypatch.setattr(git, "push", _push)
+    monkeypatch.setattr(git, "is_dirty", lambda root: False)
     return calls
 
 
@@ -139,3 +146,35 @@ def test_real_submit_plan_not_found_exits_1(monkeypatch):
     result = _run(monkeypatch, ["pr-submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "plan_not_found"
+
+
+def test_real_submit_force_pushes(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 0
+    assert calls["pushed"] is True
+    assert calls["push_kwargs"] == {"force": True}
+
+
+def test_dirty_tree_refuses_before_push(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    monkeypatch.setattr(git, "is_dirty", lambda root: True)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "dirty_tree"
+    assert calls["pushed"] is False
+
+
+def test_push_rejected_maps_to_stable_error(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+
+    def _reject(*a, **k):
+        raise git.PushRejectedError("! [rejected] plan-7 -> plan-7 (non-fast-forward)")
+
+    monkeypatch.setattr(git, "push", _reject)
+    result = _run(monkeypatch, ["pr-submit", "--json"])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "push_rejected"

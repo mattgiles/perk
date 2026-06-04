@@ -625,6 +625,20 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   files, so erk's plan-file-diff completion heuristic does **not** map — the explicit draft→ready
   transition is the gate, and no plan-file-diff detector is built (never infer completion from PR
   open/closed state alone).
+- **Re-submit on rewritten history (P2.T8a follow-up).** `perk pr-submit` **force-pushes the
+  perk-owned plan branch with `--force-with-lease`** (auto-force; a no-op on the first push). Plan
+  branches (`plan-<n>`) are single-author and expected to diverge after amend/squash/rebase, so a
+  plain push would be rejected non-fast-forward on every re-submit after a history rewrite. The
+  lease still rejects an *unexpected* origin move (teammate safety) — no `git fetch` is needed
+  because only this worktree pushes this branch. Two stable error surfaces front this:
+  - **`error_type: dirty_tree`** — submit refuses on a dirty worktree (commit-first guard, fired
+    before the push) because uncommitted work isn't pushed and would silently fail to update the PR.
+  - **`error_type: push_rejected`** — a non-fast-forward / lease failure maps to an actionable
+    "remote moved unexpectedly; fetch/rebase and re-submit" message instead of raw git stderr
+    (`error_type: git_error` remains the fallback for other git failures).
+  - **Phase-2 caveat:** a fresh-clone resume (remote branch with no local remote-tracking ref) may
+    hit a `stale info` lease failure and need a targeted `git fetch origin <branch>` before the
+    lease; deferred with remote-branch resume (Phase 2).
 
 ### Plan-ref payload (provider-agnostic; full schema → Phase 1)
 
