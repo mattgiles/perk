@@ -15,4 +15,6 @@ Cross-cutting reasoning captured for future agents lives in `docs/learned/`. The
 
 <!-- routing index — one terse line per doc/category; empty until the first /learn-docs plan lands -->
 
-_(no durable learnings catalogued yet)_
+- **workflow/** — plan factories, plan-ref lifecycle, init/doctor division; read when working on perk internals, factory sessions, or gitignore/worktree mechanics → `docs/learned/workflow/`
+- **pi/** — Pi context system: no transclusion, ambient index split, bash allowlist in read-only sessions → `docs/learned/pi/`
+- **toolchain/** — ruff check vs ruff format, CI vs pre-commit hook, silent-commit trap → `docs/learned/toolchain/`
