@@ -23,7 +23,7 @@ from perk.env import EnvCheck
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.output import user_confirm
 
-NPM_PACKAGE = "@perk/pi"
+GIT_PACKAGE = "git:github.com/mattgiles/perk"
 
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired in P2.T2a
@@ -231,8 +231,17 @@ def _npm_name(entry: str) -> str | None:
     return spec[:at] if at > 0 else spec  # at == 0 is a scope's leading @
 
 
+def _git_identity(entry: str) -> str | None:
+    """``git:host/user/repo@ref`` -> ``git:host/user/repo`` (identity for dedup, ignores ref)."""
+    if not entry.startswith("git:"):
+        return None
+    at = entry.rfind("@")
+    # Only strip the ref if @ appears after the "git:" prefix (len("git:") == 4)
+    return entry[:at] if at > 4 else entry
+
+
 def _desired_packages(self_repo: bool) -> list[str]:
-    own = ".." if self_repo else f"npm:{NPM_PACKAGE}@{__version__}"
+    own = ".." if self_repo else f"{GIT_PACKAGE}@v{__version__}"
     return [own, *BORROWED_PACKAGES]
 
 
@@ -259,8 +268,12 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     if not isinstance(packages, list):
         packages = []
 
-    have_local = {p for p in packages if isinstance(p, str) and not p.startswith("npm:")}
+    # Migration: strip legacy npm perk entries written by earlier perk init runs.
+    packages = [p for p in packages if not (isinstance(p, str) and p.startswith("npm:@perk/pi"))]
+
+    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
     have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
+    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
 
     added: list[str] = []
     for want in _desired_packages(self_repo):
@@ -270,6 +283,12 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
                 continue
             packages.append(want)
             have_npm.add(name)
+        elif want.startswith("git:"):
+            identity = _git_identity(want)
+            if identity is None or identity in have_git:
+                continue
+            packages.append(want)
+            have_git.add(identity)
         else:
             if want in have_local:
                 continue

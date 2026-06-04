@@ -22,7 +22,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
 
     settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
     packages = settings["packages"]
-    assert f"npm:@perk/pi@{__version__}" in packages
+    assert f"git:github.com/mattgiles/perk@v{__version__}" in packages
     assert "npm:@tombell/pi-status" in packages
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
     assert "npm:@juicesharp/rpiv-todo" not in packages  # P2.T12: perk owns checkpoints now
@@ -56,7 +56,9 @@ def test_init_preserves_user_settings(tmp_path):
     settings = json.loads((pi_dir / "settings.json").read_text())
     assert "npm:@me/custom" in settings["packages"]  # user entry preserved
     assert settings["theme"] == "nightowl"  # unknown key preserved
-    assert f"npm:@perk/pi@{__version__}" in settings["packages"]  # perk entry added
+    assert (
+        f"git:github.com/mattgiles/perk@v{__version__}" in settings["packages"]
+    )  # perk entry added
 
 
 def test_init_rejects_malformed_settings(tmp_path):
@@ -74,4 +76,4 @@ def test_init_self_mode_uses_local_path(tmp_path):
     run_init(tmp_path, verify=False)
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert ".." in packages
-    assert not any(p.startswith("npm:@perk/pi") for p in packages)
+    assert not any(p.startswith("git:github.com/mattgiles/perk") for p in packages)
