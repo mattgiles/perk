@@ -38,6 +38,28 @@ def test_plan_header_to_data_shape():
     assert data["run_id"] == "01R"
     assert data["lifecycle_stage"] == "planned"  # StrEnum -> value
     assert data["branch"] is None and data["pr"] is None and data["objective_id"] is None
+    assert data["consumed_learn"] == []  # hop-2: empty by default, serialized as a list
+
+
+def test_plan_header_consumed_learn_round_trips():
+    header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z", consumed_learn=(45, 50))
+    data = header.to_data()
+    assert data["consumed_learn"] == [45, 50]
+    rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
+    parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
+    assert parsed is not None and parsed["consumed_learn"] == [45, 50]
+    assert "consumed_learn" in plan.PLAN_HEADER_FIELDS
+
+
+def test_plan_ref_consumed_learn_in_to_data():
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="123",
+        url="u",
+        labels=(plan.PLAN_LABEL,),
+        consumed_learn=(7, 9),
+    )
+    assert ref.to_data()["consumed_learn"] == [7, 9]
 
 
 def test_plan_ref_to_data_pr_id_is_string():
@@ -49,6 +71,7 @@ def test_plan_ref_to_data_pr_id_is_string():
         "url": "u",
         "labels": ["perk:plan"],
         "objective_id": None,
+        "consumed_learn": [],
     }
 
 

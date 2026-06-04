@@ -19,6 +19,7 @@ import { registerCheckpoints } from "./checkpoints.ts";
 import { registerCiExecutor } from "./ciExecutor.ts";
 import { registerLand } from "./land.ts";
 import { registerLearn } from "./learn.ts";
+import { registerLearnDocs } from "./learnDocs.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerObjective } from "./objective.ts";
 import { registerObjectivePlan } from "./objectivePlan.ts";
@@ -269,6 +270,11 @@ export default function (pi: ExtensionAPI) {
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
   // `/objective-plan` command (select the next node and author a bounded plan).
   registerObjectivePlan(pi);
+
+  // hop-2 — the learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
+  // perk:learn issues into an inbox (via the `perk learn-docs --gather` cold door) and injects the
+  // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
+  registerLearnDocs(pi);
 
   pi.registerCommand("perk-selfcheck", {
     description: "Report that the perk extension is loaded.",

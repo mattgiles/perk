@@ -39,6 +39,19 @@ class ObjectiveLandUpdate:
 
 
 @dataclass(frozen=True)
+class LearnConsumeUpdate:
+    """The hop-2 on-land consume outcome: the ``perk:learn`` issues this docs plan consumed are
+    closed + labelled ``perk:consolidated``.
+
+    ``closed`` is the issue numbers successfully consolidated. ``skipped_reason`` records why
+    nothing was consumed (or an error string) — the land result is **never** affected by this step.
+    """
+
+    closed: tuple[int, ...]
+    skipped_reason: str | None
+
+
+@dataclass(frozen=True)
 class PrLandResult:
     pr: github.PullRequest
     branch: str
@@ -46,6 +59,7 @@ class PrLandResult:
     pending_learn: bool
     dry_run: bool
     objective: ObjectiveLandUpdate
+    learn: LearnConsumeUpdate
 
 
 @click.command("pr-land")
@@ -108,6 +122,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             pending_learn=False,  # a dry run sets no marker
             dry_run=True,
             objective=ObjectiveLandUpdate(None, (), "dry_run"),
+            learn=LearnConsumeUpdate((), "dry_run"),
         )
 
     pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
@@ -125,6 +140,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
     obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
+    learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
     return PrLandResult(
         pr=pr,
         branch=branch,
@@ -132,6 +148,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         pending_learn=True,
         dry_run=False,
         objective=obj_update,
+        learn=learn_update,
     )
 
 
@@ -178,6 +195,36 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         return ObjectiveLandUpdate(number, (), f"error: {exc}")
 
 
+def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUpdate:
+    """Consume the ``perk:learn`` issues a learned-docs plan consolidated (hop-2): close each +
+    label it ``perk:consolidated``.
+
+    **Fail-open + non-fatal by design** (mirrors :func:`_reconcile_objective_on_land`). The merge
+    already succeeded; consuming the learn issues is secondary and retryable, so this NEVER raises
+    and NEVER changes the land result — any failure is logged loud-but-non-fatal to stderr and
+    captured as a ``skipped_reason``.
+    """
+    raw = plan_ref.get("consumed_learn")
+    if not raw:
+        return LearnConsumeUpdate((), "no_consumed_learn")
+    try:
+        numbers = [int(str(n).lstrip("#")) for n in raw]
+    except (TypeError, ValueError):
+        return LearnConsumeUpdate((), "bad_consumed_learn")
+    try:
+        closed: list[int] = []
+        for number in numbers:
+            github.close_and_label_consolidated(issue=number, repo_root=repo_root)
+            closed.append(number)
+        return LearnConsumeUpdate(tuple(closed), None)
+    except Exception as exc:  # fail-open: consuming learn issues never blocks landing
+        print(
+            f"perk pr-land: learn consume skipped (non-fatal): {exc}",
+            file=sys.stderr,
+        )
+        return LearnConsumeUpdate((), f"error: {exc}")
+
+
 def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
     """The deepened squash commit message (P2.T8b, D8): plain ``"<plan title>\\n\\nCloses #N"``.
 
@@ -209,6 +256,10 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
             "nodes_marked": list(result.objective.nodes_marked),
             "skipped_reason": result.objective.skipped_reason,
         },
+        "learn": {
+            "closed": list(result.learn.closed),
+            "skipped_reason": result.learn.skipped_reason,
+        },
     }
 
 
@@ -227,6 +278,9 @@ def _render_human(result: PrLandResult) -> None:
     if result.objective.nodes_marked:
         nodes = ", ".join(result.objective.nodes_marked)
         user_output(f"  objective #{result.objective.objective}: marked node(s) {nodes} done")
+    if result.learn.closed:
+        closed = ", ".join(f"#{n}" for n in result.learn.closed)
+        user_output(f"  consolidated learn issue(s) {closed} into docs/learned")
 
 
 def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:

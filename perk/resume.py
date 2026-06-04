@@ -40,4 +40,5 @@ def reconstruct_plan_ref(plan_state: github.PlanState) -> dict[str, Any]:
         "url": plan_state.url,
         "labels": [plan.PLAN_LABEL],
         "objective_id": plan_state.header.get("objective_id"),
+        "consumed_learn": plan_state.header.get("consumed_learn") or [],
     }

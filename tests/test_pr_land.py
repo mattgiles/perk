@@ -7,8 +7,10 @@ from click.testing import CliRunner
 from perk import cache, github, objective
 from perk.cli.cli import cli
 from perk.cli.commands.pr_land_cmd import (
+    LearnConsumeUpdate,
     ObjectiveLandUpdate,
     PrLandResult,
+    _consume_learn_on_land,
     _reconcile_objective_on_land,
     _result_to_dict,
 )
@@ -255,9 +257,56 @@ def test_result_to_dict_carries_objective():
         pending_learn=True,
         dry_run=False,
         objective=ObjectiveLandUpdate(5, ("1.1",), None),
+        learn=LearnConsumeUpdate((45, 50), None),
     )
     data = _result_to_dict(result)
     assert data["objective"] == {"number": 5, "nodes_marked": ["1.1"], "skipped_reason": None}
+    assert data["learn"] == {"closed": [45, 50], "skipped_reason": None}
+
+
+# --- learned-docs consume on land (hop-2) ----------------------------------------------------
+
+
+def test_consume_learn_on_land_no_consumed():
+    out = _consume_learn_on_land(plan_ref={"pr_id": "7"}, repo_root=Path("."))
+    assert out.closed == () and out.skipped_reason == "no_consumed_learn"
+
+
+def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
+    closed: list[int] = []
+    monkeypatch.setattr(
+        github,
+        "close_and_label_consolidated",
+        lambda *, issue, repo_root, **k: closed.append(issue) or True,
+    )
+    out = _consume_learn_on_land(
+        plan_ref={"consumed_learn": [45, 50], "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out.closed == (45, 50) and out.skipped_reason is None
+    assert closed == [45, 50]
+
+
+def test_consume_learn_on_land_is_fail_open(monkeypatch):
+    def _boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(github, "close_and_label_consolidated", _boom)
+    out = _consume_learn_on_land(
+        plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out.closed == ()
+    assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
+
+
+def test_dry_run_learn_is_inert():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), {**_REF, "consumed_learn": [45]})
+        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["learn"] == {"closed": [], "skipped_reason": "dry_run"}
 
 
 def test_dry_run_objective_is_inert():

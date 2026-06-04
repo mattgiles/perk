@@ -12,6 +12,11 @@ export interface ObjectiveLandUpdate {
   skipped_reason: string | null;
 }
 
+export interface LearnConsumeUpdate {
+  closed: number[];
+  skipped_reason: string | null;
+}
+
 export interface LandDetails {
   ok: boolean;
   pr?: { number: number; state: string };
@@ -19,6 +24,7 @@ export interface LandDetails {
   issue?: number;
   pending_learn?: boolean;
   objective?: ObjectiveLandUpdate;
+  learn?: LearnConsumeUpdate;
   error?: string;
   error_type?: string;
 }
@@ -38,6 +44,7 @@ interface PrLandJson {
   issue?: number;
   pending_learn?: boolean;
   objective?: ObjectiveLandUpdate;
+  learn?: LearnConsumeUpdate;
 }
 
 /**
@@ -101,6 +108,15 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
         `/objective-reconcile #${obj.number} to reconcile the roadmap prose against the diff.`,
     );
   }
+  const learn = parsed.learn;
+  if (learn?.closed.length) {
+    // hop-2: the consumed perk:learn issues were closed + labelled perk:consolidated on land.
+    lines.push(
+      `Closed ${learn.closed.length} learn issue(s) (${learn.closed
+        .map((n) => `#${n}`)
+        .join(", ")}) into docs/learned.`,
+    );
+  }
 
   return {
     content: [{ type: "text", text: lines.join("\n") }],
@@ -111,6 +127,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
       issue: parsed.issue,
       pending_learn: true,
       objective: parsed.objective,
+      learn: parsed.learn,
     },
     terminate: true,
   };

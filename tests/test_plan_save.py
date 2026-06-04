@@ -98,6 +98,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         "url": "https://gh/o/r/issues/123",
         "labels": ["perk:plan"],
         "objective_id": None,
+        "consumed_learn": [],
     }
 
 

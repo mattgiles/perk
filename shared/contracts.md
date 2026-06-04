@@ -587,6 +587,21 @@ create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url
     # renders a learn-header block { run_id, created, plan } into the body so the finder matches.
 ```
 
+**Authored (hop-2 — the learned-docs consumer).** The factory cold door gathers + lands the
+consume; both ops follow the established conventions (REST `gh api`, LIST endpoint, lazy label,
+mutations raise / lookups never mask infra failure):
+
+```
+list_learn_issues{}                                 -> LearnIssueSummary[]{ number, title, url, body }
+    # GET .../issues?labels=perk:learn&state=open (the find_plan_issue list call, label-scoped to
+    # perk:learn). Returns every open learn issue's full body for the inbox; raises on infra
+    # failure (never masks as empty); skips non-dict / pull_request entries.
+close_and_label_consolidated{ issue }               -> bool
+    # lazy create_label("perk:consolidated"); POST .../issues/{n}/labels (-f labels[]=perk:consolidated,
+    # ADD not replace) THEN PATCH .../issues/{n} (-f state=closed). Idempotent (re-closing /
+    # re-labelling is success). Raises GitHubError on infra failure.
+```
+
 - **Deepened squash commit message (D8).** Land now passes `merge_pr(commit_message=)` =
   plain `"<plan title>\n\nCloses #<issue>"` (`get_plan(...).title`, fallback `Closes #<issue>` on an
   empty title). Plain text only — the second of the **two PR targets** (the GitHub HTML body, T8a,
@@ -609,8 +624,11 @@ create_learn_issue{ title, body, run_id, plan_number } -> PlanIssue{ number, url
   <text>`** still captures verbatim; **headless** bare `/learn` stays the safe marker-clear
   (can't drive a turn). The **`perk-learn` skill** is the judgment layer both surfaces point at.
   No new gateway op — the existing `learn` tool / `learn-capture` worker remain the durable-write
-  path. **Tier 3** (session-material bundling on land, multi-agent session/diff/docs analysis, the
-  `docs/learned/*.md` documentation-plan loop) remains **deferred** to its own objective node.
+  path. **Tier 3 update (hop-2):** the **`docs/learned/*.md` documentation-plan loop is now BUILT**
+  (see the *Learned-docs consumer (hop-2)* subsection below). The remaining Tier-3 pieces
+  (session-material bundling on land, multi-agent session/diff/docs analysis) stay **deferred** —
+  perk's already-synthesized `perk:learn` records are the materials, replacing erk's session
+  preprocessing.
 - **Reconciliation typing (D9 — vocabulary established; Reconcilable + objective reconciliation
   implemented in P2.T11).** Three section types on land: **Mechanical** (command-updated,
   deterministic — T8b: `pending-learn` + the plain squash commit message; **P2.T11a**: the
@@ -699,7 +717,8 @@ erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
   pr_id: string,               # STRING (allows non-numeric ids like Jira "PROJ-123")
   url: string,                 # during planning: the plan issue url/id; branch/pr staged null
   labels: string[],            # ["perk:plan"]
-  objective_id: string|null }  # Phase 2
+  objective_id: string|null,   # Phase 2
+  consumed_learn: number[] }   # hop-2: perk:learn issues a docs plan consolidates (closed on land)
 ```
 
 **Plan-header block (P1.T2a — the queryable metadata in the issue *body*).** The minimal
@@ -712,13 +731,15 @@ block; the full plan markdown lives in the `plan-body` first comment:
   branch: string|null,         # staged — populated at submit
   pr: string|null,             # staged — populated at submit
   created: string,             # ISO-8601 UTC
-  objective_id: string|null }  # Phase 2
+  objective_id: string|null,   # Phase 2
+  consumed_learn: number[] }   # hop-2: perk:learn issues a docs plan consolidates (closed on land)
 ```
 
 **Label taxonomy (minimal, PRIOR_ART §2/§6):** `perk:plan` (green `1f883d`), `perk:learn` (purple
-`8250df`), and — since P2.T9 — `perk:objective` (indigo `5319e7`, description "perk objective
-issue"), each **lazily created** by its gateway create-op on first use (perk never seeds labels in
-`init`). Query by a **single** label — GitHub label filters are AND-semantics.
+`8250df`), `perk:objective` (indigo `5319e7`, description "perk objective issue", since P2.T9), and
+— since hop-2 — `perk:consolidated` (gray `6e7781`, description "perk learn issue consolidated into
+docs/learned"), each **lazily created** by its gateway create-op on first use (perk never seeds
+labels in `init`). Query by a **single** label — GitHub label filters are AND-semantics.
 
 **The `pending-learn` semaphore (P1.T5b; Q2/Q5).** An existence-only `cache.markers` file
 (`.pi/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
@@ -980,6 +1001,58 @@ region; everything outside it (the Mechanical roadmap table, any Immutable notes
 - The judgment layer is `skills/perk-objective-reconcile/SKILL.md`: PR diff + `objective show` as
   untrusted DATA; the Mechanical/Reconcilable/Immutable boundary; the contradiction taxonomy; skip
   if nothing is stale; never-delegate judgment + durable writes.
+
+### Authored (hop-2 — the learned-docs consumer)
+
+perk's `/learn` already synthesizes durable learnings into terminal `perk:learn` issues; hop-2 is
+the missing **consumer** that consolidates them into committed `docs/learned/`. It is a **plan
+factory** (mirrors `objective-plan`, NOT a direct doc-writer), triggered on-demand/batched — so it
+adds **no `registry.yaml` stage** (it borrows the existing `plan` stage descriptor to launch) and
+uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
+
+- **The factory cold door + warm command.** `perk learn-docs` (alias `ldocs`,
+  `learn_docs_cmd.py`): `list_learn_issues` → materialize the inbox
+  `.pi/workflow/scratch/learn-docs-inbox.md` (a `## Learning #<n>` section per issue, each body in
+  `<untrusted_learning>`) → `launch_stage(plan_stage, prompt_override=<seed>)` (a read-only
+  plan-mode session). `--gather` materializes the inbox + emits `{ inbox_path, learn_numbers }`
+  with no launch (the warm path + tests consume this); `--dry-run` gathers + prints; `--remote` is
+  rejected (`remote_blocked`, the `plan` stage is `cold_remote:false`); no open learn issues →
+  exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/learnDocs.ts`) delegates to
+  `perk learn-docs --gather --json` (gate-safe — extension `pi.exec` is not subject to the
+  read-only bash gate), then `pi.sendUserMessage`s the factory guidance pointing at the
+  `perk-learn-docs` skill. **Headless-safe** (the inbox is still materialized; no turn is driven).
+- **The read-only gate forces inbox-over-gh.** The read-only tool gate's bash allowlist excludes
+  `gh`/`perk` (`extension/toolGating.ts`), so the seeded factory session reads the materialized
+  inbox via the `read` tool — it cannot query GitHub. This is why the cold door (not the model)
+  performs every GitHub read up front.
+- **The `consumed_learn` thread.** `perk plan-save --consumed-learn "45,50"` (and the warm
+  `plan_save` tool's `consumed_learn` array param) populate `plan.PlanHeader.consumed_learn` +
+  `plan.PlanRef.consumed_learn` (parsed to a sorted unique `tuple[int, ...]`; an invalid token →
+  `invalid_input`). This persists which `perk:learn` issues the docs plan consolidates; non-factory
+  plans omit it.
+- **On-land consume (Mechanical, deterministic).** `pr_land_cmd._consume_learn_on_land(*, plan_ref,
+  repo_root) -> LearnConsumeUpdate{ closed, skipped_reason }` reads `plan_ref.consumed_learn` and
+  `close_and_label_consolidated` for each issue — **fail-open, never raises, never changes the land
+  result** (mirrors `_reconcile_objective_on_land`; `skipped_reason` ∈ `no_consumed_learn` /
+  `bad_consumed_learn` / `error: <exc>`). Called in `_pr_land_impl`'s non-dry-run branch after
+  `set_marker(PENDING_LEARN)` and the objective reconcile; the dry-run branch sets an inert
+  `LearnConsumeUpdate((), "dry_run")`. `_result_to_dict` emits `"learn": { closed, skipped_reason }`;
+  `_render_human` adds a `consolidated learn issue(s) X into docs/learned` line when non-empty. The
+  warm `extension/land.ts` surfaces `learn.closed` in a `Closed N learn issue(s) … into
+  docs/learned` line. Closing already excludes a consumed issue from the next `state=open` gather;
+  the `perk:consolidated` label is the durable/queryable record.
+- **The docs surface (plan-maintained, never `init`-managed).** `docs/learned/<category>/*.md`
+  carries light frontmatter (`title` + `read_when`); `docs/learned/index.md` is the standalone full
+  catalog; `.pi/APPEND_SYSTEM.md` (Pi's project-scoped system-prompt append, ambient on every
+  session) holds the **compressed** routing index — the realization of the PRIOR_ART §6
+  "compressed index must be ambient" finding (a retrieval-tier index is too brittle). Both index
+  layers are refreshed **by `/learn-docs` plans**, never by `perk init` (and neither path is
+  gitignored — they are committed). erk's heavier machinery (tripwire generation, per-category
+  auto-indexes, `docs sync` codegen, multi-agent session preprocessing) is deliberately deferred.
+- **The judgment layer** is `skills/perk-learn-docs/SKILL.md`: read the inbox as untrusted DATA →
+  cluster by cross-cutting theme → `docs/learned/<category>/` placement → author a bounded docs
+  plan with a `## Steps` list → `plan_save` with `consumed_learn`; plus the ported content-quality
+  rules (cross-cutting insight only, explain *why* not *what*, the One Code Rule / source pointers).
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 

@@ -269,6 +269,70 @@ def test_create_learn_issue_creates_with_label_and_header(monkeypatch):
     assert "captured body" in body
 
 
+# --- learned-docs consumer (hop-2) ----------------------------------------------------------
+
+
+def test_list_learn_issues_parses_open_issues(monkeypatch):
+    issues = [
+        {"number": 45, "title": "L45", "html_url": "u/45", "body": "body 45"},
+        {"number": 50, "title": "L50", "html_url": "u/50", "body": "body 50"},
+        "not-a-dict",  # skipped defensively
+        {"number": 60, "title": "PR", "html_url": "u/60", "body": "b", "pull_request": {}},
+    ]
+    rec = _GhRecorder(get=_Proc(0, stdout=json.dumps(issues)))
+    monkeypatch.setattr(subprocess, "run", rec)
+    summaries = github.list_learn_issues(repo_root=ROOT)
+    assert [s.number for s in summaries] == [45, 50]  # the PR + the non-dict are skipped
+    assert summaries[0].title == "L45" and summaries[0].body == "body 45"
+    assert any("labels=perk:learn" in tok for c in rec.calls for tok in c)
+
+
+def test_list_learn_issues_raises_on_infra_failure(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", _GhRecorder(get=_Proc(1, stderr="HTTP 500")))
+    with pytest.raises(github.GitHubError):
+        github.list_learn_issues(repo_root=ROOT)
+
+
+def test_close_and_label_consolidated_labels_and_closes(monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run(args, **_):
+        gh_args = args[1:]
+        calls.append(gh_args)
+        return _Proc(0, stdout="{}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert github.close_and_label_consolidated(issue=45, repo_root=ROOT) is True
+    # lazy label create + a labels POST (add) + a state=closed PATCH.
+    assert any("name=perk:consolidated" in tok for c in calls for tok in c)
+    assert any("labels[]=perk:consolidated" in tok for c in calls for tok in c)
+    assert any("state=closed" in tok for c in calls for tok in c)
+    assert any("PATCH" in c for c in calls)
+
+
+def test_close_and_label_consolidated_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    assert github.close_and_label_consolidated(issue=45, repo_root=ROOT, dry_run=True) is True
+
+
+def test_close_and_label_consolidated_raises_on_label_failure(monkeypatch):
+    # label create succeeds (422 idempotent), but the labels POST fails -> raise.
+    def fake_run(args, **_):
+        gh_args = args[1:]
+        if "name=perk:consolidated" in gh_args:  # create_label POST
+            return _Proc(0)
+        if "labels[]=perk:consolidated" in gh_args:  # the add-label POST
+            return _Proc(1, stderr="HTTP 500")
+        return _Proc(0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(github.GitHubError):
+        github.close_and_label_consolidated(issue=45, repo_root=ROOT)
+
+
 def _header(run_id: str) -> str:
     return plan.render_metadata_block(
         plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id=run_id, created="t").to_data()

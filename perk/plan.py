@@ -32,6 +32,13 @@ LEARN_LABEL = "perk:learn"
 LEARN_LABEL_COLOR = "8250df"  # GitHub purple
 LEARN_LABEL_DESCRIPTION = "perk learn issue"
 
+# The consolidated label (hop-2): a `perk:learn` issue gets this label + is closed when its
+# learnings have been consumed into a `docs/learned/` documentation plan (the learn-docs factory).
+# Closing already excludes it from the next `state=open` gather; the label is the durable record.
+CONSOLIDATED_LABEL = "perk:consolidated"
+CONSOLIDATED_LABEL_COLOR = "6e7781"  # GitHub gray
+CONSOLIDATED_LABEL_DESCRIPTION = "perk learn issue consolidated into docs/learned"
+
 PLAN_HEADER_KEY = "plan-header"
 PLAN_BODY_KEY = "plan-body"
 LEARN_HEADER_KEY = "learn-header"  # carries { run_id, created, plan } in the learn issue body
@@ -39,7 +46,7 @@ LEARN_HEADER_KEY = "learn-header"  # carries { run_id, created, plan } in the le
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
 PLAN_HEADER_FIELDS = frozenset(
-    {"run_id", "lifecycle_stage", "branch", "pr", "created", "objective_id"}
+    {"run_id", "lifecycle_stage", "branch", "pr", "created", "objective_id", "consumed_learn"}
 )
 
 _OPEN = "<!-- perk:metadata-block:{key} -->"
@@ -69,6 +76,7 @@ class PlanHeader:
     branch: str | None = None
     pr: str | None = None
     objective_id: str | None = None  # Phase 2
+    consumed_learn: tuple[int, ...] = ()  # hop-2: the perk:learn issues this docs plan consumes
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -78,6 +86,7 @@ class PlanHeader:
             "pr": self.pr,
             "created": self.created,
             "objective_id": self.objective_id,
+            "consumed_learn": list(self.consumed_learn),
         }
 
 
@@ -95,6 +104,7 @@ class PlanRef:
     url: str
     labels: tuple[str, ...]
     objective_id: str | None = None
+    consumed_learn: tuple[int, ...] = ()  # hop-2: consumed perk:learn issues (closed on land)
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -103,6 +113,7 @@ class PlanRef:
             "url": self.url,
             "labels": list(self.labels),
             "objective_id": self.objective_id,
+            "consumed_learn": list(self.consumed_learn),
         }
 
 
