@@ -8,10 +8,11 @@ Three layers (phase-0-turn-6 §6.f / §10.7):
 
 import os
 import shutil
+import subprocess
 
 import pytest
 
-from perk import capabilities, init
+from perk import capabilities, git, init
 from perk.cli.commands import doctor_cmd
 from perk.doctor import Check, DoctorReport, report_to_dict, run_doctor
 from perk.init import run_init
@@ -124,6 +125,34 @@ def test_drift_detected_and_fixed_idempotently(git_repo):
     assert fixed.healthy and fixed.fixed
     again = run_doctor(git_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # fix is idempotent
+
+
+def test_legacy_tracked_plan_md_is_repaired(git_repo):
+    # #43: `.pi/workflow/plan.md` is a transient cache.plan body. A legacy repo committed it and
+    # hand-added a stray ungrouped ignore line. `--fix` untracks the file + removes the stray
+    # line (the managed block already owns it), idempotently.
+    _scaffold(git_repo)
+    rel = ".pi/workflow/plan.md"
+    plan_md = git_repo / rel
+    plan_md.write_text("# materialized plan body\n", encoding="utf-8")
+    # Simulate the legacy stray ungrouped ignore line (outside the managed block).
+    gitignore = git_repo / ".gitignore"
+    gitignore.write_text(gitignore.read_text(encoding="utf-8") + f"/{rel}\n", encoding="utf-8")
+    # Force-track it past its own ignore rule (mirrors how it got committed before the rule).
+    subprocess.run(
+        ["git", "add", "-f", rel], cwd=git_repo, check=True, capture_output=True, text=True
+    )
+    assert git.is_tracked(git_repo, rel)
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy and fixed.fixed
+    # The file is untracked but left on disk (cache, not deleted); the stray line is gone, and
+    # exactly one managed occurrence of the ignore line remains.
+    assert not git.is_tracked(git_repo, rel)
+    assert plan_md.is_file()
+    assert gitignore.read_text(encoding="utf-8").count(f"/{rel}\n") == 1
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert again.healthy and again.fixed == []  # repair is idempotent
 
 
 def test_missing_workflow_subdir_is_fixed(git_repo):

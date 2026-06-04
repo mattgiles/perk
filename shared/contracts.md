@@ -39,6 +39,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ```
 .pi/workflow/
 ├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
+├── plan.md                 # cache.plan: the materialized plan body (transient per-worktree mirror)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
@@ -56,7 +57,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   prune command (erk accumulated session dirs precisely because GC was undefined).
 - `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
   locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
-  `/.pi/workflow/plan-ref.json` — a local mirror; the canonical plan lives in GitHub).
+  `/.pi/workflow/plan-ref.json` and `/.pi/workflow/plan.md` — local mirrors; the canonical plan
+  lives in GitHub). The materialized `plan.md` body is transient and must never be tracked;
+  `perk doctor --fix` untracks a legacy-committed copy and drops any stray ungrouped ignore line
+  (#43).
 - **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
   written verbatim. One active ref per checkout/worktree (`.pi/workflow/` is per-checkout). The
   **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
