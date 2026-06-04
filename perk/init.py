@@ -11,6 +11,9 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 """
 
 import json
+import os
+import shutil
+import subprocess
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -364,6 +367,58 @@ def _converge_skills_manifest(root: Path, self_repo: bool, *, apply: bool = True
     return [f"{PERK_SKILLS_MANIFEST_DIR}/{PERK_SKILLS_MANIFEST_FILENAME}: {verb}"]
 
 
+def _skill_link_state(root: Path) -> dict[str, str]:
+    """Snapshot the `.agents/skills/` link set as ``{name: symlink-target}`` (target ``""`` for
+    non-symlinks / unreadable). Used to detect whether a `skills sync` actually changed state,
+    so init's change-reporting stays idempotent (a converged repo re-runs clean)."""
+    skills_dir = root / ".agents" / "skills"
+    if not skills_dir.is_dir():
+        return {}
+    state: dict[str, str] = {}
+    for entry in sorted(skills_dir.iterdir()):
+        try:
+            state[entry.name] = os.readlink(entry) if entry.is_symlink() else ""
+        except OSError:
+            state[entry.name] = ""
+    return state
+
+
+def _sync_skills(root: Path, changes: list[str]) -> None:
+    """Materialize the declared skills via the skills CLI (consumer repos, ``verify`` only).
+
+    Best-effort + non-fatal, exactly like the GitHub readiness probe (D3): a missing or failing
+    ``skills`` never blocks init — file convergence (incl. the perk fragment) has already
+    succeeded. ``skills init`` is idempotent (no-op once initialized); ``skills sync`` enforces
+    the declared state by (re)linking ``.agents/skills/*``. A ``changes`` entry is appended only
+    when the link set actually changes, so a converged repo reports no churn.
+    """
+    if shutil.which("skills") is None:
+        return
+    before = _skill_link_state(root)
+    try:
+        # Idempotent local-state scaffold (manifest + local config + gitignore block).
+        subprocess.run(
+            ["skills", "init", "--cache=local"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["skills", "sync"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if _skill_link_state(root) != before:
+        changes.append(".agents/skills/: synchronized via skills sync")
+
+
 def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
     """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
     (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
@@ -568,11 +623,11 @@ def run_init(
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
     _converge_config(root, changes, force=force, interactive=interactive)
-    # DEFERRED (plan #51 §2.7): orchestrating `skills init` + `skills sync` from init is held
-    # until the skills-CLI gains `manifest.d/` fragment support (plan #51 Part 1, a separate
-    # repo). Until then a sync would ignore the perk fragment, so init only *declares* the
-    # fragment; consumers run `skills sync` themselves. The fragment's drift is owned by the
-    # `skills-manifest` convergence + `perk doctor`.
+    # Materialize the declared skills under the covers (consumer repos only; perk's own tree
+    # loads `skills/perk-*` via the `..` Pi package, so a sync there would only duplicate links).
+    # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
+    if verify and not self_repo:
+        _sync_skills(root, changes)
 
     github_report: GitHubReport | None = None
     if verify:
