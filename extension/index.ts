@@ -22,7 +22,9 @@ import { registerLearn } from "./learn.ts";
 import { registerLearnDocs } from "./learnDocs.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerObjective } from "./objective.ts";
+import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
 import { registerObjectivePlan } from "./objectivePlan.ts";
+import { registerObjectiveSave } from "./objectiveSave.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
@@ -75,6 +77,10 @@ export default function (pi: ExtensionAPI) {
   // gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
   // borrowed `@tombell/pi-plan` is retired).
   registerPlanMode(pi, gating);
+
+  // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
+  // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
+  registerObjectiveAuthor(pi, gating);
   let sharedOk = false;
   try {
     sharedDir();
@@ -125,6 +131,9 @@ export default function (pi: ExtensionAPI) {
           run_id: decision.runId,
           pi_session_id: currentSessionId ?? undefined,
           mode: handoff.mode,
+          // Record the launched stage so the interior can tell e.g. objective-author from plan
+          // (both are read-only) and inject the right authoring context (planMode vs objectiveAuthor).
+          stage: handoff.stage,
         };
         pi.appendEntry(WORKFLOW_STATE_TYPE, data);
         if (rebuildWorkflowState(branchEntries()).run_id !== decision.runId) {
@@ -265,6 +274,10 @@ export default function (pi: ExtensionAPI) {
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
   registerObjective(pi);
+
+  // P3.T2 — the warm `objective_save` door: the `objective_save` tool + `/objective-save` command
+  // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
+  registerObjectiveSave(pi, gating);
 
   // P2.T10 — the objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the

@@ -60,6 +60,8 @@ def test_real_registry_is_valid():
     # The bundled shared/registry.yaml: parses and has zero issues.
     registry = load_registry()
     assert [s.id for s in registry.stages] == [
+        "objective-author",
+        "objective-save",
         "objective-plan",
         "plan",
         "save",
@@ -72,24 +74,28 @@ def test_real_registry_is_valid():
     assert validate(registry) == []
 
 
-def test_objective_plan_is_initial_before_plan():
-    # P2.T10: objective-plan -> plan (the new single initial; learn stays the single terminal).
+def test_objective_author_is_the_single_initial():
+    # P3.T2: objective-author -> objective-save -> objective-plan -> plan (the new single initial;
+    # learn stays the single terminal).
     registry = load_registry()
     by_id = {s.id: s for s in registry.stages}
-    op = by_id["objective-plan"]
-    assert op.predecessors == [] and op.successors == ["plan"]
-    assert by_id["plan"].predecessors == ["objective-plan"]
+    auth = by_id["objective-author"]
+    save = by_id["objective-save"]
+    assert auth.predecessors == [] and auth.successors == ["objective-save"]
+    assert save.predecessors == ["objective-author"] and save.successors == ["objective-plan"]
+    assert by_id["objective-plan"].predecessors == ["objective-save"]
     # Single initial, single terminal.
     initials = [s.id for s in registry.stages if not s.predecessors]
     terminals = [s.id for s in registry.stages if not s.successors]
-    assert initials == ["objective-plan"]
+    assert initials == ["objective-author"]
     assert terminals == ["learn"]
     # Mode / worktree / doors / I/O as built.
-    assert op.mode == "read-only" and op.worktree == "none"
-    assert op.doors == {"warm": True, "cold_local": True, "cold_remote": False}
-    assert op.requires == ["github.objective"]
-    assert op.reads == ["github.objective"]
-    assert op.writes == ["github.objective", "session.workflow-state"]
+    assert auth.mode == "read-only" and auth.worktree == "none"
+    assert auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
+    assert auth.requires == [] and auth.reads == []
+    assert auth.writes == ["session.workflow-state"]
+    assert save.mode == "read-write" and save.worktree == "none"
+    assert save.writes == ["github.objective", "session.workflow-state"]
 
 
 def test_address_is_linear_between_submit_and_land():

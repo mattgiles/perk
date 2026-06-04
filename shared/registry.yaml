@@ -39,7 +39,8 @@ state_keys:
     - workflow-state  # the single `perk:workflow-state` record (contracts.md §8.3)
 
 # ---------------------------------------------------------------------------
-# Stages — the MVP loop (Q5): plan -> save -> implement -> submit -> land -> learn.
+# Stages — the loop (Q5): objective-author -> objective-save -> objective-plan -> plan ->
+# save -> implement -> submit -> address -> land -> learn.
 #
 # Every field is locked EXCEPT `requires`/`reads`/`writes` (empty until handlers
 # land). `run_id` is uniform now (warm keeps, cold mints + records predecessor,
@@ -53,6 +54,32 @@ state_keys:
 # Phase 3 *drives* it. Revisable in Phase 3.
 # ---------------------------------------------------------------------------
 stages:
+  - id: objective-author
+    summary: Draft a new objective + roadmap (read-only authoring).
+    mode: read-only
+    worktree: none            # interactive authoring, like plan — no branch, no objective yet
+    doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local authoring
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: objective-author  # P3.T2: dedicated seeded cold door (perk objective-author)
+    requires: []                       # nothing exists yet — this stage CREATES the objective
+    reads: []
+    writes: [session.workflow-state]   # the read-only `mode` append (the gate toggle)
+    predecessors: []                   # the new single initial (authoring precedes everything)
+    successors: [objective-save]
+
+  - id: objective-save
+    summary: Persist the drafted objective to GitHub; the read-only -> read-write boundary.
+    mode: read-write
+    worktree: none            # still no branch; save writes the objective issue
+    doors: { warm: true, cold_local: true, cold_remote: false }
+    run_id: { warm: keep, cold_local: mint, cold_remote: mint }
+    command: objective-save   # P3.T2: the objective_save terminating tool + /objective-save command
+    requires: []
+    reads: []
+    writes: [github.objective, session.workflow-state]  # create the objective issue; link active_objective
+    predecessors: [objective-author]
+    successors: [objective-plan]
+
   - id: objective-plan
     summary: Select the next objective node and author a bounded plan (read-only).
     mode: read-only
@@ -63,7 +90,7 @@ stages:
     requires: [github.objective]                        # an objective issue must exist
     reads: [github.objective]                           # roadmap nodes + next-node selection
     writes: [github.objective, session.workflow-state]  # mark node planning; set active_objective
-    predecessors: []
+    predecessors: [objective-save]                      # P3.T2: objective-save now precedes planning
     successors: [plan]
 
   - id: plan

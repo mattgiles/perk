@@ -16,6 +16,7 @@ from perk.registry import RegistryError, Stage, load_registry
 DEDICATED_STAGES: frozenset[str] = frozenset(
     {
         "implement",  # perk/cli/commands/implement_cmd.py
+        "objective-author",  # perk/cli/commands/objective_author_cmd.py (P3.T2)
         "objective-plan",  # perk/cli/commands/objective_plan_cmd.py (P2.T10)
     }
 )

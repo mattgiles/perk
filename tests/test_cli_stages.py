@@ -17,6 +17,8 @@ def test_all_stages_are_generated():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     for stage_id in (
+        "objective-author",
+        "objective-save",
         "objective-plan",
         "plan",
         "save",
@@ -38,6 +40,23 @@ def test_objective_plan_is_dedicated_not_generic():
     result = CliRunner().invoke(cli, ["objective-plan", "--help"])
     assert result.exit_code == 0
     assert "NUMBER" in result.output  # the dedicated command's positional arg
+
+
+def test_objective_author_is_dedicated_and_local_only(git_repo):
+    # P3.T2: objective-author is a dedicated seeded launcher (no positional number); local-only.
+    from perk.cli.stages import DEDICATED_STAGES
+
+    assert "objective-author" in DEDICATED_STAGES
+    helped = CliRunner().invoke(cli, ["objective-author", "--help"])
+    assert helped.exit_code == 0
+    # A dry-run resolves + prints the launch plan (seeded prompt), launching nothing.
+    dry = CliRunner().invoke(cli, ["objective-author", "--dry-run"], obj=_ctx(git_repo))
+    assert dry.exit_code == 0, dry.output
+    assert "would launch stage 'objective-author'" in dry.output
+    # --remote is rejected (cold_remote:false).
+    remote = CliRunner().invoke(cli, ["objective-author", "--remote"], obj=_ctx(git_repo))
+    assert remote.exit_code == 1
+    assert "local-only" in remote.output
 
 
 def test_remote_door_blocked():

@@ -137,6 +137,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `predecessor` | string \| null | the prior `run_id` this run forked from (or cold-relaunched after), §8.2; null for an original run |
 | `pi_session_id` | string | the current session handle — the basename of Pi's session file; the **fork discriminator** (§8.2) and the key to resume via `SessionManager.open`/`continueRecent` |
 | `mode` | string | the active registry stage `mode` (`read-only` / `read-write`) — **structurally gates tools** (P2.T1, see below) |
+| `stage` | string | the registry stage id this run is acting on, recorded at cold **claim** from the handoff (P3.T2); lets the interior distinguish two read-only stages (e.g. `objective-author` vs `plan`) and inject the right authoring context |
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id; **live since P2.T9** (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
@@ -214,6 +215,35 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
 
 No model-facing bounded transition tools are added here — the `objective-plan` stage, the plan
 factory, and the "fire only when…" tools are **T10**.
+
+**Objective authoring loop (P3.T2).** Objective *creation* is now a first-class read-only → save
+loop, the mirror of the `plan → save` spine. Two new registry stages precede `objective-plan` as
+the new single initial: `objective-author -> objective-save -> objective-plan -> plan -> …`.
+- **`perk objective-author`** (a dedicated seeded cold door, like `objective-plan`) opens a
+  **read-only** authoring session, seeded with the objective-authoring guidance. Its handoff records
+  `stage: objective-author`, claimed into `perk:workflow-state.stage`.
+- **Coupling break (the `stage` field).** `extension/planMode.ts` previously injected its
+  plan-authoring context on *any* read-only gate. An `objective-author` session is **also**
+  read-only, so plan mode now **defers** when `stage === "objective-author"`, and
+  `extension/objectiveAuthor.ts` injects its own `perk:objective-author-context` instead (keyed off
+  read-only gate **AND** the stage; stripped from `context` when no longer authoring — the same
+  hygiene plan mode applies). Exactly one authoring context is present.
+- **`objective_save` warm door** (`extension/objectiveSave.ts`, the mirror of `planSave.ts`). The
+  `objective_save` **tool** takes `prose` + a **structured `roadmap`** (a JSON array of nodes —
+  never hand-written YAML) and delegates the write to `perk objective create --body <file> --roadmap
+  <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
+  it links the live session: appends `active_objective` **and** seeds a fresh `perk:objective-budget`
+  activation marker (mirrors `/objective <id>`), so budget tracking starts immediately; it
+  **terminates** the turn. The `/objective-save` **command** is the fragile fallback (scrapes the
+  latest message as prose, **no** roadmap) and, like `/plan-save`, exits the read-only gate on a
+  successful save (the read-only → read-write boundary). The tool is structurally unreachable while
+  read-only, so the model exits read-only (`/plan` off) before calling it.
+- **Structured roadmap (never hand-written YAML).** `create_objective_issue` gains an optional
+  `roadmap_nodes`; `perk objective create` gains `--roadmap <json>` (parsed via
+  `objective.parse_structured_roadmap`, where per-node `status` is optional and defaults to
+  `pending`). When `--roadmap`/`roadmap_nodes` is given the body is pure prose; otherwise the legacy
+  body-embedded roadmap parse still applies (the cold-CLI path). The judgment layer lives in the
+  `perk-objective-author` skill.
 
 **Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
 of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):

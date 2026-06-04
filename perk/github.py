@@ -604,11 +604,14 @@ def create_objective_issue(
     repo_root: Path,
     run_id: str,
     status: str = "active",
+    roadmap_nodes: list[objective.ObjectiveNode] | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
     """Create the ``perk:objective`` issue (the two-step create). ``body`` is the authored
-    objective markdown; any embedded roadmap nodes are parsed from it. Idempotent on ``run_id``;
-    raises ``GitHubError`` on failure.
+    objective markdown (prose). The roadmap comes from ``roadmap_nodes`` when given (the
+    structured path — the agent never hand-writes roadmap YAML); otherwise any roadmap embedded
+    in ``body`` is parsed from it (the legacy cold-CLI path). Idempotent on ``run_id``; raises
+    ``GitHubError`` on failure.
 
     Steps: (1) idempotency check; (2) lazily create the ``perk:objective`` label; (3) compose the
     issue body = ``objective-header`` (``objective_comment_id: null``) + ``objective-roadmap``
@@ -622,9 +625,12 @@ def create_objective_issue(
     if existing is not None:
         return existing
 
-    nodes, errors = objective.parse_roadmap_nodes(body)
-    if errors:
-        raise GitHubError("invalid objective roadmap: " + "; ".join(errors))
+    if roadmap_nodes is None:
+        nodes, errors = objective.parse_roadmap_nodes(body)
+        if errors:
+            raise GitHubError("invalid objective roadmap: " + "; ".join(errors))
+    else:
+        nodes = list(roadmap_nodes)
 
     create_label(
         objective.OBJECTIVE_LABEL,

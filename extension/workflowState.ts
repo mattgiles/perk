@@ -12,6 +12,8 @@ export interface WorkflowState {
   run_id?: string;
   pi_session_id?: string;
   mode?: string;
+  /** The registry stage id this run is acting on (recorded at cold claim from the handoff). */
+  stage?: string;
   predecessor?: string;
   active_plan_ref?: PlanRef | null;
   active_objective?: string | null;

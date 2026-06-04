@@ -16,6 +16,7 @@ from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn_capture_cmd import learn_capture
 from perk.cli.commands.learn_docs_cmd import learn_docs
+from perk.cli.commands.objective_author_cmd import objective_author
 from perk.cli.commands.objective_cmd import objective_group
 from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan_save_cmd import plan_save
@@ -61,8 +62,10 @@ register_with_aliases(cli, registry)
 register_with_aliases(cli, state)
 register_with_aliases(cli, worktree)
 register_with_aliases(cli, objective_group)
+register_with_aliases(cli, objective_author)
 register_with_aliases(cli, objective_plan)
-# objective-plan is registered above; register_stage_commands skips it (DEDICATED_STAGES).
+# objective-author + objective-plan are registered above; register_stage_commands skips them
+# (DEDICATED_STAGES).
 register_with_aliases(cli, learn_docs)
 # learn-docs is a dedicated cold door but NOT a registry stage (hop-2): it borrows the `plan` stage
 # to launch, so DEDICATED_STAGES is unchanged (it only suppresses generic same-named launchers).

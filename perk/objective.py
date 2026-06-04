@@ -212,6 +212,37 @@ def parse_roadmap_nodes(issue_body: str) -> tuple[list[ObjectiveNode], list[str]
     return validate_roadmap(block)
 
 
+def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
+    """Validate a *structured* roadmap supplied out-of-band (the ``perk objective create
+    --roadmap <json>`` path / the ``objective_save`` tool) — never hand-written YAML.
+
+    Accepts either a bare list of node mappings (the common shape) or a full
+    ``{schema_version, nodes}`` mapping. A bare list is wrapped with the current schema version
+    before validation. ``None`` / ``[]`` → ``([], [])`` (a valid roadmap-free objective).
+    Delegates to :func:`validate_roadmap` so the per-node rules are identical to the YAML path.
+    """
+    if raw is None:
+        return [], []
+    if isinstance(raw, list):
+        data: dict[str, Any] = {"schema_version": OBJECTIVE_SCHEMA_VERSION, "nodes": raw}
+    elif isinstance(raw, dict):
+        data = cast(dict[str, Any], dict(raw))
+        data.setdefault("schema_version", OBJECTIVE_SCHEMA_VERSION)
+    else:
+        return [], ["roadmap must be a JSON array of nodes (or a {schema_version, nodes} mapping)"]
+    # `status` is optional on the structured path (id + description are the only required fields) —
+    # default a missing/blank status to `pending` before the shared validator runs.
+    nodes_raw = data.get("nodes")
+    if isinstance(nodes_raw, list):
+        data["nodes"] = [
+            {**item, "status": item.get("status") or NodeStatus.PENDING.value}
+            if isinstance(item, dict) and not item.get("status")
+            else item
+            for item in nodes_raw
+        ]
+    return validate_roadmap(data)
+
+
 def render_roadmap_block(nodes: list[ObjectiveNode]) -> dict[str, object]:
     """Build the data dict for ``render_metadata_block(OBJECTIVE_ROADMAP_KEY, …)``.
 
