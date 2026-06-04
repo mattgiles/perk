@@ -111,6 +111,42 @@ def test_land_io_includes_github_objective():
     assert "github.objective" in land.writes
 
 
+def test_stage_io_contract():
+    # Locks the per-stage state I/O the retired scripts/verify-*.sh gates guarded.
+    # Anchored on stage ids + field names (never line numbers) so it tracks
+    # shared/registry.yaml as the cross-plane contract.
+    registry = load_registry()
+    by_id = {s.id: s for s in registry.stages}
+
+    assert by_id["save"].writes == [
+        "github.plan",
+        "cache.plan-ref",
+        "session.workflow-state",
+    ]
+
+    implement = by_id["implement"]
+    assert implement.requires == ["cache.plan-ref"]
+    assert implement.reads == ["cache.plan-ref"]
+    assert implement.writes == ["session.workflow-state"]
+    assert implement.doors["warm"] is False
+
+    submit = by_id["submit"]
+    assert "cache.plan-ref" in submit.requires
+    assert {"github.pr", "github.plan"} <= set(submit.writes)
+
+    learn = by_id["learn"]
+    assert {"github.learn", "github.comments"} <= set(learn.writes)
+    assert "cache.plan-ref" in learn.reads
+    assert "cache.markers" in learn.requires and "cache.markers" in learn.writes
+
+    assert {"github.pr", "cache.markers"} <= set(by_id["land"].writes)
+
+    cold_remote = {sid for sid, s in by_id.items() if s.doors.get("cold_remote") is True}
+    assert cold_remote == {"implement", "address"}
+
+    assert "github.learn" in registry.state_keys
+
+
 def test_good_fixture_is_valid(tmp_path):
     assert validate(load_registry(_write(tmp_path, GOOD))) == []
 

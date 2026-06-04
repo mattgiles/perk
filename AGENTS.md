@@ -29,11 +29,13 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   (in-session stage transitions + state). Anything both planes must agree on lives in `shared/`
   (the stage registry + `contracts.md`) and is read directly by each — no codegen. Put logic in the
   plane that owns its lifecycle; reach across only through `shared/`.
-- **Verify-gate discipline.** Every turn ships a `scripts/verify-<turn>.sh` hard gate of runnable,
-  CI-robust checks (`verify-t1.sh` … `verify-t7.sh` for Phase 0; `verify-p1-tN.sh` for Phase 1
-  seamed/corrective turns, e.g. `verify-p1-t5a.sh`, `verify-p1-t4c.sh`); `just verify` runs them
-  cumulatively and `just ci` must stay green. Each phase ends on a **dogfood gate** — perk must be
-  able to drive the next phase before that phase starts (Phase 1's is `docs/planning/phase-1-gate.md`).
+- **Regression-testing discipline.** Regression coverage lives in the two framework suites —
+  **`pytest` (preferred) and `node:test`** — run by `just test` and gated by `just ci` (which must
+  stay green). Grow a Python test harness when it widens what the suite checks (e.g.
+  `tests/test_packaging.py` builds the wheel + runs `npm pack --dry-run` to guard the publish
+  surface). Each phase still ends on a **dogfood gate** — perk must be able to drive the next phase
+  before that phase starts (Phase 1's is `docs/planning/phase-1-gate.md`) — but its automatable
+  preconditions are ordinary test cases, not bespoke `scripts/verify-*.sh`.
 - **Per-turn doc + §-outcomes.** Plan a turn (decisions + prior-art pass) in
   `docs/planning/phase-N-turn-M.md` **before** implementing; after it lands, record what *actually*
   got built (deviations, refinements, deferrals) in that doc's final “outcomes” section. Plan bodies

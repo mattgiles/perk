@@ -65,6 +65,81 @@ The in-session **warm doors** (the perk extension): `/plan`, `/plan-save`, `/imp
 (+ the `plan_save`/`submit`/`land`/`learn`/`resolve_review_threads`/`objective_node`/`reconcile_objective`
 tools), and cross-stage lifecycle gates.
 
+## Objectives (multi-plan roadmaps)
+
+A plan is *one* change. An **objective** is a long-running goal that **generates** bounded plans
+rather than being implemented directly — it is the unit above the spine. An objective is a GitHub
+issue (label `perk:objective`) carrying a **roadmap** of nodes; perk's `/objective-plan` factory
+selects the next actionable node and drives a normal `plan → save` session scoped to *that one node*.
+When the node's PR lands, the node is auto-marked `done` and you reconcile the roadmap against what
+was actually built. (This is perk's take on erk's objective workflow.)
+
+A roadmap **node** has an `id` (e.g. `1.1`), a `description`, a `status`
+(`pending` · `planning` · `in_progress` · `done` · `blocked` · `skipped`), and optional `pr` /
+`depends_on`. Status is **explicit-only** — it is never inferred from a PR column. Nodes with
+unsatisfied `depends_on` are blocked; the factory picks the first unblocked `pending` node.
+
+The end-to-end loop:
+
+```bash
+# 1. Create the objective from authored markdown (it may embed a roadmap — see below).
+perk objective create --body @objective.md          # creates the perk:objective issue
+perk objective show 7                                # render the objective + roadmap table
+perk objective next 7                                # which node is actionable next?
+```
+
+```text
+# 2. In a pi session (warm), set it active and run the factory:
+/objective 7                 # set the active objective for this session (/objective clear to unset)
+/objective-plan              # select the next node (or /objective-plan --node 1.2 for a specific one)
+                             #   → marks the node `planning`, hands you the objective + node,
+                             #     optionally spawns the read-only `objective-explorer` child, then
+                             #     authors a BOUNDED plan for that one node and saves it linked
+                             #     to the objective (plan→node + node→plan backlinks).
+
+# 3. The emitted plan rides the normal spine:
+/implement                   # (or `perk implement <plan>`) materialize the worktree + build it
+/submit  →  /ready  →  /address  →  /land
+
+# 4. /land squash-merges AND mechanically marks the backlinked node `done`, then nudges:
+/objective-reconcile         # reconcile the objective's prose against the real merged diff
+                             #   (rewrites only the Reconcilable region — the roadmap table and
+                             #    any Immutable historical notes are never touched)
+/learn                       # capture what was learned
+```
+
+The cold doors mirror the warm ones for scripting/CI: `perk objective-plan 7 [--node 1.2]
+[--dry-run]` is the factory launcher (a cold session has no active objective, so the number is
+required), and `perk objective node 7 --node 1.2 [--status …] [--pr "#42"] [--description …]`
+advances a node by hand. Advancing a node to `done` via the model-facing `objective_node` tool
+forces a **completion audit** (a requirement→evidence mapping); the cold CLI and the auto-on-merge
+path set `done` without one — those are deliberate, non-audited paths.
+
+To seed the roadmap at create time, embed an `objective-roadmap` perk metadata block in the body —
+a fenced YAML payload `{ schema_version: "1", nodes: [ … ] }`:
+
+````markdown
+# Ship the widget pipeline
+
+Prose describing the goal …
+
+<!-- perk:metadata-block:objective-roadmap -->
+```yaml
+schema_version: "1"
+nodes:
+  - id: "1.1"
+    description: "Extract the widget parser into its own module"
+    status: pending
+  - id: "1.2"
+    description: "Add the streaming encoder"
+    status: pending
+    depends_on: ["1.1"]
+```
+<!-- /perk:metadata-block:objective-roadmap -->
+````
+
+A roadmap-free objective is valid too — the prose alone is a goal you grow later.
+
 ## Where this is going
 
 Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** on the
@@ -97,15 +172,20 @@ Two pinned toolchains:
 With [`just`](https://github.com/casey/just):
 
 ```bash
-just setup        # uv sync + npm install + prek install (git hooks)
+just setup        # uv sync + npm install + git hooks + install-cli (the `perk` CLI on PATH)
+just install-cli  # just the `perk` CLI on PATH (editable: tracks this clone)
 just fmt          # ruff format + biome format
 just lint         # ruff check + biome check
 just typecheck    # ty + tsc
-just test         # pytest
-just verify       # the cumulative hard gates (Phase 0 + Phase 1 + Phase 2)
+just test         # pytest + node:test (the regression gate)
 just ci           # setup + lint + typecheck + test
-just perk init    # run perk in the project env
 ```
+
+After `just setup` (or `just install-cli`), call `perk` directly — no `uv run`. The install is
+**editable**, so a `git pull` reflects Python changes live; re-run `just install-cli` after a
+dependency change. It lands in uv's tool bin (`~/.local/bin`) — if `perk` isn't found, that dir
+is not on your `PATH`; run `uv tool update-shell` (then restart your shell). Remove it with
+`uv tool uninstall perk`.
 
 `just setup` also runs `just hooks` (`prek install`), wiring a [prek](https://prek.j178.dev)
 pre-commit hook that runs `ruff check` on staged Python (config in `prek.toml`; the ruff
