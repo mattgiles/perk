@@ -42,6 +42,35 @@ def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -
     ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
+def _node_not_plannable_error(
+    graph: objective.DependencyGraph, number: int, node_id: str
+) -> UserFacingCliError:
+    """A targeted error for an explicit ``--node`` that is not plannable, derived from the node's
+    actual state (not found / in-flight / terminal / blocked)."""
+    node = next((n for n in graph.nodes if n.id == node_id), None)
+    if node is None:
+        return UserFacingCliError(
+            f"Node {node_id!r} not found on objective #{number}.",
+            error_type="no_actionable_node",
+        )
+    if node in graph.in_flight_nodes():
+        return UserFacingCliError(
+            f"Node {node_id} already has a plan in flight (pr {node.pr or 'pending'}). "
+            f"Implement it (`perk implement {node.pr}` when set), or reset it "
+            f"(`perk objective node {number} --node {node_id} --status pending`) to re-plan.",
+            error_type="objective_in_flight",
+        )
+    if node.status in objective.TERMINAL:
+        return UserFacingCliError(
+            f"Node {node_id} is already {node.status.value}.",
+            error_type="no_actionable_node",
+        )
+    return UserFacingCliError(
+        f"Node {node_id} is blocked by an unfinished dependency.",
+        error_type="no_actionable_node",
+    )
+
+
 def _seed_prompt(number: int, node: objective.ObjectiveNode, title: str) -> str:
     """The node-seeded initial prompt for the read-only plan-mode session (D5).
 
@@ -61,12 +90,10 @@ def _seed_prompt(number: int, node: objective.ObjectiveNode, title: str) -> str:
         "read-only exploration half when the node is large; review its double-delivery findings.\n"
         f"  3. Author a BOUNDED plan scoped to THIS one node, referencing `Part of Objective "
         f"#{number}, Node {node.id}`. Resolve every decision (the perk-plan contract).\n"
-        f'  4. Persist with `plan_save` (pass `objective_id: "{number}"`) — ALWAYS save, NEVER '
-        "implement directly from this session.\n"
-        "  5. After save, link the node back to the plan: call the `objective_node` tool in its "
-        f'pr-only shape `{{ objective: {number}, node: "{node.id}", '
-        'pr: "#<plan-issue-number>" }` '
-        "(no status, no audit — this is a backlink, not a status transition).\n\n"
+        f'  4. Persist with `plan_save`, passing BOTH `objective_id: "{number}"` AND '
+        f'`node_id: "{node.id}"` — ALWAYS save, NEVER implement directly from this session. '
+        "`plan_save` links the node to the plan and advances it `planning → in_progress` "
+        "automatically (no separate backlink call).\n\n"
         "Judgment, user interaction, and durable writes stay with you — never delegate them."
     )
 
@@ -133,20 +160,35 @@ def objective_plan(
             )
 
         graph = objective.build_graph(list(state.nodes))
-        actionable = {n.id: n for n in graph.pending_unblocked_nodes()}
+        plannable = {n.id: n for n in graph.plannable_nodes()}
         if node_id is not None:
-            node = actionable.get(node_id)
+            node = plannable.get(node_id)
             if node is None:
+                raise _node_not_plannable_error(graph, number, node_id)
+        else:
+            sel = graph.classify_for_planning()
+            if sel.kind == "plannable":
+                assert sel.node is not None
+                node = sel.node
+            elif sel.kind == "complete":
                 raise UserFacingCliError(
-                    f"Node {node_id!r} is not an actionable (pending + unblocked) node on "
-                    f"objective #{number}.",
+                    f"Objective #{number} is complete — every node is done or skipped. "
+                    "Nothing to plan.",
                     error_type="no_actionable_node",
                 )
-        else:
-            node = graph.next_node()
-            if node is None:
+            elif sel.kind == "in_flight":
+                assert sel.node is not None
                 raise UserFacingCliError(
-                    f"No actionable node on objective #{number} (all blocked or complete).",
+                    f"No new node to plan: node {sel.node.id} has a plan in flight "
+                    f"(pr {sel.node.pr or 'pending'}, status {sel.node.status.value}). "
+                    f"Implement it (`perk implement {sel.node.pr}` when set), or reset it to "
+                    "re-plan.",
+                    error_type="objective_in_flight",
+                )
+            else:
+                raise UserFacingCliError(
+                    f"No actionable node on objective #{number}: every remaining node is blocked "
+                    "by an unfinished dependency (or explicitly blocked).",
                     error_type="no_actionable_node",
                 )
 

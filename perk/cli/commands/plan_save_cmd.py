@@ -9,12 +9,13 @@ Exit codes: 0 saved · 1 invalid input / unauthed / op failure · 2 not-a-repo.
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from perk import cache, github, plan
+from perk import cache, github, objective, plan
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -34,6 +35,10 @@ class PlanSaveResult:
     dry_run: bool
     cached: bool  # the plan-ref was written to .pi/workflow/plan-ref.json (real save only)
     updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
+    # The objective-node commit (P2.T10): `linked` true iff the node→plan backlink + in_progress
+    # advance succeeded; `node`/`status` describe it; `error` carries a non-fatal link failure.
+    # `None` when no objective node link was requested (no --node-id).
+    objective_node: dict[str, object] | None = None
 
 
 @alias("psave")
@@ -56,6 +61,13 @@ class PlanSaveResult:
     help="Link the plan to an objective (the plan→objective direction; P2.T10).",
 )
 @click.option(
+    "--node-id",
+    "node_id",
+    default=None,
+    help="Objective node id to commit on save (with --objective-id; sets the node→plan backlink "
+    "+ advances it to in_progress).",
+)
+@click.option(
     "--consumed-learn",
     "consumed_learn",
     default=None,
@@ -73,6 +85,7 @@ def plan_save(
     run_id: str | None,
     title: str | None,
     objective_id: str | None,
+    node_id: str | None,
     consumed_learn: str | None,
     dry_run: bool,
     as_json: bool,
@@ -97,6 +110,7 @@ def plan_save(
             run_id=resolved_run_id,
             title=title,
             objective_id=objective_id,
+            node_id=node_id,
             consumed_learn=_parse_consumed_learn(consumed_learn),
             dry_run=dry_run,
         )
@@ -152,6 +166,7 @@ def _plan_save_impl(
     run_id: str | None,
     title: str | None,
     objective_id: str | None = None,
+    node_id: str | None = None,
     consumed_learn: tuple[int, ...] = (),
     dry_run: bool,
 ) -> PlanSaveResult:
@@ -222,6 +237,38 @@ def _plan_save_impl(
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.
     if not dry_run:
         cache.write_plan_ref(repo_root, plan_ref.to_data())
+
+    # Commit the objective-node claim atomically (P2.T10): set the node→plan backlink AND advance
+    # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
+    # (the plan already exists — never raise here; mirror pr_land._reconcile_objective_on_land).
+    objective_node_result: dict[str, object] | None = None
+    if not dry_run and objective_id and node_id:
+        try:
+            github.update_objective_node(
+                number=int(str(objective_id).lstrip("#")),
+                node_id=node_id,
+                status=objective.NodeStatus.IN_PROGRESS,
+                pr=f"#{issue.number}",
+                repo_root=repo_root,
+            )
+            objective_node_result = {
+                "linked": True,
+                "node": node_id,
+                "status": "in_progress",
+                "error": None,
+            }
+        except Exception as exc:  # fail-loud, non-fatal: the plan already exists.
+            print(
+                f"perk plan-save: objective node link skipped (non-fatal): {exc}",
+                file=sys.stderr,
+            )
+            objective_node_result = {
+                "linked": False,
+                "node": node_id,
+                "status": None,
+                "error": str(exc),
+            }
+
     return PlanSaveResult(
         issue=issue,
         plan_ref=plan_ref,
@@ -230,6 +277,7 @@ def _plan_save_impl(
         dry_run=dry_run,
         cached=not dry_run,
         updated=updated,
+        objective_node=objective_node_result,
     )
 
 
@@ -246,6 +294,7 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "plan_ref": result.plan_ref.to_data(),
         "cached": result.cached,
         "updated": result.updated,
+        "objective_node": result.objective_node,
         "dry_run": result.dry_run,
     }
 
@@ -265,6 +314,15 @@ def _render_human(result: PlanSaveResult) -> None:
         + click.style(f"#{result.issue.number}", fg="cyan")
         + f" → {result.issue.url}"
     )
+    node_link = result.objective_node
+    if node_link and node_link.get("linked"):
+        user_output(
+            click.style(
+                f"  ↳ linked objective #{result.plan_ref.objective_id} node "
+                f"{node_link.get('node')} (in_progress)",
+                dim=True,
+            )
+        )
 
 
 def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:

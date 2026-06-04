@@ -177,6 +177,7 @@ def objective_show(ctx: click.Context, *, number: int, as_json: bool) -> None:
     nodes = list(state.nodes)
     graph = objective.build_graph(nodes)
     next_node = graph.next_node()
+    selection = graph.classify_for_planning()
     payload = {
         "success": True,
         "error_type": None,
@@ -189,6 +190,7 @@ def objective_show(ctx: click.Context, *, number: int, as_json: bool) -> None:
         "summary": objective.summary(nodes),
         "nodes": [_node_to_dict(n) for n in nodes],
         "next_node": _node_to_dict(next_node) if next_node else None,
+        "selection_kind": selection.kind,
         "all_complete": graph.is_complete(),
     }
     if as_json:
@@ -196,7 +198,17 @@ def objective_show(ctx: click.Context, *, number: int, as_json: bool) -> None:
     else:
         user_output(f"Objective #{state.number}: {state.title}")
         user_output(f"  summary: {objective.summary(nodes)}")
-        user_output(f"  next: {next_node.id if next_node else '—'}")
+        if next_node is not None:
+            user_output(f"  next: {next_node.id}")
+        elif selection.kind == "complete":
+            user_output("  next: — (complete)")
+        elif selection.kind == "in_flight" and selection.node is not None:
+            user_output(
+                f"  next: — (in flight: node {selection.node.id} pr "
+                f"{selection.node.pr or 'pending'})"
+            )
+        else:
+            user_output("  next: — (blocked)")
 
 
 @click.command("node")
@@ -335,7 +347,7 @@ def objective_reconcile(
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def objective_next(ctx: click.Context, *, number: int, as_json: bool) -> None:
-    """Print the next actionable node (first unblocked pending, dependency-graph order)."""
+    """Print the next plannable node (pending, or a resumable ``planning`` claim)."""
     try:
         repo_root = require_repo(ctx)
         state = github.get_objective(number=number, repo_root=repo_root)

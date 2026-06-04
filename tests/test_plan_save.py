@@ -125,6 +125,94 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
     assert ref["objective_id"] == "7"
 
 
+def test_plan_save_node_id_commits_objective_node(monkeypatch):
+    # P2.T10: --objective-id + --node-id flips the node to in_progress with the pr backlink.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _update_node(**k):
+        captured.update(k)
+        return github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    result = _run(
+        monkeypatch,
+        [
+            "plan-save",
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.1",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    from perk import objective
+
+    assert captured["number"] == 7
+    assert captured["node_id"] == "1.1"
+    assert captured["status"] is objective.NodeStatus.IN_PROGRESS
+    assert captured["pr"] == "#123"
+    payload = json.loads(result.stdout)
+    assert payload["objective_node"] == {
+        "linked": True,
+        "node": "1.1",
+        "status": "in_progress",
+        "error": None,
+    }
+
+
+def test_plan_save_node_link_failure_is_non_fatal(monkeypatch):
+    # A failing update_objective_node leaves the save successful (the plan already exists).
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise github.GitHubError("node 1.1 not found on #7")
+
+    monkeypatch.setattr(github, "update_objective_node", _boom)
+    result = _run(
+        monkeypatch,
+        [
+            "plan-save",
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.1",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["objective_node"]["linked"] is False
+    assert payload["objective_node"]["error"]
+    assert "objective node link skipped" in result.stderr
+
+
+def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
+    # Omitting --node-id (even with --objective-id) makes no update_objective_node call.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise AssertionError("must not link a node without --node-id")
+
+    monkeypatch.setattr(github, "update_objective_node", _boom)
+    result = _run(
+        monkeypatch, ["plan-save", "--plan-file", "plan.md", "--objective-id", "7", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["objective_node"] is None
+
+
 def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

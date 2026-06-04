@@ -26,8 +26,17 @@ export interface PlanSaveDetails {
   cached?: boolean;
   existed?: boolean | null;
   updated?: boolean;
+  objective_node?: ObjectiveNodeLink | null;
   error?: string;
   error_type?: string;
+}
+
+/** The atomic objective node→plan commit surfaced by `perk plan-save` (P2.T10). */
+export interface ObjectiveNodeLink {
+  linked: boolean;
+  node: string | null;
+  status: string | null;
+  error: string | null;
 }
 
 /** A tool result patch (AgentToolResult has no `isError`; failure is signaled via details.ok). */
@@ -46,6 +55,7 @@ interface PlanSaveJson {
   plan_ref?: PlanRef;
   cached?: boolean;
   updated?: boolean;
+  objective_node?: ObjectiveNodeLink | null;
 }
 
 /**
@@ -96,7 +106,13 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
 export async function savePlan(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: { plan: string; title?: string; objectiveId?: string; consumedLearn?: number[] },
+  opts: {
+    plan: string;
+    title?: string;
+    objectiveId?: string;
+    nodeId?: string;
+    consumedLearn?: number[];
+  },
 ): Promise<SaveResult> {
   const reportError = (message: string): void => {
     const full = `perk: plan-save — ${message}`;
@@ -132,6 +148,10 @@ export async function savePlan(
     // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
     // number; non-objective plans omit it (unchanged behavior).
     if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
+    // P2.T10: the objective plan factory passes the node id alongside the objective id; the cold
+    // door commits the node→plan backlink + `in_progress` advance atomically. Non-factory plans
+    // omit it (unchanged behavior).
+    if (opts.nodeId) args.push("--node-id", opts.nodeId);
     // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
     // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
     if (opts.consumedLearn && opts.consumedLearn.length > 0) {
@@ -176,8 +196,12 @@ export async function savePlan(
   }
 
   const verb = parsed.issue.existed ? "Updated" : "Saved";
+  const nodeLink = parsed.objective_node ?? null;
+  const linkSuffix = nodeLink?.linked
+    ? ` · linked objective node ${nodeLink.node} → in_progress`
+    : "";
   return {
-    content: [{ type: "text", text: `${verb} plan #${ref.pr_id} → ${ref.url}` }],
+    content: [{ type: "text", text: `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}` }],
     details: {
       ok: true,
       issue: { number: parsed.issue.number, url: parsed.issue.url },
@@ -185,6 +209,7 @@ export async function savePlan(
       cached: parsed.cached ?? false,
       existed: parsed.issue.existed ?? null,
       updated: parsed.updated ?? false,
+      objective_node: nodeLink,
     },
     terminate: true,
   };
@@ -194,6 +219,7 @@ const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
   "Pass the full plan markdown to plan_save in the `plan` parameter; never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
   "Pass consumed_learn (the gathered perk:learn issue numbers) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
+  "When saving an objective-factory plan, pass BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
 ];
 
 /** Register the warm door: the `plan_save` tool (canonical) + the `/plan-save` command twin. */
@@ -226,6 +252,13 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
             "Optional objective issue number to link this plan to (the objective plan factory " +
             "passes the active objective; omit for a standalone plan).",
         },
+        node_id: {
+          type: "string",
+          description:
+            "Objective node id to commit on save — the objective plan factory passes it with " +
+            "`objective_id` (links the node and advances it to `in_progress`); omit for a " +
+            "standalone plan.",
+        },
         consumed_learn: {
           type: "array",
           items: { type: "number" },
@@ -236,16 +269,18 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { plan, title, objective_id, consumed_learn } = params as {
+      const { plan, title, objective_id, node_id, consumed_learn } = params as {
         plan: string;
         title?: string;
         objective_id?: string;
+        node_id?: string;
         consumed_learn?: number[];
       };
       return savePlan(pi, ctx, {
         plan,
         title,
         objectiveId: objective_id,
+        nodeId: node_id,
         consumedLearn: consumed_learn,
       });
     },
