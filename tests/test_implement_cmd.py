@@ -20,6 +20,7 @@ _PLAN_REF = {
     "url": "https://gh/o/r/issues/7",
     "labels": ["perk:plan"],
     "objective_id": None,
+    "consumed_learn": [],
 }
 
 

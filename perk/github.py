@@ -269,6 +269,110 @@ def find_plan_issue(
     return None
 
 
+@dataclass(frozen=True)
+class LearnIssueSummary:
+    """An open ``perk:learn`` issue, materialized for the learn-docs factory inbox (hop-2)."""
+
+    number: int
+    title: str
+    url: str
+    body: str
+
+
+def list_learn_issues(*, repo_root: Path) -> tuple[LearnIssueSummary, ...]:
+    """List every open ``perk:learn`` issue (number/title/url/body) for the learn-docs factory.
+
+    Reuses the ``find_plan_issue`` list call (the LIST endpoint, not the eventually-consistent
+    search index), scoped to ``perk:learn``. Raises ``GitHubError`` on an infra/query failure
+    (never masks it as an empty list); skips non-dict entries.
+    """
+    proc = _run(
+        [
+            "api",
+            "repos/{owner}/{repo}/issues",
+            "-X",
+            "GET",
+            "-f",
+            f"labels={plan.LEARN_LABEL}",
+            "-f",
+            "state=open",
+        ],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, "failed to list learn issues")
+    try:
+        issues = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api issues` output: {exc}") from exc
+    if not isinstance(issues, list):
+        return ()
+    summaries: list[LearnIssueSummary] = []
+    for issue in issues:
+        if not isinstance(issue, dict) or "number" not in issue:
+            continue
+        # `gh api .../issues` returns PRs too; the perk:learn label filter excludes them, but guard
+        # defensively against any pull_request entry leaking through.
+        if "pull_request" in issue:
+            continue
+        summaries.append(
+            LearnIssueSummary(
+                number=int(issue["number"]),
+                title=str(issue.get("title", "")),
+                url=str(issue.get("html_url", "")),
+                body=str(issue.get("body", "")),
+            )
+        )
+    return tuple(summaries)
+
+
+def close_and_label_consolidated(*, issue: int, repo_root: Path, dry_run: bool = False) -> bool:
+    """Close a consumed ``perk:learn`` issue + add the ``perk:consolidated`` label (hop-2, on land).
+
+    Lazily creates the ``perk:consolidated`` label, ADDS it (POST ``.../labels`` — does not replace
+    the issue's existing labels), then PATCHes the issue ``state=closed``. Idempotent: re-closing /
+    re-labelling an already-consolidated issue is success. Returns ``True`` on success; raises
+    ``GitHubError`` on an infra failure.
+    """
+    if dry_run:
+        return True
+    create_label(
+        plan.CONSOLIDATED_LABEL,
+        color=plan.CONSOLIDATED_LABEL_COLOR,
+        description=plan.CONSOLIDATED_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    label_proc = _run(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{issue}/labels",
+            "-X",
+            "POST",
+            "-f",
+            f"labels[]={plan.CONSOLIDATED_LABEL}",
+        ],
+        cwd=repo_root,
+        timeout=_WRITE_TIMEOUT,
+    )
+    if label_proc.returncode != 0:
+        raise _failed(label_proc, f"failed to label issue #{issue} consolidated")
+    state_proc = _run(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{issue}",
+            "-X",
+            "PATCH",
+            "-f",
+            "state=closed",
+        ],
+        cwd=repo_root,
+        timeout=_WRITE_TIMEOUT,
+    )
+    if state_proc.returncode != 0:
+        raise _failed(state_proc, f"failed to close issue #{issue}")
+    return True
+
+
 def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
     """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches (P2.T8b).
 

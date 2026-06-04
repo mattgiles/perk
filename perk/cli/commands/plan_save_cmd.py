@@ -56,6 +56,12 @@ class PlanSaveResult:
     help="Link the plan to an objective (the plan→objective direction; P2.T10).",
 )
 @click.option(
+    "--consumed-learn",
+    "consumed_learn",
+    default=None,
+    help="Comma-separated perk:learn issue numbers this docs plan consumes (hop-2; e.g. '45,50').",
+)
+@click.option(
     "--dry-run", "dry_run", is_flag=True, help="Compose and print without touching GitHub."
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -67,6 +73,7 @@ def plan_save(
     run_id: str | None,
     title: str | None,
     objective_id: str | None,
+    consumed_learn: str | None,
     dry_run: bool,
     as_json: bool,
 ) -> None:
@@ -90,6 +97,7 @@ def plan_save(
             run_id=resolved_run_id,
             title=title,
             objective_id=objective_id,
+            consumed_learn=_parse_consumed_learn(consumed_learn),
             dry_run=dry_run,
         )
     except GitHubError as exc:
@@ -115,6 +123,28 @@ def plan_save(
         _render_human(result)
 
 
+def _parse_consumed_learn(raw: str | None) -> tuple[int, ...]:
+    """Parse a comma-separated issue-number list into a sorted unique tuple (hop-2).
+
+    ``None``/empty → ``()``. A non-integer token raises ``UserFacingCliError`` (``invalid_input``).
+    """
+    if not raw or not raw.strip():
+        return ()
+    numbers: set[int] = set()
+    for token in raw.split(","):
+        token = token.strip().lstrip("#")
+        if not token:
+            continue
+        try:
+            numbers.add(int(token))
+        except ValueError as exc:
+            raise UserFacingCliError(
+                f"Invalid --consumed-learn value {token!r} (expected issue numbers).",
+                error_type="invalid_input",
+            ) from exc
+    return tuple(sorted(numbers))
+
+
 def _plan_save_impl(
     *,
     repo_root: Path,
@@ -122,6 +152,7 @@ def _plan_save_impl(
     run_id: str | None,
     title: str | None,
     objective_id: str | None = None,
+    consumed_learn: tuple[int, ...] = (),
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
@@ -137,7 +168,12 @@ def _plan_save_impl(
         raise UserFacingCliError(f"Plan file is empty: {plan_file}", error_type="invalid_input")
 
     resolved_title = title or plan.derive_title(plan_markdown)
-    header = plan.PlanHeader(run_id=run_id or "", created=plan.now_iso(), objective_id=objective_id)
+    header = plan.PlanHeader(
+        run_id=run_id or "",
+        created=plan.now_iso(),
+        objective_id=objective_id,
+        consumed_learn=consumed_learn,
+    )
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
 
@@ -180,6 +216,7 @@ def _plan_save_impl(
         url=issue.url,
         labels=(plan.PLAN_LABEL,),
         objective_id=objective_id,
+        consumed_learn=consumed_learn,
     )
     # Persist the ref as the cache.plan-ref pointer (turn-2b §7): the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.

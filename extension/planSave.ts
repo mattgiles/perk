@@ -96,7 +96,7 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
 export async function savePlan(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: { plan: string; title?: string; objectiveId?: string },
+  opts: { plan: string; title?: string; objectiveId?: string; consumedLearn?: number[] },
 ): Promise<SaveResult> {
   const reportError = (message: string): void => {
     const full = `perk: plan-save — ${message}`;
@@ -132,6 +132,11 @@ export async function savePlan(
     // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
     // number; non-objective plans omit it (unchanged behavior).
     if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
+    // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
+    // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
+    if (opts.consumedLearn && opts.consumedLearn.length > 0) {
+      args.push("--consumed-learn", opts.consumedLearn.join(","));
+    }
     // pi.exec returns (does not throw) on spawn/non-zero exit — see turn-3 §3.5 S2.
     res = await pi.exec(perkBin, args, { cwd: ctx.cwd, signal: ctx.signal });
   } finally {
@@ -188,6 +193,7 @@ export async function savePlan(
 const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
   "Pass the full plan markdown to plan_save in the `plan` parameter; never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
+  "Pass consumed_learn (the gathered perk:learn issue numbers) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
 ];
 
 /** Register the warm door: the `plan_save` tool (canonical) + the `/plan-save` command twin. */
@@ -220,15 +226,28 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
             "Optional objective issue number to link this plan to (the objective plan factory " +
             "passes the active objective; omit for a standalone plan).",
         },
+        consumed_learn: {
+          type: "array",
+          items: { type: "number" },
+          description:
+            "Optional perk:learn issue numbers this docs plan consumes (the learned-docs factory " +
+            "passes the gathered numbers; omit for a standalone plan). /land closes + labels them.",
+        },
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { plan, title, objective_id } = params as {
+      const { plan, title, objective_id, consumed_learn } = params as {
         plan: string;
         title?: string;
         objective_id?: string;
+        consumed_learn?: number[];
       };
-      return savePlan(pi, ctx, { plan, title, objectiveId: objective_id });
+      return savePlan(pi, ctx, {
+        plan,
+        title,
+        objectiveId: objective_id,
+        consumedLearn: consumed_learn,
+      });
     },
   });
 

@@ -44,6 +44,7 @@ def test_reconstruct_plan_ref():
         "url": "https://gh/o/r/issues/7",
         "labels": ["perk:plan"],
         "objective_id": "O1",
+        "consumed_learn": [],
     }
 
 
