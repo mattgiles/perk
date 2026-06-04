@@ -45,6 +45,12 @@ CAPABILITIES: tuple[Capability, ...] = (
         required=True,
         scope="both",
     ),
+    Capability(
+        "skills-manifest",
+        "perk skills declared in .agents/manifest.d/perk.yaml for the skills CLI",
+        required=True,
+        scope="both",
+    ),
 )
 
 

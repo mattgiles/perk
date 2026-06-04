@@ -95,3 +95,41 @@ def test_init_self_mode_uses_local_path(tmp_path):
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert ".." in packages
     assert not any(p.startswith("git:github.com/mattgiles/perk") for p in packages)
+
+
+def test_init_writes_skills_manifest_fragment(tmp_path):
+    # Consumer mode: the fragment declares the perk source pinned to the release tag and lists
+    # every perk skill. The fragment is a committed declaration, never gitignored.
+    run_init(tmp_path, verify=False)
+    fragment = tmp_path / ".agents" / "manifest.d" / "perk.yaml"
+    assert fragment.is_file()
+    text = fragment.read_text(encoding="utf-8")
+    assert "url: https://github.com/mattgiles/perk" in text
+    assert f"ref: v{__version__}" in text
+    from perk.init import PERK_SKILLS
+
+    for name in PERK_SKILLS:
+        assert f"name: {name}" in text
+
+
+def test_init_self_mode_skills_manifest_tracks_main(tmp_path):
+    (tmp_path / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    text = (tmp_path / ".agents" / "manifest.d" / "perk.yaml").read_text(encoding="utf-8")
+    assert "ref: main" in text
+    assert f"ref: v{__version__}" not in text
+
+
+def test_init_preserves_user_skills_manifest(tmp_path):
+    # The user's own `.agents/manifest.yaml` is never touched by perk init.
+    agents = tmp_path / ".agents"
+    agents.mkdir()
+    user_manifest = agents / "manifest.yaml"
+    original = (
+        "sources:\n  me:\n    url: https://example.com/x\n    ref: main\n"
+        "skills:\n  - source: me\n    name: mine\n"
+    )
+    user_manifest.write_text(original, encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    assert user_manifest.read_text(encoding="utf-8") == original  # untouched
+    assert (agents / "manifest.d" / "perk.yaml").is_file()  # fragment still written alongside

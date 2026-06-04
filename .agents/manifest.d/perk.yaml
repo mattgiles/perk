@@ -1,0 +1,20 @@
+# Managed by perk init — do not edit by hand.
+sources:
+  perk:
+    url: https://github.com/mattgiles/perk
+    ref: main
+skills:
+  - source: perk
+    name: perk-address
+  - source: perk
+    name: perk-implement
+  - source: perk
+    name: perk-learn
+  - source: perk
+    name: perk-learn-docs
+  - source: perk
+    name: perk-objective-plan
+  - source: perk
+    name: perk-objective-reconcile
+  - source: perk
+    name: perk-plan
