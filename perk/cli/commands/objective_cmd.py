@@ -17,6 +17,7 @@ from pathlib import Path
 import click
 
 from perk import github, objective, plan, run_id
+from perk.cli.alias import AliasGroup, alias, register_with_aliases
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -25,7 +26,8 @@ from perk.output import machine_output, user_output
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
-@click.group("objective")
+@alias("obj")
+@click.group("objective", cls=AliasGroup)
 def objective_group() -> None:
     """Deterministic objective storage + mechanics (dev/CI/T10 surface, not an agent affordance)."""
 
@@ -48,7 +50,8 @@ def _node_to_dict(node: objective.ObjectiveNode) -> dict[str, object]:
     }
 
 
-@objective_group.command("create")
+@alias("new")
+@click.command("create")
 @click.option(
     "--body",
     "body_path",
@@ -115,7 +118,8 @@ def objective_create(
         user_output(click.style("✓ ", fg="green") + f"{verb} objective #{issue.number} {issue.url}")
 
 
-@objective_group.command("show")
+@alias("s")
+@click.command("show")
 @click.argument("number", type=int)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -165,7 +169,7 @@ def objective_show(ctx: click.Context, *, number: int, as_json: bool) -> None:
         user_output(f"  next: {next_node.id if next_node else '—'}")
 
 
-@objective_group.command("node")
+@click.command("node")
 @click.argument("number", type=int)
 @click.option("--node", "node_id", required=True, help="The roadmap node id (e.g. 1.2).")
 @click.option(
@@ -233,7 +237,8 @@ def objective_node(
         user_output(click.style("✓ ", fg="green") + f"Updated node {result.node_id} on #{number}")
 
 
-@objective_group.command("reconcile")
+@alias("rec")
+@click.command("reconcile")
 @click.argument("number", type=int)
 @click.option(
     "--body",
@@ -294,7 +299,8 @@ def objective_reconcile(
         user_output(click.style("✓ ", fg="green") + f"Reconciled objective #{number} prose region")
 
 
-@objective_group.command("next")
+@alias("n")
+@click.command("next")
 @click.argument("number", type=int)
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -329,3 +335,10 @@ def objective_next(ctx: click.Context, *, number: int, as_json: bool) -> None:
         machine_output(json.dumps(payload))
     else:
         user_output(f"next: {next_node.id if next_node else '—'}")
+
+
+register_with_aliases(objective_group, objective_create)
+register_with_aliases(objective_group, objective_show)
+register_with_aliases(objective_group, objective_node)
+register_with_aliases(objective_group, objective_reconcile)
+register_with_aliases(objective_group, objective_next)

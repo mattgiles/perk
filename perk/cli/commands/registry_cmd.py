@@ -9,6 +9,7 @@ import json
 
 import click
 
+from perk.cli.alias import AliasGroup, alias, register_with_aliases
 from perk.cli.ensure import UserFacingCliError
 from perk.output import machine_output, user_output
 from perk.registry import Registry, RegistryError, Severity, load_registry, validate
@@ -21,12 +22,14 @@ def _load_or_die() -> Registry:
         raise UserFacingCliError(str(exc)) from exc
 
 
-@click.group("registry")
+@alias("reg")
+@click.group("registry", cls=AliasGroup)
 def registry() -> None:
     """Inspect and validate the shared stage registry (`shared/registry.yaml`)."""
 
 
-@registry.command("check")
+@alias("ch")
+@click.command("check")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable result on stdout.")
 def check(as_json: bool) -> None:
     """Validate the bundled registry (shape, graph, state-key vocabulary).
@@ -72,7 +75,8 @@ def check(as_json: bool) -> None:
         )
 
 
-@registry.command("show")
+@alias("s")
+@click.command("show")
 def show() -> None:
     """Print the stages and their transitions (a dev/doctor convenience)."""
     reg = _load_or_die()
@@ -85,3 +89,7 @@ def show() -> None:
             f"  {stage.id:<10} mode={stage.mode:<10} worktree={stage.worktree:<7} "
             f"doors=[{doors}]  -> {succ}"
         )
+
+
+register_with_aliases(registry, check)
+register_with_aliases(registry, show)

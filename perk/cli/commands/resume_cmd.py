@@ -14,6 +14,7 @@ import json
 import click
 
 from perk import cache, github, launch, resume
+from perk.cli.alias import alias
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -23,6 +24,7 @@ from perk.registry import load_registry
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
+@alias("res")
 @click.command("resume", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
 @click.option(

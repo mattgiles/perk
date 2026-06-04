@@ -15,6 +15,7 @@ from pathlib import Path
 import click
 
 from perk import cache, github, plan
+from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -35,6 +36,7 @@ class PlanSaveResult:
     updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
 
 
+@alias("psave")
 @click.command("plan-save")
 @click.option(
     "--plan-file",

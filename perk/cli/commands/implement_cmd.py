@@ -19,6 +19,7 @@ import json
 import click
 
 from perk import cache, github, launch, resume
+from perk.cli.alias import alias
 from perk.cli.commands.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -31,6 +32,7 @@ def _implement_stage() -> Stage:
     return next(s for s in load_registry().stages if s.id == "implement")
 
 
+@alias("impl")
 @click.command("implement", context_settings={"ignore_unknown_options": True})
 @click.argument("plan", required=False, default=None)
 @click.option("--worktree", default=None, help="Worktree to position (overrides the plan name).")

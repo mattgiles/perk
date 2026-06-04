@@ -14,11 +14,13 @@ from typing import Any
 import click
 
 from perk import cache, run_id
+from perk.cli.alias import AliasGroup, alias, register_with_aliases
 from perk.cli.ensure import UserFacingCliError
 from perk.output import machine_output, user_output
 
 
-@click.group("state")
+@alias("st")
+@click.group("state", cls=AliasGroup)
 def state() -> None:
     """Inspect the local workflow cache and mint run ids (dev/CI/doctor surface)."""
 
@@ -41,7 +43,8 @@ def _read_handoff_arg(value: str) -> dict[str, Any]:
     return parsed
 
 
-@state.command("new-run")
+@alias("nr")
+@click.command("new-run")
 @click.option(
     "--handoff",
     "handoff_arg",
@@ -65,7 +68,8 @@ def new_run(handoff_arg: str | None) -> None:
     machine_output(rid)
 
 
-@state.command("show")
+@alias("s")
+@click.command("show")
 @click.option("--run-id", "rid", default=None, help="Show one run; omit to list all runs.")
 def show(rid: str | None) -> None:
     """Show a run's handoff + scratch, or list known runs and markers."""
@@ -91,3 +95,7 @@ def show(rid: str | None) -> None:
     scratch = cache.run_scratch_dir(root, rid)
     files = sorted(p.name for p in scratch.glob("*")) if scratch.is_dir() else []
     user_output(f"  scratch: {', '.join(files) or '—'}")
+
+
+register_with_aliases(state, new_run)
+register_with_aliases(state, show)
