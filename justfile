@@ -5,8 +5,8 @@ set shell := ["bash", "-uc"]
 default:
     @just --list
 
-# install both toolchains: python env (uv) + node dev deps (npm) + git hooks (prek)
-setup: sync install hooks
+# install both toolchains (python env + node dev deps), git hooks, and the `perk` CLI on PATH
+setup: sync install hooks install-cli
 
 # install the prek git pre-commit shim (ruff lint + format hooks; see prek.toml)
 hooks:
@@ -19,6 +19,10 @@ sync:
 # install node dev dependencies (biome, tsc, types)
 install:
     npm install
+
+# install the `perk` CLI on PATH (editable: tracks this clone; re-run after dep changes)
+install-cli:
+    uv tool install --editable . --force
 
 # refresh both lockfiles
 lock:
