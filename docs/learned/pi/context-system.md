@@ -36,12 +36,32 @@ jq
 curl
 ```
 
-Excluded: `gh`, `perk`, `npm`, `uv`, any write command. This is **intentional** — plan sessions
-must not mutate state or make network calls that require auth (beyond public curl).
+Excluded: `gh`, `perk` (mutating subcommands), `npm`, `uv`, any write command. This is
+**intentional** — plan sessions must not mutate state or make network calls that require auth
+(beyond public curl).
 
 Consequence for plan factories: any data that requires `gh` (issue bodies, PR metadata) must be
 fetched by the **cold door** and materialized into a file before the session launches. See
 `docs/learned/workflow/plan-factories.md` for the inbox-over-gh pattern.
+
+### Allowlist policy when adding an entry
+
+The gate is **allowlist-AND-not-destructive**: a command passes only if it matches a `SAFE_PATTERNS`
+regex *and* is not destructive. **Destructive patterns always win** — a safe prefix on a compound
+command (`git status && rm file`) is still blocked. To let a *new* command through you add a
+`SAFE_PATTERNS` regex, observing two rules:
+
+- **Scope to the genuinely non-mutating subcommands only.** When read-only `perk objective` queries
+  were allowed (#67), the regex enumerated `show`/`next` (+ aliases `s`/`n`) explicitly rather than
+  matching `perk objective .*`, leaving mutating `create`/`node`/`reconcile` and `perk init`
+  blocked. Prefer enumerating allowed verbs over a broad wildcard.
+- **Anchor short aliases with `\b`.** The trailing word boundary is load-bearing: without it the `n`
+  alias (for `next`) would also match the mutating `node` subcommand. Add an explicit block-side test
+  (e.g. `perk obj node 2.3` must be blocked) to prove an alias doesn't bleed into a sibling verb.
+
+Fix the **allowlist**, not cold-door seed-injection: the cold door injects only minimal context
+(e.g. an objective's title + one node description), so an agent legitimately needs the read-only
+query to read the rest.
 
 ## Cross-references
 
