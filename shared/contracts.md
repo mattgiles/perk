@@ -102,6 +102,15 @@ environment before `exec pi`; an initial message or `@file` would pollute LLM co
 3. record `run_id` in `perk:workflow-state` (§8.3);
 4. mark the handoff **consumed**.
 
+**Optional handoff link context (`objective_id`/`node_id`, #78).** Beyond the claim fields, a
+stage may stash extra keys in its handoff blob (the TS `Handoff` interface already carries
+`[key: string]: unknown`). `objective-plan` writes the `objective_id`/`node_id` it just marked
+`planning` so a later `perk plan-save` recovers the objective→node link **regardless of which save
+surface the model used** — the `/plan-save` *command* forwards only `{plan, title}` (it cannot
+carry the link), whereas the `plan_save` *tool* passes it explicitly. `plan-save` reads the
+handoff and defaults `objective_id`/`node_id` from it only when neither flag was passed (explicit
+flags always win; a non-objective handoff has no `objective_id`, so plain planning is unaffected).
+
 **Fork ≠ branch (easy to get wrong).**
 - A **fork** (`/fork`, `/clone`, `ctx.newSession({ parentSession })`, or a headless
   `pi --fork`) creates a **new session file** that inherits the parent's entries — so the

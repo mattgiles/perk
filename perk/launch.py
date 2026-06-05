@@ -316,6 +316,7 @@ def launch_stage(
     pi_args: list[str],
     prompt_override: str | None = None,
     base: str | None = None,
+    handoff_extra: dict[str, object] | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -323,6 +324,14 @@ def launch_stage(
     stage-derived ``_initial_prompt`` — the dedicated ``perk objective-plan`` command supplies a
     node-seeded prompt (objective-plan has no plan-ref, so ``_initial_prompt`` returns ``None``).
     All existing callers pass ``None`` and are unaffected.
+
+    ``handoff_extra`` (#78): extra keys merged into the handoff blob so a stage can carry context
+    that must survive *which save surface the model uses*. ``objective-plan`` passes the
+    ``objective_id``/``node_id`` it just marked ``planning`` so a later ``perk plan-save`` recovers
+    the link from the handoff even when the model saved via the ``/plan-save`` *command* (which
+    forwards only ``{plan, title}``) rather than the ``plan_save`` *tool*. The ``Handoff`` TS
+    interface already carries arbitrary keys (``[key: string]: unknown``), so no TS change is
+    needed to ferry it.
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
@@ -366,7 +375,7 @@ def launch_stage(
         return
 
     cache.ensure_layout(wt)
-    cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode})
+    cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
     if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
         cache.write_plan_ref(wt, resolved.plan_ref)
     # P2.T2c: materialize the plan body into the worktree so in-session checkpoints can seed from

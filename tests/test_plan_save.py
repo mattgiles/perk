@@ -213,6 +213,105 @@ def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
     assert json.loads(result.stdout)["objective_node"] is None
 
 
+def _run_with_handoff(monkeypatch, args, handoff, run_id="run-abc"):
+    """Run plan-save in an isolated repo seeded with a handoff for ``run_id`` (#78)."""
+    from perk import cache
+
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        if handoff is not None:
+            cache.write_handoff(Path(d), run_id, handoff)
+        monkeypatch.setenv("PERK_RUN_ID", run_id)
+        return runner.invoke(cli, args)
+
+
+def test_plan_save_recovers_objective_link_from_handoff(monkeypatch):
+    # #78: a /plan-save command path (no --objective-id/--node-id) recovers the link from the
+    # handoff the objective-plan factory stashed, links the node, and writes objective_id to the
+    # plan-ref.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _update_node(**k):
+        captured.update(k)
+        return github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    result = _run_with_handoff(
+        monkeypatch,
+        ["plan-save", "--plan-file", "plan.md", "--json"],
+        {"stage": "objective-plan", "mode": "read-only", "objective_id": "63", "node_id": "1.1"},
+    )
+    assert result.exit_code == 0, result.output
+    from perk import objective
+
+    assert captured["number"] == 63
+    assert captured["node_id"] == "1.1"
+    assert captured["status"] is objective.NodeStatus.IN_PROGRESS
+    assert captured["pr"] == "#123"
+    payload = json.loads(result.stdout)
+    assert payload["plan_ref"]["objective_id"] == "63"
+    assert payload["objective_node"]["linked"] is True
+
+
+def test_plan_save_explicit_flags_override_handoff(monkeypatch):
+    # #78: explicit --objective-id/--node-id always win over the handoff's values.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    captured: dict[str, object] = {}
+
+    def _update_node(**k):
+        captured.update(k)
+        return github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    result = _run_with_handoff(
+        monkeypatch,
+        [
+            "plan-save",
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "2.3",
+            "--json",
+        ],
+        {"stage": "objective-plan", "mode": "read-only", "objective_id": "63", "node_id": "1.1"},
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["number"] == 7
+    assert captured["node_id"] == "2.3"
+    assert json.loads(result.stdout)["plan_ref"]["objective_id"] == "7"
+
+
+def test_plan_save_handoff_without_objective_is_unlinked(monkeypatch):
+    # #78: a plain (non-objective) handoff carries no objective_id, so the save stays unlinked.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise AssertionError("must not link a node from a non-objective handoff")
+
+    monkeypatch.setattr(github, "update_objective_node", _boom)
+    result = _run_with_handoff(
+        monkeypatch,
+        ["plan-save", "--plan-file", "plan.md", "--json"],
+        {"stage": "plan", "mode": "read-only"},
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["plan_ref"]["objective_id"] is None
+    assert payload["objective_node"] is None
+
+
 def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
