@@ -18,7 +18,7 @@ _DEFAULTS = [
 def test_binding_header_is_the_cross_plane_dedup_marker():
     # Pinned byte-for-byte alongside the TS sibling (extension/bindingDelivery.test.ts): both planes
     # render under this exact literal so a cold launch + a warm injection never double-deliver.
-    assert _HEADER == "The following skill binding(s) apply here (configured via .pi/perk.toml):"
+    assert _HEADER == "The following skill binding(s) apply here:"
 
 
 def _user(trigger: str, skill: str, mode: str) -> Binding:
@@ -37,7 +37,7 @@ def test_nudge_at_new_trigger_renders_pointer(tmp_path):
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
     assert delivery.text is not None
     assert "Follow the `my-skill` skill." in delivery.text
-    assert ".pi/perk.toml" in delivery.text  # the header
+    assert _HEADER in delivery.text  # the header
     assert delivery.warnings == [] and delivery.issues == []
 
 
@@ -66,11 +66,12 @@ def test_missing_transclude_target_warns_and_falls_back_to_nudge(tmp_path):
     assert "ghost-skill" in delivery.warnings[0]
 
 
-def test_shipped_default_is_not_redelivered(tmp_path):
-    # No user override of stage:implement -> the resolved binding equals the shipped default,
-    # so it is filtered out (perk still hardcodes that nudge). No double-delivery.
+def test_shipped_default_is_delivered(tmp_path):
+    # Node 2.3: the shipped default IS now delivered (perk no longer hardcodes the nudge), so an
+    # unbound launch at stage:implement renders the default pointer — the single delivery path.
     delivery = render_cold_bindings([], tmp_path, "stage:implement", defaults=_DEFAULTS)
-    assert delivery.text is None
+    assert delivery.text is not None
+    assert "Follow the `perk-implement` skill." in delivery.text
 
 
 def test_user_override_of_perk_owned_trigger_is_delivered(tmp_path):
@@ -100,7 +101,8 @@ def test_only_matching_trigger_is_rendered(tmp_path):
 
 def test_default_resolution_uses_bundled_bindings(tmp_path):
     # When defaults is omitted, the bundled shipped set is used: stage:implement is a default,
-    # so an unbound launch delivers nothing.
+    # so an unbound launch delivers that default's pointer (Node 2.3 — defaults are delivered).
     assert load_bindings().bindings  # sanity: the bundled set loads
     delivery = render_cold_bindings([], tmp_path, "stage:implement")
-    assert delivery.text is None
+    assert delivery.text is not None
+    assert "Follow the `perk-implement` skill." in delivery.text

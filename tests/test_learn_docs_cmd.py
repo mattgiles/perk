@@ -110,7 +110,9 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt
-    assert "perk-learn-docs" in prompt
+    # Node 2.3: the perk-learn-docs skill pointer is no longer hardcoded in the seed — it rides the
+    # skill-binding mechanism (command:learn-docs).
+    assert "perk-learn-docs" not in prompt
 
 
 def test_no_learn_issues_exits_1(monkeypatch):

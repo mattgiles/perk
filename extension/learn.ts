@@ -8,6 +8,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "./bindingDelivery.ts";
 import {
   clearMarker,
   ensureRunScratch,
@@ -190,11 +191,12 @@ function activePlanRef(ctx: ExtensionContext): PlanRef | null {
 }
 
 /**
- * Inject the learn-workflow guidance the model follows (points at the perk-learn skill). When a
- * plan-ref is known, derive the merged PR from its `plan-<pr_id>` head branch.
+ * Inject the learn-workflow guidance the model follows (the perk-learn skill pointer rides the
+ * skill-binding suffix — Node 2.3 — not hardcoded here). When a plan-ref is known, derive the
+ * merged PR from its `plan-<pr_id>` head branch.
  */
 export function learnGuidance(planRef: PlanRef | null): string {
-  const lines = ["perk /learn — the knowledge-capture pass. Follow the perk-learn skill."];
+  const lines = ["perk /learn — the knowledge-capture pass."];
   if (planRef) {
     const branch = `plan-${planRef.pr_id}`;
     lines.push(
@@ -277,7 +279,7 @@ export function registerLearn(pi: ExtensionAPI): void {
         return;
       }
       ctx.ui.notify("perk: /learn — investigate the landed change and capture learnings", "info");
-      pi.sendUserMessage(learnGuidance(activePlanRef(ctx)));
+      pi.sendUserMessage(learnGuidance(activePlanRef(ctx)) + bindingSuffix(ctx.cwd, "stage:learn"));
     },
   });
 }

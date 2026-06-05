@@ -105,16 +105,17 @@ test("/learn (bare, interactive): injects guidance and keeps the marker", async 
   }
 });
 
-test("learnGuidance names the skill and derives the head branch from the plan-ref", () => {
+test("learnGuidance derives the head branch from the plan-ref (skill pointer is suffix-delivered)", () => {
   const withRef = learnGuidance(PLAN_REF);
-  assert.match(withRef, /perk-learn/);
+  // Node 2.3: the perk-learn skill pointer is no longer hardcoded — it rides the binding suffix.
+  assert.doesNotMatch(withRef, /Follow the perk-learn skill/);
   assert.match(withRef, /plan-42/);
   assert.match(withRef, /gh pr list --head plan-42/);
   assert.match(withRef, /`learn` tool/);
   assert.match(withRef, /\/learn skip/);
-  // Without a plan-ref it still names the skill and the tool (no branch derivation).
+  // Without a plan-ref it still names the tool (no branch derivation).
   const noRef = learnGuidance(null);
-  assert.match(noRef, /perk-learn/);
+  assert.doesNotMatch(noRef, /Follow the perk-learn skill/);
   assert.match(noRef, /`learn` tool/);
 });
 

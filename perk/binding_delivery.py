@@ -1,12 +1,12 @@
-"""Cold-door (Python-plane) delivery of the resolved skill-binding overlay (§8.9, Node 2.1).
+"""Cold-door (Python-plane) delivery of the resolved skill-binding overlay (§8.9, Node 2.3).
 
-When `perk` launches a `pi` session, this renders the **user-originated** resolved bindings
-whose trigger matches the launch into the session's initial prompt — `nudge` as a pointer
-line, `transclude` as the inlined skill body. **Additive only:** perk's own hardcoded "Follow
-the … skill" strings are unchanged (their removal is Node 2.3), and bindings value-equal to a
-shipped default are NOT re-delivered (avoiding double-delivery — perk still hardcodes those
-nudges). The warm door (the TS extension) is Node 2.2; target-existence validation (is
-`stage:x` a real stage? is the skill installed?) stays `doctor` (Node 3.1).
+When `perk` launches a `pi` session, this renders the **full resolved** bindings whose trigger
+matches the launch into the session's initial prompt — `nudge` as a pointer line, `transclude`
+as the inlined skill body. The mechanism is now perk's **single delivery path** for its own
+nudges: Node 2.3 deleted the hardcoded "Follow the … skill" strings, so the shipped defaults
+are delivered here (no longer subtracted). The warm door (the TS extension) is the in-session
+twin; target-existence validation (is `stage:x` a real stage? is the skill installed?) stays
+`doctor` (Node 3.1).
 
 LBYL throughout (dignified-python): a missing/unreadable transclude target is surfaced as a
 loud-but-non-fatal warning and degrades to the nudge pointer — never raises, never blocks a
@@ -22,14 +22,14 @@ from perk.registry import Issue
 SKILLS_SUBDIR = Path(".agents/skills")
 SKILL_FILENAME = "SKILL.md"
 
-_HEADER = "The following skill binding(s) apply here (configured via .pi/perk.toml):"
+_HEADER = "The following skill binding(s) apply here:"
 
 
 @dataclass(frozen=True)
 class ColdBindingDelivery:
     """The rendered cold-door delivery for one launch trigger.
 
-    ``text`` is the prompt fragment to append (``None`` when nothing user-originated matches);
+    ``text`` is the prompt fragment to append (``None`` when nothing matches the trigger);
     ``issues`` carries the resolver's shape/duplicate findings; ``warnings`` carries delivery
     warnings (e.g. a missing transclude target) — both surfaced loud-but-non-fatal by the caller.
     """
@@ -46,18 +46,17 @@ def render_cold_bindings(
     *,
     defaults: list[Binding] | None = None,
 ) -> ColdBindingDelivery:
-    """Render the user-originated bindings matching ``trigger`` into a prompt fragment.
+    """Render the full resolved bindings matching ``trigger`` into a prompt fragment.
 
-    ``user-originated`` = the resolved set minus the shipped defaults (a ``Binding`` is a frozen
-    dataclass, so set membership is the exact value-equality test). Only bindings whose trigger
-    equals ``trigger`` are delivered — additively. Resolver issues and delivery warnings are
-    collected (never raised) for the caller to surface loud-but-non-fatal.
+    The resolved set is the shipped defaults ⊕ the user overlay (Node 2.3 delivers the defaults
+    too — perk's own nudges are no longer hardcoded). Only bindings whose trigger equals
+    ``trigger`` are delivered. Resolver issues and delivery warnings are collected (never raised)
+    for the caller to surface loud-but-non-fatal.
     """
     if defaults is None:
         defaults = load_bindings().bindings
     resolved = resolve_bindings(user_bindings, defaults=defaults)
-    default_set = set(defaults)
-    mine = [b for b in resolved.bindings if b not in default_set and b.trigger == trigger]
+    mine = [b for b in resolved.bindings if b.trigger == trigger]
 
     warnings: list[str] = []
     parts: list[str] = []
