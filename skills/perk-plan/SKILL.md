@@ -65,6 +65,14 @@ the implementer gets fine-grained checkpoints. Omit it for prose-only plans — 
 Keep it concise and human- *and* agent-digestible. Resolve every open choice **before** saving — a
 saved plan must leave **no decisions to the implementer** (no "should I…?" residue).
 
+### No time or effort estimates
+
+A perk plan describes **what changes and why**, never **how long it takes**. Do not include time
+estimates, effort sizing, story points, velocity, or any other quantification of duration in a plan —
+not in the title, the steps, or the prose. They add no implementation signal, drift the moment
+anything shifts, and a saved plan is a canonical GitHub artifact where such guesses read as
+commitments. Describe scope through the concrete edits themselves; let the work define its own size.
+
 ## 🔴 Line-number references are DISALLOWED
 
 Line numbers drift as code changes and cause implementation failures. **Never** reference a line
