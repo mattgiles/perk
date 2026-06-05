@@ -16,7 +16,7 @@ launch.
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.bindings import Binding, load_bindings, resolve_bindings
+from perk.bindings import Binding, is_skill_installed, load_bindings, resolve_bindings
 from perk.registry import Issue
 
 SKILLS_SUBDIR = Path(".agents/skills")
@@ -71,6 +71,14 @@ def render_cold_bindings(
             warnings.append(
                 f"skill binding: transclude target for `{binding.skill}` not found under "
                 f"{SKILLS_SUBDIR}/{binding.skill}/{SKILL_FILENAME} — falling back to a pointer."
+            )
+        elif not is_skill_installed(repo_root, binding.skill):
+            # The nudge mirror of the transclude warning (Node 3.1, D6): a binding to a skill that
+            # is not installed is reported loud-but-non-fatal, never silently delivered. The pointer
+            # is still emitted so the model gets the nudge.
+            warnings.append(
+                f"skill binding: skill `{binding.skill}` for `{binding.trigger}` is not installed "
+                f"under {SKILLS_SUBDIR}/{binding.skill}/{SKILL_FILENAME} — the pointer may dangle."
             )
         parts.append(f"Follow the `{binding.skill}` skill.")
 

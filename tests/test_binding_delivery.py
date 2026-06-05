@@ -33,12 +33,24 @@ def _write_skill(repo_root: Path, skill: str, body: str) -> None:
 
 
 def test_nudge_at_new_trigger_renders_pointer(tmp_path):
+    _write_skill(tmp_path, "my-skill", "# my-skill\n")  # installed -> no missing-skill warning
     user = [_user("stage:save", "my-skill", "nudge")]
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
     assert delivery.text is not None
     assert "Follow the `my-skill` skill." in delivery.text
     assert _HEADER in delivery.text  # the header
     assert delivery.warnings == [] and delivery.issues == []
+
+
+def test_nudge_to_missing_skill_warns_loud_but_non_fatal(tmp_path):
+    # Node 3.1, D6: a nudge to an uninstalled skill still emits the pointer, but warns (the nudge
+    # mirror of the transclude warning) — never silently delivered, never blocks.
+    user = [_user("stage:save", "ghost-skill", "nudge")]
+    delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
+    assert delivery.text is not None
+    assert "Follow the `ghost-skill` skill." in delivery.text  # the pointer still reaches the model
+    assert len(delivery.warnings) == 1
+    assert "ghost-skill" in delivery.warnings[0]
 
 
 def test_transclude_inlines_body_with_frontmatter_stripped(tmp_path):

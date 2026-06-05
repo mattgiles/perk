@@ -48,11 +48,22 @@ test("BINDING_HEADER is the exact cross-plane dedup marker (== the Python cold _
 test("nudge at a new trigger renders a pointer under the header", () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "my-skill", mode: "nudge" }]);
+  writeSkill(cwd, "my-skill", "# my-skill\n"); // installed -> no missing-skill warning
   const { text, warnings } = renderBindings(cwd, "stage:save");
   assert.ok(text !== null);
   assert.match(text, /Follow the `my-skill` skill\./);
   assert.ok(text.includes(BINDING_HEADER)); // the header
   assert.deepEqual(warnings, []);
+});
+
+test("a nudge to an uninstalled skill warns loud-but-non-fatal (Node 3.1, D6)", () => {
+  const cwd = scaffoldRepo();
+  writeBindings(cwd, [{ trigger: "stage:save", skill: "ghost-skill", mode: "nudge" }]);
+  const { text, warnings } = renderBindings(cwd, "stage:save");
+  assert.ok(text !== null);
+  assert.match(text, /Follow the `ghost-skill` skill\./); // the pointer still reaches the model
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] as string, /ghost-skill/);
 });
 
 test("transclude inlines the skill body with frontmatter stripped", () => {
