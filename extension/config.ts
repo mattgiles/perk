@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseUserBindings, type SkillBinding } from "./bindings.ts";
 
 const CONFIG_FILENAME = "perk.toml";
 const LOCAL_CONFIG_FILENAME = "perk.local.toml";
@@ -26,10 +27,21 @@ export interface PerkConfig {
    * string values, it must be written as a quoted string (e.g. `compact_threshold = "0.8"`).
    */
   objectiveCompactThreshold?: number;
+  /** The `[[bindings]]` user overlay (Node 1.2), resolved against shipped defaults downstream. */
+  bindings: SkillBinding[];
 }
 
 /** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
 type StringTable = Record<string, Record<string, string>>;
+
+/**
+ * The narrow TOML subset perk reads: `[section]`/top-level string tables plus `[[name]]`
+ * array-of-tables (each row a string table). Mirrors `tomllib`'s shape for the keys perk uses.
+ */
+interface TomlSubset {
+  tables: StringTable;
+  arrays: Record<string, Array<Record<string, string>>>;
+}
 
 function unescapeBasic(raw: string): string {
   return raw
@@ -40,22 +52,42 @@ function unescapeBasic(raw: string): string {
 }
 
 /**
- * Parse the narrow TOML subset perk consumes. Returns a `{ section: { key: stringValue } }` map.
- * Top-level keys land under the `""` section. Non-string values and unknown syntax are skipped —
- * this is intentionally NOT a full TOML parser.
+ * Parse the narrow TOML subset perk consumes. Returns `{ tables, arrays }`: `tables` is a
+ * `{ section: { key: stringValue } }` map (top-level keys under the `""` section); `arrays` is a
+ * `{ name: [{ key: stringValue }, ...] }` map fed by `[[name]]` array-of-tables. Non-string values
+ * and unknown syntax are skipped — this is intentionally NOT a full TOML parser.
  */
-export function parseTomlSubset(text: string): StringTable {
-  const table: StringTable = { "": {} };
-  let section = "";
+export function parseTomlSubset(text: string): TomlSubset {
+  const root: Record<string, string> = {};
+  const tables: StringTable = { "": root };
+  const arrays: Record<string, Array<Record<string, string>>> = {};
+  // The current write target for `key = value` lines (a section table or an array-of-tables row).
+  let dest: Record<string, string> = root;
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = (lines[i] ?? "").trim();
     if (line === "" || line.startsWith("#")) continue;
 
+    // `[[name]]` array-of-tables must be detected BEFORE the `[section]` header (it also matches).
+    const arrayHeader = line.match(/^\[\[([^\]]+)\]\]$/);
+    if (arrayHeader) {
+      const name = (arrayHeader[1] ?? "").trim();
+      const row: Record<string, string> = {};
+      let rows = arrays[name];
+      if (!rows) {
+        rows = [];
+        arrays[name] = rows;
+      }
+      rows.push(row);
+      dest = row;
+      continue;
+    }
+
     const header = line.match(/^\[([^\]]+)\]$/);
     if (header) {
-      section = (header[1] ?? "").trim();
-      if (!table[section]) table[section] = {};
+      const section = (header[1] ?? "").trim();
+      if (!tables[section]) tables[section] = {};
+      dest = tables[section];
       continue;
     }
 
@@ -64,8 +96,6 @@ export function parseTomlSubset(text: string): StringTable {
     const key = line.slice(0, eq).trim();
     const value = line.slice(eq + 1).trim();
     if (key === "") continue;
-    const dest: Record<string, string> = table[section] ?? {};
-    table[section] = dest;
 
     // Multi-line basic string: """ ... """ (possibly spanning lines).
     if (value.startsWith('"""')) {
@@ -101,40 +131,49 @@ export function parseTomlSubset(text: string): StringTable {
     }
     // Non-string scalars are intentionally ignored (perk reads only strings today).
   }
-  return table;
+  return { tables, arrays };
 }
 
-function readTomlFile(path: string): StringTable {
-  if (!existsSync(path)) return { "": {} };
+function emptySubset(): TomlSubset {
+  return { tables: { "": {} }, arrays: {} };
+}
+
+function readTomlFile(path: string): TomlSubset {
+  if (!existsSync(path)) return emptySubset();
   try {
     return parseTomlSubset(readFileSync(path, "utf8"));
   } catch (error) {
     // Loud-but-non-fatal: a malformed config never blocks the session.
     console.error(`perk: ignoring malformed ${path} — ${error}`);
-    return { "": {} };
+    return emptySubset();
   }
 }
 
-/** Overlay `over` onto `base` (local wins; sections merge, leaf keys replace). */
-function overlay(base: StringTable, over: StringTable): StringTable {
-  const merged: StringTable = {};
-  for (const [section, kv] of Object.entries(base)) merged[section] = { ...kv };
-  for (const [section, kv] of Object.entries(over)) {
-    merged[section] = { ...(merged[section] ?? {}), ...kv };
+/**
+ * Overlay `over` onto `base` (local wins). Section tables merge leaf-by-leaf; array-of-tables
+ * replace as a whole array (mirror of perk/config.py's list-replaces-list overlay).
+ */
+function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
+  const tables: StringTable = {};
+  for (const [section, kv] of Object.entries(base.tables)) tables[section] = { ...kv };
+  for (const [section, kv] of Object.entries(over.tables)) {
+    tables[section] = { ...(tables[section] ?? {}), ...kv };
   }
-  return merged;
+  const arrays: Record<string, Array<Record<string, string>>> = { ...base.arrays };
+  for (const [name, rows] of Object.entries(over.arrays)) arrays[name] = rows;
+  return { tables, arrays };
 }
 
 /** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/config.py). */
 export function loadPerkConfig(cwd: string): PerkConfig {
   const piDir = join(cwd, ".pi");
-  let merged: StringTable = { "": {} };
+  let merged: TomlSubset = emptySubset();
   for (const name of [CONFIG_FILENAME, LOCAL_CONFIG_FILENAME]) {
     merged = overlay(merged, readTomlFile(join(piDir, name)));
   }
 
-  const planAuthoring = merged.workflow?.plan_authoring;
-  const rawThreshold = merged.objective?.compact_threshold;
+  const planAuthoring = merged.tables.workflow?.plan_authoring;
+  const rawThreshold = merged.tables.objective?.compact_threshold;
   const parsedThreshold = rawThreshold != null ? Number.parseFloat(rawThreshold) : Number.NaN;
   const objectiveCompactThreshold =
     Number.isFinite(parsedThreshold) && parsedThreshold > 0 && parsedThreshold <= 1
@@ -143,7 +182,8 @@ export function loadPerkConfig(cwd: string): PerkConfig {
   return {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
-    ci: merged.ci ?? {},
+    ci: merged.tables.ci ?? {},
     objectiveCompactThreshold,
+    bindings: parseUserBindings(merged.arrays.bindings ?? []),
   };
 }

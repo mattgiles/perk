@@ -7,9 +7,11 @@ translated to a ``UserFacingCliError`` at the CLI boundary (``require_config``).
 """
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from perk.bindings import Binding, parse_user_bindings
 
 CONFIG_FILENAME = "perk.toml"
 LOCAL_CONFIG_FILENAME = "perk.local.toml"
@@ -21,6 +23,7 @@ class Config:
     """Resolved perk config. ``worktree_root`` is absolute."""
 
     worktree_root: Path
+    user_bindings: list[Binding] = field(default_factory=list)
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -52,4 +55,7 @@ def load_config(repo_root: Path) -> Config:
     root = Path(root_value) if isinstance(root_value, str) else Path(DEFAULT_WORKTREE_DIRNAME)
     if not root.is_absolute():
         root = repo_root / root
-    return Config(worktree_root=root)
+    return Config(
+        worktree_root=root,
+        user_bindings=parse_user_bindings(merged.get("bindings")),
+    )

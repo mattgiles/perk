@@ -27,21 +27,74 @@ test("parseTomlSubset: sections, basic strings, comments", () => {
       'plan_authoring = "be concise"  # inline',
     ].join("\n"),
   );
-  assert.equal(t[""]?.top, "root");
-  assert.equal(t.workflow?.plan_authoring, "be concise");
+  assert.equal(t.tables[""]?.top, "root");
+  assert.equal(t.tables.workflow?.plan_authoring, "be concise");
 });
 
 test("parseTomlSubset: multi-line basic string", () => {
   const t = parseTomlSubset(
     ["[workflow]", 'plan_authoring = """', "line one", "line two", '"""'].join("\n"),
   );
-  assert.equal(t.workflow?.plan_authoring, "line one\nline two");
+  assert.equal(t.tables.workflow?.plan_authoring, "line one\nline two");
 });
 
 test("parseTomlSubset: ignores non-string scalars (subset only)", () => {
   const t = parseTomlSubset(["[workflow]", "count = 3", "flag = true"].join("\n"));
-  assert.equal(t.workflow?.count, undefined);
-  assert.equal(t.workflow?.flag, undefined);
+  assert.equal(t.tables.workflow?.count, undefined);
+  assert.equal(t.tables.workflow?.flag, undefined);
+});
+
+test("parseTomlSubset: [[bindings]] array-of-tables -> arrays.bindings", () => {
+  const t = parseTomlSubset(
+    [
+      "[[bindings]]",
+      'trigger = "stage:plan"',
+      'skill = "house-style"',
+      'mode = "transclude"',
+      "",
+      "[[bindings]]",
+      'trigger = "command:learn-docs"',
+      'skill = "docs"',
+      'mode = "nudge"',
+    ].join("\n"),
+  );
+  assert.deepEqual(t.arrays.bindings, [
+    { trigger: "stage:plan", skill: "house-style", mode: "transclude" },
+    { trigger: "command:learn-docs", skill: "docs", mode: "nudge" },
+  ]);
+});
+
+test("loadPerkConfig: parses [[bindings]] into config.bindings", () => {
+  const cwd = repoWith({
+    "perk.toml":
+      '[[bindings]]\ntrigger = "stage:plan"\nskill = "house-style"\nmode = "transclude"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).bindings, [
+    {
+      trigger: "stage:plan",
+      kind: "stage",
+      targetId: "plan",
+      skill: "house-style",
+      mode: "transclude",
+    },
+  ]);
+});
+
+test("loadPerkConfig: local [[bindings]] replaces the committed array (whole-array)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[[bindings]]\ntrigger = "stage:plan"\nskill = "committed"\nmode = "nudge"\n',
+    "perk.local.toml":
+      '[[bindings]]\ntrigger = "stage:implement"\nskill = "local"\nmode = "nudge"\n',
+  });
+  assert.deepEqual(
+    loadPerkConfig(cwd).bindings.map((b) => [b.trigger, b.skill]),
+    [["stage:implement", "local"]],
+  );
+});
+
+test("loadPerkConfig: no [[bindings]] -> empty bindings", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  assert.deepEqual(loadPerkConfig(cwd).bindings, []);
 });
 
 test("loadPerkConfig: no files -> empty config", () => {

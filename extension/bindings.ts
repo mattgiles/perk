@@ -25,6 +25,18 @@ export interface SkillBinding {
 export const BINDING_TRIGGER_KINDS = ["stage", "command"] as const;
 export const BINDING_MODES = ["nudge", "transclude"] as const;
 
+/** One shape finding for a user binding (registry-free; mirror of Python's `Issue`). */
+export interface BindingIssue {
+  where: string;
+  message: string;
+}
+
+/** The effective binding set after overlaying user bindings onto shipped defaults. */
+export interface ResolvedBindings {
+  bindings: SkillBinding[];
+  issues: BindingIssue[];
+}
+
 /** Split a `"<kind>:<id>"` trigger on the first `:`. No colon -> `["", ""]`. */
 function splitTrigger(trigger: string): [string, string] {
   const idx = trigger.indexOf(":");
@@ -58,4 +70,110 @@ export function loadDefaultBindings(): SkillBinding[] {
       mode: typeof entry.mode === "string" ? entry.mode : "",
     };
   });
+}
+
+/**
+ * Parse `.pi/perk.toml` `[[bindings]]` rows (string tables) into `SkillBinding`s. Tolerant like
+ * the YAML reader: absent/ill-typed fields become empty strings so the *resolver* reports them.
+ */
+export function parseUserBindings(rows: Array<Record<string, string>>): SkillBinding[] {
+  return rows.map((row) => {
+    const trigger = typeof row.trigger === "string" ? row.trigger : "";
+    const [kind, targetId] = splitTrigger(trigger);
+    return {
+      trigger,
+      kind,
+      targetId,
+      skill: typeof row.skill === "string" ? row.skill : "",
+      mode: typeof row.mode === "string" ? row.mode : "",
+    };
+  });
+}
+
+/**
+ * Shape issues for a *single* binding (skill/mode/trigger well-formedness). Registry-free —
+ * target-existence is `doctor`'s job (Node 3.1). Duplicate-trigger detection is the caller's.
+ */
+function bindingIssues(binding: SkillBinding): BindingIssue[] {
+  const issues: BindingIssue[] = [];
+  const where = binding.trigger || "bindings";
+
+  if (!binding.skill) issues.push({ where, message: "missing `skill`" });
+  if (!(BINDING_MODES as readonly string[]).includes(binding.mode)) {
+    issues.push({ where, message: `\`mode\` must be one of ${BINDING_MODES.join(", ")}` });
+  }
+
+  if (!binding.trigger) {
+    issues.push({ where: "bindings", message: "a binding is missing its `trigger`" });
+  } else if (!binding.trigger.includes(":")) {
+    issues.push({ where, message: "`trigger` must be of the form `<kind>:<id>`" });
+  } else if (!(BINDING_TRIGGER_KINDS as readonly string[]).includes(binding.kind)) {
+    issues.push({
+      where,
+      message: `\`trigger\` kind must be one of ${BINDING_TRIGGER_KINDS.join(", ")}`,
+    });
+  } else if (!binding.targetId) {
+    issues.push({ where, message: "`trigger` has an empty `<id>`" });
+  }
+
+  return issues;
+}
+
+/** Return every shape issue across a user binding set (empty == valid); duplicates included. */
+export function validateUserBindings(bindings: SkillBinding[]): BindingIssue[] {
+  const issues: BindingIssue[] = [];
+  const seen = new Set<string>();
+  for (const binding of bindings) {
+    issues.push(...bindingIssues(binding));
+    if (binding.trigger) {
+      if (seen.has(binding.trigger)) {
+        issues.push({ where: binding.trigger, message: "duplicate `trigger`" });
+      }
+      seen.add(binding.trigger);
+    }
+  }
+  return issues;
+}
+
+/**
+ * Overlay user bindings onto shipped defaults (trigger-keyed; pure). Defaults are trusted (not
+ * re-validated). Each user binding is applied iff it is shape-valid AND its trigger was not already
+ * applied by an earlier user binding; otherwise it is dropped and its issue recorded. An applied
+ * binding replaces in place the default with the same trigger, or appends at a new trigger — so the
+ * resolved set has unique triggers by construction. Target-existence stays `doctor` (Node 3.1).
+ */
+export function resolveBindings(
+  userBindings: SkillBinding[],
+  defaults: SkillBinding[] = loadDefaultBindings(),
+): ResolvedBindings {
+  const resolved = [...defaults];
+  const index = new Map<string, number>();
+  for (let i = 0; i < resolved.length; i++) {
+    const entry = resolved[i];
+    if (entry) index.set(entry.trigger, i);
+  }
+  const issues: BindingIssue[] = [];
+  const applied = new Set<string>();
+
+  for (const binding of userBindings) {
+    const shapeIssues = bindingIssues(binding);
+    if (shapeIssues.length > 0) {
+      issues.push(...shapeIssues);
+      continue;
+    }
+    if (applied.has(binding.trigger)) {
+      issues.push({ where: binding.trigger, message: "duplicate `trigger`" });
+      continue;
+    }
+    applied.add(binding.trigger);
+    const at = index.get(binding.trigger);
+    if (at !== undefined) {
+      resolved[at] = binding;
+    } else {
+      index.set(binding.trigger, resolved.length);
+      resolved.push(binding);
+    }
+  }
+
+  return { bindings: resolved, issues };
 }

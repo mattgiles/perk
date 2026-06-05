@@ -9,7 +9,14 @@ the loader itself stays registry-free (target-existence is doctor's job, Node 3.
 
 import pytest
 
-from perk.bindings import BindingsError, Severity, load_bindings, validate
+from perk.bindings import (
+    Binding,
+    BindingsError,
+    Severity,
+    load_bindings,
+    resolve_bindings,
+    validate,
+)
 from perk.registry import load_registry
 
 # A minimal-but-complete, valid binding set. Each negative test mutates one line.
@@ -105,3 +112,84 @@ def test_unsupported_schema_version_raises(tmp_path):
     bad = GOOD.replace("schema_version: 1", "schema_version: 99")
     with pytest.raises(BindingsError):
         load_bindings(_write(tmp_path, bad))
+
+
+# --------------------------------------------------------------------------- resolver
+
+DEFAULTS = [
+    Binding("stage:plan", "stage", "plan", "perk-plan", "nudge"),
+    Binding("stage:implement", "stage", "implement", "perk-implement", "nudge"),
+]
+
+
+def _b(trigger, skill, mode):
+    kind, _, target_id = trigger.partition(":")
+    return Binding(trigger, kind, target_id, skill, mode)
+
+
+def test_resolve_empty_user_returns_defaults_unchanged():
+    resolved = resolve_bindings([], defaults=DEFAULTS)
+    assert resolved.bindings == DEFAULTS
+    assert resolved.issues == []
+
+
+def test_resolve_override_mode_in_place_preserves_position_and_count():
+    resolved = resolve_bindings([_b("stage:plan", "perk-plan", "transclude")], defaults=DEFAULTS)
+    assert resolved.issues == []
+    assert [(b.trigger, b.skill, b.mode) for b in resolved.bindings] == [
+        ("stage:plan", "perk-plan", "transclude"),
+        ("stage:implement", "perk-implement", "nudge"),
+    ]
+
+
+def test_resolve_replace_skill_at_existing_trigger():
+    resolved = resolve_bindings([_b("stage:plan", "house-style", "nudge")], defaults=DEFAULTS)
+    assert resolved.bindings[0] == _b("stage:plan", "house-style", "nudge")
+
+
+def test_resolve_new_trigger_is_appended():
+    resolved = resolve_bindings([_b("stage:address", "house-style", "nudge")], defaults=DEFAULTS)
+    assert resolved.issues == []
+    assert [b.trigger for b in resolved.bindings] == [
+        "stage:plan",
+        "stage:implement",
+        "stage:address",
+    ]
+
+
+def test_resolve_drops_invalid_bindings_and_reports_each_class():
+    invalid = [
+        _b("stage:plan", "", "nudge"),  # missing skill
+        _b("stage:implement", "s", "shout"),  # bad mode
+        _b("noColon", "s", "nudge"),  # malformed trigger
+        _b("phase:x", "s", "nudge"),  # unknown kind
+        _b("stage:", "s", "nudge"),  # empty target id
+    ]
+    resolved = resolve_bindings(invalid, defaults=DEFAULTS)
+    # Defaults untouched (every user binding dropped).
+    assert resolved.bindings == DEFAULTS
+    messages = " | ".join(i.message for i in resolved.issues)
+    assert all(i.severity is Severity.ERROR for i in resolved.issues)
+    for fragment in ("skill", "mode", "<kind>:<id>", "kind", "empty"):
+        assert fragment in messages
+
+
+def test_resolve_duplicate_user_trigger_applies_first_reports_second():
+    resolved = resolve_bindings(
+        [
+            _b("stage:plan", "first", "nudge"),
+            _b("stage:plan", "second", "nudge"),
+        ],
+        defaults=DEFAULTS,
+    )
+    assert resolved.bindings[0].skill == "first"
+    assert [i.message for i in resolved.issues] == ["duplicate `trigger`"]
+    # Unique triggers by construction.
+    triggers = [b.trigger for b in resolved.bindings]
+    assert len(triggers) == len(set(triggers))
+
+
+def test_resolve_defaults_to_shipped_when_omitted():
+    resolved = resolve_bindings([])
+    assert [(b.trigger, b.skill, b.mode) for b in resolved.bindings] == EXPECTED_DEFAULTS
+    assert resolved.issues == []

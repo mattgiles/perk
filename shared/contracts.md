@@ -1256,9 +1256,27 @@ skills, so a pointer suffices; `transclude` exists for the user-binding case):**
 non-empty `<id>`, and that no `trigger` repeats. They do **not** check that a `stage:`/`command:`
 target actually exists — that cross-contract, target-existence validation is **`doctor`**'s job.
 
-> **Status (Node 1.1):** this locks the **shape** + ships the **defaults** with **no runtime
-> behavior** — nothing imports the readers yet. Deferred: the resolver `shipped-defaults ⊕
-> user-bindings` + the `.pi/perk.toml` `[[bindings]]` table → **Node 1.2**; `nudge`/`transclude`
-> delivery (cold + warm doors) → **Nodes 2.1/2.2**; porting perk's own hardcoded "Follow the … skill"
-> strings onto the mechanism + deleting them → **Node 2.3**; `doctor` target-existence validation →
-> **Node 3.1**; `init` scaffolding + user docs → **Node 3.2**.
+**Resolver — `shipped-defaults ⊕ user-bindings` (Node 1.2, pure + unit-tested both planes):** a
+user **skill-binding overlay** is authored in `.pi/perk.toml` as a `[[bindings]]` array-of-tables
+(`trigger`/`skill`/`mode` strings); `.pi/perk.local.toml` overlays it with a **whole-array replace**
+(local wins — the local array supersedes the committed one entirely, never merged element-wise,
+mirroring the leaf-replace overlay for scalars). Both planes parse this into the same binding shape
+(`perk/config.py` → `Config.user_bindings`; `extension/config.ts` → `PerkConfig.bindings`) and
+resolve it against the shipped defaults through a **pure free function** —
+`perk.bindings.resolve_bindings(user_bindings, defaults=load_bindings().bindings)` /
+`extension/bindings.ts resolveBindings(userBindings, defaults=loadDefaultBindings())` — each
+returning a `ResolvedBindings { bindings, issues }`. The override is **trigger-keyed**: starting from
+the defaults (order preserved), each *applied* user binding **replaces in place** the entry with the
+same trigger or **appends** at a new trigger, so the resolved set has **unique triggers by
+construction**. A user binding is applied iff it is **shape-valid** (same shape-only checks above)
+AND its trigger was not already applied by an earlier user binding; otherwise it is dropped and its
+shape/`duplicate` `Issue` recorded in `issues` for loud-but-non-fatal surfacing. **Defaults are
+trusted** (not re-validated). The resolver remains registry-free: target-existence is still
+**`doctor`** (Node 3.1), never the resolver. No removal/disable syntax and no multi-skill-per-trigger
+co-delivery are defined yet.
+
+> **Status (Node 1.2):** parsing + resolver landed (pure, cross-plane-identical, unit-tested) with
+> **no consumer wiring**. Deferred: `nudge`/`transclude` delivery (cold + warm doors) → **Nodes
+> 2.1/2.2**; porting perk's own hardcoded "Follow the … skill" strings onto the mechanism + deleting
+> them → **Node 2.3**; `doctor` target-existence validation → **Node 3.1**; `init` `[[bindings]]`
+> template + user docs → **Node 3.2**.

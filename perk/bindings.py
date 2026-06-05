@@ -131,6 +131,36 @@ def _str(value: Any) -> str:
 # ----------------------------------------------------------------------- validate
 
 
+def _binding_issues(binding: Binding) -> list[Issue]:
+    """Return the shape issues for a *single* binding (skill/mode/trigger well-formedness).
+
+    Shape-only and registry-free (§8.9): does not check that a ``stage:``/``command:``
+    target actually exists — that cross-contract validation is ``doctor`` (Node 3.1).
+    Duplicate-trigger detection is a *set*-level concern owned by the caller (``validate``
+    over a committed set; ``resolve_bindings`` over the user overlay).
+    """
+    issues: list[Issue] = []
+    where = binding.trigger or "bindings"
+
+    if not binding.skill:
+        issues.append(Issue(Severity.ERROR, where, "missing `skill`"))
+    if binding.mode not in MODES:
+        issues.append(Issue(Severity.ERROR, where, f"`mode` must be one of {MODES}"))
+
+    if not binding.trigger:
+        issues.append(Issue(Severity.ERROR, "bindings", "a binding is missing its `trigger`"))
+    elif ":" not in binding.trigger:
+        issues.append(Issue(Severity.ERROR, where, "`trigger` must be of the form `<kind>:<id>`"))
+    elif binding.kind not in TRIGGER_KINDS:
+        issues.append(
+            Issue(Severity.ERROR, where, f"`trigger` kind must be one of {TRIGGER_KINDS}")
+        )
+    elif not binding.target_id:
+        issues.append(Issue(Severity.ERROR, where, "`trigger` has an empty `<id>`"))
+
+    return issues
+
+
 def validate(bindings: BindingSet) -> list[Issue]:
     """Return every shape issue (empty list == valid). Never raises for content.
 
@@ -140,29 +170,69 @@ def validate(bindings: BindingSet) -> list[Issue]:
     issues: list[Issue] = []
     seen: set[str] = set()
     for binding in bindings.bindings:
-        where = binding.trigger or "bindings"
-
-        if not binding.skill:
-            issues.append(Issue(Severity.ERROR, where, "missing `skill`"))
-        if binding.mode not in MODES:
-            issues.append(Issue(Severity.ERROR, where, f"`mode` must be one of {MODES}"))
-
-        if not binding.trigger:
-            issues.append(Issue(Severity.ERROR, "bindings", "a binding is missing its `trigger`"))
-        elif ":" not in binding.trigger:
-            issues.append(
-                Issue(Severity.ERROR, where, "`trigger` must be of the form `<kind>:<id>`")
-            )
-        elif binding.kind not in TRIGGER_KINDS:
-            issues.append(
-                Issue(Severity.ERROR, where, f"`trigger` kind must be one of {TRIGGER_KINDS}")
-            )
-        elif not binding.target_id:
-            issues.append(Issue(Severity.ERROR, where, "`trigger` has an empty `<id>`"))
-
+        issues.extend(_binding_issues(binding))
         if binding.trigger:
             if binding.trigger in seen:
-                issues.append(Issue(Severity.ERROR, where, "duplicate `trigger`"))
+                issues.append(Issue(Severity.ERROR, binding.trigger, "duplicate `trigger`"))
             seen.add(binding.trigger)
 
     return issues
+
+
+# ------------------------------------------------------------------------ resolve
+
+
+@dataclass(frozen=True)
+class ResolvedBindings:
+    """The effective binding set after overlaying user bindings onto shipped defaults.
+
+    ``bindings`` has **unique triggers by construction**; ``issues`` collects every dropped
+    user binding's shape/duplicate finding for later loud-but-non-fatal surfacing.
+    """
+
+    bindings: list[Binding]
+    issues: list[Issue]
+
+
+def parse_user_bindings(raw: Any) -> list[Binding]:
+    """Parse a ``.pi/perk.toml`` ``[[bindings]]`` array-of-tables into ``Binding``s.
+
+    Tolerant like ``_parse_binding``: absent/ill-typed fields become empty strings so the
+    *resolver* reports them. A non-list ``raw`` (absent table) yields ``[]``.
+    """
+    return [_parse_binding(item) for item in _as_list(raw)]
+
+
+def resolve_bindings(
+    user_bindings: list[Binding], defaults: list[Binding] | None = None
+) -> ResolvedBindings:
+    """Overlay user bindings onto shipped defaults (trigger-keyed; pure).
+
+    Defaults are trusted (not re-validated). Each user binding is applied iff it is
+    shape-valid AND its trigger was not already applied by an earlier user binding;
+    otherwise it is dropped and its issue recorded. An applied binding **replaces in place**
+    the default with the same trigger, or **appends** at a new trigger — so the resolved set
+    has unique triggers by construction. Target-existence stays ``doctor`` (Node 3.1).
+    """
+    if defaults is None:
+        defaults = load_bindings().bindings
+    resolved = list(defaults)
+    index = {binding.trigger: i for i, binding in enumerate(resolved)}
+    issues: list[Issue] = []
+    applied: set[str] = set()
+    for binding in user_bindings:
+        binding_issues = _binding_issues(binding)
+        if binding_issues:
+            issues.extend(binding_issues)
+            continue
+        if binding.trigger in applied:
+            issues.append(Issue(Severity.ERROR, binding.trigger, "duplicate `trigger`"))
+            continue
+        applied.add(binding.trigger)
+        at = index.get(binding.trigger)
+        if at is not None:
+            resolved[at] = binding
+        else:
+            index[binding.trigger] = len(resolved)
+            resolved.append(binding)
+    return ResolvedBindings(bindings=resolved, issues=issues)
