@@ -22,7 +22,7 @@ def _authed(monkeypatch) -> None:
 
 
 def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
-    calls: dict[str, object] = {"commented": False, "updated": None}
+    calls: dict[str, object] = {"commented": False, "updated": None, "header": None}
     monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
     monkeypatch.setattr(
         github,
@@ -40,8 +40,13 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
             number=k["number"], body_updated=True, title_updated=True, dry_run=False
         )
 
+    def _update_header(**k):
+        calls["header"] = k
+        return github.PlanHeaderUpdate(fields_updated=tuple(k.get("fields", {})), dry_run=False)
+
     monkeypatch.setattr(github, "add_issue_comment", _comment)
     monkeypatch.setattr(github, "update_plan_issue", _update)
+    monkeypatch.setattr(github, "update_plan_header", _update_header)
     return calls
 
 
@@ -398,6 +403,43 @@ def test_plan_save_resave_updates_in_place(monkeypatch):
     assert kwargs["number"] == 123
     assert kwargs["title"] == "My Feature"  # re-derived from the plan H1
     assert "Do the thing." in str(kwargs["body_comment"])
+    assert calls["header"] is None  # no planning header fields -> no header merge
+
+
+def test_plan_save_resave_merges_header_fields(monkeypatch):
+    # Re-save must propagate the planning-time header fields (objective_id, consumed_learn) into
+    # the existing plan-header block (the canonical source reconstruct_plan_ref / on-land consume
+    # read), since update_plan_issue only rewrites the body comment + title.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    result = _run(
+        monkeypatch,
+        [
+            "plan-save",
+            "--plan-file",
+            "plan.md",
+            "--consumed-learn",
+            "50,45",
+            "--objective-id",
+            "7",
+        ],
+    )
+    assert result.exit_code == 0
+    header = calls["header"]
+    assert isinstance(header, dict)
+    kwargs = cast("dict[str, object]", header)
+    assert kwargs["issue"] == 123
+    assert kwargs["fields"] == {"objective_id": "7", "consumed_learn": [45, 50]}
+
+
+def test_plan_save_resave_without_header_fields_skips_update(monkeypatch):
+    # A plain re-save (no --consumed-learn / --objective-id) must not call update_plan_header —
+    # no needless write, no clobber of a previously linked objective/learn set.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md"])
+    assert result.exit_code == 0
+    assert calls["header"] is None
 
 
 def test_plan_save_resave_json_reports_updated(monkeypatch):

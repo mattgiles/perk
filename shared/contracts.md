@@ -588,7 +588,15 @@ find_plan_issue{ run_id }                           -> PlanIssue | null
   revised) plan H1. The comment is found by marker (REST comment list → first body containing the
   `plan-body` block; perk stores no comment id), which also repairs legacy plan issues; a missing
   comment falls back to a fresh POST so the body is never stranded. The anti-duplicate guarantee is
-  preserved. `--json` carries a top-level `updated` (true on re-save, false on fresh create);
+  preserved. Because `update_plan_issue` rewrites only the `plan-body` comment + the title (never
+  the `plan-header`), a re-save **additionally** merges the planning header fields (`objective_id`,
+  `consumed_learn`) back into the existing `plan-header` via `update_plan_header` when provided —
+  additive, so an omitted field is left intact (no clobber of a previously linked objective/learn
+  set, no reset of the submit-populated `branch`/`pr`/`lifecycle_stage`). This keeps the canonical
+  header (the source `reconstruct_plan_ref` and the on-land `consumed_learn` consume read from)
+  current on every save, not just the first create; the header write is fail-loud (a failure raises
+  `GitHubError` → `github_error`, since this is the canonical save). `--json` carries a top-level
+  `updated` (true on re-save, false on fresh create);
   `cached` stays true on every real save. The warm `/plan-save` surfaces `details.updated` and an
   "Updated plan #N" message on the re-save path.
 
