@@ -1299,41 +1299,45 @@ trusted** (not re-validated). The resolver remains registry-free: target-existen
 **`doctor`** (Node 3.1), never the resolver. No removal/disable syntax and no multi-skill-per-trigger
 co-delivery are defined yet.
 
-**Cold-door delivery (Node 2.1, Python plane):** `perk/binding_delivery.py`
-(`render_cold_bindings(user_bindings, repo_root, trigger)`) renders the **user-originated** resolved
-bindings — the resolved overlay **minus the shipped defaults** (a `Binding` is a frozen dataclass, so
-set membership is the exact value-equality test) — whose trigger matches the launch, and
-`launch_stage` appends that fragment **additively** to the initial prompt. perk's own hardcoded
-"Follow the … skill" strings are **unchanged** (their removal is Node 2.3), and bindings value-equal
-to a shipped default are **not** re-delivered (no double-delivery — perk still hardcodes those
-nudges); a user binding at a *new* trigger, or a user *override* of a perk-owned trigger, **is**
-delivered. The launch trigger is `stage:<stage.id>` by default; the `learn-docs` cold door (which
-borrows the `plan` stage) overrides it to `command:learn-docs` via `launch_stage`'s `binding_trigger`
-parameter, so it never fires `stage:plan`. `objective-reconcile` is a non-launching **worker** (it
-rewrites the objective body, no initial prompt), so `command:objective-reconcile` has **no cold
-delivery surface** — it fires only at the warm door (Node 2.2). `nudge` renders a ``Follow the
+**Cold-door delivery (Node 2.3, Python plane):** `perk/binding_delivery.py`
+(`render_cold_bindings(user_bindings, repo_root, trigger)`) renders the **full resolved** bindings
+(shipped defaults ⊕ the user overlay) whose trigger matches the launch — Node 2.3 deleted perk's
+hardcoded "Follow the … skill" strings, so the mechanism is now the **single delivery path** for
+perk's own nudges and the defaults are **no longer subtracted**. `launch_stage` appends that
+fragment to the initial prompt **only when there is one to augment** (D2): an **idle** launch (a
+stage with no `_initial_prompt` — today only `plan`) stays idle, so a binding **never synthesizes** a
+whole prompt and never auto-starts a turn; the idle stage's pointer is delivered **warm** by
+Mechanism A instead. The launch trigger is `stage:<stage.id>` by default; the `learn-docs` cold door
+(which borrows the `plan` stage) overrides it to `command:learn-docs` via `launch_stage`'s
+`binding_trigger` parameter, so it never fires `stage:plan`. `objective-reconcile` is a non-launching
+**worker** (it rewrites the objective body, no initial prompt), so `command:objective-reconcile` has
+**no cold delivery surface** — it fires only at the warm door. `nudge` renders a ``Follow the
 `<skill>` skill.`` pointer line; `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
 frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal** warning when the
 file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
 on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).
 
-**Warm-door delivery (Node 2.2, TS extension):** `extension/bindingDelivery.ts` is the in-session twin
-of the cold door. `userOriginatedBindings(cwd)` is the TS mirror of cold's `mine` — the resolved
-overlay **minus the shipped defaults** by exact value-equality (a `SkillBinding` is a plain object, so
-the filter compares the full tuple), and `renderBindings(cwd, trigger)` / `commandBindingSuffix(cwd,
-trigger)` render exactly as the cold door does. It delivers at two **warm surfaces**: **Mechanism A**
-— a `before_agent_start` handler injects the launched **`stage:<id>`** bindings as a hidden
-(`display:false`) `perk:binding-context` message (mirroring `planMode.ts` / `objectiveAuthor.ts`);
-**Mechanism B** — `commandBindingSuffix` is appended into the guidance of the two non-stage warm
-slash-commands, **`command:objective-reconcile`** (the contract-mandated warm-only worker) and
-**`command:learn-docs`**. Delivery is **additive** (perk's hardcoded nudges untouched — Node 2.3) and
-**never double-delivers**.
+**Warm-door delivery (Node 2.2/2.3, TS extension):** `extension/bindingDelivery.ts` is the in-session
+twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resolve_bindings(...)
+.bindings` — the **full resolved** overlay (defaults ⊕ user, no subtraction — Node 2.3), and
+`renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
+It delivers at two **warm surfaces**: **Mechanism A** — a `before_agent_start` handler injects the
+launched **`stage:<id>`** bindings as a hidden (`display:false`) `perk:binding-context` message
+(mirroring `planMode.ts` / `objectiveAuthor.ts`). This is the delivery path for **`stage:plan`**'s
+`perk-plan` pointer (D6): a cold `perk plan` launches **idle** (no prompt to augment), so the one
+previously-ambient `plan` skill is now made **explicit** here. **Mechanism B** — `bindingSuffix` is
+appended into the guidance of **every** perk warm slash-command so each **self-delivers** its pointer
+(D5): `/address`→`stage:address`, `/learn`→`stage:learn`, `/objective-plan`→`stage:objective-plan`
+(a warm `/objective-plan` run *outside* a `stage:objective-plan` session would otherwise get none
+from Mechanism A), `/objective-reconcile`→`command:objective-reconcile`, `/learn-docs`→
+`command:learn-docs`. Delivery is the **single path** for perk's own nudges (Node 2.3 deleted the
+hardcoded strings) and **never double-delivers**.
 
 The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER` (TS) is pinned
 byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
 already puts `stage:<id>` bindings in a cold-launched session's **initial prompt**, and
 `before_agent_start` fires for that same session, so Mechanism A injects **iff** a launched `stage`
-exists, the user-originated render is non-empty, **and** no entry on `ctx.sessionManager.getBranch()`
+exists, the resolved render is non-empty, **and** no entry on `ctx.sessionManager.getBranch()`
 already carries `BINDING_HEADER` (the cold prompt OR a prior warm inject). The injected custom and the
 cold prompt both carry the header → idempotent across turns/reloads; after compaction drops the
 original the header disappears and it **re-delivers** (its ongoing value). Mechanism B is a one-shot
@@ -1344,7 +1348,12 @@ prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (th
 own them); only the transclude `warnings` are loud-but-non-fatal (Mechanism A logs them; the warm
 command path degrades silently to the nudge).
 
-> **Status (Node 2.2):** cold-door (Python) **and** warm-door (TS) delivery landed. Deferred: porting
-> perk's own hardcoded "Follow the … skill" strings onto the mechanism + deleting them → **Node 2.3**;
-> `doctor` target-existence validation → **Node 3.1**; `init` `[[bindings]]` template + user docs →
-> **Node 3.2**.
+> **Status (Node 2.3):** cold-door (Python) **and** warm-door (TS) delivery landed, **and** perk's own
+> hardcoded "Follow the … skill" strings are migrated onto the mechanism + deleted (Node 2.3) — the
+> skill-binding mechanism is now the single delivery path for perk's own nudges. The render header
+> was neutralized to `"The following skill binding(s) apply here:"` (the `.pi/perk.toml` parenthetical
+> was false for the delivered perk defaults). Known residual (out of scope, documented): in a cold
+> `learn-docs` session, after compaction Mechanism A re-renders the borrowed `stage:plan` and injects
+> `perk-plan` rather than `perk-learn-docs` — benign (learn-docs *is* a planning factory); a
+> pre-existing stage-vs-command `binding_trigger` quirk. Deferred: `doctor` target-existence
+> validation → **Node 3.1**; `init` `[[bindings]]` template + user docs → **Node 3.2**.

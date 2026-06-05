@@ -1,19 +1,23 @@
-// Node 2.2 — warm-door (TS-extension) delivery of user-originated skill bindings. The in-session
-// twin of Node 2.1's cold door (perk/binding_delivery.py): both planes render the SAME
-// user-originated overlay (`nudge` -> a pointer line, `transclude` -> the inlined skill body) under
-// the SAME header literal. The cold door appends it to a launch's initial prompt; this module
+// Node 2.2/2.3 — warm-door (TS-extension) delivery of resolved skill bindings. The in-session twin
+// of the cold door (perk/binding_delivery.py): both planes render the SAME resolved overlay
+// (defaults ⊕ the user bindings; `nudge` -> a pointer line, `transclude` -> the inlined skill body)
+// under the SAME header literal. The cold door appends it to a launch's initial prompt; this module
 // renders it at two WARM surfaces:
 //
 //   Mechanism A — stage triggers: a `before_agent_start` handler (mirroring planMode.ts /
-//   objectiveAuthor.ts) injects the launched stage's bindings as a hidden context message.
-//   Mechanism B — command triggers: `commandBindingSuffix()` is appended into the guidance of the
-//   two non-stage warm slash-commands (`/objective-reconcile`, `/learn-docs`).
+//   objectiveAuthor.ts) injects the launched stage's bindings as a hidden context message. This is
+//   the delivery path for `stage:plan`'s `perk-plan` pointer, since a cold `perk plan` launches
+//   idle (no initial prompt to augment) — Node 2.3, D6.
+//   Mechanism B — `bindingSuffix()` is appended into the guidance of perk's warm slash-commands so
+//   each self-delivers its own pointer (a warm `/objective-plan` run outside a stage:objective-plan
+//   session would not get one from Mechanism A).
 //
-// Delivery is ADDITIVE (perk's hardcoded "Follow the … skill" strings are untouched — Node 2.3
-// migrates them) and NEVER double-delivers. The cold↔warm dedup marker is `BINDING_HEADER` itself:
-// the cold door's initial prompt and every warm injection carry it, so Mechanism A injects ONLY
-// when nothing already on the branch carries the header (idempotent across turns/reloads; after
-// compaction drops the original the header disappears and it re-delivers — its ongoing value).
+// Node 2.3 made this the SINGLE delivery path for perk's own nudges (the hardcoded "Follow the …
+// skill" strings are gone). Delivery NEVER double-delivers: the cold↔warm dedup marker is
+// `BINDING_HEADER` itself — the cold door's initial prompt and every warm injection carry it, so
+// Mechanism A injects ONLY when nothing already on the branch carries the header (idempotent across
+// turns/reloads; after compaction drops the original the header disappears and it re-delivers —
+// its ongoing value).
 //
 // LBYL throughout (dignified-python's TS sibling): a missing/unreadable transclude target degrades
 // to the nudge pointer with a loud-but-non-fatal warning, never throws, never blocks a turn.
@@ -32,8 +36,7 @@ import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
  * door's `_HEADER` (perk/binding_delivery.py) — both planes render under it so a cold launch and a
  * warm injection never double-deliver. Pinned by a literal test in both planes (§8.9).
  */
-export const BINDING_HEADER =
-  "The following skill binding(s) apply here (configured via .pi/perk.toml):";
+export const BINDING_HEADER = "The following skill binding(s) apply here:";
 
 /** The hidden context customType carrying a warm-injected stage-binding render (Mechanism A). */
 export const BINDING_CONTEXT_TYPE = "perk:binding-context";
@@ -48,40 +51,22 @@ export interface BindingRender {
 }
 
 /**
- * Value-equality key for a binding — the TS twin of Python's frozen-dataclass set membership. A
- * `SkillBinding` is a plain object (no value identity), so the user-originated filter compares the
- * full tuple, exactly mirroring `binding not in default_set`.
+ * The full resolved bindings: the shipped defaults ⊕ the user overlay. The TS twin of cold's
+ * `resolve_bindings(...).bindings` (perk/binding_delivery.py) — Node 2.3 delivers the defaults too
+ * (perk's own nudges are no longer hardcoded), so there is no longer a default subtraction.
  */
-function bindingKey(binding: SkillBinding): string {
-  return JSON.stringify([
-    binding.trigger,
-    binding.kind,
-    binding.targetId,
-    binding.skill,
-    binding.mode,
-  ]);
+export function resolvedBindings(cwd: string): SkillBinding[] {
+  return resolveBindings(loadPerkConfig(cwd).bindings, loadDefaultBindings()).bindings;
 }
 
 /**
- * The user-originated resolved bindings: the resolved overlay MINUS the shipped defaults (by exact
- * value-equality). The TS twin of cold's `mine` (perk/binding_delivery.py) — perk still hardcodes
- * its own default nudges, so re-delivering a default would double up.
- */
-export function userOriginatedBindings(cwd: string): SkillBinding[] {
-  const defaults = loadDefaultBindings();
-  const resolved = resolveBindings(loadPerkConfig(cwd).bindings, defaults).bindings;
-  const defaultKeys = new Set(defaults.map(bindingKey));
-  return resolved.filter((binding) => !defaultKeys.has(bindingKey(binding)));
-}
-
-/**
- * Render the user-originated bindings matching `trigger` into a header-joined fragment (or `null`
- * when none match). `nudge` renders a `Follow the \`<skill>\` skill.` pointer; `transclude` inlines
+ * Render the resolved bindings matching `trigger` into a header-joined fragment (or `null` when
+ * none match). `nudge` renders a `Follow the \`<skill>\` skill.` pointer; `transclude` inlines
  * `.agents/skills/<skill>/SKILL.md` (frontmatter stripped), degrading to the nudge pointer with a
  * loud-but-non-fatal warning when the file is absent/unreadable. Pure but for the LBYL file read.
  */
 export function renderBindings(cwd: string, trigger: string): BindingRender {
-  const mine = userOriginatedBindings(cwd).filter((binding) => binding.trigger === trigger);
+  const mine = resolvedBindings(cwd).filter((binding) => binding.trigger === trigger);
   const warnings: string[] = [];
   const parts: string[] = [];
   for (const binding of mine) {
@@ -103,12 +88,13 @@ export function renderBindings(cwd: string, trigger: string): BindingRender {
 }
 
 /**
- * The Mechanism-B suffix: the rendered `command:<id>` bindings to append into a warm command's
- * guidance (empty string when none match). A leading blank line keeps it visually distinct from the
- * guidance it follows. The transclude warning (if any) degrades silently here — the nudge fallback
- * is what reaches the model; the loud surface is the cold launch + doctor.
+ * The Mechanism-B suffix: the rendered bindings for `trigger` to append into a warm command's
+ * guidance (empty string when none match). Every perk warm slash-command self-delivers its pointer
+ * this way (Node 2.3, D5), by `stage:<id>` or `command:<id>`. A leading blank line keeps it
+ * visually distinct from the guidance it follows. The transclude warning (if any) degrades silently
+ * here — the nudge fallback is what reaches the model; the loud surface is the cold launch + doctor.
  */
-export function commandBindingSuffix(cwd: string, trigger: string): string {
+export function bindingSuffix(cwd: string, trigger: string): string {
   const { text } = renderBindings(cwd, trigger);
   return text ? `\n\n${text}` : "";
 }
@@ -157,11 +143,11 @@ function activeStageRender(cwd: string, branch: readonly BranchEntry[]): Binding
 /**
  * Register warm-door binding delivery: Mechanism A's dedup-guarded `before_agent_start` injection
  * plus a `context` strip mirroring planMode.ts / objectiveAuthor.ts (keep while the stage's
- * bindings are live; strip the stale custom otherwise). Inert when nothing is user-originated;
- * never throws. Mechanism B (`commandBindingSuffix`) is wired by the command modules themselves.
+ * bindings are live; strip the stale custom otherwise). Inert when nothing matches the stage;
+ * never throws. Mechanism B (`bindingSuffix`) is wired by the command modules themselves.
  */
 export function registerBindingDelivery(pi: ExtensionAPI): void {
-  // Mechanism A — inject the launched stage's user-originated bindings as a hidden context message,
+  // Mechanism A — inject the launched stage's resolved bindings as a hidden context message,
   // but ONLY when no entry on the branch already carries BINDING_HEADER (the cold door's initial
   // prompt or a prior warm inject) — the cold↔warm idempotency guard.
   pi.on("before_agent_start", async (_event, ctx) => {

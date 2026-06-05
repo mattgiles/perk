@@ -1,6 +1,7 @@
 // hop-2 — unit tests for the pure `learnDocsGuidance` (the warm `/learn-docs` factory seed). The
 // command's delegation to `perk learn-docs --gather` is exercised offline elsewhere; here we pin
-// the guidance shape (inbox path, consumed numbers, skill pointer).
+// the guidance shape (inbox path, consumed numbers). The skill pointer is no longer in the pure
+// guidance — Node 2.3 delivers it via the skill-binding suffix (command:learn-docs).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -16,7 +17,7 @@ test("learnDocsGuidance carries the consumed learn numbers", () => {
   assert.match(text, /consumed_learn: \[45, 50\]/);
 });
 
-test("learnDocsGuidance points at the perk-learn-docs skill", () => {
+test("learnDocsGuidance no longer hardcodes the perk-learn-docs skill pointer (Node 2.3)", () => {
   const text = learnDocsGuidance("inbox.md", [45]);
-  assert.match(text, /perk-learn-docs skill/);
+  assert.doesNotMatch(text, /Follow the perk-learn-docs skill/);
 });

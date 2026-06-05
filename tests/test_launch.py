@@ -189,9 +189,10 @@ def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
     assert "Follow the `custom-implement` skill." in prompt  # delivered additively
 
 
-def test_user_binding_becomes_whole_prompt_when_no_base_prompt(tmp_path, capsys):
-    # Node 2.1: the `save` stage has no _initial_prompt, so a user binding at stage:save becomes
-    # the entire launch prompt (argv grows from no-prompt to a one-prompt argv).
+def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
+    # Node 2.3 (D2): cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
+    # `save` stage has no _initial_prompt, so even a user binding at stage:save does NOT become the
+    # launch prompt: argv stays a no-prompt argv (length 1). The warm Mechanism A delivers it there.
     launch_stage(
         repo_root=tmp_path,
         config=_config(tmp_path, [_binding("stage:save", "my-save-skill")]),
@@ -202,13 +203,13 @@ def test_user_binding_becomes_whole_prompt_when_no_base_prompt(tmp_path, capsys)
         pi_args=[],
     )
     data = json.loads(capsys.readouterr().out)
-    assert len(data["argv"]) == 2
-    assert "Follow the `my-save-skill` skill." in data["argv"][-1]
+    assert len(data["argv"]) == 1
+    assert data["argv"] == ["pi"]
 
 
-def test_no_user_bindings_no_double_delivery(tmp_path, capsys):
-    # Node 2.1: with no user bindings, the shipped default stage:implement nudge is NOT
-    # re-delivered — the only perk-implement reference is the hardcoded one.
+def test_shipped_default_delivered_once_to_initial_prompt(tmp_path, capsys):
+    # Node 2.3: with no user bindings, the shipped default stage:implement nudge IS now delivered
+    # (perk no longer hardcodes it) — appended once to the implement initial prompt.
     cache.write_plan_ref(tmp_path, _PLAN_REF)
     launch_stage(
         repo_root=tmp_path,
@@ -221,6 +222,7 @@ def test_no_user_bindings_no_double_delivery(tmp_path, capsys):
     )
     data = json.loads(capsys.readouterr().out)
     assert data["argv"][-1].count("perk-implement") == 1
+    assert "Follow the `perk-implement` skill." in data["argv"][-1]
 
 
 def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
@@ -239,28 +241,33 @@ def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["stage"] == "objective-plan"
     assert data["argv"][0] == "pi"
-    assert data["argv"][-1] == "SEED PROMPT for node 2.3"
+    # The seed wins over _initial_prompt; Node 2.3 appends the stage:objective-plan default binding
+    # (perk no longer hardcodes the pointer in the seed) additively after it.
+    assert data["argv"][-1].startswith("SEED PROMPT for node 2.3")
+    assert "Follow the `perk-objective-plan` skill." in data["argv"][-1]
 
 
 def test_initial_prompt_primes_implement_and_address():
     """P1.T4c Bug 1 + P2.T7: implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
-    # The implement prompt teaches the marker protocol + points at the perk-implement skill.
-    assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" in impl
+    # The implement prompt teaches the marker protocol; the perk-implement skill pointer is NOT
+    # hardcoded here anymore (Node 2.3 — it rides the skill-binding mechanism).
+    assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" not in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF)
-    assert addr is not None and "perk-address" in addr and "review-classifier" in addr
+    assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
     assert _initial_prompt(_stage("plan"), _PLAN_REF) is None
     assert _initial_prompt(_stage("implement"), None) is None
     assert _initial_prompt(_stage("address"), None) is None
 
 
 def test_initial_prompt_primes_learn():
-    """P2.T17: the learn stage is primed — it names the perk-learn skill, derives the merged PR
-    from the plan-<pr_id> head branch, and stays unprimed without a plan-ref."""
+    """P2.T17: the learn stage is primed — it derives the merged PR from the plan-<pr_id> head
+    branch and stays unprimed without a plan-ref (the perk-learn pointer rides the binding
+    mechanism — Node 2.3 — not the hardcoded prompt)."""
     learn = _initial_prompt(_stage("learn"), _PLAN_REF)
     assert learn is not None
-    assert "perk-learn" in learn
+    assert "perk-learn" not in learn  # Node 2.3 — the skill pointer rides the binding mechanism
     assert "plan-42" in learn  # the derived head branch (pr_id is the plan-issue number)
     assert "gh pr list --head plan-42" in learn
     assert "learn` tool" in learn  # drives the durable capture path

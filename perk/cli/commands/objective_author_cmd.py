@@ -42,8 +42,7 @@ def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -
 def _seed_prompt() -> str:
     """The authoring-seed initial prompt for the read-only objective-author session."""
     return (
-        "You are running the perk objective-author flow. Follow the perk-objective-author "
-        "skill.\n\n"
+        "You are running the perk objective-author flow.\n\n"
         "You are authoring a NEW objective: a long-running goal that GENERATES bounded plans "
         "rather than being implemented directly. In short:\n"
         "  1. Clarify the goal with the user; explore the codebase read-only for design context. "

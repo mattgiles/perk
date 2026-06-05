@@ -12,6 +12,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch } from "./cache.ts";
 import { type BranchEntry, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -185,10 +186,11 @@ const TOOL_GUIDELINES = [
   "Judgment and edits stay with you (the parent) — never delegate the fix; the spawned classifier is read-only and classification-only.",
 ];
 
-/** Inject the address-workflow guidance the model follows (points at the perk-address skill). */
+/** Inject the address-workflow guidance the model follows (the perk-address skill pointer is
+ * delivered by the skill-binding suffix — Node 2.3 — not hardcoded here). */
 function addressGuidance(preview: boolean): string {
   const base = [
-    "perk /address — the review loop. Follow the perk-address skill.",
+    "perk /address — the review loop.",
     "1. Spawn the `perk.review-classifier` agent via the `subagent` tool to fetch + classify the PR " +
       "feedback in an ISOLATED read-only child (it runs `perk pr-feedback` itself; the raw GitHub " +
       "JSON never enters this session). Review its structured classification.",
@@ -274,8 +276,9 @@ export function registerAddress(pi: ExtensionAPI): void {
         console.error("perk: /address invoked (headless)");
       }
       // Inject the address-workflow guidance as a user message so the model starts the loop.
-      // `pi.sendUserMessage` always triggers a turn (the warm entry to the review loop).
-      pi.sendUserMessage(guidance);
+      // `pi.sendUserMessage` always triggers a turn (the warm entry to the review loop). The
+      // perk-address pointer rides the skill-binding suffix (Node 2.3, D5).
+      pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "stage:address"));
     },
   });
 }
