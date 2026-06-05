@@ -6,13 +6,19 @@ The shipped defaults are passed explicitly so the tests are independent of the b
 
 from pathlib import Path
 
-from perk.binding_delivery import render_cold_bindings
+from perk.binding_delivery import _HEADER, render_cold_bindings
 from perk.bindings import Binding, load_bindings
 
 _DEFAULTS = [
     Binding("stage:implement", "stage", "implement", "perk-implement", "nudge"),
     Binding("stage:plan", "stage", "plan", "perk-plan", "nudge"),
 ]
+
+
+def test_binding_header_is_the_cross_plane_dedup_marker():
+    # Pinned byte-for-byte alongside the TS sibling (extension/bindingDelivery.test.ts): both planes
+    # render under this exact literal so a cold launch + a warm injection never double-deliver.
+    assert _HEADER == "The following skill binding(s) apply here (configured via .pi/perk.toml):"
 
 
 def _user(trigger: str, skill: str, mode: str) -> Binding:

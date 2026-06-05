@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./address.ts";
+import { registerBindingDelivery } from "./bindingDelivery.ts";
 import {
   ensureRunScratch,
   markHandoffConsumed,
@@ -298,6 +299,11 @@ export default function (pi: ExtensionAPI) {
   // perk:learn issues into an inbox (via the `perk learn-docs --gather` cold door) and injects the
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
   registerLearnDocs(pi);
+
+  // Node 2.2 — warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
+  // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the
+  // `command:<id>` suffix) is wired into the `/objective-reconcile` + `/learn-docs` guidance.
+  registerBindingDelivery(pi);
 
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check
   // that the converged ambient index reached `appendSystemPrompt` and the managed `AGENTS.md` block

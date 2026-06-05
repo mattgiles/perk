@@ -1293,7 +1293,34 @@ frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal
 file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
 on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).
 
-> **Status (Node 2.1):** cold-door delivery landed (Python plane). Deferred: warm-door delivery (the
-> TS extension) → **Node 2.2**; porting perk's own hardcoded "Follow the … skill" strings onto the
-> mechanism + deleting them → **Node 2.3**; `doctor` target-existence validation → **Node 3.1**;
-> `init` `[[bindings]]` template + user docs → **Node 3.2**.
+**Warm-door delivery (Node 2.2, TS extension):** `extension/bindingDelivery.ts` is the in-session twin
+of the cold door. `userOriginatedBindings(cwd)` is the TS mirror of cold's `mine` — the resolved
+overlay **minus the shipped defaults** by exact value-equality (a `SkillBinding` is a plain object, so
+the filter compares the full tuple), and `renderBindings(cwd, trigger)` / `commandBindingSuffix(cwd,
+trigger)` render exactly as the cold door does. It delivers at two **warm surfaces**: **Mechanism A**
+— a `before_agent_start` handler injects the launched **`stage:<id>`** bindings as a hidden
+(`display:false`) `perk:binding-context` message (mirroring `planMode.ts` / `objectiveAuthor.ts`);
+**Mechanism B** — `commandBindingSuffix` is appended into the guidance of the two non-stage warm
+slash-commands, **`command:objective-reconcile`** (the contract-mandated warm-only worker) and
+**`command:learn-docs`**. Delivery is **additive** (perk's hardcoded nudges untouched — Node 2.3) and
+**never double-delivers**.
+
+The **cross-plane dedup marker is the render header itself** — `BINDING_HEADER` (TS) is pinned
+byte-for-byte to the cold `_HEADER` (Python) by a literal test in **both** planes. The cold door
+already puts `stage:<id>` bindings in a cold-launched session's **initial prompt**, and
+`before_agent_start` fires for that same session, so Mechanism A injects **iff** a launched `stage`
+exists, the user-originated render is non-empty, **and** no entry on `ctx.sessionManager.getBranch()`
+already carries `BINDING_HEADER` (the cold prompt OR a prior warm inject). The injected custom and the
+cold prompt both carry the header → idempotent across turns/reloads; after compaction drops the
+original the header disappears and it **re-delivers** (its ongoing value). Mechanism B is a one-shot
+`sendUserMessage` suffix at an invocation distinct from any cold launch, so it cannot auto-double. A
+narrower-than-`planMode` `context` strip removes a **stale** `perk:binding-context` custom (stage
+changed / overlay removed) while **never** stripping a user message that carries the header (a cold
+prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
+own them); only the transclude `warnings` are loud-but-non-fatal (Mechanism A logs them; the warm
+command path degrades silently to the nudge).
+
+> **Status (Node 2.2):** cold-door (Python) **and** warm-door (TS) delivery landed. Deferred: porting
+> perk's own hardcoded "Follow the … skill" strings onto the mechanism + deleting them → **Node 2.3**;
+> `doctor` target-existence validation → **Node 3.1**; `init` `[[bindings]]` template + user docs →
+> **Node 3.2**.
