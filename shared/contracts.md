@@ -1359,8 +1359,34 @@ original the header disappears and it **re-delivers** (its ongoing value). Mecha
 narrower-than-`planMode` `context` strip removes a **stale** `perk:binding-context` custom (stage
 changed / overlay removed) while **never** stripping a user message that carries the header (a cold
 prompt legitimately does). Resolver shape `issues` are **not** surfaced warm (the cold launch + doctor
-own them); only the transclude `warnings` are loud-but-non-fatal (Mechanism A logs them; the warm
-command path degrades silently to the nudge).
+own them); only the delivery `warnings` are loud-but-non-fatal: Mechanism A `console.error`s them,
+and **`bindingSuffix` (Mechanism B) now `console.error`s them too** (Node 3.1) — previously it
+degraded silently. The injection-time mirror is **skill-presence only** (the trigger is fixed at
+injection): the **`nudge`** path now warns when its skill is not installed under
+`.agents/skills/<name>/SKILL.md` (mirroring the long-standing `transclude` warning), so every
+delivered binding whose skill is missing yields **exactly one** warning, in both planes — never
+silently delivered. Injection checks only user-originated skills (installed under `.agents/skills`),
+so it uses that path **only** (no self-repo fallback).
+
+**Validation (`doctor`, Node 3.1):** `perk doctor` adds one rolled-up, non-fatal **`bindings`**
+check (`perk/doctor.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
+defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
+per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
+SKILL.md`, with a self-repo `skills/<name>/SKILL.md` fallback (perk's own `perk-*` skills are not
+symlinked — `bindings.is_skill_installed(root, skill, *, self_repo)`, D4) — and **target-existence**
+— `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
+`DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs}` (the only command triggers perk's
+delivery layer fires; a `command:<id>` outside it never fires). Every binding finding is a **`warn`**
+(loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration (a consumer that
+has not run `skills sync` yet is not failed). A `BindingsError` on the *bundled* file is a `fail`
+("Reinstall perk"; cannot occur in a healthy install). A `RegistryError`/bad-TOML during the check
+degrades to a warn note rather than failing (the registry/config checks own those failures). The
+check is report-only — no `--fix` for bindings.
+
+> **Status (Node 3.1):** `doctor` target-existence/skill-presence validation landed (the non-fatal
+> `bindings` check), plus the injection-time skill-presence mirror (the `nudge` path warns;
+> `bindingSuffix` now logs its warnings). Deferred: `init` `[[bindings]]` commented template + user
+> docs → **Node 3.2**.
 
 > **Status (Node 2.3):** cold-door (Python) **and** warm-door (TS) delivery landed, **and** perk's own
 > hardcoded "Follow the … skill" strings are migrated onto the mechanism + deleted (Node 2.3) — the

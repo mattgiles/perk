@@ -33,6 +33,21 @@ SUPPORTED_SCHEMA_VERSION = 1
 TRIGGER_KINDS: tuple[str, ...] = ("stage", "command")
 MODES: tuple[str, ...] = ("nudge", "transclude")
 
+# The `command:<id>` targets that perk's binding-delivery layer actually fires (Node 3.1, D5).
+# A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
+# only deliverable command triggers are the two Mechanism-B call sites (`bindingSuffix` in
+# extension/objectivePlan.ts + extension/learnDocs.ts) plus the cold `binding_trigger=
+# "command:learn-docs"` override in perk/launch.py. Commands that ARE registry stages bind via
+# `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
+DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset({"objective-reconcile", "learn-docs"})
+
+# Where an installed skill body lives. Consumers symlink skills under `.agents/skills/<name>/`;
+# perk's own self-repo keeps its `perk-*` skills under `skills/<name>/` (not symlinked — they reach
+# Pi via the `..` package), so doctor accepts that fallback under `self_repo`.
+_SKILLS_DIR = Path(".agents/skills")
+_SELF_REPO_SKILLS_DIR = Path("skills")
+_SKILL_FILENAME = "SKILL.md"
+
 
 @dataclass(frozen=True)
 class Binding:
@@ -236,3 +251,20 @@ def resolve_bindings(
             index[binding.trigger] = len(resolved)
             resolved.append(binding)
     return ResolvedBindings(bindings=resolved, issues=issues)
+
+
+# ----------------------------------------------------------------- target-existence (doctor, 3.1)
+
+
+def is_skill_installed(root: Path, skill: str, *, self_repo: bool = False) -> bool:
+    """True iff ``skill``'s ``SKILL.md`` is installed under ``root`` (the delivery read path).
+
+    Checks ``.agents/skills/<skill>/SKILL.md`` — byte-identical to the cold/warm delivery readers
+    (``binding_delivery._read_skill_body`` / ``bindingDelivery.readSkillBody``). When ``self_repo``
+    is set, also accepts perk's own ``skills/<skill>/SKILL.md`` layout (its ``perk-*`` skills are
+    not symlinked under ``.agents/skills`` — they reach Pi via the ``..`` package). The self-repo
+    fallback is doctor-only; injection always uses the default ``self_repo=False``.
+    """
+    if (root / _SKILLS_DIR / skill / _SKILL_FILENAME).is_file():
+        return True
+    return self_repo and (root / _SELF_REPO_SKILLS_DIR / skill / _SKILL_FILENAME).is_file()

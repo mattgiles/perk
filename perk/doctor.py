@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import cache, capabilities, env, git, github, init, registry
+from perk import bindings, cache, capabilities, env, git, github, init, registry
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.github import GitHubError
@@ -243,6 +243,72 @@ def _registry_check() -> Check:
     return Check("registry", "registry", "ok", f"registry valid ({len(reg.stages)} stages)")
 
 
+def _bindings_check(root: Path, self_repo: bool) -> Check:
+    """Validate the FULL resolved skill-binding set: dropped-user issues + target existence (3.1).
+
+    Loud-but-non-fatal (D1): every binding misconfiguration is a ``warn`` so ``perk doctor`` stays
+    exit-0 over it. A ``BindingsError`` on the *bundled* file is a ``fail`` (cannot happen in a
+    healthy install; mirrors ``_registry_check``). The full resolved set is validated (D3): the
+    resolver's dropped-user-binding ``issues`` plus, per delivered binding, skill-presence and
+    trigger-target existence (D5). Self-repo accepts the ``skills/<name>`` skill layout (D4).
+    """
+    try:
+        defaults = bindings.load_bindings().bindings
+    except bindings.BindingsError as exc:
+        return Check(
+            "bindings", "bindings", "fail", "bindings not loadable", str(exc), "Reinstall perk."
+        )
+
+    problems: list[str] = []
+    try:
+        user = load_config(root).user_bindings
+    except tomllib.TOMLDecodeError:
+        user = []
+        problems.append("user bindings not evaluated — config invalid; see the config check")
+
+    resolved = bindings.resolve_bindings(user, defaults=defaults)
+    problems.extend(str(i) for i in resolved.issues)
+
+    try:
+        stage_ids: set[str] | None = registry.load_registry().stage_ids()
+    except registry.RegistryError:
+        stage_ids = None
+        problems.append("stage targets not validated — registry unloadable; see the registry check")
+
+    for binding in resolved.bindings:
+        if not bindings.is_skill_installed(root, binding.skill, self_repo=self_repo):
+            problems.append(
+                f"{binding.trigger}: skill `{binding.skill}` is not installed "
+                f"(no .agents/skills/{binding.skill}/SKILL.md)"
+            )
+        if binding.kind == "stage" and stage_ids is not None and binding.target_id not in stage_ids:
+            problems.append(
+                f"{binding.trigger}: stage `{binding.target_id}` is not a registry stage"
+            )
+        elif (
+            binding.kind == "command"
+            and binding.target_id not in bindings.DELIVERABLE_COMMAND_TARGETS
+        ):
+            problems.append(
+                f"{binding.trigger}: command `{binding.target_id}` has no perk binding-delivery "
+                "surface (this binding never fires)"
+            )
+
+    if not problems:
+        return Check("bindings", "bindings", "ok", f"bindings valid ({len(resolved.bindings)})")
+    shown = "; ".join(problems[:3])
+    if len(problems) > 3:
+        shown += f" (+{len(problems) - 3} more)"
+    return Check(
+        "bindings",
+        "bindings",
+        "warn",
+        f"bindings: {len(problems)} problem(s)",
+        shown,
+        "Fix .pi/perk.toml [[bindings]], run 'skills sync', or re-run 'perk init'.",
+    )
+
+
 def _subagent_engine_check(root: Path) -> Check:
     """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
 
@@ -296,6 +362,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
+    checks.append(_bindings_check(root, self_repo))
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     return checks

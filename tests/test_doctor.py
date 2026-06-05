@@ -227,6 +227,74 @@ def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     assert agents_block.status == "fail"  # un-readable -> fail, never a crash
 
 
+# --- bindings check (Node 3.1) --------------------------------------------------------------
+
+
+def _install_default_skills(root, subdir=".agents/skills"):
+    """Plant a SKILL.md for each of the 8 shipped default binding skills under ``subdir``."""
+    from perk.bindings import load_bindings
+
+    for binding in load_bindings().bindings:
+        path = root / subdir / binding.skill / "SKILL.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# skill\n", encoding="utf-8")
+
+
+def _bindings_check(report):
+    return next(c for c in report.checks if c.name == "bindings")
+
+
+def test_bindings_check_ok_when_defaults_installed(git_repo):
+    _scaffold(git_repo)
+    _install_default_skills(git_repo)
+    check = _bindings_check(run_doctor(git_repo, verify=False))
+    assert check.status == "ok" and check.group == "bindings"
+
+
+def test_bindings_check_warns_on_missing_skill_but_stays_healthy(git_repo):
+    _scaffold(git_repo)
+    _install_default_skills(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text(
+        '[[bindings]]\ntrigger = "stage:plan"\nskill = "ghost-skill"\nmode = "nudge"\n',
+        encoding="utf-8",
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = _bindings_check(report)
+    assert check.status == "warn" and "ghost-skill" in check.detail
+    assert report.healthy and report.exit_code == 0  # loud-but-non-fatal
+
+
+def test_bindings_check_warns_on_unknown_stage_target(git_repo):
+    _scaffold(git_repo)
+    _install_default_skills(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text(
+        '[[bindings]]\ntrigger = "stage:nope"\nskill = "perk-plan"\nmode = "nudge"\n',
+        encoding="utf-8",
+    )
+    check = _bindings_check(run_doctor(git_repo, verify=False))
+    assert check.status == "warn" and "nope" in check.detail
+
+
+def test_bindings_check_warns_on_command_without_delivery_surface(git_repo):
+    _scaffold(git_repo)
+    _install_default_skills(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text(
+        '[[bindings]]\ntrigger = "command:ci"\nskill = "perk-plan"\nmode = "nudge"\n',
+        encoding="utf-8",
+    )
+    check = _bindings_check(run_doctor(git_repo, verify=False))
+    assert check.status == "warn" and "never fires" in check.detail
+
+
+def test_bindings_check_self_repo_skills_fallback(git_repo):
+    _scaffold(git_repo)
+    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+    _install_default_skills(git_repo, subdir="skills")  # perk's own layout, not .agents/skills
+    report = run_doctor(git_repo, verify=False)
+    assert report.self_repo is True
+    assert _bindings_check(report).status == "ok"  # self-repo skills/ fallback, not 8 warnings
+
+
 def test_self_vs_consumer_dual_mode(git_repo):
     _scaffold(git_repo)
     assert run_doctor(git_repo, verify=False).self_repo is False

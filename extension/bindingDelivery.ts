@@ -80,6 +80,14 @@ export function renderBindings(cwd: string, trigger: string): BindingRender {
         `skill binding: transclude target for \`${binding.skill}\` not found under ` +
           `${SKILLS_SUBDIR}/${binding.skill}/${SKILL_FILENAME} — falling back to a pointer.`,
       );
+    } else if (!skillInstalled(cwd, binding.skill)) {
+      // The nudge mirror of the transclude warning (Node 3.1, D6): a binding to a skill that is
+      // not installed is reported loud-but-non-fatal, never silently delivered. The pointer is
+      // still emitted so the model gets the nudge.
+      warnings.push(
+        `skill binding: skill \`${binding.skill}\` for \`${binding.trigger}\` is not installed ` +
+          `under ${SKILLS_SUBDIR}/${binding.skill}/${SKILL_FILENAME} — the pointer may dangle.`,
+      );
     }
     parts.push(`Follow the \`${binding.skill}\` skill.`);
   }
@@ -91,12 +99,19 @@ export function renderBindings(cwd: string, trigger: string): BindingRender {
  * The Mechanism-B suffix: the rendered bindings for `trigger` to append into a warm command's
  * guidance (empty string when none match). Every perk warm slash-command self-delivers its pointer
  * this way (Node 2.3, D5), by `stage:<id>` or `command:<id>`. A leading blank line keeps it
- * visually distinct from the guidance it follows. The transclude warning (if any) degrades silently
- * here — the nudge fallback is what reaches the model; the loud surface is the cold launch + doctor.
+ * visually distinct from the guidance it follows. Any render warnings (missing transclude target or
+ * uninstalled nudge skill) are `console.error`-ed loud-but-non-fatal (Node 3.1, D6) — the nudge
+ * fallback still reaches the model, but the misconfiguration is no longer surfaced silently.
  */
 export function bindingSuffix(cwd: string, trigger: string): string {
-  const { text } = renderBindings(cwd, trigger);
+  const { text, warnings } = renderBindings(cwd, trigger);
+  for (const warning of warnings) console.error(`perk: ${warning}`);
   return text ? `\n\n${text}` : "";
+}
+
+/** Whether `.agents/skills/<skill>/SKILL.md` exists under `cwd` (the warm delivery read path). */
+function skillInstalled(cwd: string, skill: string): boolean {
+  return existsSync(join(cwd, SKILLS_SUBDIR, skill, SKILL_FILENAME));
 }
 
 /** Read `.agents/skills/<skill>/SKILL.md` (frontmatter stripped); `null` if absent/unreadable. */

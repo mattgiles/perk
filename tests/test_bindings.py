@@ -10,9 +10,11 @@ the loader itself stays registry-free (target-existence is doctor's job, Node 3.
 import pytest
 
 from perk.bindings import (
+    DELIVERABLE_COMMAND_TARGETS,
     Binding,
     BindingsError,
     Severity,
+    is_skill_installed,
     load_bindings,
     resolve_bindings,
     validate,
@@ -193,3 +195,35 @@ def test_resolve_defaults_to_shipped_when_omitted():
     resolved = resolve_bindings([])
     assert [(b.trigger, b.skill, b.mode) for b in resolved.bindings] == EXPECTED_DEFAULTS
     assert resolved.issues == []
+
+
+# --- target-existence primitives (Node 3.1, doctor) -----------------------------------------
+
+
+def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
+    # The only command triggers perk's delivery layer fires; stage-named commands bind via stage:.
+    assert frozenset({"objective-reconcile", "learn-docs"}) == DELIVERABLE_COMMAND_TARGETS
+
+
+def _plant_skill(root, subdir, name):
+    path = root / subdir / name / "SKILL.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# skill\n", encoding="utf-8")
+
+
+def test_is_skill_installed_absent(tmp_path):
+    assert is_skill_installed(tmp_path, "ghost") is False
+    assert is_skill_installed(tmp_path, "ghost", self_repo=True) is False
+
+
+def test_is_skill_installed_under_agents_skills(tmp_path):
+    _plant_skill(tmp_path, ".agents/skills", "my-skill")
+    assert is_skill_installed(tmp_path, "my-skill") is True
+    assert is_skill_installed(tmp_path, "my-skill", self_repo=True) is True
+
+
+def test_is_skill_installed_self_repo_fallback(tmp_path):
+    # perk's own perk-* skills live under skills/<name>/ (not .agents/skills/) — a doctor fallback.
+    _plant_skill(tmp_path, "skills", "perk-plan")
+    assert is_skill_installed(tmp_path, "perk-plan") is False  # not the injection read path
+    assert is_skill_installed(tmp_path, "perk-plan", self_repo=True) is True
