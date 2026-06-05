@@ -165,6 +165,144 @@ def test_no_actionable_node(monkeypatch):
         assert json.loads(result2.output)["error_type"] == "no_actionable_node"
 
 
+def test_resumes_orphaned_planning_claim(monkeypatch):
+    # A `planning` head node with no pr (an abandoned claim) is re-selected and re-marked planning.
+    _authed(monkeypatch)
+    orphaned = github.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Resume",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr=None),
+            objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+        ),
+    )
+    monkeypatch.setattr(github, "get_objective", lambda **k: orphaned)
+    marked: dict = {}
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: (
+            marked.update(k)
+            or github.ObjectiveNodeUpdate(
+                number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+            )
+        ),
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert marked["node_id"] == "1.1" and marked["status"] is N.PLANNING
+    assert launched["stage"] == "objective-plan"
+
+
+def _in_flight_state():
+    return github.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="In flight",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS, pr="#9"),
+            objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+        ),
+    )
+
+
+def test_in_flight_node_reports_objective_in_flight(monkeypatch):
+    # A head in_progress node blocks the rest: no plannable node -> objective_in_flight, no launch.
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_objective", lambda **k: _in_flight_state())
+
+    def boom_update(**k):
+        raise AssertionError("must not mark when in flight")
+
+    def boom_launch(**k):
+        raise AssertionError("must not launch when in flight")
+
+    monkeypatch.setattr(github, "update_objective_node", boom_update)
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "objective_in_flight"
+
+
+def test_complete_objective_reports_complete_message(monkeypatch):
+    _authed(monkeypatch)
+    done_only = github.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Done",
+        header={},
+        nodes=(objective.ObjectiveNode(id="1.1", description="A", status=N.DONE),),
+    )
+    monkeypatch.setattr(github, "get_objective", lambda **k: done_only)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["error_type"] == "no_actionable_node"
+        assert "complete" in payload["message"]
+
+
+def test_explicit_node_resumes_planning_claim(monkeypatch):
+    _authed(monkeypatch)
+    orphaned = github.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Resume",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr=None),
+            objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+        ),
+    )
+    monkeypatch.setattr(github, "get_objective", lambda **k: orphaned)
+    marked: dict = {}
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: (
+            marked.update(k)
+            or github.ObjectiveNodeUpdate(
+                number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+            )
+        ),
+    )
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--node", "1.1", "--json"])
+        assert result.exit_code == 0, result.output
+    assert marked["node_id"] == "1.1"
+
+
+def test_explicit_in_flight_node_rejected(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_objective", lambda **k: _in_flight_state())
+    monkeypatch.setattr(
+        github, "update_objective_node", lambda **k: AssertionError("must not mark")
+    )
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--node", "1.1", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "objective_in_flight"
+
+
 def test_remote_blocked(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "get_objective", lambda **k: _state())

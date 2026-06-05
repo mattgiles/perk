@@ -116,6 +116,38 @@ test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)
   }
 });
 
+test("tool: plan_save threads node_id into --node-id next to --objective-id (P2.T10)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, objective_id: "7", node_id: "1.1" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(
+      argv.includes("--node-id") && argv[argv.indexOf("--node-id") + 1] === "1.1",
+      `--node-id 1.1 was delegated (got ${JSON.stringify(argv)})`,
+    );
+    assert.ok(argv.includes("--objective-id"), "--objective-id still delegated alongside");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save without node_id omits --node-id", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, objective_id: "7" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(!argv.includes("--node-id"), "plan without node_id omits --node-id");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: plan_save threads consumed_learn into --consumed-learn (hop-2)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");

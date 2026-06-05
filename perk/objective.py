@@ -75,6 +75,13 @@ class NodeStatus(StrEnum):
 # The terminal statuses (a dependency is "satisfied" only when terminal).
 TERMINAL: frozenset[NodeStatus] = frozenset({NodeStatus.DONE, NodeStatus.SKIPPED})
 
+# Lifecycle categories for factory selection (P2.T10 — the resumable-lease model). `planning` is a
+# resumable CLAIM (re-selectable until a plan is committed); `in_progress` is a COMMITTED plan (a
+# plan was saved and the node↔plan backlink set atomically by `plan-save`). A `planning` node IS
+# plannable, but only while it carries no `pr` backlink (see `plannable_nodes`).
+PLANNABLE: frozenset[NodeStatus] = frozenset({NodeStatus.PENDING, NodeStatus.PLANNING})
+IN_FLIGHT: frozenset[NodeStatus] = frozenset({NodeStatus.PLANNING, NodeStatus.IN_PROGRESS})
+
 _VALID_STATUS_VALUES = frozenset(s.value for s in NodeStatus)
 
 
@@ -425,6 +432,20 @@ def slugify_description(description: str) -> str:
 
 
 @dataclass(frozen=True)
+class PlanSelection:
+    """The classified planning state of an objective (drives the factory's honest reporting).
+
+    ``kind`` is one of ``"plannable"`` (a resumable node is ready), ``"in_flight"`` (a plan is in
+    flight — implement it, don't re-plan), ``"blocked"`` (every remaining node is blocked by an
+    unfinished dependency), or ``"complete"`` (every node is terminal). ``node`` is the relevant
+    node for ``plannable``/``in_flight``, else ``None``.
+    """
+
+    kind: str
+    node: ObjectiveNode | None
+
+
+@dataclass(frozen=True)
 class DependencyGraph:
     """A DAG of objective nodes with resolved (never-``None``) dependency edges."""
 
@@ -447,10 +468,57 @@ class DependencyGraph:
         """All unblocked ``pending`` nodes, in position order."""
         return [n for n in self.unblocked_nodes() if n.status == NodeStatus.PENDING]
 
+    def plannable_nodes(self) -> list[ObjectiveNode]:
+        """All unblocked, resumable/plannable nodes in position order.
+
+        A node is plannable when it is ``pending``, or a ``planning`` **claim with no saved plan**
+        (``pr is None``). A ``planning`` node that already carries a ``pr`` backlink is treated as
+        in-flight (a committed plan), not resumable.
+        """
+        return [
+            n
+            for n in self.unblocked_nodes()
+            if n.status == NodeStatus.PENDING or (n.status == NodeStatus.PLANNING and n.pr is None)
+        ]
+
+    def next_plannable(self) -> ObjectiveNode | None:
+        """The first plannable node by position, else ``None``."""
+        plannable = self.plannable_nodes()
+        return plannable[0] if plannable else None
+
+    def in_flight_nodes(self) -> list[ObjectiveNode]:
+        """Nodes with a committed/in-flight plan, in position order.
+
+        ``in_progress`` (a committed plan), or a ``planning`` node that already carries a ``pr``
+        backlink (a saved-but-not-yet-advanced edge case).
+        """
+        return [
+            n
+            for n in self.nodes
+            if n.status == NodeStatus.IN_PROGRESS
+            or (n.status == NodeStatus.PLANNING and n.pr is not None)
+        ]
+
+    def classify_for_planning(self) -> PlanSelection:
+        """Classify the objective's planning state (drives honest factory reporting).
+
+        Order: a plannable node wins; else complete; else an in-flight node; else blocked.
+        """
+        node = self.next_plannable()
+        if node is not None:
+            return PlanSelection(kind="plannable", node=node)
+        if self.is_complete():
+            return PlanSelection(kind="complete", node=None)
+        in_flight = self.in_flight_nodes()
+        if in_flight:
+            return PlanSelection(kind="in_flight", node=in_flight[0])
+        return PlanSelection(kind="blocked", node=None)
+
     def next_node(self) -> ObjectiveNode | None:
-        """The first unblocked pending node by position, else ``None``."""
-        pending = self.pending_unblocked_nodes()
-        return pending[0] if pending else None
+        """The first **plannable** node (pending, or a ``planning`` claim with no saved plan),
+        else ``None``. Delegates to :meth:`next_plannable` so factory-facing surfaces
+        (``objective next``/``show``) resume an abandoned ``planning`` claim."""
+        return self.next_plannable()
 
     def is_complete(self) -> bool:
         """True when every node is terminal."""

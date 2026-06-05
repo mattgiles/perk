@@ -161,6 +161,63 @@ def test_next_node_blocked_by_unfinished_dep():
     assert graph.next_node() is None
 
 
+def test_next_plannable_resumes_orphaned_planning_claim():
+    # A `planning` head node with no pr is a resumable claim -> re-selectable.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr=None),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+    ]
+    graph = o.build_graph(nodes)
+    nxt = graph.next_plannable()
+    assert nxt is not None and nxt.id == "1.1"
+    # next_node() delegates to next_plannable()
+    delegated = graph.next_node()
+    assert delegated is not None and delegated.id == "1.1"
+    assert [n.id for n in graph.plannable_nodes()] == ["1.1"]  # 1.2 blocked behind 1.1
+    assert graph.in_flight_nodes() == []
+
+
+def test_planning_with_pr_is_in_flight_not_plannable():
+    # A `planning` node that already carries a pr backlink is in-flight, not resumable.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr="#9"),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+    ]
+    graph = o.build_graph(nodes)
+    assert graph.next_plannable() is None  # 1.1 in-flight, 1.2 blocked behind it
+    assert [n.id for n in graph.in_flight_nodes()] == ["1.1"]
+    assert graph.plannable_nodes() == []
+
+
+def test_classify_for_planning_kinds():
+    # plannable: a pending unblocked head.
+    plannable = o.build_graph(_nodes()).classify_for_planning()
+    assert plannable.kind == "plannable" and plannable.node is not None
+    # complete: all terminal.
+    done = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.DONE),
+        o.ObjectiveNode(id="1.2", description="B", status=N.SKIPPED),
+    ]
+    assert o.build_graph(done).classify_for_planning().kind == "complete"
+    # in_flight: head in_progress blocks the rest, nothing plannable.
+    in_flight = o.build_graph(
+        [
+            o.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS),
+            o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+        ]
+    ).classify_for_planning()
+    assert in_flight.kind == "in_flight" and in_flight.node is not None
+    assert in_flight.node.id == "1.1"
+    # blocked: head explicitly blocked, nothing in-flight, nothing plannable.
+    blocked = o.build_graph(
+        [
+            o.ObjectiveNode(id="1.1", description="A", status=N.BLOCKED),
+            o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
+        ]
+    ).classify_for_planning()
+    assert blocked.kind == "blocked" and blocked.node is None
+
+
 def test_is_complete_and_summary():
     done = [
         o.ObjectiveNode(id="1.1", description="A", status=N.DONE),

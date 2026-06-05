@@ -344,10 +344,9 @@ function factoryGuidance(objective: string, node: string | null): string {
     "3. OPTIONALLY spawn `perk.objective-explorer` (the `subagent` tool) for read-only exploration " +
       "when the node is large; review its double-delivery findings.",
     `4. Author a BOUNDED plan scoped to the one node (reference \`Part of Objective #${objective}\`), ` +
-      `then persist with \`plan_save\` (pass \`objective_id: "${objective}"\`) — ALWAYS save, NEVER ` +
-      "implement directly.",
-    "5. After save, link the node to the plan: the `objective_node` tool in its pr-only shape " +
-      `\`{ objective: ${objective}, node: "<id>", pr: "#<plan-issue-number>" }\` (no status, no audit).`,
+      `then persist with \`plan_save\`, passing BOTH \`objective_id: "${objective}"\` AND ` +
+      '`node_id: "<id>"` — ALWAYS save, NEVER implement directly. `plan_save` links the node to ' +
+      "the plan and advances it `planning → in_progress` automatically (no separate backlink call).",
   ].join("\n");
 }
 
