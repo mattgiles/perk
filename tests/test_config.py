@@ -27,3 +27,35 @@ def test_local_overrides_committed(tmp_path):
 def test_absolute_root_preserved(tmp_path):
     _write(tmp_path, "perk.toml", '[worktree]\nroot = "/abs/wt"\n')
     assert load_config(tmp_path).worktree_root == Path("/abs/wt")
+
+
+def test_user_bindings_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).user_bindings == []
+
+
+def test_user_bindings_parsed_from_array_of_tables(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[[bindings]]\ntrigger = "stage:plan"\nskill = "house-style"\nmode = "transclude"\n',
+    )
+    bindings = load_config(tmp_path).user_bindings
+    assert [(b.trigger, b.kind, b.target_id, b.skill, b.mode) for b in bindings] == [
+        ("stage:plan", "stage", "plan", "house-style", "transclude")
+    ]
+
+
+def test_local_bindings_replace_committed_array(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[[bindings]]\ntrigger = "stage:plan"\nskill = "committed"\nmode = "nudge"\n',
+    )
+    _write(
+        tmp_path,
+        "perk.local.toml",
+        '[[bindings]]\ntrigger = "stage:implement"\nskill = "local"\nmode = "nudge"\n',
+    )
+    bindings = load_config(tmp_path).user_bindings
+    # Whole-array replace (local wins): the committed binding is gone entirely.
+    assert [(b.trigger, b.skill) for b in bindings] == [("stage:implement", "local")]
