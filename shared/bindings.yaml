@@ -1,0 +1,61 @@
+# perk skill bindings — the SECOND parsed cross-plane contract (sibling of registry.yaml).
+#
+# Authored once here, bundled into each build artifact (wheel -> perk/_shared/,
+# npm tarball -> shared/), and parsed directly by both planes at runtime: the
+# Python reader is perk/bindings.py, the TS reader is extension/bindings.ts. No
+# codegen step — both planes read this same file.
+#
+# Vocabulary — a binding's `trigger` is one "<kind>:<id>" string, kind ∈ {stage, command}:
+#   stage:<id>    — <id> is a registry stage id (e.g. stage:implement). Fires at that
+#                   stage's launch / session entry.
+#   command:<id>  — <id> is a perk command / slash-command that is NOT a registry stage
+#                   (e.g. command:learn-docs). Fires when that command runs.
+# Kind-selection rule: when a command corresponds 1:1 to a registry stage of the same
+# name, bind to stage:<id> (the canonical trigger — the delivery layer fires it across
+# both the cold launch and the warm slash-command of that name). Use command:<id> ONLY
+# for commands that have no registry stage. This keeps the default set free of redundant
+# stage+command pairs for one skill.
+#
+# Binding model — each binding has exactly three authored fields:
+#   trigger — the "<kind>:<id>" string above.
+#   skill   — the skill name (a skills/*/ dir name today).
+#   mode    — per-binding delivery mode:
+#               nudge      — deliver a short pointer to follow the named skill (the skill
+#                            body stays ambient / Pi-discovered).
+#               transclude — inline the skill body into the prompt/context.
+#             mode is per-binding (not global): one skill may be a nudge at one trigger
+#             and a transclude at another.
+#
+# Status (Node 1.1): this file LOCKS the shape + the shipped defaults with NO runtime
+# behavior. The resolver (shipped-defaults ⊕ user-bindings) is Node 1.2; nudge/transclude
+# delivery is Nodes 2.1/2.2; porting perk's own hardcoded "Follow the … skill" strings is
+# Node 2.3. Target-existence validation (is stage:<id> a real stage? is command:<id> a real
+# command?) lives in `doctor` (Node 3.1), NOT in the loaders — they validate shape only.
+
+schema_version: 1
+
+bindings:
+  - trigger: "stage:plan"
+    skill: perk-plan
+    mode: nudge
+  - trigger: "stage:objective-author"
+    skill: perk-objective-author
+    mode: nudge
+  - trigger: "stage:objective-plan"
+    skill: perk-objective-plan
+    mode: nudge
+  - trigger: "stage:implement"
+    skill: perk-implement
+    mode: nudge
+  - trigger: "stage:address"
+    skill: perk-address
+    mode: nudge
+  - trigger: "stage:learn"
+    skill: perk-learn
+    mode: nudge
+  - trigger: "command:objective-reconcile"
+    skill: perk-objective-reconcile
+    mode: nudge
+  - trigger: "command:learn-docs"
+    skill: perk-learn-docs
+    mode: nudge

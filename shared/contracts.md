@@ -5,8 +5,10 @@ each build artifact (`Q12`). These are **prose specs** (no parser): the Python C
 and the TS extension (`@perk/pi`) each implement one side, against the exact names/paths/
 fields pinned below. `perk doctor` (T6) verifies conformance.
 
-The stage registry — the one *parsed* contract — is the sibling `registry.yaml`; its
-`state_keys` block is the canonical vocabulary referenced throughout this document.
+There are now **two** parsed contracts (siblings of this file): `registry.yaml` — the stage
+graph, whose `state_keys` block is the canonical vocabulary referenced throughout this
+document — and `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
+in §8.9.
 
 Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified linkage),
 `Q9`/`Q10` (gateway). Pi mechanics are cited against
@@ -1195,3 +1197,59 @@ The `.pi/workflow/.perk-t3.json` diagnostics sentinel additionally records **`ru
 `ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/
 `read-write`) that drives tool gating. `run_mode` is observability `ctx.hasUI` (a binary) can't
 express; it is written from `ctx.mode` on both `session_start` and `session_tree`.
+
+---
+
+## §8.9 · Skill bindings (the trigger→skill delivery contract)
+
+The **second parsed cross-plane contract**, `shared/bindings.yaml` (sibling of `registry.yaml`),
+maps a **trigger** to a **skill** plus a per-binding delivery **mode**. It is bundled automatically
+via the `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both
+planes through independent readers: **`perk/bindings.py`** (`load_bindings` / `validate`, returning
+`BindingSet`/`Binding` + the shared `Issue`/`Severity` findings, raising `BindingsError` only for
+structural failures) and **`extension/bindings.ts`** (`loadDefaultBindings`, a thin structural
+parse). The Python plane is the authoritative validator.
+
+**Trigger vocabulary — one `"<kind>:<id>"` string, kind ∈ {`stage`, `command`}:**
+- `stage:<id>` — `<id>` is a **registry stage id** (e.g. `stage:implement`). Fires at that stage's
+  launch / session entry.
+- `command:<id>` — `<id>` is a perk command / slash-command that is **not** a registry stage (e.g.
+  `command:learn-docs`). Fires when that command runs.
+
+**Kind-selection rule:** when a command corresponds 1:1 to a registry stage of the same name, bind
+to `stage:<id>` (the canonical trigger — the delivery layer fires it across both the cold launch and
+the warm slash-command of that name). Use `command:<id>` **only** for commands with no registry
+stage. This keeps the default set free of redundant stage+command pairs for one skill.
+
+**Binding model — `{ trigger, skill, mode }`:** `trigger` is the `<kind>:<id>` string; `skill` is a
+skill name (a `skills/*/` dir name today); `mode ∈ {nudge, transclude}` is **per-binding** —
+`nudge` delivers a short pointer to follow the named skill (the skill body stays ambient /
+Pi-discovered), `transclude` inlines the skill body. The same skill may be a nudge at one trigger
+and a transclude at another.
+
+**Shipped default set (all 8 perk skills, all `nudge` — perk's own skills are ambient package
+skills, so a pointer suffices; `transclude` exists for the user-binding case):**
+
+| trigger | skill | mode |
+|---|---|---|
+| `stage:plan` | `perk-plan` | `nudge` |
+| `stage:objective-author` | `perk-objective-author` | `nudge` |
+| `stage:objective-plan` | `perk-objective-plan` | `nudge` |
+| `stage:implement` | `perk-implement` | `nudge` |
+| `stage:address` | `perk-address` | `nudge` |
+| `stage:learn` | `perk-learn` | `nudge` |
+| `command:objective-reconcile` | `perk-objective-reconcile` | `nudge` |
+| `command:learn-docs` | `perk-learn-docs` | `nudge` |
+
+**Validation depth (shape-only, registry-free):** the loaders/validators check that
+`schema_version == 1` (else a structural load error), each binding has a non-empty `skill`, a
+`mode ∈ {nudge, transclude}`, and a `trigger` that parses as `<kind>:<id>` with a known `kind` and a
+non-empty `<id>`, and that no `trigger` repeats. They do **not** check that a `stage:`/`command:`
+target actually exists — that cross-contract, target-existence validation is **`doctor`**'s job.
+
+> **Status (Node 1.1):** this locks the **shape** + ships the **defaults** with **no runtime
+> behavior** — nothing imports the readers yet. Deferred: the resolver `shipped-defaults ⊕
+> user-bindings` + the `.pi/perk.toml` `[[bindings]]` table → **Node 1.2**; `nudge`/`transclude`
+> delivery (cold + warm doors) → **Nodes 2.1/2.2**; porting perk's own hardcoded "Follow the … skill"
+> strings onto the mechanism + deleting them → **Node 2.3**; `doctor` target-existence validation →
+> **Node 3.1**; `init` scaffolding + user docs → **Node 3.2**.
