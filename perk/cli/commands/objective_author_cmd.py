@@ -55,7 +55,9 @@ def _seed_prompt() -> str:
         "  4. When ready, EXIT read-only mode (`/plan` off) and call the `objective_save` tool "
         "with the prose and the structured `roadmap` — it creates the perk:objective issue, "
         "activates it, and starts budget tracking. ALWAYS save via the tool; never create the "
-        "issue by hand.\n\n"
+        "issue by hand. Do NOT use the `/objective-save` command to save — it cannot carry the "
+        "structured roadmap and will not create the objective; it only flips you to read-write and "
+        "points you back to the `objective_save` tool.\n\n"
         "Judgment, user interaction, and durable writes stay with you — never delegate them."
     )
 

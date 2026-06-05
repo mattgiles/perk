@@ -971,6 +971,18 @@ def test_create_objective_issue_idempotent(monkeypatch):
     assert not rec.posted()  # dedup short-circuits before any write
 
 
+def test_create_objective_issue_rejects_empty_roadmap(monkeypatch):
+    # Storage backstop: a node-less objective (no embedded roadmap, no roadmap_nodes) raises
+    # GitHubError after the idempotency lookup (returns []) and before any issue POST.
+    rec = _GhRecorder(get=_Proc(0, stdout="[]"))
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError):
+        github.create_objective_issue(
+            title="Obj", body="# Obj\n\nprose", repo_root=ROOT, run_id="01EMPTY"
+        )
+    assert not rec.posted()  # no issue created
+
+
 def test_create_objective_issue_two_step(monkeypatch):
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)

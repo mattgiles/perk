@@ -234,31 +234,21 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
 
   pi.registerCommand("objective-save", {
     description:
-      "Save the latest drafted objective to GitHub (the read-only → read-write boundary). " +
-      "Prefer the objective_save tool to pass a structured roadmap.",
-    handler: async (args, ctx) => {
-      const prose = extractObjectiveMarkdown(ctx.sessionManager.getBranch());
-      if (prose === null) {
-        const message =
-          "perk: objective-save — no objective to save; draft one first, or call the objective_save tool.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else console.error(message);
-        return;
-      }
-      const title = args.trim() || undefined;
-      // The command may run while read-only; on a successful save exit the gate (the read-only →
-      // read-write boundary in one gesture). The command scrapes prose only — no roadmap.
-      const wasReadOnly = gating.isActive();
-      const result = await saveObjective(pi, ctx, { prose, title });
-      if (result.details.ok && wasReadOnly) {
-        gating.exit(ctx);
-      }
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          result.content[0]?.text ?? "objective-save done",
-          result.details.ok ? "info" : "error",
-        );
-      }
+      "Not a save path: an objective needs its structured roadmap, which only the objective_save " +
+      "tool can carry. This exits read-only and redirects you to the tool — it writes nothing.",
+    handler: async (_args, ctx) => {
+      // The command path is STRUCTURALLY roadmap-less (it could only scrape prose from one
+      // message), so it must NEVER write — no saveObjective, no `perk objective create`, no false
+      // success. Instead it preserves the original "read-only → read-write in one gesture" intent
+      // by flipping the gate (so the objective_save tool becomes visible), then redirects to the
+      // tool at exactly the save moment. Part A is the storage backstop for the CLI/CI path.
+      if (gating.isActive()) gating.exit(ctx);
+      const message =
+        "perk: objective-save — `/objective-save` does not save: an objective needs its structured " +
+        "roadmap, which only the objective_save tool can carry. Read-only is now off; call the " +
+        "objective_save tool with your `prose` and `roadmap`. Nothing was written yet.";
+      if (ctx.hasUI) ctx.ui.notify(message, "info");
+      else console.error(message);
     },
   });
 }

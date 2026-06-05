@@ -4,7 +4,7 @@
 // stands in for the GitHub write. The pure extractObjectiveMarkdown twin is unit-tested below.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
@@ -91,9 +91,11 @@ test("tool: objective_save surfaces a cold-door failure as details.ok=false (no 
   }
 });
 
-test("command: /objective-save scrapes the latest message + exits read-only on success", async () => {
+test("command: /objective-save writes nothing, exits read-only, and redirects to the tool", async () => {
   const cwd = scaffoldRepo();
-  const bin = fakePerk(cwd, { stdout: CREATE_JSON });
+  const argvFile = `${cwd}/argv.txt`;
+  // The fake perk fails the test if ever invoked (the command must never write).
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
   const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }], {
     assistantText: PROSE,
   });
@@ -105,8 +107,34 @@ test("command: /objective-save scrapes the latest message + exits read-only on s
   try {
     assert.equal(h.workflowState().mode, "read-only");
     await h.invokeCommand("objective-save");
-    assert.equal(h.workflowState().active_objective, "7", "objective linked from scraped prose");
-    assert.equal(h.workflowState().mode, "read-write", "save exits the read-only gate");
+    // (a) nothing saved (no active_objective), (b) the gate flipped to read-write,
+    assert.equal(h.workflowState().active_objective ?? null, null, "no save");
+    assert.equal(h.workflowState().mode, "read-write", "exits the read-only gate");
+    // (c) the fake perk binary was never invoked (no argv captured).
+    assert.equal(existsSync(argvFile), false, "perk objective create was not shelled");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: /objective-save while read-write only redirects (no gate change)", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = `${cwd}/argv.txt`;
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText: PROSE,
+  });
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_BIN: bin },
+  });
+  try {
+    assert.equal(h.workflowState().mode, "read-write");
+    await h.invokeCommand("objective-save");
+    assert.equal(h.workflowState().mode, "read-write", "gate unchanged");
+    assert.equal(h.workflowState().active_objective ?? null, null, "no save");
+    assert.equal(existsSync(argvFile), false, "perk objective create was not shelled");
   } finally {
     h.dispose();
   }
