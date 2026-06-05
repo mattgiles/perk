@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from perk import cache, git, github, run_id
+from perk.binding_delivery import render_cold_bindings
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
 from perk.git import GitError
@@ -317,6 +318,7 @@ def launch_stage(
     prompt_override: str | None = None,
     base: str | None = None,
     handoff_extra: dict[str, object] | None = None,
+    binding_trigger: str | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -332,6 +334,11 @@ def launch_stage(
     forwards only ``{plan, title}``) rather than the ``plan_save`` *tool*. The ``Handoff`` TS
     interface already carries arbitrary keys (``[key: string]: unknown``), so no TS change is
     needed to ferry it.
+
+    ``binding_trigger`` (Node 2.1): the trigger whose user-originated skill bindings (the resolved
+    overlay minus the shipped defaults) are rendered **additively** into the initial prompt; it
+    defaults to ``f"stage:{stage.id}"``. The ``learn-docs`` cold door (which borrows the ``plan``
+    stage) overrides it to its ``command:learn-docs`` trigger so it does not fire ``stage:plan``.
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
@@ -356,6 +363,17 @@ def launch_stage(
     prompt = prompt_override
     if prompt is None:
         prompt = _initial_prompt(stage, resolved.plan_ref or cache.read_plan_ref(repo_root))
+    # Node 2.1: append the user-originated skill bindings for this launch's trigger (additive —
+    # perk's own hardcoded nudges are unchanged). Resolver issues + delivery warnings are surfaced
+    # loud-but-non-fatal and never block a launch.
+    trigger = binding_trigger or f"stage:{stage.id}"
+    delivery = render_cold_bindings(config.user_bindings, repo_root, trigger)
+    for issue in delivery.issues:
+        user_output(f"⚠ skill binding: {issue}")
+    for warning in delivery.warnings:
+        user_output(f"⚠ {warning}")
+    if delivery.text:
+        prompt = f"{prompt}\n\n{delivery.text}" if prompt else delivery.text
     argv = ["pi", *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written

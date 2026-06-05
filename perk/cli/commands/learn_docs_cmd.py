@@ -218,4 +218,6 @@ def learn_docs(
         remote=remote,
         pi_args=list(pi_args),
         prompt_override=seed,
+        # learn-docs borrows `plan`, so its binding trigger is the command (not stage:plan).
+        binding_trigger="command:learn-docs",
     )

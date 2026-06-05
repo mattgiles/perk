@@ -43,7 +43,11 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     monkeypatch.setattr(
         launch,
         "launch_stage",
-        lambda **k: sink.update(stage=k["stage"].id, prompt=k.get("prompt_override")),
+        lambda **k: sink.update(
+            stage=k["stage"].id,
+            prompt=k.get("prompt_override"),
+            binding_trigger=k.get("binding_trigger"),
+        ),
     )
 
 
@@ -100,6 +104,9 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
         result = runner.invoke(cli, ["learn-docs", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "plan"  # borrows the plan stage to launch
+    # Node 2.1: learn-docs borrows `plan` but overrides the binding trigger to its command — so a
+    # stage:plan user binding does NOT bleed into the learn-docs launch.
+    assert launched["binding_trigger"] == "command:learn-docs"
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt

@@ -6,6 +6,7 @@ import pytest
 
 from perk import cache
 from perk import git as git_mod
+from perk.bindings import Binding
 from perk.cli.ensure import UserFacingCliError
 from perk.config import Config
 from perk.git import GitError
@@ -33,8 +34,16 @@ def _stage(stage_id: str) -> Stage:
     return next(s for s in load_registry().stages if s.id == stage_id)
 
 
-def _config(tmp_path) -> Config:
-    return Config(worktree_root=tmp_path / ".worktrees")
+def _config(tmp_path, user_bindings=None) -> Config:
+    return Config(
+        worktree_root=tmp_path / ".worktrees",
+        user_bindings=user_bindings if user_bindings is not None else [],
+    )
+
+
+def _binding(trigger: str, skill: str, mode: str = "nudge") -> "Binding":
+    kind, target_id = trigger.split(":", 1)
+    return Binding(trigger, kind, target_id, skill, mode)
 
 
 def test_sweep_removes_stale_lock_files(tmp_path):
@@ -159,6 +168,59 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert "gh issue view 42 --comments" in data["argv"][1]
     # dry run is side-effect-free: no worktree, no handoff
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
+
+
+def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
+    # Node 2.1: a user override of the stage:implement trigger is delivered ADDITIVELY — it
+    # appears appended to the hardcoded implement prompt (which is unchanged).
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path, [_binding("stage:implement", "custom-implement")]),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    prompt = data["argv"][-1]
+    assert "gh issue view 42 --comments" in prompt  # hardcoded prompt preserved
+    assert "Follow the `custom-implement` skill." in prompt  # delivered additively
+
+
+def test_user_binding_becomes_whole_prompt_when_no_base_prompt(tmp_path, capsys):
+    # Node 2.1: the `save` stage has no _initial_prompt, so a user binding at stage:save becomes
+    # the entire launch prompt (argv grows from no-prompt to a one-prompt argv).
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path, [_binding("stage:save", "my-save-skill")]),
+        stage=_stage("save"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert len(data["argv"]) == 2
+    assert "Follow the `my-save-skill` skill." in data["argv"][-1]
+
+
+def test_no_user_bindings_no_double_delivery(tmp_path, capsys):
+    # Node 2.1: with no user bindings, the shipped default stage:implement nudge is NOT
+    # re-delivered — the only perk-implement reference is the hardcoded one.
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["argv"][-1].count("perk-implement") == 1
 
 
 def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):

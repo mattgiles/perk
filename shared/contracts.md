@@ -1275,8 +1275,25 @@ trusted** (not re-validated). The resolver remains registry-free: target-existen
 **`doctor`** (Node 3.1), never the resolver. No removal/disable syntax and no multi-skill-per-trigger
 co-delivery are defined yet.
 
-> **Status (Node 1.2):** parsing + resolver landed (pure, cross-plane-identical, unit-tested) with
-> **no consumer wiring**. Deferred: `nudge`/`transclude` delivery (cold + warm doors) → **Nodes
-> 2.1/2.2**; porting perk's own hardcoded "Follow the … skill" strings onto the mechanism + deleting
-> them → **Node 2.3**; `doctor` target-existence validation → **Node 3.1**; `init` `[[bindings]]`
-> template + user docs → **Node 3.2**.
+**Cold-door delivery (Node 2.1, Python plane):** `perk/binding_delivery.py`
+(`render_cold_bindings(user_bindings, repo_root, trigger)`) renders the **user-originated** resolved
+bindings — the resolved overlay **minus the shipped defaults** (a `Binding` is a frozen dataclass, so
+set membership is the exact value-equality test) — whose trigger matches the launch, and
+`launch_stage` appends that fragment **additively** to the initial prompt. perk's own hardcoded
+"Follow the … skill" strings are **unchanged** (their removal is Node 2.3), and bindings value-equal
+to a shipped default are **not** re-delivered (no double-delivery — perk still hardcodes those
+nudges); a user binding at a *new* trigger, or a user *override* of a perk-owned trigger, **is**
+delivered. The launch trigger is `stage:<stage.id>` by default; the `learn-docs` cold door (which
+borrows the `plan` stage) overrides it to `command:learn-docs` via `launch_stage`'s `binding_trigger`
+parameter, so it never fires `stage:plan`. `objective-reconcile` is a non-launching **worker** (it
+rewrites the objective body, no initial prompt), so `command:objective-reconcile` has **no cold
+delivery surface** — it fires only at the warm door (Node 2.2). `nudge` renders a ``Follow the
+`<skill>` skill.`` pointer line; `transclude` inlines `.agents/skills/<skill>/SKILL.md` with its YAML
+frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal** warning when the
+file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
+on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).
+
+> **Status (Node 2.1):** cold-door delivery landed (Python plane). Deferred: warm-door delivery (the
+> TS extension) → **Node 2.2**; porting perk's own hardcoded "Follow the … skill" strings onto the
+> mechanism + deleting them → **Node 2.3**; `doctor` target-existence validation → **Node 3.1**;
+> `init` `[[bindings]]` template + user docs → **Node 3.2**.
