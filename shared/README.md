@@ -7,10 +7,13 @@ repo layout (`Q12`).
 
 Contents (authored in **T2**):
 
-- **`registry.yaml`** — the one *parsed* contract: the stage registry (descriptor
+- **`registry.yaml`** — a *parsed* contract: the stage registry (descriptor
   shape + the six MVP stages + graph) and the `state_keys` vocabulary. Read by both
   planes (`perk/registry.py`, `extension/registry.ts`); validated by
   `perk registry check`.
+- **`bindings.yaml`** — the second *parsed* contract: the skill-binding set
+  (trigger→skill delivery, with a per-binding `nudge`/`transclude` mode). Read by both
+  planes (`perk/bindings.py`, `extension/bindings.ts`); see `contracts.md` §8.9.
 - **`contracts.md`** — the four *prose* specs implemented once per plane: the
   `.pi/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract.
