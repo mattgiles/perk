@@ -210,6 +210,9 @@ def parse_roadmap_nodes(issue_body: str) -> tuple[list[ObjectiveNode], list[str]
 
     Three cases: **no block** ⇒ ``([], [])`` (a valid roadmap-free objective); **block present
     but malformed/invalid** ⇒ ``([], [error])``; **valid** ⇒ ``(nodes, [])``.
+
+    Roadmap-free is valid at parse/read time; creation rejects an empty roadmap — see
+    :func:`perk.github.create_objective_issue` / ``perk objective create``.
     """
     if not _has_block(issue_body, OBJECTIVE_ROADMAP_KEY):
         return [], []
@@ -227,6 +230,9 @@ def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
     ``{schema_version, nodes}`` mapping. A bare list is wrapped with the current schema version
     before validation. ``None`` / ``[]`` → ``([], [])`` (a valid roadmap-free objective).
     Delegates to :func:`validate_roadmap` so the per-node rules are identical to the YAML path.
+
+    Roadmap-free is valid at parse/read time; creation rejects an empty roadmap — see
+    :func:`perk.github.create_objective_issue` / ``perk objective create``.
     """
     if raw is None:
         return [], []

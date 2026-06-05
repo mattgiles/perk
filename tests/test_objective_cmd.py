@@ -48,11 +48,42 @@ def test_create_json(monkeypatch):
         return github.ObjectiveIssue(number=42, url="u/42", existed=False)
 
     monkeypatch.setattr(github, "create_objective_issue", _create)
-    result = _invoke(["objective", "create", "--json"], body="# Ship it\n\nprose")
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["success"] is True and payload["objective"]["number"] == 42
     assert captured["title"] == "Ship it"  # derived from the body heading
+
+
+def test_create_empty_roadmap_rejected(monkeypatch):
+    # A prose body with no --roadmap (and no embedded roadmap) is rejected before any write.
+    _authed(monkeypatch)
+
+    def _must_not_create(**k):
+        raise AssertionError("create_objective_issue must not be called for an empty roadmap")
+
+    monkeypatch.setattr(github, "create_objective_issue", _must_not_create)
+    result = _invoke(["objective", "create", "--json"], body="# Obj\n\nprose")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "empty_roadmap"
+
+
+def test_create_structured_empty_roadmap_rejected(monkeypatch):
+    # --roadmap "[]" is a structurally empty roadmap — rejected before any write.
+    _authed(monkeypatch)
+
+    def _must_not_create(**k):
+        raise AssertionError("create_objective_issue must not be called for an empty roadmap")
+
+    monkeypatch.setattr(github, "create_objective_issue", _must_not_create)
+    result = _invoke(["objective", "create", "--json", "--roadmap", "[]"], body="# Obj\n\nprose")
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "empty_roadmap"
 
 
 def test_create_structured_roadmap_passes_nodes(monkeypatch):

@@ -94,6 +94,7 @@ def objective_create(
         # Resolve the roadmap: a structured --roadmap JSON wins (the agent path, never hand-written
         # YAML); otherwise validate any roadmap embedded in the body (the legacy cold-CLI path).
         roadmap_nodes: list[objective.ObjectiveNode] | None = None
+        body_nodes: list[objective.ObjectiveNode] = []
         if roadmap_json is not None:
             try:
                 raw = json.loads(roadmap_json)
@@ -103,10 +104,20 @@ def objective_create(
                 ) from exc
             roadmap_nodes, errors = objective.parse_structured_roadmap(raw)
         else:
-            _nodes, errors = objective.parse_roadmap_nodes(body_text)
+            body_nodes, errors = objective.parse_roadmap_nodes(body_text)
         if errors:
             raise UserFacingCliError(
                 "Invalid objective roadmap: " + "; ".join(errors), error_type="invalid_roadmap"
+            )
+        # Reject a roadmap-free objective before creating (also makes --dry-run reject early). The
+        # parse/read layer stays lenient (existing node-less issues remain readable); creation does
+        # not. `empty_roadmap` falls through _EXIT_FOR_TYPE to exit 1.
+        effective_nodes = roadmap_nodes if roadmap_nodes is not None else body_nodes
+        if not effective_nodes:
+            raise UserFacingCliError(
+                "An objective needs at least one roadmap node — author a roadmap (the "
+                "objective_save tool's `roadmap`, or a `--roadmap` JSON array) before creating.",
+                error_type="empty_roadmap",
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
         resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()

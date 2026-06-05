@@ -632,6 +632,12 @@ def create_objective_issue(
     else:
         nodes = list(roadmap_nodes)
 
+    # Storage backstop: no surface may store a node-less objective. Placed after the dedup
+    # short-circuit (idempotent re-lookups unaffected) and the dry-run early-return (a no-op),
+    # before any label/issue write.
+    if not nodes:
+        raise GitHubError("objective roadmap is empty: an objective needs at least one node")
+
     create_label(
         objective.OBJECTIVE_LABEL,
         color=objective.OBJECTIVE_LABEL_COLOR,

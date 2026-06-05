@@ -253,16 +253,23 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
   it links the live session: appends `active_objective` **and** seeds a fresh `perk:objective-budget`
   activation marker (mirrors `/objective <id>`), so budget tracking starts immediately; it
-  **terminates** the turn. The `/objective-save` **command** is the fragile fallback (scrapes the
-  latest message as prose, **no** roadmap) and, like `/plan-save`, exits the read-only gate on a
-  successful save (the read-only → read-write boundary). The tool is structurally unreachable while
-  read-only, so the model exits read-only (`/plan` off) before calling it.
+  **terminates** the turn. The `/objective-save` **command is no longer a save path**: because the
+  command can only scrape prose from one message, it can never carry the structured roadmap, so it
+  **writes nothing** (no GitHub mutation, no false success). It exits the read-only gate (so the
+  `objective_save` tool becomes visible) and redirects the model to the tool at the save moment. This
+  is asymmetric with `/plan-save`: a plan *is* its prose, so the `/plan-save` command genuinely
+  saves; an objective's roadmap is structured data that is unscrapeable, so its command cannot. The
+  tool is structurally unreachable while read-only, so the model exits read-only (`/plan` off) before
+  calling it.
 - **Structured roadmap (never hand-written YAML).** `create_objective_issue` gains an optional
   `roadmap_nodes`; `perk objective create` gains `--roadmap <json>` (parsed via
   `objective.parse_structured_roadmap`, where per-node `status` is optional and defaults to
   `pending`). When `--roadmap`/`roadmap_nodes` is given the body is pure prose; otherwise the legacy
-  body-embedded roadmap parse still applies (the cold-CLI path). The judgment layer lives in the
-  `perk-objective-author` skill.
+  body-embedded roadmap parse still applies (the cold-CLI path). **Creation requires ≥1 roadmap
+  node**: `perk objective create` rejects an empty roadmap with `error_type: empty_roadmap` (exit 1)
+  and `create_objective_issue` raises `GitHubError` — the parse/read layer stays lenient (existing
+  node-less issues remain readable/closable). The judgment layer lives in the `perk-objective-author`
+  skill.
 
 **Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
 of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
