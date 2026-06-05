@@ -71,6 +71,29 @@ and after, append only on difference.** `_sync_skills` snapshots the `.agents/sk
 (`_skill_link_state`: name → target) before and after running `skills sync`, and appends a change
 only when the set actually changed.
 
+## "doctor checks disk; selfcheck checks the prompt"
+
+perk converges context **onto disk** (`perk init` writes the `<!-- BEGIN perk managed -->` AGENTS
+block; `/learn-docs` maintains `.pi/APPEND_SYSTEM.md`) and trusts Pi to splice it into the model
+prompt. `perk doctor` verifies only the **disk** side. The `/perk-selfcheck` command verifies the
+**prompt** side via the live `getSystemPromptOptions()` (see `docs/learned/pi/extension-api.md` for
+why that must be a *command* handler). The division:
+
+| Surface | Verifies | Mechanism |
+|---|---|---|
+| `perk doctor` | the on-disk convergence | managed-convergence dry-run |
+| `/perk-selfcheck` | the spliced system prompt | live `getSystemPromptOptions()` |
+
+This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**: `perk/init.py`
+(`AGENTS_BEGIN`) writes it, `extension/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
+literal in one plane must update the other in the same turn (recorded in `shared/contracts.md` §8.7).
+
+The selfcheck probes are tolerant by design: an **absent** on-disk ambient index counts as wired (a
+fresh consumer repo has none until the first `/learn-docs` lands), so selfcheck never false-fails on
+it; only an index that *exists but didn't reach* the prompt is a gap. The "reached" probe is a
+trimmed-substring match (robust to join-newline/whitespace differences) and stays sound only while Pi
+loads `.pi/APPEND_SYSTEM.md` **verbatim** — see `docs/learned/pi/context-system.md`.
+
 ## Doctor migration idempotency rule
 
 `_MIGRATIONS` run **unconditionally on every `--fix`** (not gated on a failing check), so each
@@ -86,3 +109,5 @@ the `again.fixed == []` idempotency tests.
 - `perk/git.py` — `is_tracked`, `rm_cached`
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
+- `extension/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
+- `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
