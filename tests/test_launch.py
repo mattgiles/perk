@@ -331,6 +331,38 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     assert "could not fetch plan #42 body" in capsys.readouterr().err
 
 
+def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
+    """#78: launch_stage merges handoff_extra into the handoff blob (objective-plan ferries the
+    objective_id/node_id link this way so a later plan-save recovers it)."""
+    config = Config(worktree_root=git_repo / ".worktrees")
+    captured: dict[str, dict[str, object]] = {}
+
+    def _capture(root, run_id, data):
+        captured["data"] = data
+        return cache.handoff_path(root, run_id)
+
+    monkeypatch.setattr("perk.launch.cache.write_handoff", _capture)
+    monkeypatch.setattr("perk.launch.cache.write_plan_ref", lambda *a, **k: None)
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: None)
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("objective-plan"),  # worktree: none -> handoff at repo root
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        prompt_override="seed",
+        handoff_extra={"objective_id": "63", "node_id": "1.1"},
+    )
+    data = captured["data"]
+    assert data["stage"] == "objective-plan"
+    assert data["objective_id"] == "63"
+    assert data["node_id"] == "1.1"
+
+
 def test_dry_run_has_no_side_effects(tmp_path, capsys):
     launch_stage(
         repo_root=tmp_path,

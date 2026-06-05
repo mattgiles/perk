@@ -104,6 +104,13 @@ def plan_save(
         if not dry_run:
             require_github(ctx)
         resolved_run_id = run_id if run_id is not None else os.environ.get("PERK_RUN_ID")
+        # Recover the objective link from the handoff (#78): the `/plan-save` command forwards only
+        # {plan, title}, so an objective-plan factory session would otherwise drop the link the
+        # `objective-plan` command stashed in the handoff. Explicit flags always win; a non-
+        # objective run (handoff without `objective_id`) is unaffected.
+        objective_id, node_id = _link_from_handoff(
+            repo_root, resolved_run_id, objective_id, node_id
+        )
         result = _plan_save_impl(
             repo_root=repo_root,
             plan_file=plan_file,
@@ -135,6 +142,36 @@ def plan_save(
         machine_output(json.dumps(_result_to_dict(result)))
     else:
         _render_human(result)
+
+
+def _link_from_handoff(
+    repo_root: Path,
+    run_id: str | None,
+    objective_id: str | None,
+    node_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Default ``objective_id``/``node_id`` from the run's handoff when not passed explicitly (#78).
+
+    The ``objective-plan`` factory stashes ``objective_id``/``node_id`` in the handoff so the link
+    survives the ``/plan-save`` *command* path (which forwards only ``{plan, title}``). Explicit
+    flags win outright; only fill BOTH from the handoff when BOTH were absent (a half-specified
+    link is the caller's, never silently mixed with the handoff's). A missing handoff, a non-
+    objective handoff, or a missing key leaves the inputs untouched. Best-effort: a malformed
+    handoff must never block a save.
+    """
+    if objective_id is not None or node_id is not None or not run_id:
+        return objective_id, node_id
+    try:
+        handoff = cache.read_handoff(repo_root, run_id)
+    except (OSError, ValueError):
+        return objective_id, node_id
+    if not handoff:
+        return objective_id, node_id
+    ho_objective = handoff.get("objective_id")
+    ho_node = handoff.get("node_id")
+    if ho_objective and ho_node:
+        return str(ho_objective), str(ho_node)
+    return objective_id, node_id
 
 
 def _parse_consumed_learn(raw: str | None) -> tuple[int, ...]:

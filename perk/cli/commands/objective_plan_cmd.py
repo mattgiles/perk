@@ -254,4 +254,8 @@ def objective_plan(
         remote=remote,
         pi_args=list(pi_args),
         prompt_override=seed,
+        # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
+        # regardless of which save surface the model uses (the /plan-save command forwards only
+        # {plan, title}; #78). The factory already marked node.id `planning` above.
+        handoff_extra={"objective_id": str(number), "node_id": node.id},
     )

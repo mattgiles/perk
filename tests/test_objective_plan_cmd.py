@@ -45,7 +45,11 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
     monkeypatch.setattr(
         launch,
         "launch_stage",
-        lambda **k: sink.update(stage=k["stage"].id, prompt=k.get("prompt_override")),
+        lambda **k: sink.update(
+            stage=k["stage"].id,
+            prompt=k.get("prompt_override"),
+            handoff_extra=k.get("handoff_extra"),
+        ),
     )
 
 
@@ -74,6 +78,9 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
     assert "1.2" in (launched["prompt"] or "") and "objective_id" in (launched["prompt"] or "")
+    # #78: the objective link is also ferried through the handoff so plan-save recovers it even
+    # when the model saves via the /plan-save command (which forwards only {plan, title}).
+    assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.2"}
 
 
 def test_explicit_node_selects_it(monkeypatch):
