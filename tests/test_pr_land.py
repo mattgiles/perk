@@ -12,6 +12,7 @@ from perk.cli.commands.pr_land_cmd import (
     PrLandResult,
     _consume_learn_on_land,
     _reconcile_objective_on_land,
+    _render_human,
     _result_to_dict,
 )
 
@@ -264,6 +265,33 @@ def test_result_to_dict_carries_objective():
     assert data["learn"] == {"closed": [45, 50], "skipped_reason": None}
 
 
+def _land_result(learn: LearnConsumeUpdate) -> PrLandResult:
+    return PrLandResult(
+        pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
+        branch="plan-7",
+        issue=7,
+        pending_learn=True,
+        dry_run=False,
+        objective=ObjectiveLandUpdate(None, (), "no_objective_link"),
+        learn=learn,
+    )
+
+
+def test_render_human_surfaces_non_benign_learn_skip(capsys):
+    # #102: a non-benign skip (a partial `failed: …`) is surfaced, not silent.
+    _render_human(_land_result(LearnConsumeUpdate((45,), "failed: #50")))
+    out = capsys.readouterr().err
+    assert "consolidated learn issue(s) #45" in out
+    assert "learn consume incomplete: failed: #50" in out
+
+
+def test_render_human_quiet_on_benign_learn_skip(capsys):
+    # #102: `no_consumed_learn` is the ordinary non-factory case — stay quiet.
+    _render_human(_land_result(LearnConsumeUpdate((), "no_consumed_learn")))
+    out = capsys.readouterr().err
+    assert "learn consume incomplete" not in out
+
+
 # --- learned-docs consume on land (hop-2) ----------------------------------------------------
 
 
@@ -287,6 +315,7 @@ def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
 
 
 def test_consume_learn_on_land_is_fail_open(monkeypatch):
+    # #102: a fully-failing close is fail-open (never raises) and the failure is recorded per-issue.
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
@@ -295,7 +324,27 @@ def test_consume_learn_on_land_is_fail_open(monkeypatch):
         plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path(".")
     )
     assert out.closed == ()
-    assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
+    assert out.skipped_reason == "failed: #45"
+
+
+def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
+    # #102: one bad issue must not strand the rest — the good closes still land, the failure is
+    # rolled into `failed: #N` while the result stays fail-open.
+    closed: list[int] = []
+
+    def _close(*, issue, repo_root, **k):
+        if issue == 50:
+            raise github.GitHubError("already deleted")
+        closed.append(issue)
+        return True
+
+    monkeypatch.setattr(github, "close_and_label_consolidated", _close)
+    out = _consume_learn_on_land(
+        plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path(".")
+    )
+    assert out.closed == (45, 51)
+    assert closed == [45, 51]
+    assert out.skipped_reason == "failed: #50"
 
 
 def test_dry_run_learn_is_inert():

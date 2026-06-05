@@ -317,6 +317,48 @@ def test_plan_save_handoff_without_objective_is_unlinked(monkeypatch):
     assert payload["objective_node"] is None
 
 
+def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
+    # #102: a /plan-save command path (no --consumed-learn) recovers the gathered perk:learn
+    # numbers the learn-docs factory stashed in the handoff, persisting them in the plan-ref +
+    # header so the on-land consume can close them.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    result = _run_with_handoff(
+        monkeypatch,
+        ["plan-save", "--plan-file", "plan.md", "--json"],
+        {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["plan_ref"]["consumed_learn"] == [45, 50]
+
+
+def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
+    # #102: an explicit --consumed-learn always wins over the handoff's numbers.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    result = _run_with_handoff(
+        monkeypatch,
+        ["plan-save", "--plan-file", "plan.md", "--consumed-learn", "7,9", "--json"],
+        {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == [7, 9]
+
+
+def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
+    # #102: a non-factory handoff carries no consumed_learn key, so the save stays empty.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    result = _run_with_handoff(
+        monkeypatch,
+        ["plan-save", "--plan-file", "plan.md", "--json"],
+        {"stage": "plan", "mode": "read-only"},
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == []
+
+
 def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

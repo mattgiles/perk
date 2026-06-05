@@ -111,6 +111,14 @@ carry the link), whereas the `plan_save` *tool* passes it explicitly. `plan-save
 handoff and defaults `objective_id`/`node_id` from it only when neither flag was passed (explicit
 flags always win; a non-objective handoff has no `objective_id`, so plain planning is unaffected).
 
+The same carrier ferries `consumed_learn` (#102). `learn-docs` launches a **read-only** plan-mode
+session, where the `plan_save` *tool* is gated out (`toolGating.ts`), so the model saves via the
+`/plan-save` *command* — which forwards only `{plan, title}`, dropping the gathered `perk:learn`
+numbers. The `learn-docs` cold door stashes them as `handoff_extra={"consumed_learn": […]}`, and
+`plan-save` recovers them (`_consumed_learn_from_handoff`) when `--consumed-learn` is absent
+(explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). This makes
+the consume mechanism independent of which save surface the model used.
+
 **Fork ≠ branch (easy to get wrong).**
 - A **fork** (`/fork`, `/clone`, `ctx.newSession({ parentSession })`, or a headless
   `pi --fork`) creates a **new session file** that inherits the parent's entries — so the
@@ -1111,17 +1119,23 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   `plan_save` tool's `consumed_learn` array param) populate `plan.PlanHeader.consumed_learn` +
   `plan.PlanRef.consumed_learn` (parsed to a sorted unique `tuple[int, ...]`; an invalid token →
   `invalid_input`). This persists which `perk:learn` issues the docs plan consolidates; non-factory
-  plans omit it.
+  plans omit it. Because the read-only factory saves via the `/plan-save` *command* (which forwards
+  only `{plan, title}`), `plan-save` also recovers `consumed_learn` from the run's handoff
+  (`_consumed_learn_from_handoff`, #102) when the flag is absent — see §8.2's handoff-carrier note.
 - **On-land consume (Mechanical, deterministic).** `pr_land_cmd._consume_learn_on_land(*, plan_ref,
   repo_root) -> LearnConsumeUpdate{ closed, skipped_reason }` reads `plan_ref.consumed_learn` and
   `close_and_label_consolidated` for each issue — **fail-open, never raises, never changes the land
-  result** (mirrors `_reconcile_objective_on_land`; `skipped_reason` ∈ `no_consumed_learn` /
-  `bad_consumed_learn` / `error: <exc>`). Called in `_pr_land_impl`'s non-dry-run branch after
-  `set_marker(PENDING_LEARN)` and the objective reconcile; the dry-run branch sets an inert
-  `LearnConsumeUpdate((), "dry_run")`. `_result_to_dict` emits `"learn": { closed, skipped_reason }`;
-  `_render_human` adds a `consolidated learn issue(s) X into docs/learned` line when non-empty. The
-  warm `extension/land.ts` surfaces `learn.closed` in a `Closed N learn issue(s) … into
-  docs/learned` line. Closing already excludes a consumed issue from the next `state=open` gather;
+  result** (mirrors `_reconcile_objective_on_land`). Each issue is closed **independently** (#102
+  per-issue isolation): one bad issue (already-deleted / transient infra error) is logged
+  loud-but-non-fatal and rolled into a `failed: #a, #b` `skipped_reason` while the rest still close.
+  `skipped_reason` ∈ `no_consumed_learn` / `bad_consumed_learn` / `failed: …` / `error: <exc>`.
+  Called in `_pr_land_impl`'s non-dry-run branch after `set_marker(PENDING_LEARN)` and the objective
+  reconcile; the dry-run branch sets an inert `LearnConsumeUpdate((), "dry_run")`. `_result_to_dict`
+  emits `"learn": { closed, skipped_reason }`; `_render_human` adds a `consolidated learn issue(s) X
+  into docs/learned` line when non-empty, plus a `⚠ learn consume incomplete: <reason>` line for any
+  non-benign skip (everything except `no_consumed_learn`/`dry_run`). The warm `extension/land.ts`
+  surfaces `learn.closed` in a `Closed N learn issue(s) … into docs/learned` line and a
+  `Warning: learn consume incomplete — <reason>` line for the same non-benign skips. Closing already excludes a consumed issue from the next `state=open` gather;
   the `perk:consolidated` label is the durable/queryable record.
 - **The docs surface (plan-maintained, never `init`-managed).** `docs/learned/<category>/*.md`
   carries light frontmatter (`title` + `read_when`); `docs/learned/index.md` is the standalone full

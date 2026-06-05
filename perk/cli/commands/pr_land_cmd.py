@@ -23,6 +23,11 @@ from perk.output import machine_output, user_output
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
+# Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
+# `consumed_learn` (so `no_consumed_learn` is expected) and a dry run early-returns `dry_run`.
+# Anything else is surfaced (#102).
+_BENIGN_LEARN_SKIPS = frozenset({"no_consumed_learn", "dry_run"})
+
 
 @dataclass(frozen=True)
 class ObjectiveLandUpdate:
@@ -211,18 +216,24 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
         numbers = [int(str(n).lstrip("#")) for n in raw]
     except (TypeError, ValueError):
         return LearnConsumeUpdate((), "bad_consumed_learn")
-    try:
-        closed: list[int] = []
-        for number in numbers:
+    # Per-issue isolation (#102): close each issue independently so one bad issue (already-deleted,
+    # transient infra error) does NOT strand the rest — the #89-residual that made the accumulated
+    # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
+    # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
+    closed: list[int] = []
+    failed: list[int] = []
+    for number in numbers:
+        try:
             github.close_and_label_consolidated(issue=number, repo_root=repo_root)
             closed.append(number)
-        return LearnConsumeUpdate(tuple(closed), None)
-    except Exception as exc:  # fail-open: consuming learn issues never blocks landing
-        print(
-            f"perk pr-land: learn consume skipped (non-fatal): {exc}",
-            file=sys.stderr,
-        )
-        return LearnConsumeUpdate((), f"error: {exc}")
+        except Exception as exc:  # fail-open: consuming learn issues never blocks landing
+            print(
+                f"perk pr-land: learn consume skipped issue #{number} (non-fatal): {exc}",
+                file=sys.stderr,
+            )
+            failed.append(number)
+    skipped_reason = f"failed: {', '.join(f'#{n}' for n in failed)}" if failed else None
+    return LearnConsumeUpdate(tuple(closed), skipped_reason)
 
 
 def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
@@ -281,6 +292,13 @@ def _render_human(result: PrLandResult) -> None:
     if result.learn.closed:
         closed = ", ".join(f"#{n}" for n in result.learn.closed)
         user_output(f"  consolidated learn issue(s) {closed} into docs/learned")
+    # Surface a non-benign learn-consume skip (#102): `no_consumed_learn` is the ordinary
+    # non-factory case (and dry-run early-returns), so stay quiet on those; a real failure
+    # (`failed: …`, `bad_consumed_learn`, `error: …`) must be visible, not silent.
+    if result.learn.skipped_reason and result.learn.skipped_reason not in _BENIGN_LEARN_SKIPS:
+        user_output(
+            click.style(f"  ⚠ learn consume incomplete: {result.learn.skipped_reason}", fg="yellow")
+        )
 
 
 def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
