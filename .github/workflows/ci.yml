@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint · typecheck · test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.13)
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Install Python deps
+        run: uv sync
+
+      - name: Install Node deps
+        run: npm ci
+
+      # Lint: `uv run ruff check perk tests` + `npm run lint` (biome check extension).
+      # Deliberately NO `ruff format` here — that is the pre-commit hook's job
+      # (see docs/learned/toolchain/ruff.md).
+      - name: Lint
+        run: just lint
+
+      # Typecheck: `uv run ty check` + `npm run typecheck` (tsc --noEmit).
+      - name: Typecheck
+        run: just typecheck
+
+      # Test: `uv run pytest` + `node --test extension/*.test.ts`.
+      # Both uv and npm are on PATH so the cross-plane packaging tests in
+      # tests/test_packaging.py actually run instead of skipping.
+      - name: Test
+        run: just test
