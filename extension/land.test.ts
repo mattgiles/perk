@@ -109,6 +109,57 @@ test("tool: land with a skipped objective adds no nudge", async () => {
   }
 });
 
+test("tool: land surfaces a non-benign learn-consume skip", async () => {
+  // #102: a partial `failed: …` close is a real failure — surface it, do not stay silent.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const partial = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    branch: "plan-7",
+    issue: 7,
+    pending_learn: true,
+    dry_run: false,
+    learn: { closed: [45], skipped_reason: "failed: #50" },
+  });
+  const bin = fakePerk(cwd, { stdout: partial });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Closed 1 learn issue\(s\)/);
+    assert.match(text, /learn consume incomplete — failed: #50/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: land stays quiet on a benign learn-consume skip", async () => {
+  // #102: `no_consumed_learn` is the ordinary non-factory case — no warning.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const benign = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    branch: "plan-7",
+    issue: 7,
+    pending_learn: true,
+    dry_run: false,
+    learn: { closed: [], skipped_reason: "no_consumed_learn" },
+  });
+  const bin = fakePerk(cwd, { stdout: benign });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const text = result.content[0]?.text ?? "";
+    assert.doesNotMatch(text, /learn consume incomplete/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/land command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: LAND_JSON });

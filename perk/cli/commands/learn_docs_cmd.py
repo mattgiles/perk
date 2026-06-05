@@ -220,4 +220,10 @@ def learn_docs(
         prompt_override=seed,
         # learn-docs borrows `plan`, so its binding trigger is the command (not stage:plan).
         binding_trigger="command:learn-docs",
+        # Carry the gathered perk:learn numbers through the handoff so `perk plan-save` recovers
+        # `consumed_learn` regardless of which save surface the model uses (#102, mirroring #78).
+        # The factory session is read-only, so the `plan_save` *tool* is gated out and the model
+        # saves via the `/plan-save` *command* — which forwards only {plan, title}, dropping the
+        # numbers. Stashing them here makes the tool-vs-command save surface irrelevant.
+        handoff_extra={"consumed_learn": list(numbers)},
     )

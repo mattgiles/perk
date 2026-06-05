@@ -6,6 +6,10 @@
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
 
+// Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
+// `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
+const BENIGN_LEARN_SKIPS = new Set(["no_consumed_learn", "dry_run"]);
+
 export interface ObjectiveLandUpdate {
   number: number | null;
   nodes_marked: string[];
@@ -116,6 +120,11 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
         .map((n) => `#${n}`)
         .join(", ")}) into docs/learned.`,
     );
+  }
+  // Surface a non-benign learn-consume skip (#102): `no_consumed_learn` is the ordinary
+  // non-factory case, so stay quiet on it; a real failure must be visible, not silent.
+  if (learn?.skipped_reason && !BENIGN_LEARN_SKIPS.has(learn.skipped_reason)) {
+    lines.push(`Warning: learn consume incomplete — ${learn.skipped_reason}.`);
   }
 
   return {

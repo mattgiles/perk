@@ -111,6 +111,14 @@ def plan_save(
         objective_id, node_id = _link_from_handoff(
             repo_root, resolved_run_id, objective_id, node_id
         )
+        # Recover `consumed_learn` from the handoff (#102): the learn-docs factory is read-only, so
+        # the model saves via the `/plan-save` *command* (forwards only {plan, title}) rather than
+        # the gated-out `plan_save` *tool*. The learn-docs cold door stashes the gathered numbers in
+        # the handoff; recover them here so the save surface is irrelevant. An explicit
+        # --consumed-learn always wins; a non-factory run (no handoff key) is unaffected.
+        consumed_learn_numbers = _consumed_learn_from_handoff(
+            repo_root, resolved_run_id, _parse_consumed_learn(consumed_learn)
+        )
         result = _plan_save_impl(
             repo_root=repo_root,
             plan_file=plan_file,
@@ -118,7 +126,7 @@ def plan_save(
             title=title,
             objective_id=objective_id,
             node_id=node_id,
-            consumed_learn=_parse_consumed_learn(consumed_learn),
+            consumed_learn=consumed_learn_numbers,
             dry_run=dry_run,
         )
     except GitHubError as exc:
@@ -172,6 +180,38 @@ def _link_from_handoff(
     if ho_objective and ho_node:
         return str(ho_objective), str(ho_node)
     return objective_id, node_id
+
+
+def _consumed_learn_from_handoff(
+    repo_root: Path,
+    run_id: str | None,
+    consumed_learn: tuple[int, ...],
+) -> tuple[int, ...]:
+    """Default ``consumed_learn`` from the run's handoff when not passed explicitly (#102).
+
+    The ``learn-docs`` factory stashes the gathered ``perk:learn`` numbers in the handoff so they
+    survive the ``/plan-save`` *command* path (which forwards only ``{plan, title}``, dropping the
+    flag). An explicit ``--consumed-learn`` (parsed to a non-empty tuple) always wins; an empty
+    tuple means the flag was absent, so fall back to the handoff. A missing handoff, a non-factory
+    handoff (no ``consumed_learn`` key), or a malformed value leaves the input untouched.
+    Best-effort: a malformed handoff must never block a save.
+    """
+    if consumed_learn or not run_id:
+        return consumed_learn
+    try:
+        handoff = cache.read_handoff(repo_root, run_id)
+    except (OSError, ValueError):
+        return consumed_learn
+    if not handoff:
+        return consumed_learn
+    raw = handoff.get("consumed_learn")
+    if not raw:
+        return consumed_learn
+    try:
+        numbers = {int(str(n).lstrip("#")) for n in raw}
+    except (TypeError, ValueError):
+        return consumed_learn
+    return tuple(sorted(numbers))
 
 
 def _parse_consumed_learn(raw: str | None) -> tuple[int, ...]:
