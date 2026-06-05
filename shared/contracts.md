@@ -618,9 +618,25 @@ create_pr{ head, base, title, body, draft }         -> PullRequest{ number, url,
 update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_updated[], dry_run }
     # GET issue body -> merge fields into the plan-header block -> PATCH .../issues/{n}
     # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
-get_plan{ number }                                  -> PlanState{ number, url, title, header, pr } | null
-    # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read (T5c)
+get_plan{ number }                                  -> PlanState{ number, url, title, header, pr, state } | null
+    # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read (T5c).
+    # `state` is the issue's OPEN/CLOSED state (the `replan` OPEN guard reads it).
 ```
+
+- **`perk replan <plan>` re-authors an OPEN plan *in place*.** A **dedicated cold door** (not a
+  registry stage): it borrows the `plan` stage descriptor (`mode: read-only`, `worktree: none`) and
+  re-launches it with `run_id_override` = the target plan's **original `run_id`** (a deliberate,
+  documented exception to the registry's "cold mints" `run_id` policy — the override re-enters an
+  existing plan's run). Because the warm `plan_save` is an upsert keyed on `run_id` (above), the
+  re-save **updates the same plan issue in place** rather than creating a new one — preserving the
+  `plan-header` and thus the plan→objective link (`objective_id`) and the node→plan backlink. The
+  cold door performs every GitHub read up front (the read-only bash allowlist excludes `gh`) and
+  materializes the prior plan body into a `<untrusted_plan>` scratch file the session reads. It
+  **refuses** a non-OPEN plan (`plan_not_open` — a closed plan would silently create a new issue),
+  a missing plan (`plan_not_found`), a header without `run_id` (`no_run_id`), or an empty body
+  (`no_plan_body`). **No extension change is required** (the interior sees an ordinary read-only
+  `plan`-stage session). **Single-plan only** — erk's multi-plan consolidation (`erk-consolidated`)
+  is deliberately deferred.
 
 - **PR body (P1.T5a, minimal):** `Closes #<issue>` (so the squash-merge closes the plan) + a
   `Plan: #<issue>` link + a **plain-text** `` `gh pr checkout <n>` `` footer (no HTML — erk's

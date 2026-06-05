@@ -30,6 +30,7 @@ EXPECTED_ROOT_ALIASES = {
     "implement": "impl",
     "objective-plan": "oplan",
     "resume": "res",
+    "replan": "rp",
     "learn-capture": "lc",
     "plan-save": "psave",
 }

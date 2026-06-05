@@ -898,6 +898,10 @@ class PlanState:
     title: str
     header: dict[str, object]
     pr: PullRequest | None
+    # The issue's GitHub state (``OPEN``/``CLOSED``, uppercase as `gh issue view` returns it).
+    # ``perk replan`` requires an OPEN plan so its in-place ``run_id`` upsert re-targets the same
+    # issue rather than silently creating a new one.
+    state: str = ""
 
 
 def _owner(repo_root: Path) -> str:
@@ -1236,6 +1240,7 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
         title=str(data.get("title", "")),
         header=header,
         pr=pr,
+        state=str(data.get("state", "")),
     )
 
 

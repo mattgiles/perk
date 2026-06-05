@@ -54,6 +54,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-objective-plan",
     "perk-objective-reconcile",
     "perk-plan",
+    "perk-replan",
 )
 
 # perk manages a *slice* of the skills-CLI manifest (its own skills) via a committed fragment

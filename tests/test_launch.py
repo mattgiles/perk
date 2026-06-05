@@ -442,6 +442,38 @@ def test_dry_run_has_no_side_effects(tmp_path, capsys):
     assert not (tmp_path / ".pi" / "workflow" / "handoff").exists()
 
 
+def test_run_id_override_reuses_existing_run_id(tmp_path, capsys):
+    # The replan cold door re-enters an existing plan's run_id instead of minting a fresh one.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        run_id_override="01ABCDEF0123456789ABCDEFGH",
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["run_id"] == "01ABCDEF0123456789ABCDEFGH"
+
+
+def test_no_run_id_override_mints(tmp_path, capsys):
+    # Existing behavior unchanged: omitting the override mints a fresh ULID-shaped run_id.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert data["run_id"] != "01ABCDEF0123456789ABCDEFGH"
+    assert len(data["run_id"]) == 26  # a minted ULID
+
+
 # --- T8c: the launch target resolver --------------------------------------------------
 
 

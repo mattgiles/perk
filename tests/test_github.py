@@ -554,6 +554,16 @@ def test_get_plan_planned_has_no_pr(monkeypatch):
     )
     state = github.get_plan(number=7, repo_root=ROOT)
     assert state is not None and state.title == "T" and state.pr is None
+    assert state.state == "OPEN"  # populated from the fetched issue JSON
+
+
+def test_get_plan_carries_closed_state(monkeypatch):
+    issue = {"number": 7, "title": "T", "body": _header("01RID"), "state": "CLOSED", "url": "u/7"}
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issue", "view"), _Proc(0, json.dumps(issue)))])
+    )
+    state = github.get_plan(number=7, repo_root=ROOT)
+    assert state is not None and state.state == "CLOSED"
 
 
 def test_get_plan_impl_fetches_pr(monkeypatch):

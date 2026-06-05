@@ -319,6 +319,7 @@ def launch_stage(
     base: str | None = None,
     handoff_extra: dict[str, object] | None = None,
     binding_trigger: str | None = None,
+    run_id_override: str | None = None,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -339,6 +340,13 @@ def launch_stage(
     overlay minus the shipped defaults) are rendered **additively** into the initial prompt; it
     defaults to ``f"stage:{stage.id}"``. The ``learn-docs`` cold door (which borrows the ``plan``
     stage) overrides it to its ``command:learn-docs`` trigger so it does not fire ``stage:plan``.
+
+    ``run_id_override`` (the ``replan`` cold door): when given, the session re-enters this
+    *existing* ``run_id`` instead of minting a fresh one — a deliberate, documented exception to the
+    registry's "cold mints" default. ``perk replan`` re-launches the ``plan`` stage with the target
+    plan's original ``run_id`` so the warm ``plan_save`` upserts the SAME plan issue in place
+    (preserving its ``plan-header`` and objective link). Every other caller passes ``None`` and
+    mints as before.
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
@@ -357,7 +365,7 @@ def launch_stage(
         base=base,
     )
     wt = resolved.path
-    rid = run_id.mint()
+    rid = run_id_override or run_id.mint()
     # Prime the session (Bug 1): when --worktree is given the derived ref is absent, so fall back
     # to the repo-root active ref for the prompt. A `prompt_override` (P2.T10) wins outright.
     prompt = prompt_override
