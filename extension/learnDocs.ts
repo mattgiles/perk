@@ -10,6 +10,7 @@
 // (the gather still runs so the inbox is materialized, but no turn is driven).
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { commandBindingSuffix } from "./bindingDelivery.ts";
 
 /** The `perk learn-docs --gather --json` success shape (the contract the warm door consumes). */
 interface LearnDocsGatherJson {
@@ -112,7 +113,10 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
         `perk: /learn-docs — gathered ${parsed.learn_numbers.length} learn issue(s)`,
         "info",
       );
-      pi.sendUserMessage(learnDocsGuidance(parsed.inbox_path, parsed.learn_numbers));
+      pi.sendUserMessage(
+        learnDocsGuidance(parsed.inbox_path, parsed.learn_numbers) +
+          commandBindingSuffix(ctx.cwd, "command:learn-docs"),
+      );
     },
   });
 }

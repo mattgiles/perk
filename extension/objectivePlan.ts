@@ -18,6 +18,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { commandBindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch, readPlanRef } from "./cache.ts";
 import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -478,7 +479,9 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       } else {
         console.error("perk: /objective-reconcile invoked (headless)");
       }
-      pi.sendUserMessage(reconcileGuidance(objective));
+      pi.sendUserMessage(
+        reconcileGuidance(objective) + commandBindingSuffix(ctx.cwd, "command:objective-reconcile"),
+      );
     },
   });
 
