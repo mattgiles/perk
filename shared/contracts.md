@@ -204,7 +204,10 @@ alone fixes the leak, and the Python plane is untouched.
 **directly** after a successful save (same strict read-back, idempotent by `(provider, pr_id)`),
 so the live session is linked without waiting for the next `session_start`. Both writers feed the
 same LWW field; a warm append makes the next reload's reconciliation a no-op. This makes the warm
-`save` stage a direct writer of `session.workflow-state`.
+`save` stage a direct writer of `session.workflow-state`. The warm door also **surfaces the
+objective node→plan link outcome** returned by `perk plan-save` (`objective_node`): a successful
+advance shows `→ in_progress`, a failed one shows a visible `⚠ … NOT advanced — re-run /plan-save`
+warning (§8.4 "The node↔plan link") — it is not silently swallowed.
 
 State key (registry vocabulary): `session.workflow-state`.
 
@@ -299,8 +302,13 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
   **atomically by `plan-save`** when invoked with `--objective-id` + `--node-id` (warm `plan_save`
   tool params `objective_id` + `node_id`) — a single `update_objective_node(status=in_progress,
   pr="#<issue>")` write, **fail-open + non-fatal + idempotent on re-save** (the plan already exists
-  so a link failure only warns to stderr and surfaces `objective_node.error`; the same `run_id`
-  re-links on a retried save). The standalone `objective_node` `pr`-only shape remains for **manual
+  so a link failure is non-fatal and surfaces `objective_node.error`; the same `run_id` re-links on
+  a retried save). On a failed advance, the **warm `/plan-save` door surfaces the outcome to the
+  user** — it appends a `⚠ objective node <id> NOT advanced — re-run /plan-save to retry` note to
+  the save-result text (rendered by both the `plan_save` tool and the `/plan-save` command) and
+  notifies at **`warning`** severity (mirrored to stderr in headless runs), not merely a Python
+  stderr line. Re-running `/plan-save` with no further arguments retries the advance idempotently.
+  The standalone `objective_node` `pr`-only shape remains for **manual
   repair** but is no longer part of the factory loop. T11's reconciliation-on-land consumes both
   directions.
 - **Node lifecycle = a resumable lease (factory selection).** `planning` is a **resumable claim**
