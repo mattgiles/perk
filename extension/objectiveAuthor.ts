@@ -44,9 +44,10 @@ When the objective + roadmap are decision-complete: exit read-only mode (\`/plan
 the objective_save tool with the prose and the structured roadmap. It creates the perk:objective
 issue, activates it, and starts budget tracking.
 
-Do NOT use the \`/objective-save\` command to save — it cannot carry the structured roadmap and will
-not create the objective; it only flips you to read-write and points you back to the objective_save
-tool.`;
+Either path saves: call the objective_save tool directly after exiting read-only, OR run
+\`/objective-save\`, which exits read-only and asks you to call the objective_save tool with your
+converged prose + structured roadmap. Either way the structured save flows through the tool — never
+hand-write roadmap YAML.`;
 
 /** Whether the current branch is an objective-author session (read-only gate AND stage match). */
 function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {

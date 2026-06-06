@@ -253,10 +253,11 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
   it links the live session: appends `active_objective` **and** seeds a fresh `perk:objective-budget`
   activation marker (mirrors `/objective <id>`), so budget tracking starts immediately; it
-  **terminates** the turn. The `/objective-save` **command is no longer a save path**: because the
-  command can only scrape prose from one message, it can never carry the structured roadmap, so it
-  **writes nothing** (no GitHub mutation, no false success). It exits the read-only gate (so the
-  `objective_save` tool becomes visible) and redirects the model to the tool at the save moment. This
+  **terminates** the turn. The `/objective-save` **command drives the structured save**: it exits the
+  read-only gate (so the `objective_save` tool becomes reachable) and injects guidance via
+  `pi.sendUserMessage` instructing the model to call `objective_save` with `prose` + the structured
+  `roadmap` (mirrors `/address`, `/objective-plan`, `/learn-docs`). It still performs **no GitHub
+  mutation itself** — the canonical write flows through the tool, never a prose scrape. This
   is asymmetric with `/plan-save`: a plan *is* its prose, so the `/plan-save` command genuinely
   saves; an objective's roadmap is structured data that is unscrapeable, so its command cannot. The
   tool is structurally unreachable while read-only, so the model exits read-only (`/plan` off) before

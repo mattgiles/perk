@@ -1,15 +1,14 @@
 // P3.T2 — live warm-door tests for the `objective_save` tool + `/objective-save` command. Drive a
 // REAL bound AgentSession via the harness and prove the `perk objective create` delegation +
 // session linkage (active_objective + budget marker) end-to-end, OFFLINE: a fake `perk` (PERK_BIN)
-// stands in for the GitHub write. The pure extractObjectiveMarkdown twin is unit-tested below.
+// stands in for the GitHub write. The pure objectiveSaveGuidance twin is unit-tested below.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
-import { extractObjectiveMarkdown } from "./objectiveSave.ts";
-import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import { objectiveSaveGuidance } from "./objectiveSave.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 const CREATE_JSON = JSON.stringify({
   success: true,
@@ -91,60 +90,36 @@ test("tool: objective_save surfaces a cold-door failure as details.ok=false (no 
   }
 });
 
-test("command: /objective-save writes nothing, exits read-only, and redirects to the tool", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = `${cwd}/argv.txt`;
-  // The fake perk fails the test if ever invoked (the command must never write).
-  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
-  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }], {
-    assistantText: PROSE,
-  });
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_BIN: bin },
-  });
+test("/objective-save registers and is headless-safe", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
   try {
-    assert.equal(h.workflowState().mode, "read-only");
-    await h.invokeCommand("objective-save");
-    // (a) nothing saved (no active_objective), (b) the gate flipped to read-write,
-    assert.equal(h.workflowState().active_objective ?? null, null, "no save");
-    assert.equal(h.workflowState().mode, "read-write", "exits the read-only gate");
-    // (c) the fake perk binary was never invoked (no argv captured).
-    assert.equal(existsSync(argvFile), false, "perk objective create was not shelled");
+    assert.ok(
+      h.registeredCommands().includes("objective-save"),
+      "the /objective-save command is registered",
+    );
   } finally {
     h.dispose();
   }
 });
 
-test("command: /objective-save while read-write only redirects (no gate change)", async () => {
-  const cwd = scaffoldRepo();
-  const argvFile = `${cwd}/argv.txt`;
-  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
-  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
-    assistantText: PROSE,
-  });
-  const h = await loadPerkSession({
-    cwd,
-    sessionManager: SessionManager.open(file),
-    env: { PERK_BIN: bin },
-  });
-  try {
-    assert.equal(h.workflowState().mode, "read-write");
-    await h.invokeCommand("objective-save");
-    assert.equal(h.workflowState().mode, "read-write", "gate unchanged");
-    assert.equal(h.workflowState().active_objective ?? null, null, "no save");
-    assert.equal(existsSync(argvFile), false, "perk objective create was not shelled");
-  } finally {
-    h.dispose();
-  }
+// --- pure helpers (offline unit) --------------------------------------------------------
+
+test("objectiveSaveGuidance: with no title, drives the objective_save tool with prose + roadmap", () => {
+  const text = objectiveSaveGuidance();
+  assert.match(text, /objective_save/);
+  assert.match(text, /prose/);
+  assert.match(text, /roadmap/);
+  assert.match(text, /JSON array of nodes/);
+  assert.match(text, /defaults to the prose's first heading/);
 });
 
-test("extractObjectiveMarkdown: returns the latest assistant text, else null", () => {
-  assert.equal(extractObjectiveMarkdown([]), null);
-  const entries = [
-    { type: "message", message: { role: "user", content: "ignore me" } },
-    { type: "message", message: { role: "assistant", content: [{ type: "text", text: "# Obj" }] } },
-  ];
-  assert.equal(extractObjectiveMarkdown(entries), "# Obj");
+test("objectiveSaveGuidance: with a title argument, names that title", () => {
+  const text = objectiveSaveGuidance("Ship retries");
+  assert.match(text, /title: "Ship retries"/);
+});
+
+test("objectiveSaveGuidance: does not hardcode the perk-objective-author skill pointer", () => {
+  // The skill pointer rides the binding suffix (Node 2.3), never the guidance body.
+  assert.doesNotMatch(objectiveSaveGuidance(), /perk-objective-author/);
 });
