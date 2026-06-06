@@ -94,6 +94,34 @@ PERK_TOML_TEMPLATE = """\
 # Where `perk worktree create` and cold-door stages place worktrees.
 # Relative paths resolve against the repo root.
 root = ".worktrees"
+
+# Skill bindings (optional) — attach a skill to a stage or command, delivered
+# into that session. Each [[bindings]] row binds one trigger to one skill:
+#   trigger — "<kind>:<id>"; kind is `stage` or `command`.
+#               stage:<id>   fires at that stage's launch / session entry.
+#                            (ids: plan, implement, address, learn,
+#                             objective-author, objective-plan, … — see
+#                             `perk registry`.)
+#               command:<id> fires when that perk command runs.
+#                            (deliverable: objective-reconcile, learn-docs.)
+#   skill   — a skill name installed under .agents/skills/<name>/.
+#   mode    — `nudge` delivers a short pointer to follow the skill (its body
+#             stays ambient / Pi-discovered); `transclude` inlines the skill's
+#             SKILL.md into the prompt. Pick `nudge` for an already-installed
+#             skill Pi can find on its own; `transclude` to force the full body
+#             in (heavier context, but guaranteed present).
+# A row at a trigger perk already binds OVERRIDES perk's default there; a new
+# trigger is added. `perk doctor` validates every binding's skill + target.
+#
+# [[bindings]]
+# trigger = "stage:implement"
+# skill = "house-style"
+# mode = "nudge"
+#
+# [[bindings]]
+# trigger = "command:learn-docs"
+# skill = "house-style"
+# mode = "transclude"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
@@ -101,6 +129,9 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 # here win over the committed config. Example:
 #   [worktree]
 #   root = "/abs/path/to/worktrees"
+#
+# A local [[bindings]] array REPLACES the committed [[bindings]] array wholesale
+# (whole-array override, not element-wise merge — unlike scalar leaf-merge).
 """
 
 # The post-init handoff — an agent-readable markdown on-ramp (distinct from the T3/T4
