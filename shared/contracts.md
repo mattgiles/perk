@@ -1409,3 +1409,10 @@ check is report-only — no `--fix` for bindings.
 > `perk-plan` rather than `perk-learn-docs` — benign (learn-docs *is* a planning factory); a
 > pre-existing stage-vs-command `binding_trigger` quirk. Deferred: `doctor` target-existence
 > validation → **Node 3.1**; `init` `[[bindings]]` template + user docs → **Node 3.2**.
+
+> **Status (Node 3.2):** the `init` `[[bindings]]` commented template + user docs landed, resolving
+> the deferral above. `PERK_TOML_TEMPLATE` now seeds a comment-only `[[bindings]]` block documenting
+> `trigger` / `skill` / `mode` and the nudge-vs-transclude choice; `PERK_LOCAL_TOML_TEMPLATE` records
+> the whole-array-replace override rule. README gains a `## Skill bindings` user section. The seeded
+> block is inert (comment-only) — a fresh repo still resolves to zero user bindings and `doctor`
+> stays exit-0 (pinned by a `tests/test_config.py` regression).

@@ -140,6 +140,57 @@ nodes:
 
 A roadmap-free objective is valid too — the prose alone is a goal you grow later.
 
+## Skill bindings
+
+A **skill binding** attaches an installed skill (a directory under `.agents/skills/<name>/`) to a
+perk **trigger** — a stage or a command — so the skill is delivered into that session automatically.
+perk ships its own workflow skills (e.g. `perk-implement`, `perk-plan`) as bindings; you can add your
+own and override perk's at the same trigger.
+
+Bindings live in `.pi/perk.toml` as an array of tables. Each row is `{ trigger, skill, mode }`:
+
+```toml
+[[bindings]]
+trigger = "stage:implement"   # fire when the implement stage starts
+skill = "house-style"         # a skill installed at .agents/skills/house-style/
+mode = "nudge"                # how to deliver it (see below)
+
+[[bindings]]
+trigger = "command:learn-docs"
+skill = "house-style"
+mode = "transclude"
+```
+
+**Triggers** are `"<kind>:<id>"`. The kind is `stage` or `command`:
+
+- `stage:<id>` fires at that stage's launch / session entry. Stage ids:
+  `objective-author`, `objective-save`, `objective-plan`, `plan`, `save`, `implement`, `submit`,
+  `address`, `land`, `learn`.
+- `command:<id>` fires when that perk command runs. Deliverable command ids:
+  `objective-reconcile`, `learn-docs`.
+
+Prefer `stage:<id>` when a command maps 1:1 to a stage; reach for `command:<id>` only for the
+deliverable commands that aren't a stage.
+
+**`mode` is the nudge-vs-transclude trade-off:**
+
+- `nudge` delivers a short *pointer* telling the session to follow the skill, leaving the skill's
+  body ambient for Pi to discover on its own. Lightweight context. Pick this for a skill that is
+  already installed and Pi can find.
+- `transclude` inlines the skill's `SKILL.md` directly into the prompt. Heavier context, but the
+  body is *guaranteed present* — the intended path for a skill Pi can't otherwise discover.
+
+perk's own skills ship as `nudge` defaults. A binding you declare **at a trigger perk already binds
+overrides** perk's default there; a binding at a new trigger is added alongside.
+
+Per-user overrides go in `.pi/perk.local.toml` (gitignored). Note the array semantics differ from
+scalar config: a local `[[bindings]]` array **replaces the committed array wholesale** — it is not
+merged element-wise.
+
+`perk doctor` validates every binding's `skill` (the directory exists) and `trigger` (a known stage
+or command) — loud-but-non-fatal, so a typo is surfaced without blocking the workflow. The
+authoritative spec is `shared/contracts.md` §8.9.
+
 ## Where this is going
 
 Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** on the

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from perk.config import load_config
+from perk.init import PERK_TOML_TEMPLATE
 
 
 def _write(repo: Path, name: str, text: str) -> None:
@@ -30,6 +31,13 @@ def test_absolute_root_preserved(tmp_path):
 
 
 def test_user_bindings_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).user_bindings == []
+
+
+def test_seeded_template_is_inert(tmp_path):
+    # The seeded `.pi/perk.toml` carries a *commented* [[bindings]] example; it must
+    # parse to zero user bindings (guards the comment-only invariant against edits).
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_config(tmp_path).user_bindings == []
 
 
