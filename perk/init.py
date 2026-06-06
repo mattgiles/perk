@@ -386,13 +386,18 @@ def _skill_link_state(root: Path) -> dict[str, str]:
 
 
 def _sync_skills(root: Path, changes: list[str]) -> None:
-    """Materialize the declared skills via the skills CLI (consumer repos, ``verify`` only).
+    """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
+
+    The ``skills`` CLI is the single delivery path for perk's own skills: the ``..``/``git:`` Pi
+    package no longer declares ``pi.skills``, so Pi never discovers the package ``skills/`` dir —
+    every ``perk-*`` skill reaches a session only through the CLI-managed ``.agents/skills/``
+    symlinks. Runs for both self-repo and consumers under ``verify``.
 
     Best-effort + non-fatal, exactly like the GitHub readiness probe (D3): a missing or failing
     ``skills`` never blocks init — file convergence (incl. the perk fragment) has already
-    succeeded. ``skills init`` is idempotent (no-op once initialized); ``skills sync`` enforces
-    the declared state by (re)linking ``.agents/skills/*``. A ``changes`` entry is appended only
-    when the link set actually changes, so a converged repo reports no churn.
+    succeeded. ``skills init`` is idempotent (no-op once initialized); ``skills update --sync``
+    enforces the declared state by (re)linking ``.agents/skills/*``. A ``changes`` entry is
+    appended only when the link set actually changes, so a converged repo reports no churn.
     """
     if shutil.which("skills") is None:
         return
@@ -408,7 +413,7 @@ def _sync_skills(root: Path, changes: list[str]) -> None:
             timeout=30,
         )
         subprocess.run(
-            ["skills", "sync"],
+            ["skills", "update", "--sync"],
             cwd=root,
             check=False,
             capture_output=True,
@@ -418,7 +423,7 @@ def _sync_skills(root: Path, changes: list[str]) -> None:
     except (OSError, subprocess.TimeoutExpired):
         return
     if _skill_link_state(root) != before:
-        changes.append(".agents/skills/: synchronized via skills sync")
+        changes.append(".agents/skills/: synchronized via skills update --sync")
 
 
 def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
@@ -625,10 +630,11 @@ def run_init(
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
     _converge_config(root, changes, force=force, interactive=interactive)
-    # Materialize the declared skills under the covers (consumer repos only; perk's own tree
-    # loads `skills/perk-*` via the `..` Pi package, so a sync there would only duplicate links).
+    # Materialize the declared skills under the covers via the `skills` CLI — the single delivery
+    # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
+    # so Pi discovers `perk-*` only through `.agents/skills/`).
     # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
-    if verify and not self_repo:
+    if verify:
         _sync_skills(root, changes)
 
     github_report: GitHubReport | None = None

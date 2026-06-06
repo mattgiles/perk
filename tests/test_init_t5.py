@@ -44,12 +44,13 @@ def test_report_to_dict_shape(tmp_path):
 # --- skills sync orchestration (§2.7) ----------------------------------------
 
 
-def test_sync_skills_skipped_for_self_repo(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
+def test_sync_skills_runs_for_self_repo(git_repo, monkeypatch, stub_env):
+    # The `skills` CLI is the single delivery path in both trees: self-repo now syncs too.
+    (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
     called = []
     monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes: called.append(root))
-    run_init(tmp_path, verify=True)  # self repo: skills loaded via the `..` package, never synced
-    assert called == []
+    run_init(git_repo, verify=True)
+    assert called == [git_repo]
 
 
 def test_sync_skills_runs_for_consumer_under_verify(git_repo, monkeypatch, stub_env):
@@ -81,7 +82,7 @@ def test_sync_skills_reports_only_on_link_change(tmp_path, monkeypatch):
     monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: next(states))
     changes: list[str] = []
     init_mod._sync_skills(tmp_path, changes)
-    assert changes == [".agents/skills/: synchronized via skills sync"]
+    assert changes == [".agents/skills/: synchronized via skills update --sync"]
 
     # Link set unchanged -> no change entry (idempotent reporting).
     monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: {"perk-plan": "/cache/x"})

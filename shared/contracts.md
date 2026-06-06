@@ -1380,13 +1380,17 @@ so it uses that path **only** (no self-repo fallback).
 check (`perk/doctor.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
-SKILL.md`, with a self-repo `skills/<name>/SKILL.md` fallback (perk's own `perk-*` skills are not
-symlinked — `bindings.is_skill_installed(root, skill, *, self_repo)`, D4) — and **target-existence**
+SKILL.md`, with a self-repo `skills/<name>/SKILL.md` *pre-sync safety net* fallback
+(`bindings.is_skill_installed(root, skill, *, self_repo)`, D4). perk's own `perk-*` skills are
+delivered into `.agents/skills/` by the `skills` CLI in **both** self-repo and consumer trees (the
+Pi package no longer declares `pi.skills`, so Pi never discovers the package `skills/` dir); the
+`skills/<name>` fallback covers only the window before `skills update --sync` has run — and
+**target-existence**
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
 `DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs}` (the only command triggers perk's
 delivery layer fires; a `command:<id>` outside it never fires). Every binding finding is a **`warn`**
 (loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration (a consumer that
-has not run `skills sync` yet is not failed). A `BindingsError` on the *bundled* file is a `fail`
+has not run `skills update --sync` yet is not failed). A `BindingsError` on the *bundled* file is a `fail`
 ("Reinstall perk"; cannot occur in a healthy install). A `RegistryError`/bad-TOML during the check
 degrades to a warn note rather than failing (the registry/config checks own those failures). The
 check is report-only — no `--fix` for bindings.

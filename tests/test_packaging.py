@@ -5,9 +5,11 @@ These promote the cross-plane packaging assertions formerly carried by the
 
 - version lockstep between the npm `package.json` and the Python `perk.__version__`,
 - the built **wheel** bundles `perk/_shared/{README,registry,contracts}`,
-- the **npm tarball** ships `shared/`, `extension/index.ts`, and `skills/` while
-  excluding the dev-only `extension/testing/` + `*.test.ts`,
-- the skills publish surface (each `skills/*/` has a `SKILL.md`, declared in `package.json`).
+- the **npm tarball** ships `shared/` and `extension/index.ts` while excluding the dev-only
+  `extension/testing/` + `*.test.ts` (skills are delivered by the external `skills` CLI from the
+  git repo — they are no longer in the `pi` manifest or the npm tarball),
+- the skill source quality (each `skills/*/` has a `SKILL.md`), with the `pi` manifest and
+  `files` list asserted to *not* carry skills.
 
 Build/pack tests skip cleanly when `uv`/`npm` are absent so the suite stays
 CI-robust; in CI both toolchains are present so they actually run.
@@ -77,7 +79,6 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/bindings.yaml" in paths
     assert "shared/contracts.md" in paths
     assert "shared/README.md" in paths
-    assert any(p.startswith("skills/") for p in paths), paths
 
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths
@@ -92,5 +93,7 @@ def test_skills_shipped():
         assert (d / "SKILL.md").is_file(), f"{d.name} missing SKILL.md"
 
     pkg = _package_json()
-    assert pkg["pi"]["skills"] == ["./skills"]
-    assert "skills/" in pkg["files"]
+    # Skills are delivered by the `skills` CLI from the git repo, not by the Pi package or the
+    # npm tarball: the `pi` manifest must not declare skills and the tarball must not ship them.
+    assert "skills" not in pkg.get("pi", {})
+    assert "skills/" not in pkg["files"]
