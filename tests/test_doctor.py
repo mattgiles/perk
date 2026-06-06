@@ -227,6 +227,35 @@ def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     assert agents_block.status == "fail"  # un-readable -> fail, never a crash
 
 
+# --- skills sync under --fix (the repair gesture) -------------------------------------------
+
+
+def test_fix_verify_stays_healthy_with_stubbed_sync(git_repo, stub_env):
+    # `stub_env` no-ops `init._sync_skills`; `run_doctor(fix=True, verify=True)` must not crash
+    # and stays healthy on a freshly converged repo.
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert report.healthy and report.exit_code == 0
+
+
+def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
+    # `stub_env` keeps env/github offline; re-patch the sync seam (overriding the fixture's
+    # no-op) to observe that `--fix` materializes skills under `verify`.
+    _scaffold(git_repo)
+    called = []
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    run_doctor(git_repo, fix=True, verify=True)
+    assert called == [git_repo]
+
+
+def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
+    _scaffold(git_repo)
+    called = []
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    run_doctor(git_repo, fix=False, verify=True)
+    assert called == []
+
+
 # --- bindings check (Node 3.1) --------------------------------------------------------------
 
 

@@ -23,23 +23,35 @@ unauthed GitHub report.
 
 ## A single patchable seam keeps the suite offline
 
-`skills init` / `skills sync` would clone over the network during *verified* init tests (the ones
-that run `verify=True`). The pattern that keeps the test suite offline:
+`skills init` / `skills update --sync` would clone over the network during *verified* init tests
+(the ones that run `verify=True`). The pattern that keeps the test suite offline:
 
 - Route the whole shell through **one module-level function** (`init._sync_skills(root, changes)`).
-- Gate the call site `if verify and not self_repo:` in `run_init` — the pure unit-test path
-  (`verify=False`) already skips it.
+- Gate the call site `if verify:` in `run_init` — the pure unit-test path (`verify=False`) already
+  skips it. (The sync runs in **both** self-repo and consumer trees — see below.)
 - Stub that one seam in `tests/conftest.py`'s `stub_env`
   (`monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes: None)`), next to the env /
   github stubs. Any other verified-path test (e.g. the non-fatal github test) stubs the same seam.
 
 One function = one patch point. Don't scatter `subprocess.run` calls across the convergence.
 
-## Self-repo skips the sync entirely
+## The `skills` CLI is the single delivery path (both trees)
 
-perk's own tree loads `skills/perk-*` via the `..` Pi package entry, so running `skills sync`
-there would only **duplicate** the symlinks. Hence the `not self_repo` half of the gate. The same
-`is_self_repo(root)` split drives ref pinning (below).
+The `skills` CLI materializes `.agents/skills/perk-*` in **both** self-repo and consumer trees via
+`skills update --sync`. The `..`/`git:` Pi package contributes only the **extension** — its `pi`
+manifest no longer lists `skills`, so Pi never discovers the package's top-level `skills/` dir
+(convention auto-discovery applies *only* when no `pi` manifest is present; the manifest stays for
+`extensions`). This kills the double-load that previously emitted a noisy `[Skill conflicts]` block
+(Pi found each `perk-*` skill twice — once from `.agents/skills/`, once from the package `skills/`).
+
+Consequently the `run_init` gate dropped its `not self_repo` half (`if verify:` now). `perk doctor
+--fix` performs the same `init._sync_skills` under the covers as its repair gesture (plain `perk
+doctor` stays read-only). The `is_self_repo(root)` split still drives ref pinning (below).
+
+**Dogfooding caveat:** because the CLI clones the perk git repo at a pinned ref into a content-
+addressed worktree, a perk developer's *uncommitted* edits to `skills/perk-*/SKILL.md` are not
+reflected in the loaded `.agents/skills/` symlink until pushed and re-synced. The committed
+`skills/<name>/` bodies remain the in-repo source and a pre-sync `is_skill_installed` fallback.
 
 ## Ref pinning mirrors `_desired_packages`
 

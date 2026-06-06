@@ -41,9 +41,11 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset({"objective-reconcile", "learn-docs"})
 
-# Where an installed skill body lives. Consumers symlink skills under `.agents/skills/<name>/`;
-# perk's own self-repo keeps its `perk-*` skills under `skills/<name>/` (not symlinked — they reach
-# Pi via the `..` package), so doctor accepts that fallback under `self_repo`.
+# Where an installed skill body lives. The `skills` CLI delivers every `perk-*` skill into
+# `.agents/skills/<name>/` in both self-repo and consumer trees (the Pi package no longer declares
+# `pi.skills`, so Pi discovers them only through these symlinks). perk's own self-repo also keeps
+# the skill bodies committed at `skills/<name>/`; doctor accepts that as a pre-sync fallback under
+# `self_repo` (a best-effort safety net before `skills update --sync` has run).
 _SKILLS_DIR = Path(".agents/skills")
 _SELF_REPO_SKILLS_DIR = Path("skills")
 _SKILL_FILENAME = "SKILL.md"
@@ -261,9 +263,10 @@ def is_skill_installed(root: Path, skill: str, *, self_repo: bool = False) -> bo
 
     Checks ``.agents/skills/<skill>/SKILL.md`` — byte-identical to the cold/warm delivery readers
     (``binding_delivery._read_skill_body`` / ``bindingDelivery.readSkillBody``). When ``self_repo``
-    is set, also accepts perk's own ``skills/<skill>/SKILL.md`` layout (its ``perk-*`` skills are
-    not symlinked under ``.agents/skills`` — they reach Pi via the ``..`` package). The self-repo
-    fallback is doctor-only; injection always uses the default ``self_repo=False``.
+    is set, also accepts perk's own committed ``skills/<skill>/SKILL.md`` layout as a pre-sync
+    fallback (a best-effort safety net before the ``skills`` CLI has materialized
+    ``.agents/skills/``). The self-repo fallback is doctor-only; injection always uses the default
+    ``self_repo=False``.
     """
     if (root / _SKILLS_DIR / skill / _SKILL_FILENAME).is_file():
         return True

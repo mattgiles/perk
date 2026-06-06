@@ -305,7 +305,7 @@ def _bindings_check(root: Path, self_repo: bool) -> Check:
         "warn",
         f"bindings: {len(problems)} problem(s)",
         shown,
-        "Fix .pi/perk.toml [[bindings]], run 'skills sync', or re-run 'perk init'.",
+        "Fix .pi/perk.toml [[bindings]], or re-run 'perk init' / 'perk doctor --fix' to sync.",
     )
 
 
@@ -460,6 +460,12 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     fixed: list[str] = []
     if fix:
         fixed = _apply_fixes(root, self_repo, checks)
+        # Materialize skills under the covers (the repair gesture) via the `skills` CLI — best-
+        # effort, appends its own change entry on link change. Gated on `verify` so the external
+        # shell runs on real `--fix` runs but not in unit tests; a sync that links missing skills
+        # clears the `bindings` skill-presence warnings on the post-fix re-verify below.
+        if verify:
+            init._sync_skills(root, fixed)
         if fixed:
             checks = _build_checks(root, self_repo, verify=verify)
     return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo)
