@@ -43,9 +43,10 @@ read-only mode hides custom tools, the flow is:
 The tool creates the `perk:objective` issue, **activates** it (`active_objective`), and **starts
 budget tracking** — so you can go straight to `/objective-plan` afterwards.
 
-The `/objective-save` **command** is a fragile fallback that scrapes your latest message as the
-prose and saves **no roadmap**; it *can* run while read-only and auto-exits the gate on success.
-Prefer the tool whenever you have a roadmap.
+The `/objective-save` **command** is a convenience trigger — it exits read-only and drives you (the
+agent) to call the `objective_save` tool with your converged `prose` + structured `roadmap`, so the
+structured save still flows through the tool. Both the direct tool call and `/objective-save` reach
+the same place; neither hand-writes roadmap YAML.
 
 ## 🔴 Never hand-write roadmap YAML
 

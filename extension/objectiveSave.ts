@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "./bindingDelivery.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { type BranchEntry, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
@@ -35,30 +36,6 @@ interface ObjectiveCreateJson {
   error_type: string | null;
   message?: string | null;
   objective?: { number: number; url: string; existed?: boolean };
-}
-
-function textOf(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block) => {
-      const b = block as { type?: string; text?: string };
-      return b.type === "text" && typeof b.text === "string" ? b.text : "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-/** Best-effort fallback prose source for the `/objective-save` command: the latest assistant text. */
-export function extractObjectiveMarkdown(entries: readonly unknown[]): string | null {
-  for (let i = entries.length - 1; i >= 0; i--) {
-    const entry = entries[i] as { type?: string; message?: { role?: string; content?: unknown } };
-    if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
-    const text = textOf(entry.message.content).trim();
-    if (!text) continue;
-    return text;
-  }
-  return null;
 }
 
 /**
@@ -168,6 +145,28 @@ const TOOL_GUIDELINES = [
   'Each roadmap node needs a stable `id` (e.g. "1.1") and a `description`; `status` defaults to pending. Use `depends_on` for explicit ordering.',
 ];
 
+/**
+ * The seed guidance the warm `/objective-save` injects to drive the structured save (the
+ * perk-objective-author skill pointer rides the skill-binding suffix — Node 2.3 — not hardcoded
+ * here). Pure + exported for offline tests.
+ */
+export function objectiveSaveGuidance(title?: string): string {
+  const named = title?.trim();
+  return [
+    "perk /objective-save — persist the objective the session converged on.",
+    "1. If the objective + roadmap are NOT yet decision-complete, finish converging first, then " +
+      "call the tool.",
+    "2. Call the `objective_save` tool NOW, passing `prose` (the decision-complete objective " +
+      "prose) and `roadmap` (the STRUCTURED roadmap as a JSON array of nodes, each with a stable " +
+      "`id` and `description`) — NEVER hand-write the roadmap as YAML.",
+    named
+      ? `3. Pass \`title: "${named}"\` as the objective title.`
+      : "3. `title` is optional (defaults to the prose's first heading).",
+    "4. The tool creates the perk:objective issue, activates it, starts budget tracking, and " +
+      "terminates the turn. Judgment + durable writes stay with you.",
+  ].join("\n");
+}
+
 /** Register the warm door: the `objective_save` tool (canonical) + the `/objective-save` twin. */
 export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): void {
   pi.registerTool({
@@ -234,21 +233,24 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
 
   pi.registerCommand("objective-save", {
     description:
-      "Not a save path: an objective needs its structured roadmap, which only the objective_save " +
-      "tool can carry. This exits read-only and redirects you to the tool — it writes nothing.",
-    handler: async (_args, ctx) => {
-      // The command path is STRUCTURALLY roadmap-less (it could only scrape prose from one
-      // message), so it must NEVER write — no saveObjective, no `perk objective create`, no false
-      // success. Instead it preserves the original "read-only → read-write in one gesture" intent
-      // by flipping the gate (so the objective_save tool becomes visible), then redirects to the
-      // tool at exactly the save moment. Part A is the storage backstop for the CLI/CI path.
+      "Drive the structured objective save: exit read-only (so the objective_save tool is " +
+      "reachable) and inject guidance for the session to call objective_save with prose + the " +
+      "structured roadmap.",
+    handler: async (args, ctx) => {
+      const title = args.trim() || undefined;
+      // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS) becomes
+      // reachable on the driven turn, then drive the turn — unlike /learn-docs (which early-returns
+      // on headless), /objective-save has no pre-gather artifact, so the only useful action is the
+      // gate-exit + drive (mirrors /address and /objective-plan).
       if (gating.isActive()) gating.exit(ctx);
-      const message =
-        "perk: objective-save — `/objective-save` does not save: an objective needs its structured " +
-        "roadmap, which only the objective_save tool can carry. Read-only is now off; call the " +
-        "objective_save tool with your `prose` and `roadmap`. Nothing was written yet.";
+      const message = "perk: /objective-save — handing the structured save to the session";
       if (ctx.hasUI) ctx.ui.notify(message, "info");
       else console.error(message);
+      // The perk-objective-author pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
+      // /objective-save outside a stage:objective-author session gets none from Mechanism A.
+      pi.sendUserMessage(
+        objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),
+      );
     },
   });
 }
