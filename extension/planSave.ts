@@ -197,9 +197,19 @@ export async function savePlan(
 
   const verb = parsed.issue.existed ? "Updated" : "Saved";
   const nodeLink = parsed.objective_node ?? null;
-  const linkSuffix = nodeLink?.linked
-    ? ` · linked objective node ${nodeLink.node} → in_progress`
-    : "";
+  // Render all THREE node-link outcomes (the silent-partial-failure fix, #124). A failed advance
+  // (`linked: false`) is a non-fatal sub-step — the plan genuinely saved — but it must be VISIBLE
+  // (the §8.4 "warn + retriable" intent), not swallowed. Both surfaces render content[0].text, so
+  // this one site fixes the tool path (the model relays it) and the command path (the user sees the
+  // notify) at once.
+  let linkSuffix = "";
+  if (nodeLink?.linked === true) {
+    linkSuffix = ` · linked objective node ${nodeLink.node} → in_progress`;
+  } else if (nodeLink && nodeLink.linked === false) {
+    linkSuffix = ` · ⚠ objective node ${nodeLink.node} NOT advanced — re-run /plan-save to retry${
+      nodeLink.error ? ` (${nodeLink.error})` : ""
+    }`;
+  }
   return {
     content: [{ type: "text", text: `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}` }],
     details: {
@@ -306,11 +316,19 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       if (result.details.ok && wasReadOnly) {
         gating.exit(ctx);
       }
+      // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
+      // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
+      // saved) — but it MUST surface (the #124 silent-partial-failure fix), in headless runs too.
+      const message = result.content[0]?.text ?? "plan-save done";
+      const severity = !result.details.ok
+        ? "error"
+        : result.details.objective_node?.linked === false
+          ? "warning"
+          : "info";
       if (ctx.hasUI) {
-        ctx.ui.notify(
-          result.content[0]?.text ?? "plan-save done",
-          result.details.ok ? "info" : "error",
-        );
+        ctx.ui.notify(message, severity);
+      } else if (severity !== "info") {
+        console.error(`perk: plan-save — ${message}`);
       }
     },
   });

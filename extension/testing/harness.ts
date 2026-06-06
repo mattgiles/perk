@@ -60,6 +60,8 @@ export interface PerkSession {
   readonly session: AgentSession;
   /** Captured `ui.notify` calls (headful only). */
   readonly notifies: readonly string[];
+  /** Captured `ui.notify` calls with severity (headful only). */
+  readonly notifyEvents: readonly { message: string; severity?: string }[];
   /** Captured `ui.setStatus(slot, value)` calls (headful only). */
   readonly statuses: readonly { slot: string; value: string | undefined }[];
   /** Captured `ui.setWidget(slot, value)` calls (headful only). */
@@ -260,11 +262,13 @@ function headfulUIContext(
   notifies: string[],
   statuses: { slot: string; value: string | undefined }[] = [],
   widgets: { slot: string; value: string[] | undefined }[] = [],
+  notifyEvents: { message: string; severity?: string }[] = [],
 ): ExtensionUIContext {
-  // Minimal context: records notify + setStatus/setWidget so tests can assert rendered UI.
+  // Minimal context: records notify (+ severity) + setStatus/setWidget so tests can assert UI.
   return {
-    notify: (message: string) => {
+    notify: (message: string, severity?: string) => {
       notifies.push(message);
+      notifyEvents.push({ message, severity });
     },
     setStatus: (slot: string, value: string | undefined) => {
       statuses.push({ slot, value });
@@ -305,6 +309,7 @@ export async function loadPerkSession(opts: {
   applyEnv({ PERK_SELFCHECK: "1", ...(opts.env ?? {}) }, savedEnv);
 
   const notifies: string[] = [];
+  const notifyEvents: { message: string; severity?: string }[] = [];
   const statuses: { slot: string; value: string | undefined }[] = [];
   const widgets: { slot: string; value: string[] | undefined }[] = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
@@ -323,7 +328,7 @@ export async function loadPerkSession(opts: {
   });
 
   await session.bindExtensions({
-    uiContext: headful ? headfulUIContext(notifies, statuses, widgets) : undefined,
+    uiContext: headful ? headfulUIContext(notifies, statuses, widgets, notifyEvents) : undefined,
     // Forward the Pi run mode so `ctx.mode` (and the `run_mode` sentinel) is observable.
     mode: opts.mode,
     // Surface (don't swallow) extension-handler failures; a real bug also fails downstream asserts.
@@ -337,6 +342,7 @@ export async function loadPerkSession(opts: {
   return {
     session,
     notifies,
+    notifyEvents,
     statuses,
     widgets,
     sentinel() {

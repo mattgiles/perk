@@ -46,6 +46,40 @@ const PLAN_RESAVE_JSON = JSON.stringify({
   dry_run: false,
 });
 
+const PLAN_NODE_FAIL_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { number: 122, url: "https://gh/o/r/issues/122", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "122",
+    url: "https://gh/o/r/issues/122",
+    labels: ["perk:plan"],
+    objective_id: "115",
+  },
+  cached: true,
+  objective_node: { linked: false, node: "1.2", status: null, error: "boom" },
+  dry_run: false,
+});
+
+const PLAN_NODE_OK_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  issue: { number: 122, url: "https://gh/o/r/issues/122", existed: false },
+  plan_ref: {
+    provider: "github",
+    pr_id: "122",
+    url: "https://gh/o/r/issues/122",
+    labels: ["perk:plan"],
+    objective_id: "115",
+  },
+  cached: true,
+  objective_node: { linked: true, node: "1.2", status: "in_progress", error: null },
+  dry_run: false,
+});
+
 const PLAN_MD = "# Add retry\n\n## Summary\nAdd retry to the gateway.\n";
 
 test("tool: plan_save re-save surfaces Updated + details.updated", async () => {
@@ -296,6 +330,70 @@ test("command: /plan-save saves while read-only, then auto-exits the gate (D1a)"
       "plan saved + linked",
     );
     assert.equal(h.workflowState().mode, "read-write", "auto-exited to read-write on success");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- objective node-link outcome surfacing (#124 silent-partial-failure fix) -----------
+
+test("command: /plan-save surfaces a failed objective-node advance as a warning", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: PLAN_NODE_FAIL_JSON });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText: "# Add retry\n\n## Summary\nRetry it.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeCommand("plan-save");
+    const warned = h.notifyEvents.find(
+      (n) =>
+        /objective node 1\.2 NOT advanced/.test(n.message) && /re-run \/plan-save/.test(n.message),
+    );
+    assert.ok(
+      warned,
+      `a failed-advance warning was notified (got ${JSON.stringify(h.notifyEvents)})`,
+    );
+    assert.equal(warned?.severity, "warning", "raised at warning severity");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save content text reflects a failed node link (save still succeeds)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_NODE_FAIL_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.match(result.content[0]?.text ?? "", /NOT advanced/);
+    const details = result.details as {
+      ok: boolean;
+      objective_node?: { linked: boolean } | null;
+    };
+    assert.equal(details.ok, true, "the save itself succeeded");
+    assert.equal(details.objective_node?.linked, false);
+    assert.equal(result.terminate, true, "a failed link does not block termination");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command/tool: a successful node link still shows → in_progress", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_NODE_OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.match(result.content[0]?.text ?? "", /linked objective node 1\.2 → in_progress/);
+    assert.equal(
+      (result.details as { objective_node?: { linked: boolean } }).objective_node?.linked,
+      true,
+    );
   } finally {
     h.dispose();
   }
