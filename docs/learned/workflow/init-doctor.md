@@ -42,6 +42,16 @@ The coherence guard `test_every_required_capability_has_a_doctor_check`
 (`tests/test_doctor.py`) enforces convergence↔capability parity: every dry-run convergence has a
 check, and no applicable capability is left uncovered.
 
+**The exception — a report-only check is not a hand-authored managed check.** This rule forbids
+hand-writing a check for a piece that *has a managed convergence* (that would duplicate the
+auto-generated one). A **pure validation with no converge/`--fix` semantics** has no convergence to
+mirror, so it legitimately appends to `doctor._build_checks` directly and leaves `_apply_fixes`
+untouched (e.g. the skill-bindings `bindings` check — see `skill-bindings.md`). Doctor group strings
+are free-form (`_MANAGED_GROUP` only governs managed-convergence render grouping), and the coherence
+guard checks *capability* coverage, not an enumerated group set, so a brand-new report-only group
+renders fine. The test to apply: **does this piece have a `--fix`/converge side?** Yes → three-edit
+managed convergence; no → a report-only `_build_checks` entry.
+
 ## Gitignore untrack pattern
 
 A gitignore rule is **inert for already-tracked files** — `git check-ignore` even reports a tracked
