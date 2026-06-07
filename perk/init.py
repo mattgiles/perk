@@ -18,13 +18,15 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from perk import __version__, cache, capabilities, env, git, github
 from perk.cli.ensure import UserFacingCliError
-from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.env import EnvCheck
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.output import user_confirm
+from perk.providers import ProviderSet, load_providers, resolve_providers
 
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
 
@@ -294,6 +296,20 @@ def _git_identity(entry: str) -> str | None:
     return entry[:at] if at > 4 else entry
 
 
+def _package_identity(entry: object) -> str | None:
+    """Identity of a `packages` entry (string OR object-form), for dedup/removal.
+
+    Object-form entries (the provider-wired shape, `{ "source": <spec>, **filter }`) carry the
+    package spec under ``source``; string entries are the spec directly. The spec is reduced to
+    its npm/git identity (a non-npm/git spec is its own identity). ``None`` for an entry with no
+    string spec.
+    """
+    spec = cast("dict[str, object]", entry).get("source") if isinstance(entry, dict) else entry
+    if not isinstance(spec, str):
+        return None
+    return _npm_name(spec) or _git_identity(spec) or spec
+
+
 def _desired_packages(self_repo: bool) -> list[str]:
     own = ".." if self_repo else f"{GIT_PACKAGE}@v{__version__}"
     return [own, *BORROWED_PACKAGES]
@@ -350,6 +366,12 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
             have_local.add(want)
         added.append(want)
 
+    # Provider-driven two-directional wiring (Node 2.1). Composes on top of the static layer
+    # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT
+    # — doctor dry-runs/fixes it for free). perk's own package is never filtered (Invariant 2).
+    packages, provider_changes = _converge_provider_packages(root, packages)
+    added.extend(provider_changes.added)
+
     settings["packages"] = packages
     new_text = json.dumps(settings, indent=2) + "\n"
     if new_text == old_text:
@@ -357,9 +379,84 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     if apply:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text(new_text, encoding="utf-8")
-    return [
-        f".pi/settings.json: added {', '.join(added)}" if added else ".pi/settings.json: normalized"
-    ]
+
+    parts: list[str] = []
+    if added:
+        parts.append(f"added {', '.join(added)}")
+    if provider_changes.removed:
+        parts.append(f"removed {', '.join(provider_changes.removed)}")
+    return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
+
+
+@dataclass(frozen=True)
+class _ProviderChanges:
+    added: list[str]
+    removed: list[str]
+
+
+def _converge_provider_packages(
+    root: Path, packages: list[object]
+) -> tuple[list[object], _ProviderChanges]:
+    """Reconcile provider-managed `packages` entries against the repo `[providers]` selection.
+
+    Two-directional (the new wrinkle over the append-only static layer): the **whole supported
+    set** (`shared/providers.yaml`) gives the provider-managed identity set — the discriminator
+    separating provider packages from `BORROWED_PACKAGES` and the user's hand-added packages. The
+    resolved selection gives the *desired* foreign packages. We **remove** any managed entry that
+    is no longer desired (a deselect) and **add** each desired foreign package in object form,
+    merging its `package_filter`. Entries outside the managed set (perk's own, borrowed, user) are
+    never touched. Any `packages` entry whose identity matches a provider's `package` is treated
+    as provider-managed (removable when deselected); hand-adding a provider package *without*
+    selecting it is unsupported — select it via `[providers]` instead (D5).
+    """
+    provider_set = load_providers()
+    managed_identities = _managed_identities(provider_set)
+
+    # Guard a malformed perk.toml: defer surfacing to the config check (mirrors _bindings_check).
+    try:
+        selection = load_config(root).providers
+    except tomllib.TOMLDecodeError:
+        selection = {}
+    resolved = resolve_providers(selection, provider_set)
+
+    desired: dict[str, dict[str, object] | None] = {}  # spec -> filter (for object-form addition)
+    for provider in (resolved.plan, resolved.todo):
+        if provider.package:
+            desired[provider.package] = provider.package_filter
+    desired_identities = {i for spec in desired if (i := _package_identity(spec))}
+
+    removed: list[str] = []
+    kept: list[object] = []
+    for entry in packages:
+        identity = _package_identity(entry)
+        if identity in managed_identities and identity not in desired_identities:
+            removed.append(identity)
+            continue
+        kept.append(entry)
+
+    present = {i for entry in kept if (i := _package_identity(entry))}
+    added: list[str] = []
+    for spec, package_filter in desired.items():
+        identity = _package_identity(spec)
+        if identity is None or identity in present:
+            continue
+        entry: dict[str, object] = {"source": spec}
+        if package_filter:
+            entry.update(package_filter)
+        kept.append(entry)
+        present.add(identity)
+        added.append(spec)
+
+    return kept, _ProviderChanges(added=added, removed=removed)
+
+
+def _managed_identities(provider_set: ProviderSet) -> set[str]:
+    """Every non-null `package`'s identity across the supported set (the removal discriminator)."""
+    return {
+        identity
+        for provider in provider_set.providers
+        if provider.package and (identity := _package_identity(provider.package))
+    }
 
 
 def _desired_skills_manifest(self_repo: bool) -> str:

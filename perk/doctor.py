@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import bindings, cache, capabilities, env, git, github, init, registry
+from perk import bindings, cache, capabilities, env, git, github, init, providers, registry
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.github import GitHubError
@@ -309,6 +309,64 @@ def _bindings_check(root: Path, self_repo: bool) -> Check:
     )
 
 
+def _providers_check(root: Path) -> Check:
+    """Validate the provider-selection supported set + the repo selection (loud-but-non-fatal).
+
+    A ``ProvidersError`` on the *bundled* file is a ``fail`` (cannot happen in a healthy install;
+    mirrors ``_registry_check``). An ``ERROR`` Issue from the shape validator on the bundled file
+    is a ``fail``. The repo ``[providers]`` selection is resolved against the supported set; any
+    resolver issue (unknown id / seam mismatch) is a single ``warn`` so ``perk doctor`` stays
+    exit-0 over it. Package-wired / orphan drift is NOT checked here — that is owned by the
+    `settings-wiring` managed convergence (D6).
+    """
+    try:
+        provider_set = providers.load_providers()
+    except providers.ProvidersError as exc:
+        return Check(
+            "providers", "providers", "fail", "providers not loadable", str(exc), "Reinstall perk."
+        )
+
+    errors = [i for i in providers.validate(provider_set) if i.severity is registry.Severity.ERROR]
+    if errors:
+        return Check(
+            "providers",
+            "providers",
+            "fail",
+            "providers invalid",
+            "; ".join(str(i) for i in errors[:3]),
+            "Reinstall perk.",
+        )
+
+    problems: list[str] = []
+    try:
+        selection = load_config(root).providers
+    except tomllib.TOMLDecodeError:
+        selection = {}
+        problems.append("selection not evaluated — config invalid; see the config check")
+
+    resolved = providers.resolve_providers(selection, provider_set)
+    problems.extend(str(i) for i in resolved.issues)
+
+    if not problems:
+        return Check(
+            "providers",
+            "providers",
+            "ok",
+            f"providers valid (selection: plan={resolved.plan.id}, todo={resolved.todo.id})",
+        )
+    shown = "; ".join(problems[:3])
+    if len(problems) > 3:
+        shown += f" (+{len(problems) - 3} more)"
+    return Check(
+        "providers",
+        "providers",
+        "warn",
+        f"providers: {len(problems)} problem(s)",
+        shown,
+        "Fix .pi/perk.toml [providers], or re-run 'perk init' / 'perk doctor --fix' to sync.",
+    )
+
+
 def _subagent_engine_check(root: Path) -> Check:
     """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
 
@@ -363,6 +421,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_config_check(root))
     checks.append(_registry_check())
     checks.append(_bindings_check(root, self_repo))
+    checks.append(_providers_check(root))
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     return checks

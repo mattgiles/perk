@@ -121,3 +121,28 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
   const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "   "\n' });
   assert.equal(loadPerkConfig(cwd).planAuthoring, undefined);
 });
+
+// --- [providers] selection (Node 2.1) ---
+
+test("loadPerkConfig: [providers] absent -> empty selection", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  assert.deepEqual(loadPerkConfig(cwd).providers, {});
+});
+
+test("loadPerkConfig: parses [providers] plan/todo strings", () => {
+  const cwd = repoWith({
+    "perk.toml": '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).providers, {
+    plan: "tombell-plan",
+    todo: "perk-checkpoints",
+  });
+});
+
+test("loadPerkConfig: perk.local.toml [providers] overlays perk.toml (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[providers]\nplan = "perk-plan"\n',
+    "perk.local.toml": '[providers]\nplan = "tombell-plan"\n',
+  });
+  assert.equal(loadPerkConfig(cwd).providers.plan, "tombell-plan");
+});

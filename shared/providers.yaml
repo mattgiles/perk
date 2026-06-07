@@ -1,0 +1,71 @@
+# perk provider-selection supported set — the THIRD parsed cross-plane contract
+# (sibling of registry.yaml and bindings.yaml).
+#
+# Authored once here, bundled into each build artifact (wheel -> perk/_shared/,
+# npm tarball -> shared/), and parsed directly by both planes at runtime: the
+# Python reader is perk/providers.py, the TS reader is extension/providers.ts. No
+# codegen step — both planes read this same file.
+#
+# This is the SUPPORTED SET (the full catalog of providers perk knows how to wire),
+# distinct from the per-repo SELECTION (the flat `[providers]` table in .pi/perk.toml,
+# which is just a pointer into this catalog). Because both planes read this with their
+# full YAML readers, it can carry nested structure — notably the Pi `package_filter`
+# object — that the narrow-TOML config reader cannot.
+#
+# Vocabulary — each provider entry:
+#   id      — the stable provider id; for the `plan` seam it is exactly the
+#             cache.plan-ref `provider` string (provider-contract.md dimension 1).
+#   seam    — `plan` | `todo` (the two seams pluggability-taxonomy.md scope-fenced).
+#   package — the foreign Pi package spec added to .pi/settings.json `packages`
+#             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
+#             provider (nothing to add — perk produces the contract natively).
+#   adapter — the perk-owned shim module that bridges the foreign surface to the
+#             artifact boundary (cache.plan-ref / perk:checkpoint); `null` for the
+#             reference provider.
+#   default — exactly ONE `true` per seam: the behavior-preserving no-config pick.
+#   package_filter — optional Pi object-form filter (extensions/skills/… arrays)
+#             merged into the foreign package's `packages` entry to enable only the
+#             conflicting surface. perk's own package is NEVER filtered (it defers at
+#             runtime instead — adapter-architecture.md Invariant 2).
+#
+# Validation split (mirrors bindings.yaml): the shape-only loaders (perk/providers.py,
+# extension/providers.ts) check schema_version, id uniqueness, seam membership, and
+# exactly-one-default-per-seam. Cross-checks — does the repo's `[providers]` selection
+# name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
+# loaders. The Python plane is the authoritative validator.
+#
+# Status (Node 2.1): this file ships the substrate (the two reference entries + one
+# ILLUSTRATIVE foreign entry per seam — flagged below). Runtime consumption of the
+# selection (perk's plan/todo stepping aside when a foreign provider is selected) is
+# Nodes 2.2/3.1; the concrete adapter shims are Nodes 2.3/3.2. Until those land,
+# selecting a foreign provider wires its package but perk's own surface does NOT yet
+# step aside — the DEFAULT path (both reference providers) is the node's hard guarantee.
+
+schema_version: 1
+
+providers:
+  - id: perk-plan            # perk's own planMode/planSave over toolGating
+    seam: plan
+    package: null            # null ⇒ perk's bundled reference provider (no foreign package)
+    adapter: null            # null ⇒ no shim needed; perk produces the contract natively
+    default: true            # the behavior-preserving no-config pick for the plan seam
+  - id: perk-checkpoints     # perk's own checkpoints
+    seam: todo
+    package: null
+    adapter: null
+    default: true            # the behavior-preserving no-config pick for the todo seam
+
+  # --- illustrative foreign entries — the real forms land with the Node 2.3 / 3.2 adapters ---
+  - id: tombell-plan         # ILLUSTRATIVE — the real entry lands with the Node 2.3 adapter
+    seam: plan
+    package: "npm:@tombell/pi-plan"   # the foreign Pi package to add to `packages`
+    adapter: "planAdapterTombell"     # the perk-owned shim bridging surface → cache.plan-ref
+    default: false
+    package_filter:                   # optional Pi object-form filter for the foreign package
+      extensions: ["extensions/*.ts"]
+      skills: []
+  - id: juicesharp-todo      # ILLUSTRATIVE — the real entry lands with the Node 3.2 adapter
+    seam: todo
+    package: "npm:@juicesharp/rpiv-todo"
+    adapter: "todoAdapterJuicesharp"
+    default: false

@@ -44,6 +44,72 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert before == after
 
 
+def _identities(packages):
+    """Map a `packages` list (str or object-form) to the set of package specs/sources present."""
+    out = set()
+    for p in packages:
+        if isinstance(p, str):
+            out.add(p)
+        elif isinstance(p, dict) and isinstance(p.get("source"), str):
+            out.add(p["source"])
+    return out
+
+
+def test_init_default_repo_wires_no_foreign_provider_package(tmp_path):
+    # The zero-config default: both seams resolve to the `package: null` reference providers, so
+    # no foreign package is added or removed — byte-identical to today's append-only output.
+    assert run_init(tmp_path, verify=False).ok
+    packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" not in _identities(packages)
+    assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
+    # All entries are still plain strings (no object-form provider entries on the default path).
+    assert all(isinstance(p, str) for p in packages)
+
+
+def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # A user hand-added package + a borrowed package present from a prior run; both must survive.
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+    )
+    # Select the illustrative tombell-plan provider for the plan seam.
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nplan = "tombell-plan"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    # The foreign package is wired in OBJECT form with its package_filter merged.
+    entry = next(
+        p for p in packages if isinstance(p, dict) and p.get("source") == "npm:@tombell/pi-plan"
+    )
+    assert entry["extensions"] == ["extensions/*.ts"]
+    assert entry["skills"] == []
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+
+    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
+    pi_dir.joinpath("perk.toml").write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@tombell/pi-plan" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-status" in _identities(packages)
+
+
+def test_init_provider_wiring_is_idempotent(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nplan = "tombell-plan"\n', encoding="utf-8"
+    )
+    assert run_init(tmp_path, verify=False).ok
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)  # a re-run with the selection in place changes nothing
+
+
 def test_init_preserves_user_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
