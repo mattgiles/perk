@@ -4,6 +4,13 @@
 // to `perk plan-save --json` via `pi.exec` (the sanctioned process-launch + cli-vs-pi §3.2
 // machine-JSON channel), then appends `active_plan_ref` so the live session is linked immediately
 // (strict read-back, idempotent, headless-safe). Failures are loud-but-non-fatal — never throw.
+//
+// SEAM-SHARED SUBSTRATE (Node 2.2). `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
+// are the produced-contract landing for the PLAN seam (`adapter-architecture.md` Invariant 1) — the
+// Node 2.3 adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
+// they must stay always-registered. They do NOT defer when a foreign `[providers] plan` is selected
+// — only perk's own authoring surface (`extension/planMode.ts`: `/plan`, `Ctrl+Alt+P`, `--plan`,
+// the `perk:plan-context` injection) steps aside. Deferring this substrate would break Node 2.3.
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

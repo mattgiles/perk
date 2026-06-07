@@ -76,6 +76,26 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
   }
 });
 
+test("deferral: a foreign [providers] plan selection makes /plan step aside", async () => {
+  const cwd = scaffoldRepo();
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[providers]\nplan = "tombell-plan"\n', "utf8");
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  try {
+    // /plan does NOT flip read-only (perk's authoring surface defers to the foreign provider).
+    await h.invokeCommand("plan");
+    assert.notEqual(h.workflowState().mode, "read-only", "plan mode stays inactive when deferred");
+    // ...and no plan-authoring context is injected even if the gate were active.
+    assert.equal(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      false,
+      "no plan-context injected while deferred",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("--plan cold start enters read-only on session_start", async () => {
   const cwd = scaffoldRepo();
   // Unset PERK_RUN_ID so session_start takes the no-op "none" path (ad-hoc `pi --plan`, no run).
