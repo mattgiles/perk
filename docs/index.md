@@ -72,6 +72,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 |---|---|
 | [python-cli-guidelines.md](./python-cli-guidelines.md) | House style for perk's **Click**-based Python CLI: the three-layer command pattern, context DI, option/flag conventions, two-tier validation, `UserFacingCliError`, `\b` help text, human-vs-machine output, group structure, and testing. Distilled from the erk prior-art. |
 | [cli-vs-pi.md](./cli-vs-pi.md) | The CLI/extension separation: **boundary = the session; authority follows the actor.** The CLI owns the exterior, the extension owns the interior; they coordinate only through durable state, process launch, and a shared static schema. Defines **stage parity** (warm/cold-local/cold-remote doors from one stage registry). |
+| [design/headless-worker.md](./design/headless-worker.md) | The Phase-1 autonomy spike (Objective #137 node 1.1): the gap list for the in-process SDK headless drive pathway, and the headless-worker contract — inputs, terminal-signal, outcome shape — that node 1.2 builds against. |
 
 ## Explainers (interactive HTML)
 
