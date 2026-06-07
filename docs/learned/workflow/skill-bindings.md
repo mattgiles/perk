@@ -80,6 +80,72 @@ Two delivery-surface boundaries that held:
   delivery `warnings` are **returned, never raised**, and surfaced loud-but-non-fatal: a missing
   transclude target degrades to the nudge pointer with a warning, never blocking a launch.
 
+## doctor validation + the injection-time presence mirror (Node 3.1)
+
+`doctor` validates skill bindings, and a missing/unknown binding target yields a **loud-but-non-fatal
+warning** at both doctor-time and injection-time. The traps below are what an agent can't derive from
+the mechanics.
+
+### The self-repo skill-layout asymmetry (the biggest trap)
+
+perk's own `perk-*` skills are **NOT** under `.agents/skills/` in the self-repo — that dir holds only
+*borrowed* skills (`dignified-python`, `ruff`, `ty`, `uv`). The 9 `perk-*` skills live at
+`skills/<name>/SKILL.md` and reach Pi via the `..` package's `skills` CLI sync, not via
+`.agents/skills/` symlinks the self-repo materializes. A naive `.agents/skills/<name>/SKILL.md`
+presence check therefore emits **8 false warnings** on perk's own `perk doctor`. The fix:
+`is_skill_installed(root, skill, *, self_repo=False)` accepts a `skills/<name>/SKILL.md` fallback
+**only** when `self_repo`. Any future code asking "is this perk skill installed?" must thread
+`self_repo` or it mis-fires on perk's own tree. (See `init-external-cli.md` for why this fallback is
+also the pre-sync safety net.)
+
+### Two-tier validation split (deliberate, not an oversight)
+
+- **doctor** validates the **full resolved set** (`resolve_bindings(user, defaults=load_bindings()
+  .bindings).bindings`) with the **self-repo `skills/` fallback**.
+- **Injection** (cold `render_cold_bindings` nudge path + warm `bindingSuffix`) checks only
+  **user-originated** bindings and uses `.agents/skills/<name>` **only** (default `self_repo=False`)
+  — byte-identical to the delivery read path. Injection only ever references skills the *user*
+  installed under `.agents/skills/`; the self-repo fallback is doctor-only. Keep these asymmetric on
+  purpose.
+
+### Severity = `warn`, never `fail` (tied to a real lifecycle fact)
+
+Missing-skill / unknown-target findings are **`warn`** so `perk doctor` stays exit-0 — not cosmetic:
+`skills sync` is best-effort/non-fatal and is skipped under `run_init(verify=False)`, so a freshly-
+inited test repo (and any consumer who hasn't run `skills sync` yet) legitimately has no
+`.agents/skills/perk-*`. A `fail` would break `tests/test_doctor.py::test_healthy_after_init` and
+exit-1 a real consumer for a benign state. Only a `BindingsError` on the **bundled** file is `fail`
+("Reinstall perk" — impossible in a healthy install; mirrors `_registry_check`).
+`RegistryError`/bad-TOML mid-check degrade to a warn *note* (those failures are owned by the
+registry/config checks — don't double-fail).
+
+### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
+
+Only `command:objective-reconcile` and `command:learn-docs` have a binding-delivery surface (the two
+Mechanism-B `bindingSuffix` call sites + the cold `binding_trigger="command:learn-docs"` override).
+Any other `command:<id>` binding **can never fire** and doctor reports it as such. Commands that *are*
+registry stages bind via `stage:<id>` (the kind-selection rule above). If a future command grows a
+delivery surface, this frozenset must be extended in lockstep.
+
+### The injection mirror: the nudge path now warns too
+
+Previously only the `transclude` path warned on a missing skill; the `nudge` path delivered
+silently. Node 3.1 added the `elif not is_skill_installed(...)` branch (both planes) so **every**
+delivered binding to a missing skill yields exactly one warning. Also `bindingSuffix` (warm
+Mechanism B) now `console.error`s its warnings — it previously "degraded silently". Tests that assert
+`warnings == []` must now install the skill they bind (this bit two pre-existing pointer tests in
+both planes).
+
+### A report-only check is not a hand-authored managed check
+
+This `bindings` doctor check is **report-only** (no `--fix`): a brand-new `group="bindings"` string
+renders fine, and a new report-only check just appends to `doctor._build_checks` and leaves
+`_apply_fixes` untouched. This is **not** a contradiction of the "never hand-author a check" rule in
+`init-doctor.md` — that rule forbids hand-writing a check for a piece that *has a managed
+convergence* (which would duplicate the auto-generated one). A pure validation with no converge/`--fix`
+semantics has no convergence to mirror, so it lives in `_build_checks` directly. The coherence guard
+checks *capability* coverage, not an enumerated group set, so a free-form group string is fine.
+
 ## Cross-references
 
 - `shared/bindings.yaml`, `shared/contracts.md` §8.9 — the data contract and trigger vocabulary
@@ -89,3 +155,8 @@ Two delivery-surface boundaries that held:
 - `docs/learned/workflow/shared-contracts.md` — adding a new parsed `shared/` contract
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/toolchain/biome.md` — the `parseTomlSubset` rewrite gotchas
+- `perk/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/doctor.py` — the
+  report-only `bindings` check; `DELIVERABLE_COMMAND_TARGETS`
+- `docs/learned/workflow/init-doctor.md` — why a report-only check ≠ a hand-authored managed check
+- `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the
+  pre-sync `is_skill_installed` fallback)

@@ -44,6 +44,13 @@ manifest no longer lists `skills`, so Pi never discovers the package's top-level
 `extensions`). This kills the double-load that previously emitted a noisy `[Skill conflicts]` block
 (Pi found each `perk-*` skill twice — once from `.agents/skills/`, once from the package `skills/`).
 
+**Negative correction (the original assumption was wrong):** **no** settings-level package filter
+(`.pi/settings.json` `"skills": []`) and **no** removal of the `..`/`git:` package are needed.
+Because Pi's convention auto-discovery of a package's `skills/` dir applies *only when the package
+has no `pi` manifest at all*, dropping just the `skills` key from the manifest (which stays for
+`extensions`) is sufficient to stop discovery entirely. The earlier plan assumed a filter or a
+package removal was required; neither is.
+
 Consequently the `run_init` gate dropped its `not self_repo` half (`if verify:` now). `perk doctor
 --fix` performs the same `init._sync_skills` under the covers as its repair gesture (plain `perk
 doctor` stays read-only). The `is_self_repo(root)` split still drives ref pinning (below).
