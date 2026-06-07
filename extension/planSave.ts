@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
+import { generatePlanTitle } from "./planTitle.ts";
 import type { ToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
@@ -130,6 +131,14 @@ export async function savePlan(
   const plan = opts.plan.trim();
   if (!plan) return fail("no plan markdown to save (propose a plan first)", "invalid_input");
 
+  // #129: forward an explicit title (previously accepted but DROPPED), else best-effort generate
+  // one via the session model. On any failure the cold door's `derive_title` fallback takes over.
+  const explicit = opts.title?.trim();
+  const title =
+    explicit && explicit.length > 0
+      ? explicit
+      : ((await generatePlanTitle(ctx, plan, ctx.signal)) ?? undefined);
+
   const branch = (): BranchEntry[] => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
   // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable while
   // read-only (T1's allowlist excludes it), so reaching savePlan via the tool means the gate is
@@ -145,6 +154,8 @@ export async function savePlan(
     writeFileSync(planFile, plan, "utf8");
     const args = ["plan-save", "--plan-file", planFile, "--json"];
     if (runId) args.push("--run-id", runId);
+    // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
+    if (title) args.push("--title", title);
     // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
     // number; non-objective plans omit it (unchanged behavior).
     if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);

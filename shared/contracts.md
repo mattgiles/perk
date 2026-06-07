@@ -209,6 +209,16 @@ objective node→plan link outcome** returned by `perk plan-save` (`objective_no
 advance shows `→ in_progress`, a failed one shows a visible `⚠ … NOT advanced — re-run /plan-save`
 warning (§8.4 "The node↔plan link") — it is not silently swallowed.
 
+**Plan-issue title (#129).** The warm door now **actually forwards** an explicit `title` to
+`perk plan-save --title` (it was previously accepted by `savePlan` but silently dropped). When no
+explicit `title` is given, it **best-effort generates one** via the session model
+(`extension/planTitle.ts` → `extension/structuredOutput.ts`, a reusable structured-output substrate
+over `@earendil-works/pi-ai` tool-calling) and forwards that. Every failure mode (no model,
+unresolved auth, a model error, no tool call, schema-invalid args, an empty sanitized title) and the
+`PERK_NO_LLM` offline gate (set by the test harness, never by the production CLI) yield **no**
+`--title`, so the cold door's deterministic `plan.derive_title` fallback takes over — a save is never
+blocked. The cold door's `--title`/`derive_title` contract is unchanged.
+
 State key (registry vocabulary): `session.workflow-state`.
 
 **Objective budget + compaction (P2.T9).** With `active_objective` now live, the TS substrate
