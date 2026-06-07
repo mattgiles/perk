@@ -227,6 +227,39 @@ test("tool: plan_save without objective_id omits --objective-id", async () => {
   }
 });
 
+test("tool: plan_save forwards an explicit title into --title (#129 dropped-title fix)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, title: "Custom Title" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(
+      argv.includes("--title") && argv[argv.indexOf("--title") + 1] === "Custom Title",
+      `--title Custom Title was delegated (got ${JSON.stringify(argv)})`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save with no title and the LLM gate on omits --title (#129)", async () => {
+  // The harness sets PERK_NO_LLM=1 by default, so no model call fires and the cold door's
+  // derive_title stays in control — proven by the absence of --title.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.ok(!argv.includes("--title"), "no explicit title + gate on omits --title");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a second save with the same ref does not duplicate the linkage", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: PLAN_JSON });

@@ -305,8 +305,10 @@ export async function loadPerkSession(opts: {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
   const savedEnv = new Map<string, string | undefined>();
-  // Sentinels on by default so the lifecycle is observable; caller env may override.
-  applyEnv({ PERK_SELFCHECK: "1", ...(opts.env ?? {}) }, savedEnv);
+  // Sentinels on by default so the lifecycle is observable; PERK_NO_LLM on by default so harness-
+  // bound sessions stay fully offline (no title-generation model call) even on a dev machine that
+  // has provider API keys in its env. Caller env is spread last, so both remain overridable.
+  applyEnv({ PERK_SELFCHECK: "1", PERK_NO_LLM: "1", ...(opts.env ?? {}) }, savedEnv);
 
   const notifies: string[] = [];
   const notifyEvents: { message: string; severity?: string }[] = [];
