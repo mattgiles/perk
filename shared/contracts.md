@@ -1434,3 +1434,94 @@ check is report-only — no `--fix` for bindings.
 > the whole-array-replace override rule. README gains a `## Skill bindings` user section. The seeded
 > block is inert (comment-only) — a fresh repo still resolves to zero user bindings and `doctor`
 > stays exit-0 (pinned by a `tests/test_config.py` regression).
+
+## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
+
+The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo *providers* perk knows
+how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
+`.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
+`shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
+through independent readers: **`perk/providers.py`** (`load_providers` / `validate` /
+`resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
+raising `ProvidersError` only for structural failures) and **`extension/providers.ts`**
+(`loadProviders`, a thin structural parse). The Python plane is the authoritative validator. The
+design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
+`docs/design/provider-contract.md` (the seven dimensions; the `cache.plan-ref` `provider` field ==
+the plan provider id) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving
+default).
+
+**Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
+stable provider id (for the `plan` seam, exactly the `cache.plan-ref` `provider` string); `seam ∈
+{plan, todo}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+(`null` for perk's own bundled reference provider — nothing to add); `adapter` is the perk-owned
+shim module bridging a foreign surface to the artifact boundary (`null` for the reference
+provider); `default` is a bool — **exactly one `true` per seam**, the behavior-preserving no-config
+pick; `package_filter` is an optional Pi object-form filter (`extensions`/`skills`/… arrays) merged
+into a foreign package's object-form `packages` entry. Because both planes read this with their
+full YAML readers, it can carry the nested `package_filter` object that the narrow-TOML config
+reader cannot.
+
+**Shipped set (Node 2.1):** the two reference entries `perk-plan` (seam `plan`) and
+`perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus
+**one illustrative foreign entry per seam** (`tombell-plan` → `npm:@tombell/pi-plan` with a
+`package_filter`; `juicesharp-todo` → `npm:@juicesharp/rpiv-todo`), both flagged ILLUSTRATIVE — the
+real forms land with the Node 2.3 / 3.2 adapters. The illustrative entries make the two-directional
+`init` wiring real and testable now even though the adapter shims (2.3/3.2) and runtime deferral
+(2.2/3.1) do not exist yet. **Known interim limitation:** selecting a foreign provider in 2.1 wires
+its package but perk's own surface does **not** yet step aside (deferral is 2.2/3.1), so two
+surfaces would collide — selecting a foreign provider is not behavior-complete until those nodes.
+The **default** path (both reference providers) is unaffected and is the node's hard guarantee.
+
+**Validation depth (shape-only, repo-free):** the loaders/validators check that
+`schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
+`seam ∈ {plan, todo}`, and that **exactly one `default: true`** exists per seam. They do **not**
+check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
+job (mirroring how bindings target-existence lives in doctor, not the loaders).
+
+**The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
+one key per seam (`plan` / `todo`), values are **bare provider-id strings** (the TS narrow-TOML
+reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
+Both planes parse it raw (`perk/config.py` → `Config.providers`; `extension/config.ts` →
+`PerkConfig.providers`); resolution against the supported set is downstream (`init`/`doctor` in
+Python; the TS resolver is Node 2.2/3.1). An **absent table or absent key → the seam's
+`default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
+wins (standard local-override precedence). The pure resolver
+`perk.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
+issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+falls back to the default and records a **loud-but-non-fatal** `Issue`.
+
+**`perk init` two-directional settings wiring:** provider wiring composes on top of the static
+`_desired_packages` (perk + `BORROWED_PACKAGES`) layer within the same `_converge_settings` body,
+so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
+dry-runs/fixes it for free). The **whole supported set** gives the *provider-managed identity set*
+(every non-null `package`'s npm/git identity) — the discriminator separating provider packages from
+borrowed and user-hand-added packages. The resolved selection gives the *desired foreign packages*.
+Unlike today's append-only convergence, provider wiring is **two-directional**: it **removes** any
+existing `packages` entry whose identity is provider-managed but **not** desired (a deselect), and
+**adds** each desired foreign package in **object form** (`{ "source": <spec>, **package_filter }`,
+omitting the filter keys when absent). Entries outside the managed set (perk's own, borrowed, user)
+are never touched. **perk's own package is never filtered, never object-form** (Invariant 2: perk
+defers at runtime, it is not filtered). **Resolved ambiguity (Node 1.3 step 4):** any `packages`
+entry whose identity matches a provider's `package` is treated as **provider-managed** (removable
+when deselected); hand-adding a provider's package *without* selecting it is unsupported — a user
+who wants that package selects the provider via `[providers]`. The retired `@tombell/pi-plan` /
+`@juicesharp/rpiv-todo` re-enter `packages` **only** when a selection names them.
+
+**Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/doctor.py::
+_providers_check`). A `ProvidersError` on the *bundled* file is a `fail` (cannot occur in a healthy
+install; "Reinstall perk"); an `ERROR` shape `Issue` on the bundled file is a `fail`. The repo
+selection is resolved against the supported set and any resolver `issue` (unknown id / seam
+mismatch) is a single **`warn`** (loud-but-non-fatal — `perk doctor` stays exit-0 over a selection
+typo), remediation pointing at `.pi/perk.toml [providers]` / `perk init`. There is **no** separate
+package-wired / orphan check — that drift is owned by the `settings-wiring` managed convergence
+(which `doctor` already dry-runs); `_providers_check` owns only what convergence cannot repair (an
+invalid bundled file, a selection naming a non-existent / wrong-seam provider).
+
+> **Status (Node 2.1):** ships the selection **substrate** only — `shared/providers.yaml`, the two
+> shape-only loaders + the pure resolver, the `[providers]` config-reading in both planes, the
+> two-directional `init` wiring, and the `doctor` selection cross-check. Runtime **consumption** of
+> the selection (perk's `planMode`/`planSave` and `checkpoints` stepping aside when a foreign
+> provider is selected — Invariant 2's deferral) is **Nodes 2.2 / 3.1**; the concrete adapter shims
+> (`planAdapterTombell`, `todoAdapterJuicesharp`) are **Nodes 2.3 / 3.2**; the read-only tool-gate
+> (`extension/toolGating.ts`, Invariant 1) is untouched.

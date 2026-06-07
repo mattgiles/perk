@@ -91,6 +91,27 @@ def test_healthy_after_init(git_repo):
     assert "environment" not in groups and "github" not in groups  # external shells skipped
 
 
+def test_providers_check_ok_on_default_repo(git_repo):
+    # A default repo (no [providers] selection) resolves to the reference providers → `ok`.
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    providers = next(c for c in report.checks if c.name == "providers")
+    assert providers.status == "ok" and providers.group == "providers"
+    assert "plan=perk-plan" in providers.message and "todo=perk-checkpoints" in providers.message
+    assert report.exit_code == 0
+
+
+def test_providers_check_warns_on_unknown_selection(git_repo):
+    # A selection naming a non-existent provider is a loud-but-non-fatal warn (exit still 0).
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text('[providers]\nplan = "ghost"\n', encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    providers = next(c for c in report.checks if c.name == "providers")
+    assert providers.status == "warn"
+    assert "unknown provider `ghost`" in providers.detail
+    assert report.exit_code == 0  # a selection typo never fails doctor
+
+
 def test_subagent_engine_signal_and_defs_dir(git_repo):
     # P2.T6: the constant informational pointer is `ok`, and the defs-dir convergence is `ok`
     # on a freshly-converged repo.

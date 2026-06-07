@@ -67,3 +67,27 @@ def test_local_bindings_replace_committed_array(tmp_path):
     bindings = load_config(tmp_path).user_bindings
     # Whole-array replace (local wins): the committed binding is gone entirely.
     assert [(b.trigger, b.skill) for b in bindings] == [("stage:implement", "local")]
+
+
+# --- [providers] selection (Node 2.1) -------------------------------------------------------
+
+
+def test_providers_selection_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).providers == {}
+
+
+def test_providers_selection_parsed(tmp_path):
+    _write(tmp_path, "perk.toml", '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n')
+    assert load_config(tmp_path).providers == {"plan": "tombell-plan", "todo": "perk-checkpoints"}
+
+
+def test_providers_selection_local_overlay_wins(tmp_path):
+    _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\n')
+    _write(tmp_path, "perk.local.toml", '[providers]\nplan = "tombell-plan"\n')
+    assert load_config(tmp_path).providers == {"plan": "tombell-plan"}
+
+
+def test_providers_selection_ignores_non_string_values(tmp_path):
+    _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\ntodo = 3\n')
+    # Non-string `todo` is dropped (the resolver falls back to the seam default for it).
+    assert load_config(tmp_path).providers == {"plan": "perk-plan"}

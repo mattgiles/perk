@@ -29,6 +29,12 @@ export interface PerkConfig {
   objectiveCompactThreshold?: number;
   /** The `[[bindings]]` user overlay (Node 1.2), resolved against shipped defaults downstream. */
   bindings: SkillBinding[];
+  /**
+   * The flat `[providers]` per-seam selection (Node 2.1) — bare provider-id strings pointing into
+   * `shared/providers.yaml`. Absent keys mean “use the seam default”; resolution against the
+   * supported set is a downstream concern (the TS resolver is Node 2.2/3.1, not this node).
+   */
+  providers: { plan?: string; todo?: string };
 }
 
 /** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
@@ -185,5 +191,17 @@ export function loadPerkConfig(cwd: string): PerkConfig {
     ci: merged.tables.ci ?? {},
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
+    providers: parseProvidersSelection(merged.tables.providers),
   };
+}
+
+/** Read the flat `[providers]` table into a `{plan?, todo?}` selection (string values only). */
+function parseProvidersSelection(table: Record<string, string> | undefined): {
+  plan?: string;
+  todo?: string;
+} {
+  const selection: { plan?: string; todo?: string } = {};
+  if (typeof table?.plan === "string") selection.plan = table.plan;
+  if (typeof table?.todo === "string") selection.todo = table.todo;
+  return selection;
 }

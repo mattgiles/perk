@@ -14,6 +14,10 @@ Contents (authored in **T2**):
 - **`bindings.yaml`** — the second *parsed* contract: the skill-binding set
   (trigger→skill delivery, with a per-binding `nudge`/`transclude` mode). Read by both
   planes (`perk/bindings.py`, `extension/bindings.ts`); see `contracts.md` §8.9.
+- **`providers.yaml`** — the third *parsed* contract: the provider-selection supported
+  set (the catalog of plan/todo providers perk can wire, with each entry's `package` /
+  `adapter` / `default` / optional `package_filter`). Read by both planes
+  (`perk/providers.py`, `extension/providers.ts`); see `contracts.md` §8.10.
 - **`contracts.md`** — the four *prose* specs implemented once per plane: the
   `.pi/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract.

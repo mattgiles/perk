@@ -24,6 +24,10 @@ class Config:
 
     worktree_root: Path
     user_bindings: list[Binding] = field(default_factory=list)
+    # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
+    # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
+    # `user_bindings` is raw and `resolve_bindings` resolves it).
+    providers: dict[str, str | None] = field(default_factory=dict)
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -58,4 +62,16 @@ def load_config(repo_root: Path) -> Config:
     return Config(
         worktree_root=root,
         user_bindings=parse_user_bindings(merged.get("bindings")),
+        providers=_parse_providers_selection(merged.get("providers")),
     )
+
+
+def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
+    """Read the flat `[providers]` table into a `{plan, todo}` selection (string values only).
+
+    A non-dict table (absent) yields ``{}``; only `plan`/`todo` keys with **string** values are
+    kept (an absent/ill-typed key is simply omitted, so the resolver falls back to the seam
+    default silently for it).
+    """
+    table = raw if isinstance(raw, dict) else {}
+    return {seam: value for seam in ("plan", "todo") if isinstance(value := table.get(seam), str)}
