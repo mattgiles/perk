@@ -33,6 +33,16 @@ version.
 **Rule:** any plan that bumps a pinned Pi/SDK version must run `npm install` in the worktree (or the
 root checkout, depending on which `node_modules` is resolving), or the bump is inert.
 
+## Commit hygiene after installing in a worktree
+
+A **fresh `.worktrees/plan-N` has no `node_modules`** — run `npm install` first, or `tsc` /
+`node --test` cannot resolve `@earendil-works/*` (the same resolution-walk premise above).
+
+`npm install` in a worktree **dirties `package-lock.json`** with incidental `"peer": true`
+annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width). Run
+`git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
+not part of the change.
+
 ## Cross-references
 
 - `docs/learned/pi/extension-api.md` — the 0.78.x API surface a stale SDK fails to provide

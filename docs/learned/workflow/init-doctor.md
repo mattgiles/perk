@@ -104,6 +104,24 @@ it; only an index that *exists but didn't reach* the prompt is a gap. The "reach
 trimmed-substring match (robust to join-newline/whitespace differences) and stays sound only while Pi
 loads `.pi/APPEND_SYSTEM.md` **verbatim** — see `docs/learned/pi/context-system.md`.
 
+## `doctor`'s human output renders only `_GROUP_ORDER` groups
+
+`perk doctor`'s **condensed human output** renders only the groups in the literal tuple
+`_GROUP_ORDER` in `perk/cli/commands/doctor_cmd.py` (`environment, github, package, repository,
+registry, state`). Its render loop iterates that tuple, so any check whose group is **not** listed —
+currently `bindings`, `skills`, and `providers` — is **invisible in the human text** and surfaces
+only in `--json` and the exit code.
+
+This is distinct from `perk/doctor.py`'s `_MANAGED_GROUP` (which only *assigns* a managed
+convergence's group name, falling back to `"repository"`); assigning a group there does **not** make
+it render unless that group is also in `doctor_cmd._GROUP_ORDER`.
+
+The latent trap: "mirror bindings" instructions inherit bindings' own unrendered status. A node that
+actually wants `bindings` / `skills` / `providers` to appear in the human output must extend
+`_GROUP_ORDER` — and that changes long-standing behavior for `bindings` / `skills` too, so treat it
+as a deliberate cross-cutting change, not a drive-by. **Verify render visibility empirically with
+`perk doctor`, not just `--json`.**
+
 ## Doctor migration idempotency rule
 
 `_MIGRATIONS` run **unconditionally on every `--fix`** (not gated on a failing check), so each
@@ -115,6 +133,7 @@ the `again.fixed == []` idempotency tests.
 - `perk/init.py` — `GITIGNORE_BODY`, `converge()`, `ManagedConvergence`, `managed_convergences()`,
   `_skill_link_state`, `_sync_skills`
 - `perk/doctor.py` — `_MIGRATIONS`, `_managed_checks`, `_MANAGED_GROUP`, `_apply_fixes`
+- `perk/cli/commands/doctor_cmd.py` — `_GROUP_ORDER` (the human-render group allow-list)
 - `perk/capabilities.py` — `Capability`, `applicable()`
 - `perk/git.py` — `is_tracked`, `rm_cached`
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
