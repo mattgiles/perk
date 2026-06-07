@@ -450,6 +450,17 @@ from implement (cold-door fresh worktree session); `[DONE:n]` checkpoints live i
 session (T2c). The `plan` registry stage now records `writes: [session.workflow-state]` (the
 `/plan` enter/exit `mode` append).
 
+**Plan-provider deferral (Node 2.2).** `planMode` now *consumes* the resolved `[providers] plan`
+selection: it reads `loadPerkConfig(ctx.cwd).providers` through `extension/providers.ts`'s
+`resolveProviders` per-event (`resolvedPlanProviderId(cwd)` / `isPerkPlanReferenceSelected(cwd)`,
+fail-safe to `perk-plan` on any load failure) and **steps its authoring surface aside** when the
+resolved plan provider ≠ `perk-plan` — the `/plan` toggle announces the deferral headless-safe and
+returns, `Ctrl+Alt+P` routes through the same `toggle`, `--plan` defers **silently** (no gate
+entry), and the `perk:plan-context` injection is suppressed (a second defer condition alongside the
+objective-author one). The `context`-strip is unchanged. `savePlan`/the `plan_save` tool/`/plan-save`
+/the read-only gate are the **seam-shared substrate** the Node 2.3 adapter bridges to — they are
+always-registered and never defer (only perk's own authoring surface does).
+
 **In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
 deterministic, fully-isolated read-only child spun at the SDK level (`extension/readOnlySession.ts`,
 interior/TS-only). This is the **shared handoff contract** both context-isolation primitives honor
@@ -1445,7 +1456,9 @@ how to wire — distinct from the per-repo **selection** (a flat `[providers]` t
 through independent readers: **`perk/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/providers.ts`**
-(`loadProviders`, a thin structural parse). The Python plane is the authoritative validator. The
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, issues }`
+with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
+authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
 `docs/design/provider-contract.md` (the seven dimensions; the `cache.plan-ref` `provider` field ==
 the plan provider id) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving
@@ -1467,11 +1480,22 @@ reader cannot.
 **one illustrative foreign entry per seam** (`tombell-plan` → `npm:@tombell/pi-plan` with a
 `package_filter`; `juicesharp-todo` → `npm:@juicesharp/rpiv-todo`), both flagged ILLUSTRATIVE — the
 real forms land with the Node 2.3 / 3.2 adapters. The illustrative entries make the two-directional
-`init` wiring real and testable now even though the adapter shims (2.3/3.2) and runtime deferral
-(2.2/3.1) do not exist yet. **Known interim limitation:** selecting a foreign provider in 2.1 wires
-its package but perk's own surface does **not** yet step aside (deferral is 2.2/3.1), so two
-surfaces would collide — selecting a foreign provider is not behavior-complete until those nodes.
-The **default** path (both reference providers) is unaffected and is the node's hard guarantee.
+`init` wiring real and testable now even though the adapter shims (2.3/3.2) and the **todo**-seam
+runtime deferral (3.1) do not exist yet. **Known interim limitation (post-2.2):** the **plan** seam
+now steps aside at runtime — perk's `planMode` authoring surface defers when a foreign
+`[providers] plan` is selected (Node 2.2) — but nothing yet *replaces* it under a foreign selection
+(the concrete plan adapter is Node 2.3), and the **todo** seam (`checkpoints`) does not defer yet
+(Node 3.1). So selecting a foreign plan provider makes perk yield but is not behavior-complete until
+the 2.3 adapter; selecting a foreign todo provider still collides until 3.1. The **default** path
+(both reference providers) is unaffected and is the hard guarantee.
+
+**`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
+`docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
+provider id, today it is the **issue backend** (`"github"`) — `perk/launch.py` branches on
+`provider == "github"`, and `plan_save_cmd.py`/`resume.py`/all TS fixtures stamp `"github"`. That
+"id == provider field" equivalence is aspirational; Node 2.2 does **not** restamp it (restamping
+would break `launch.py`'s backend branching). `cache.plan-ref` is untouched by the plan-seam
+deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
@@ -1483,8 +1507,8 @@ job (mirroring how bindings target-existence lives in doctor, not the loaders).
 one key per seam (`plan` / `todo`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/config.py` → `Config.providers`; `extension/config.ts` →
-`PerkConfig.providers`); resolution against the supported set is downstream (`init`/`doctor` in
-Python; the TS resolver is Node 2.2/3.1). An **absent table or absent key → the seam's
+`PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
+`extension/providers.ts` `resolveProviders` resolver in TS (added Node 2.2, consumed by `planMode`). An **absent table or absent key → the seam's
 `default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
@@ -1520,8 +1544,13 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 
 > **Status (Node 2.1):** ships the selection **substrate** only — `shared/providers.yaml`, the two
 > shape-only loaders + the pure resolver, the `[providers]` config-reading in both planes, the
-> two-directional `init` wiring, and the `doctor` selection cross-check. Runtime **consumption** of
-> the selection (perk's `planMode`/`planSave` and `checkpoints` stepping aside when a foreign
-> provider is selected — Invariant 2's deferral) is **Nodes 2.2 / 3.1**; the concrete adapter shims
+> two-directional `init` wiring, and the `doctor` selection cross-check. The concrete adapter shims
 > (`planAdapterTombell`, `todoAdapterJuicesharp`) are **Nodes 2.3 / 3.2**; the read-only tool-gate
 > (`extension/toolGating.ts`, Invariant 1) is untouched.
+>
+> **Status (Node 2.2):** lands the TS resolver (`resolveProviders`) and the **plan-seam runtime
+> deferral** — perk's `planMode` authoring surface (`/plan`, `Ctrl+Alt+P`, `--plan`, the
+> `perk:plan-context` injection) steps aside when the resolved `[providers] plan` ≠ `perk-plan`
+> (fail-safe to the reference). `savePlan`/`plan_save`/`/plan-save`/the read-only gate are
+> seam-shared substrate — always-registered, the produced-contract landing the Node 2.3 adapter
+> bridges to — and do **not** defer. The **todo**-seam deferral (`checkpoints`) is still **Node 3.1**.
