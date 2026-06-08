@@ -2023,3 +2023,64 @@ def cancel_workflow_run(*, run_id: str, repo_root: Path) -> None:
     proc = _run(["run", "cancel", run_id], cwd=repo_root, timeout=_WRITE_TIMEOUT)
     if proc.returncode != 0:
         raise _failed(proc, f"failed to cancel workflow run {run_id}")
+
+
+# ===========================================================================
+# Runner-prerequisite reads (Node 2.4 — contracts.md §8.16).
+#
+# Verification-only pre-flight reads for the remote-runner's prerequisites (the checkout/push
+# PAT, the model credential, repo workflow-permissions). Same conventions as `check_auth` /
+# `check_repo_access`: `cwd=repo_root` + gh's `{owner}/{repo}` placeholder auto-fill (no
+# remote-URL parsing); routed through `_run`; a gh-missing/timeout raises `GitHubError`. None
+# of these MUTATE GitHub (Decision D2 — perk init/doctor never write secrets/permissions).
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class WorkflowPermissions:
+    """`GET .../actions/permissions/workflow` result (§8.16 ``get_workflow_permissions`` shape)."""
+
+    default_workflow_permissions: str
+    can_approve_pull_request_reviews: bool
+
+
+def secret_exists(*, name: str, repo_root: Path) -> bool | None:
+    """Does an Actions repo secret named ``name`` exist? ``True`` (present) / ``False`` (404) /
+    ``None`` (unknown — e.g. 403 insufficient permission). Never reads the secret value. A
+    gh-missing/timeout raises ``GitHubError`` via ``_run`` (the doctor layer degrades it)."""
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/actions/secrets/{name}"], cwd=repo_root)
+    if proc.returncode == 0:
+        return True
+    if "404" in (proc.stderr + proc.stdout):
+        return False
+    return None
+
+
+def get_workflow_permissions(*, repo_root: Path) -> WorkflowPermissions | None:
+    """Read the repo's default Actions workflow permissions. ``None`` on a non-zero call;
+    raises ``GitHubError`` only on a gh-missing/timeout or unparseable JSON."""
+    proc = _run(["api", "repos/{owner}/{repo}/actions/permissions/workflow"], cwd=repo_root)
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api workflow permissions` output: {exc}") from exc
+    if not isinstance(data, dict):
+        raise GitHubError(f"unexpected `gh api workflow permissions` payload: {data!r}")
+    return WorkflowPermissions(
+        default_workflow_permissions=str(data.get("default_workflow_permissions", "")),
+        can_approve_pull_request_reviews=bool(data.get("can_approve_pull_request_reviews", False)),
+    )
+
+
+def get_repo_variable(*, name: str, repo_root: Path) -> str | None:
+    """Read an Actions repo variable's value (``gh api .../actions/variables/{name}``). ``None``
+    when absent (404) / the call is non-zero / the value is empty. A gh-missing/timeout raises."""
+    proc = _run(
+        ["api", f"repos/{{owner}}/{{repo}}/actions/variables/{name}", "--jq", ".value"],
+        cwd=repo_root,
+    )
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None

@@ -1345,6 +1345,7 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 ```
 
 **Groups.** `environment` (tools; missing = `fail`) · `github` (auth/access; non-fatal `warn`) ·
+`runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `state` (the `.pi/workflow/` cache layout + handoff-blob
 integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
@@ -1976,7 +1977,8 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   run-worker`. An opt-out repo variable `PERK_ENABLED=false` disables the job without removing the
   file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
   PAT-pushed commit triggers downstream CI (the implement drive commits + `submit` pushes);
-  `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherits.
+  `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherited (the
+  `runner-workflow-permissions` check is advisory `info` because of this PAT-push model — §8.16).
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
   toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
   `git+https://github.com/mattgiles/perk@v{__version__}` for a consumer), pi (the interior the
@@ -2018,7 +2020,7 @@ model/auth resolution is the Node worker's job (env-var key resolution, Gap 5). 
 the §8.13 input contract and is carried for parity, but the plan branch is already checked out by the
 workflow, so it is not consumed here. Reporting run progress/terminal status back into GitHub is
 **Node 2.3**; the runner's secrets/health checks (the `PERK_GH_PAT`/model-credential prereqs) are
-**Node 2.4**.
+**Node 2.4** — the `perk doctor` `runner` check group (§8.16).
 
 ---
 
@@ -2078,3 +2080,74 @@ route-don't-relay from the worker's structured channel all the way into the GitH
 
 No change to `.github/workflows/perk-run.yml` or `perk/workflow_artifacts.py`: reporting hooks into
 `run-worker` itself, so the managed artifact (and its convergence/doctor tests) stay untouched.
+
+---
+
+## §8.16 · Remote-runner prerequisites: credential + permission health-checks (Node 2.4)
+
+The **pre-flight** twin of §8.14's execution-time `Validate required secrets` step: `perk doctor`'s
+diagnostic side surfaces a mis-configured runner (missing checkout/push PAT, missing model
+credential, restrictive workflow-permissions) **before** a `--remote` drive reaches CI, instead of
+letting the CI job fail at its validate step. This is perk's analogue of erk's
+`erk-queue-pat-secret` / `anthropic-api-secret` / `workflow-permissions` doctor checks, adapted to
+Pi (multi-provider model keys) and perk's `{owner}/{repo}` gateway convention.
+
+**Division of labor.** `init` *manages* the runner credentials by writing the managed workflow whose
+`Validate required secrets` step is the execution-time gate (§8.14, Node 2.2); `doctor` *health-checks*
+them ahead of time. perk init/doctor **never mutate** GitHub (Decision D2 — there is no
+secret-setting command); each actionable finding instead carries an exact `gh` remediation string in
+`Check.remediation` (e.g. `gh secret set PERK_GH_PAT`).
+
+### The three verification-only gateway reads (`perk/github.py`)
+
+All shell `gh` via `_run` with `cwd=repo_root` + gh's `{owner}/{repo}` placeholder auto-fill (no
+remote-URL parsing); none mutate; a gh-missing/timeout raises `GitHubError`:
+
+- `secret_exists(*, name, repo_root) -> bool | None` — `GET .../actions/secrets/{name}`: present →
+  `True`, 404 → `False`, any other non-zero (e.g. 403) → `None` (unknown). Never reads the value.
+- `get_workflow_permissions(*, repo_root) -> WorkflowPermissions | None` —
+  `GET .../actions/permissions/workflow`; the frozen `WorkflowPermissions` carries
+  `default_workflow_permissions: str` + `can_approve_pull_request_reviews: bool`. Non-zero → `None`;
+  unparseable JSON → `GitHubError`.
+- `get_repo_variable(*, name, repo_root) -> str | None` — `GET .../actions/variables/{name}`
+  (`--jq .value`): value on returncode 0, `None` on 404/non-zero/empty. Used to read `PERK_ENABLED`.
+
+### The report-only `runner` check group (`perk/doctor.py::_runner_checks`)
+
+A **report-only** check group (no `--fix` side — `_apply_fixes` is untouched), wired into
+`_build_checks` **inside the `if verify:` block** after `_github_checks` (it shells `gh`), wrapped in
+`try/except GitHubError` → a single `info` `runner-prereqs` degrade (no silent pass, never a crash).
+**Non-fatal posture:** present → `ok`; actionable-absent → `warn`; unverifiable → `info`; **never
+`fail`** — so a `warn` keeps exit 0 (`report.healthy` keys off `fail` only), matching §8.6's
+GitHub-non-fatal rule. Order:
+
+1. **Auth gate** — re-probe `check_auth()`; unauthed → a single `runner-prereqs` `info`, no further
+   `gh` calls.
+2. **`runner-enabled`** (always emitted) — reads `PERK_ENABLED` (`RUNNER_ENABLED_VAR`): `info`
+   reporting unset→default-on / `=<value>` / `=false`→disabled.
+3. **`PERK_ENABLED=false` → stop** (skip the three probes — don't nag about a deliberately-disabled
+   runner). This is "check only what's enabled".
+4. Otherwise the three probes (all group `"runner"`; names from `workflow_artifacts`):
+   - **`runner-pat-secret`** ← `secret_exists(RUNNER_PAT_SECRET)`: `True`→`ok`; `False`→`warn`
+     (remediation `gh secret set PERK_GH_PAT`); `None`→`info`.
+   - **`runner-model-secret`** ← `secret_exists` for **both** `ANTHROPIC_API_KEY` and
+     `OPENAI_API_KEY` (the workflow's "either" logic): either present→`ok`; both absent→`warn`;
+     else→`info`.
+   - **`runner-workflow-permissions`** ← `get_workflow_permissions`: **`info` in all non-error
+     cases** (advisory — perk pushes with a PAT, not `github.token`, so it does not block the
+     runner); `can_approve_pull_request_reviews` false carries the PUT remediation; `None`→`info`.
+
+**Self-vs-consumer dual mode (D6).** The check *set* is identical for both repo kinds (the
+`runner-workflow` capability is `scope="both"`); only the actionable-absent `detail` wording adapts —
+self: "expected on perk's own repo (perk dogfoods `--remote` drives)"; consumer: "required only if
+you use `perk … --remote` drives". No new capability is added (report-only), so the
+`test_every_required_capability_has_a_doctor_check` coherence guard is unaffected.
+
+**Human render.** `runner` is added to `doctor_cmd._GROUP_ORDER` (after `github`) — a group absent
+from that tuple is invisible in human text (the `_GROUP_ORDER` trap); `--json` and the exit code
+surface it regardless.
+
+**Node 3.3 reuse.** `_runner_checks` is a free function (not inlined) and the three reads are the
+**static** prereq layer that `perk doctor workflow` (Node 3.3) will compose with the
+managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks to the **bare**
+`perk doctor` run only; the `doctor workflow` subcommand is not built here.

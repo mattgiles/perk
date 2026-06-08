@@ -12,9 +12,9 @@ import subprocess
 
 import pytest
 
-from perk import capabilities, git, init
+from perk import capabilities, git, github, init
 from perk.cli.commands import doctor_cmd
-from perk.doctor import Check, DoctorReport, report_to_dict, run_doctor
+from perk.doctor import Check, DoctorReport, _runner_checks, report_to_dict, run_doctor
 from perk.init import run_init
 
 
@@ -350,6 +350,152 @@ def test_self_vs_consumer_dual_mode(git_repo):
     assert run_doctor(git_repo, verify=False).self_repo is False
     (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
     assert run_doctor(git_repo, verify=False).self_repo is True
+
+
+# --- runner-prerequisite checks (Node 2.4, §8.16) -------------------------------------------
+
+
+def _runner_env(monkeypatch, *, authed=True, enabled=None, pat=True, models=None, perms=True):
+    """Stub the gh-shelling seams `_runner_checks` calls so no real gh runs."""
+    monkeypatch.setattr(
+        github,
+        "check_auth",
+        lambda: github.AuthStatus(
+            authed, "octocat" if authed else None, (), None if authed else "no"
+        ),
+    )
+    monkeypatch.setattr(github, "get_repo_variable", lambda *, name, repo_root: enabled)
+    model_map = (
+        models if models is not None else {"ANTHROPIC_API_KEY": True, "OPENAI_API_KEY": False}
+    )
+
+    def fake_secret(*, name, repo_root):
+        if name == "PERK_GH_PAT":
+            return pat
+        return model_map.get(name)
+
+    monkeypatch.setattr(github, "secret_exists", fake_secret)
+    monkeypatch.setattr(
+        github,
+        "get_workflow_permissions",
+        lambda *, repo_root: (
+            None if perms is None else github.WorkflowPermissions("write", bool(perms))
+        ),
+    )
+
+
+def test_runner_unauthed_single_info(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, authed=False)
+    checks = _runner_checks(tmp_path, False)
+    assert [c.name for c in checks] == ["runner-prereqs"]
+    assert checks[0].status == "info"
+
+
+def test_runner_disabled_skips_probes(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, enabled="false")
+    checks = _runner_checks(tmp_path, False)
+    assert [c.name for c in checks] == ["runner-enabled"]
+    assert "disabled" in checks[0].message
+
+
+def test_runner_all_present_ok(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, pat=True, models={"ANTHROPIC_API_KEY": True, "OPENAI_API_KEY": False})
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    assert by["runner-pat-secret"].status == "ok"
+    assert by["runner-model-secret"].status == "ok"
+    assert "ANTHROPIC_API_KEY" in by["runner-model-secret"].message
+    # report stays healthy / exit 0 (only ok+info)
+    report = DoctorReport(checks=list(by.values()), fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0
+
+
+def test_runner_pat_absent_warn_stays_healthy(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, pat=False)
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    assert by["runner-pat-secret"].status == "warn"
+    assert by["runner-pat-secret"].remediation == "gh secret set PERK_GH_PAT"
+    report = DoctorReport(checks=list(by.values()), fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0  # non-fatal
+
+
+def test_runner_pat_unverifiable_info(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, pat=None)
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    assert by["runner-pat-secret"].status == "info"
+
+
+def test_runner_model_only_openai_ok(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, models={"ANTHROPIC_API_KEY": False, "OPENAI_API_KEY": True})
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    assert by["runner-model-secret"].status == "ok"
+    assert "OPENAI_API_KEY" in by["runner-model-secret"].message
+
+
+def test_runner_model_both_absent_warn(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, models={"ANTHROPIC_API_KEY": False, "OPENAI_API_KEY": False})
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    assert by["runner-model-secret"].status == "warn"
+
+
+def test_runner_workflow_permissions_advisory_info(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, perms=False)
+    by = {c.name: c for c in _runner_checks(tmp_path, False)}
+    perm = by["runner-workflow-permissions"]
+    assert perm.status == "info" and "cannot create PRs" in perm.message and perm.remediation
+
+
+def test_runner_self_vs_consumer_detail(monkeypatch, tmp_path):
+    _runner_env(monkeypatch, pat=False)
+    consumer = {c.name: c for c in _runner_checks(tmp_path, False)}["runner-pat-secret"]
+    self_ = {c.name: c for c in _runner_checks(tmp_path, True)}["runner-pat-secret"]
+    assert "required only if" in consumer.detail
+    assert "dogfoods" in self_.detail
+
+
+def test_runner_githuberror_degrades(monkeypatch, tmp_path):
+    def boom():
+        raise github.GitHubError("gh not found on PATH")
+
+    monkeypatch.setattr(github, "check_auth", boom)
+    # The _build_checks wrapper degrades to a single info (driven via run_doctor under verify).
+    from perk import doctor
+
+    monkeypatch.setattr(doctor, "_env_checks", lambda: [])
+    monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: None)
+    _scaffold(tmp_path_repo := _git_repo_at(tmp_path))
+    report = run_doctor(tmp_path_repo, verify=True)
+    runner = [c for c in report.checks if c.group == "runner"]
+    assert len(runner) == 1 and runner[0].name == "runner-prereqs" and runner[0].status == "info"
+    assert report.healthy
+
+
+def _git_repo_at(tmp_path):
+    repo = tmp_path / "r"
+    repo.mkdir()
+
+    def g(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+    g("init", "-q")
+    g("config", "user.email", "t@example.com")
+    g("config", "user.name", "perk tests")
+    (repo / "f.txt").write_text("hi\n", encoding="utf-8")
+    g("add", ".")
+    g("commit", "-qm", "init")
+    return repo
+
+
+def test_runner_group_renders_in_human_output(capsys):
+    checks = [
+        _check("git", "environment", "ok"),
+        _check("runner-enabled", "runner", "info"),
+        _check("runner-pat-secret", "runner", "warn", remediation="gh secret set PERK_GH_PAT"),
+    ]
+    doctor_cmd._render(DoctorReport(checks=checks, fixed=[], self_repo=False), verbose=False)
+    err = capsys.readouterr().err
+    assert "runner (" in err  # the runner group is visible (D7 — added to _GROUP_ORDER)
+    assert "gh secret set PERK_GH_PAT" in err
 
 
 # --- coherence guard (the D2 SSOT, on coverage) ---------------------------------------------
