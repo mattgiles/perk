@@ -7,6 +7,11 @@ explicit ``--worktree`` is given, the worktree/branch name is **derived** from t
 the worktree** (D5) so the launched ``pi`` links ``active_plan_ref`` on ``session_start``.
 ``create`` is **idempotent** (D4): an existing worktree is reused (resume), not re-created.
 Arbitrary plan-``#N`` resolution is ``perk resume`` (T5c); here the *active* ref is used (D2).
+
+A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
+(Node 2.1, contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
+linkage, verifies it, then triggers the runner via :mod:`perk.runner` (it positions nothing
+locally — the Node 2.2 workflow positions the worker in CI).
 """
 
 import json
@@ -15,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, git, github, run_id
+from perk import cache, git, github, run_id, runner
 from perk.binding_delivery import render_cold_bindings
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
@@ -78,35 +83,14 @@ class Target:
     runner: str | None = None  # the remote runner ref ("" => the default runner); None when local
 
 
-@dataclass(frozen=True)
-class RemoteTarget:
-    """A resolved remote-runner descriptor (P2.T8c, D12): the runner ref + the run_id→plan linkage.
-
-    The seam the Phase-3 worker reuses. This turn **resolves and surfaces** it (in ``--dry-run`` /
-    ``--json``) but does **not** drive it (no persisted intent, no runner trigger) — Phase 2 builds
-    and resolves the target; Phase 3 drives it.
-    """
-
-    runner: str
-    run_id: str
-    plan_ref: dict[str, Any] | None
-
-    def to_data(self) -> dict[str, object]:
-        return {
-            "runner": self.runner or "(default)",
-            "run_id": self.run_id,
-            "plan_ref": self.plan_ref,
-        }
-
-
 def resolve_target(stage: Stage, remote: str | None) -> Target:
     """Resolve a stage's run target (P2.T8c, D12). Pure + unit-testable.
 
     - ``remote is None`` → **local** (today's behavior).
     - ``remote`` set on a ``cold_remote:false`` stage → ``UserFacingCliError`` (``remote_blocked``).
-    - ``remote`` set on a ``cold_remote:true`` stage → a remote ``Target`` (the descriptor is
-      enriched with the run_id→plan linkage by :func:`launch_stage`, which then exits
-      ``remote_not_driven`` — the Phase-3 worker is the consumer, not built here).
+    - ``remote`` set on a ``cold_remote:true`` stage → a remote ``Target`` that
+      :func:`launch_stage` drives: persist the ``run_id→plan`` linkage, then trigger the runner
+      (Node 2.1, contracts.md §8.13).
     """
     if remote is None:
         return Target(is_remote=False)
@@ -353,7 +337,8 @@ def launch_stage(
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
-        _surface_remote_target(stage, target, repo_root)  # surfaces + exits `remote_not_driven`
+        _drive_remote_target(stage=stage, target=target, repo_root=repo_root, dry_run=dry_run)
+        return  # the remote path never reaches the cold-local exec block below
     Ensure.invariant(
         stage.doors.get("cold_local") is True,
         f"Stage '{stage.id}' has no cold-local door.",
@@ -420,37 +405,141 @@ def launch_stage(
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 
 
-def _surface_remote_target(stage: Stage, target: Target, repo_root: Path) -> None:
-    """Resolve + surface the remote descriptor (the Phase-3 seam), then exit ``remote_not_driven``.
+def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_run: bool) -> None:
+    """Drive a ``--remote`` launch of a drivable stage (Node 2.1, contracts.md §8.13).
 
-    No side effects beyond minting a run_id for the descriptor: no worktree, no handoff, no
-    persisted intent, no runner trigger (the Phase-3 consumer is not built — no fiction). It is
-    emitted on stdout (the ``--json`` supervisor surface) before the stable exit.
+    Unlike the cold-local door, a remote dispatch positions **nothing** on the dispatcher's
+    machine (no worktree, no handoff) — the Node 2.2 workflow checks out the branch and positions
+    the worker in CI. Here we only: resolve the plan, mint the ``run_id``, **persist the
+    ``run_id→plan`` linkage and read it back to verify** (the establish-before-consume gate,
+    §8.2), then **trigger** the runner and record the verified handle. A ``--dry-run`` is a
+    side-effect-free dispatch preview (no persist, no trigger).
     """
-    descriptor = RemoteTarget(
-        runner=target.runner or "",
-        run_id=run_id.mint(),
-        plan_ref=cache.read_plan_ref(repo_root),
+    plan_ref = cache.read_plan_ref(repo_root)
+    if plan_ref is None:
+        raise UserFacingCliError(
+            "a remote drive needs a saved plan — run /plan-save first.",
+            error_type="no_plan_ref",
+        )
+    rid = run_id.mint()  # a cold dispatch is a cold launch => mints (registry policy)
+    runner_ref = target.runner or ""
+    selected = runner.select_runner(runner_ref)
+    try:
+        base = github.default_branch(repo_root)
+    except GitHubError as exc:
+        base = "main"
+        user_output(
+            f"⚠ could not resolve the default branch ({exc}); basing the dispatch on "
+            f"{base!r} — pass an explicit base if that is wrong."
+        )
+    pr_id = str(plan_ref.get("pr_id", ""))
+    inputs = {
+        "run_id": rid,
+        "stage": stage.id,
+        "plan": pr_id,
+        "base": base,
+        "workflow": runner.GITHUB_ACTIONS_WORKFLOW,
+    }
+    runner_label = runner_ref or "(default)"
+
+    if dry_run:  # side-effect-free dispatch preview: no persist, no trigger
+        user_output(
+            f"would dispatch stage '{stage.id}' to {runner_label} (run_id={rid}, plan #{pr_id})"
+        )
+        machine_output(
+            json.dumps(
+                {
+                    "success": True,
+                    "dry_run": True,
+                    "stage": stage.id,
+                    "runner": runner_ref,
+                    "run_id": rid,
+                    "plan_ref": plan_ref,
+                    "inputs": inputs,
+                }
+            )
+        )
+        return
+
+    # Persist the intent (the verified linkage), then read it back and assert the round-trip
+    # established before consuming — the establish-before-consume gate (§8.2 / PRIOR_ART §8).
+    record = runner.DispatchRecord(
+        run_id=rid,
+        stage=stage.id,
+        plan_ref=plan_ref,
+        runner=runner_ref,
+        kind=selected.kind,
+        status="dispatching",
+        dispatched_at=runner.utc_now_iso(),
+        run_handle=None,
+        error=None,
     )
-    runner_label = descriptor.runner or "(default)"
+    cache.write_dispatch(repo_root, rid, record.to_data())
+    back = cache.read_dispatch(repo_root, rid)
+    if (
+        back is None
+        or back.get("run_id") != rid
+        or (back.get("plan_ref") or {}).get("pr_id") != plan_ref.get("pr_id")
+    ):
+        raise UserFacingCliError(
+            f"dispatch state for run {rid} did not verify after write — refusing to trigger.",
+            error_type="dispatch_state_unverified",
+        )
+
+    # Trigger the runner. On failure, the failed record stays for supervisor visibility.
+    try:
+        handle = selected.dispatch(
+            stage=stage.id, plan_ref=plan_ref, run_id=rid, base=base, repo_root=repo_root
+        )
+    except (runner.RunnerError, GitHubError) as exc:
+        failed = runner.DispatchRecord(
+            run_id=rid,
+            stage=stage.id,
+            plan_ref=plan_ref,
+            runner=runner_ref,
+            kind=selected.kind,
+            status="failed",
+            dispatched_at=record.dispatched_at,
+            run_handle=None,
+            error=str(exc),
+        )
+        cache.write_dispatch(repo_root, rid, failed.to_data())
+        raise UserFacingCliError(
+            f"failed to dispatch stage '{stage.id}' to {runner_label}: {exc}",
+            error_type="dispatch_failed",
+        ) from exc
+
+    # Finalize: record the verified handle. The critical verified linkage is the step-above one;
+    # a finalize-write mismatch is loud-but-non-fatal.
+    final = runner.DispatchRecord(
+        run_id=rid,
+        stage=stage.id,
+        plan_ref=plan_ref,
+        runner=runner_ref,
+        kind=selected.kind,
+        status="dispatched",
+        dispatched_at=record.dispatched_at,
+        run_handle=handle.to_data(),
+        error=None,
+    )
+    cache.write_dispatch(repo_root, rid, final.to_data())
+    confirm = cache.read_dispatch(repo_root, rid)
+    if confirm is None or confirm.get("status") != "dispatched":
+        user_output(f"⚠ dispatch record for run {rid} did not confirm 'dispatched' after finalize.")
+
     user_output(
-        f"resolved remote target for stage '{stage.id}' (runner={runner_label}); "
-        "the Phase-3 worker drives it"
+        f"dispatched stage '{stage.id}' to {runner_label} — run {handle.url or handle.run_ref}"
     )
     machine_output(
         json.dumps(
             {
-                "success": False,
-                "error_type": "remote_not_driven",
+                "success": True,
                 "stage": stage.id,
-                "target": descriptor.to_data(),
-                "message": "remote target resolved; the Phase-3 worker drives it",
+                "run_id": rid,
+                "runner": runner_ref,
+                "run_handle": handle.to_data(),
             }
         )
-    )
-    raise UserFacingCliError(
-        "remote target resolved; the Phase-3 worker drives it",
-        error_type="remote_not_driven",
     )
 
 

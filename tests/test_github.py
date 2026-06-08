@@ -1181,3 +1181,87 @@ def test_update_objective_header_rejects_unknown_field(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, _obj_header("01RID")))
     with pytest.raises(github.GitHubError, match="unknown objective-header field"):
         github.update_objective_header(number=5, fields={"bogus": "x"}, repo_root=ROOT)
+
+
+# --- workflow dispatch (Node 2.1 — contracts.md §8.13) --------------------------------
+
+
+def test_trigger_workflow_matches_on_a_later_attempt(monkeypatch):
+    # The discovery poll uses an injected no-op sleep; the matching run only appears on attempt 3.
+    attempts = {"n": 0}
+    slept: list[float] = []
+
+    def fake_run(args, **_):
+        if args[1] == "workflow":
+            return _Proc(0)
+        if args[1] == "api":
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                return _Proc(0, "[]")
+            return _Proc(
+                0,
+                json.dumps(
+                    [
+                        {
+                            "id": 7,
+                            "html_url": "u",
+                            "status": "queued",
+                            "display_title": "plan (01TOK)",
+                        }
+                    ]
+                ),
+            )
+        return _Proc(1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    wr = github.trigger_workflow(
+        repo_root=ROOT,
+        workflow="perk-run.yml",
+        inputs={"run_id": "01TOK", "stage": "implement"},
+        ref="main",
+        match_token="01TOK",
+        sleep=slept.append,
+        max_attempts=5,
+    )
+    assert wr.id == "7" and wr.status == "queued"
+    assert len(slept) == 2  # slept after attempts 1 and 2, matched on 3
+
+
+def test_trigger_workflow_raises_when_dispatch_nonzero(monkeypatch):
+    def fake_run(args, **_):
+        if args[1] == "workflow":
+            return _Proc(1, "", "could not find any workflows named perk-run.yml")
+        return _Proc(1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(github.GitHubError):
+        github.trigger_workflow(
+            repo_root=ROOT,
+            workflow="perk-run.yml",
+            inputs={"run_id": "01TOK"},
+            ref="main",
+            match_token="01TOK",
+            sleep=lambda _s: None,
+            max_attempts=2,
+        )
+
+
+def test_trigger_workflow_raises_on_exhaustion(monkeypatch):
+    def fake_run(args, **_):
+        if args[1] == "workflow":
+            return _Proc(0)
+        if args[1] == "api":
+            return _Proc(0, json.dumps([{"id": 1, "display_title": "unrelated"}]))
+        return _Proc(1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(github.GitHubError):
+        github.trigger_workflow(
+            repo_root=ROOT,
+            workflow="perk-run.yml",
+            inputs={"run_id": "01TOK"},
+            ref="main",
+            match_token="01TOK",
+            sleep=lambda _s: None,
+            max_attempts=2,
+        )

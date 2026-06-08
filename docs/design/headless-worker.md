@@ -340,6 +340,12 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   carries it as a known risk.
 - **The outcome shape (§B) is the substrate** node 1.3 (the structured event stream) and node 4.1
   (the e2e harness) consume — additive-stable, asserted there.
+- **Node 2.1 turns the remote door into a real drive.** The "resolved but not driven" status above
+  is superseded: `perk/launch.py` `_drive_remote_target` (the dispatch driver) + `perk/runner.py`
+  (the runner-agnostic `Runner` contract) persist the `run_id→plan` dispatch record
+  (`.pi/workflow/scratch/runs/<run_id>/dispatch.json`), verify it, then trigger a runner
+  (contracts.md §8.13). The position-without-exec entrypoint the CI workflow consumes (Gap 7) is
+  **Node 2.2** — the dispatcher positions nothing locally.
 
 ---
 
