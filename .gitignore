@@ -1,10 +1,3 @@
-# BEGIN skills managed runtime artifacts
-/.agents/state.yaml
-/.agents/local.yaml
-/.agents/skills/
-/.claude/skills/
-/.agents/cache/
-# END skills managed runtime artifacts
 
 # dev / build artifacts
 .venv/
@@ -29,3 +22,11 @@ node_modules/
 /.pi/workflow/scratch/
 /.pi/workflow/markers/
 # END perk managed
+
+# BEGIN skills managed runtime artifacts
+/.agents/state.yaml
+/.agents/local.yaml
+/.agents/skills/
+/.claude/skills/
+/.agents/cache/
+# END skills managed runtime artifacts
