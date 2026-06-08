@@ -16,6 +16,7 @@ test("prReviewGuidance spawns perk.pr-reviewer with a fresh context", () => {
 test("prReviewGuidance injects the configured model when set", () => {
   const text = prReviewGuidance("anthropic/claude-opus-4");
   assert.match(text, /model: "anthropic\/claude-opus-4"/);
+  assert.match(text, /\[subagents\] pr-reviewer model/);
 });
 
 test("prReviewGuidance omits the model override when unset", () => {

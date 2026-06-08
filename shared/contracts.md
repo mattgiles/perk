@@ -613,7 +613,9 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   agent def sets `package: perk`) + **explicit-name invocation** (`perk.review-classifier`), not by
   suppressing the borrowed engine's legacy scan; the stray skill agents are benign (never invoked).
   The cheap-model tiering value is realized: the classifier uses `anthropic/claude-haiku-4-5` with a
-  `claude-sonnet-4-5` fallback (overridable via `subagents.agentOverrides`).
+  `claude-sonnet-4-5` fallback (overridable via the inline per-call `model` override keyed by
+  `[subagents] review-classifier` — **not** `subagents.agentOverrides`, which reaches only builtins;
+  see the `[subagents]` paragraph below).
 
 **PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
 stage — `shared/registry.yaml` is unchanged) that conducts automated code review of the active PR
@@ -629,13 +631,21 @@ implementation session's history never biases the review.
   `perk pr-review-post` (the child has `write` only to stage the payload file + `bash` to run the
   CLI). The review is **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway,
   so the agent can never approve/request-changes.
-- **Configurable model + a correction.** The reviewer model is set by `[pr-review] model` in
-  `.pi/perk.toml` (a string; overlaid by `.pi/perk.local.toml`). The warm `/pr-review` injects it as
-  a **per-call inline `model` override** on the spawn (the agent's frontmatter `model` is the
-  default). **Correction to the T7 note above:** `subagents.agentOverrides` does **not** reach
-  project agents — `pi-subagents`' `applyBuiltinOverrides` applies overrides only to **builtin**
-  agents — so the inline per-call override (not an override map) is the configuration mechanism for
-  project agents like `perk.review-classifier` and `perk.pr-reviewer`.
+- **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
+  agent's model is configurable through one flat `[subagents]` table in `.pi/perk.toml` (overlaid by
+  `.pi/perk.local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
+  `objective-explorer` (matching each def's `name:` frontmatter and the `perk.<name>` invocation).
+  Each configured value is injected as a **per-call inline `model` override** on that agent's
+  `subagent` spawn (the agent's frontmatter `model` stays the default when the key is unset). This
+  is wired at **all six** authored spawn sites: the warm TS doors (`prReviewGuidance`,
+  `addressGuidance`, `factoryGuidance`), the cold Python prompts (`_address_prompt`, `_seed_prompt`),
+  and the headless worker (`initialPromptFor`). The earlier `[pr-review] model` key is removed
+  outright (clean break, no alias — perk `0.0.1` pre-release, init converges forward). Unknown/typo'd
+  agent keys are silently ignored (mirrors `_parse_providers_selection`); no doctor validation.
+  **Correction to the T7 note above:** `subagents.agentOverrides` does **not** reach project agents
+  — `pi-subagents`' `applyBuiltinOverrides` applies overrides only to **builtin** agents — so the
+  inline per-call override (not an override map) is the configuration mechanism for project agents
+  like `perk.review-classifier` and `perk.pr-reviewer`.
 - **No workflow-state record (deferral).** There is no parent-side tool turn (the child posts), so
   no `last_review_batch`-style record is written; the PR comment is the canonical record. A richer
   in-session record is a future enhancement.
@@ -1787,9 +1797,12 @@ stream's terminal `run_finished` event (§8.12) — the same frozen object, carr
 channel.
 
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
-> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The
-> **subagent-under-worker live smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the
-> Phase-3 `doctor workflow`**; Node 1.2 does not prove it.
+> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The worker's
+> address prompt now also injects the configured classifier model when `[subagents]
+> review-classifier` is set in the worktree's `.pi/perk.toml` (#196), as a per-call inline `model`
+> override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
+> smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the Phase-3 `doctor workflow`**;
+> Node 1.2 does not prove it.
 
 ## §8.12 · The structured run-event stream (Node 1.3)
 

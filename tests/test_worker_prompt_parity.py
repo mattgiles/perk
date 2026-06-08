@@ -47,6 +47,23 @@ def test_address_prompt_carries_invariant_substrings() -> None:
         assert needle in prompt, f"address prompt drifted — missing: {needle!r}"
 
 
+# The review-classifier model clause (#196) — byte-identical to ADDRESS_MODEL_CLAUSE in
+# extension/worker.test.ts. Drift in either plane fails the paired suites.
+_ADDRESS_MODEL_CLAUSE = (
+    ', passing `model: "test/model"` on that call '
+    "(the configured [subagents] review-classifier model)"
+)
+
+
+def test_address_prompt_injects_classifier_model_when_configured() -> None:
+    prompt = _address_prompt(_PLAN_REF, "test/model")
+    assert _ADDRESS_MODEL_CLAUSE in prompt, "address prompt missing the configured model clause"
+
+
+def test_address_prompt_omits_model_clause_when_unconfigured() -> None:
+    assert "passing `model:" not in _address_prompt(_PLAN_REF)
+
+
 def test_implement_prompt_non_github_uses_open_url() -> None:
     ref = {"provider": "gitlab", "pr_id": "9", "url": "https://gl/x"}
     assert "open https://gl/x" in _implement_prompt(ref)

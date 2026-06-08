@@ -261,6 +261,16 @@ def test_initial_prompt_primes_implement_and_address():
     assert _initial_prompt(_stage("address"), None) is None
 
 
+def test_initial_prompt_injects_classifier_model_from_config():
+    """#196: a configured `[subagents] review-classifier` model is injected into the address
+    prompt's spawn clause; an absent key (or no config) leaves it unset."""
+    config = Config(worktree_root=Path("/tmp/x"), subagents={"review-classifier": "test/model"})
+    primed = _initial_prompt(_stage("address"), _PLAN_REF, config)
+    assert primed is not None and 'model: "test/model"' in primed
+    bare = _initial_prompt(_stage("address"), _PLAN_REF, Config(worktree_root=Path("/tmp/x")))
+    assert bare is not None and "passing `model:" not in bare
+
+
 def test_initial_prompt_primes_learn():
     """P2.T17: the learn stage is primed — it derives the merged PR from the plan-<pr_id> head
     branch and stays unprimed without a plan-ref (the perk-learn pointer rides the binding

@@ -22,12 +22,19 @@ export interface PerkConfig {
   /** The `[ci]` named-checks map (`name = "shell command"`); the executor (P2.T5) consumes it. */
   ci?: Record<string, string>;
   /**
-   * Optional `[pr-review]` settings (#175). `model` is the per-call inline override the warm
-   * `/pr-review` injects on the `perk.pr-reviewer` spawn; when unset, the agent's frontmatter model
-   * is the default. (`subagents.agentOverrides` does NOT reach project agents, so this inline
-   * override — not an override map — is the configuration mechanism.)
+   * The agent-keyed `[subagents]` table (#196): a per-agent model override for each perk-owned
+   * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`). Each configured
+   * value is injected as a per-call inline `model` override on that agent's `subagent` spawn; when
+   * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
+   * (`subagents.agentOverrides` does NOT reach project agents — `pi-subagents`'
+   * `applyBuiltinOverrides` applies only to builtins — so this inline override is the mechanism.)
+   * Always-present object; absent keys omitted (mirror of `providers`).
    */
-  prReview?: { model?: string };
+  subagents: {
+    "pr-reviewer"?: string;
+    "review-classifier"?: string;
+    "objective-explorer"?: string;
+  };
   /**
    * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
    * threshold compaction while an objective is active (P2.T9). Because the TOML subset reads only
@@ -196,18 +203,30 @@ export function loadPerkConfig(cwd: string): PerkConfig {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
     ci: merged.tables.ci ?? {},
-    prReview: parsePrReview(merged.tables["pr-review"]),
+    subagents: parseSubagentsSelection(merged.tables.subagents),
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
     providers: parseProvidersSelection(merged.tables.providers),
   };
 }
 
-/** Read the `[pr-review]` table into `{model?}` (string values only); `undefined` when absent. */
-function parsePrReview(table: Record<string, string> | undefined): { model?: string } | undefined {
-  const model = table?.model;
-  if (typeof model === "string" && model.trim()) return { model };
-  return undefined;
+/** The perk-owned project agents configurable via the `[subagents]` table. */
+const SUBAGENT_KEYS = ["pr-reviewer", "review-classifier", "objective-explorer"] as const;
+
+/**
+ * Read the agent-keyed `[subagents]` table into a selection (string values only). For each known
+ * agent key, the value is kept only when it is a non-blank string; absent/ill-typed/unknown keys
+ * are omitted (mirror of `parseProvidersSelection`).
+ */
+function parseSubagentsSelection(
+  table: Record<string, string> | undefined,
+): PerkConfig["subagents"] {
+  const selection: PerkConfig["subagents"] = {};
+  for (const key of SUBAGENT_KEYS) {
+    const value = table?.[key];
+    if (typeof value === "string" && value.trim()) selection[key] = value;
+  }
+  return selection;
 }
 
 /** Read the flat `[providers]` table into a `{plan?, todo?}` selection (string values only). */

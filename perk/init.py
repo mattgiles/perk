@@ -126,12 +126,14 @@ root = ".worktrees"
 # skill = "house-style"
 # mode = "transclude"
 
-# Automated PR review (`/pr-review`) — the model the fresh-context reviewer
-# uses. When unset, the perk.pr-reviewer agent's committed default is used.
-# Set a per-user override in .pi/perk.local.toml to avoid dirtying this file.
+# Per-agent subagent models — override the model each perk-owned subagent uses
+# (the frontmatter default in .pi/agents/<name>.md is used when unset). Set a
+# per-user override in .pi/perk.local.toml to avoid dirtying this file.
 #
-# [pr-review]
-# model = "anthropic/claude-sonnet-4-5"
+# [subagents]
+# pr-reviewer = "anthropic/claude-sonnet-4-5"
+# review-classifier = "anthropic/claude-haiku-4-5"
+# objective-explorer = "anthropic/claude-haiku-4-5"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
