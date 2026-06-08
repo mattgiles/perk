@@ -75,6 +75,32 @@ re-engagement**. Headless, there is no human to nudge "keep going." Whether to n
 fail-fast-and-resurface to whole-stage retry is an empirical call deferred to 4.1 traces / 3.2 retry.
 Future worker/runner work must **not** assume the drive self-recovers from a stall.
 
+## The structured run-event stream
+
+`driveStage` emits an **additive** `RunEvent` union (`run_started` / `step_marker` / `tool_outcome`
+/ `run_finished`) through an injectable `RunEventSink` (default = a fail-soft NDJSON file at
+`runEventsPath`). `RunOutcome`'s shape was **unchanged** (`§8.11` frozen); contract `§8.12` added the
+stream. One `finish()` helper routes **every** terminal exit through exactly one `run_finished`.
+
+- **Two fail-soft tiers when adding an injected seam to a never-throws worker.** The default sink
+  wraps each file append in try/catch (logs + swallows), **AND** the emitter independently
+  try/catches the `sink(...)` call — so a *throwing injected* sink also can't abort the drive.
+  Belt-and-suspenders is deliberate: the injected-seam contract can't assume callers are fail-soft.
+  **Guard at the seam boundary, not just inside the default implementation.**
+- **The route-don't-relay / double-delivery split generalizes to any emitted stream.** Full ordered
+  narrative in the structured channel (the NDJSON file / array sink), bounded model-visible surface
+  (per-event `EVENT_SUMMARY_CAP`, reusing `readOnlySession.ts`'s `capForModel`). Co-locate the
+  durable artifact under the gitignored `scratch/runs/<runId>/` cache tier, and make the file sink a
+  **no-op when `run_id` is empty** so existing offline drive tests (which set no `PERK_RUN_ID`) stay
+  write-free with **zero** changes. This confirms the project's established idiom for new run-detail
+  surfaces — the same discipline as the route-don't-relay material above.
+- A small `toolErrorMessage(event)` helper (`details.error` string → raw `result` string → generic
+  `"tool <name> failed"` fallback) derives the pre-cap `tool_outcome.summary` text; no contract
+  impact.
+
+Building the emitter hit a tsc gotcha — `Omit<RunEvent, "seq"|"t">` collapses the discriminated union
+— fixed with a distributive `Omit`; see `docs/learned/toolchain/biome.md`.
+
 ## Offline-test determinism for model availability
 
 A "no model available" test must **inject an empty `{ getAvailable: () => [] }` registry + auth
@@ -105,5 +131,5 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `extension/readOnlySession.ts` — the fully-isolated read-only child this inverts
 - `docs/learned/pi/extension-api.md` — `ctx.mode`/`ctx.hasUI`, the root-export-list rule
 - `docs/learned/pi/context-system.md` — the read-only child it inverts
-- `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas hit while building it
+- `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter
 - `docs/learned/toolchain/worktree-node-modules.md` — worktree SDK resolution + the stale-global smoke trap
