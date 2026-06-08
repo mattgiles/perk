@@ -5,6 +5,9 @@ sources:
          astral:
            url: https://github.com/astral-sh/claude-code-plugins
            ref: main
+         mattpocock:
+           url: https://github.com/mattpocock/skills
+           ref: main
 skills:
         - source: dagster
           name: dignified-python
@@ -14,3 +17,5 @@ skills:
           name: ty
         - source: astral
           name: ruff
+        - source: mattpocock
+          name: grill-with-docs
