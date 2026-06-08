@@ -161,7 +161,7 @@ def test_worker_entry_env_override_missing_file_is_loud(tmp_path):
     assert exc.value.error_type == "worker_entry_missing"
 
 
-def test_worker_entry_consumer_install(tmp_path):
+def test_worker_entry_consumer_npm_install(tmp_path):
     entry = (
         tmp_path / ".pi" / "npm" / "node_modules" / "@perk" / "pi" / "extension" / "workerMain.ts"
     )
@@ -169,4 +169,15 @@ def test_worker_entry_consumer_install(tmp_path):
     entry.write_text("// w\n", encoding="utf-8")
     resolved = run_worker.resolve_worker_entry(tmp_path, {})
     assert resolved.path == entry
-    assert resolved.source == "consumer"
+    assert resolved.source == "consumer-npm"
+
+
+def test_worker_entry_consumer_git_clone(tmp_path):
+    # B2: pi clones the `git:` package to `.pi/git/<host>/<path>`; the resolver finds it (derived
+    # from GIT_PACKAGE) before the npm fallback.
+    entry = run_worker._git_clone_worker_entry(tmp_path)
+    entry.parent.mkdir(parents=True)
+    entry.write_text("// w\n", encoding="utf-8")
+    resolved = run_worker.resolve_worker_entry(tmp_path, {})
+    assert resolved.path == entry
+    assert resolved.source == "consumer-git"

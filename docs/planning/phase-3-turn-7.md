@@ -101,3 +101,35 @@ Built as planned, with these refinements:
 
 Deferred (named, not built): GitHub progress/terminal reporting (Node 2.3), runner secrets/health
 checks (Node 2.4), supervisor command surfaces (Nodes 3.1/3.2), the live doctor smoke (Node 3.3).
+
+### Post-merge fixes (CI-seam audit, plan #173)
+
+A CI-seam audit after merge found six defects, all in the **untested execution path** — nothing in
+the suite or a dogfood run ever executed the `plan → dispatch → checkout → setup → drive` chain (the
+declarative half — init/doctor/capability/contract §8.14 — was correct). All six are fixed in #173:
+
+- **B1 (git identity):** the composite setup ended at the worker-deps step — a fresh `ubuntu-latest`
+  runner has no `user.name`/`user.email`, so the implement drive's `bash` commit would fail. Added a
+  final `git config --global` step (`perk[bot]`) to both repo-kind variants.
+- **B2 (consumer-git entrypoint):** `resolve_worker_entry` checked only `self` + the
+  `.pi/npm/node_modules/@perk/pi` npm path, but `GIT_PACKAGE` clones to `.pi/git/<host>/<path>`.
+  Inserted a `consumer-git` candidate (derived from `GIT_PACKAGE`) before the npm fallback; renamed
+  `consumer` → `consumer-npm`.
+- **B3 (honest install):** `_PERK_INSTALL_CONSUMER` was the fictional `uv tool install perk` (no such
+  PyPI package). Pinned it to `git+https://github.com/mattgiles/perk@v{__version__}`, mirroring
+  `init._desired_skills_manifest`.
+- **B4 (loud consumer deferral):** `.pi/git` + `.pi/npm` are gitignored and nothing in the composite
+  runs `pi`, so a consumer worker-clone cannot exist in CI. The consumer worker-deps step is now a
+  loud `::error::` + `exit 1` Node-2.4 deferral instead of a silently-broken `npm ci`; self keeps
+  `npm ci`.
+- **B5 (model-key fail-fast):** the validate step gated only `PERK_GH_PAT`; model keys were passed
+  unvalidated, surfacing as a late, deep `no_model`. It now also fails fast when **both**
+  `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are empty.
+- **B6 (tight `base` input):** `base` had drifted to `required: false` / `default: "main"`; restored
+  to `required: true` with no default (the dispatcher always sends it — §8.13's tight four-input
+  contract).
+
+Recorded as a stated decision (B5/§8.14): the runner uses **`PERK_GH_PAT` (PAT checkout), not
+`github.token`** — PAT-pushed commits trigger downstream CI; `GITHUB_TOKEN`-pushed commits do not.
+Node 2.4 inherits it. **The real lesson:** all six defects lived in a CI seam no test executed; the
+standing follow-up is a live `--remote` dogfood/smoke (folded into Node 3.3 `doctor workflow`).

@@ -19,6 +19,7 @@ inputs ``run_id``/``stage``/``plan``/``base``; a per-plan ``concurrency`` group.
 
 from pathlib import Path
 
+from perk import __version__
 from perk.runner import GITHUB_ACTIONS_WORKFLOW
 
 # The two managed files (repo-relative). The composite action lives at a fixed local path the
@@ -60,9 +61,8 @@ on:
         type: string
       base:
         description: "Base branch the plan branch targets"
-        required: false
+        required: true
         type: string
-        default: "main"
 
 # One in-flight run per plan; a newer dispatch supersedes an older one (mirrors erk's
 # implement-plan-${{ … }} group).
@@ -83,9 +83,15 @@ jobs:
       - name: Validate required secrets
         env:
           PERK_GH_PAT: ${{ secrets.PERK_GH_PAT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "$PERK_GH_PAT" ]; then
             echo "::error::PERK_GH_PAT secret is missing; add a repo-scoped PAT secret."
+            exit 1
+          fi
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::No model key set; add ANTHROPIC_API_KEY or OPENAI_API_KEY."
             exit 1
           fi
 
@@ -126,7 +132,20 @@ jobs:
 # (`--from .`); a consumer installs the published distribution by name. The consumer install + its
 # version pinning is Node 2.4's prereq concern (named here so the artifact is honest, not fiction).
 _PERK_INSTALL_SELF = "uv tool install --from . perk"
-_PERK_INSTALL_CONSUMER = "uv tool install perk"
+_PERK_INSTALL_CONSUMER = f"uv tool install git+https://github.com/mattgiles/perk@v{__version__}"
+
+# The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
+# the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout has no
+# worker clone (`.pi/git` + `.pi/npm` are gitignored, and nothing in the composite runs `pi` to
+# trigger pi's git-package `npm install`), so consumer remote drive genuinely cannot run end-to-end
+# until Node 2.4 wires worker-clone reconciliation + dep resolution. Until then the consumer step is
+# a loud, explicit deferral instead of a silently-broken `npm ci`.
+_WORKER_DEPS_SELF = "npm ci"
+_WORKER_DEPS_CONSUMER = (
+    'echo "::error::perk remote drive for consumer repos lands in Node 2.4 '
+    '(the .pi/git worker-clone + Node peer-dep resolution are not wired yet)."; '
+    "exit 1"
+)
 
 _REMOTE_SETUP_ACTION_TEMPLATE = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.
@@ -158,14 +177,21 @@ runs:
 
     - name: Install Node worker deps
       shell: bash
-      run: npm ci
+      run: {worker_deps}
+
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config --global user.name "perk[bot]"
+        git config --global user.email "perk[bot]@users.noreply.github.com"
 """
 
 
 def remote_setup_action(self_repo: bool) -> str:
     """The composite setup action body for this repo kind (self-repo dogfoods the local code)."""
     install = _PERK_INSTALL_SELF if self_repo else _PERK_INSTALL_CONSUMER
-    return _REMOTE_SETUP_ACTION_TEMPLATE.format(perk_install=install)
+    worker_deps = _WORKER_DEPS_SELF if self_repo else _WORKER_DEPS_CONSUMER
+    return _REMOTE_SETUP_ACTION_TEMPLATE.format(perk_install=install, worker_deps=worker_deps)
 
 
 def _converge_file(path: Path, content: str, *, label: str, apply: bool) -> list[str]:
