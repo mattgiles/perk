@@ -615,6 +615,34 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   The cheap-model tiering value is realized: the classifier uses `anthropic/claude-haiku-4-5` with a
   `claude-sonnet-4-5` fallback (overridable via `subagents.agentOverrides`).
 
+**PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
+stage — `shared/registry.yaml` is unchanged) that conducts automated code review of the active PR
+and leaves the review **as comments on the PR**. It spawns the perk-owned **`perk.pr-reviewer`**
+agent via the borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the
+implementation session's history never biases the review.
+
+- **Deliberate departure from the read-only-child convention.** Unlike `/address` (read-only child
+  classifies; the **parent** acts), the reviewer child **posts its own review**. Rationale: the PR
+  is the sole output sink and there is no parent-side fix to apply, so relaying the review back
+  through the parent would reintroduce exactly the session pollution this command avoids. D1 is
+  still honored — the mutation stays canonical in the **Python gateway**: the child posts via
+  `perk pr-review-post` (the child has `write` only to stage the payload file + `bash` to run the
+  CLI). The review is **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway,
+  so the agent can never approve/request-changes.
+- **Configurable model + a correction.** The reviewer model is set by `[pr-review] model` in
+  `.pi/perk.toml` (a string; overlaid by `.pi/perk.local.toml`). The warm `/pr-review` injects it as
+  a **per-call inline `model` override** on the spawn (the agent's frontmatter `model` is the
+  default). **Correction to the T7 note above:** `subagents.agentOverrides` does **not** reach
+  project agents — `pi-subagents`' `applyBuiltinOverrides` applies overrides only to **builtin**
+  agents — so the inline per-call override (not an override map) is the configuration mechanism for
+  project agents like `perk.review-classifier` and `perk.pr-reviewer`.
+- **No workflow-state record (deferral).** There is no parent-side tool turn (the child posts), so
+  no `last_review_batch`-style record is written; the PR comment is the canonical record. A richer
+  in-session record is a future enhancement.
+- **Agent-def delivery (deferral).** `pr-reviewer.md` is hand-committed in perk's `.pi/agents/`
+  (matching `review-classifier.md`/`objective-explorer.md`); delivering perk agent defs to *consumer*
+  repos remains the pre-existing gap, out of scope here.
+
 - **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
   workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
   dedicated "context-isolation" section is a **deferred** doc refactor — T6 files as a sibling here to
@@ -826,6 +854,25 @@ resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ s
 ```
 
 - **Batch shape (PRIOR_ART §5/§11):** `[{ thread_id, comment }]` (objects, not a flat list).
+
+**Authored (#175 — the `/pr-review` automated-review door).** The read gathers everything the
+fresh-context `perk.pr-reviewer` child needs to review the active PR; the mutation submits the
+child's review back. `event` is **hardcoded `COMMENT`** (the agent can never approve/block).
+Resilience: if the inline-anchored review submission fails (e.g. a `line` not present in the diff),
+`post_pr_review` falls back to posting the summary (+ rendered findings) as a single discussion
+comment, so a review **always** lands on the PR:
+
+```
+get_pr_review_context{ pr_number, branch }          -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
+    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. `plan_body` is
+    # best-effort: the materialized `cache.plan` body if present, else the plan issue body, else
+    # null (the review still runs from the diff). What the spawned child runs (`perk pr-review-context`).
+post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
+    # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
+    # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
+    # comment when the review submission fails)}. The warm twin is the /pr-review child, which
+    # delegates via `perk pr-review-post --json --batch <path>`.
+```
 
 **Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
 in `perk pr-submit` via **create-then-update** (the checkout footer needs the PR number, unknown

@@ -22,6 +22,13 @@ export interface PerkConfig {
   /** The `[ci]` named-checks map (`name = "shell command"`); the executor (P2.T5) consumes it. */
   ci?: Record<string, string>;
   /**
+   * Optional `[pr-review]` settings (#175). `model` is the per-call inline override the warm
+   * `/pr-review` injects on the `perk.pr-reviewer` spawn; when unset, the agent's frontmatter model
+   * is the default. (`subagents.agentOverrides` does NOT reach project agents, so this inline
+   * override — not an override map — is the configuration mechanism.)
+   */
+  prReview?: { model?: string };
+  /**
    * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
    * threshold compaction while an objective is active (P2.T9). Because the TOML subset reads only
    * string values, it must be written as a quoted string (e.g. `compact_threshold = "0.8"`).
@@ -189,10 +196,18 @@ export function loadPerkConfig(cwd: string): PerkConfig {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
     ci: merged.tables.ci ?? {},
+    prReview: parsePrReview(merged.tables["pr-review"]),
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
     providers: parseProvidersSelection(merged.tables.providers),
   };
+}
+
+/** Read the `[pr-review]` table into `{model?}` (string values only); `undefined` when absent. */
+function parsePrReview(table: Record<string, string> | undefined): { model?: string } | undefined {
+  const model = table?.model;
+  if (typeof model === "string" && model.trim()) return { model };
+  return undefined;
 }
 
 /** Read the flat `[providers]` table into a `{plan?, todo?}` selection (string values only). */

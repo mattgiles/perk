@@ -122,6 +122,31 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
   assert.equal(loadPerkConfig(cwd).planAuthoring, undefined);
 });
 
+// --- [pr-review] model (#175) ---
+
+test("loadPerkConfig: [pr-review] absent -> prReview undefined", () => {
+  const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "x"\n' });
+  assert.equal(loadPerkConfig(cwd).prReview, undefined);
+});
+
+test("loadPerkConfig: parses [pr-review] model", () => {
+  const cwd = repoWith({ "perk.toml": '[pr-review]\nmodel = "anthropic/claude-sonnet-4-5"\n' });
+  assert.deepEqual(loadPerkConfig(cwd).prReview, { model: "anthropic/claude-sonnet-4-5" });
+});
+
+test("loadPerkConfig: blank [pr-review] model is treated as absent", () => {
+  const cwd = repoWith({ "perk.toml": '[pr-review]\nmodel = "   "\n' });
+  assert.equal(loadPerkConfig(cwd).prReview, undefined);
+});
+
+test("loadPerkConfig: perk.local.toml [pr-review] overlays perk.toml (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[pr-review]\nmodel = "base/model"\n',
+    "perk.local.toml": '[pr-review]\nmodel = "local/model"\n',
+  });
+  assert.equal(loadPerkConfig(cwd).prReview?.model, "local/model");
+});
+
 // --- [providers] selection (Node 2.1) ---
 
 test("loadPerkConfig: [providers] absent -> empty selection", () => {

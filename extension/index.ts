@@ -29,6 +29,7 @@ import { registerObjectiveSave } from "./objectiveSave.ts";
 import { registerPlanAdapterTombell } from "./planAdapterTombell.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
+import { registerPrReview } from "./prReview.ts";
 import { registerReady } from "./ready.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
@@ -280,6 +281,10 @@ export default function (pi: ExtensionAPI) {
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
   // spawned child; the parent fixes actionable items and batch-resolves the threads).
   registerAddress(pi);
+
+  // #175 — the warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
+  // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
+  registerPrReview(pi);
 
   // P2.T5 — the read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

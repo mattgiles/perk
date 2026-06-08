@@ -20,3 +20,7 @@ skills:
     name: perk-objective-reconcile
   - source: perk
     name: perk-plan
+  - source: perk
+    name: perk-pr-review
+  - source: perk
+    name: perk-replan
