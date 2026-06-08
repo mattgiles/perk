@@ -34,6 +34,7 @@ import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
+import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
@@ -291,6 +292,14 @@ export default function (pi: ExtensionAPI) {
   // runtime surfaces step aside when a foreign `[providers] todo` is selected (the todo-seam mirror
   // of planMode's plan-seam deferral) — silent on the event handlers, announced on `/checkpoints`.
   registerCheckpoints(pi);
+
+  // Node 3.2 — the FIRST 3rd-party todo adapter (the todo-seam mirror of registerPlanAdapterTombell).
+  // Injection-only: inert unless `[providers] todo = "juicesharp-todo"` is selected AND the session
+  // is an active workflow. It carries perk's implement-progress discipline onto `@juicesharp/rpiv-
+  // todo`'s checklist overlay (perk's own checkpoints deferred at Node 3.1). No `gating` argument —
+  // the shim NEVER arbitrates tools (Invariant 1); no registration-time vacating (no command-name
+  // collision on the todo seam, unlike the plan seam); never writes `perk:checkpoint`.
+  registerTodoAdapterJuicesharp(pi);
 
   // P2.T9 — the objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.

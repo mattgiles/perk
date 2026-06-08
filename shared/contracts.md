@@ -471,12 +471,36 @@ of the plan-seam deferral above. It reads `loadPerkConfig(ctx.cwd).providers` th
 **steps its progress surface aside** when the resolved todo provider ≠ `perk-checkpoints`: the
 `session_start` / `session_tree` / `turn_end` handlers early-return **silently** (no seed, no
 advance, no `setStatus`/`setWidget` render — the foreign provider owns the surface uncontested) and
-`/checkpoints` **announces** the deferral headless-safe and returns. This is **runtime deferral
-only** — registration-time vacating (the todo-seam mirror of Node 2.3's `registerPlanMode`) is the
-concrete foreign todo adapter's concern (Node 3.2). The pure checkpoint helpers, the
+`/checkpoints` **announces** the deferral headless-safe and returns. The pure checkpoint helpers, the
 `perk:checkpoint` session entry, and the `## Steps` seeding are the seam-shared substrate (untouched).
 Fail-safe to the reference: any config-read error → treated as `perk-checkpoints` → everything runs
 exactly as today (the default path is the hard guarantee, zero behavior change).
+
+**The `@juicesharp/rpiv-todo` adapter (Node 3.2).** `juicesharp-todo` is now a **real, selectable**
+todo provider (no longer illustrative); the todo seam is **behavior-complete**. The perk-owned shim
+`extension/todoAdapterJuicesharp.ts` (`registerTodoAdapterJuicesharp`, always registered, wired right
+after `registerCheckpoints`) is an **injection-only** bridge, inert unless `[providers] todo =
+"juicesharp-todo"` **and** the session is an active workflow (`active_plan_ref != null`). When both
+hold it injects a hidden (`display:false`) `perk:todo-adapter-juicesharp` context that carries perk's
+implement-progress **discipline** onto the foreign checklist overlay (seed from `## Steps`, mark each
+item complete in order); a `context` handler strips the stale `[TODO ADAPTER: JUICESHARP]` marker
+once deselected. Two seam asymmetries this node resolves, both deliberate deviations from the Node
+3.1 forward-assumption that "registration-time vacating is the concrete adapter's concern":
+  - **(a) NO registration-time vacating** for the todo seam. The plan seam needed it purely because
+    perk and `@tombell/pi-plan` both register `/plan` (Pi suffixes duplicate command names). The todo
+    seam has **no command-name collision** — perk registers `/checkpoints`, the foreign overlay
+    registers its own differently-named command(s) — so Node 3.1's runtime deferral is already
+    sufficient and the shim adds none.
+  - **(b) The bridge is injection-only + active-workflow-gated** and does **NOT** write
+    `perk:checkpoint` or revive the deferred marker scanner (Correction 2). Unlike `cache.plan-ref`
+    (a durable cross-plane artifact downstream stages read, so a foreign plan *must* be bridged into
+    it), `perk:checkpoint` is a transient TS-only overlay nothing downstream consumes and perk's
+    render + scanner are already deferred — re-populating it would be dead duplication. The foreign
+    overlay is the sole, uncontested progress surface.
+
+  The shim **never** owns the read-only gate, **never** `setActiveTools`, and **never** restamps any
+  provider field (the todo-provider id lives only in `[providers] todo`). Validation record:
+  `docs/design/provider-smoke-juicesharp-todo.md`.
 
 **In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
 deterministic, fully-isolated read-only child spun at the SDK level (`extension/readOnlySession.ts`,
@@ -1499,16 +1523,17 @@ into a foreign package's object-form `packages` entry. Because both planes read 
 full YAML readers, it can carry the nested `package_filter` object that the narrow-TOML config
 reader cannot.
 
-**Shipped set (Node 2.1 → 2.3):** the two reference entries `perk-plan` (seam `plan`) and
+**Shipped set (Node 2.1 → 3.2):** the two reference entries `perk-plan` (seam `plan`) and
 `perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus a
-foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) is
-now a **real, selectable** plan provider (Node 2.3) — only `juicesharp-todo`
-(→ `npm:@juicesharp/rpiv-todo`) remains flagged ILLUSTRATIVE until the Node 3.2 adapter lands.
-**Interim limitation (post-3.1):** the **plan** seam is behavior-complete (perk vacates its surface
-+ the adapter bridges the foreign one — see the Node 2.3 status note). The **todo** seam
-(`checkpoints`) now **defers at runtime** (Node 3.1) — perk's progress surface steps aside under a
-foreign `[providers] todo` selection — but there is no shipped foreign todo adapter yet, so
-`juicesharp-todo` remains illustrative-only until Node 3.2 bridges a real one. The **default** path
+**real** foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter:
+planAdapterTombell`) is a real, selectable plan provider (Node 2.3); `juicesharp-todo`
+(→ `npm:@juicesharp/rpiv-todo`, `adapter: todoAdapterJuicesharp`) is now a real, selectable **todo**
+provider (Node 3.2) — neither is illustrative any longer. **Both seams are behavior-complete:** the
+**plan** seam (perk vacates its surface at registration time + the adapter bridges the foreign one —
+see the Node 2.3 status note) and the **todo** seam (perk's `checkpoints` **defers at runtime** under
+a foreign `[providers] todo` selection — Node 3.1 — with **no** registration-time vacating, because
+the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
+progress discipline onto the foreign overlay — see the Node 3.2 status note). The **default** path
 (both reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
@@ -1583,9 +1608,11 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 > `isPerkCheckpointsReferenceSelected`, fail-safe to the reference) — the exact todo-seam mirror of
 > the Node 2.2 plan-seam deferral: silent early-returns on the event handlers, an announced deferral
 > on `/checkpoints`. The pure checkpoint helpers + the `perk:checkpoint` entry + `## Steps` seeding
-> are seam-shared substrate (untouched). **Runtime** deferral only — registration-time vacating (the
-> mirror of Node 2.3's `registerPlanMode`) and the concrete `@juicesharp/rpiv-todo` adapter are
-> **Node 3.2**.
+> are seam-shared substrate (untouched). **Runtime** deferral only — the concrete
+> `@juicesharp/rpiv-todo` adapter is **Node 3.2** (which, per Correction 1 below, adds **no**
+> registration-time vacating: the todo seam has no command-name collision, so runtime deferral is
+> already sufficient — the forward-assumption here that registration-time vacating would be needed
+> turned out not to transfer from the plan seam).
 >
 > **Status (Node 2.3):** the **first 3rd-party plan adapter** lands `tombell-plan` as a real,
 > selectable plan provider. (1) The shipped entry drops `package_filter` (the illustrative
@@ -1607,6 +1634,25 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 > `provider="github"` exactly like a perk-authored plan; the authoring-provider id lives only in the
 > `[providers] plan` selection, and all downstream stages bind only to the provider-agnostic
 > plan-ref (unchanged).
+>
+> **Status (Node 3.2):** the **first 3rd-party todo adapter** lands `juicesharp-todo` as a real,
+> selectable todo provider (no longer illustrative); the todo seam is **behavior-complete**. (1) The
+> shipped entry carries no `package_filter` (single-concern checklist overlay — mirrors the tombell
+> case). (2) **NO registration-time vacating** (an explicit deviation from the Node 3.1
+> forward-assumption): the plan seam needed it only because perk and `@tombell/pi-plan` both register
+> `/plan` (Pi suffixes duplicate names); the todo seam has **no command-name collision** — perk
+> registers `/checkpoints`, the foreign overlay registers its own differently-named command(s) — so
+> Node 3.1's runtime deferral is already sufficient. (3) The new
+> `extension/todoAdapterJuicesharp.ts` shim is an **injection-only**, **active-workflow-gated**
+> (`active_plan_ref != null`) bridge — always registered, inert unless `[providers] todo =
+> "juicesharp-todo"`, injecting a hidden `perk:todo-adapter-juicesharp` context that carries perk's
+> implement-progress **discipline** (seed from `## Steps`, mark each item complete in order) onto the
+> foreign overlay. (4) It does **NOT** write `perk:checkpoint` or revive the deferred marker scanner
+> (Correction 2): that entry is a transient TS-only overlay nothing downstream consumes, and perk's
+> render + scanner are already deferred (Node 3.1), so re-populating it would be dead duplication —
+> the lighter bridge the todo seam's lack of a downstream consumer permits. The shim **never** owns
+> the read-only gate, **never** `setActiveTools`, and **never** restamps any provider field.
+> Validation record: `docs/design/provider-smoke-juicesharp-todo.md`.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

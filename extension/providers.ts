@@ -33,6 +33,9 @@ export const PERK_CHECKPOINTS_PROVIDER_ID = "perk-checkpoints";
 /** The foreign `@tombell/pi-plan` plan-provider id (Node 2.3 adapter selection check). */
 export const TOMBELL_PLAN_PROVIDER_ID = "tombell-plan";
 
+/** The foreign `@juicesharp/rpiv-todo` todo-provider id (Node 3.2 adapter selection check). */
+export const JUICESHARP_TODO_PROVIDER_ID = "juicesharp-todo";
+
 /** Parse the bundled `providers.yaml`. Throws on a missing file or unexpected shape. */
 export function loadProviders(): Provider[] {
   const path = join(sharedDir(), "providers.yaml");

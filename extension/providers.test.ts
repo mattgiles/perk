@@ -1,7 +1,8 @@
 // Node 2.1 — loadProviders against the REAL bundled providers.yaml. The shipped supported set is
-// the two reference entries (perk-plan, perk-checkpoints — both default) plus one illustrative
-// foreign entry per seam. The Python plane (tests/test_providers.py) is the authoritative
-// validator; this is the thin TS-side structural parse (mirror of extension/bindings.test.ts).
+// the two reference entries (perk-plan, perk-checkpoints — both default) plus one REAL foreign
+// entry per seam (tombell-plan, Node 2.3; juicesharp-todo, Node 3.2). The Python plane
+// (tests/test_providers.py) is the authoritative validator; this is the thin TS-side structural
+// parse (mirror of extension/bindings.test.ts).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -45,6 +46,17 @@ test("loadProviders: the real tombell-plan entry carries adapter + NO package_fi
   assert.equal(tombell?.seam, "plan");
   assert.equal(tombell?.default, false);
   assert.equal(tombell?.packageFilter, undefined);
+});
+
+test("loadProviders: the real juicesharp-todo entry carries adapter + NO package_filter", () => {
+  // Node 3.2: `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it). No
+  // `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
+  const juicesharp = loadProviders().find((p) => p.id === "juicesharp-todo");
+  assert.equal(juicesharp?.adapter, "todoAdapterJuicesharp");
+  assert.equal(juicesharp?.package, "npm:@juicesharp/rpiv-todo");
+  assert.equal(juicesharp?.seam, "todo");
+  assert.equal(juicesharp?.default, false);
+  assert.equal(juicesharp?.packageFilter, undefined);
 });
 
 // --- resolveProviders (the pure resolver, mirror of tests/test_providers.py) ------------------
