@@ -51,6 +51,14 @@ contracts intro line (e.g. "the one parsed contract" → "two parsed contracts")
 corrected in two places — grep for such count-prose. More generally: **any implementation that
 changes cross-plane behavior amends `shared/contracts.md` in the same turn.**
 
+**`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
+already taken (provider selection), so the headless worker contract landed as **§8.11**. **Grep the
+existing `## §8.` headings before assigning a section number** — do not trust a plan's pre-assigned
+section id. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` — ship in the npm
+tarball automatically via the `files` glob, and a flat `extension/` layout stays covered by
+`node --test extension/*.test.ts` / `biome check extension` / `tsc` with **no justfile change** —
+reinforcing the "bundling is automatic" theme above.)
+
 ## Adding a registry stage ripples into both planes + hardcoded tests
 
 A new stage in `shared/registry.yaml` ripples to:

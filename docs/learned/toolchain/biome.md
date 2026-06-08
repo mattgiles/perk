@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn, noAssignInExpressions, noUncheckedIndexedAccess) or a CI lint iteration on formatting.
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting.
 ---
 
 # Biome / tsc gotchas
@@ -16,6 +16,17 @@ rules are general.
   arrow *returns* the `Map`. Use a plain `for` loop when the body's expression returns a value.
 - **`noAssignInExpressions`** — the idiomatic `(arrays[name] ??= []).push(row)` is rejected. Expand
   to an explicit `let rows = arrays[name]; if (!rows) { rows = []; arrays[name] = rows; }`.
+- **`noUselessUndefinedInitialization` → `noImplicitAnyLet` (the `let x = undefined` trap chain).**
+  Biome rewrites `let x = undefined` to `let x;`, which then trips `noImplicitAnyLet`. Resolve by
+  giving an explicit type instead of an initializer: e.g. `let model: Model<Api> | undefined;`.
+
+## Node 22 type-stripping rejects TS parameter properties
+
+`constructor(private readonly x: T) {}` throws `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` under
+`node --test` — parameter properties are not erasable, and the test runner only strips types, it does
+not transpile. Declare the field on the class and assign it in the constructor body instead.
+Generalize: assume only **erasable** TS is allowed in `*.test.ts` (same class of trap as other
+strip-only limits).
 
 ## tsc strictness (`noUncheckedIndexedAccess`-style)
 
@@ -30,6 +41,11 @@ Biome formatting (line-wrapping long string literals, multi-line imports) is par
 **Run `npx biome check --write extension` to auto-fix before `run_ci`** rather than hand-wrapping —
 hand-wrapping tends to disagree with Biome's formatter and burns an iteration. (This is the TS
 analogue of the Python `ruff format` pre-commit trap — see `toolchain/ruff.md`.)
+
+**Why `check --write`, not `format --write`:** `organizeImports` is an **assist** action, applied
+**only by `biome check --write`, not `biome format --write`**. So `npm run format` (which runs
+`biome format`) will **not** sort imports, and CI's `biome check` then fails on the unsorted order.
+Always run `npx biome check --write extension` to apply import sorting alongside formatting.
 
 ## Cross-references
 

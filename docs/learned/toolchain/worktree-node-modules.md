@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, or you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing.
+read_when: CI surfaces typecheck/test failures in files your diff never touched, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, or a `shared/` source change is not reflected when smoked via the global `perk` binary.
 ---
 
 # Worktree `node_modules` resolution
@@ -43,7 +43,21 @@ annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-wid
 `git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
 not part of the change.
 
+## Stale globally-installed `perk` + accidental self-converge
+
+The same staleness trap has a Python-plane analogue. A smoke that exercises a `shared/` source change
+can silently run the **globally installed `perk`** (e.g. v0.0.1), which reads the **bundled (old)
+`providers.yaml`** rather than the worktree's `shared/` source — so the change appears to do nothing.
+To smoke a `shared/` source change you must run the **worktree's `.venv/bin/perk`** (the editable
+install resolves `shared/` from the repo sibling), not whatever `perk` is on `PATH`.
+
+Separately, running `perk init` (e.g. `uv run perk init`) **from inside the worktree converges the
+worktree repo itself** — it rewrites `.gitignore` ordering, adds manifest skill entries, and similar
+incidental dirt that must be `git checkout`-reverted before commit. **Rule:** run `perk init` smokes
+in a **scratch dir, never the worktree.**
+
 ## Cross-references
 
 - `docs/learned/pi/extension-api.md` — the 0.78.x API surface a stale SDK fails to provide
 - `docs/learned/toolchain/biome.md` — the other half of the TS CI gate
+- `docs/learned/workflow/provider-seam.md` — the `shared/providers.yaml` seam these smokes exercise
