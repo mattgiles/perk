@@ -1879,7 +1879,7 @@ class Runner(Protocol):
 - **`observe`/`cancel`** operate on a previously-returned `RunHandle`. They are implemented (not
   stubbed) so the contract is validated end-to-end and the supervisor nodes (3.1/3.2) consume
   settled shapes — but the **supervisor command surfaces** (`perk workflow run list/cancel/retry`,
-  tables, correlation) are those later nodes' work, not this one.
+  tables, correlation) are those later nodes' work, not this one (`list` is §8.17).
 
 The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
 
@@ -1910,7 +1910,8 @@ scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` alr
 ```
 
 The supervisor (Node 3.1) enumerates `scratch/runs/*/dispatch.json` to correlate
-`run_id ↔ plan ↔ PR`; that enumeration is its work, not this node's. A **failed** record is kept
+`run_id ↔ plan ↔ PR` (the `perk workflow run list` read surface, §8.17); that enumeration is its
+work, not this node's. A **failed** record is kept
 (not deleted) for that visibility. GC of dispatch records rides the existing `.pi/workflow/` GC
 story (records live under `scratch/runs/<run_id>/`).
 
@@ -2151,3 +2152,69 @@ surface it regardless.
 **static** prereq layer that `perk doctor workflow` (Node 3.3) will compose with the
 managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks to the **bare**
 `perk doctor` run only; the `doctor workflow` subcommand is not built here.
+
+## §8.17 · The supervisor read surface (`perk workflow run list`, Node 3.1)
+
+The first command in the `perk workflow run` group: a deterministic, **read-only** supervisor
+surface that enumerates the durable dispatch records (§8.13) and correlates each
+`run_id ↔ plan ↔ PR`, overlaying live GitHub run state. It mutates nothing (no GitHub writes, no
+`.pi/workflow/` writes). `cancel`/`retry` (the `run` subgroup's siblings) are **Node 3.2**.
+
+### Command surface (`perk/cli/commands/workflow_cmd.py`)
+
+- `perk workflow run list` (aliases `perk workflow run ls`, `perk wf run list`). The `workflow`
+  group (alias `wf`) holds the `run` subgroup so Node 3.2 extends the same subgroup.
+- A dev/CI/supervisor surface (like `perk objective`/`perk state`), **not** an agent affordance.
+- `--json` → a stable machine report on **stdout**; the human table → **stderr** (the cli-vs-pi
+  §3.2 split). `--no-refresh` skips the live GitHub overlay; `--limit N` (default 50) caps the
+  newest-first list.
+
+### Source of truth + correlation
+
+- **Local records are authoritative for *which* runs exist.** `cache.list_dispatch_records(root)`
+  enumerates `scratch/runs/*/dispatch.json` (§8.13), newest-first by `dispatched_at` (descending;
+  string ISO-8601 sort). A missing/unparseable/non-object record is skipped loud-but-non-fatal
+  (stderr warning), never fatal — a corrupt record must not break the supervisor read; an absent
+  `scratch/runs/` yields `[]`. GitHub is **not** enumerated for run discovery.
+- **Plan block** comes straight from the record's `plan_ref` (`pr_id`, `url`) — offline-safe, always
+  present. Note `plan_ref.pr_id` is the **plan issue** number, not a PR number.
+- **PR correlation** derives the PR through `github.get_plan(number=int(pr_id)).pr` (memoized per
+  `pr_id`), since the draft PR is separate from the plan issue.
+- **Run state** overlays via the `Runner.observe` contract (§8.13): when the record's `run_handle`
+  is non-null, `runner.select_runner(record.runner).observe(RunHandle.from_data(...))` yields the
+  `RunObservation` (`status`/`conclusion`/`url`). A null `run_handle` (records still
+  `dispatching`/`failed`) ⇒ no GitHub call.
+
+### Fail-soft overlay discipline
+
+The live overlay is **best-effort**: it does **not** call `require_github`; a missing/unauthed gh
+simply yields no overlay (noted once on stderr). Each per-record read is wrapped — a
+`runner.RunnerError` degrades the `run` block to `null`; a `github.GitHubError` degrades the `pr`
+block to `null` — with a one-line stderr note, never raising and never changing the exit code (this
+is a read surface, not a gate). `--no-refresh` forces `pr`/`run` to `null` with zero GitHub reads.
+
+### The `--json` payload (stdout, stable)
+
+```jsonc
+{ "success": true, "error_type": null, "refreshed": true, "count": 1,
+  "runs": [
+    { "run_id": "01J…", "stage": "implement", "runner": "", "kind": "github-actions",
+      "dispatch_status": "dispatched", "dispatched_at": "<ISO-8601 UTC>", "error": null,
+      "plan": { "pr_id": "42", "url": "https://…/issues/42" },
+      "pr":   { "number": 51, "url": "https://…/pull/51", "state": "OPEN" } | null,
+      "run":  { "run_ref": "1234567", "url": "https://…/actions/runs/1234567",
+                "status": "completed", "conclusion": "success" } | null } ] }
+```
+
+`refreshed = not no_refresh`; `pr`/`run` are `null` under `--no-refresh` or a failed/empty overlay.
+`success` is always `true` for a successful enumeration (even zero runs); only `require_repo` failing
+(`not_a_repo`) routes through `_fail` (exit 2). No other error type is introduced.
+
+### Human table (stderr)
+
+Plain, manually-aligned, newest-first columns
+`RUN_ID  STAGE  DISPATCH  RUN  CONCLUSION  PLAN  PR  AGE`. The full `run_id` (the supervisor copies
+it into Node 3.2's `cancel`/`retry`) is never truncated; the overlay columns show `-` when not
+refreshed/unresolved; `AGE` is a compact relative age from `dispatched_at`. A `failed` record's
+`error` is surfaced on an indented continuation line (the §8.13 "failed records kept for visibility"
+rule). Empty state prints `No dispatched runs found`.
