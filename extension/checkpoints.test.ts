@@ -3,7 +3,8 @@
 // headless-safe). Fully offline. See checkpoints.ts.
 
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, planBodyPath } from "./cache.ts";
@@ -15,8 +16,10 @@ import {
   extractSteps,
   extractWipSteps,
   isInert,
+  isPerkCheckpointsReferenceSelected,
   markCompletedSteps,
   rebuildCheckpoint,
+  resolvedTodoProviderId,
 } from "./checkpoints.ts";
 import { loadPerkSession, plantRawSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import type { WorkflowState } from "./workflowState.ts";
@@ -149,6 +152,65 @@ test("rebuildCheckpoint: scan-after-marker ignores stale [DONE:n] before the see
   ]);
   assert.equal(built.steps[0]?.completed, true, "step 1 (after marker) completed");
   assert.equal(built.steps[1]?.completed, false, "stale step 2 (before marker) NOT completed");
+});
+
+// --- todo-provider deferral (Node 3.1) --------------------------------------------------
+
+/** Write a `[providers]` selection into `cwd`'s `.pi/perk.toml`. */
+function writeProvidersSelection(cwd: string, body: string): void {
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), body, "utf8");
+}
+
+test("resolvedTodoProviderId / isPerkCheckpointsReferenceSelected: default + foreign + unknown", () => {
+  // No config -> the reference todo provider is selected.
+  const bare = scaffoldRepo();
+  assert.equal(resolvedTodoProviderId(bare), "perk-checkpoints");
+  assert.equal(isPerkCheckpointsReferenceSelected(bare), true);
+
+  // A foreign `[providers] todo` selection -> NOT the reference.
+  const foreign = scaffoldRepo();
+  writeProvidersSelection(foreign, '[providers]\ntodo = "juicesharp-todo"\n');
+  assert.equal(resolvedTodoProviderId(foreign), "juicesharp-todo");
+  assert.equal(isPerkCheckpointsReferenceSelected(foreign), false);
+
+  // An unknown id falls back to the reference (the resolver's loud-but-non-fatal default).
+  const unknown = scaffoldRepo();
+  writeProvidersSelection(unknown, '[providers]\ntodo = "no-such-provider"\n');
+  assert.equal(resolvedTodoProviderId(unknown), "perk-checkpoints");
+  assert.equal(isPerkCheckpointsReferenceSelected(unknown), true);
+});
+
+test("deferral: a foreign [providers] todo steps the progress surface aside", async () => {
+  const cwd = scaffoldRepo();
+  writeProvidersSelection(cwd, '[providers]\ntodo = "juicesharp-todo"\n');
+  writeFileSync(planBodyPath(cwd), PLAN_WITH_STEPS, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    // session_start defers silently: NO `perk:checkpoint` entry seeded despite a `## Steps` body.
+    const branch = h.session.sessionManager.getBranch() as never as { customType?: string }[];
+    assert.equal(
+      branch.some((e) => e.customType === CHECKPOINT_TYPE),
+      false,
+      "no checkpoint entry seeded under a foreign todo selection",
+    );
+    // ...and no progress status/widget rendered.
+    assert.equal(
+      h.statuses.filter((s) => s.slot === "perk-checkpoints").length,
+      0,
+      "no status rendered while deferred",
+    );
+
+    // /checkpoints ANNOUNCES the deferral (the surface-facing mirror of the silent handlers).
+    await h.invokeCommand("checkpoints");
+    assert.ok(
+      h.notifies.some((m) => m.includes("deferred") && m.includes("juicesharp-todo")),
+      `\`/checkpoints\` announced the deferral: ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    h.dispose();
+  }
 });
 
 // --- live round-trip --------------------------------------------------------------------

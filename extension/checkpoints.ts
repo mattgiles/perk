@@ -11,14 +11,49 @@
 // copies of pi's official `examples/extensions/plan-mode/utils.ts` (as T1 copied the regex tables),
 // adapted to key off `## Steps` rather than plan-mode's `Plan:` header. Status is surfaced via
 // `ctx.ui.setStatus`/`setWidget` guarded by `ctx.hasUI` (headless-safe); `/checkpoints` lists it.
+//
+// TODO-PROVIDER DEFERRAL (Node 3.1). perk's checkpoints are the *reference* todo provider
+// (`perk-checkpoints`). They now *consume* the resolved `[providers] todo` selection and **step the
+// progress surface aside** when a foreign todo provider is selected — the todo-seam mirror of
+// planMode.ts's plan-seam deferral (Node 2.2). The four runtime surfaces guard on
+// `isPerkCheckpointsReferenceSelected(ctx.cwd)` (read fresh per-event, fail-safe to the reference):
+// `session_start`/`session_tree`/`turn_end` early-return **silently** (no seed, no advance, no
+// render) so the foreign todo provider owns the progress surface uncontested; `/checkpoints`
+// **announces** the deferral headless-safe. Runtime deferral only — registration-time vacating is
+// the concrete foreign todo adapter's concern (Node 3.2). Fail-safe: any config-read error → treated
+// as the reference → behavior-preserving, zero change on the default selection.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readHandoff, readPlanBody } from "./cache.ts";
+import { loadPerkConfig } from "./config.ts";
+import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { rebuildWorkflowState } from "./workflowState.ts";
 
 /** The dedicated checkpoint session entry type (D3). */
 export const CHECKPOINT_TYPE = "perk:checkpoint";
+
+/**
+ * The resolved `[providers] todo` selection id for `cwd`, read fresh per-event (no static state —
+ * the same per-event-read shape `resolvedPlanProviderId` uses in planMode.ts). Fail-safe to the
+ * perk-checkpoints reference: any load/resolution failure (corrupt bundled set, etc.) returns the
+ * reference id so perk's own checkpoints keep working — the default path is the hard guarantee.
+ */
+export function resolvedTodoProviderId(cwd: string): string {
+  try {
+    return resolveProviders(loadPerkConfig(cwd).providers, loadProviders()).todo.id;
+  } catch {
+    return PERK_CHECKPOINTS_PROVIDER_ID;
+  }
+}
+
+/**
+ * Whether perk's own checkpoints reference is the selected todo provider for `cwd`. When a foreign
+ * todo provider is selected via `[providers] todo`, perk's progress surface steps aside (defers).
+ */
+export function isPerkCheckpointsReferenceSelected(cwd: string): boolean {
+  return resolvedTodoProviderId(cwd) === PERK_CHECKPOINTS_PROVIDER_ID;
+}
 
 export interface CheckpointStep {
   step: number;
@@ -247,6 +282,9 @@ function branchOf(ctx: ExtensionContext): BranchEntry[] {
 export function registerCheckpoints(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     try {
+      // Todo-provider deferral (Node 3.1): when a foreign `[providers] todo` is selected, step the
+      // progress surface aside silently (no seed, no render) — the foreign provider owns it.
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
       const existing = rebuildCheckpoint(branch);
       // Seed once: only when there is no checkpoint yet, a workflow is active, and the plan body
@@ -268,6 +306,7 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
 
   pi.on("session_tree", async (_event, ctx) => {
     try {
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
       renderStatus(ctx, rebuildCheckpoint(branch), branch);
     } catch (error) {
@@ -277,6 +316,7 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
 
   pi.on("turn_end", async (event, ctx) => {
     try {
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
       const state = rebuildCheckpoint(branch);
       if (isInert(state)) {
@@ -309,6 +349,16 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
   pi.registerCommand("checkpoints", {
     description: "Show perk implementation checkpoints (read-only).",
     handler: async (_args, ctx) => {
+      // Todo-provider deferral (Node 3.1): announce the deferral headless-safe and step aside when a
+      // foreign `[providers] todo` is selected (the surface-facing mirror of the silent handlers).
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) {
+        const deferral = `perk: checkpoints deferred — a foreign todo provider (\`${resolvedTodoProviderId(
+          ctx.cwd,
+        )}\`) is selected via [providers] todo.`;
+        if (ctx.hasUI) ctx.ui.notify(deferral, "info");
+        else console.error(deferral);
+        return;
+      }
       const state = rebuildCheckpoint(branchOf(ctx));
       const message = isInert(state)
         ? "perk: no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
