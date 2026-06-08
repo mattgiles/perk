@@ -99,6 +99,75 @@ def test_require_github_returns_status_when_authed(monkeypatch):
     assert require_github(ctx).user == "octocat"
 
 
+# --------------------------------------------------------- runner-prerequisite reads (Node 2.4)
+
+
+def test_secret_exists_present(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(0, "{}"))
+    assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is True
+
+
+def test_secret_exists_absent_404(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Not Found (HTTP 404)")
+    )
+    assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is False
+
+
+def test_secret_exists_unknown_403(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Forbidden (HTTP 403)")
+    )
+    assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is None
+
+
+def test_secret_exists_gh_missing_raises(monkeypatch):
+    def boom(*_a, **_k):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(github.GitHubError):
+        github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT)
+
+
+def test_get_workflow_permissions_parses(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **_: _Proc(
+            0,
+            '{"default_workflow_permissions":"write","can_approve_pull_request_reviews":true}',
+        ),
+    )
+    perms = github.get_workflow_permissions(repo_root=ROOT)
+    assert perms is not None
+    assert perms.default_workflow_permissions == "write"
+    assert perms.can_approve_pull_request_reviews is True
+
+
+def test_get_workflow_permissions_none_on_nonzero(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(1, "", "boom"))
+    assert github.get_workflow_permissions(repo_root=ROOT) is None
+
+
+def test_get_workflow_permissions_unparseable_raises(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(0, "not json"))
+    with pytest.raises(github.GitHubError):
+        github.get_workflow_permissions(repo_root=ROOT)
+
+
+def test_get_repo_variable_value(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(0, "false\n"))
+    assert github.get_repo_variable(name="PERK_ENABLED", repo_root=ROOT) == "false"
+
+
+def test_get_repo_variable_absent_404(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Not Found (HTTP 404)")
+    )
+    assert github.get_repo_variable(name="PERK_ENABLED", repo_root=ROOT) is None
+
+
 # --------------------------------------------------------------- mutation ops (T2a)
 
 

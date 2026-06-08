@@ -17,7 +17,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.doctor import Check, DoctorReport, report_to_dict, run_doctor
 from perk.output import machine_output, user_output
 
-_GROUP_ORDER = ("environment", "github", "package", "repository", "registry", "state")
+_GROUP_ORDER = ("environment", "github", "runner", "package", "repository", "registry", "state")
 _ICON: dict[str, tuple[str, str]] = {
     "ok": ("✓", "green"),
     "warn": ("⚠", "yellow"),

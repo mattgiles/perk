@@ -146,6 +146,175 @@ def _github_checks(root: Path) -> list[Check]:
     return checks
 
 
+# Model credentials the runner accepts (the workflow's "either" validate logic — §8.14).
+_MODEL_SECRETS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+
+def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
+    """Pre-flight health-checks for the remote-runner's prerequisites (§8.16, Node 2.4).
+
+    Report-only and **non-fatal** (never ``fail``): present → ``ok``; actionable-absent → ``warn``;
+    unverifiable → ``info``. A ``warn`` keeps exit 0 (``report.healthy`` keys off ``fail`` only),
+    matching erk's always-passes posture and §8.6's GitHub-non-fatal rule. Shells ``gh``, so it
+    runs only under ``verify=True``; a ``GitHubError`` is degraded by ``_build_checks`` to a single
+    ``info``. Kept a free function so Node 3.3's ``perk doctor workflow`` can compose it directly.
+    """
+    from perk.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
+
+    # D6 — same check set for both repo kinds (the runner-workflow capability is scope="both");
+    # only the `detail` wording adapts.
+    if self_repo:
+        absent_detail = "expected on perk's own repo (perk dogfoods `--remote` drives)"
+    else:
+        absent_detail = "required only if you use `perk … --remote` drives"
+
+    # D4.1 — auth gate: re-probe auth; unauthed ⇒ a single info, no further gh calls.
+    auth = github.check_auth()
+    if not auth.ok:
+        return [
+            Check(
+                "runner-prereqs",
+                "runner",
+                "info",
+                "runner prereqs not checked (GitHub not authenticated)",
+                auth.error or "",
+            )
+        ]
+
+    checks: list[Check] = []
+
+    # D4.2 — always report the enabled state.
+    enabled = github.get_repo_variable(name=RUNNER_ENABLED_VAR, repo_root=root)
+    if enabled is None:
+        checks.append(
+            Check(
+                "runner-enabled",
+                "runner",
+                "info",
+                f"remote runner enabled ({RUNNER_ENABLED_VAR} unset → default-on)",
+            )
+        )
+    elif enabled == "false":
+        checks.append(
+            Check(
+                "runner-enabled",
+                "runner",
+                "info",
+                f"remote runner disabled ({RUNNER_ENABLED_VAR}=false)",
+            )
+        )
+        # D4.3 — deliberately disabled ⇒ stop; don't nag about credentials.
+        return checks
+    else:
+        checks.append(
+            Check(
+                "runner-enabled",
+                "runner",
+                "info",
+                f"remote runner enabled ({RUNNER_ENABLED_VAR}={enabled})",
+            )
+        )
+
+    # D5.1 — the checkout/push PAT.
+    pat = github.secret_exists(name=RUNNER_PAT_SECRET, repo_root=root)
+    if pat is True:
+        checks.append(Check("runner-pat-secret", "runner", "ok", f"{RUNNER_PAT_SECRET} configured"))
+    elif pat is False:
+        checks.append(
+            Check(
+                "runner-pat-secret",
+                "runner",
+                "warn",
+                f"{RUNNER_PAT_SECRET} not configured",
+                absent_detail,
+                f"gh secret set {RUNNER_PAT_SECRET}",
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "runner-pat-secret",
+                "runner",
+                "info",
+                f"could not verify {RUNNER_PAT_SECRET} (insufficient permission?)",
+            )
+        )
+
+    # D5.2 — the model credential (either ANTHROPIC_API_KEY or OPENAI_API_KEY).
+    model_results = {
+        name: github.secret_exists(name=name, repo_root=root) for name in _MODEL_SECRETS
+    }
+    present = [name for name, ok in model_results.items() if ok is True]
+    if present:
+        checks.append(
+            Check(
+                "runner-model-secret",
+                "runner",
+                "ok",
+                f"model credential configured ({', '.join(present)})",
+            )
+        )
+    elif all(ok is False for ok in model_results.values()):
+        checks.append(
+            Check(
+                "runner-model-secret",
+                "runner",
+                "warn",
+                "no model credential configured",
+                absent_detail,
+                "gh secret set ANTHROPIC_API_KEY   # or OPENAI_API_KEY",
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "runner-model-secret",
+                "runner",
+                "info",
+                "could not verify model credential",
+            )
+        )
+
+    # D5.3 — workflow permissions (advisory `info` in all non-error cases — perk pushes with a
+    # PAT, not github.token, so this is not blocking for the runner).
+    perms_detail = "advisory — perk's runner pushes with a PAT, not github.token"
+    perms = github.get_workflow_permissions(repo_root=root)
+    if perms is None:
+        checks.append(
+            Check(
+                "runner-workflow-permissions",
+                "runner",
+                "info",
+                "could not verify workflow permissions",
+                perms_detail,
+            )
+        )
+    elif perms.can_approve_pull_request_reviews:
+        checks.append(
+            Check(
+                "runner-workflow-permissions",
+                "runner",
+                "info",
+                "Actions may create PRs",
+                perms_detail,
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "runner-workflow-permissions",
+                "runner",
+                "info",
+                "Actions cannot create PRs",
+                perms_detail,
+                "gh api --method PUT repos/{owner}/{repo}/actions/permissions/workflow "
+                "-F can_approve_pull_request_reviews=true",
+            )
+        )
+
+    return checks
+
+
 def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
     """The structural managed pieces, as converge dry-runs (`apply=False`); filtered by scope."""
     applicable = {cap.name for cap in capabilities.applicable(self_repo)}
@@ -418,6 +587,12 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     if verify:
         checks.extend(_env_checks())
         checks.extend(_github_checks(root))
+        try:
+            checks.extend(_runner_checks(root, self_repo))
+        except GitHubError as exc:
+            checks.append(
+                Check("runner-prereqs", "runner", "info", f"runner prereqs not checked: {exc}")
+            )
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
