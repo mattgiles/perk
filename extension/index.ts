@@ -287,6 +287,9 @@ export default function (pi: ExtensionAPI) {
   // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
   // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
+  // Node 3.1 todo-seam deferral: perk is the reference todo provider (`perk-checkpoints`); these
+  // runtime surfaces step aside when a foreign `[providers] todo` is selected (the todo-seam mirror
+  // of planMode's plan-seam deferral) — silent on the event handlers, announced on `/checkpoints`.
   registerCheckpoints(pi);
 
   // P2.T9 — the objective substrate: `/objective` set/clear, budget accounting, threshold

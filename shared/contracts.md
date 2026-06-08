@@ -461,6 +461,21 @@ objective-author one). The `context`-strip is unchanged. `savePlan`/the `plan_sa
 /the read-only gate are the **seam-shared substrate** the Node 2.3 adapter bridges to — they are
 always-registered and never defer (only perk's own authoring surface does).
 
+**Todo-provider deferral (Node 3.1).** `checkpoints` (perk's reference todo provider,
+`perk-checkpoints`) now *consumes* the resolved `[providers] todo` selection — the todo-seam mirror
+of the plan-seam deferral above. It reads `loadPerkConfig(ctx.cwd).providers` through
+`extension/providers.ts`'s `resolveProviders` per-event (`resolvedTodoProviderId(cwd)` /
+`isPerkCheckpointsReferenceSelected(cwd)`, fail-safe to `perk-checkpoints` on any load failure) and
+**steps its progress surface aside** when the resolved todo provider ≠ `perk-checkpoints`: the
+`session_start` / `session_tree` / `turn_end` handlers early-return **silently** (no seed, no
+advance, no `setStatus`/`setWidget` render — the foreign provider owns the surface uncontested) and
+`/checkpoints` **announces** the deferral headless-safe and returns. This is **runtime deferral
+only** — registration-time vacating (the todo-seam mirror of Node 2.3's `registerPlanMode`) is the
+concrete foreign todo adapter's concern (Node 3.2). The pure checkpoint helpers, the
+`perk:checkpoint` session entry, and the `## Steps` seeding are the seam-shared substrate (untouched).
+Fail-safe to the reference: any config-read error → treated as `perk-checkpoints` → everything runs
+exactly as today (the default path is the hard guarantee, zero behavior change).
+
 **In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
 deterministic, fully-isolated read-only child spun at the SDK level (`extension/readOnlySession.ts`,
 interior/TS-only). This is the **shared handoff contract** both context-isolation primitives honor
@@ -1479,12 +1494,13 @@ reader cannot.
 `perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus a
 foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) is
 now a **real, selectable** plan provider (Node 2.3) — only `juicesharp-todo`
-(→ `npm:@juicesharp/rpiv-todo`) remains flagged ILLUSTRATIVE until the Node 3.2 adapter + Node 3.1
-todo-seam deferral land. **Interim limitation (post-2.3):** the **plan** seam is behavior-complete
-(perk vacates its surface + the adapter bridges the foreign one — see the Node 2.3 status note), but
-the **todo** seam (`checkpoints`) still does not defer (Node 3.1), so selecting a foreign todo
-provider still collides until 3.1. The **default** path (both reference providers) is unaffected and
-is the hard guarantee.
+(→ `npm:@juicesharp/rpiv-todo`) remains flagged ILLUSTRATIVE until the Node 3.2 adapter lands.
+**Interim limitation (post-3.1):** the **plan** seam is behavior-complete (perk vacates its surface
++ the adapter bridges the foreign one — see the Node 2.3 status note). The **todo** seam
+(`checkpoints`) now **defers at runtime** (Node 3.1) — perk's progress surface steps aside under a
+foreign `[providers] todo` selection — but there is no shipped foreign todo adapter yet, so
+`juicesharp-todo` remains illustrative-only until Node 3.2 bridges a real one. The **default** path
+(both reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -1551,6 +1567,16 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 > (fail-safe to the reference). `savePlan`/`plan_save`/`/plan-save`/the read-only gate are
 > seam-shared substrate — always-registered, the produced-contract landing the Node 2.3 adapter
 > bridges to — and do **not** defer. The **todo**-seam deferral (`checkpoints`) is still **Node 3.1**.
+>
+> **Status (Node 3.1):** lands the **todo-seam runtime deferral** — perk's `checkpoints` reference
+> surface (`session_start`/`session_tree`/`turn_end` render + the `/checkpoints` command) steps
+> aside when the resolved `[providers] todo` ≠ `perk-checkpoints` (`resolvedTodoProviderId` /
+> `isPerkCheckpointsReferenceSelected`, fail-safe to the reference) — the exact todo-seam mirror of
+> the Node 2.2 plan-seam deferral: silent early-returns on the event handlers, an announced deferral
+> on `/checkpoints`. The pure checkpoint helpers + the `perk:checkpoint` entry + `## Steps` seeding
+> are seam-shared substrate (untouched). **Runtime** deferral only — registration-time vacating (the
+> mirror of Node 2.3's `registerPlanMode`) and the concrete `@juicesharp/rpiv-todo` adapter are
+> **Node 3.2**.
 >
 > **Status (Node 2.3):** the **first 3rd-party plan adapter** lands `tombell-plan` as a real,
 > selectable plan provider. (1) The shipped entry drops `package_filter` (the illustrative
