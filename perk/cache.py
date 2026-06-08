@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from perk.output import user_output
+
 # The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
@@ -129,6 +131,35 @@ def read_dispatch(root: Path, run_id: str) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def list_dispatch_records(root: Path) -> list[dict[str, Any]]:
+    """All dispatch records under ``scratch/runs/*/dispatch.json``, newest-first.
+
+    Reads every run's ``dispatch.json``; skips a missing/unparseable file (loud-but-non-fatal
+    to stderr, never raises — a corrupt record must not break the supervisor read). Sorted by
+    ``dispatched_at`` descending (empty/missing timestamps sort last). An absent ``scratch/runs/``
+    dir is the normal pre-dispatch state and yields ``[]``.
+    """
+    runs_root = workflow_dir(root) / "scratch" / "runs"
+    if not runs_root.is_dir():
+        return []
+    records: list[dict[str, Any]] = []
+    for run_dir in sorted(runs_root.iterdir()):
+        path = run_dir / "dispatch.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            user_output(f"warning: skipping unreadable dispatch record {path}: {exc}")
+            continue
+        if not isinstance(data, dict):
+            user_output(f"warning: skipping non-object dispatch record {path}")
+            continue
+        records.append(data)
+    records.sort(key=lambda d: str(d.get("dispatched_at", "")), reverse=True)
+    return records
 
 
 # --- plan-ref: the active plan->branch ref pointer (plan-ref.json) -----------------------
