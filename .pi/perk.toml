@@ -13,3 +13,6 @@ root = ".worktrees"
 lint = "just lint"
 typecheck = "just typecheck"
 test = "just test"
+
+[pr-review]
+model = "anthropic/claude-opus-4-8"
