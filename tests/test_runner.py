@@ -135,6 +135,49 @@ def test_cancel_shells_gh_run_cancel(monkeypatch):
     assert seen[0][1:4] == ["run", "cancel", "42"]
 
 
+def test_retry_shells_gh_run_rerun(monkeypatch):
+    seen = []
+
+    def fake_run(args, **_):
+        seen.append(args)
+        return _Proc(0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    gha = runner.GitHubActionsRunner("")
+    gha.retry(
+        runner.RunHandle(runner="", kind="github-actions", run_ref="42", url="u"),
+        failed_only=False,
+        repo_root=ROOT,
+    )
+    assert seen[0][1:4] == ["run", "rerun", "42"]
+    assert "--failed" not in seen[0]
+
+
+def test_retry_failed_only_appends_flag(monkeypatch):
+    seen = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: seen.append(args) or _Proc(0))
+    runner.GitHubActionsRunner("").retry(
+        runner.RunHandle(runner="", kind="github-actions", run_ref="42", url="u"),
+        failed_only=True,
+        repo_root=ROOT,
+    )
+    assert seen[0][1:4] == ["run", "rerun", "42"] and "--failed" in seen[0]
+
+
+def test_retry_wraps_github_error_as_runner_error(monkeypatch):
+    def boom(**_k):
+        raise github.GitHubError("cannot rerun a run in progress")
+
+    monkeypatch.setattr(runner.github, "rerun_workflow_run", boom)
+    gha = runner.GitHubActionsRunner("")
+    with pytest.raises(runner.RunnerError):
+        gha.retry(
+            runner.RunHandle(runner="", kind="github-actions", run_ref="42", url="u"),
+            failed_only=False,
+            repo_root=ROOT,
+        )
+
+
 # --- select_runner --------------------------------------------------------------------
 
 

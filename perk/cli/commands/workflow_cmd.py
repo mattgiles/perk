@@ -7,8 +7,13 @@ dispatch records (the verified ``run_id → plan`` linkage from Node 2.1) and co
 
 ``--json`` → a stable machine report on stdout; the human table → stderr. The live overlay is
 **best-effort, fail-soft** — a GitHub read failure degrades that field to record-only state with a
-one-line stderr note; it never raises and never changes the exit code. ``cancel``/``retry`` (the
-``run`` subgroup's siblings) are Node 3.2.
+one-line stderr note; it never raises and never changes the exit code.
+
+``cancel``/``retry`` are the shipped control siblings of ``list`` (Node 3.2, contracts.md §8.18):
+deterministic, mutating supervisor commands that resolve a perk ``run_id`` to its dispatch record
+and act on the runner-native handle (cancel an in-flight run; re-run a completed/failed run, with
+``--failed`` to re-run only the failed jobs). They require GitHub auth and surface gh's own error
+verbatim; they mutate no ``.pi/workflow/`` state.
 """
 
 import json
@@ -19,7 +24,7 @@ import click
 
 from perk import cache, github, runner
 from perk.cli.alias import AliasGroup, alias, register_with_aliases
-from perk.cli.context import require_repo
+from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.output import machine_output, user_output
 
@@ -247,5 +252,116 @@ def workflow_run_list(ctx: click.Context, *, no_refresh: bool, limit: int, as_js
         )
 
 
+def _action_payload(
+    action: str,
+    run_id: str,
+    handle: runner.RunHandle,
+    *,
+    failed_only: bool | None = None,
+) -> dict[str, Any]:
+    """The stable ``--json`` success payload for a control action (stdout)."""
+    payload: dict[str, Any] = {
+        "success": True,
+        "error_type": None,
+        "action": action,
+        "run_id": run_id,
+        "run_ref": handle.run_ref,
+        "runner": handle.runner,
+        "kind": handle.kind,
+        "url": handle.url,
+    }
+    if failed_only is not None:
+        payload["failed_only"] = failed_only
+    return payload
+
+
+def _resolve_target(
+    ctx: click.Context,
+    *,
+    as_json: bool,
+    run_id: str,
+    action: str,
+) -> tuple[Any, dict[str, Any], runner.RunHandle, runner.Runner] | None:
+    """Shared control-command prelude: require a repo + GitHub auth, resolve ``run_id`` to its
+    dispatch record and a reconstructed runner handle. Routes every expected failure through
+    ``_fail`` and returns ``None`` (the caller returns); on success returns
+    ``(repo_root, record, handle, runner_obj)``."""
+    try:
+        repo_root = require_repo(ctx)
+        require_github(ctx)
+    except UserFacingCliError as exc:
+        _fail(
+            ctx,
+            as_json=as_json,
+            error_type=exc.error_type or "invalid_input",
+            message=exc.format_message(),
+        )
+        return None
+    record = cache.read_dispatch(repo_root, run_id)
+    if record is None:
+        _fail(
+            ctx,
+            as_json=as_json,
+            error_type="run_not_found",
+            message=f"no dispatched run with run_id {run_id!r}",
+        )
+        return None
+    handle_data = record.get("run_handle")
+    if not handle_data:
+        _fail(
+            ctx,
+            as_json=as_json,
+            error_type="run_not_dispatched",
+            message=f"run {run_id!r} was never triggered (no run handle); nothing to {action}",
+        )
+        return None
+    handle = runner.RunHandle.from_data(handle_data)
+    runner_obj = runner.select_runner(str(record.get("runner", "")))
+    return repo_root, record, handle, runner_obj
+
+
+@click.command("cancel")
+@click.argument("run_id")
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def workflow_run_cancel(ctx: click.Context, *, run_id: str, as_json: bool) -> None:
+    """Cancel an in-flight (queued/in_progress) dispatched run by its perk run_id."""
+    resolved = _resolve_target(ctx, as_json=as_json, run_id=run_id, action="cancel")
+    if resolved is None:
+        return
+    repo_root, _record, handle, runner_obj = resolved
+    try:
+        runner_obj.cancel(handle, repo_root=repo_root)
+    except runner.RunnerError as exc:
+        _fail(ctx, as_json=as_json, error_type="cancel_failed", message=str(exc))
+        return
+    user_output(f"Cancelled run {run_id} ({handle.run_ref})")
+    if as_json:
+        machine_output(json.dumps(_action_payload("cancel", run_id, handle)))
+
+
+@click.command("retry")
+@click.argument("run_id")
+@click.option("--failed", "failed", is_flag=True, help="Re-run only the failed jobs.")
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def workflow_run_retry(ctx: click.Context, *, run_id: str, failed: bool, as_json: bool) -> None:
+    """Re-run a completed/failed dispatched run by its perk run_id (``--failed`` = failed jobs)."""
+    resolved = _resolve_target(ctx, as_json=as_json, run_id=run_id, action="retry")
+    if resolved is None:
+        return
+    repo_root, _record, handle, runner_obj = resolved
+    try:
+        runner_obj.retry(handle, failed_only=failed, repo_root=repo_root)
+    except runner.RunnerError as exc:
+        _fail(ctx, as_json=as_json, error_type="retry_failed", message=str(exc))
+        return
+    user_output(f"Retried {'failed jobs of ' if failed else ''}run {run_id} ({handle.run_ref})")
+    if as_json:
+        machine_output(json.dumps(_action_payload("retry", run_id, handle, failed_only=failed)))
+
+
 register_with_aliases(workflow_group, run_group)
 register_with_aliases(run_group, workflow_run_list)
+register_with_aliases(run_group, workflow_run_cancel)
+register_with_aliases(run_group, workflow_run_retry)

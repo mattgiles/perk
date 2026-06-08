@@ -2025,6 +2025,20 @@ def cancel_workflow_run(*, run_id: str, repo_root: Path) -> None:
         raise _failed(proc, f"failed to cancel workflow run {run_id}")
 
 
+def rerun_workflow_run(*, run_id: str, repo_root: Path, failed_only: bool) -> None:
+    """Re-run a workflow run by its runner-native id (``gh run rerun``); raises on failure.
+
+    ``failed_only`` re-runs only the failed jobs (``gh run rerun --failed``). ``run_id`` is the
+    runner-native id (the ``RunHandle.run_ref``), NOT the perk ``run_id``.
+    """
+    args = ["run", "rerun", run_id]
+    if failed_only:
+        args.append("--failed")
+    proc = _run(args, cwd=repo_root, timeout=_WRITE_TIMEOUT)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to re-run workflow run {run_id}")
+
+
 # ===========================================================================
 # Runner-prerequisite reads (Node 2.4 — contracts.md §8.16).
 #

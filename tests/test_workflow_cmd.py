@@ -193,3 +193,181 @@ def test_aliases_resolve(args):
     result = _invoke_in_repo([*args, "--json"], records=[])
     assert result.exit_code == 0
     assert json.loads(result.stdout)["success"] is True
+
+
+# --- cancel / retry (control surface, Node 3.2) ---------------------------------------
+
+from perk import runner as _runner  # noqa: E402
+
+
+def _noop_cancel(self, handle, *, repo_root):
+    return None
+
+
+def _authed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        github, "check_auth", lambda: github.AuthStatus(ok=True, user="u", scopes=(), error=None)
+    )
+
+
+def _unauthed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        github,
+        "check_auth",
+        lambda: github.AuthStatus(ok=False, user=None, scopes=(), error="no auth"),
+    )
+
+
+def test_cancel_json_happy_path(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01ok", "--json"], records=recs)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True and payload["action"] == "cancel"
+    assert payload["run_id"] == "01ok" and payload["run_ref"] == "1234567"
+    assert payload["runner"] == "" and payload["kind"] == "github-actions"
+    assert payload["url"] == "u/actions/runs/1234567"
+    assert "Cancelled run 01ok" in result.stderr
+
+
+def test_retry_json_happy_path(monkeypatch):
+    _authed(monkeypatch)
+    seen = {}
+
+    def _retry(self, handle, *, failed_only, repo_root):
+        seen["failed_only"] = failed_only
+
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "retry", _retry)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "retry", "01ok", "--json"], records=recs)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["action"] == "retry" and payload["failed_only"] is False
+    assert seen["failed_only"] is False
+    assert "Retried run 01ok" in result.stderr
+
+
+def test_retry_failed_only(monkeypatch):
+    _authed(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(
+        _runner.GitHubActionsRunner,
+        "retry",
+        lambda self, handle, *, failed_only, repo_root: seen.update(failed_only=failed_only),
+    )
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(
+        ["workflow", "run", "retry", "01ok", "--failed", "--json"], records=recs
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["failed_only"] is True and seen["failed_only"] is True
+    assert "Retried failed jobs of run 01ok" in result.stderr
+
+
+def test_cancel_run_not_found(monkeypatch):
+    _authed(monkeypatch)
+    result = _invoke_in_repo(["workflow", "run", "cancel", "nope", "--json"], records=[])
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False and payload["error_type"] == "run_not_found"
+
+
+def test_cancel_run_not_dispatched(monkeypatch):
+    _authed(monkeypatch)
+    recs = [_record("01nh", dispatched_at="2026-06-07T12:00:00Z", run_handle=None)]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01nh", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "run_not_dispatched"
+
+
+def test_cancel_requires_github(monkeypatch):
+    _unauthed(monkeypatch)
+
+    def _boom(self, handle, *, repo_root):
+        raise AssertionError("runner op must not be called when unauthed")
+
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _boom)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01ok", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "github_unauthed"
+
+
+def test_cancel_runner_error_surfaces(monkeypatch):
+    _authed(monkeypatch)
+
+    def _boom(self, handle, *, repo_root):
+        raise _runner.RunnerError("cannot cancel a completed run")
+
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _boom)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01ok", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "cancel_failed"
+    assert "cannot cancel a completed run" in payload["message"]
+
+
+def test_retry_runner_error_surfaces(monkeypatch):
+    _authed(monkeypatch)
+
+    def _boom(self, handle, *, failed_only, repo_root):
+        raise _runner.RunnerError("cannot rerun")
+
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "retry", _boom)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "retry", "01ok", "--json"], records=recs)
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "retry_failed" and "cannot rerun" in payload["message"]
+
+
+def test_not_a_repo_cancel():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["workflow", "run", "cancel", "01ok", "--json"])
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error_type"] == "not_a_repo"
+
+
+def test_not_a_repo_retry():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["workflow", "run", "retry", "01ok", "--json"])
+    assert result.exit_code == 2
+    assert json.loads(result.stdout)["error_type"] == "not_a_repo"
+
+
+def test_human_output_smoke(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo(["workflow", "run", "cancel", "01ok"], records=recs)
+    assert result.exit_code == 0
+    assert "Cancelled run 01ok" in result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["workflow", "run", "cancel", "01ok"],
+        ["wf", "run", "cancel", "01ok"],
+        ["workflow", "run", "retry", "01ok"],
+    ],
+)
+def test_control_aliases_resolve(monkeypatch, args):
+    _authed(monkeypatch)
+    monkeypatch.setattr(_runner.GitHubActionsRunner, "cancel", _noop_cancel)
+    monkeypatch.setattr(
+        _runner.GitHubActionsRunner, "retry", lambda self, handle, *, failed_only, repo_root: None
+    )
+    recs = [_record("01ok", dispatched_at="2026-06-07T12:00:00Z")]
+    result = _invoke_in_repo([*args, "--json"], records=recs)
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["success"] is True

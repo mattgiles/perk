@@ -118,8 +118,8 @@ class Runner(Protocol):
 
     ``dispatch`` triggers a run and returns a **verified** handle (the runner-side run was
     discovered and matched to ``run_id``); it raises ``RunnerError`` on a trigger/discovery
-    failure. ``observe``/``cancel`` operate on a previously-returned ``RunHandle`` — they are
-    implemented (not stubbed) so the contract is validated end-to-end and Nodes 3.1/3.2 consume
+    failure. ``observe``/``cancel``/``retry`` operate on a previously-returned ``RunHandle`` — they
+    are implemented (not stubbed) so the contract is validated end-to-end and Nodes 3.1/3.2 consume
     settled shapes (the supervisor *command surfaces* are those later nodes' work, not this one).
     """
 
@@ -138,6 +138,8 @@ class Runner(Protocol):
     def observe(self, handle: RunHandle, *, repo_root: Path) -> RunObservation: ...
 
     def cancel(self, handle: RunHandle, *, repo_root: Path) -> None: ...
+
+    def retry(self, handle: RunHandle, *, failed_only: bool, repo_root: Path) -> None: ...
 
 
 class GitHubActionsRunner:
@@ -187,6 +189,14 @@ class GitHubActionsRunner:
     def cancel(self, handle: RunHandle, *, repo_root: Path) -> None:
         try:
             github.cancel_workflow_run(run_id=handle.run_ref, repo_root=repo_root)
+        except github.GitHubError as exc:
+            raise RunnerError(str(exc)) from exc
+
+    def retry(self, handle: RunHandle, *, failed_only: bool, repo_root: Path) -> None:
+        try:
+            github.rerun_workflow_run(
+                run_id=handle.run_ref, repo_root=repo_root, failed_only=failed_only
+            )
         except github.GitHubError as exc:
             raise RunnerError(str(exc)) from exc
 

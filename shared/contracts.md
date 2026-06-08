@@ -1871,15 +1871,19 @@ class Runner(Protocol):
     def dispatch(self, *, stage, plan_ref, run_id, base, repo_root) -> RunHandle: ...
     def observe(self, handle: RunHandle, *, repo_root) -> RunObservation: ...
     def cancel(self, handle: RunHandle, *, repo_root) -> None: ...
+    def retry(self, handle: RunHandle, *, failed_only, repo_root) -> None: ...
 ```
 
 - **`dispatch`** triggers the run and returns the **verified** handle (verified = the runner-side
   run was discovered and matched to `run_id`); it raises `RunnerError` on a trigger/discovery
   failure.
-- **`observe`/`cancel`** operate on a previously-returned `RunHandle`. They are implemented (not
+- **`observe`/`cancel`/`retry`** operate on a previously-returned `RunHandle`. They are implemented (not
   stubbed) so the contract is validated end-to-end and the supervisor nodes (3.1/3.2) consume
   settled shapes — but the **supervisor command surfaces** (`perk workflow run list/cancel/retry`,
-  tables, correlation) are those later nodes' work, not this one (`list` is §8.17).
+  tables, correlation) are those later nodes' work, not this one (`list` is §8.17;
+  `cancel`/`retry` are §8.18). `retry` re-runs the existing run (same `run_ref`); `failed_only`
+  re-runs only the failed jobs. `GitHubActionsRunner.retry` shells `github.rerun_workflow_run`
+  (`gh run rerun [--failed]`), wrapping `github.GitHubError` as `RunnerError` exactly as `cancel`.
 
 The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
 
@@ -2158,7 +2162,8 @@ managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks
 The first command in the `perk workflow run` group: a deterministic, **read-only** supervisor
 surface that enumerates the durable dispatch records (§8.13) and correlates each
 `run_id ↔ plan ↔ PR`, overlaying live GitHub run state. It mutates nothing (no GitHub writes, no
-`.pi/workflow/` writes). `cancel`/`retry` (the `run` subgroup's siblings) are **Node 3.2**.
+`.pi/workflow/` writes). `cancel`/`retry` (the `run` subgroup's mutating siblings) **shipped** in
+Node 3.2 — see §8.18.
 
 ### Command surface (`perk/cli/commands/workflow_cmd.py`)
 
@@ -2218,3 +2223,56 @@ it into Node 3.2's `cancel`/`retry`) is never truncated; the overlay columns sho
 refreshed/unresolved; `AGE` is a compact relative age from `dispatched_at`. A `failed` record's
 `error` is surfaced on an indented continuation line (the §8.13 "failed records kept for visibility"
 rule). Empty state prints `No dispatched runs found`.
+
+## §8.18 · The supervisor control surface (`perk workflow run cancel`/`retry`, Node 3.2)
+
+The mutating control siblings of `list` (§8.17) in the same `perk workflow run` subgroup:
+deterministic, **no agentic reasoning** dev/CI/supervisor commands (not agent affordances).
+
+- `perk workflow run cancel <RUN_ID>` — cancel an in-flight (queued/in_progress) run.
+- `perk workflow run retry <RUN_ID> [--failed]` — re-run a completed/failed run; `--failed` re-runs
+  only the failed jobs.
+
+Both take `--json` (stable machine report on **stdout**; human confirmation on **stderr**). The
+group/subgroup aliases (`wf`, `run`) apply; the commands themselves carry no aliases.
+
+### `<RUN_ID>` resolution (D1)
+
+`<RUN_ID>` is the **perk `run_id`** — the never-truncated `RUN_ID` the supervisor copies from
+`list` (§8.17). After `require_repo` + `require_github` (both commands *do* require auth — unlike
+fail-soft `list`), the shared `_resolve_target` helper resolves it:
+
+1. `record = cache.read_dispatch(root, run_id)`; `None` ⇒ `run_not_found` (exit 1).
+2. `record.run_handle` falsy (still `dispatching`/`failed`, never triggered) ⇒ `run_not_dispatched`
+   (exit 1) — nothing to act on.
+3. otherwise reconstruct `RunHandle.from_data(...)` + `select_runner(record.runner)`; the runner op
+   acts on the runner-native `run_ref`.
+
+### No local mutation, no pre-gate (Corrections)
+
+- **Retry reuses the SAME run** — `gh run rerun` re-runs the existing run (same `run_ref`,
+  preserving the `run-name` that embeds the perk `run_id`), so the dispatch record and its
+  `run_id ↔ plan ↔ PR` linkage stay valid. **No new ULID, no `cache.write_dispatch`.**
+- **Neither command mutates the dispatch record.** The record's `status` is the *dispatch-attempt*
+  lifecycle; live run state is observed via `Runner.observe` (surfaced by `list`'s overlay). No
+  `.pi/workflow/` writes in this node.
+- **No pre-flight run-state gating.** The commands do not `observe` to decide cancellability/
+  retryability — they pass through to gh and surface gh's own error (e.g. "cannot cancel a
+  completed run") as a clean `cancel_failed`/`retry_failed`.
+
+### `--json` payload (stdout, stable)
+
+```jsonc
+// success (cancel)
+{ "success": true, "error_type": null, "action": "cancel",
+  "run_id": "01J…", "run_ref": "1234567", "runner": "", "kind": "github-actions",
+  "url": "https://…/actions/runs/1234567" }
+// success (retry) — adds: "failed_only": false
+// failure → the shared _fail shape:
+{ "success": false, "error_type": "<type>", "message": "<gh's own error>" }
+```
+
+`run_ref`/`runner`/`kind`/`url` come from the reconstructed `RunHandle`. Error types + exits:
+`not_a_repo` → 2; `github_unauthed`, `run_not_found`, `run_not_dispatched`, `cancel_failed`,
+`retry_failed`, `invalid_input` → 1. The only free text in a failure payload is gh's own error
+string (wrapped via `RunnerError`) — no model-authored interpretation.
