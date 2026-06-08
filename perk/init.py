@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from perk import __version__, cache, capabilities, env, git, github
+from perk import __version__, cache, capabilities, env, git, github, workflow_artifacts
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.env import EnvCheck
@@ -692,6 +692,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
             "skills-manifest",
             ("skills-manifest",),
             lambda apply: _converge_skills_manifest(root, self_repo, apply=apply),
+        ),
+        ManagedConvergence(
+            "runner-workflow",
+            ("runner-workflow",),
+            lambda apply: workflow_artifacts.converge_runner_workflow(root, self_repo, apply=apply),
         ),
         ManagedConvergence(
             "gitignore-block",

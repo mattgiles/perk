@@ -29,6 +29,7 @@ from perk.cli.commands.pr_submit_cmd import pr_submit
 from perk.cli.commands.registry_cmd import registry
 from perk.cli.commands.replan_cmd import replan
 from perk.cli.commands.resume_cmd import resume_cmd
+from perk.cli.commands.run_worker_cmd import run_worker_cmd
 from perk.cli.commands.state_cmd import state
 from perk.cli.commands.worktree_cmd import worktree
 from perk.cli.context import PerkContext
@@ -71,6 +72,7 @@ register_with_aliases(cli, learn_docs)
 # learn-docs is a dedicated cold door but NOT a registry stage (hop-2): it borrows the `plan` stage
 # to launch, so DEDICATED_STAGES is unchanged (it only suppresses generic same-named launchers).
 register_with_aliases(cli, replan)
+cli.add_command(run_worker_cmd)
 # replan is likewise a dedicated cold door, not a registry stage: it borrows `plan` to re-launch
 # with the target plan's original run_id (in-place upsert), so DEDICATED_STAGES is unchanged.
 register_stage_commands(cli)
