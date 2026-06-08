@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, github, launch, resume
+from perk import cache, github, launch, resume, run_report
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.init import GIT_PACKAGE
@@ -180,8 +180,12 @@ def run_worker(
     position_worktree(repo_root, run_id=run_id, stage=stage, plan_ref=plan_ref)
     entry = resolve_worker_entry(repo_root, environ)
     user_output(f"run-worker: worker entry={entry.path} ({entry.source})")
+    run_report.report_started(repo_root, run_id=run_id, stage=stage.id, plan=plan, environ=environ)
     code = _spawn_worker(
         entry.path, stage_id=stage.id, worktree=repo_root, run_id=run_id, environ=environ
     )
     user_output(f"run-worker: worker exited {code}")
+    run_report.report_terminal(
+        repo_root, run_id=run_id, stage=stage.id, plan=plan, exit_code=code, environ=environ
+    )
     return code

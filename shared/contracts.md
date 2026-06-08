@@ -2019,3 +2019,62 @@ the §8.13 input contract and is carried for parity, but the plan branch is alre
 workflow, so it is not consumed here. Reporting run progress/terminal status back into GitHub is
 **Node 2.3**; the runner's secrets/health checks (the `PERK_GH_PAT`/model-credential prereqs) are
 **Node 2.4**.
+
+---
+
+## §8.15 · Remote run reporting back into GitHub (Node 2.3)
+
+The **runner-side** consumer of the §8.12 structured run-event stream + the §8.11 `RunOutcome`: when
+`perk run-worker` drives a stage remotely, it makes that run **observable on GitHub**. The worker
+itself never mutates GitHub (§8.12 is explicit — surfacing the stream is this node); the reporter is
+a deterministic exterior task (no agentic reasoning) living in the Python plane (`perk/run_report.py`)
+and wired into `perk run-worker` (`perk/run_worker.py`).
+
+### The two reporting points (fail-soft, exit-code-neutral)
+
+Two calls bracket the worker spawn in `run_worker(...)`:
+
+- **started** — `report_started(...)` after the worker entry resolves and **before** `_spawn_worker`
+  (the truest "drive is starting" point; positioning failures already raise loudly before this).
+- **terminal** — `report_terminal(...)` after `_spawn_worker` returns the exit code and **before**
+  `run-worker` returns it.
+
+Both are **fully fail-soft**: any exception inside reporting is caught, logged via `user_output` to
+stderr, and swallowed. Reporting must never change the worker's exit code or crash the runner —
+observability is best-effort (mirrors the worker's fail-soft event sink).
+
+### The surfaces
+
+- **One marker-keyed plan-issue comment per `run_id`.** The target is the **plan issue** (the
+  issue-canonical model — a perk plan *is* a GitHub issue; the implementation PR is referenced by
+  URL when known). A single comment carrying the marker `<!-- perk:run-report:<run_id> -->` is
+  **upserted** started → terminal (`github.upsert_marked_comment` →
+  `find_comment_id_by_marker` PATCH-if-found, else POST), so the started note evolves into the
+  terminal note (no two-comment spam; reruns are distinct `run_id`s). The plan issue is the only
+  correlation anchor known at *started* time (for `implement` the PR does not exist until mid-drive).
+- **The GitHub Actions job summary** (`$GITHUB_STEP_SUMMARY`) is the "checks"/run-page half: the
+  terminal step appends a self-contained `## perk remote <stage>` summary (status + budget + the
+  failure summary on non-success) when the env var is set (skipped silently when unset — local/test).
+
+### Inputs the reporter derives
+
+- The terminal `RunOutcome` is read from the **durable events file** out-of-process
+  (`cache.read_scratch(repo_root, run_id, "events.ndjson")` → the last `run_finished` event's
+  `outcome`), because `_spawn_worker` inherits stdio and does not capture the worker's stdout. A
+  missing/empty/malformed events file ⇒ a clearly-labelled **degraded** terminal note derived from
+  the worker exit code alone (so a terminal note always posts).
+- The run URL is derived from standard GitHub Actions env
+  (`GITHUB_SERVER_URL`/`GITHUB_REPOSITORY`/`GITHUB_RUN_ID` →
+  `{server}/{repo}/actions/runs/{run_id}`); absent ⇒ notes post without the link.
+- `outcome.pr` is present only for a successful `implement` drive (the worker captures the PR from
+  `submit`); for `address`/failures it is `null`, and the report omits the PR line.
+
+### Untrusted-data discipline (route-don't-relay end-to-end)
+
+The reporter quotes **no** GitHub-sourced prose (no plan title, no fetched GitHub text is
+interpolated into the bodies). The only free text it surfaces is the worker's own `error.summary`,
+which is worker-generated and already capped at 2 KiB (§8.12) — never re-expanded. This preserves
+route-don't-relay from the worker's structured channel all the way into the GitHub surfaces.
+
+No change to `.github/workflows/perk-run.yml` or `perk/workflow_artifacts.py`: reporting hooks into
+`run-worker` itself, so the managed artifact (and its convergence/doctor tests) stay untouched.
