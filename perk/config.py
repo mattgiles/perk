@@ -24,6 +24,10 @@ class Config:
 
     worktree_root: Path
     user_bindings: list[Binding] = field(default_factory=list)
+    # The `[pr-review] model` selection (#175) — the configurable `/pr-review` reviewer model, or
+    # None when unset (the `perk.pr-reviewer` agent's frontmatter model is then the default). Read
+    # for forward parity; today only the TS warm path consumes it (no cold `/pr-review` door yet).
+    pr_review_model: str | None = None
     # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
     # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
     # `user_bindings` is raw and `resolve_bindings` resolves it).
@@ -63,7 +67,15 @@ def load_config(repo_root: Path) -> Config:
         worktree_root=root,
         user_bindings=parse_user_bindings(merged.get("bindings")),
         providers=_parse_providers_selection(merged.get("providers")),
+        pr_review_model=_parse_pr_review_model(merged.get("pr-review")),
     )
+
+
+def _parse_pr_review_model(raw: Any) -> str | None:
+    """Read `[pr-review] model` (a string) from the merged config; ``None`` if absent/ill-typed."""
+    if isinstance(raw, dict) and isinstance(model := raw.get("model"), str) and model.strip():
+        return model
+    return None
 
 
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:

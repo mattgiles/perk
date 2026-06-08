@@ -59,3 +59,6 @@ bindings:
   - trigger: "command:learn-docs"
     skill: perk-learn-docs
     mode: nudge
+  - trigger: "command:pr-review"
+    skill: perk-pr-review
+    mode: nudge

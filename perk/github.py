@@ -1680,6 +1680,191 @@ def resolve_review_threads(
 
 
 # ===========================================================================
+# PR review ops (#175 — the `/pr-review` automated-review door; contracts.md §8.4).
+#
+# The read (`get_pr_review_context`) gathers everything the fresh-context `perk.pr-reviewer` child
+# needs to review the active PR (diff + PR text + plan body); the mutation (`post_pr_review`) sends
+# the child's review back to the PR. `event` is **hardcoded `COMMENT`** — the reviewer can never
+# approve/request-changes. Resilience: if the inline-anchored review submission fails (bad line
+# anchors), `post_pr_review` falls back to posting the summary (+ rendered findings) as one
+# discussion comment, so a review ALWAYS lands on the PR.
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class PrReviewContext:
+    """The read-only context a `/pr-review` child needs to review the active PR.
+
+    ``plan_body`` is the materialized plan markdown (or ``None`` when unavailable)."""
+
+    pr_number: int
+    base_ref: str
+    head_ref: str
+    title: str
+    body: str
+    diff: str
+    plan_body: str | None
+
+
+@dataclass(frozen=True)
+class InlineReviewComment:
+    """One inline review finding (anchored to a diff line on the RIGHT side; vs. the review-thread
+    ``ReviewComment`` above, which is a fetched comment, not a finding to post)."""
+
+    path: str
+    line: int
+    body: str
+
+
+@dataclass(frozen=True)
+class ReviewPostResult:
+    """The outcome of posting a `/pr-review`. ``mode`` records WHICH path landed the review."""
+
+    ok: bool
+    mode: str  # "review" (inline-anchored COMMENT review) | "comment_fallback" (discussion comment)
+    pr_number: int
+    comment_count: int
+    error: str | None = None
+
+
+def get_pr_review_context(*, pr_number: int, branch: str, repo_root: Path) -> PrReviewContext:
+    """Gather the active PR's review context (diff + PR text + plan body). Read-only; raises
+    ``GitHubError`` on an infra failure. ``branch`` is the head ref (already resolved by the
+    caller). ``plan_body`` is best-effort: the materialized `cache.plan` body if present, else the
+    plan issue body, else ``None`` (the review still runs from the diff)."""
+    meta = _run(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/pulls/{pr_number}",
+            "--jq",
+            "{title: .title, body: .body, base: .base.ref, head: .head.ref}",
+        ],
+        cwd=repo_root,
+    )
+    if meta.returncode != 0:
+        raise _failed(meta, f"failed to read PR #{pr_number}")
+    try:
+        data = json.loads(meta.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh api pulls/{pr_number}` output: {exc}") from exc
+    if not isinstance(data, dict):
+        raise GitHubError(f"unexpected PR payload: {data!r}")
+
+    diff_proc = _run(["pr", "diff", str(pr_number)], cwd=repo_root)
+    if diff_proc.returncode != 0:
+        raise _failed(diff_proc, f"failed to read the diff for PR #{pr_number}")
+
+    return PrReviewContext(
+        pr_number=pr_number,
+        base_ref=str(data.get("base") or branch),
+        head_ref=str(data.get("head") or branch),
+        title=str(data.get("title") or ""),
+        body=str(data.get("body") or ""),
+        diff=diff_proc.stdout,
+        plan_body=_read_plan_body(branch=branch, repo_root=repo_root),
+    )
+
+
+def _read_plan_body(*, branch: str, repo_root: Path) -> str | None:
+    """Best-effort plan body: the materialized `cache.plan` mirror, else the plan issue body."""
+    from perk import cache  # local import: avoid a module-load cycle (cache imports nothing of us)
+
+    materialized = cache.plan_body_path(repo_root)
+    if materialized.is_file():
+        try:
+            text = materialized.read_text(encoding="utf-8").strip()
+        except OSError:
+            text = ""
+        if text:
+            return text
+    plan_ref = cache.read_plan_ref(repo_root)
+    if isinstance(plan_ref, dict) and str(plan_ref.get("provider", "")) == "github":
+        pr_id = str(plan_ref.get("pr_id", "")).strip()
+        if pr_id.isdigit():
+            try:
+                return get_plan_body(number=int(pr_id), repo_root=repo_root)
+            except GitHubError:
+                return None
+    return None
+
+
+def _render_review_comment(summary: str, comments: list[InlineReviewComment]) -> str:
+    """Render the summary + inline findings as a single markdown discussion comment (the fallback
+    path, when inline-anchored review submission fails)."""
+    parts = [summary.rstrip()]
+    if comments:
+        parts.append("\n---\n\n**Inline findings:**")
+        for c in comments:
+            parts.append(f"- `{c.path}:{c.line}` — {c.body}")
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def post_pr_review(
+    *,
+    pr_number: int,
+    summary: str,
+    comments: list[InlineReviewComment],
+    repo_root: Path,
+    dry_run: bool = False,
+) -> ReviewPostResult:
+    """Submit a `/pr-review` as an advisory **COMMENT** review (event hardcoded). Tries one inline-
+    anchored review first; on failure (e.g. bad line anchors) falls back to posting the summary
+    (+ rendered findings) as a single discussion comment, so a review always lands. Raises only on
+    a hard infra failure even the fallback cannot survive (gh missing / timeout via ``_run``)."""
+    if dry_run:
+        return ReviewPostResult(
+            ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
+        )
+
+    payload: dict[str, Any] = {
+        "event": "COMMENT",
+        "body": summary,
+        "comments": [
+            {"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body} for c in comments
+        ],
+    }
+    with _body_file(json.dumps(payload)) as input_path:
+        proc = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/pulls/{pr_number}/reviews",
+                "-X",
+                "POST",
+                "--input",
+                input_path,
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if proc.returncode == 0:
+        return ReviewPostResult(
+            ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
+        )
+
+    # Inline-anchored submission failed (commonly: a `line` not present in the diff). Fall back to a
+    # single discussion comment so the review is never lost.
+    body = _render_review_comment(summary, comments)
+    with _body_file(body) as body_path:
+        fallback = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments",
+                "-X",
+                "POST",
+                "-F",
+                f"body=@{body_path}",
+            ],
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
+    if fallback.returncode != 0:
+        raise _failed(fallback, f"failed to post the review for PR #{pr_number}")
+    return ReviewPostResult(
+        ok=True, mode="comment_fallback", pr_number=pr_number, comment_count=len(comments)
+    )
+
+
+# ===========================================================================
 # Workflow-dispatch ops (Node 2.1 — the remote drive; contracts.md §8.13).
 #
 # Same conventions as the rest of the gateway (REST `gh api` / porcelain `gh run`, routed through

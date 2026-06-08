@@ -35,11 +35,13 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 
 # The `command:<id>` targets that perk's binding-delivery layer actually fires (Node 3.1, D5).
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
-# only deliverable command triggers are the two Mechanism-B call sites (`bindingSuffix` in
-# extension/objectivePlan.ts + extension/learnDocs.ts) plus the cold `binding_trigger=
-# "command:learn-docs"` override in perk/launch.py. Commands that ARE registry stages bind via
-# `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
-DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset({"objective-reconcile", "learn-docs"})
+# only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
+# extension/objectivePlan.ts + extension/learnDocs.ts + extension/prReview.ts) plus the cold
+# `binding_trigger="command:learn-docs"` override in perk/launch.py. Commands that ARE registry
+# stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
+DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
+    {"objective-reconcile", "learn-docs", "pr-review"}
+)
 
 # Where an installed skill body lives. The `skills` CLI delivers every `perk-*` skill into
 # `.agents/skills/<name>/` in both self-repo and consumer trees (the Pi package no longer declares

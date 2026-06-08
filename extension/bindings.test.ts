@@ -16,9 +16,10 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["stage:learn", "perk-learn", "nudge"],
   ["command:objective-reconcile", "perk-objective-reconcile", "nudge"],
   ["command:learn-docs", "perk-learn-docs", "nudge"],
+  ["command:pr-review", "perk-pr-review", "nudge"],
 ];
 
-test("loadDefaultBindings: returns the 8 shipped default bindings", () => {
+test("loadDefaultBindings: returns the 9 shipped default bindings", () => {
   const bindings = loadDefaultBindings();
   assert.deepEqual(
     bindings.map((b) => [b.trigger, b.skill, b.mode]),

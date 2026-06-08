@@ -56,6 +56,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-objective-plan",
     "perk-objective-reconcile",
     "perk-plan",
+    "perk-pr-review",
     "perk-replan",
 )
 
@@ -124,6 +125,13 @@ root = ".worktrees"
 # trigger = "command:learn-docs"
 # skill = "house-style"
 # mode = "transclude"
+
+# Automated PR review (`/pr-review`) — the model the fresh-context reviewer
+# uses. When unset, the perk.pr-reviewer agent's committed default is used.
+# Set a per-user override in .pi/perk.local.toml to avoid dirtying this file.
+#
+# [pr-review]
+# model = "anthropic/claude-sonnet-4-5"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
