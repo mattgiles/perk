@@ -14,6 +14,7 @@ import {
   buildObjectiveNodeArgs,
   isNonTrivialAudit,
   MIN_AUDIT_LENGTH,
+  reconcileGuidance,
   resolveReconcileObjective,
 } from "./objectivePlan.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
@@ -379,4 +380,14 @@ test("isNonTrivialAudit: the trim().length >= MIN_AUDIT_LENGTH predicate", () =>
   assert.equal(isNonTrivialAudit(`   ${"x".repeat(MIN_AUDIT_LENGTH - 1)}   `), false);
   assert.equal(isNonTrivialAudit("x".repeat(MIN_AUDIT_LENGTH)), true);
   assert.equal(isNonTrivialAudit(AUDIT), true);
+});
+
+test("reconcileGuidance: names the objective and carries the reconcile cues (no skill pointer)", () => {
+  const g = reconcileGuidance("5");
+  assert.match(g, /#5/);
+  assert.match(g, /gh pr diff/);
+  assert.match(g, /perk objective show 5/);
+  assert.match(g, /reconcile_objective/);
+  // The skill pointer rides the bindingSuffix, never the guidance body.
+  assert.doesNotMatch(g, /Follow the/);
 });

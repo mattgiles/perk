@@ -71,8 +71,8 @@ A plan is *one* change. An **objective** is a long-running goal that **generates
 rather than being implemented directly — it is the unit above the spine. An objective is a GitHub
 issue (label `perk:objective`) carrying a **roadmap** of nodes; perk's `/objective-plan` factory
 selects the next actionable node and drives a normal `plan → save` session scoped to *that one node*.
-When the node's PR lands, the node is auto-marked `done` and you reconcile the roadmap against what
-was actually built. (This is perk's take on erk's objective workflow.)
+When the node's PR lands, the node is auto-marked `done` and reconciliation against what was actually
+built is automatically driven on land. (This is perk's take on erk's objective workflow.)
 
 A roadmap **node** has an `id` (e.g. `1.1`), a `description`, a `status`
 (`pending` · `planning` · `in_progress` · `done` · `blocked` · `skipped`), and optional `pr` /
@@ -101,10 +101,10 @@ perk objective next 7                                # which node is actionable 
 /implement                   # (or `perk implement <plan>`) materialize the worktree + build it
 /submit  →  /ready  →  /address  →  /land
 
-# 4. /land squash-merges AND mechanically marks the backlinked node `done`, then nudges:
-/objective-reconcile         # reconcile the objective's prose against the real merged diff
-                             #   (rewrites only the Reconcilable region — the roadmap table and
-                             #    any Immutable historical notes are never touched)
+# 4. /land squash-merges AND mechanically marks the backlinked node `done`, then
+#    AUTOMATICALLY reconciles the objective's prose against the real merged diff
+#    (rewrites only the Reconcilable region — the roadmap table and any Immutable
+#     historical notes are never touched). Run /objective-reconcile manually to redo it.
 /learn                       # capture what was learned
 ```
 
