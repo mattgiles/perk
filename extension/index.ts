@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerAddress } from "./address.ts";
+import { registerAskUser } from "./askUser.ts";
 import { registerBindingDelivery } from "./bindingDelivery.ts";
 import {
   ensureRunScratch,
@@ -263,6 +264,11 @@ export default function (pi: ExtensionAPI) {
   // Warm door: the `plan_save` tool + `/plan-save` command (turn-3). Takes `gating` for D1a:
   // a successful command-path save exits read-only mode (the read-only → read-write boundary).
   registerPlanSave(pi, gating);
+
+  // #187 — the universal `ask_user_question` tool: lets a model interactively ask the human a
+  // clarifying question (free-text or multiple-choice). Registered in the factory so it exists
+  // before the gate snapshots tools; its name is in READ_ONLY_TOOLS so it survives plan mode.
+  registerAskUser(pi);
 
   // Lifecycle gates: the dirty-repo switch/fork guard + the guard-only `/implement` (turn-4b).
   registerLifecycleGates(pi);

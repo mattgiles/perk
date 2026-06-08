@@ -12,7 +12,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS). */
-export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash"];
+export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash", "ask_user_question"];
 
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";

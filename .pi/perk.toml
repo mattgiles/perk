@@ -16,3 +16,12 @@ test = "just test"
 
 [pr-review]
 model = "anthropic/claude-opus-4-8"
+
+# Repo-local planning addendum (#187). Appended to PLAN_AUTHORING_CONTEXT by the TS planMode
+# injection during every read-only planning session (plan, replan, objective-plan) — it coexists
+# with the shipped `perk-plan` skill nudge rather than overriding it. Ignored by the Python
+# `tomllib` config reader (valid TOML it doesn't extract).
+[workflow]
+plan_authoring = """
+Before finalizing the plan, follow the `grill-with-docs` skill: interview the user one question at a time (waiting for each answer before the next), stress-testing the plan against the codebase and the project's documented language/decisions, and provide your recommended answer for each question. Use the `ask_user_question` tool to ask — one focused question per call. Prefer exploring the codebase over asking when a question is answerable from the code.
+"""
