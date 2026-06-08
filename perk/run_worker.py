@@ -21,6 +21,7 @@ from typing import Any
 from perk import cache, github, launch, resume
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
+from perk.init import GIT_PACKAGE
 from perk.output import user_output
 from perk.registry import Stage, load_registry
 
@@ -37,7 +38,7 @@ class WorkerEntry:
     """The resolved Node worker entrypoint + how it was found (for the progress line)."""
 
     path: Path
-    source: str  # "env" | "self" | "consumer"
+    source: str  # "env" | "self" | "consumer-git" | "consumer-npm"
 
 
 def _drivable_stage(stage_id: str) -> Stage:
@@ -53,9 +54,24 @@ def _drivable_stage(stage_id: str) -> Stage:
     return stage
 
 
+def _git_clone_worker_entry(repo_root: Path) -> Path:
+    """The worker entrypoint inside pi's git-package clone, derived from ``GIT_PACKAGE``.
+
+    pi clones a ``git:`` package to ``.pi/git/<host>/<path>`` (docs/packages.md). Deriving the path
+    from ``GIT_PACKAGE`` (rather than hardcoding segments) keeps the resolver in lockstep with the
+    package URL — a URL change cannot silently desync this candidate.
+    """
+    remainder = GIT_PACKAGE.removeprefix("git:")
+    clone = repo_root / ".pi" / "git"
+    for segment in remainder.split("/"):
+        clone = clone / segment
+    return clone / "extension" / "workerMain.ts"
+
+
 def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntry:
     """Locate ``workerMain.ts``: the ``PERK_WORKER_ENTRY`` override, else the self-repo path, else
-    the consumer install under ``.pi/npm/node_modules/@perk/pi``. A miss is loud, never silent."""
+    the consumer git-package clone under ``.pi/git/<host>/<path>``, else the consumer npm install
+    under ``.pi/npm/node_modules/@perk/pi``. A miss is loud, never silent."""
     override = (environ.get("PERK_WORKER_ENTRY") or "").strip()
     if override:
         path = Path(override)
@@ -67,6 +83,7 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
         )
     candidates: list[tuple[Path, str]] = [
         (repo_root / "extension" / "workerMain.ts", "self"),
+        (_git_clone_worker_entry(repo_root), "consumer-git"),
         (
             repo_root
             / ".pi"
@@ -76,7 +93,7 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
             / "pi"
             / "extension"
             / "workerMain.ts",
-            "consumer",
+            "consumer-npm",
         ),
     ]
     for path, source in candidates:

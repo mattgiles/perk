@@ -1921,13 +1921,24 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
 
 - **`.github/workflows/perk-run.yml`** — the runner workflow. It honors §8.13's `workflow_dispatch`
   input contract: a `run-name` embedding **`${{ inputs.run_id }}`** (verify-by-discovery); typed
-  inputs **`run_id`, `stage`, `plan`, `base`**; a per-plan `concurrency` group
-  `perk-run-${{ inputs.plan }}`. The `drive` job validates the `PERK_GH_PAT` secret, checks out the
-  plan branch (`plan-<plan>`), runs the composite setup, then `perk run-worker`. An opt-out repo
-  variable `PERK_ENABLED=false` disables the job without removing the file.
+  inputs **`run_id`, `stage`, `plan`, `base`** (`base` is `required: true` with no default — the
+  dispatcher always sends it); a per-plan `concurrency` group `perk-run-${{ inputs.plan }}`. The
+  `drive` job validates required secrets — it fails fast when `PERK_GH_PAT` is missing **and** when
+  **both** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are empty (pre-empting the worker's late
+  `no_model`) — checks out the plan branch (`plan-<plan>`), runs the composite setup, then `perk
+  run-worker`. An opt-out repo variable `PERK_ENABLED=false` disables the job without removing the
+  file. **Auth model:** checkout + push use the `PERK_GH_PAT` PAT, **not** `github.token` — a
+  PAT-pushed commit triggers downstream CI (the implement drive commits + `submit` pushes);
+  `GITHUB_TOKEN`-pushed commits do not. This is a stated decision Node 2.4 inherits.
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
-  toolchains (uv + Node 22), then perk (the exterior CLI), pi (the interior the worker drives), and
-  the Node worker's peer deps (`npm ci`).
+  toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
+  `git+https://github.com/mattgiles/perk@v{__version__}` for a consumer), pi (the interior the
+  worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
+  `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
+  aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
+  resolves); **consumer** is a **loud Node-2.4 deferral** (`::error::` + `exit 1`) because the
+  consumer worker-clone genuinely cannot exist in CI yet (`.pi/git` + `.pi/npm` are gitignored and
+  nothing in the composite runs `pi` to trigger pi's git-package `npm install`).
 
 Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited file reads as drift and
 is converged back to the template. The templates are authored as code (string constants), not
@@ -1945,9 +1956,12 @@ by the workflow **after** it checks out the plan branch (so cwd = the checkout =
 3. **Position** the worktree (mirroring `launch.launch_stage`): `cache.ensure_layout`,
    `write_handoff({stage, mode})`, `write_plan_ref`, then materialize the plan body. The worker
    inherits the prepared worktree and never re-writes it (the §B inputs table).
-4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override, else the self-repo
-   `extension/workerMain.ts`, else the consumer install under
-   `.pi/npm/node_modules/@perk/pi/extension/workerMain.ts`; a miss ⇒ `worker_entry_missing`.
+4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
+   `extension/workerMain.ts` (`self`), else the consumer git-package clone
+   `.pi/git/<host>/<path>/extension/workerMain.ts` (`consumer-git`, derived from `GIT_PACKAGE` so a
+   package-URL change cannot desync the resolver), else the consumer npm install under
+   `.pi/npm/node_modules/@perk/pi/extension/workerMain.ts` (`consumer-npm`); a miss ⇒
+   `worker_entry_missing`.
 5. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
    (inherited stdio — the worker owns stdout/the `RunOutcome` JSON), and **exit with the worker's
    exit code** so the workflow step reflects the drive outcome.

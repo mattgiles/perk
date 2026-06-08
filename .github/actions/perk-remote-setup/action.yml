@@ -28,3 +28,9 @@ runs:
     - name: Install Node worker deps
       shell: bash
       run: npm ci
+
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config --global user.name "perk[bot]"
+        git config --global user.email "perk[bot]@users.noreply.github.com"

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from perk import __version__
 from perk import workflow_artifacts as wa
 from perk.runner import GITHUB_ACTIONS_WORKFLOW
 
@@ -24,6 +25,9 @@ def test_workflow_honors_the_dispatch_input_contract():
     assert inputs["run_id"]["required"] is True
     assert inputs["stage"]["required"] is True
     assert inputs["plan"]["required"] is True
+    # `base` is required with no default — the dispatcher always sends it (B6, the tight contract).
+    assert inputs["base"]["required"] is True
+    assert "default" not in inputs["base"]
     # A per-plan concurrency group (mirrors erk's implement-plan-${{ … }}).
     assert doc["concurrency"]["group"] == "perk-run-${{ inputs.plan }}"
 
@@ -39,19 +43,52 @@ def test_workflow_validates_the_secret_and_invokes_run_worker():
 
 
 def test_composite_action_installs_perk_and_pi():
-    body = wa.remote_setup_action(self_repo=False)
+    body = wa.remote_setup_action(self_repo=True)
     doc = yaml.safe_load(body)
     assert doc["runs"]["using"] == "composite"
     assert "uv tool install" in body  # perk (the exterior)
     assert "@earendil-works/pi-coding-agent" in body  # pi (the interior)
-    assert "npm ci" in body  # the Node worker's peer deps
+    assert "npm ci" in body  # the Node worker's peer deps (self-repo)
 
 
 def test_composite_action_install_is_self_vs_consumer_aware():
-    # The self-repo dogfoods the code under test; a consumer installs the published distribution.
+    # The self-repo dogfoods the code under test; a consumer installs the version-pinned git build.
     assert "uv tool install --from . perk" in wa.remote_setup_action(self_repo=True)
-    assert "uv tool install perk" in wa.remote_setup_action(self_repo=False)
-    assert "--from ." not in wa.remote_setup_action(self_repo=False)
+    consumer = wa.remote_setup_action(self_repo=False)
+    assert f"git+https://github.com/mattgiles/perk@v{__version__}" in consumer
+    assert "--from ." not in consumer
+    # The fictional bare `uv tool install perk` is gone (B3).
+    assert "run: uv tool install perk" not in consumer
+
+
+def test_composite_action_configures_git_identity():
+    # B1: both repo-kind variants set a git identity so the worker's commits succeed on a fresh
+    # runner (no user.name/user.email otherwise).
+    for self_repo in (True, False):
+        body = wa.remote_setup_action(self_repo=self_repo)
+        assert 'git config --global user.name "perk[bot]"' in body
+        assert "perk[bot]@users.noreply.github.com" in body
+
+
+def test_composite_action_worker_deps_is_repo_kind_aware():
+    # B4: self uses `npm ci`; consumer is a loud Node-2.4 deferral (no silent `npm ci`).
+    assert "npm ci" in wa.remote_setup_action(self_repo=True)
+    consumer = wa.remote_setup_action(self_repo=False)
+    assert "npm ci" not in consumer
+    assert "::error::" in consumer
+    assert "exit 1" in consumer
+    assert "Node 2.4" in consumer
+
+
+def test_workflow_validates_model_keys_fail_fast():
+    # B5: the validate step fails fast when BOTH model keys are empty.
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    validate = next(
+        s for s in doc["jobs"]["drive"]["steps"] if s.get("name") == "Validate required secrets"
+    )
+    assert "ANTHROPIC_API_KEY" in validate["env"]
+    assert "OPENAI_API_KEY" in validate["env"]
+    assert '[ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]' in validate["run"]
 
 
 def test_converge_creates_both_files_then_is_a_noop(tmp_path: Path):

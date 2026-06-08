@@ -22,9 +22,8 @@ on:
         type: string
       base:
         description: "Base branch the plan branch targets"
-        required: false
+        required: true
         type: string
-        default: "main"
 
 # One in-flight run per plan; a newer dispatch supersedes an older one (mirrors erk's
 # implement-plan-${{ … }} group).
@@ -45,9 +44,15 @@ jobs:
       - name: Validate required secrets
         env:
           PERK_GH_PAT: ${{ secrets.PERK_GH_PAT }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           if [ -z "$PERK_GH_PAT" ]; then
             echo "::error::PERK_GH_PAT secret is missing; add a repo-scoped PAT secret."
+            exit 1
+          fi
+          if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo "::error::No model key set; add ANTHROPIC_API_KEY or OPENAI_API_KEY."
             exit 1
           fi
 
