@@ -45,6 +45,7 @@ test("headless: hasUI:false → no-user sentinel, UI never called", async () => 
   const { ui, calls } = fakeUI({});
   const result = await runAskUserQuestion({ hasUI: false, ui, question: "Which?" });
   assert.match(textOf(result), /no interactive user available/);
+  assert.deepEqual(result.details, { ok: true, answered: false });
   assert.equal(calls.length, 0);
 });
 
@@ -59,6 +60,7 @@ test("free-text (no options): input called with question, typed answer returned"
   const { ui, calls } = fakeUI({ input: "blue" });
   const result = await runAskUserQuestion({ hasUI: true, ui, question: "Favorite color?" });
   assert.equal(textOf(result), "blue");
+  assert.deepEqual(result.details, { ok: true, answered: true });
   assert.equal(calls.length, 1);
   assert.equal(at(calls, 0).method, "input");
   assert.equal(at(calls, 0).title, "Favorite color?");
@@ -100,6 +102,7 @@ test("dismiss at select: select returns undefined → dismissed text", async () 
     question: "Pick one",
     options: ["A", "B"],
   });
+  assert.deepEqual(result.details, { ok: true, answered: false });
   assert.equal(textOf(result), "(no answer — the user dismissed the prompt.)");
 });
 
