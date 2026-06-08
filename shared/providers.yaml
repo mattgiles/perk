@@ -34,15 +34,19 @@
 # name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
 # loaders. The Python plane is the authoritative validator.
 #
-# Status (Node 2.1 → 2.3): this file ships the substrate (the two reference entries +
-# foreign entries per seam). The PLAN adapter has landed (Node 2.3): `tombell-plan` is a
-# REAL, selectable plan provider — `planAdapterTombell` bridges `@tombell/pi-plan`'s
-# free-form prose surface to perk's canonical `plan_save` → `cache.plan-ref` contract, and
-# perk VACATES the plan surface at REGISTRATION time (not just handler-time) under a foreign
-# plan selection so the foreign `/plan`/`Ctrl+Alt+P`/`--plan` are the sole registrants (Pi
-# suffixes duplicate command names). The TODO entry (`juicesharp-todo`) stays ILLUSTRATIVE
-# until the Node 3.2 adapter + Node 3.1 todo-seam deferral land. The DEFAULT path (both
-# reference providers) is the hard guarantee.
+# Status (Node 2.1 → 3.2): this file ships the substrate (the two reference entries +
+# foreign entries per seam), and BOTH seams now have a REAL foreign provider. The PLAN
+# adapter landed at Node 2.3: `tombell-plan` is a REAL, selectable plan provider —
+# `planAdapterTombell` bridges `@tombell/pi-plan`'s free-form prose surface to perk's
+# canonical `plan_save` → `cache.plan-ref` contract, and perk VACATES the plan surface at
+# REGISTRATION time (not just handler-time) under a foreign plan selection so the foreign
+# `/plan`/`Ctrl+Alt+P`/`--plan` are the sole registrants (Pi suffixes duplicate command
+# names). The TODO adapter landed at Node 3.2: `juicesharp-todo` is a REAL, selectable todo
+# provider — `todoAdapterJuicesharp` carries perk's implement-progress discipline onto
+# `@juicesharp/rpiv-todo`'s checklist overlay (injection-only, active-workflow-gated), and
+# perk's own checkpoints simply DEFER at runtime (Node 3.1) — NO registration-time vacating,
+# because the todo seam has no command-name collision (`/checkpoints` vs the overlay's own
+# command). The DEFAULT path (both reference providers) is the hard guarantee.
 
 schema_version: 1
 
@@ -67,8 +71,11 @@ providers:
     # No `package_filter`: `@tombell/pi-plan`'s sole extension is its root `index.ts` (not under
     # `extensions/`), so omitting the filter ("load all of that type") loads exactly that one
     # extension. The `package_filter` field stays in the vocabulary for future providers.
-  - id: juicesharp-todo      # ILLUSTRATIVE — the real entry lands with the Node 3.2 adapter
+  - id: juicesharp-todo      # REAL todo provider (Node 3.2) — todoAdapterJuicesharp bridges it
     seam: todo
-    package: "npm:@juicesharp/rpiv-todo"
-    adapter: "todoAdapterJuicesharp"
+    package: "npm:@juicesharp/rpiv-todo"   # the foreign Pi package to add to `packages`
+    adapter: "todoAdapterJuicesharp"       # the perk-owned shim carrying progress discipline onto it
     default: false
+    # No `package_filter`: `@juicesharp/rpiv-todo` is a single-concern checklist overlay, so omitting
+    # the filter ("load all of that type") loads its bundled extension. The smoke's manual half is the
+    # gate that no perk surface collides; a targeted `extensions` filter is a follow-up if one ever does.

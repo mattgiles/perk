@@ -64,6 +64,14 @@ def test_real_providers_load_the_four_entries():
     # Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
     # nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`; omitting it loads all).
     assert tombell.package_filter is None
+    # Node 3.2: `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it).
+    juicesharp = by_id["juicesharp-todo"]
+    assert juicesharp.seam == "todo"
+    assert juicesharp.package == "npm:@juicesharp/rpiv-todo"
+    assert juicesharp.adapter == "todoAdapterJuicesharp"
+    assert juicesharp.default is False
+    # No `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
+    assert juicesharp.package_filter is None
 
 
 def test_real_providers_are_valid():

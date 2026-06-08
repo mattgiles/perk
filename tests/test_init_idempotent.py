@@ -98,6 +98,42 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     assert "npm:@tombell/pi-status" in _identities(packages)
 
 
+def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):
+    # The todo-seam analogue (Node 3.2): the init wiring is already seam-generic, so selecting the
+    # real `juicesharp-todo` provider wires `npm:@juicesharp/rpiv-todo` (object form, no filter) and
+    # deselecting removes it — locking the generic behavior for the todo seam too.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\ntodo = "juicesharp-todo"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    # The real juicesharp-todo entry has no `package_filter`, so the object carries `source` only.
+    entry = next(
+        p
+        for p in packages
+        if isinstance(p, dict) and p.get("source") == "npm:@juicesharp/rpiv-todo"
+    )
+    assert entry == {"source": "npm:@juicesharp/rpiv-todo"}
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+
+    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\ntodo = "perk-checkpoints"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-status" in _identities(packages)
+
+
 def test_init_provider_wiring_is_idempotent(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
