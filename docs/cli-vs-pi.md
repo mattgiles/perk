@@ -295,15 +295,19 @@ exactly, a host/orchestration concern the CLI owns. Two lessons carried from erk
   state, so a later cold resume or a supervisor can correlate the run with its plan. This
   is the same "coordinate through artifacts" rule from §3.
 
-> **Status (P2.T8c) — the resolver + registered targets are built; the runner is not.** The cold
-> door's target parameterization is now real: `perk/launch.py` `resolve_target(stage, remote)` is a
-> pure step returning a **local** or **remote** `Target`, with the legal targets recorded per stage
-> in the registry (`doors.cold_remote: true` on `implement` + `address`; `false` on
-> `plan`/`save`/`submit`/`land`/`learn`). A `--remote` launch on a drivable stage **resolves and
-> surfaces** a `RemoteTarget` descriptor (runner ref + run_id→plan linkage) over the `--json`
-> supervisor channel, then exits with a stable `remote_not_driven` — it does **not** yet persist
-> intent or trigger a runner. **Phase 2 builds and resolves the target; the Phase-3 worker drives
-> it** (and is the consumer that writes the linkage metadata above).
+> **Status (Node 2.1) — the remote door is a real drive.** The cold door's target
+> parameterization is real: `perk/launch.py` `resolve_target(stage, remote)` is a pure step
+> returning a **local** or **remote** `Target`, with the legal targets recorded per stage in the
+> registry (`doors.cold_remote: true` on `implement` + `address`; `false` on
+> `plan`/`save`/`submit`/`land`/`learn`). A `--remote` launch on a drivable stage now **persists
+> the `run_id→plan` linkage** (`.pi/workflow/scratch/runs/<run_id>/dispatch.json`), **reads it back
+> to verify** (the establish-before-consume gate, contracts.md §8.2/§8.13), then **triggers** a
+> runner via the runner-agnostic `Runner` contract (`perk/runner.py`; GitHub Actions is the first
+> implementation, discovering its run by the `run_id` embedded in the workflow run-name). The
+> verified run handle is recorded back into the dispatch record and surfaced on `--json`;
+> `remote_not_driven` is retired. The GitHub Actions workflow YAML it triggers (`perk-run.yml`) is
+> **Node 2.2**; progress/terminal reporting is **Node 2.3**; the supervisor command surfaces are
+> **Nodes 3.1/3.2**.
 
 ---
 

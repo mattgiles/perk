@@ -101,6 +101,36 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
     handoff_path(root, run_id).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+# --- dispatch: the durable run_id->plan linkage for a remote drive (Node 2.1, §8.13) -----
+
+
+def dispatch_path(root: Path, run_id: str) -> Path:
+    """The dispatch-record path for a remote drive (under the run's scratch dir)."""
+    return run_scratch_dir(root, run_id) / "dispatch.json"
+
+
+def write_dispatch(root: Path, run_id: str, data: dict[str, Any]) -> Path:
+    """Write the durable ``run_id -> plan`` dispatch record (creating the run dir); return its
+    path. ``run_id`` is authoritative (it overrides anything in ``data``), mirroring
+    ``write_handoff``. The supervisor (Node 3.1) enumerates ``scratch/runs/*/dispatch.json``
+    to correlate ``run_id <-> plan <-> PR`` (§8.13).
+    """
+    directory = run_scratch_dir(root, run_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "dispatch.json"
+    payload = {**data, "run_id": run_id}
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def read_dispatch(root: Path, run_id: str) -> dict[str, Any] | None:
+    """Read a dispatch record, or ``None`` if it does not exist."""
+    path = dispatch_path(root, run_id)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 # --- plan-ref: the active plan->branch ref pointer (plan-ref.json) -----------------------
 
 

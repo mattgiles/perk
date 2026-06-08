@@ -13,7 +13,8 @@ import json
 import re
 import subprocess
 import tempfile
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1676,3 +1677,121 @@ def resolve_review_threads(
         for item in batch
     )
     return BatchResolveResult(success=all(r.success for r in results), results=results)
+
+
+# ===========================================================================
+# Workflow-dispatch ops (Node 2.1 — the remote drive; contracts.md §8.13).
+#
+# Same conventions as the rest of the gateway (REST `gh api` / porcelain `gh run`, routed through
+# `_run`, mutations raise `GitHubError`). `trigger_workflow` triggers a `workflow_dispatch` and
+# then VERIFIES the run by discovering it via the perk `run_id` embedded in the run-name
+# (erk's distinct-id run-discovery pattern; the perk `run_id` unifies erk's separate distinct_id).
+# The `sleep` injection + `max_attempts` keep the poll fully unit-testable with no real delay.
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class WorkflowRun:
+    """A GitHub Actions workflow run (the runner-native handle behind a `runner.RunHandle`)."""
+
+    id: str  # the numeric run id, as a string
+    url: str
+    status: str  # "queued" | "in_progress" | "completed" | …
+    conclusion: str | None  # "success" | "failure" | "cancelled" | … | None
+
+
+def trigger_workflow(
+    *,
+    repo_root: Path,
+    workflow: str,
+    inputs: dict[str, str],
+    ref: str,
+    match_token: str,
+    sleep: Callable[[float], None] = time.sleep,
+    max_attempts: int = 11,
+) -> WorkflowRun:
+    """Trigger a ``workflow_dispatch`` and return the **verified** run (discovered by matching
+    ``match_token`` in the run's ``display_title``/``name`` — the run-name embeds the perk
+    ``run_id``). Raises ``GitHubError`` on a trigger failure, a job-level skip/cancel, or
+    discovery exhaustion. Backoff is ``min(2**attempt, 8)`` via the injected ``sleep``.
+    """
+    args = ["workflow", "run", workflow, "--ref", ref]
+    for key, value in inputs.items():
+        args += ["-f", f"{key}={value}"]
+    proc = _run(args, cwd=repo_root, timeout=_WRITE_TIMEOUT)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to dispatch workflow {workflow!r}")
+
+    titles: list[str] = []
+    for attempt in range(max_attempts):
+        runs = _run(
+            [
+                "api",
+                f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs?per_page=20",
+                "--jq",
+                ".workflow_runs",
+            ],
+            cwd=repo_root,
+        )
+        if runs.returncode == 0:
+            try:
+                workflow_runs = json.loads(runs.stdout or "[]")
+            except json.JSONDecodeError as exc:
+                raise GitHubError(f"unparseable `gh api workflow runs` output: {exc}") from exc
+            titles = []
+            for run in workflow_runs if isinstance(workflow_runs, list) else []:
+                if not isinstance(run, dict):
+                    continue
+                title = str(run.get("display_title") or run.get("name") or "")
+                titles.append(title)
+                if match_token not in title:
+                    continue
+                conclusion = run.get("conclusion")
+                if conclusion in ("skipped", "cancelled"):
+                    raise GitHubError(
+                        f"workflow {workflow!r} run was {conclusion} (run {run.get('id')!r}, "
+                        f"title {title!r}) — a job-level condition was likely not met"
+                    )
+                return WorkflowRun(
+                    id=str(run.get("id", "")),
+                    url=str(run.get("html_url", "")),
+                    status=str(run.get("status", "")),
+                    conclusion=conclusion if isinstance(conclusion, str) else None,
+                )
+        if attempt < max_attempts - 1:
+            sleep(min(2**attempt, 8))
+    recent = ", ".join(repr(t) for t in titles[:10]) or "(none)"
+    raise GitHubError(
+        f"dispatched workflow {workflow!r} but no run matched token {match_token!r} after "
+        f"{max_attempts} attempts; recent run titles: {recent}"
+    )
+
+
+def get_workflow_run(*, run_id: str, repo_root: Path) -> WorkflowRun | None:
+    """Read a workflow run's state by its runner-native id (``gh run view``). ``None`` when the
+    run is absent / the call is non-zero; raises ``GitHubError`` only on a gh-missing/timeout."""
+    proc = _run(
+        ["run", "view", run_id, "--json", "databaseId,url,status,conclusion"], cwd=repo_root
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable `gh run view` output: {exc}") from exc
+    if not isinstance(data, dict) or "databaseId" not in data:
+        return None
+    conclusion = data.get("conclusion")
+    return WorkflowRun(
+        id=str(data.get("databaseId", "")),
+        url=str(data.get("url", "")),
+        status=str(data.get("status", "")),
+        conclusion=conclusion if isinstance(conclusion, str) and conclusion else None,
+    )
+
+
+def cancel_workflow_run(*, run_id: str, repo_root: Path) -> None:
+    """Cancel a workflow run by its runner-native id (``gh run cancel``); raises on failure."""
+    proc = _run(["run", "cancel", run_id], cwd=repo_root, timeout=_WRITE_TIMEOUT)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to cancel workflow run {run_id}")

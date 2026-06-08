@@ -1799,3 +1799,110 @@ outcome), **not** raw tool payloads (those already live in the session transcrip
 text is capped at `EVENT_SUMMARY_CAP = 2 KiB`. The surfaced `RunOutcome` is unchanged and already
 bounded. The worker only *writes* the structured channel — **no GitHub mutation** here; surfacing it
 as PR comments/checks from the runner is Node 2.3 (Phase 2).
+
+---
+
+## §8.13 · Remote dispatch: the `Runner` contract + the dispatch record (Node 2.1)
+
+A `--remote` launch of a drivable stage (`implement`/`address`, the `doors.cold_remote:true`
+stages) is a **real drive** (it was `remote_not_driven` through P2.T8c). The Python plane mints a
+perk `run_id`, **persists the `run_id → plan` linkage**, reads it back to verify, then **triggers**
+a runner that is discovered + matched back to the `run_id`. This node builds the dispatch driver
+(`perk/launch.py` `_drive_remote_target`) + the runner library (`perk/runner.py`); the GitHub
+Actions workflow YAML it triggers is **Node 2.2** (named below, built there).
+
+### The `Runner` contract (`perk/runner.py`)
+
+A runner-agnostic `typing.Protocol`. GitHub Actions is the first (and currently only)
+implementation; `select_runner(ref)` returns a `GitHubActionsRunner(ref)` for any ref today (the
+"keep future runners open" seam — the ref is recorded but not yet mapped to a runner *kind*).
+
+```python
+class Runner(Protocol):
+    kind: str
+    def dispatch(self, *, stage, plan_ref, run_id, base, repo_root) -> RunHandle: ...
+    def observe(self, handle: RunHandle, *, repo_root) -> RunObservation: ...
+    def cancel(self, handle: RunHandle, *, repo_root) -> None: ...
+```
+
+- **`dispatch`** triggers the run and returns the **verified** handle (verified = the runner-side
+  run was discovered and matched to `run_id`); it raises `RunnerError` on a trigger/discovery
+  failure.
+- **`observe`/`cancel`** operate on a previously-returned `RunHandle`. They are implemented (not
+  stubbed) so the contract is validated end-to-end and the supervisor nodes (3.1/3.2) consume
+  settled shapes — but the **supervisor command surfaces** (`perk workflow run list/cancel/retry`,
+  tables, correlation) are those later nodes' work, not this one.
+
+The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
+
+- **`RunHandle`** — `runner` (the routed ref, `""` ⇒ default), `kind` (`"github-actions"`),
+  `run_ref` (the runner-native run id — GitHub Actions' numeric id as a string), `url`. Stored
+  inside the dispatch record. **Do not conflate** `run_ref` with the perk `run_id`: the perk
+  `run_id` is the canonical, runner-agnostic correlation key; `run_ref` is the runner-side handle.
+- **`RunObservation`** — `status` (`"queued"|"in_progress"|"completed"|"unknown"`), `conclusion`
+  (`"success"|"failure"|"cancelled"|…|None`), `url`.
+- **`DispatchRecord`** — the durable linkage (below).
+
+### The dispatch record (the supervisor's correlation source)
+
+`DispatchRecord` is persisted at **`.pi/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
+scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` already excludes
+`/.pi/workflow/scratch/`, so no layout/gitignore change). Shape:
+
+```jsonc
+{ "run_id": "<ULID>",            // perk's canonical correlation key (authoritative on write)
+  "stage": "implement",
+  "plan_ref": { /* the cache.plan-ref blob */ },
+  "runner": "",                  // the routed runner ref ("" => default)
+  "kind": "github-actions",
+  "status": "dispatching" | "dispatched" | "failed",
+  "dispatched_at": "<ISO-8601 UTC>",
+  "run_handle": { /* RunHandle.to_data() */ } | null,
+  "error": "<string>" | null }
+```
+
+The supervisor (Node 3.1) enumerates `scratch/runs/*/dispatch.json` to correlate
+`run_id ↔ plan ↔ PR`; that enumeration is its work, not this node's. A **failed** record is kept
+(not deleted) for that visibility. GC of dispatch records rides the existing `.pi/workflow/` GC
+story (records live under `scratch/runs/<run_id>/`).
+
+### Persist-then-trigger + read-back-verify (the establish-before-consume gate)
+
+`_drive_remote_target` ordering (the establish-before-consume discipline, cross-referencing §8.2):
+
+1. Resolve the plan from `cache.plan-ref`; **no plan ⇒** `UserFacingCliError(no_plan_ref)` (a
+   remote drive must not invent a plan).
+2. Mint `run_id` (a cold dispatch is a cold launch ⇒ mints).
+3. Resolve `base` = the default branch (best-effort; loud fallback to `"main"` on failure — never
+   silent).
+4. **`--dry-run` ⇒ a side-effect-free dispatch preview** (`success:true`, `dry_run:true`, an
+   `inputs` preview; **no** persist, **no** trigger) — mirroring the local dry-run.
+5. **Persist** the `DispatchRecord` (`status:"dispatching"`) via `cache.write_dispatch`, then
+   **read it back** and assert `run_id` + `plan_ref.pr_id` round-tripped; a mismatch raises a
+   **hard** `UserFacingCliError(dispatch_state_unverified)` (never a silent `pass`).
+6. **Trigger** via the selected runner's `dispatch`. On `RunnerError`/`GitHubError`: rewrite the
+   record `status:"failed"` + `error`, then raise `UserFacingCliError(dispatch_failed)`.
+7. **Finalize** the record `status:"dispatched"` + `run_handle` (read-back is best-effort here —
+   the critical verified linkage is step 5's). Surface a human line + a `--json`
+   `{success, stage, run_id, runner, run_handle}` payload. Exit 0.
+
+The **error types**: `remote_not_driven` is **retired**; the new types are `no_plan_ref`,
+`dispatch_state_unverified`, `dispatch_failed`.
+
+### The `workflow_dispatch` input contract (the Node 2.2 dependency)
+
+`GitHubActionsRunner.dispatch` triggers a `workflow_dispatch` and then **verifies** the run by
+polling `repos/{owner}/{repo}/actions/workflows/<workflow>/runs` and matching the run whose
+`display_title`/`name` **contains the perk `run_id`** (exponential backoff `min(2**attempt, 8)`,
+`max_attempts=11`; a matched `skipped`/`cancelled` run or exhaustion ⇒ `GitHubError`). So Node 2.2
+**must** ship:
+
+- a workflow file named **`perk-run.yml`** (`runner.GITHUB_ACTIONS_WORKFLOW`);
+- typed `workflow_dispatch` inputs **`run_id`, `stage`, `plan`, `base`**;
+- a `run-name` that **embeds `${{ inputs.run_id }}`** so the dispatcher can verify-by-discovery
+  (the perk `run_id` unifies erk's separate `distinct_id`);
+- a per-plan `concurrency` group is recommended (mirroring erk's `implement-plan-${{ … }}`).
+
+Until 2.2 lands, a real `--remote` dispatch surfaces a clean `gh`-sourced "workflow not found"
+`dispatch_failed` (an honest failure, not a crash). The CI-side positioning (the worktree/handoff
+the worker consumes) is also Node 2.2's workflow; this node positions **nothing** locally.

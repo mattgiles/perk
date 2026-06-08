@@ -46,7 +46,7 @@ def _implement_stage() -> Stage:
     default=None,
     is_flag=False,
     flag_value="",
-    help="Local (default) or a remote runner; remote dispatch is driven by the Phase-3 worker.",
+    help="Local (default) or a remote runner (dispatch the stage to CI).",
 )
 @click.option(
     "--base",

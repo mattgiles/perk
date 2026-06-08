@@ -66,9 +66,9 @@ def test_remote_door_blocked():
     assert "local-only" in result.output
 
 
-def test_implement_remote_resolves_then_exits_not_driven(git_repo):
-    # implement is cold_remote:true (P2.T8c): --remote resolves a remote target descriptor (stdout
-    # json) and exits remote_not_driven; it does NOT drive the (unbuilt) Phase-3 worker.
+def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
+    # implement is cold_remote:true (Node 2.1): --remote --dry-run is a side-effect-free dispatch
+    # PREVIEW (success:true), not the retired not-driven error exit.
     import json
 
     from perk import cache
@@ -84,9 +84,10 @@ def test_implement_remote_resolves_then_exits_not_driven(git_repo):
         },
     )
     result = CliRunner().invoke(cli, ["implement", "--remote", "--dry-run"], obj=_ctx(git_repo))
-    assert result.exit_code == 1
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout.strip().splitlines()[-1])
-    assert payload["error_type"] == "remote_not_driven" and payload["stage"] == "implement"
+    assert payload["success"] is True and payload["dry_run"] is True
+    assert payload["stage"] == "implement"
 
 
 def test_plan_local_dry_run_still_launches(git_repo):

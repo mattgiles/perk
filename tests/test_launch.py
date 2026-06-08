@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from perk import cache
+from perk import cache, launch
 from perk import git as git_mod
 from perk.bindings import Binding
 from perk.cli.ensure import UserFacingCliError
@@ -517,25 +517,128 @@ def test_remote_blocked_stage_raises_in_launch(tmp_path):
     assert exc.value.error_type == "remote_blocked"
 
 
-def test_remote_drivable_stage_surfaces_then_exits_not_driven(tmp_path, capsys):
-    # implement is cold_remote:true: launch surfaces the descriptor (json) then exits not-driven.
+def test_remote_dry_run_is_side_effect_free_dispatch_preview(tmp_path, capsys, monkeypatch):
+    # implement is cold_remote:true: --dry-run --remote is a side-effect-free dispatch PREVIEW
+    # (success:true, an inputs preview) that writes NOTHING (no dispatch.json, no trigger).
+    monkeypatch.setattr(launch.github, "default_branch", lambda _r: "main")
+    monkeypatch.setattr(
+        launch.runner, "select_runner", lambda _ref: _boom_runner("dispatch must not run")
+    )
     cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote="ci-large",
+        pi_args=[],
+    )
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["success"] is True and payload["dry_run"] is True
+    assert payload["stage"] == "implement" and payload["runner"] == "ci-large"
+    assert payload["inputs"]["stage"] == "implement" and payload["inputs"]["plan"] == "42"
+    assert payload["inputs"]["workflow"] == launch.runner.GITHUB_ACTIONS_WORKFLOW
+    # No run dir was created (no scratch/runs/<run_id>/dispatch.json).
+    runs_dir = cache.workflow_dir(tmp_path) / "scratch" / "runs"
+    assert not runs_dir.exists() or not any(runs_dir.iterdir())
+
+
+class _FakeRunner:
+    kind = "github-actions"
+
+    def __init__(self, handle=None, exc=None):
+        self._handle = handle
+        self._exc = exc
+        self.calls = []
+
+    def dispatch(self, *, stage, plan_ref, run_id, base, repo_root):
+        self.calls.append({"stage": stage, "run_id": run_id, "base": base})
+        if self._exc is not None:
+            raise self._exc
+        return self._handle
+
+
+def _boom_runner(message):
+    class _Boom:
+        kind = "github-actions"
+
+        def dispatch(self, **_k):
+            raise AssertionError(message)
+
+    return _Boom()
+
+
+def _last_dispatch(tmp_path):
+    runs_dir = cache.workflow_dir(tmp_path) / "scratch" / "runs"
+    rid = next(iter(runs_dir.iterdir()))
+    return json.loads((rid / "dispatch.json").read_text())
+
+
+def test_remote_drive_persists_verified_linkage_and_surfaces_handle(tmp_path, capsys, monkeypatch):
+    from perk import runner
+
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    handle = runner.RunHandle(
+        runner="ci-large", kind="github-actions", run_ref="99", url="https://gh/run/99"
+    )
+    fake = _FakeRunner(handle=handle)
+    monkeypatch.setattr(launch.github, "default_branch", lambda _r: "trunk")
+    monkeypatch.setattr(launch.runner, "select_runner", lambda _ref: fake)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote="ci-large",
+        pi_args=[],
+    )
+    record = _last_dispatch(tmp_path)
+    assert record["status"] == "dispatched"
+    assert record["plan_ref"]["pr_id"] == "42" and record["runner"] == "ci-large"
+    assert record["run_handle"]["run_ref"] == "99"
+    assert fake.calls and fake.calls[0]["base"] == "trunk"
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["success"] is True and payload["run_handle"]["run_ref"] == "99"
+    assert payload["run_id"] == record["run_id"]
+
+
+def test_remote_drive_failure_records_failed_and_raises(tmp_path, monkeypatch):
+    from perk import runner
+
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    fake = _FakeRunner(exc=runner.RunnerError("workflow not found"))
+    monkeypatch.setattr(launch.github, "default_branch", lambda _r: "main")
+    monkeypatch.setattr(launch.runner, "select_runner", lambda _ref: fake)
     with pytest.raises(UserFacingCliError) as exc:
         launch_stage(
             repo_root=tmp_path,
             config=_config(tmp_path),
             stage=_stage("implement"),
             worktree=None,
-            dry_run=True,
+            dry_run=False,
             remote="ci-large",
             pi_args=[],
         )
-    assert exc.value.error_type == "remote_not_driven"
-    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert payload["error_type"] == "remote_not_driven"
-    assert payload["stage"] == "implement"
-    assert payload["target"]["runner"] == "ci-large"
-    assert payload["target"]["plan_ref"]["pr_id"] == "42"
+    assert exc.value.error_type == "dispatch_failed"
+    record = _last_dispatch(tmp_path)
+    assert record["status"] == "failed" and "workflow not found" in record["error"]
+
+
+def test_remote_drive_no_plan_ref_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch.github, "default_branch", lambda _r: "main")
+    with pytest.raises(UserFacingCliError) as exc:
+        launch_stage(
+            repo_root=tmp_path,
+            config=_config(tmp_path),
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=False,
+            remote="ci-large",
+            pi_args=[],
+        )
+    assert exc.value.error_type == "no_plan_ref"
 
 
 # --- origin-aware create base ---------------------------------------------------------
