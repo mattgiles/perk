@@ -305,8 +305,13 @@ exactly, a host/orchestration concern the CLI owns. Two lessons carried from erk
 > runner via the runner-agnostic `Runner` contract (`perk/runner.py`; GitHub Actions is the first
 > implementation, discovering its run by the `run_id` embedded in the workflow run-name). The
 > verified run handle is recorded back into the dispatch record and surfaced on `--json`;
-> `remote_not_driven` is retired. The GitHub Actions workflow YAML it triggers (`perk-run.yml`) is
-> **Node 2.2**; progress/terminal reporting is **Node 2.3**; the supervisor command surfaces are
+> `remote_not_driven` is retired. The GitHub Actions workflow YAML it triggers (`perk-run.yml`) +
+> its composite setup action are now the **managed** runner artifact (Node 2.2, contracts.md §8.14):
+> `perk init` installs them and `perk doctor --fix` repairs them. The workflow checks out the plan
+> branch and runs **`perk run-worker`** — the runner-side positioning entrypoint that reconstructs
+> the plan-ref, materializes the worktree (handoff/plan-ref/plan-body), and spawns the Node headless
+> worker (Node 1.2) for the dispatched stage. Progress/terminal reporting is **Node 2.3**; the
+> runner's secrets/health checks are **Node 2.4**; the supervisor command surfaces are
 > **Nodes 3.1/3.2**.
 
 ---

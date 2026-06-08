@@ -51,6 +51,12 @@ CAPABILITIES: tuple[Capability, ...] = (
         required=True,
         scope="both",
     ),
+    Capability(
+        "runner-workflow",
+        "managed GitHub Actions runner (.github/workflows/perk-run.yml + composite setup action)",
+        required=True,
+        scope="both",
+    ),
 )
 
 

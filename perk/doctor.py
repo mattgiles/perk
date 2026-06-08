@@ -35,6 +35,7 @@ _MANAGED_GROUP: dict[str, str] = {
     "settings-wiring": "package",
     "workflow-dir": "state",
     "skills-manifest": "skills",
+    "runner-workflow": "repository",
 }
 
 

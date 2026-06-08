@@ -1906,3 +1906,55 @@ polling `repos/{owner}/{repo}/actions/workflows/<workflow>/runs` and matching th
 Until 2.2 lands, a real `--remote` dispatch surfaces a clean `gh`-sourced "workflow not found"
 `dispatch_failed` (an honest failure, not a crash). The CI-side positioning (the worktree/handoff
 the worker consumes) is also Node 2.2's workflow; this node positions **nothing** locally.
+
+## §8.14 · The GitHub Actions runner artifact + the CI worker entrypoint (Node 2.2)
+
+The runner side of §8.13's cold remote door: the **managed** GitHub Actions workflow the dispatcher
+triggers, plus the `perk run-worker` positioning entrypoint that workflow invokes. Both are built in
+this node; §8.13's "until 2.2 lands" caveat is reconciled by it.
+
+### The managed artifact (`perk/workflow_artifacts.py`)
+
+Two perk-owned files, **managed by `perk init` and repaired by `perk doctor --fix`** (a
+`ManagedConvergence` in `init.managed_convergences()`, covering the `runner-workflow` capability —
+so `init` writes them and `doctor` verifies/repairs them through the one shared SSOT):
+
+- **`.github/workflows/perk-run.yml`** — the runner workflow. It honors §8.13's `workflow_dispatch`
+  input contract: a `run-name` embedding **`${{ inputs.run_id }}`** (verify-by-discovery); typed
+  inputs **`run_id`, `stage`, `plan`, `base`**; a per-plan `concurrency` group
+  `perk-run-${{ inputs.plan }}`. The `drive` job validates the `PERK_GH_PAT` secret, checks out the
+  plan branch (`plan-<plan>`), runs the composite setup, then `perk run-worker`. An opt-out repo
+  variable `PERK_ENABLED=false` disables the job without removing the file.
+- **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
+  toolchains (uv + Node 22), then perk (the exterior CLI), pi (the interior the worker drives), and
+  the Node worker's peer deps (`npm ci`).
+
+Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited file reads as drift and
+is converged back to the template. The templates are authored as code (string constants), not
+packaged data, so there is no wheel-data surface to guard.
+
+### `perk run-worker` (the CI positioning + drive entrypoint, `perk/run_worker.py`)
+
+`perk run-worker --run-id --stage --plan [--base]` is the runner's positioning job (Gap 7), invoked
+by the workflow **after** it checks out the plan branch (so cwd = the checkout = the worktree):
+
+1. Resolve a remotely-drivable stage (a `doors.cold_remote: true` stage) from the registry; else
+   `UserFacingCliError(stage_not_drivable)`.
+2. Reconstruct the `cache.plan-ref` from the plan's GitHub state (`github.get_plan` +
+   `resume.reconstruct_plan_ref`); a missing plan ⇒ `plan_not_found`.
+3. **Position** the worktree (mirroring `launch.launch_stage`): `cache.ensure_layout`,
+   `write_handoff({stage, mode})`, `write_plan_ref`, then materialize the plan body. The worker
+   inherits the prepared worktree and never re-writes it (the §B inputs table).
+4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override, else the self-repo
+   `extension/workerMain.ts`, else the consumer install under
+   `.pi/npm/node_modules/@perk/pi/extension/workerMain.ts`; a miss ⇒ `worker_entry_missing`.
+5. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
+   (inherited stdio — the worker owns stdout/the `RunOutcome` JSON), and **exit with the worker's
+   exit code** so the workflow step reflects the drive outcome.
+
+`run-worker` is a deterministic exterior command (no agentic reasoning): it positions and drives;
+model/auth resolution is the Node worker's job (env-var key resolution, Gap 5). `--base` is part of
+the §8.13 input contract and is carried for parity, but the plan branch is already checked out by the
+workflow, so it is not consumed here. Reporting run progress/terminal status back into GitHub is
+**Node 2.3**; the runner's secrets/health checks (the `PERK_GH_PAT`/model-credential prereqs) are
+**Node 2.4**.
