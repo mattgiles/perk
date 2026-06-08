@@ -25,6 +25,18 @@ Recovery:
 2. Re-commit with the same message.
 3. `git log` — verify the commit actually advanced (new hash at HEAD).
 
+## `RUF100` fires on a `# noqa` for a non-enabled rule
+
+A `# noqa: N801` on a class name with an underscore (`ReviewComment_Inline`) drew a **`RUF100`**
+(unused-noqa) — because `N801` isn't in the enabled rule set, the noqa suppresses nothing and ruff
+flags it as unused. **Don't paper over a lint with a noqa for a rule the config doesn't run**; pick a
+clean name instead (e.g. rename `ReviewComment_Inline` → `InlineReviewComment`).
+
+And tie the multi-line-collapse case to the format-on-commit trap above: the pre-commit `ruff-format`
+hook reformats (e.g. collapses a multi-line call) on commit, and `just lint` / `ruff check` won't
+catch what `ruff format` *changes* — expect a first-commit "files modified", then `git add -A` +
+re-commit.
+
 ## Summary
 
 | Check | Run by | Catches |

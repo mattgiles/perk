@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting.
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting.
 ---
 
 # Biome / tsc gotchas
@@ -34,6 +34,20 @@ Indexed access into a record yields `T | undefined`, so `let dest = tables[""]` 
 non-optional binding. Hold a `const root = {}` reference, **seed the record with it**
 (`tables = { "": root }`), then assign `dest = root` — the local reference is non-optional even
 though the index access isn't.
+
+## `Omit<Union, K>` collapses a discriminated union — use a distributive Omit
+
+Building an emitter whose `emit()` accepts "any variant minus the stamped fields" (e.g.
+`seq`/`t`), the obvious `Omit<RunEvent, "seq"|"t">` reduces to **only the common properties** — so
+per-variant fields become tsc type errors. Fix: a distributive conditional over a **naked** type
+param:
+
+```ts
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+```
+
+Distribution fires only when the checked type is the naked param `T`; **inlining the union in the
+conditional does NOT distribute.** Reusable any time you stamp common fields onto a union member.
 
 ## Formatting is enforced in `lint` — auto-fix, don't hand-wrap
 

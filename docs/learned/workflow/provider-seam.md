@@ -91,10 +91,13 @@ not just defer inside handlers. Fail-safe holds in **both** modes: any config-re
 the reference id → register everything. The default path (reference provider) is the hard
 zero-change guarantee, so the error branch must always fall toward full registration.
 
-A future 3.2 agent should expect to (a) add registration-time vacating to `registerCheckpoints` and
-(b) ship an injection-only adapter shim mirroring `planAdapterTombell.ts` — **not** re-litigate why
-3.1 "only" did runtime deferral. The runtime tier was correct *for a node with no foreign package
-loaded*; the escalation is what the foreign-adapter node adds.
+This forward-note was written plan-first and **partly mis-fired for the todo seam** — see "A sibling
+seam's forward-note must be re-derived, not mirrored" below. The escalation to registration-time
+vacating is forced **only when the foreign package registers a same-named command**; the plan seam
+hit that (`/plan`), the todo seam did **not** (`/checkpoints` has no collision), so Node 3.2 shipped
+an injection-only shim mirroring `planAdapterTombell.ts` but added **zero** registration-time
+vacating. The general rule still holds — *any perk surface a foreign package may also own must vacate
+at registration time* — but re-derive whether a collision actually exists before assuming it does.
 
 ## The reusable mirror shape (proven on both seams)
 
@@ -160,27 +163,78 @@ free. The dedicated providers check only owns what convergence cannot repair: an
 file, or a selection naming a non-existent / wrong-seam provider. See
 `docs/learned/workflow/init-doctor.md` for the managed-convergence SSOT recipe (not duplicated here).
 
+## A sibling seam's forward-note must be re-derived, not mirrored
+
+The Node 3.1 status note (`shared/contracts.md`) + `extension/checkpoints.ts` both forward-assumed
+the todo adapter would add registration-time vacating "mirroring `registerPlanMode`." That was
+**wrong for the todo seam.** The plan seam needed registration-time vacating *only* because perk and
+`@tombell/pi-plan` both register the identically-named `/plan` command — Pi suffixes duplicate names
+(`/plan:1`, `/plan:2`), so handler-time deferral alone is ambiguous once the foreign package loads.
+The todo seam has **no command-name collision**: perk registers `/checkpoints`; the foreign overlay
+(`@juicesharp/rpiv-todo`) registers its own differently-named command(s). With no clash there is no
+suffixing, so Node 3.1's *runtime* deferral is already sufficient and the adapter adds **zero**
+registration-time vacating.
+
+**Lesson:** when a prior node leaves a "the concrete adapter handles X" assumption for a parallel
+seam, **re-derive X from the new seam's actual mechanics** (here: is there a command-name collision?)
+rather than copying the sibling's structure.
+
+## The produced-contract tier sets the bridge weight
+
+The two seams' produced contracts live in different tiers (`docs/design/provider-contract.md`
+Generalization 1), and that tier decides how heavy the bridge is:
+
+- **plan → `cache.plan-ref`** is a **durable cross-plane** artifact downstream stages
+  (implement/submit/…) read, so a foreign plan **must** be bridged into it or it never reaches them.
+  The plan adapter directs the foreign prose surface into perk's existing
+  `plan_save` / `extractPlanMarkdown` → `cache.plan-ref`.
+- **todo → `perk:checkpoint`** is a **transient TS-only** session entry that **nothing downstream
+  consumes** (purely the in-session progress overlay), and under a foreign todo selection perk's
+  render + marker-scanner already defer (Node 3.1). So the todo adapter deliberately does **NOT**
+  write `perk:checkpoint` and does **NOT** revive the scanner — that would be dead duplication.
+  Instead it carries perk's progress **discipline** (seed the foreign overlay from the plan body's
+  `## Steps`, mark each item complete in order) onto the foreign surface via an injected
+  `display:false` context — **prompting, not artifact population.**
+
+**Lesson:** before building an adapter, check whether the produced contract has a real **downstream
+consumer**. No consumer ⇒ the bridge is *lighter* — carry the discipline by prompting rather than
+populating the entry.
+
 ## The substrate landed seam-generic, not "plan seam first"
 
 Even though the node was framed plan-first, a shared substrate node delivers all seams' plumbing at
 once — the todo selection plumbing landed *with* the substrate. Lesson for sequenced objectives:
 reconcile downstream per-seam node descriptions when the substrate node over-delivers.
 
+Because the substrate was built seam-generic, **"enable the first real foreign provider for seam N"
+reduced to a shim + comment reframe**: the injection-only shim + its `index.ts` wiring + flipping
+ILLUSTRATIVE→REAL comments across `providers.yaml` / `contracts.md` + provider/init tests asserting
+the already-generic behavior. The todo adapter (Node 3.2, `@juicesharp/rpiv-todo`) needed **no**
+changes to `perk/init.py` / `perk/providers.py` / `perk/config.py` / the TS resolver / the
+`providers.yaml` entry's structural fields. The todo shim copied `planAdapterTombell.ts`'s shape
+verbatim (always-registered + inert; a `before_agent_start` injector + a `context` stale-marker
+strip — the strip's customType filter + user-role string/array marker removal is verbatim) plus one
+extra gate unique to todo: **active-workflow scoping** (`rebuildWorkflowState(branch).active_plan_ref
+!= null`, the same gate the reference checkpoints provider seeds on) so the bridge never reaches
+planning/objective sessions. Invariant 1 held: never `setActiveTools`, never owns the read-only gate,
+never restamps a provider field.
+
 ## Residual / interim limitation
 
-The plan seam now has a **real foreign adapter** (`@tombell/pi-plan`, Node 2.3): selecting it vacates
-perk's plan surface at registration time and bridges the foreign prose into the plan-ref substrate.
-The **todo seam defers at runtime** (Node 3.1) but its foreign adapter — registration-time vacating
-in `registerCheckpoints` + the `@juicesharp/rpiv-todo` injection-only shim — is still **Node 3.2**.
-Until 3.2 lands, selecting a *foreign todo* provider still collides (both `/checkpoints` surfaces
-register and Pi suffixes them). The default path (both reference providers, `package: null`) is the
-hard guarantee and is unaffected in every mode.
+Both seams now have **real foreign adapters**: the plan seam (`@tombell/pi-plan`, Node 2.3) vacates
+perk's plan surface at registration time and bridges the foreign prose into the plan-ref substrate;
+the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/todoAdapterJuicesharp.ts`) carries
+perk's progress discipline onto the foreign overlay via an injected context (no `perk:checkpoint`
+population, no registration-time vacating — there is no `/checkpoints` command-name collision). The
+default path (both reference providers, `package: null`) remains the hard zero-change guarantee in
+every mode.
 
 ## Cross-references
 
 - `extension/planMode.ts` — the owned plan-authoring surface that defers
 - `extension/checkpoints.ts` — the todo-seam owned surface (runtime deferral, Node 3.1; the mirror)
-- `extension/planAdapterTombell.ts` — the injection-only adapter shim (always registered, inert by default)
+- `extension/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
+- `extension/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (Node 3.2; carries discipline by prompting)
 - `extension/planSave.ts` — the seam-shared substrate that never defers
 - `extension/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
 - `perk/providers.py` — `resolve_providers`, `ProvidersError`

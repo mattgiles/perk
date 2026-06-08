@@ -84,6 +84,47 @@ assert `h.registeredCommands().includes("<cmd>")`), and (b) **pure `*Guidance` u
 rendered text names the tool + required args, renders/omits optional args like `title`, and contains
 no hardcoded skill-pointer string). The canonical tool tests remain the behavioral coverage.
 
+## A terminating surface can drive the *next* pass
+
+The section above covers "warm commands DRIVE the session." This adds the case where the driving
+surface is **terminating** (the `land` tool returns `{ terminate: true }`): `/land` (and the `land`
+tool) auto-drives `/objective-reconcile` instead of printing a copy-pasteable nudge.
+
+- **`terminate` + `followUp` compose.** `terminate: true` only skips the *automatic* follow-up LLM
+  call; an injected `pi.sendUserMessage(msg, { deliverAs: "followUp" })` is a *separate* deliberate
+  new turn delivered once the agent has no more tool calls. So a terminating tool can still hand off
+  into a fresh driven turn — the two are **orthogonal mechanisms**, not in conflict.
+- **Delivery mode branches on `ctx.isIdle()`.** One shared helper serves both surfaces: idle (the
+  `/land` *command* path) → plain `pi.sendUserMessage(msg)` (immediate turn); streaming (the `land`
+  *tool* `execute` path) → `deliverAs: "followUp"`. `isIdle()` lives on the base `ExtensionContext`
+  shared by tool-`execute` ctx and command-handler ctx.
+- **Reuse the guidance, don't re-invoke the slash command.** Inject
+  `reconcileGuidance(String(n)) + bindingSuffix(cwd, "command:objective-reconcile")` — byte-for-byte
+  what `/objective-reconcile` injects — rather than sending literal `"/objective-reconcile #5"` text.
+  Avoids relying on slash-command expansion of an injected message and skips redundant re-resolution
+  (the land result already carries `objective.number`). Required exporting the previously
+  module-private `reconcileGuidance` from `objectivePlan.ts` (no circular import: `objectivePlan.ts`
+  does not import `land.ts`).
+- **Keep the pure-impl function drive-free.** `landPr` merges / sets-marker / builds text and
+  returns; the drive lives in a *separate* exported helper called by both `execute` and the command
+  handler — preserving the pure function as directly unit-testable. The drive condition mirrors the
+  old nudge condition exactly (`ok === true`, objective present, `number !== null`,
+  `nodes_marked.length > 0`), so non-objective plans / skipped node-marks drive nothing.
+
+**Test-shape consequence.** Once `execute` routes through the drive helper, it can **no longer** be
+harness-routed via `h.invokeTool(...)` (it fires a real model turn the keyless offline harness can't
+service — same limitation as `invokeCommand` on driving commands, already noted above). Replace it
+with (a) a **direct pure-function unit test** for the merge/report path (a stub `pi` whose `exec`
+resolves a fixture + a minimal `ctx` over a `scaffoldRepo()` cwd, asserting on `result.details` +
+success text), and (b) **drive-helper decision/delivery spy tests** (a spy `pi.sendUserMessage`
+recording `{ content, options }`: no objective → not called; failed land → not called; idle → called
+once with `options` undefined; streaming → called once with `options.deliverAs === "followUp"`). The
+non-driving land tests stay on the harness because their fixtures short-circuit the helper.
+
+**`/pr-review` is a different driving shape.** It does **not** drive the same session — it spawns a
+fresh-context subagent that posts its own review. See `docs/learned/pi/subagents.md` for that
+orchestration (project-vs-builtin agents, child-posts-own-mutation vs read-only-child-parent-mutates).
+
 ## A warm door must render EVERY cold-door outcome, not just the success case
 
 When a warm TS surface wraps a cold Python door that returns a **structured non-fatal sub-result**,
@@ -149,3 +190,5 @@ chain.
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring/save loop the driving commands feed
 - `docs/learned/workflow/skill-bindings.md` — `bindingSuffix` (the skill pointer the guidance rides)
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
+- `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
+- `extension/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case

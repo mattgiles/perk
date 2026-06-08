@@ -127,6 +127,30 @@ Any other `command:<id>` binding **can never fire** and doctor reports it as suc
 registry stages bind via `stage:<id>` (the kind-selection rule above). If a future command grows a
 delivery surface, this frozenset must be extended in lockstep.
 
+#### Adding a `command:<id>` binding touches MANY sites (the checklist)
+
+Adding a deliverable command + skill requires **all** of these to change together, or tests/doctor
+break (the concrete instance is `/pr-review` → `command:pr-review`):
+
+1. **`shared/bindings.yaml`** — the `{trigger, skill, mode}` row.
+2. **`perk/bindings.py` `DELIVERABLE_COMMAND_TARGETS`** frozenset (+ its comment listing the
+   `bindingSuffix` call sites) — else doctor's binding-target check fails.
+3. The warm command must call **`bindingSuffix(ctx.cwd, "command:<id>")`** (Mechanism B) — the skill
+   pointer is never hardcoded in the guidance body.
+4. **`perk/init.py` `PERK_SKILLS`** tuple, then **regenerate** the committed manifest fragment
+   `.agents/manifest.d/perk.yaml` (it's generated via `_desired_skills_manifest(True)`, not
+   hand-edited — watch for pre-existing drift).
+5. **THREE** binding-count test sites: Python `tests/test_bindings.py` `EXPECTED_DEFAULTS`; TS
+   `extension/bindings.test.ts` `EXPECTED` array **and** the "returns the N shipped default bindings"
+   count in the test name.
+6. If configurable: `extension/config.ts` `PerkConfig` + parser, and `perk/config.py` `Config` for
+   forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
+   Concretely, `perk/config.py`'s `pr_review_model` is **parsed-but-unused** today; only the TS warm
+   `/pr-review` path consumes it.
+
+See `docs/learned/pi/subagents.md` for `/pr-review`'s orchestration (the per-call inline `model`
+override this `[pr-review] model` config feeds).
+
 ### The injection mirror: the nudge path now warns too
 
 Previously only the `transclude` path warned on a missing skill; the `nudge` path delivered
@@ -160,3 +184,4 @@ checks *capability* coverage, not an enumerated group set, so a free-form group 
 - `docs/learned/workflow/init-doctor.md` — why a report-only check ≠ a hand-authored managed check
 - `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the
   pre-sync `is_skill_installed` fallback)
+- `docs/learned/pi/subagents.md` — `/pr-review` (`command:pr-review`), the concrete `command:<id>` binding instance
