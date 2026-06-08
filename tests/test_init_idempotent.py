@@ -80,12 +80,12 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    # The foreign package is wired in OBJECT form with its package_filter merged.
+    # The foreign package is wired in OBJECT form. Node 2.3: the real tombell-plan entry has no
+    # `package_filter`, so the object carries `source` only (no merged extensions/skills keys).
     entry = next(
         p for p in packages if isinstance(p, dict) and p.get("source") == "npm:@tombell/pi-plan"
     )
-    assert entry["extensions"] == ["extensions/*.ts"]
-    assert entry["skills"] == []
+    assert entry == {"source": "npm:@tombell/pi-plan"}
     assert "npm:@me/custom" in _identities(packages)  # user package preserved
     assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
 

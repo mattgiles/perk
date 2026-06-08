@@ -26,6 +26,7 @@ import { registerObjective } from "./objective.ts";
 import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
 import { registerObjectivePlan } from "./objectivePlan.ts";
 import { registerObjectiveSave } from "./objectiveSave.ts";
+import { registerPlanAdapterTombell } from "./planAdapterTombell.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerReady } from "./ready.ts";
@@ -88,6 +89,13 @@ export default function (pi: ExtensionAPI) {
   // gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
   // borrowed `@tombell/pi-plan` is retired).
   registerPlanMode(pi, gating);
+
+  // Node 2.3 — the first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
+  // `@tombell/pi-plan` as a real plan provider. Always registered, but INERT unless
+  // `[providers] plan = "tombell-plan"`; it directs the foreign free-form prose `/plan` surface into
+  // perk's canonical `plan_save` → `cache.plan-ref` contract. It needs no `gating` (Invariant 1: the
+  // read-only gate stays perk's, engaged by the cold-door launch — the shim never arbitrates tools).
+  registerPlanAdapterTombell(pi);
 
   // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.

@@ -61,7 +61,9 @@ def test_real_providers_load_the_four_entries():
     assert tombell.package == "npm:@tombell/pi-plan"
     assert tombell.adapter == "planAdapterTombell"
     assert tombell.default is False
-    assert tombell.package_filter == {"extensions": ["extensions/*.ts"], "skills": []}
+    # Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
+    # nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`; omitting it loads all).
+    assert tombell.package_filter is None
 
 
 def test_real_providers_are_valid():
