@@ -6,22 +6,31 @@
 // + binds the project `@perk/pi` extension, with the `session_start` claim engaging). See worker.ts.
 
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { PlanRef } from "./cache.ts";
+import { runEventsPath } from "./cache.ts";
 import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 import {
   applyEvent,
   assembleOutcome,
+  assistantText,
   budgetTripped,
   createBindManager,
+  createEventEmitter,
   type DriveCounters,
   type DriveEvent,
   type DriveRuntimeLike,
   type DriveSessionLike,
   driveStage,
   evaluateTerminal,
+  extractStepMarkers,
   freshCounters,
   initialPromptFor,
+  type RunEvent,
+  toolOutcomeOf,
 } from "./worker.ts";
 
 // The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS
@@ -502,5 +511,318 @@ test("Gap-4: a bound perk session registers the worker's terminal tools and clai
     assert.equal(perk.sentinel()?.run_id, runId);
   } finally {
     perk.dispose();
+  }
+});
+
+// --- Node 1.3: structured run-event stream ------------------------------------------------------
+
+// --- pure: extractStepMarkers -------------------------------------------------------------------
+
+test("extractStepMarkers: textual appearance order (WIP before DONE in one message)", () => {
+  const markers = extractStepMarkers("starting [WIP:2] then finishing [DONE:1] now");
+  assert.deepEqual(markers, [
+    { marker: "wip", step: 2 },
+    { marker: "done", step: 1 },
+  ]);
+});
+
+test("extractStepMarkers: case-insensitive, mixed, and none", () => {
+  assert.deepEqual(extractStepMarkers("[wip:3][DONE:3][Wip:4]"), [
+    { marker: "wip", step: 3 },
+    { marker: "done", step: 3 },
+    { marker: "wip", step: 4 },
+  ]);
+  assert.deepEqual(extractStepMarkers("no markers here"), []);
+});
+
+// --- pure: assistantText ------------------------------------------------------------------------
+
+test("assistantText: string, block-array, and empty content", () => {
+  assert.equal(assistantText({ type: "turn_end", message: { content: "hello" } }), "hello");
+  assert.equal(
+    assistantText({
+      type: "turn_end",
+      message: {
+        content: [{ type: "text", text: "a" }, { type: "tool_use" }, { type: "text", text: "b" }],
+      },
+    }),
+    "a\nb",
+  );
+  assert.equal(assistantText({ type: "turn_end", message: {} }), "");
+  assert.equal(assistantText({ type: "turn_end" }), "");
+});
+
+// --- pure: toolOutcomeOf ------------------------------------------------------------------------
+
+test("toolOutcomeOf: ok via details.ok, fallback to !isError, capped error summary", () => {
+  assert.deepEqual(
+    toolOutcomeOf({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true } },
+    }),
+    { tool: "submit", ok: true, summary: null },
+  );
+  // No details.ok boolean → fall back to !isError.
+  assert.deepEqual(
+    toolOutcomeOf({ type: "tool_execution_end", toolName: "read", isError: false }),
+    {
+      tool: "read",
+      ok: true,
+      summary: null,
+    },
+  );
+  const bigErr = "x".repeat(5000);
+  const out = toolOutcomeOf({
+    type: "tool_execution_end",
+    toolName: "submit",
+    isError: true,
+    result: { details: { ok: false, error: bigErr } },
+  });
+  assert.equal(out.ok, false);
+  assert.ok(out.summary && out.summary.length < bigErr.length, "summary is capped");
+  assert.ok(out.summary?.includes("[Output truncated"), "carries the truncation notice");
+});
+
+// --- createEventEmitter -------------------------------------------------------------------------
+
+test("createEventEmitter: monotonic seq, t from the injected clock, fail-soft on a throwing sink", () => {
+  const seen: RunEvent[] = [];
+  let clock = 1000;
+  const emitter = createEventEmitter(
+    (e) => seen.push(e),
+    () => clock,
+    1000,
+  );
+  emitter.emit({ kind: "run_started", run_id: "r", stage: "implement" });
+  clock = 1250;
+  emitter.emit({ kind: "step_marker", marker: "wip", step: 1 });
+  assert.equal(seen[0]?.seq, 0);
+  assert.equal(seen[0]?.t, 0);
+  assert.equal(seen[1]?.seq, 1);
+  assert.equal(seen[1]?.t, 250);
+
+  // A throwing sink is swallowed (does not break emission).
+  const thrower = createEventEmitter(
+    () => {
+      throw new Error("boom");
+    },
+    () => 0,
+    0,
+  );
+  assert.doesNotThrow(() => thrower.emit({ kind: "step_marker", marker: "done", step: 1 }));
+});
+
+// --- driveStage with an injected array sink -----------------------------------------------------
+
+const eventBudget = { maxTurns: 100, maxTokens: 1_000_000, wallClockMs: 60_000 };
+
+test("driveStage: a happy implement run emits run_started → tool_outcome(submit) → run_finished", async () => {
+  const events: RunEvent[] = [];
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant", usage: { input: 1, output: 1 } } });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  const outcome = await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+      model: {} as never,
+    },
+    {
+      createRuntime: async () => fakeRuntime(session),
+      now: () => 0,
+      eventSink: (e) => events.push(e),
+    },
+  );
+  assert.equal(outcome.status, "completed");
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["run_started", "tool_outcome", "run_finished"],
+  );
+  // seq is monotonic 0..n.
+  events.forEach((e, i) => {
+    assert.equal(e.seq, i);
+  });
+  const started = events[0] as Extract<RunEvent, { kind: "run_started" }>;
+  assert.equal(started.stage, "implement");
+  const tool = events[1] as Extract<RunEvent, { kind: "tool_outcome" }>;
+  assert.equal(tool.tool, "submit");
+  assert.equal(tool.ok, true);
+  const finished = events[2] as Extract<RunEvent, { kind: "run_finished" }>;
+  assert.equal(finished.outcome.status, "completed");
+});
+
+test("driveStage: a turn carrying [WIP:1]/[DONE:1] emits ordered step_marker events", async () => {
+  const events: RunEvent[] = [];
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "turn_end",
+      message: { role: "assistant", content: "begin [WIP:1] and finish [DONE:1]" },
+    });
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 1, url: "u" } } },
+    });
+  });
+  await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+      model: {} as never,
+    },
+    {
+      createRuntime: async () => fakeRuntime(session),
+      now: () => 0,
+      eventSink: (e) => events.push(e),
+    },
+  );
+  const markers = events.filter((e) => e.kind === "step_marker") as Extract<
+    RunEvent,
+    { kind: "step_marker" }
+  >[];
+  assert.deepEqual(
+    markers.map((m) => [m.marker, m.step]),
+    [
+      ["wip", 1],
+      ["done", 1],
+    ],
+  );
+});
+
+test("driveStage: a budget trip emits a terminal run_finished(budget_exhausted)", async () => {
+  const events: RunEvent[] = [];
+  const session = new FakeSession((emit) => {
+    emit({ type: "turn_end", message: { role: "assistant" } });
+  });
+  await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: { maxTurns: 1, maxTokens: 1_000_000, wallClockMs: 60_000 },
+      model: {} as never,
+    },
+    { createRuntime: async () => fakeRuntime(session), eventSink: (e) => events.push(e) },
+  );
+  const finished = events.at(-1) as Extract<RunEvent, { kind: "run_finished" }>;
+  assert.equal(finished.kind, "run_finished");
+  assert.equal(finished.outcome.status, "budget_exhausted");
+});
+
+test("driveStage: an external abort emits a terminal run_finished(aborted)", async () => {
+  const events: RunEvent[] = [];
+  const controller = new AbortController();
+  const session = new FakeSession(async () => {
+    controller.abort();
+    await new Promise((r) => setTimeout(r, 1));
+  });
+  await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+      model: {} as never,
+      signal: controller.signal,
+    },
+    { createRuntime: async () => fakeRuntime(session), eventSink: (e) => events.push(e) },
+  );
+  const finished = events.at(-1) as Extract<RunEvent, { kind: "run_finished" }>;
+  assert.equal(finished.outcome.status, "aborted");
+});
+
+test("driveStage: the no_model early return still emits run_started + run_finished(failed/no_model)", async () => {
+  const events: RunEvent[] = [];
+  await driveStage(
+    {
+      worktree: "/tmp/wt",
+      stage: "implement",
+      initialPrompt: "go",
+      budget: eventBudget,
+      authStorage: {} as never,
+      modelRegistry: { getAvailable: () => [] } as never,
+    },
+    { eventSink: (e) => events.push(e) },
+  );
+  assert.deepEqual(
+    events.map((e) => e.kind),
+    ["run_started", "run_finished"],
+  );
+  const finished = events[1] as Extract<RunEvent, { kind: "run_finished" }>;
+  assert.equal(finished.outcome.status, "failed");
+  assert.equal(finished.outcome.error?.type, "no_model");
+  // The terminal failure summary is the capped error.summary.
+  assert.ok((finished.outcome.error?.summary?.length ?? 0) > 0);
+});
+
+// --- default file sink (NDJSON under the gitignored run scratch dir) -----------------------------
+
+test("driveStage: with no eventSink + a set run_id writes parseable NDJSON to runEventsPath", async () => {
+  const worktree = mkdtempSync(join(tmpdir(), "perk-worker-events-"));
+  const runId = "01JEVENTSTREAMTESTRUNID00000";
+  const prior = process.env.PERK_RUN_ID;
+  process.env.PERK_RUN_ID = runId;
+  try {
+    const session = new FakeSession((emit) => {
+      emit({ type: "turn_end", message: { role: "assistant", content: "[WIP:1]" } });
+      emit({
+        type: "tool_execution_end",
+        toolName: "submit",
+        result: { details: { ok: true, pr: { number: 9, url: "u" } } },
+      });
+    });
+    await driveStage(
+      {
+        worktree,
+        stage: "implement",
+        initialPrompt: "go",
+        budget: eventBudget,
+        model: {} as never,
+      },
+      { createRuntime: async () => fakeRuntime(session) },
+    );
+    const lines = readFileSync(runEventsPath(worktree, runId), "utf8").trim().split("\n");
+    const parsed = lines.map((l) => JSON.parse(l) as RunEvent);
+    assert.equal(parsed[0]?.kind, "run_started");
+    assert.equal(parsed.at(-1)?.kind, "run_finished");
+    assert.ok(parsed.some((e) => e.kind === "step_marker"));
+  } finally {
+    if (prior === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = prior;
+  }
+});
+
+test("driveStage: with an empty run_id writes nothing (the no-op default sink)", async () => {
+  const worktree = mkdtempSync(join(tmpdir(), "perk-worker-noevents-"));
+  const prior = process.env.PERK_RUN_ID;
+  delete process.env.PERK_RUN_ID;
+  try {
+    const session = new FakeSession((emit) => {
+      emit({ type: "turn_end", message: { role: "assistant" } });
+    });
+    await driveStage(
+      {
+        worktree,
+        stage: "implement",
+        initialPrompt: "go",
+        budget: eventBudget,
+        model: {} as never,
+      },
+      { createRuntime: async () => fakeRuntime(session) },
+    );
+    assert.ok(!existsSync(runEventsPath(worktree, "")), "no events file when run_id is empty");
+  } finally {
+    if (prior === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = prior;
   }
 });

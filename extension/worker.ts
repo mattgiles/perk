@@ -17,7 +17,7 @@
 // real perk extension loaded from the worktree's `.pi/settings.json` (cwd-discovery), with the
 // user-global tier locked out via a throwaway `agentDir`.
 
-import { mkdtempSync } from "node:fs";
+import { appendFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { env } from "node:process";
@@ -33,7 +33,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, readPlanRef } from "./cache.ts";
+import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "./cache.ts";
 import { capForModel } from "./readOnlySession.ts";
 import { rebuildWorkflowState } from "./workflowState.ts";
 
@@ -75,6 +75,37 @@ export interface RunOutcome {
   error: { type: string; message: string; summary: string } | null;
 }
 
+// --- structured run-event stream (Node 1.3; §8.12) ----------------------------------------------
+
+/**
+ * The structured run-event stream (Node 1.3, contracts §8.12). A small, JSON-serializable,
+ * **additive-stable** discriminated union keyed on `kind` (distinct from `DriveEvent.type`). Every
+ * event carries a monotonic `seq` (0-based) and `t` (elapsed ms, same basis as
+ * `RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep meaning.
+ */
+export type RunEvent =
+  | { kind: "run_started"; seq: number; t: number; run_id: string; stage: DriveStage }
+  | { kind: "step_marker"; seq: number; t: number; marker: "wip" | "done"; step: number }
+  | {
+      kind: "tool_outcome";
+      seq: number;
+      t: number;
+      tool: string;
+      ok: boolean;
+      summary: string | null;
+    }
+  | { kind: "run_finished"; seq: number; t: number; outcome: RunOutcome };
+
+/** The injectable delivery seam: default = a run-scoped NDJSON file sink; tests inject an array. */
+export type RunEventSink = (event: RunEvent) => void;
+
+/** Distributive `Omit` so each `RunEvent` variant keeps its own fields when `seq`/`t` are stamped. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type RunEventInput = DistributiveOmit<RunEvent, "seq" | "t">;
+
+/** Per-event free-text cap (route-don't-relay): events carry the narrative, not raw tool payloads. */
+export const EVENT_SUMMARY_CAP = 2 * 1024;
+
 export interface DriveStageOptions {
   /** Absolute path to the already-positioned worktree (Gap 7). */
   worktree: string;
@@ -99,6 +130,8 @@ export interface DriveStageDeps {
   createRuntime?: (opts: DriveStageOptions) => Promise<DriveRuntimeLike>;
   resourceLoaderOptions?: CreateAgentSessionServicesOptions["resourceLoaderOptions"];
   now?: () => number;
+  /** The structured run-event sink (Node 1.3). Absent ⇒ the default run-scoped NDJSON file sink. */
+  eventSink?: RunEventSink;
 }
 
 // --- structural shapes (kept minimal so pure helpers stay offline-testable) ---------------------
@@ -114,6 +147,8 @@ export interface DriveEvent {
     stopReason?: string;
     errorMessage?: string;
     usage?: { input?: number; output?: number };
+    /** Assistant text/content blocks (where `[WIP:n]`/`[DONE:n]` markers live). */
+    content?: unknown;
   };
 }
 
@@ -304,6 +339,111 @@ export function assembleOutcome(args: {
   };
 }
 
+// --- run-event helpers (Node 1.3; offline-testable) ---------------------------------------------
+
+/**
+ * Extract `[WIP:n]`/`[DONE:n]` markers from assistant text in **textual appearance order** (pure).
+ * A single combined, case-insensitive regex so interleaved markers (`[WIP:2]` before `[DONE:1]` in
+ * the same message) emit in that order — unlike checkpoints.ts's separate `extractWip/DoneSteps`
+ * lists, which lose cross-marker order. Returns `[]` when there are no markers.
+ */
+export function extractStepMarkers(text: string): { marker: "wip" | "done"; step: number }[] {
+  const out: { marker: "wip" | "done"; step: number }[] = [];
+  for (const m of text.matchAll(/\[(WIP|DONE):(\d+)\]/gi)) {
+    const step = Number(m[2]);
+    if (Number.isFinite(step)) {
+      out.push({ marker: (m[1] ?? "").toLowerCase() === "done" ? "done" : "wip", step });
+    }
+  }
+  return out;
+}
+
+/** Flatten a `DriveEvent`'s assistant `message.content` (string | `{type:'text',text}[]`) to text. */
+export function assistantText(event: DriveEvent): string {
+  const content = event.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => {
+        const block = b as { type?: string; text?: string };
+        return block.type === "text" && typeof block.text === "string" ? block.text : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+/**
+ * Compute a `tool_outcome` `{ tool, ok, summary }` from a `tool_execution_end` `DriveEvent` (pure).
+ * `ok` = `details.ok === true` when the result carries a `details.ok` boolean, else `!isError`.
+ * `summary` is `null` on success and, on failure, a capped (route-don't-relay) synthesis of the
+ * tool's error message — never the raw tool result.
+ */
+export function toolOutcomeOf(event: DriveEvent): {
+  tool: string;
+  ok: boolean;
+  summary: string | null;
+} {
+  const details = detailsOf(event.result);
+  const ok = typeof details?.ok === "boolean" ? details.ok === true : !event.isError;
+  let summary: string | null = null;
+  if (!ok) {
+    const raw = toolErrorMessage(event);
+    summary = capForModel(raw, EVENT_SUMMARY_CAP).shown;
+  }
+  return { tool: event.toolName ?? "", ok, summary };
+}
+
+/** Best-effort error text for a failed tool (details.error | result string | a generic fallback). */
+function toolErrorMessage(event: DriveEvent): string {
+  const details = detailsOf(event.result);
+  if (details && typeof details.error === "string" && details.error) return details.error;
+  if (typeof event.result === "string" && event.result) return event.result;
+  return `tool ${event.toolName ?? ""} failed`;
+}
+
+/**
+ * The run-event emitter: owns the monotonic `seq` counter and stamps `t = max(0, now() - startMs)`
+ * (same basis as `RunOutcome.budget.elapsed_ms`). Fail-soft: a throwing injected sink is caught and
+ * swallowed so a broken sink never aborts the drive.
+ */
+export function createEventEmitter(sink: RunEventSink, now: () => number, startMs: number) {
+  let seq = 0;
+  return {
+    emit(event: RunEventInput): void {
+      const full = { ...event, seq: seq++, t: Math.max(0, now() - startMs) } as RunEvent;
+      try {
+        sink(full);
+      } catch (err) {
+        console.error(`perk worker: run-event sink threw — ${String(err)}`);
+      }
+    },
+  };
+}
+
+/**
+ * The default run-event sink: a fail-soft NDJSON appender to `runEventsPath(worktree, runId)`. A
+ * **no-op when `runId` is empty** (keeps the offline drive tests, which set no `PERK_RUN_ID`,
+ * write-free). Each append is wrapped so a write error logs and is swallowed.
+ */
+export function defaultEventSink(worktree: string, runId: string): RunEventSink {
+  if (!runId) return () => {};
+  let ensured = false;
+  const path = runEventsPath(worktree, runId);
+  return (event: RunEvent): void => {
+    try {
+      if (!ensured) {
+        ensureRunScratch(worktree, runId);
+        ensured = true;
+      }
+      appendFileSync(path, `${JSON.stringify(event)}\n`, "utf8");
+    } catch (err) {
+      console.error(`perk worker: run-event sink write failed — ${String(err)}`);
+    }
+  };
+}
+
 /**
  * Re-derive the stage's initial prompt from the plan-ref — the TS twin of
  * `perk/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
@@ -462,19 +602,31 @@ export async function driveStage(
   const counters = freshCounters();
   const elapsed = (): number => Math.max(0, now() - startMs);
 
+  // Structured run-event stream (Node 1.3): resolve the sink + run_id once, build the emitter, and
+  // route every terminal exit through `finish` so exactly one `run_finished` is emitted per drive.
+  const runId = env.PERK_RUN_ID ?? "";
+  const sink = deps.eventSink ?? defaultEventSink(opts.worktree, runId);
+  const emitter = createEventEmitter(sink, now, startMs);
+  const finish = (verdict: TerminalVerdict): RunOutcome => {
+    const outcome = assembleOutcome({
+      stage: opts.stage,
+      verdict,
+      budget: { turns: counters.turns, tokens: counters.tokens, elapsed_ms: elapsed() },
+    });
+    emitter.emit({ kind: "run_finished", outcome });
+    return outcome;
+  };
+
   const resolved = resolveAuth(opts);
   if (resolved === null && !deps.createRuntime) {
-    return assembleOutcome({
-      stage: opts.stage,
-      verdict: {
-        status: "failed",
-        terminal_signal: "model_error",
-        pr: null,
-        errorType: "no_model",
-        errorMessage:
-          "no model available — set an API key (e.g. ANTHROPIC_API_KEY) or pass a model.",
-      },
-      budget: { turns: 0, tokens: 0, elapsed_ms: elapsed() },
+    // A zero-turn run is still observable: emit a `run_started` + `run_finished` pair.
+    emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
+    return finish({
+      status: "failed",
+      terminal_signal: "model_error",
+      pr: null,
+      errorType: "no_model",
+      errorMessage: "no model available — set an API key (e.g. ANTHROPIC_API_KEY) or pass a model.",
     });
   }
 
@@ -483,7 +635,16 @@ export async function driveStage(
   let runtime: DriveRuntimeLike | null = null;
   const bindManager = createBindManager(headlessBinding(), (event) => {
     applyEvent(counters, event);
-    if (event.type === "turn_end" && budgetTripped(counters, opts.budget)) trip("budget");
+    if (event.type === "turn_end") {
+      // Emit this turn's `[WIP:n]`/`[DONE:n]` markers in textual appearance order (one event each).
+      for (const m of extractStepMarkers(assistantText(event))) {
+        emitter.emit({ kind: "step_marker", marker: m.marker, step: m.step });
+      }
+      if (budgetTripped(counters, opts.budget)) trip("budget");
+    } else if (event.type === "tool_execution_end") {
+      const o = toolOutcomeOf(event);
+      emitter.emit({ kind: "tool_outcome", tool: o.tool, ok: o.ok, summary: o.summary });
+    }
   });
 
   function trip(reason: "budget" | "abort"): void {
@@ -502,6 +663,7 @@ export async function driveStage(
 
     let boundSession = runtime.session;
     await bindManager.bind(boundSession);
+    emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
 
     // Budget/abort wiring (Gap 2): wall-clock timer + external signal both trip → session.abort().
     const timer = setTimeout(() => trip("budget"), opts.budget.wallClockMs);
@@ -526,23 +688,15 @@ export async function driveStage(
     }
 
     const verdict = classify(opts, counters, terminationReason, boundSession);
-    return assembleOutcome({
-      stage: opts.stage,
-      verdict,
-      budget: { turns: counters.turns, tokens: counters.tokens, elapsed_ms: elapsed() },
-    });
+    return finish(verdict);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return assembleOutcome({
-      stage: opts.stage,
-      verdict: {
-        status: "failed",
-        terminal_signal: "model_error",
-        pr: null,
-        errorType: "drive_error",
-        errorMessage: `headless drive failed: ${message}`,
-      },
-      budget: { turns: counters.turns, tokens: counters.tokens, elapsed_ms: elapsed() },
+    return finish({
+      status: "failed",
+      terminal_signal: "model_error",
+      pr: null,
+      errorType: "drive_error",
+      errorMessage: `headless drive failed: ${message}`,
     });
   } finally {
     bindManager.dispose();

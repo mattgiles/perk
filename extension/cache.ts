@@ -58,6 +58,15 @@ export function ensureRunScratch(cwd: string, runId: string): string {
   return dir;
 }
 
+/**
+ * The run-scoped structured run-event stream (Node 1.3, contracts §8.12) — an NDJSON file under the
+ * gitignored run scratch dir. Co-located with the run's read-only-child scratch so a runner/Phase-3
+ * reader finds all run artifacts under one dir.
+ */
+export function runEventsPath(cwd: string, runId: string): string {
+  return join(runScratchDir(cwd, runId), "events.ndjson");
+}
+
 /** Names of all run scratch dirs (used to enumerate fork siblings). */
 export function listRunIds(cwd: string): string[] {
   const dir = join(workflowDir(cwd), "scratch", "runs");

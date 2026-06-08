@@ -11,6 +11,7 @@
 import { argv, env, exit, stderr, stdout } from "node:process";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { runEventsPath } from "./cache.ts";
 import {
   type DriveBudget,
   type DriveStage,
@@ -131,6 +132,10 @@ async function main(): Promise<number> {
 
   stdout.write(`${JSON.stringify(outcome)}\n`);
   stderr.write(summarize(outcome));
+  // Breadcrumb: where the structured run-event stream (Node 1.3) landed (cache-tier NDJSON).
+  stderr.write(
+    `perk worker: run events → ${runEventsPath(parsed.worktree, env.PERK_RUN_ID ?? "")}\n`,
+  );
   return outcome.status === "completed" ? 0 : 1;
 }
 
