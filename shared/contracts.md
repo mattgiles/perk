@@ -1598,3 +1598,90 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 > `provider="github"` exactly like a perk-authored plan; the authoring-provider id lives only in the
 > `[providers] plan` selection, and all downstream stages bind only to the provider-agnostic
 > plan-ref (unchanged).
+
+## §8.11 · The headless stage-drive worker contract (Node 1.2)
+
+The **stage-drive primitive** (`extension/worker.ts` `driveStage`) drives ONE read-write stage
+(`implement`/`address`) end-to-end on an **already-prepared** worktree, in-process via the SDK
+runtime factory, running the **same** `@perk/pi` extension package. It is the substrate Node 1.3
+(the structured event stream) and Node 4.1 (the e2e harness) consume. This section locks the
+worker's inputs, determinism invariants, terminal-signal definition, and outcome shape (the full
+audit is `docs/design/headless-worker.md`, Node 1.1). The worker makes **no GitHub mutation of its
+own** — the stage's own tools (`submit`, `resolve_review_threads`) delegate to the Python gateway
+exactly as in a warm session (§8.4).
+
+### Inputs (the prepared-worktree contract)
+
+| input | shape | source |
+|---|---|---|
+| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/launch.py`), **not** the worker (Gap 7) |
+| `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
+| `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
+| handoff / plan-ref / plan-body | files under `<worktree>/.pi/workflow/` | materialized by positioning; the worker does not re-write them |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/launch.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
+| `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** |
+| `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
+| `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
+
+### Determinism invariants (fixed by the worker; not caller-tunable)
+
+- **`cwd = worktree`, `agentDir = throwaway temp dir`** (Gap 4): the project tier loads (perk's
+  `@perk/pi` via the managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`); the
+  user-global tier (extensions/settings/skills/models/auth) is locked out. The
+  `createAgentSessionServices` factory builds the `DefaultResourceLoader` internally from
+  `cwd`/`agentDir` — the runtime path does **not** take a pre-built loader (recipe correction #1).
+- **Compaction-off + retry-off** via `SettingsManager.inMemory({ compaction:{enabled:false},
+  retry:{enabled:false} })` (Gap 3) **AND** the **no-active-objective invariant**: positioning never
+  writes an `active_objective`, so `objective.ts`'s `turn_end` `ctx.compact` is inert. Together
+  these kill both SDK auto-compaction and perk's threshold compaction. The worker must **never**
+  call `/objective`/`objective_save` in the driven session.
+- **`ctx.hasUI === false`** (Gap 6): the session binds with `{ uiContext: undefined, mode: "json" }`,
+  so every perk UI surface takes its headless `console.error` fallback.
+- **Rebind defensiveness** (Gap 1): the worker is built on `createAgentSessionRuntime` (the
+  services/from-services factory), and a `bindAndSubscribe`/`rebind` helper re-binds the extension
+  and re-attaches the terminal/budget listener after any runtime replacement — but `bindExtensions`
+  is **still called explicitly** at startup (the factory only *loads* extensions; binding emits
+  `session_start` and runs perk's claim path). A mid-drive replacement is **not expected** on the
+  happy path (the prompt instructs `/submit`, never `/implement`; `lifecycleGates.newSession` is
+  `hasUI`-guarded; objective compaction is inert) — so an observed replacement is a **loud
+  structured-log error** before the listener is kept alive.
+
+### Terminal-signal definition
+
+The drive terminates on the **first** of:
+
+1. **Terminating-tool success** (the primary signal), observed via the `tool_execution_end`
+   `result.details` captured by the subscribe listener: for `implement`, a successful `submit`
+   carrying a `pr` → `completed`/`submit_tool`; for `address`, `resolve_review_threads` ok **and**
+   `perk:workflow-state.last_review_batch` appended → `completed`/`address_resolved`.
+2. **Driving `prompt()` resolved (agent idle), verified against the success predicate.** Idle is
+   **not** itself success — if the predicate does not hold, → `failed`/`agent_idle_incomplete`.
+3. **Budget / timeout / external abort** → `session.abort()` (hard; propagates into the in-flight
+   `ctx.signal`-aware shelled tools `submit`/`resolve_review_threads`/`run_ci`): the watchdog →
+   `budget_exhausted`/`budget`; the external `signal` → `aborted`/`external_abort`.
+4. **Post-acceptance model error** (with retry off, an assistant `message_end` with
+   `stopReason:"error"`) → `failed`/`model_error`.
+
+### Outcome shape (frozen; **additive-stable** — 1.3 may add fields, existing fields keep meaning)
+
+```jsonc
+{
+  "run_id": "<ULID>",
+  "stage": "implement" | "address",
+  "status": "completed" | "failed" | "aborted" | "budget_exhausted",
+  "terminal_signal": "submit_tool" | "address_resolved" | "agent_idle_incomplete"
+                    | "budget" | "external_abort" | "model_error",
+  "pr": { "number": 0, "url": "" } | null,   // populated on a completed implement; from SubmitDetails.pr
+  "budget": { "turns": 0, "tokens": 0, "elapsed_ms": 0 },
+  "error": { "type": "string", "message": "string", "summary": "string" } | null
+}
+```
+
+`error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
+discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
+not a new Python `find-pr-for-branch` JSON command.
+
+> **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
+> spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The
+> **subagent-under-worker live smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the
+> Phase-3 `doctor workflow`**; Node 1.2 does not prove it.
