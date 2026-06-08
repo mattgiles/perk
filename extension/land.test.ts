@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { markerPath, PENDING_LEARN } from "./cache.ts";
+import { driveReconcileAfterLand, type LandDetails, landPr } from "./land.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 const LAND_JSON = JSON.stringify({
@@ -68,20 +70,78 @@ const LAND_JSON_WITH_OBJECTIVE = JSON.stringify({
   objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
 });
 
-test("tool: land surfaces the objective node-done + /objective-reconcile nudge", async () => {
+// `landPr` is exercised directly here (not via the harness `invokeTool`) because the tool's
+// `execute` now routes through `driveReconcileAfterLand`, which would inject a real model turn for
+// an objective fixture the keyless harness can't service. The drive itself is unit-tested below
+// with a spy `pi`. This test fixes `landPr`'s merge/marker/report behavior for the objective case.
+test("landPr: objective node-done reports auto-reconciliation (no manual nudge)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: LAND_JSON_WITH_OBJECTIVE });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("land", {});
-    const text = result.content[0]?.text ?? "";
-    assert.match(text, /Objective #5 node\(s\) 1\.2 marked done/);
-    assert.match(text, /\/objective-reconcile #5/);
-    const details = result.details as { objective?: { nodes_marked: string[] } };
-    assert.deepEqual(details.objective?.nodes_marked, ["1.2"]);
-  } finally {
-    h.dispose();
-  }
+  const piStub = {
+    exec: async () => ({
+      code: 0,
+      killed: false,
+      stdout: LAND_JSON_WITH_OBJECTIVE,
+      stderr: "",
+    }),
+  } as unknown as ExtensionAPI;
+  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  const result = await landPr(piStub, ctx);
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /Objective #5 node\(s\) 1\.2 marked done/);
+  assert.match(text, /reconciling/i);
+  assert.doesNotMatch(text, /\/objective-reconcile #/);
+  assert.deepEqual(result.details.objective?.nodes_marked, ["1.2"]);
+});
+
+// --- driveReconcileAfterLand: decision + delivery-mode unit tests (spy pi, no real turn) ---
+
+function spyPi(): {
+  pi: ExtensionAPI;
+  calls: { content: string; options?: { deliverAs?: string } }[];
+} {
+  const calls: { content: string; options?: { deliverAs?: string } }[] = [];
+  const pi = {
+    sendUserMessage: (content: string, options?: { deliverAs?: string }) => {
+      calls.push({ content, options });
+    },
+  } as unknown as ExtensionAPI;
+  return { pi, calls };
+}
+
+const OBJECTIVE_DETAILS: LandDetails = {
+  ok: true,
+  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
+};
+
+test("driveReconcileAfterLand: no objective → not driven", () => {
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, { ok: true });
+  assert.equal(calls.length, 0);
+});
+
+test("driveReconcileAfterLand: failed land → not driven", () => {
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, { ...OBJECTIVE_DETAILS, ok: false });
+  assert.equal(calls.length, 0);
+});
+
+test("driveReconcileAfterLand: idle (/land command) → immediate turn", () => {
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]?.content ?? "", /objective #5/i);
+  assert.equal(calls[0]?.options, undefined);
+});
+
+test("driveReconcileAfterLand: streaming (land tool) → followUp", () => {
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => false } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.options?.deliverAs, "followUp");
 });
 
 test("tool: land with a skipped objective adds no nudge", async () => {

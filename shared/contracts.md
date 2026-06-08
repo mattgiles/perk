@@ -337,8 +337,10 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
 the roadmap reconciles against what actually landed — two seams matching the D9 Mechanical/
 Reconcilable/Immutable typing:
 - **Mechanical (on land).** The land path auto-marks the backlinked node(s) `done` — fail-open and
-  non-audited (the audit gate is the model-tool boundary only). The warm `/land` surfaces the marked
-  node(s) and a copy-pasteable `/objective-reconcile #<n>` nudge (no auto model turn).
+  non-audited (the audit gate is the model-tool boundary only). The warm `/land` then **auto-drives**
+  the reconcile pass: it injects the same `reconcileGuidance` message `/objective-reconcile` injects
+  (`deliverAs: "followUp"` from the terminating `land` tool, an immediate turn from the idle `/land`
+  command) instead of printing a manual nudge.
 - **Reconcilable (warm, post-merge).** `/objective-reconcile [<number>]` resolves the objective via
   a **three-tier** lookup — arg → `active_objective` → `readPlanRef(cwd).objective_id` (the
   just-landed objective sitting in the plan-ref, so the post-land path works even when the user
@@ -1106,9 +1108,16 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
   dry-run branch sets an inert `ObjectiveLandUpdate(None, (), "dry_run")` and stays fully offline.
   `_result_to_dict` always emits `"objective": { number, nodes_marked, skipped_reason }`;
   `_render_human` adds an `objective #N: marked node(s) X done` line when non-empty.
-- The warm `extension/land.ts` surfaces `objective.nodes_marked` and appends a **copy-pasteable**
-  `/objective-reconcile #<n>` nudge to the success text (no auto model turn from this terminating
-  tool); the merge itself is unchanged.
+- The warm `extension/land.ts` surfaces `objective.nodes_marked` and **auto-drives** the reconcile
+  pass via `driveReconcileAfterLand`, which injects
+  `reconcileGuidance(...) + bindingSuffix(..., "command:objective-reconcile")` — byte-for-byte the
+  message `/objective-reconcile` injects — when the land succeeded with a node marked done.
+  Delivery branches on `ctx.isIdle()`: the streaming `land` tool path uses
+  `deliverAs: "followUp"` (delivered after the terminating batch), the idle `/land` command path an
+  immediate turn. `land` stays **terminating** because `terminate` only skips the *automatic*
+  follow-up LLM call — an injected `followUp` user message is a separate deliberate new turn, so the
+  two compose. The success text reports the auto-reconciliation rather than a copy-pasteable nudge;
+  the merge itself is unchanged.
 - The `land` stage I/O gains `github.objective` in both `reads` (the node lookup) and `writes` (the
   mechanical node-done).
 

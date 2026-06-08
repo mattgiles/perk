@@ -4,7 +4,9 @@
 // sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "./bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
+import { reconcileGuidance } from "./objectivePlan.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
@@ -106,10 +108,10 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   const lines = [`Landed PR #${parsed.pr.number}; run /learn to release the worktree.`];
   const obj = parsed.objective;
   if (obj?.nodes_marked.length && obj.number !== null) {
-    // A copy-pasteable nudge into the reconcile pass (this terminating tool starts no model turn).
+    // The reconcile pass is auto-driven after land (see driveReconcileAfterLand); just report it.
     lines.push(
-      `Objective #${obj.number} node(s) ${obj.nodes_marked.join(", ")} marked done — run ` +
-        `/objective-reconcile #${obj.number} to reconcile the roadmap prose against the diff.`,
+      `Objective #${obj.number} node(s) ${obj.nodes_marked.join(", ")} marked done — ` +
+        `reconciling the roadmap against the merged diff.`,
     );
   }
   const learn = parsed.learn;
@@ -142,6 +144,32 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   };
 }
 
+/**
+ * After a successful land that marked at least one objective node done, drive the session into the
+ * reconcile pass by injecting the exact guidance `/objective-reconcile` injects (warm-door driving
+ * pattern). The terminating `land` tool stays terminating — terminate only skips the *automatic*
+ * follow-up LLM call, while a `followUp` user message is a separate deliberate new turn. Short-
+ * circuits (sends nothing) unless the land succeeded with an objective node marked done — the exact
+ * condition that gated the old copy-pasteable nudge.
+ */
+export function driveReconcileAfterLand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  details: LandDetails,
+): void {
+  const obj = details.objective;
+  if (!details.ok || !obj || obj.number === null || obj.nodes_marked.length === 0) return;
+  const message =
+    reconcileGuidance(String(obj.number)) + bindingSuffix(ctx.cwd, "command:objective-reconcile");
+  if (ctx.isIdle()) {
+    // The `/land` command path (idle): inject an immediate turn.
+    pi.sendUserMessage(message);
+  } else {
+    // The `land` tool path (streaming): deliver after the terminating land batch.
+    pi.sendUserMessage(message, { deliverAs: "followUp" });
+  }
+}
+
 const TOOL_GUIDELINES = [
   "Call land only when the PR is approved and ready to merge; it squash-merges the PR (closing the plan issue) and sets pending-learn.",
   "land operates on the active plan's worktree — it takes no arguments; the PR is discovered from the local plan-ref's branch.",
@@ -160,7 +188,9 @@ export function registerLand(pi: ExtensionAPI): void {
     executionMode: "sequential",
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return landPr(pi, ctx);
+      const result = await landPr(pi, ctx);
+      driveReconcileAfterLand(pi, ctx, result.details);
+      return result;
     },
   });
 
@@ -171,6 +201,7 @@ export function registerLand(pi: ExtensionAPI): void {
       if (ctx.hasUI) {
         ctx.ui.notify(result.content[0]?.text ?? "land done", result.details.ok ? "info" : "error");
       }
+      driveReconcileAfterLand(pi, ctx, result.details);
     },
   });
 }

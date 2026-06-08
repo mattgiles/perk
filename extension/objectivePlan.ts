@@ -354,7 +354,7 @@ function factoryGuidance(objective: string, node: string | null): string {
 /** The seed guidance the warm `/objective-reconcile` injects to start the reconcile pass (the
  * perk-objective-reconcile skill pointer rides the skill-binding suffix — Node 2.3 — not
  * hardcoded). */
-function reconcileGuidance(objective: string): string {
+export function reconcileGuidance(objective: string): string {
   return [
     `perk /objective-reconcile — reconcile objective #${objective}'s roadmap against what actually ` +
       "landed.",
