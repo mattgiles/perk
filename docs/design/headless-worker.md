@@ -340,3 +340,36 @@ Lock now; 1.3 builds the event stream that carries it, 4.1 asserts it.
   carries it as a known risk.
 - **The outcome shape (§B) is the substrate** node 1.3 (the structured event stream) and node 4.1
   (the e2e harness) consume — additive-stable, asserted there.
+
+---
+
+## Outcomes (Node 1.2 — landed)
+
+*Additive reconciliation note; the audit body above is the historical record and is not rewritten.*
+
+Node 1.2 landed the worker as **`extension/worker.ts`** (the `driveStage` primitive + the pure
+`evaluateTerminal`/`assembleOutcome`/`applyEvent` helpers, the `createBindManager` rebind manager,
+`initialPromptFor`, and the runtime/budget/abort wiring) and **`extension/workerMain.ts`** (the thin
+runnable entrypoint shim). The worker contract is recorded in `shared/contracts.md` §8.11.
+
+**Two recipe corrections applied** (verified against `@earendil-works/pi-coding-agent@0.78.1`
+`.d.ts`), already folded into §B above's intent:
+
+1. The runtime-factory path does **not** accept a pre-built `resourceLoader`.
+   `createAgentSessionServices({ cwd, agentDir, …, resourceLoaderOptions })` builds the
+   `DefaultResourceLoader` **internally**. The worker achieves the asymmetric load by passing
+   `cwd = worktree` + `agentDir = throwaway` — not a hand-built, manually-`reload()`ed loader.
+2. `bindExtensions(...)` is still called **explicitly** on the runtime session.
+   `createAgentSessionFromServices` only *loads* extensions; binding (which emits `session_start`
+   and runs perk's claim path) happens when the host calls
+   `runtime.session.bindExtensions({ uiContext: undefined, mode: "json", onError })`.
+
+**Gap-4 verification discharged.** `extension/worker.test.ts` ("Gap-4: a bound perk session
+registers the worker's terminal tools and claims its run") proves under the offline
+`loadPerkSession` harness that a throwaway `agentDir` still loads + binds the project `@perk/pi`
+extension: the `submit` and `resolve_review_threads` tools register, and the `session_start` claim
+engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.run_id` matches).
+
+**Deferred, as planned:** the live model-driven e2e (Node 4.1), the structured event stream (Node
+1.3, which carries this outcome shape), remote dispatch / the GitHub Actions runner (2.1/2.2), and
+the `address`-path subagent-under-worker live smoke (Phase-3 `doctor workflow`, open-#6).
