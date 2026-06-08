@@ -30,6 +30,9 @@ export const PROVIDER_SEAMS = ["plan", "todo"] as const;
 export const PERK_PLAN_PROVIDER_ID = "perk-plan";
 export const PERK_CHECKPOINTS_PROVIDER_ID = "perk-checkpoints";
 
+/** The foreign `@tombell/pi-plan` plan-provider id (Node 2.3 adapter selection check). */
+export const TOMBELL_PLAN_PROVIDER_ID = "tombell-plan";
+
 /** Parse the bundled `providers.yaml`. Throws on a missing file or unexpected shape. */
 export function loadProviders(): Provider[] {
   const path = join(sharedDir(), "providers.yaml");

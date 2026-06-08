@@ -14,6 +14,15 @@
 // read-only authoring half: there is no in-session "execution mode" flip — perk separates plan
 // (read-only session) from implement (cold-door fresh worktree session), and `[DONE:n]` tracking
 // lives in the implement session (T2c).
+//
+// REGISTRATION-TIME DEFERRAL (Node 2.3). When a foreign `[providers] plan` is selected, perk's
+// surface is NOT registered at all: `registerPlanMode` resolves the plan provider id once at
+// factory time and, when it is not `perk-plan`, registers NONE of the `--plan` flag, the `/plan`
+// command, the `Ctrl+Alt+P` shortcut, the `--plan` session_start entry, or the `before_agent_start`
+// injection / its `context` strip. The foreign package then owns those surfaces with no collision
+// (Pi suffixes duplicate command names, so handler-time deferral alone is insufficient once the
+// foreign package is loaded). Fail-safe: any config-read error → treated as `perk-plan` → everything
+// registers exactly as today (the default path is the hard guarantee, zero behavior change).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
@@ -83,6 +92,11 @@ export function isPerkPlanReferenceSelected(cwd: string): boolean {
  * tracks its own on/off transition), fail-safe-headless (notify when UI, else stderr).
  */
 export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
+  // Registration-time deferral (Node 2.3): resolve the plan provider once at factory time. Under a
+  // foreign plan selection, register NOTHING here so the foreign package owns `/plan`/`Ctrl+Alt+P`/
+  // `--plan` unambiguously. Fail-safe to the reference (any read error registers everything).
+  if (!isPerkPlanReferenceSelected(process.cwd())) return;
+
   pi.registerFlag("plan", {
     description: "Start in perk plan mode (read-only exploration + plan authoring).",
     type: "boolean",
@@ -98,18 +112,6 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   }
 
   function toggle(ctx: ExtensionContext): void {
-    // Defer the authoring surface when a foreign plan provider is selected: announce why plan mode
-    // is inactive (headless-safe) and step aside. The Node 2.3 adapter replaces it under a foreign
-    // selection; here perk's surface simply yields (the default `perk-plan` path is untouched).
-    if (!isPerkPlanReferenceSelected(ctx.cwd)) {
-      const id = resolvedPlanProviderId(ctx.cwd);
-      const message =
-        `perk: plan mode is inactive — the '${id}' plan provider is selected ` +
-        `(set [providers] plan = "perk-plan" in .pi/perk.toml to use perk plan mode).`;
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
-      return;
-    }
     if (gating.isActive()) {
       gating.exit(ctx);
       announce(ctx, false);
@@ -134,8 +136,7 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   // on top for ad-hoc `pi --plan` interactive starts — the cold plan door drives read-only via the
   // handoff `mode`, not this flag.)
   pi.on("session_start", async (_event, ctx) => {
-    // `--plan` defers SILENTLY when a foreign plan provider is selected (no gate entry, no notice).
-    if (pi.getFlag("plan") === true && !gating.isActive() && isPerkPlanReferenceSelected(ctx.cwd)) {
+    if (pi.getFlag("plan") === true && !gating.isActive()) {
       gating.enter(ctx);
     }
   });
@@ -148,8 +149,6 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     if (!gating.isActive()) return;
     const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
     if (rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE) return;
-    // Second defer condition (alongside objective-author): a foreign plan provider owns authoring.
-    if (!isPerkPlanReferenceSelected(ctx.cwd)) return;
     return {
       message: {
         customType: PLAN_CONTEXT_TYPE,

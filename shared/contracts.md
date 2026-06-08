@@ -1475,19 +1475,16 @@ into a foreign package's object-form `packages` entry. Because both planes read 
 full YAML readers, it can carry the nested `package_filter` object that the narrow-TOML config
 reader cannot.
 
-**Shipped set (Node 2.1):** the two reference entries `perk-plan` (seam `plan`) and
-`perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus
-**one illustrative foreign entry per seam** (`tombell-plan` → `npm:@tombell/pi-plan` with a
-`package_filter`; `juicesharp-todo` → `npm:@juicesharp/rpiv-todo`), both flagged ILLUSTRATIVE — the
-real forms land with the Node 2.3 / 3.2 adapters. The illustrative entries make the two-directional
-`init` wiring real and testable now even though the adapter shims (2.3/3.2) and the **todo**-seam
-runtime deferral (3.1) do not exist yet. **Known interim limitation (post-2.2):** the **plan** seam
-now steps aside at runtime — perk's `planMode` authoring surface defers when a foreign
-`[providers] plan` is selected (Node 2.2) — but nothing yet *replaces* it under a foreign selection
-(the concrete plan adapter is Node 2.3), and the **todo** seam (`checkpoints`) does not defer yet
-(Node 3.1). So selecting a foreign plan provider makes perk yield but is not behavior-complete until
-the 2.3 adapter; selecting a foreign todo provider still collides until 3.1. The **default** path
-(both reference providers) is unaffected and is the hard guarantee.
+**Shipped set (Node 2.1 → 2.3):** the two reference entries `perk-plan` (seam `plan`) and
+`perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus a
+foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter: planAdapterTombell`) is
+now a **real, selectable** plan provider (Node 2.3) — only `juicesharp-todo`
+(→ `npm:@juicesharp/rpiv-todo`) remains flagged ILLUSTRATIVE until the Node 3.2 adapter + Node 3.1
+todo-seam deferral land. **Interim limitation (post-2.3):** the **plan** seam is behavior-complete
+(perk vacates its surface + the adapter bridges the foreign one — see the Node 2.3 status note), but
+the **todo** seam (`checkpoints`) still does not defer (Node 3.1), so selecting a foreign todo
+provider still collides until 3.1. The **default** path (both reference providers) is unaffected and
+is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -1554,3 +1551,24 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 > (fail-safe to the reference). `savePlan`/`plan_save`/`/plan-save`/the read-only gate are
 > seam-shared substrate — always-registered, the produced-contract landing the Node 2.3 adapter
 > bridges to — and do **not** defer. The **todo**-seam deferral (`checkpoints`) is still **Node 3.1**.
+>
+> **Status (Node 2.3):** the **first 3rd-party plan adapter** lands `tombell-plan` as a real,
+> selectable plan provider. (1) The shipped entry drops `package_filter` (the illustrative
+> `extensions/*.ts` matched nothing — `@tombell/pi-plan`'s sole extension is its root `index.ts`,
+> so omitting the filter loads exactly that one extension); the `package_filter` field stays in the
+> vocabulary for future providers. (2) perk's plan surface now **vacates at REGISTRATION time** (not
+> just handler-time): `registerPlanMode` resolves the plan provider once at factory time and, under a
+> foreign selection, registers NONE of `/plan` / `Ctrl+Alt+P` / `--plan` / the injection — so the
+> foreign surfaces are the sole registrants (Pi suffixes duplicate command names, so handler-time
+> deferral alone is insufficient once the foreign package is loaded). Fail-safe to the reference
+> registers everything. (3) The new `extension/planAdapterTombell.ts` shim is an **injection-only**
+> bridge — always registered, inert unless `[providers] plan = "tombell-plan"`, injecting a hidden
+> `perk:plan-adapter-tombell` context that directs the foreign free-form prose `/plan` output into
+> perk's canonical save. The prose→plan-ref bridge **reuses the existing** `/plan-save`
+> `extractPlanMarkdown` scrape (planSave.ts); no new save machinery. The shim **never** owns or
+> duplicates the read-only gate and **never** calls `setActiveTools` (Invariant 1 — the gate stays
+> perk's, engaged by the cold-door launch; the foreign package self-enforces ad-hoc). (4) The adapter
+> does **NOT** restamp `cache.plan-ref.provider` — a tombell-authored prose plan lands with
+> `provider="github"` exactly like a perk-authored plan; the authoring-provider id lives only in the
+> `[providers] plan` selection, and all downstream stages bind only to the provider-agnostic
+> plan-ref (unchanged).

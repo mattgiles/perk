@@ -76,16 +76,35 @@ test("/plan round-trip: on -> read-only + write blocked + plan-context injected;
   }
 });
 
-test("deferral: a foreign [providers] plan selection makes /plan step aside", async () => {
+test("deferral: a foreign [providers] plan selection makes perk NOT register the plan surface", async () => {
   const cwd = scaffoldRepo();
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "perk.toml"), '[providers]\nplan = "tombell-plan"\n', "utf8");
-  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.inMemory(cwd) });
+  // Registration-time deferral resolves `process.cwd()` at factory time (the production cwd IS the
+  // repo Pi launches in). Point process.cwd() at the scaffold so the factory sees the selection.
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
   try {
-    // /plan does NOT flip read-only (perk's authoring surface defers to the foreign provider).
-    await h.invokeCommand("plan");
-    assert.notEqual(h.workflowState().mode, "read-only", "plan mode stays inactive when deferred");
-    // ...and no plan-authoring context is injected even if the gate were active.
+    // Node 2.3 registration-time deferral: the `/plan` command is not registered at all.
+    assert.equal(
+      h.registeredCommands().includes("plan"),
+      false,
+      "perk does not register /plan under a foreign plan selection",
+    );
+    // The `--plan` flag is not registered either: setting it + reload does NOT flip read-only.
+    h.setFlag("plan", true);
+    await h.reload();
+    assert.notEqual(
+      h.workflowState().mode,
+      "read-only",
+      "--plan is inert (unregistered) under a foreign selection",
+    );
+    // ...and no plan-authoring context is injected (the before_agent_start handler is unregistered).
     assert.equal(
       (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
       false,
@@ -93,6 +112,7 @@ test("deferral: a foreign [providers] plan selection makes /plan step aside", as
     );
   } finally {
     h.dispose();
+    process.chdir(savedCwd);
   }
 });
 

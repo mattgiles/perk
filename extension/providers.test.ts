@@ -36,10 +36,15 @@ test("loadProviders: reference provider has null package/adapter and no filter",
   });
 });
 
-test("loadProviders: foreign entry carries adapter + nested package_filter", () => {
+test("loadProviders: the real tombell-plan entry carries adapter + NO package_filter", () => {
+  // Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
+  // nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`). Omitting it loads all.
   const tombell = loadProviders().find((p) => p.id === "tombell-plan");
   assert.equal(tombell?.adapter, "planAdapterTombell");
-  assert.deepEqual(tombell?.packageFilter, { extensions: ["extensions/*.ts"], skills: [] });
+  assert.equal(tombell?.package, "npm:@tombell/pi-plan");
+  assert.equal(tombell?.seam, "plan");
+  assert.equal(tombell?.default, false);
+  assert.equal(tombell?.packageFilter, undefined);
 });
 
 // --- resolveProviders (the pure resolver, mirror of tests/test_providers.py) ------------------

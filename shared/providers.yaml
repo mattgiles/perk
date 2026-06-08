@@ -34,12 +34,15 @@
 # name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
 # loaders. The Python plane is the authoritative validator.
 #
-# Status (Node 2.1): this file ships the substrate (the two reference entries + one
-# ILLUSTRATIVE foreign entry per seam — flagged below). Runtime consumption of the
-# selection (perk's plan/todo stepping aside when a foreign provider is selected) is
-# Nodes 2.2/3.1; the concrete adapter shims are Nodes 2.3/3.2. Until those land,
-# selecting a foreign provider wires its package but perk's own surface does NOT yet
-# step aside — the DEFAULT path (both reference providers) is the node's hard guarantee.
+# Status (Node 2.1 → 2.3): this file ships the substrate (the two reference entries +
+# foreign entries per seam). The PLAN adapter has landed (Node 2.3): `tombell-plan` is a
+# REAL, selectable plan provider — `planAdapterTombell` bridges `@tombell/pi-plan`'s
+# free-form prose surface to perk's canonical `plan_save` → `cache.plan-ref` contract, and
+# perk VACATES the plan surface at REGISTRATION time (not just handler-time) under a foreign
+# plan selection so the foreign `/plan`/`Ctrl+Alt+P`/`--plan` are the sole registrants (Pi
+# suffixes duplicate command names). The TODO entry (`juicesharp-todo`) stays ILLUSTRATIVE
+# until the Node 3.2 adapter + Node 3.1 todo-seam deferral land. The DEFAULT path (both
+# reference providers) is the hard guarantee.
 
 schema_version: 1
 
@@ -55,15 +58,15 @@ providers:
     adapter: null
     default: true            # the behavior-preserving no-config pick for the todo seam
 
-  # --- illustrative foreign entries — the real forms land with the Node 2.3 / 3.2 adapters ---
-  - id: tombell-plan         # ILLUSTRATIVE — the real entry lands with the Node 2.3 adapter
+  # --- foreign entries ---
+  - id: tombell-plan         # REAL plan provider (Node 2.3) — planAdapterTombell bridges it
     seam: plan
     package: "npm:@tombell/pi-plan"   # the foreign Pi package to add to `packages`
     adapter: "planAdapterTombell"     # the perk-owned shim bridging surface → cache.plan-ref
     default: false
-    package_filter:                   # optional Pi object-form filter for the foreign package
-      extensions: ["extensions/*.ts"]
-      skills: []
+    # No `package_filter`: `@tombell/pi-plan`'s sole extension is its root `index.ts` (not under
+    # `extensions/`), so omitting the filter ("load all of that type") loads exactly that one
+    # extension. The `package_filter` field stays in the vocabulary for future providers.
   - id: juicesharp-todo      # ILLUSTRATIVE — the real entry lands with the Node 3.2 adapter
     seam: todo
     package: "npm:@juicesharp/rpiv-todo"
