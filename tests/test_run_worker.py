@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from perk import cache, github, run_worker
+from perk import cache, github, run_report, run_worker
 from perk.cli.ensure import UserFacingCliError
 
 
@@ -75,6 +75,9 @@ def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypat
         return SimpleNamespace(returncode=7)
 
     monkeypatch.setattr(run_worker.subprocess, "run", fake_run)
+    # Isolate the spawn: reporting (its own gh calls) is covered in test_run_report.
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: None)
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: None)
 
     code = run_worker.run_worker(
         repo_root=tmp_path,
@@ -89,6 +92,33 @@ def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypat
     assert captured["kwargs"]["cwd"] == tmp_path
     assert captured["kwargs"]["env"]["PERK_RUN_ID"] == "RID9"
     assert captured["kwargs"]["check"] is False
+
+
+def test_reporting_brackets_the_spawn_and_is_exit_code_neutral(tmp_path, fake_github, monkeypatch):
+    _make_entry(tmp_path)
+    order: list[str] = []
+
+    def fake_run(argv, **kwargs):
+        order.append("spawn")
+        return SimpleNamespace(returncode=3)
+
+    monkeypatch.setattr(run_worker.subprocess, "run", fake_run)
+    # report_started runs before the spawn; report_terminal after it returns. The orchestrators are
+    # internally fail-soft (asserted in test_run_report), so a swallowed reporting failure here
+    # still forwards the worker's exit code unchanged.
+    monkeypatch.setattr(run_report, "report_started", lambda *a, **k: order.append("started"))
+    monkeypatch.setattr(run_report, "report_terminal", lambda *a, **k: order.append("terminal"))
+
+    code = run_worker.run_worker(
+        repo_root=tmp_path,
+        run_id="RIDX",
+        stage_id="implement",
+        plan=42,
+        base=None,
+        environ={"PATH": "/usr/bin"},
+    )
+    assert code == 3  # reporting never changes the worker exit code
+    assert order == ["started", "spawn", "terminal"]
 
 
 def test_plan_not_found_is_loud(tmp_path, monkeypatch):

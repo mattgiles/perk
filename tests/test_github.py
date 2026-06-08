@@ -547,6 +547,69 @@ def test_update_plan_issue_dry_run_does_not_shell(monkeypatch):
     assert rec.calls == []
 
 
+# ---------------------------------------------- marker-keyed comment upsert (Node 2.3)
+
+MARKER = "<!-- perk:run-report:RID -->"
+
+
+def test_find_comment_id_by_marker_matches(monkeypatch):
+    listing = _comment_list("chatter", f"{MARKER}\nstarted note")
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    )
+    assert github.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) == 101
+
+
+def test_find_comment_id_by_marker_no_match(monkeypatch):
+    listing = _comment_list("nothing", "still nothing")
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/42/comments"), _Proc(0, listing))])
+    )
+    assert github.find_comment_id_by_marker(issue=42, marker=MARKER, repo_root=ROOT) is None
+
+
+def test_upsert_marked_comment_patches_existing(monkeypatch):
+    listing = _comment_list(f"{MARKER}\nstarted note")
+    rec = _GhDispatch(
+        [
+            (_has("issues/42/comments"), _Proc(0, listing)),
+            (_has("issues/comments/100", "PATCH"), _Proc(0, "{}")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.upsert_marked_comment(
+        issue=42, marker=MARKER, body=f"{MARKER}\nterminal note", repo_root=ROOT
+    )
+    assert result.posted is True
+    assert rec.method_calls("PATCH") == 1 and rec.method_calls("POST") == 0
+    assert "terminal note" in rec.body_files[-1]
+
+
+def test_upsert_marked_comment_posts_new(monkeypatch):
+    listing = _comment_list("no marker here")
+    rec = _GhDispatch(
+        [
+            (_has("issues/42/comments", "POST"), _Proc(0, "{}")),
+            (_has("issues/42/comments"), _Proc(0, listing)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.upsert_marked_comment(
+        issue=42, marker=MARKER, body=f"{MARKER}\nstarted note", repo_root=ROOT
+    )
+    assert result.posted is True
+    assert rec.method_calls("POST") == 1
+
+
+def test_upsert_marked_comment_dry_run_does_not_shell(monkeypatch):
+    rec = _GhDispatch([])
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.upsert_marked_comment(
+        issue=42, marker=MARKER, body=MARKER, repo_root=ROOT, dry_run=True
+    )
+    assert result.posted is False and rec.calls == []
+
+
 def test_get_plan_planned_has_no_pr(monkeypatch):
     issue = {"number": 7, "title": "T", "body": _header("01RID"), "state": "OPEN", "url": "u/7"}
     monkeypatch.setattr(

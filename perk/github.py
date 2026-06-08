@@ -1089,6 +1089,49 @@ def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
     return None
 
 
+def find_comment_id_by_marker(*, issue: int, marker: str, repo_root: Path) -> int | None:
+    """Find the integer id of the first issue comment whose body contains ``marker`` (REST list).
+
+    Mirrors :func:`_find_plan_body_comment_id` (the REST list + integer-``id`` discipline — the
+    GraphQL node id from ``gh issue view`` is not usable for the comment-PATCH endpoint). Used by
+    :func:`upsert_marked_comment` to evolve a single marker-keyed comment (e.g. the per-run
+    ``run-report`` note). ``None`` when no comment matches; raises ``GitHubError`` on infra failure.
+    """
+    proc = _run(["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"], cwd=repo_root)
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to list comments on issue #{issue}")
+    try:
+        raw = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable issue comments output: {exc}") from exc
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict) or "id" not in c:
+            continue
+        if marker in str(c.get("body", "")):
+            return int(c["id"])
+    return None
+
+
+def upsert_marked_comment(
+    *, issue: int, marker: str, body: str, repo_root: Path, dry_run: bool = False
+) -> CommentResult:
+    """Post-or-update a single marker-keyed issue comment (idempotent on ``marker``).
+
+    ``find_comment_id_by_marker`` -> PATCH the existing comment (``_patch_comment_body``) when
+    found, else POST a fresh one (``add_issue_comment``). ``body`` MUST already embed ``marker``
+    (the caller's responsibility) so the next upsert can find it. Lets a single comment evolve in
+    place (started -> terminal) rather than spamming the issue. Returns the existing
+    :class:`CommentResult` (``posted=False`` on dry run); raises ``GitHubError`` on infra failure.
+    """
+    if dry_run:
+        return CommentResult(posted=False)
+    comment_id = find_comment_id_by_marker(issue=issue, marker=marker, repo_root=repo_root)
+    if comment_id is not None:
+        _patch_comment_body(comment_id, body, repo_root)
+        return CommentResult(posted=True)
+    return add_issue_comment(issue=issue, body=body, repo_root=repo_root)
+
+
 def update_plan_issue(
     *,
     number: int,
