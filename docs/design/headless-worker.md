@@ -373,3 +373,31 @@ engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.
 **Deferred, as planned:** the live model-driven e2e (Node 4.1), the structured event stream (Node
 1.3, which carries this outcome shape), remote dispatch / the GitHub Actions runner (2.1/2.2), and
 the `address`-path subagent-under-worker live smoke (Phase-3 `doctor workflow`, open-#6).
+
+---
+
+## Outcomes (Node 1.3 — landed)
+
+The structured run-event stream shipped as a **purely additive** layer over the Node 1.2 worker (the
+`RunOutcome` shape is unchanged; §8.11 stays frozen). What landed:
+
+- A small, additive-stable `RunEvent` discriminated union (`run_started` / `step_marker` /
+  `tool_outcome` / `run_finished`), each carrying a monotonic `seq` + elapsed `t` (the same clock as
+  `RunOutcome.budget.elapsed_ms`). The terminal `run_finished` carries the full frozen `RunOutcome`
+  — `error.summary` is the terminal failure summary. See `shared/contracts.md` §8.12.
+- A dual-delivery `RunEventSink` seam (`DriveStageDeps.eventSink`): tests inject an array sink; the
+  default is a fail-soft, run-scoped NDJSON **file** sink at `runEventsPath(cwd, runId)` =
+  `<cwd>/.pi/workflow/scratch/runs/<runId>/events.ndjson` (a gitignored cache-tier artifact). The
+  default sink is a **no-op when `run_id` is empty**, so the offline drive tests stay write-free.
+- `driveStage` emits `run_started` after bind/before prompt, folds `step_marker`/`tool_outcome` into
+  the existing single subscribe listener (alongside the unchanged `applyEvent`/budget-trip), and
+  routes **every** terminal exit (verdict, budget/abort, drive-error catch, `no_model`) through one
+  `finish()` helper so exactly one `run_finished` is emitted per drive. `workerMain` adds a stderr
+  breadcrumb (`perk worker: run events → <path>`); stdout/exit-code are unchanged.
+- Route-don't-relay: per-event free text is capped (`EVENT_SUMMARY_CAP = 2 KiB`); the structured
+  channel carries the narrative, not raw tool payloads. The worker only *writes* the stream — no
+  GitHub mutation (Node 2.3) and no live model-driven e2e (Node 4.1) here.
+
+**Still deferred, as planned:** GitHub progress/terminal reporting (Node 2.3), the live e2e worker
+harness that asserts these events end-to-end (Node 4.1), remote dispatch / the runner (2.1/2.2), and
+the `address`-path subagent-under-worker live smoke (open-#6, Phase-3 `doctor workflow`).

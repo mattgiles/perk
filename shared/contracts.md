@@ -1688,9 +1688,68 @@ The drive terminates on the **first** of:
 
 `error.summary` is a short, model-free synthesis capped via the `route-don't-relay`/double-delivery
 discipline (`capForModel`); the PR is extracted **directly from the captured terminal tool event**,
-not a new Python `find-pr-for-branch` JSON command.
+not a new Python `find-pr-for-branch` JSON command. Node 1.3 surfaces this outcome as the run-event
+stream's terminal `run_finished` event (§8.12) — the same frozen object, carried in the structured
+channel.
 
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
 > spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The
 > **subagent-under-worker live smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the
 > Phase-3 `doctor workflow`**; Node 1.2 does not prove it.
+
+## §8.12 · The structured run-event stream (Node 1.3)
+
+The headless stage-drive worker (§8.11) emits a **structured run-event stream** while it drives one
+`implement`/`address` stage to terminal. The stream is the *substrate* Node 2.3 (GitHub
+progress/terminal reporting) and Node 4.1 (the e2e worker harness) consume: it carries full ordered
+run detail in a **structured channel**, while the surfaced `RunOutcome` (§8.11) stays bounded — the
+`route-don't-relay`/double-delivery discipline. This node is **purely additive** to §8.11: the
+`RunOutcome` shape is unchanged, and every surface is opt-in/fail-soft.
+
+### The `RunEvent` union (additive-stable; keyed on `kind`)
+
+A small, JSON-serializable, **additive-stable** discriminated union. Every event carries a monotonic
+`seq` (0-based, +1 per emit) and `t` (elapsed ms from the drive's injected clock — the SAME basis as
+`RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep meaning.
+
+```jsonc
+{ "kind": "run_started",  "seq": 0, "t": 0, "run_id": "<ULID>", "stage": "implement" | "address" }
+{ "kind": "step_marker",  "seq": 1, "t": 0, "marker": "wip" | "done", "step": 1 }
+{ "kind": "tool_outcome", "seq": 2, "t": 0, "tool": "submit", "ok": true, "summary": null }
+{ "kind": "run_finished", "seq": 3, "t": 0, "outcome": { /* the frozen §8.11 RunOutcome */ } }
+```
+
+- **`run_started`** — emitted once at drive start (after a successful bind, before `session.prompt`).
+- **`step_marker`** — one per `[WIP:n]`/`[DONE:n]` in an assistant turn's text, in **textual
+  appearance order** (`turn_end` fires once per turn, so each turn's markers emit exactly once).
+- **`tool_outcome`** — one per `tool_execution_end`. `ok` = `details.ok === true` when the result
+  carries a `details.ok` boolean, else `!isError`. `summary` is `null` on success and, on failure, a
+  **capped** synthesis (`capForModel(message, EVENT_SUMMARY_CAP=2KiB).shown`) — never the raw result.
+- **`run_finished`** — emitted **exactly once** at every terminal exit (natural-idle/verdict,
+  budget/abort, drive-error catch, AND the `no_model` early return), carrying the full frozen
+  `RunOutcome` (terminal status + `error.summary` = the terminal failure summary). The stream's
+  "terminal status" event. A zero-turn run still emits a `run_started` + `run_finished` pair.
+
+### Dual delivery (the injectable sink seam)
+
+`RunEventSink = (event: RunEvent) => void`, injectable via `DriveStageDeps.eventSink`. This satisfies
+both consumers: Node 4.1 asserts events in-process via an injected array sink; Node 2.3 reads the
+durable file out-of-process.
+
+- **Default sink** (when `eventSink` is absent) = a run-scoped NDJSON **file** sink built from
+  `opts.worktree` + the resolved `run_id` (`env.PERK_RUN_ID`, the same source `assembleOutcome`
+  uses). It appends one JSON object + `\n` per event to `runEventsPath(cwd, runId)` =
+  `<cwd>/.pi/workflow/scratch/runs/<runId>/events.ndjson` — a **cache-tier** artifact (the
+  `.pi/workflow/scratch/` tree is gitignored), co-located with the run's read-only-child scratch.
+- **No-op when `run_id` is empty** — keeps the offline drive tests (which set no `PERK_RUN_ID`)
+  write-free; `workerMain` always has `PERK_RUN_ID`, so a real run always writes the file.
+- **Fail-soft** — each append (and the emitter's `sink(...)` call) is try/caught and swallowed with a
+  structured-log line; a broken/throwing sink never aborts or fails the drive.
+
+### Cap (route-don't-relay)
+
+The structured channel carries the *narrative* (which tools ran + ok/fail, step progress, terminal
+outcome), **not** raw tool payloads (those already live in the session transcript). Per-event free
+text is capped at `EVENT_SUMMARY_CAP = 2 KiB`. The surfaced `RunOutcome` is unchanged and already
+bounded. The worker only *writes* the structured channel — **no GitHub mutation** here; surfacing it
+as PR comments/checks from the runner is Node 2.3 (Phase 2).
