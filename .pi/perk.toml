@@ -7,12 +7,17 @@
 root = ".worktrees"
 
 # perk's own dogfood CI checks (P2.T5). The `run_ci` tool / `/ci` command run these named checks
-# and REPORT pass/fail — they never edit or fix. Project-supplied CI is untrusted: an interactive
-# session prompts to confirm (per-session latch), and headless runs need `--allow-project-ci`.
+# and REPORT pass/fail — they never edit or fix. Project-supplied CI is untrusted by default: an
+# interactive session prompts to confirm (per-session latch), and headless runs need
+# `--allow-project-ci` — unless `[trust] ci = "true"` below opts the whole repo in.
 [ci]
 lint = "just lint"
 typecheck = "just typecheck"
 test = "just test"
+
+[trust]
+# This is our own repo — run the [ci] checks above without a per-session confirm.
+ci = "true"
 
 [subagents]
 pr-reviewer = "google/gemini-3.5-flash"

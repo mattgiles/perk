@@ -140,6 +140,14 @@ root = ".worktrees"
 # review-classifier = "anthropic/claude-haiku-4-5"
 # objective-explorer = "anthropic/claude-haiku-4-5"
 
+# Trust (optional) — declare parts of this repo trusted so perk skips a safety
+# prompt. With `ci = "true"`, the [ci] checks above run WITHOUT a per-session
+# confirm (and headless runs need no --allow-project-ci). Leave it unset for
+# cloned/untrusted repos. Value is a quoted string. The table may grow later.
+#
+# [trust]
+# ci = "true"
+
 # Interactive auto-compaction — tunes pi's global compaction for `perk <stage>`
 # sessions by converging the specified keys into .pi/settings.json's `compaction`
 # object (pi reads that natively at session boot). Keys are committed-only (read

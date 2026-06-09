@@ -18,9 +18,9 @@
 //     1. The model never authors the command — it picks a configured NAME (a persuaded model
 //        cannot run `rm -rf` because it cannot supply a command).
 //     2. Untrusted-config scope gate (`decideCiScope`) — running a project-supplied command at
-//        all requires `--allow-project-ci`, an interactive confirm, or a per-session approval
-//        latch; headless with no flag REFUSES (fail closed). This is the real defense against a
-//        malicious cloned-repo `[ci]`.
+//        all requires `[trust] ci = "true"` (committed config), `--allow-project-ci`, an
+//        interactive confirm, or a per-session approval latch; headless with none REFUSES (fail
+//        closed). This is the real defense against a malicious cloned-repo `[ci]`.
 //     3. Output isolation — full output to scratch, capped + `<untrusted_ci_output>`-wrapped in
 //        the parent's view (prompt-injection-in-stdout hygiene).
 //   A true OS/tool sandbox around the check command is explicitly OUT OF SCOPE.
@@ -86,16 +86,18 @@ export type CiScope = "run" | "confirm" | "refuse";
 
 /**
  * Decide how to treat project-supplied CI. Pure (the load-bearing safety boundary):
- *   - flag or per-session approval ⇒ "run"
+ *   - `[trust] ci` (committed config), `--allow-project-ci`, or a per-session latch ⇒ "run"
+ *     (trust runs on EVERY surface, overriding the headless refuse below)
  *   - else with UI ⇒ "confirm" (ask the human)
- *   - else (headless, no flag) ⇒ "refuse" (fail closed)
+ *   - else (headless, no trust/flag) ⇒ "refuse" (fail closed)
  */
 export function decideCiScope(args: {
   hasUI: boolean;
   allowFlag: boolean;
   approved: boolean;
+  trusted: boolean;
 }): CiScope {
-  if (args.allowFlag || args.approved) return "run";
+  if (args.trusted || args.allowFlag || args.approved) return "run";
   return args.hasUI ? "confirm" : "refuse";
 }
 
@@ -300,7 +302,8 @@ async function runCiImpl(
   latch: ApprovalLatch,
   deps: RunCiDeps = {},
 ): Promise<CiResult> {
-  const checks: CiChecks = loadPerkConfig(ctx.cwd).ci ?? {};
+  const cfg = loadPerkConfig(ctx.cwd);
+  const checks: CiChecks = cfg.ci ?? {};
   const wrap = (report: CiReport): CiResult => ({
     content: [{ type: "text", text: renderCiProse(report) }],
     details: report,
@@ -314,7 +317,8 @@ async function runCiImpl(
   if (Object.keys(checks).length > 0) {
     const decideScope = deps.decideScope ?? decideCiScope;
     const allowFlag = pi.getFlag("allow-project-ci") === true;
-    const scope = decideScope({ hasUI: ctx.hasUI, allowFlag, approved: latch.approved });
+    const trusted = cfg.trust.ci === true;
+    const scope = decideScope({ hasUI: ctx.hasUI, allowFlag, approved: latch.approved, trusted });
 
     if (scope === "refuse") {
       const message =
