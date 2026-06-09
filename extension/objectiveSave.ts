@@ -13,7 +13,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import type { ToolGating } from "./toolGating.ts";
-import { type BranchEntry, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** The structured `details` surface (doubles as branch-safe persisted state). */
 export interface ObjectiveSaveDetails {
@@ -68,7 +68,7 @@ export async function saveObjective(
     return fail("roadmap must be a JSON array of nodes", "invalid_input");
   }
 
-  const branch = (): BranchEntry[] => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+  const branch = () => branchOf(ctx);
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
   const perkBin = process.env.PERK_BIN ?? "perk";
 

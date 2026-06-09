@@ -27,6 +27,22 @@ export interface BranchEntry {
   data?: Record<string, unknown>;
 }
 
+/** The minimal read-only session surface the branch accessor needs. */
+export interface BranchSource {
+  sessionManager: { getBranch(): unknown[] };
+}
+
+/**
+ * The one typed seam over `sessionManager.getBranch()`. Centralizes the single unavoidable
+ * assertion from the SDK's `SessionEntry[]` (surfaced here as `unknown[]`) to perk's structural
+ * `BranchEntry[]`. The SDK union (whose `CustomEntry.data` is `unknown`) is not assignable to the
+ * structural slice, so the assertion is irreducible — do not "fix" it into a type error.
+ * `ExtensionContext` and the test harness `session` both satisfy `BranchSource`.
+ */
+export function branchOf(source: BranchSource): BranchEntry[] {
+  return source.sessionManager.getBranch() as BranchEntry[];
+}
+
 /**
  * Per-field last-write-wins over the `perk:workflow-state` custom entries on a branch.
  * Non-perk entries are ignored; `undefined` fields never clobber (but explicit `null` does).

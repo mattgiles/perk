@@ -17,7 +17,7 @@ import {
   type PlanRef,
   readPlanRef,
 } from "./cache.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 export interface LearnDetails {
   ok: boolean;
@@ -46,7 +46,7 @@ interface LearnCaptureJson {
 /** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
 function activeRunId(ctx: ExtensionContext): string {
   try {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     const runId = rebuildWorkflowState(branch).run_id;
     if (typeof runId === "string" && runId.length > 0) return runId;
   } catch {
@@ -183,7 +183,7 @@ function activePlanRef(ctx: ExtensionContext): PlanRef | null {
   const fromWorktree = readPlanRef(ctx.cwd);
   if (fromWorktree) return fromWorktree;
   try {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     return (rebuildWorkflowState(branch).active_plan_ref as PlanRef | null) ?? null;
   } catch {
     return null;

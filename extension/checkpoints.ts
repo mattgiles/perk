@@ -28,7 +28,7 @@ import { readHandoff, readPlanBody } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
 import type { BranchEntry } from "./workflowState.ts";
-import { rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The dedicated checkpoint session entry type (D3). */
 export const CHECKPOINT_TYPE = "perk:checkpoint";
@@ -268,10 +268,6 @@ function renderStatus(
     "perk-checkpoints",
     state.steps.map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`),
   );
-}
-
-function branchOf(ctx: ExtensionContext): BranchEntry[] {
-  return ctx.sessionManager.getBranch() as unknown as BranchEntry[];
 }
 
 /**

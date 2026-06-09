@@ -36,7 +36,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type PlanRef, workflowDir, writePlanRef } from "../cache.ts";
 import perk from "../index.ts";
-import { type BranchEntry, rebuildWorkflowState, type WorkflowState } from "../workflowState.ts";
+import {
+  type BranchEntry,
+  branchOf,
+  rebuildWorkflowState,
+  type WorkflowState,
+} from "../workflowState.ts";
 
 /**
  * Pi's run-mode union. Mirrors `@earendil-works/pi-coding-agent`'s `ExtensionMode` (which the
@@ -434,8 +439,7 @@ export async function loadPerkSession(opts: {
   });
   await tick();
 
-  const branchEntries = (): BranchEntry[] =>
-    session.sessionManager.getBranch() as unknown as BranchEntry[];
+  const branchEntries = (): BranchEntry[] => branchOf(session);
 
   return {
     session,

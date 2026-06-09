@@ -21,7 +21,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch, readPlanRef } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
 const NODE_STATUSES = ["pending", "planning", "in_progress", "done", "blocked", "skipped"] as const;
@@ -206,7 +206,7 @@ interface ObjectiveReconcileJson {
 /** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
 function reconcileRunId(ctx: ExtensionContext): string {
   try {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     const runId = rebuildWorkflowState(branch).run_id;
     if (typeof runId === "string" && runId.length > 0) return runId;
   } catch {
@@ -297,7 +297,7 @@ export async function reconcileObjective(
 /** Resolve the active objective number from the rebuilt workflow-state (for the warm command). */
 function activeObjective(ctx: ExtensionContext): string | null {
   try {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     return rebuildWorkflowState(branch).active_objective ?? null;
   } catch {
     return null;

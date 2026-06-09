@@ -6,6 +6,7 @@ import { test } from "node:test";
 import { handoffPath, type PlanRef, workflowDir } from "./cache.ts";
 import {
   type BranchEntry,
+  branchOf,
   decideClaim,
   deriveForkRunId,
   planRefsEqual,
@@ -29,6 +30,14 @@ function plantHandoff(runId: string, stage?: string): string {
 function ws(data: Record<string, unknown>): BranchEntry {
   return { type: "custom", customType: WORKFLOW_STATE_TYPE, data };
 }
+
+test("branchOf: typed seam over sessionManager.getBranch", () => {
+  const entries = [ws({ run_id: "r1" })];
+  const source = { sessionManager: { getBranch: () => entries } };
+  assert.deepEqual(branchOf(source), entries);
+  // feeds rebuildWorkflowState without further casting:
+  assert.equal(rebuildWorkflowState(branchOf(source)).run_id, "r1");
+});
 
 test("planRefsEqual: identity by (provider, pr_id); null only equals null", () => {
   const ref = (provider: string, pr_id: string): PlanRef => ({

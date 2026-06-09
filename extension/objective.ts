@@ -20,7 +20,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPerkConfig } from "./config.ts";
-import { type BranchEntry, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
 export const OBJECTIVE_BUDGET_TYPE = "perk:objective-budget";
@@ -124,13 +124,13 @@ export function shouldCompact(
 
 // --- the controller -----------------------------------------------------------------------------
 
-function branchOf(ctx: ExtensionContext): ScanEntry[] {
+function scanBranchOf(ctx: ExtensionContext): ScanEntry[] {
   return ctx.sessionManager.getBranch() as unknown as ScanEntry[];
 }
 
 function activeObjective(ctx: ExtensionContext): string | null {
   try {
-    const state = rebuildWorkflowState(branchOf(ctx) as unknown as BranchEntry[]);
+    const state = rebuildWorkflowState(branchOf(ctx));
     return state.active_objective ?? null;
   } catch {
     return null;
@@ -147,7 +147,7 @@ function renderStatus(ctx: ExtensionContext): void {
       ctx.ui.setWidget("perk-objective", undefined);
       return;
     }
-    const budget = rebuildBudget(branchOf(ctx), Date.now());
+    const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
     ctx.ui.setStatus("perk-objective", `🎯 ${active} · ${formatBudgetLine(budget)}`);
     ctx.ui.setWidget("perk-objective", [
       `objective: ${active}`,
@@ -170,7 +170,7 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
   try {
     if (arg === "") {
       const active = activeObjective(ctx);
-      const budget = rebuildBudget(branchOf(ctx), Date.now());
+      const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
       const message =
         active === null
           ? "perk: no active objective. Use `/objective <id>` to activate one."
