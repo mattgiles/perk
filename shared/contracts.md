@@ -2362,3 +2362,115 @@ leftover).
 
 Error types + exits: `not_a_repo` → 2; `github_unauthed`, `runner_disabled`, `smoke_dispatch_failed`
 → 1.
+
+## §8.20 · The capstone supervisor loop (`perk objective run`, Node 3.4)
+
+The **scheduler** on top of the §8.13 dispatch-record substrate and the §8.17/§8.18 read/control
+siblings: a **deterministic, no-agentic-reasoning** supervisor that advances an active objective's
+backlog as far as is autonomously safe, then pauses at the human land gate. `perk objective run
+<NUMBER>` (alias `obj r`) is a supervisor surface (cli-vs-pi §3.2): `--json` → stdout, human text →
+stderr, stable exits (`0` ok · `1` invalid/op-failure · `2` not-a-repo), `_fail`/`UserFacingCliError`
+with a stable `error_type`.
+
+### Autonomous reach: one dispatch, then stop — and **never land**
+
+Per invocation the supervisor does **one** thing: it selects the next in-flight node and dispatches
+the correct **remote** agentic stage (`implement`/`address`), or it pauses at a draft-PR /
+awaiting-review / planning-required / completion boundary, then exits. It **never lands** — ready+merge
+stays the human/interactive `/land`, and a node reaches `done` only via that path's
+`_reconcile_objective_on_land`, which this loop merely *observes* (a `MERGED` PR ⇒
+`merged_pending_reconcile`). Landing must not route through `launch_stage`: a local stage `os.execvpe`s
+into interactive pi and never returns, which would destroy the loop.
+
+### Options
+
+- `--remote <ref>` — a normal string option (not a flag) defaulting to **`""`** (the default runner);
+  dispatch is always remote, since the supervisor never drives an agentic stage locally.
+  (`resolve_target` treats `""` as the default runner ref, not a kind.)
+- `--wait` — poll an already-in-flight run to completion (cadence below), then re-evaluate selection
+  **once**; never crosses the land gate.
+- `--dry-run` — resolve + report the *selection* decision and would-be action only: **skip** the live
+  `observe` overlay + active-run gate (stay offline-safe), and **mint/write/trigger/close nothing**.
+- `--json` — machine report to stdout (human text to stderr).
+
+### Single-pass control flow (deterministic)
+
+1. `require_repo` + `require_config`; `require_github` unless `--dry-run`.
+2. `state = github.get_objective(NUMBER)`; `None` → `_fail(objective_not_found)`.
+3. **Cumulative budget report** (always, before any action): enumerate
+   `cache.list_dispatch_records`, keep records whose `plan_ref.objective_id` canonicalizes
+   (`str(...).lstrip("#")`) to NUMBER, sum each `run_report.read_outcome` `budget`
+   (`turns`/`tokens`/`elapsed_ms`, missing ⇒ 0) → `{runs, turns, tokens, elapsed_ms}`. **Report-only:
+   no limits, no thresholds, no `budget_exhausted`.**
+4. **Active-run gate** (skipped under `--dry-run`): an objective run is in-flight when a kept record
+   has a `run_handle` and a live `observe` returns `queued`/`in_progress` (newest-first; observe
+   fail-soft → treat as not-in-flight). Not `--wait` → `awaiting_run`, exit 0. `--wait` → poll to
+   `completed` (or timeout → `awaiting_run` + `timed_out:true`, exit 0), then **re-fetch the
+   objective state + rebuild the graph** (the settled run may have advanced GitHub) and re-evaluate
+   selection once.
+5. **Selection** via `graph.classify_for_planning()` → action:
+
+   | kind | condition | action | effect |
+   |------|-----------|--------|--------|
+   | `complete` | every node terminal | `completed` | print the `(node→status→pr)` audit; unless `--dry-run`, `github.close_issue(NUMBER)` |
+   | `blocked` | every remaining node blocked | `blocked` | pause |
+   | `plannable` | a resumable node is ready | `plan_required` | emit node + remediation `perk objective-plan <NUMBER> --node <id>` (the supervisor cannot plan — `objective-plan` is `cold_remote:false`) |
+   | `in_flight` | a committed plan exists | (stage resolution ↓) | |
+
+### In-flight stage resolution (`get_plan(node.pr)` → branch on `plan_state.pr`)
+
+| `plan_state.pr` | action | dispatch? |
+|-----------------|--------|-----------|
+| `None` (no PR yet) | `dispatched` `stage:"implement"` | yes (remote) |
+| `MERGED` | `merged_pending_reconcile` | no |
+| `CLOSED` (unmerged) | `pr_closed` (needs human) | no |
+| `OPEN` + `is_draft` | `ready_for_review` | **no — never re-dispatch implement** |
+| `OPEN` + not draft, `needs_address` true | `dispatched` `stage:"address"` | yes (remote) |
+| `OPEN` + not draft, `needs_address` false | `awaiting_review` | no |
+
+A missing `node.pr` or a `None` `get_plan` falls back to `plan_required` (defensive). A draft PR means
+implement is **complete** — never re-dispatch `implement` from a draft.
+
+### The `needs_address` predicate (pure, offline-testable)
+
+`needs_address(feedback: PrFeedback) -> bool` is **True** when either any `review_thread.is_resolved is
+False`, **or** the **latest review per author** is `CHANGES_REQUESTED`. "Latest per author" = the
+`Review` with the max `submitted_at` (ISO-8601 string compare; `None` sorts oldest). A `COMMENTED`/
+`APPROVED` latest review does **not** trigger address; `discussion_comments` are never address triggers
+(conversation, not change requests).
+
+### Remote dispatch mechanics
+
+`_dispatch_stage_remote` reconstructs the node's plan-ref via `resume.reconstruct_plan_ref` (preserving
+`objective_id` so the eventual human land reconciles the node), writes it to the **repo-root**
+`cache.plan-ref` (the seam `_drive_remote_target` reads — both `objective-plan`/`run` are `worktree:
+none`, so repo-root write ↔ repo-root read agree), then drives `launch.launch_stage(..., remote=...)`
+— capturing its machine output so the supervisor emits a **single** unified payload, surfacing the
+minted `run_id`. Only `implement`/`address` (the `cold_remote:true` stages) are dispatchable here
+(`Ensure.invariant` guard; `resolve_target` is belt-and-suspenders).
+
+### `--wait` polling cadence
+
+`POLL_INTERVAL_S = 15`, `POLL_TIMEOUT_S = 600`, defined **locally** in the command module (same values
+as the §8.19 smoke, independent lifecycle). The poll helper takes an injectable `sleep` for tests. A
+timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, exit 0).
+
+### `--json` payload (stdout, stable)
+
+```jsonc
+{ "success": true, "error_type": null,
+  "objective": <NUMBER>,
+  "budget": { "runs": 0, "turns": 0, "tokens": 0, "elapsed_ms": 0 },
+  "action": "dispatched" | "ready_for_review" | "awaiting_review" | "awaiting_run"
+          | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed",
+  "node": "<id>" | null, "stage": "implement" | "address" | null,
+  "run_id": "<ULID>" | null,     // present on dispatched
+  "remediation": "<cmd>" | null, // present on plan_required
+  "closed": false,               // present on completed (+ "audit": [{node,status,pr}, …])
+  "timed_out": false,            // present on awaiting_run under --wait
+  "dry_run": false }
+```
+
+Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, `dispatch_failed`
+(propagated from `launch_stage`) → 1. Benign decision kinds (`plan_required`/`blocked`/`awaiting_*`/
+`ready_for_review`/`merged_pending_reconcile`/`pr_closed`/`completed`) are **not** errors (exit 0).
