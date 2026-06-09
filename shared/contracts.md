@@ -2405,7 +2405,9 @@ into interactive pi and never returns, which would destroy the loop.
 4. **Active-run gate** (skipped under `--dry-run`): an objective run is in-flight when a kept record
    has a `run_handle` and a live `observe` returns `queued`/`in_progress` (newest-first; observe
    fail-soft → treat as not-in-flight). Not `--wait` → `awaiting_run`, exit 0. `--wait` → poll to
-   `completed` (or timeout → `awaiting_run` + `timed_out:true`, exit 0), then re-evaluate once.
+   `completed` (or timeout → `awaiting_run` + `timed_out:true`, exit 0), then **re-fetch the
+   objective state + rebuild the graph** (the settled run may have advanced GitHub) and re-evaluate
+   selection once.
 5. **Selection** via `graph.classify_for_planning()` → action:
 
    | kind | condition | action | effect |

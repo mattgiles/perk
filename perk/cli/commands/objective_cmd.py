@@ -592,7 +592,10 @@ def _resolve_in_flight_stage(
 ) -> dict[str, Any]:
     """Resolve the action for an in-flight node by inspecting its linked plan's PR state (D7)."""
     remediation = f"perk objective-plan {number} --node {node.id}"
-    pr_number = int(str(node.pr).lstrip("#")) if node.pr else None
+    # Defensive parse: a malformed/non-numeric `node.pr` (e.g. "#abc") must not raise a raw
+    # ValueError — it falls through to the plan_required fallback below like a missing pr.
+    raw_pr = str(node.pr).lstrip("#").strip() if node.pr else ""
+    pr_number = int(raw_pr) if raw_pr.isdigit() else None
     plan_state = (
         github.get_plan(number=pr_number, repo_root=repo_root) if pr_number is not None else None
     )
@@ -678,7 +681,16 @@ def _run_impl(
             if completed is None:
                 payload.update(action="awaiting_run", run_id=record.get("run_id"), timed_out=True)
                 return payload
-            payload["budget"] = _cumulative_budget(repo_root, number)  # re-evaluate after the run
+            # Re-evaluate against FRESH state after the run settled: the just-completed run may have
+            # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the
+            # graph rather than classifying on the pre-poll snapshot.
+            payload["budget"] = _cumulative_budget(repo_root, number)
+            state = github.get_objective(number=number, repo_root=repo_root)
+            if state is None:
+                raise UserFacingCliError(
+                    f"Objective #{number} not found", error_type="objective_not_found"
+                )
+            graph = objective.build_graph(list(state.nodes))
 
     selection = graph.classify_for_planning()
     if selection.kind == "complete":

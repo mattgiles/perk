@@ -340,6 +340,46 @@ def test_active_run_with_wait_polls_then_reevaluates(monkeypatch):
     assert _payload(result)["action"] == "dispatched"
 
 
+def test_active_run_with_wait_refetches_objective_state(monkeypatch):
+    """After polling completes, selection must re-evaluate against FRESH objective state."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [_record()])
+    # in_progress (active-run gate detects in-flight) → completed (poll loop settles).
+    statuses = ["in_progress", "completed"]
+    monkeypatch.setattr(runner, "select_runner", lambda ref: _FakeRunner(statuses))
+    monkeypatch.setattr(run_report, "read_outcome", lambda root, rid: None)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    # First get_objective returns the in-flight snapshot; the post-poll re-fetch returns a state
+    # whose node has advanced to a terminal roll-up (complete) — proving a re-fetch happened.
+    states = iter([_state(_in_flight_nodes()), _state(_complete_nodes())])
+    monkeypatch.setattr(github, "get_objective", lambda **k: next(states))
+    monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [_record()])
+    monkeypatch.setattr(github, "close_issue", lambda **k: True)
+    cli_runner = CliRunner()
+    with cli_runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = cli_runner.invoke(cli, ["objective", "run", "137", "--wait", "--json"])
+    assert result.exit_code == 0
+    # Re-fetched state was complete → the supervisor audits + closes (not the stale in-flight path).
+    assert _payload(result)["action"] == "completed"
+
+
+def test_in_flight_malformed_pr_id_falls_back_to_plan_required(monkeypatch):
+    """A non-numeric `node.pr` must not raise — it degrades to plan_required (D7 fallback)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=N.DONE, depends_on=()),
+        objective.ObjectiveNode(
+            id="1.2", description="B", status=N.IN_PROGRESS, pr="#abc", depends_on=("1.1",)
+        ),
+    ]
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(nodes))
+    assert result.exit_code == 0
+    payload = _payload(result)
+    assert payload["action"] == "plan_required" and payload["node"] == "1.2"
+
+
 def test_active_run_with_wait_timeout_is_inconclusive(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [_record()])
