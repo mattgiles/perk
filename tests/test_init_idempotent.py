@@ -146,6 +146,50 @@ def test_init_provider_wiring_is_idempotent(tmp_path):
     assert before == _snapshot(tmp_path)  # a re-run with the selection in place changes nothing
 
 
+def test_init_writes_compaction_when_present(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("perk.toml").write_text(
+        "[compaction]\nenabled = false\nreserve_tokens = 8192\n", encoding="utf-8"
+    )
+    assert run_init(tmp_path, verify=False).ok
+    settings = json.loads((pi_dir / "settings.json").read_text())
+    assert settings["compaction"] == {"enabled": False, "reserveTokens": 8192}
+    # Idempotent: a second run changes nothing on disk.
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)
+
+
+def test_init_compaction_overwrites_perk_keys_preserving_others(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # An existing settings.json `compaction` with a perk-specified key (to overwrite) and an
+    # unrelated hand-added key (to preserve).
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"compaction": {"reserveTokens": 999, "customKey": 7}}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        "[compaction]\nreserve_tokens = 8192\n", encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    compaction = json.loads((pi_dir / "settings.json").read_text())["compaction"]
+    assert compaction["reserveTokens"] == 8192  # perk key overwrote
+    assert compaction["customKey"] == 7  # unrelated key preserved
+
+
+def test_init_compaction_absent_leaves_existing_untouched(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # No [compaction] in perk.toml → an existing settings.json `compaction` is never touched.
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"compaction": {"reserveTokens": 999}}, indent=2) + "\n"
+    )
+    run_init(tmp_path, verify=False)
+    compaction = json.loads((pi_dir / "settings.json").read_text())["compaction"]
+    assert compaction == {"reserveTokens": 999}  # left exactly as the user set it
+
+
 def test_init_preserves_user_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

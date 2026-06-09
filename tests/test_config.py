@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from perk.config import load_config
+from perk.config import load_committed_compaction, load_config
 from perk.init import PERK_TOML_TEMPLATE
 
 
@@ -128,3 +128,52 @@ def test_subagents_selection_ignores_non_string_values(tmp_path):
 def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
     _write(tmp_path, "perk.toml", '[subagents]\nbogus = "a/x"\n')
     assert load_config(tmp_path).subagents == {}
+
+
+# --- [compaction] committed-only read (#206) ------------------------------------------------
+
+
+def test_compaction_absent_is_empty(tmp_path):
+    assert load_committed_compaction(tmp_path) == {}
+
+
+def test_compaction_seeded_template_is_inert(tmp_path):
+    # The seeded `.pi/perk.toml` carries only a *commented* [compaction] example.
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_committed_compaction(tmp_path) == {}
+
+
+def test_compaction_parses_all_keys_with_camelcase_mapping(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        "[compaction]\nenabled = false\nreserve_tokens = 8192\nkeep_recent_tokens = 10000\n",
+    )
+    assert load_committed_compaction(tmp_path) == {
+        "enabled": False,
+        "reserveTokens": 8192,
+        "keepRecentTokens": 10000,
+    }
+
+
+def test_compaction_drops_illtyped_and_nonpositive_values(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        # `enabled` non-bool, `reserve_tokens` zero, `keep_recent_tokens` negative → all dropped.
+        '[compaction]\nenabled = "yes"\nreserve_tokens = 0\nkeep_recent_tokens = -1\n',
+    )
+    assert load_committed_compaction(tmp_path) == {}
+
+
+def test_compaction_drops_bool_token_value(tmp_path):
+    # `bool` is an `int` subclass; `reserve_tokens = true` must NOT be read as 1.
+    _write(tmp_path, "perk.toml", "[compaction]\nreserve_tokens = true\n")
+    assert load_committed_compaction(tmp_path) == {}
+
+
+def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
+    # The committed-only guarantee: perk.local.toml's [compaction] is NEVER read.
+    _write(tmp_path, "perk.toml", "[compaction]\nenabled = true\n")
+    _write(tmp_path, "perk.local.toml", "[compaction]\nenabled = false\nreserve_tokens = 999\n")
+    assert load_committed_compaction(tmp_path) == {"enabled": True}

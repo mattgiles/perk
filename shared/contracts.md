@@ -1647,6 +1647,31 @@ package-wired / orphan check — that drift is owned by the `settings-wiring` ma
 (which `doctor` already dry-runs); `_providers_check` owns only what convergence cannot repair (an
 invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 
+**`[compaction]` → `settings.json` `compaction` convergence (init-owned, #206):** a `[compaction]`
+table in `.pi/perk.toml` tunes pi's **interactive** global auto-compaction for `perk <stage>`
+sessions by converging into the committed `.pi/settings.json` `compaction` object (pi reads that
+natively at session boot). It is **Python-plane-only** — the extension never reads it (pi consumes
+`settings.json` itself), so `extension/config.ts` is untouched. Three snake_case keys map to pi's
+camelCase `settings.json` keys: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
+`keep_recent_tokens`→`keepRecentTokens`. Validation is LBYL silent-omit (mirrors `[providers]`):
+`enabled` kept only if a real `bool`; the token keys kept only if `int` (not `bool`) and `> 0`;
+ill-typed/absent keys are dropped (pi fills defaults). The convergence composes inside
+`_converge_settings` (`perk/config.py::parse_compaction_table` + `load_committed_compaction`,
+`perk/init.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
+`doctor` dry-runs/fixes it for free, **no** new check. **Committed-only read** (the deliberate
+divergence from `[providers]`' overlaid `load_config` read): `[compaction]` is read from committed
+`.pi/perk.toml` **only**, never the `perk.local.toml` overlay, so the committed `settings.json`
+stays a deterministic function of committed config (no stray per-user git diff). Per-user overrides
+belong in pi's native global `~/.pi/agent/settings.json` (pi merges it under project settings).
+**Write semantics are non-destructive write-when-present / leave-when-absent:** when `[compaction]`
+is present, its mapped keys merge over any existing `settings.json` `compaction` dict (perk keys
+win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults); when
+**absent**, `settings.json` is left untouched (perk cannot prove ownership of a bare `compaction`
+key, so removal is unsafe — removing `[compaction]` from `perk.toml` leaves a stale block to clean
+up by hand). A malformed-TOML error defers to the config check (treated as empty here, mirroring
+`_converge_provider_packages`). perk's headless worker (`compaction: { enabled: false }`) and the
+objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
+
 > **Status (Node 2.1):** ships the selection **substrate** only — `shared/providers.yaml`, the two
 > shape-only loaders + the pure resolver, the `[providers]` config-reading in both planes, the
 > two-directional `init` wiring, and the `doctor` selection cross-check. The concrete adapter shims
