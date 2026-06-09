@@ -166,6 +166,12 @@ def worktree_add(
         _run(["worktree", "add", str(path), branch], cwd=repo)
 
 
+def delete_branch(repo: Path, name: str, *, force: bool = False) -> None:
+    """Delete local branch ``name``. ``-d`` (safe: refuses an unmerged branch) unless ``force``."""
+    flag = "-D" if force else "-d"
+    _run(["branch", flag, name], cwd=repo)
+
+
 def worktree_list(repo: Path) -> list[Worktree]:
     """All worktrees of ``repo`` (parsed from ``--porcelain``)."""
     return _parse_worktrees(_run(["worktree", "list", "--porcelain"], cwd=repo))
