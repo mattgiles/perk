@@ -315,6 +315,74 @@ def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
     return checks
 
 
+def _runner_workflow_managed_check(root: Path, self_repo: bool) -> Check:
+    """The ``runner-workflow`` managed-artifact-present check (same shape as ``_managed_checks``).
+
+    Locates the ``runner-workflow`` ``ManagedConvergence`` and dry-runs it: drift ⇒ ``fail`` (the
+    runner cannot work without the managed workflow), converged ⇒ ``ok``. Wrapped so an
+    unverifiable file (``UserFacingCliError``/``OSError``) is a loud ``fail``, never a silent pass.
+    Group ``"repository"`` (mirrors ``_MANAGED_GROUP``). Kept free so ``workflow_checks`` composes
+    it without duplicating the convergence wiring.
+    """
+    mc = next(
+        (m for m in init.managed_convergences(root, self_repo) if m.name == "runner-workflow"),
+        None,
+    )
+    if mc is None:  # defensive: the convergence list always carries it (capability scope="both")
+        return Check(
+            "runner-workflow",
+            "repository",
+            "fail",
+            "runner-workflow convergence missing",
+            "no runner-workflow ManagedConvergence registered",
+            "Reinstall perk.",
+        )
+    try:
+        drift = mc.converge(False)
+    except (UserFacingCliError, OSError) as exc:
+        detail = exc.format_message() if isinstance(exc, UserFacingCliError) else str(exc)
+        return Check(
+            "runner-workflow",
+            "repository",
+            "fail",
+            "runner-workflow unverifiable",
+            detail,
+            "Fix the file, then re-run 'perk init'.",
+        )
+    if drift:
+        return Check(
+            "runner-workflow",
+            "repository",
+            "fail",
+            "runner-workflow drift",
+            "; ".join(drift),
+            "perk doctor --fix",
+        )
+    return Check("runner-workflow", "repository", "ok", "runner-workflow converged")
+
+
+def workflow_checks(root: Path, self_repo: bool, *, verify: bool = True) -> list[Check]:
+    """The workflow-focused static layer for ``perk doctor workflow`` (Node 3.3, §8.19).
+
+    Reuses the same builders as bare ``perk doctor`` (doctor's SSOT): the GitHub readiness +
+    remote-runner prereq checks (under ``verify``) ⊕ the ``runner-workflow``
+    managed-artifact-present check (always). A ``GitHubError`` while probing the runner prereqs
+    degrades to a single ``info``
+    ``runner-prereqs`` (mirrors ``_build_checks``).
+    """
+    checks: list[Check] = []
+    if verify:
+        checks.extend(_github_checks(root))
+        try:
+            checks.extend(_runner_checks(root, self_repo))
+        except GitHubError as exc:
+            checks.append(
+                Check("runner-prereqs", "runner", "info", f"runner prereqs not checked: {exc}")
+            )
+    checks.append(_runner_workflow_managed_check(root, self_repo))
+    return checks
+
+
 def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
     """The structural managed pieces, as converge dry-runs (`apply=False`); filtered by scope."""
     applicable = {cap.name for cap in capabilities.applicable(self_repo)}
