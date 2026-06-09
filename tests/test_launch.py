@@ -164,10 +164,45 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert data["plan_ref"] == _PLAN_REF
     # Bug 1 (P1.T4c): the implement launch is primed — argv carries the initial prompt.
     assert data["argv"][0] == "pi"
-    assert len(data["argv"]) == 2
-    assert "gh issue view 42 --comments" in data["argv"][1]
+    assert len(data["argv"]) == 3
+    assert "gh issue view 42 --comments" in data["argv"][-1]
+    # implement is a `worktree: create` stage, so perk auto-approves project trust for the run.
+    assert "--approve" in data["argv"]
+    assert data["argv"][1] == "--approve"
     # dry run is side-effect-free: no worktree, no handoff
     assert not (_config(tmp_path).worktree_root / "plan-42").exists()
+
+
+def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, capsys):
+    # Worktree stages auto-inject `--approve` (perk launches its own managed checkout, so project
+    # trust is implicit), but a user-passed `--no-approve` wins via pi's last-wins trust parsing.
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=["--no-approve"],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert "--approve" in data["argv"]
+    assert "--no-approve" in data["argv"]
+    assert data["argv"].index("--approve") < data["argv"].index("--no-approve")
+
+    # `worktree: none` stages run in the repo root the user trusts manually — no auto-approve.
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    data = json.loads(capsys.readouterr().out)
+    assert "--approve" not in data["argv"]
 
 
 def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
