@@ -29,7 +29,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadDefaultBindings, resolveBindings, type SkillBinding } from "./bindings.ts";
 import { loadPerkConfig } from "./config.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /**
  * The cross-plane dedup marker AND render header. MUST stay byte-identical to the Python cold
@@ -166,7 +166,7 @@ export function registerBindingDelivery(pi: ExtensionAPI): void {
   // but ONLY when no entry on the branch already carries BINDING_HEADER (the cold door's initial
   // prompt or a prior warm inject) — the cold↔warm idempotency guard.
   pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     const rendered = activeStageRender(ctx.cwd, branch);
     if (rendered === null || rendered.text === null) return;
     if (branchHasHeader(branch)) return;
@@ -189,7 +189,7 @@ export function registerBindingDelivery(pi: ExtensionAPI): void {
   // user message carrying the header — a cold launch's initial prompt legitimately carries
   // BINDING_HEADER and must survive in context.
   pi.on("context", async (event, ctx) => {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     const rendered = activeStageRender(ctx.cwd, branch);
     if (rendered !== null && rendered.text !== null) return;
     return {

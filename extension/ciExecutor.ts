@@ -31,7 +31,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { ensureRunScratch, workflowDir } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "./readOnlySession.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** A named-checks map: `name -> shell command` (the whole `[ci]` config section). */
 export type CiChecks = Record<string, string>;
@@ -309,9 +309,7 @@ async function runCiImpl(
     details: report,
   });
 
-  const runId = rebuildWorkflowState(
-    ctx.sessionManager.getBranch() as unknown as BranchEntry[],
-  ).run_id;
+  const runId = rebuildWorkflowState(branchOf(ctx)).run_id;
 
   // Scope gate only matters when there is something to run.
   if (Object.keys(checks).length > 0) {

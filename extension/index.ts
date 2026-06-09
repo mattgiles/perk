@@ -39,7 +39,7 @@ import { registerSubmit } from "./submit.ts";
 import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
-  type BranchEntry,
+  branchOf,
   decideClaim,
   planRefsEqual,
   rebuildWorkflowState,
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI) {
   const registryOk = registryStages > 0;
 
   pi.on("session_start", async (_event, ctx) => {
-    const branchEntries = () => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branchEntries = () => branchOf(ctx);
     const sessionFile = ctx.sessionManager.getSessionFile();
     const currentSessionId = sessionFile ? basename(sessionFile) : null;
 
@@ -249,7 +249,7 @@ export default function (pi: ExtensionAPI) {
 
   // Non-negotiable: rebuild on branch navigation too, or state goes stale after /tree (§8.3).
   pi.on("session_tree", async (_event, ctx) => {
-    const state = rebuildWorkflowState(ctx.sessionManager.getBranch() as unknown as BranchEntry[]);
+    const state = rebuildWorkflowState(branchOf(ctx));
     // Non-negotiable: re-sync the gate on tree navigation too (mode is per-field LWW). Fail-closed.
     try {
       gating.syncFromState(state.mode);

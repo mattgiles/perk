@@ -30,7 +30,7 @@ import { loadPerkConfig } from "./config.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { loadProviders, PERK_PLAN_PROVIDER_ID, resolveProviders } from "./providers.ts";
 import type { ToolGating } from "./toolGating.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The plan-authoring context customType (distinct from T1's `perk:mode-context`). */
 export const PLAN_CONTEXT_TYPE = "perk:plan-context";
@@ -147,7 +147,7 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
   // (the coupling break: plan-authoring context is no longer keyed off the bare read-only gate).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!gating.isActive()) return;
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     if (rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE) return;
     return {
       message: {

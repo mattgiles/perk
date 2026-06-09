@@ -11,7 +11,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ToolGating } from "./toolGating.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The registry stage id of the objective-authoring session (shared with planMode's defer check). */
 export const OBJECTIVE_AUTHOR_STAGE = "objective-author";
@@ -60,7 +60,7 @@ function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]
  */
 export function registerObjectiveAuthor(pi: ExtensionAPI, gating: ToolGating): void {
   pi.on("before_agent_start", async (_event, ctx) => {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     if (!isObjectiveAuthoring(gating, branch)) return;
     return {
       message: {
@@ -74,7 +74,7 @@ export function registerObjectiveAuthor(pi: ExtensionAPI, gating: ToolGating): v
   // Strip the stale objective-authoring marker from context once the session is no longer authoring
   // (gate off, or the stage moved on) so it never lingers — the same hygiene planMode applies.
   pi.on("context", async (event, ctx) => {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     if (isObjectiveAuthoring(gating, branch)) return;
     return {
       messages: event.messages.filter((m) => {

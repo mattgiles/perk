@@ -15,7 +15,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
-import { type BranchEntry, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 interface ThreadInput {
   thread_id: string;
@@ -64,7 +64,7 @@ interface PrResolveJson {
 /** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
 function activeRunId(ctx: ExtensionContext): string {
   try {
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     const runId = rebuildWorkflowState(branch).run_id;
     if (typeof runId === "string" && runId.length > 0) return runId;
   } catch {

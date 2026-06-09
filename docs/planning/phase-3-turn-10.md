@@ -1,54 +1,50 @@
-# Phase 3 · Turn 10 — Skip pi's project-trust prompt on worktree launches
-
-Plan: GitHub #209.
-
-## Problem
-
-Recent pi releases prompt for **project trust** on interactive startup for any cwd with trust inputs
-(`.pi/`, `AGENTS.md`, `.agents/skills`) and no saved decision in `~/.pi/agent/trust.json`. Trust is
-keyed per canonical cwd. perk launches each worktree stage by `chdir`-ing into a freshly-created
-`plan-<pr_id>` worktree (which carries the committed managed `.pi/` + `AGENTS.md`) and `execvpe`-ing
-`pi`. Each worktree path is brand-new, so pi re-prompts for trust on every `perk implement` (and
-every other worktree-stage launch).
+# Phase 3 · Turn 10 — Typed `branchOf` seam (#226, Objective #224 Node 1.1)
 
 ## Decisions
 
-1. **Scope.** Inject `--approve` only for worktree stages, gated by `stage.worktree != "none"`.
-   `worktree: none` stages (`objective-author/save/plan`, `plan`, `save`) run in `repo_root` (trusted
-   manually once) and are left untouched.
-2. **Override.** Injection is unconditional for worktree stages but inserted **before** `pi_args`, so
-   a user-supplied `--no-approve`/`-na` wins via pi's last-wins trust parsing. No config flag / env.
-3. **Honest preview.** The argv is built once before the `dry_run` branch, so the dry-run JSON `argv`
-   includes `--approve` for worktree stages too — faithful to the real exec.
+- **One typed seam, repo-wide.** Added `branchOf(source: BranchSource): BranchEntry[]` to
+  `extension/workflowState.ts` beside `BranchEntry`/`rebuildWorkflowState`. It performs the single
+  unavoidable `as BranchEntry[]` assertion over `sessionManager.getBranch()`. After this turn it is
+  the **sole** `BranchEntry` type assertion in the repo; the `getBranch() as unknown as
+  BranchEntry[]` double-cast idiom is fully retired (`grep` returns zero matches).
+- **Seam lives in `workflowState.ts`, stays SDK-import-free.** The param is a minimal structural
+  `BranchSource = { sessionManager: { getBranch(): unknown[] } }`, not the SDK `ExtensionContext`,
+  preserving the module's offline-testable, no-`@earendil-works/pi-coding-agent`-import discipline.
+  Typing `getBranch` as `unknown[]` makes the body a single `as BranchEntry[]` (no `as unknown as`).
+- **`ExtensionContext` and the harness `session` both satisfy `BranchSource`**, so production sites
+  stay `branchOf(ctx)` and tests use `branchOf(session)` / `branchOf(h.session)`.
 
-## Prior art (pi distribution evidence)
+## What got built
 
-- `dist/cli/args.js`: `--approve`/`-a` → `projectTrustOverride = true`; `--no-approve`/`-na` →
-  `false`; assigned in the arg loop (last-wins).
-- `dist/main.js`: when the override is `true`, `shouldResolveProjectTrust` is `false` and
-  `projectTrusted` resolves to `true` regardless of `appMode` — suppresses the interactive prompt
-  for this run only (no `trust.json` write).
+- `workflowState.ts`: `BranchSource` interface + `branchOf` accessor with the explanatory comment
+  about why the assertion is irreducible.
+- `workflowState.test.ts`: new `branchOf` case (returns entries; composes with
+  `rebuildWorkflowState`).
+- Deleted the two duplicate local `branchOf` helpers (`checkpoints.ts`, `lifecycleGates.ts`).
+- Migrated all production sites through the import: `address`, `learn`, `ciExecutor`, `planMode`,
+  `objectivePlan`, `objectiveAuthor`, `bindingDelivery`, `todoAdapterJuicesharp`, `planSave`,
+  `objectiveSave`, `index`. Dropped/kept the `BranchEntry` type-import per the plan's table.
+- `objective.ts`: renamed local `branchOf(ctx): ScanEntry[]` → `scanBranchOf` (its two
+  `rebuildBudget` callers updated); `activeObjective` now uses the shared `branchOf`; dropped its
+  `BranchEntry` import.
+- Test harness + `objective.test.ts` accessor casts swapped to `branchOf(...)`.
 
-## Implementation
+## Deferrals (flagged, not omitted)
 
-`perk/launch.py` `launch_stage`: the single argv construction line now prepends
-`trust_args = ["--approve"] if stage.worktree != "none" else []`. No other production changes;
-`_drive_remote_target`, `perk/run_worker.py`, and `extension/worker.ts` are untouched (the Node
-worker never goes through pi-CLI trust resolution).
+- `worker.ts` `getBranch() as never` — worker has no `ExtensionContext`/`BranchEntry` coupling; left
+  as-is.
+- `objective.ts` `scanBranchOf` (`ScanEntry[]`) — a different, richer budget-scan type, not a
+  `BranchEntry` seam; left as a separate concern.
+- `BranchEntry` literal constructors in tests and `checkpoints.test.ts`'s `as never` casts — not the
+  retired idiom; left as-is.
 
-## Tests (`tests/test_launch.py`)
+## Cross-plane
 
-- Updated `test_implement_dry_run_json_carries_worktree_and_plan_ref` for the new 3-element argv
-  (`--approve` at index 1, prompt last).
-- Added `test_worktree_stage_auto_approves_and_respects_user_no_approve`: `--approve` precedes a
-  user `--no-approve` on `implement`; `--approve` absent on the `worktree: none` `plan` stage.
+- None. Purely internal to the TypeScript extension plane; no `shared/contracts.md` amendment, no
+  Python-plane change. Behavior unchanged.
 
-## Out of scope
+## Verification
 
-- No `shared/contracts.md` amendment (local launch mechanics only; cross-plane Node-worker contract
-  unchanged). No `perk init` / `perk doctor` change.
-
-## Outcomes
-
-- Implemented exactly as planned: `trust_args` gate in `launch_stage`, the two test changes, this
-  turn doc. `just ci` green.
+- `grep -rn "as unknown as BranchEntry\[\]" extension/` → zero matches; the only `as BranchEntry[]`
+  is inside `branchOf`.
+- `just ci` green: Biome + tsc clean, `node:test` + `pytest` pass.

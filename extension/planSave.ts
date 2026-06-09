@@ -21,6 +21,7 @@ import { generatePlanTitle } from "./planTitle.ts";
 import type { ToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
+  branchOf,
   planRefsEqual,
   rebuildWorkflowState,
   WORKFLOW_STATE_TYPE,
@@ -146,7 +147,7 @@ export async function savePlan(
       ? explicit
       : ((await generatePlanTitle(ctx, plan, ctx.signal)) ?? undefined);
 
-  const branch = (): BranchEntry[] => ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+  const branch = (): BranchEntry[] => branchOf(ctx);
   // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable while
   // read-only (T1's allowlist excludes it), so reaching savePlan via the tool means the gate is
   // already off; the `/plan-save` COMMAND is allowed to run while read-only and the command handler

@@ -15,7 +15,7 @@ import {
   sumAssistantTokens,
 } from "./objective.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { BranchEntry, WorkflowState } from "./workflowState.ts";
+import { type BranchEntry, branchOf, type WorkflowState } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -114,7 +114,7 @@ test("/objective <id> sets active_objective + seeds the budget marker", async ()
   try {
     await h.runCommandHandler("objective", "obj-7");
     assert.equal(h.workflowState().active_objective, "obj-7");
-    const branch = h.session.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(h.session);
     const markers = budgetMarkers(branch);
     assert.equal(markers.length, 1);
     assert.equal((markers[0] as { data?: { objective_id?: string } }).data?.objective_id, "obj-7");
@@ -145,7 +145,7 @@ test("session_tree rebuild preserves the budget marker", async () => {
     const ids = h.entryIds();
     // navigate to the last entry — rebuild must not throw and the marker survives.
     await h.navigateTo(ids[ids.length - 1] as string);
-    const branch = h.session.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(h.session);
     assert.ok(findBudgetMarker(branch as never));
     assert.equal(h.workflowState().active_objective, "obj-9");
   } finally {

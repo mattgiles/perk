@@ -15,7 +15,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 const DIRTY_MESSAGE =
   "perk: uncommitted changes — commit or stash before switching/forking this stage.";
@@ -29,10 +29,6 @@ const HANDOFF_DIRTY_MESSAGE =
  */
 export function gateDecision(inputs: { active: boolean; dirty: boolean }): { cancel: boolean } {
   return { cancel: inputs.active && inputs.dirty };
-}
-
-function branchOf(ctx: ExtensionContext): BranchEntry[] {
-  return ctx.sessionManager.getBranch() as unknown as BranchEntry[];
 }
 
 /** True when this session is linked to a plan (a perk workflow is in progress). */

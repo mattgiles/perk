@@ -30,7 +30,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolvedTodoProviderId } from "./checkpoints.ts";
 import { JUICESHARP_TODO_PROVIDER_ID } from "./providers.ts";
-import { type BranchEntry, rebuildWorkflowState } from "./workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The juicesharp todo-adapter bridge customType (distinct from checkpoints' `perk:checkpoint`). */
 export const TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE = "perk:todo-adapter-juicesharp";
@@ -69,7 +69,7 @@ export function registerTodoAdapterJuicesharp(pi: ExtensionAPI): void {
   // provider seeds on, so the bridge never reaches planning/objective sessions (display:false).
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isJuicesharpTodoSelected(ctx.cwd)) return;
-    const branch = ctx.sessionManager.getBranch() as unknown as BranchEntry[];
+    const branch = branchOf(ctx);
     if (rebuildWorkflowState(branch).active_plan_ref == null) return;
     return {
       message: {
