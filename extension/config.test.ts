@@ -122,29 +122,42 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
   assert.equal(loadPerkConfig(cwd).planAuthoring, undefined);
 });
 
-// --- [pr-review] model (#175) ---
+// --- [subagents] selection (#196) ---
 
-test("loadPerkConfig: [pr-review] absent -> prReview undefined", () => {
+test("loadPerkConfig: [subagents] absent -> empty object", () => {
   const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "x"\n' });
-  assert.equal(loadPerkConfig(cwd).prReview, undefined);
+  assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
-test("loadPerkConfig: parses [pr-review] model", () => {
-  const cwd = repoWith({ "perk.toml": '[pr-review]\nmodel = "anthropic/claude-sonnet-4-5"\n' });
-  assert.deepEqual(loadPerkConfig(cwd).prReview, { model: "anthropic/claude-sonnet-4-5" });
-});
-
-test("loadPerkConfig: blank [pr-review] model is treated as absent", () => {
-  const cwd = repoWith({ "perk.toml": '[pr-review]\nmodel = "   "\n' });
-  assert.equal(loadPerkConfig(cwd).prReview, undefined);
-});
-
-test("loadPerkConfig: perk.local.toml [pr-review] overlays perk.toml (local wins)", () => {
+test("loadPerkConfig: parses all three [subagents] agent keys", () => {
   const cwd = repoWith({
-    "perk.toml": '[pr-review]\nmodel = "base/model"\n',
-    "perk.local.toml": '[pr-review]\nmodel = "local/model"\n',
+    "perk.toml":
+      '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
+      'objective-explorer = "a/haiku2"\n',
   });
-  assert.equal(loadPerkConfig(cwd).prReview?.model, "local/model");
+  assert.deepEqual(loadPerkConfig(cwd).subagents, {
+    "pr-reviewer": "a/sonnet",
+    "review-classifier": "a/haiku",
+    "objective-explorer": "a/haiku2",
+  });
+});
+
+test("loadPerkConfig: blank [subagents] value is treated as absent", () => {
+  const cwd = repoWith({ "perk.toml": '[subagents]\npr-reviewer = "   "\n' });
+  assert.deepEqual(loadPerkConfig(cwd).subagents, {});
+});
+
+test("loadPerkConfig: unknown [subagents] agent key is ignored", () => {
+  const cwd = repoWith({ "perk.toml": '[subagents]\nbogus = "a/x"\n' });
+  assert.deepEqual(loadPerkConfig(cwd).subagents, {});
+});
+
+test("loadPerkConfig: perk.local.toml [subagents] overlays perk.toml (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[subagents]\npr-reviewer = "base/model"\n',
+    "perk.local.toml": '[subagents]\npr-reviewer = "local/model"\n',
+  });
+  assert.equal(loadPerkConfig(cwd).subagents["pr-reviewer"], "local/model");
 });
 
 // --- [providers] selection (Node 2.1) ---

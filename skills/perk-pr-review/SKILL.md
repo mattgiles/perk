@@ -37,10 +37,11 @@ text, and the plan — exactly what a human reviewer would.
 
 ## Configuring the review model
 
-The reviewer model is set by `[pr-review] model` in `.pi/perk.toml` (overlaid by the gitignored
-`.pi/perk.local.toml` for a per-user override that doesn't dirty committed files). When set,
-`/pr-review` passes it as a per-call inline `model` override on the spawn; when unset, the
-`perk.pr-reviewer` agent's committed default model is used.
+The reviewer model is set by `[subagents] pr-reviewer` in `.pi/perk.toml` (overlaid by the
+gitignored `.pi/perk.local.toml` for a per-user override that doesn't dirty committed files). When
+set, `/pr-review` passes it as a per-call inline `model` override on the spawn; when unset, the
+`perk.pr-reviewer` agent's committed default model is used. (`[subagents]` is the unified,
+agent-keyed table that also configures `review-classifier` and `objective-explorer`.)
 
 > Note: `subagents.agentOverrides` does **not** reach project agents (it applies only to builtin
 > agents), so the inline per-call override — not an override map — is the configuration mechanism.

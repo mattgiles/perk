@@ -475,6 +475,21 @@ test("initialPromptFor: address output carries the cross-plane invariant substri
   for (const s of ADDRESS_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
 });
 
+// The review-classifier model clause (#196) — the parity literal shared with
+// tests/test_worker_prompt_parity.py (`_address_prompt(_PLAN_REF, "test/model")`).
+const ADDRESS_MODEL_CLAUSE =
+  ', passing `model: "test/model"` on that call (the configured [subagents] review-classifier model)';
+
+test("initialPromptFor: address injects the classifier model clause when configured", () => {
+  const prompt = initialPromptFor("address", samplePlanRef, "test/model");
+  assert.ok(prompt?.includes(ADDRESS_MODEL_CLAUSE), "missing the configured model clause");
+});
+
+test("initialPromptFor: address omits the model clause when unconfigured", () => {
+  const prompt = initialPromptFor("address", samplePlanRef);
+  assert.doesNotMatch(prompt ?? "", /passing `model:/);
+});
+
 test("initialPromptFor: a non-github implement plan uses the open-url read command", () => {
   const ref: PlanRef = { ...samplePlanRef, provider: "gitlab", url: "https://gl/x" };
   const prompt = initialPromptFor("implement", ref);

@@ -24,10 +24,11 @@ class Config:
 
     worktree_root: Path
     user_bindings: list[Binding] = field(default_factory=list)
-    # The `[pr-review] model` selection (#175) — the configurable `/pr-review` reviewer model, or
-    # None when unset (the `perk.pr-reviewer` agent's frontmatter model is then the default). Read
-    # for forward parity; today only the TS warm path consumes it (no cold `/pr-review` door yet).
-    pr_review_model: str | None = None
+    # The agent-keyed `[subagents]` table (#196) — a per-agent model override for each perk-owned
+    # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`), injected as a
+    # per-call inline `model` override on that agent's spawn. Absent keys mean "use the agent's
+    # frontmatter default". Only known agent keys with string values are kept (mirrors `providers`).
+    subagents: dict[str, str] = field(default_factory=dict)
     # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
     # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
     # `user_bindings` is raw and `resolve_bindings` resolves it).
@@ -67,15 +68,27 @@ def load_config(repo_root: Path) -> Config:
         worktree_root=root,
         user_bindings=parse_user_bindings(merged.get("bindings")),
         providers=_parse_providers_selection(merged.get("providers")),
-        pr_review_model=_parse_pr_review_model(merged.get("pr-review")),
+        subagents=_parse_subagents_selection(merged.get("subagents")),
     )
 
 
-def _parse_pr_review_model(raw: Any) -> str | None:
-    """Read `[pr-review] model` (a string) from the merged config; ``None`` if absent/ill-typed."""
-    if isinstance(raw, dict) and isinstance(model := raw.get("model"), str) and model.strip():
-        return model
-    return None
+# The perk-owned project agents configurable via the `[subagents]` table.
+_SUBAGENT_KEYS = ("pr-reviewer", "review-classifier", "objective-explorer")
+
+
+def _parse_subagents_selection(raw: Any) -> dict[str, str]:
+    """Read the agent-keyed `[subagents]` table into a `{agent: model}` selection.
+
+    A non-dict table (absent) yields ``{}``; only the known agent keys whose values are non-blank
+    strings are kept (an absent/ill-typed/unknown key is omitted, so the spawn falls back to the
+    agent's frontmatter default silently for it — mirrors ``_parse_providers_selection``).
+    """
+    table = raw if isinstance(raw, dict) else {}
+    return {
+        key: value
+        for key in _SUBAGENT_KEYS
+        if isinstance(value := table.get(key), str) and value.strip()
+    }
 
 
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:

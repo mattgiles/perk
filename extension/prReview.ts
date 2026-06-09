@@ -9,9 +9,10 @@
 // shared/contracts.md §8.3.
 //
 // No model tool here — the model uses the borrowed `pi-subagents` `subagent` tool to spawn the
-// reviewer. The review model is configurable via `[pr-review] model` in `.pi/perk.toml`; because
-// `subagents.agentOverrides` does NOT reach project agents, the warm command injects that model as
-// a per-call inline `model` override on the spawn (the agent's frontmatter model is the default).
+// reviewer. The review model is configurable via `[subagents] pr-reviewer` in `.pi/perk.toml`;
+// because `subagents.agentOverrides` does NOT reach project agents, the warm command injects that
+// model as a per-call inline `model` override on the spawn (the agent's frontmatter model is the
+// default).
 //
 // Headless-safe: rich UI is guarded by `ctx.hasUI`; without a UI it logs to stderr.
 
@@ -27,7 +28,7 @@ import { loadPerkConfig } from "./config.ts";
  */
 export function prReviewGuidance(model?: string): string {
   const modelClause = model
-    ? `, and pass \`model: "${model}"\` on that call (the configured [pr-review] model)`
+    ? `, and pass \`model: "${model}"\` on that call (the configured [subagents] pr-reviewer model)`
     : " (no model override — the agent's default model is used)";
   return [
     "perk /pr-review — automated code review of the active PR in a FRESH, isolated session.",
@@ -47,9 +48,9 @@ export function registerPrReview(pi: ExtensionAPI): void {
   pi.registerCommand("pr-review", {
     description:
       "Review the active PR in a fresh, isolated subagent that posts its review to the PR. " +
-      "The review model is configurable via [pr-review] model in .pi/perk.toml.",
+      "The review model is configurable via [subagents] pr-reviewer in .pi/perk.toml.",
     handler: async (_args, ctx: ExtensionContext) => {
-      const model = loadPerkConfig(ctx.cwd).prReview?.model;
+      const model = loadPerkConfig(ctx.cwd).subagents["pr-reviewer"];
       const guidance = prReviewGuidance(model);
       if (ctx.hasUI) {
         ctx.ui.notify("perk: /pr-review (fresh-context review → posts to the PR)", "info");

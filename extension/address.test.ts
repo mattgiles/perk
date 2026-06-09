@@ -4,7 +4,18 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { addressGuidance } from "./address.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
+
+test("addressGuidance injects the configured review-classifier model when set", () => {
+  const text = addressGuidance(false, "x/y");
+  assert.match(text, /model: "x\/y"/);
+  assert.match(text, /\[subagents\] review-classifier model/);
+});
+
+test("addressGuidance omits the model override when unset", () => {
+  assert.doesNotMatch(addressGuidance(false), /model: "/);
+});
 
 const RESOLVE_JSON = JSON.stringify({
   success: true,

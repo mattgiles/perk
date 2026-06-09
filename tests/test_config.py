@@ -91,3 +91,40 @@ def test_providers_selection_ignores_non_string_values(tmp_path):
     _write(tmp_path, "perk.toml", '[providers]\nplan = "perk-plan"\ntodo = 3\n')
     # Non-string `todo` is dropped (the resolver falls back to the seam default for it).
     assert load_config(tmp_path).providers == {"plan": "perk-plan"}
+
+
+# --- [subagents] selection (#196) -----------------------------------------------------------
+
+
+def test_subagents_selection_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).subagents == {}
+
+
+def test_subagents_selection_parsed(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n'
+        'objective-explorer = "a/haiku2"\n',
+    )
+    assert load_config(tmp_path).subagents == {
+        "pr-reviewer": "a/sonnet",
+        "review-classifier": "a/haiku",
+        "objective-explorer": "a/haiku2",
+    }
+
+
+def test_subagents_selection_local_overlay_wins(tmp_path):
+    _write(tmp_path, "perk.toml", '[subagents]\npr-reviewer = "base/model"\n')
+    _write(tmp_path, "perk.local.toml", '[subagents]\npr-reviewer = "local/model"\n')
+    assert load_config(tmp_path).subagents == {"pr-reviewer": "local/model"}
+
+
+def test_subagents_selection_ignores_non_string_values(tmp_path):
+    _write(tmp_path, "perk.toml", '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = 3\n')
+    assert load_config(tmp_path).subagents == {"pr-reviewer": "a/sonnet"}
+
+
+def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
+    _write(tmp_path, "perk.toml", '[subagents]\nbogus = "a/x"\n')
+    assert load_config(tmp_path).subagents == {}
