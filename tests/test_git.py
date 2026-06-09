@@ -28,6 +28,19 @@ def test_worktree_lifecycle(git_repo):
     assert "wt1" not in {w.path.name for w in git.worktree_list(git_repo)}
 
 
+def test_delete_branch(git_repo):
+    import pytest
+
+    subprocess.run(
+        ["git", "branch", "scratch"], cwd=git_repo, check=True, capture_output=True, text=True
+    )
+    assert "scratch" in _git(git_repo, "branch", "--format=%(refname:short)").split()
+    git.delete_branch(git_repo, "scratch")
+    assert "scratch" not in _git(git_repo, "branch", "--format=%(refname:short)").split()
+    with pytest.raises(git.GitError):
+        git.delete_branch(git_repo, "no-such-branch")
+
+
 def _git(cwd, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, check=True, capture_output=True, text=True
