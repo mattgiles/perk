@@ -14,8 +14,10 @@ lint = "just lint"
 typecheck = "just typecheck"
 test = "just test"
 
-[pr-review]
-model = "anthropic/claude-opus-4-8"
+[subagents]
+pr-reviewer = "google/gemini-3.5-flash"
+review-classifier = "google/gemini-3.5-flash"
+objective-explorer = "google/gemini-3.5-flash"
 
 # Repo-local planning addendum (#187). Appended to PLAN_AUTHORING_CONTEXT by the TS planMode
 # injection during every read-only planning session (plan, replan, objective-plan) — it coexists
