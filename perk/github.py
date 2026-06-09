@@ -374,6 +374,33 @@ def close_and_label_consolidated(*, issue: int, repo_root: Path, dry_run: bool =
     return True
 
 
+def close_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
+    """Close an issue (PATCH ``state=closed``) — the supervisor's completion-audit auto-close (D8).
+
+    Mirrors :func:`close_and_label_consolidated`'s REST PATCH shape (minus the labelling). Unlike
+    the post-merge bookkeeping path, this is **fail-loud**: a user-invoked completion close raises
+    ``GitHubError`` on an infra failure rather than swallowing it. Idempotent: re-closing an
+    already-closed issue is success. ``dry_run`` returns ``False`` without shelling.
+    """
+    if dry_run:
+        return False
+    state_proc = _run(
+        [
+            "api",
+            f"repos/{{owner}}/{{repo}}/issues/{number}",
+            "-X",
+            "PATCH",
+            "-f",
+            "state=closed",
+        ],
+        cwd=repo_root,
+        timeout=_WRITE_TIMEOUT,
+    )
+    if state_proc.returncode != 0:
+        raise _failed(state_proc, f"failed to close issue #{number}")
+    return True
+
+
 def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
     """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches (P2.T8b).
 

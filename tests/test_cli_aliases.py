@@ -116,3 +116,12 @@ def test_root_and_subgroups_use_alias_group():
     assert isinstance(cli, AliasGroup)
     for name in ("worktree", "objective", "registry", "state"):
         assert isinstance(cli.commands[name], AliasGroup)
+
+
+def test_objective_run_and_alias_resolve():
+    """`perk objective run` and `perk obj r` resolve to the supervisor command (Node 3.4)."""
+    objective_group = cli.commands["objective"]
+    assert isinstance(objective_group, click.Group)
+    assert "run" in objective_group.commands
+    assert objective_group.commands["r"] is objective_group.commands["run"]
+    assert cli.commands["obj"] is objective_group
