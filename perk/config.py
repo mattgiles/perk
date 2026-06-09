@@ -91,6 +91,41 @@ def _parse_subagents_selection(raw: Any) -> dict[str, str]:
     }
 
 
+def parse_compaction_table(raw: Any) -> dict[str, object]:
+    """Map the raw `[compaction]` table to pi's camelCase `settings.json` `compaction` keys.
+
+    snake_case TOML → camelCase: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
+    `keep_recent_tokens`→`keepRecentTokens`. LBYL silent-omit (mirrors the providers/subagents
+    parsers): `enabled` kept only if a real `bool`; the token keys kept only if `int` and `> 0`.
+    A non-dict/absent input yields ``{}``; ill-typed/absent keys are dropped (pi fills defaults).
+    """
+    table = raw if isinstance(raw, dict) else {}
+    result: dict[str, object] = {}
+    enabled = table.get("enabled")
+    if isinstance(enabled, bool):
+        result["enabled"] = enabled
+    token_keys = (("reserve_tokens", "reserveTokens"), ("keep_recent_tokens", "keepRecentTokens"))
+    for snake, camel in token_keys:
+        value = table.get(snake)
+        # `bool` is a subclass of `int`; exclude it so `reserve_tokens = true` is not read as 1.
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            result[camel] = value
+    return result
+
+
+def load_committed_compaction(repo_root: Path) -> dict[str, object]:
+    """Read the `[compaction]` table from **committed** `.pi/perk.toml` only (no local overlay).
+
+    Deliberately bypasses ``load_config`` (and thus ``perk.local.toml``) so the committed
+    `settings.json` stays a deterministic function of committed config — per-user compaction
+    overrides belong in pi's native global `~/.pi/agent/settings.json`. A missing file yields
+    ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates (init guards it, deferring to
+    the config check — mirrors ``_converge_provider_packages``).
+    """
+    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    return parse_compaction_table(raw.get("compaction"))
+
+
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
     """Read the flat `[providers]` table into a `{plan, todo}` selection (string values only).
 

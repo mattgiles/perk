@@ -22,7 +22,12 @@ from typing import cast
 
 from perk import __version__, cache, capabilities, env, git, github, workflow_artifacts
 from perk.cli.ensure import UserFacingCliError
-from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
+from perk.config import (
+    CONFIG_FILENAME,
+    LOCAL_CONFIG_FILENAME,
+    load_committed_compaction,
+    load_config,
+)
 from perk.env import EnvCheck
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.output import user_confirm
@@ -134,6 +139,19 @@ root = ".worktrees"
 # pr-reviewer = "anthropic/claude-sonnet-4-5"
 # review-classifier = "anthropic/claude-haiku-4-5"
 # objective-explorer = "anthropic/claude-haiku-4-5"
+
+# Interactive auto-compaction — tunes pi's global compaction for `perk <stage>`
+# sessions by converging the specified keys into .pi/settings.json's `compaction`
+# object (pi reads that natively at session boot). Keys are committed-only (read
+# from THIS file, never the perk.local.toml overlay) so the committed settings.json
+# stays deterministic; per-user overrides belong in pi's global ~/.pi/agent/settings.json.
+# Editing this requires re-running `perk init` (or `perk doctor --fix`) to converge.
+# Removing this block leaves a stale settings.json `compaction` to clean up by hand.
+#
+# [compaction]
+# enabled = true            # turn pi's auto-compaction on/off
+# reserve_tokens = 16384    # tokens reserved for the response (pi default)
+# keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
@@ -383,6 +401,10 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     added.extend(provider_changes.added)
 
     settings["packages"] = packages
+    # Converge pi's interactive auto-compaction from committed `[compaction]` (composes within
+    # this same body, so it flows into the no-op short-circuit and stays inside `settings-wiring`
+    # — doctor dry-runs/fixes it for free).
+    compaction_changes = _converge_compaction(root, settings)
     new_text = json.dumps(settings, indent=2) + "\n"
     if new_text == old_text:
         return []
@@ -395,7 +417,33 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
         parts.append(f"added {', '.join(added)}")
     if provider_changes.removed:
         parts.append(f"removed {', '.join(provider_changes.removed)}")
+    parts.extend(compaction_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
+
+
+def _converge_compaction(root: Path, settings: dict[str, object]) -> list[str]:
+    """Merge committed `[compaction]` over `settings["compaction"]` (write-when-present).
+
+    Reads **committed** `.pi/perk.toml` only (no local overlay; D2). When the parsed table is
+    non-empty, its mapped keys are merged over any existing `compaction` dict (perk-specified
+    keys win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults). When
+    empty/absent, `settings` is left untouched (perk cannot prove ownership of a bare `compaction`
+    key, so removal is unsafe). A malformed-TOML error defers to the config check (treated as
+    empty here, mirroring `_converge_provider_packages`). Returns a human-readable change fragment
+    list, or `[]` when nothing was written.
+    """
+    try:
+        desired = load_committed_compaction(root)
+    except tomllib.TOMLDecodeError:
+        desired = {}
+    if not desired:
+        return []
+    existing = settings.get("compaction")
+    merged = dict(existing) if isinstance(existing, dict) else {}
+    merged.update(desired)
+    settings["compaction"] = merged
+    fragment = ", ".join(f"{key}={value}" for key, value in desired.items())
+    return [f"compaction: {fragment}"]
 
 
 @dataclass(frozen=True)

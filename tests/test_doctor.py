@@ -232,6 +232,25 @@ def test_no_silent_pass_on_unverifiable_check(git_repo):
     assert settings.status == "fail"  # un-evaluable -> fail, never a silent ok
 
 
+def test_compaction_drift_detected_and_fixed(git_repo):
+    # #206: `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
+    # free. Select a compaction policy that diverges from settings.json → drift → `--fix` repairs.
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text(
+        "[compaction]\nenabled = false\nreserve_tokens = 8192\n", encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    import json
+
+    compaction = json.loads((git_repo / ".pi" / "settings.json").read_text())["compaction"]
+    assert compaction == {"enabled": False, "reserveTokens": 8192}
+    again = run_doctor(git_repo, verify=False)  # converged → no drift
+    assert next(c for c in again.checks if c.name == "settings-wiring").status == "ok"
+
+
 def test_unreadable_managed_file_is_fail_not_crash(git_repo):
     _scaffold(git_repo)
     agents = git_repo / "AGENTS.md"
