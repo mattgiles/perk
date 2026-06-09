@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop, or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop, the deterministic perk objective run supervisor loop, or debugging a node stuck in planning.
 ---
 
 # Objective lifecycle
@@ -80,9 +80,72 @@ updating it** — unlike `plan_save`'s in-place upsert. Re-running `objective_sa
 prose/roadmap in the same run will **not** push the edits. A genuine follow-up gap (see
 `plan-save-surfaces.md` for the symmetric-write discipline this violates).
 
+## The `perk objective run` supervisor loop
+
+`perk objective run` is a **deterministic, no-agentic-reasoning** supervisor that advances the
+objective backlog **one safe step per invocation**, then pauses at the human land gate. The
+composition + testing mechanics live in `cold-door-launch.md`; the design *semantics* are here.
+
+### It never lands and never plans
+
+These are deliberate corrections against the roadmap node's "→ plan → implement → … via the runner"
+text, which was **fiction**:
+
+- **Never lands.** Landing via a local stage launch would destroy the loop — a local stage
+  `execvpe`s pi and never returns (see `cold-door-launch.md`). Landing stays the human/interactive
+  `/land`, and a node reaches `done` only via that path's `_reconcile_objective_on_land`. The loop
+  merely *observes* terminality (a MERGED PR → `merged_pending_reconcile`).
+- **Never plans.** Planning cannot be dispatched remotely (`objective-plan` is `cold_remote:false`),
+  so the supervisor emits a `plan_required` action + remediation string
+  (`perk objective-plan <N> --node <id>`) rather than authoring a non-existent remote-plan path.
+
+Frame both as the **"don't author fiction for an unbuilt path"** discipline applied to a supervisor.
+
+### PR existence is the implement-done signal
+
+A draft PR ≠ "keep implementing." Branch on `plan_state.pr`:
+
+- `None` → dispatch implement
+- OPEN + draft → `ready_for_review` and stop
+- OPEN + non-draft → `needs_address` predicate (dispatch address | `awaiting_review`)
+- MERGED → pending-reconcile
+- CLOSED → `pr_closed`
+
+### "Wait, then re-decide" must re-fetch the *whole* world it waited on
+
+Under `--wait`, after a polled run settles you must re-fetch `github.get_objective` + rebuild the
+dependency graph **before** classifying — a completed run can advance GitHub state, so classifying
+against the pre-poll snapshot is a correctness bug (review-caught). General lesson for any
+poll-then-act loop.
+
+### The `needs_address` predicate
+
+Latest-review-*per-author* tie-break via ISO-8601 string compare with `>=` (`None` sorts oldest).
+`COMMENTED`/`APPROVED` reviews and discussion comments are **never** triggers — only an unresolved
+thread or a latest-`CHANGES_REQUESTED` review.
+
+### `--dry-run` short-circuits *before* `launch_stage`
+
+The regression test asserts `launch_stage` is **not** called (no mint/write/trigger) rather than
+relying on `launch_stage`'s own dry-run preview.
+
+### Budget is report-only
+
+By resolved decision: cumulative `{runs,turns,tokens,elapsed_ms}` summed across dispatch records
+filtered by canonicalized `plan_ref.objective_id` (`str(...).lstrip("#")`). No thresholds, no
+enforcement, no `budget_exhausted`.
+
+### Defensive parse of `node.pr`
+
+Guard `node.pr` with `.isdigit()` before `int(str(node.pr).lstrip("#"))` and fall through to the
+existing `plan_required` fallback on a malformed/non-numeric id.
+
 ## Cross-references
 
 - `perk/objective.py` — `DependencyGraph` (`plannable_nodes`, `classify_for_planning`, `PlanSelection`)
+- `perk/cli/commands/objective_cmd.py` — the `perk objective run` supervisor (`needs_address`, classification)
+- `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
+- `shared/contracts.md` §8.20 — the capstone supervisor loop contract
 - `extension/objectiveAuthor.ts` + `perk` objective-author/save stages — the authoring loop
 - `docs/learned/workflow/plan-save-surfaces.md` — the node→plan link carrier + re-save discipline
 - `docs/learned/pi/context-injection.md` — the `stage`-field disambiguation of shared-mode stages
