@@ -389,7 +389,14 @@ def launch_stage(
         user_output(f"⚠ {warning}")
     if delivery.text and prompt is not None:
         prompt = f"{prompt}\n\n{delivery.text}"
-    argv = ["pi", *pi_args, *([prompt] if prompt is not None else [])]
+    # Worktree stages run in a fresh `plan-<id>` checkout whose path pi has never seen, so pi's
+    # project-trust prompt (keyed per canonical cwd) re-fires on every launch. perk always launches
+    # its OWN managed checkout, so trust is implicit — pass pi's `--approve` to trust the project
+    # for THIS run (no `~/.pi/agent/trust.json` write, so ephemeral worktrees leave no residue).
+    # Inserted BEFORE pi_args so a user-passed `--no-approve` overrides it (pi parses last-wins).
+    # `worktree: none` stages run in the repo root the user trusts manually, so they are left alone.
+    trust_args = ["--approve"] if stage.worktree != "none" else []
+    argv = ["pi", *trust_args, *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
         user_output(f"would launch stage '{stage.id}' in {wt}")
