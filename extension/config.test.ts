@@ -184,3 +184,28 @@ test("loadPerkConfig: perk.local.toml [providers] overlays perk.toml (local wins
   });
   assert.equal(loadPerkConfig(cwd).providers.plan, "tombell-plan");
 });
+
+// --- [trust] selection (#214) ---
+
+test("loadPerkConfig: [trust] absent -> empty selection", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  assert.deepEqual(loadPerkConfig(cwd).trust, {});
+});
+
+test('loadPerkConfig: parses [trust] ci = "true"', () => {
+  const cwd = repoWith({ "perk.toml": '[trust]\nci = "true"\n' });
+  assert.equal(loadPerkConfig(cwd).trust.ci, true);
+});
+
+test('loadPerkConfig: [trust] ci = "false" / blank is treated as absent', () => {
+  assert.deepEqual(loadPerkConfig(repoWith({ "perk.toml": '[trust]\nci = "false"\n' })).trust, {});
+  assert.deepEqual(loadPerkConfig(repoWith({ "perk.toml": '[trust]\nci = "  "\n' })).trust, {});
+});
+
+test("loadPerkConfig: perk.local.toml [trust] overlays perk.toml (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[trust]\nci = "false"\n',
+    "perk.local.toml": '[trust]\nci = "true"\n',
+  });
+  assert.equal(loadPerkConfig(cwd).trust.ci, true);
+});

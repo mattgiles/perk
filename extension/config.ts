@@ -49,6 +49,15 @@ export interface PerkConfig {
    * supported set is a downstream concern (the TS resolver is Node 2.2/3.1, not this node).
    */
   providers: { plan?: string; todo?: string };
+  /**
+   * The `[trust]` per-repo trust table. `trust.ci === true` (written `ci = "true"` — the subset
+   * parser reads strings only) declares the project's `[ci]` checks trusted, so the read-only CI
+   * executor (P2.T5) runs them WITHOUT a per-session confirm on every surface, including headless
+   * (it overrides the fail-closed refuse). Absent/"false" ⇒ unchanged (confirm with UI; refuse
+   * headless). Always-present object; absent keys omitted (mirror of `providers`). The table may
+   * grow further trust keys later.
+   */
+  trust: { ci?: boolean };
 }
 
 /** A nested string table: `{ section: { key: value } }` (the only shape perk reads today). */
@@ -207,6 +216,7 @@ export function loadPerkConfig(cwd: string): PerkConfig {
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
     providers: parseProvidersSelection(merged.tables.providers),
+    trust: parseTrustSelection(merged.tables.trust),
   };
 }
 
@@ -226,6 +236,14 @@ function parseSubagentsSelection(
     const value = table?.[key];
     if (typeof value === "string" && value.trim()) selection[key] = value;
   }
+  return selection;
+}
+
+/** Read the `[trust]` table into a `{ci?}` selection. `ci` is true only for the string "true". */
+function parseTrustSelection(table: Record<string, string> | undefined): { ci?: boolean } {
+  const selection: { ci?: boolean } = {};
+  if (typeof table?.ci === "string" && table.ci.trim().toLowerCase() === "true")
+    selection.ci = true;
   return selection;
 }
 

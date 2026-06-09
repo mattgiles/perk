@@ -28,10 +28,33 @@ function fakeExec(map: Record<string, { code: number; output: string }>): CiExec
 // --- decideCiScope matrix ---------------------------------------------------------------
 
 test("decideCiScope: flag → run; approved → run; UI+no-flag → confirm; headless+no-flag → refuse", () => {
-  assert.equal(decideCiScope({ hasUI: false, allowFlag: true, approved: false }), "run");
-  assert.equal(decideCiScope({ hasUI: false, allowFlag: false, approved: true }), "run");
-  assert.equal(decideCiScope({ hasUI: true, allowFlag: false, approved: false }), "confirm");
-  assert.equal(decideCiScope({ hasUI: false, allowFlag: false, approved: false }), "refuse");
+  assert.equal(
+    decideCiScope({ hasUI: false, allowFlag: true, approved: false, trusted: false }),
+    "run",
+  );
+  assert.equal(
+    decideCiScope({ hasUI: false, allowFlag: false, approved: true, trusted: false }),
+    "run",
+  );
+  assert.equal(
+    decideCiScope({ hasUI: true, allowFlag: false, approved: false, trusted: false }),
+    "confirm",
+  );
+  assert.equal(
+    decideCiScope({ hasUI: false, allowFlag: false, approved: false, trusted: false }),
+    "refuse",
+  );
+});
+
+test("decideCiScope: trusted → run on every surface (headless + UI), overriding the refuse", () => {
+  assert.equal(
+    decideCiScope({ hasUI: false, allowFlag: false, approved: false, trusted: true }),
+    "run",
+  );
+  assert.equal(
+    decideCiScope({ hasUI: true, allowFlag: false, approved: false, trusted: true }),
+    "run",
+  );
 });
 
 // --- runCiChecks: empty / unknown / run-all --------------------------------------------
@@ -223,6 +246,30 @@ test("harness: run_ci with a configured [ci] runs it (flag-trusted, deterministi
     const result = await h.invokeTool("run_ci", {});
     const details = result.details as { ok: boolean; passed: boolean; checks: { name: string }[] };
     assert.equal(details.ok, true);
+    assert.equal(details.passed, true);
+    assert.equal(details.checks[0]?.name, "ok");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("harness: headless run_ci with [trust] ci runs it (trust applies everywhere)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "perk.toml"),
+    '[ci]\nok = "true"\n\n[trust]\nci = "true"\n',
+    "utf8",
+  );
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
+  try {
+    const result = await h.invokeTool("run_ci", {});
+    const details = result.details as {
+      refused?: boolean;
+      passed: boolean;
+      checks: { name: string }[];
+    };
+    assert.notEqual(details.refused, true);
     assert.equal(details.passed, true);
     assert.equal(details.checks[0]?.name, "ok");
   } finally {
