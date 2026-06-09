@@ -42,7 +42,7 @@ module** — shape + defaults locked, zero runtime behavior, resolver/delivery d
 node. Verify the seam is unconsumed with a grep before submitting (it's part of the plan's
 verification). Node 1.1 of the bindings work did exactly this.
 
-## Prose-contract maintenance — do it the same turn
+## Prose-contract maintenance & objective hygiene — do it the same turn
 
 A new parsed contract requires three doc edits **in the same turn**: a new `shared/contracts.md`
 §8.x section (vocabulary + model + shipped-set table + a **Status (Node N)** deferral note), the
@@ -52,12 +52,19 @@ corrected in two places — grep for such count-prose. More generally: **any imp
 changes cross-plane behavior amends `shared/contracts.md` in the same turn.**
 
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
-already taken (provider selection), so the headless worker contract landed as **§8.11**. **Grep the
-existing `## §8.` headings before assigning a section number** — do not trust a plan's pre-assigned
-section id. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` — ship in the npm
-tarball automatically via the `files` glob, and a flat `extension/` layout stays covered by
-`node --test extension/*.test.ts` / `biome check extension` / `tsc` with **no justfile change** —
+already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the
+existing `## §8.` headings in `shared/contracts.md` before assigning a section number** — do not trust
+a plan's pre-assigned section id. (Related: `extension/*.ts` modules — minus `*.test.ts`/`testing/` —
+ship in the npm tarball automatically via the `files` glob, and a flat `extension/` layout stays covered
+by `node --test extension/*.test.ts` / `biome check extension` / `tsc` with **no justfile change** —
 reinforcing the "bundling is automatic" theme above.)
+
+### Post-merge objective roadmap reconciliation
+
+When a PR lands, any objective roadmap prose or node descriptions can drift from what was actually built.
+You must immediately reconcile the objective's Reconcilable prose region and node descriptions post-merge
+(using `reconcile_objective` and `objective_node` tools) to ensure the active roadmap accurately reflects
+the implemented reality.
 
 ## Adding a registry stage ripples into both planes + hardcoded tests
 

@@ -51,6 +51,8 @@ This is the easy mistake the contract (`§8.13`) calls out explicitly:
 - the GitHub Actions **numeric run id** is a *separate* runner-side handle, stored as
   `RunHandle.run_ref`.
 
+Additionally, reconfirm that **`plan_ref.pr_id` is the plan's GitHub issue ID (the plan issue number)**, *not* the pull request number. The actual PR is derived when needed by calling `github.get_plan(...)` with the issue ID.
+
 ## The pinned `workflow_dispatch` contract
 
 The dispatch contract is pinned so the verify-by-discovery poll works:
@@ -93,6 +95,32 @@ A runner-level exhaustion test would therefore sleep for real (~minutes). The di
 test poll/backoff + exhaustion at the **github-gateway level** (with an injected no-op `sleep`), and
 test the runner's `GitHubError→RunnerError` wrapping by **monkeypatching the gateway call to raise**.
 Don't try to exercise exhaustion through the runner.
+
+## Smoke-test short-circuit pattern
+
+To enable universal, zero-spend GHA smoke testing of workflows, introduce an additive `smoke` boolean input inside `workflow_dispatch`. When `smoke` is set to true, the workflow should immediately exit successfully (a fast short-circuit) without spinning up heavy runner jobs or committing real resources. This allows verifying GHA dispatch wiring, API credentials, and input contract integrity instantly and safely.
+
+## Runner-control seam shape
+
+The supervisor controls (such as `cancel` and `retry`/`rerun` commands) operate via a strict translation pipeline:
+1. Resolve the `run_id` (ULID) from command arguments.
+2. Read the local dispatch record from `scratch/runs/<run_id>/dispatch.json`.
+3. Reconstruct the `RunHandle` (repopulating the GHA numeric run reference if applicable).
+4. Dispatch the action to the resolved runner instance via `select_runner(record["runner"])`.
+
+### Rerun reuse
+
+When retrying/rerunning a remote execution, the supervisor reuses the existing GHA run ID by invoking `gh run rerun [--failed]` against the runner reference. It does not generate a new local ULID or mutate local dispatch records, ensuring history and tracking remain linked to the single canonical dispatch record.
+
+## Fail-soft orchestrators & subprocess test trap
+
+While event-stream reporting components are called unguarded, their internal reporting logic must be fully guarded (`try/except Exception: log + swallow`) to ensure failures in the telemetry/reporting layer never crash the primary execution loop.
+
+**Subprocess Monkeypatching Test Trap:** When writing unit tests for these orchestrators, be extremely careful with subprocess capturing-fakes in parent test suites. Stub the reporting collaborator directly at its module-function seam (e.g., mocking the high-level python function that interfaces with `gh`) rather than letting the code make real or mock-subprocess shell out. Otherwise, internal `gh` calls can bypass or clobber the parent test suite's capture-fakes, resulting in leaky and brittle test runs.
+
+## Local records truth with fail-soft overlays
+
+Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the absolute source of truth for supervisor read commands (such as `run list`). Any external calls to GHA, PR, or issue APIs are treated purely as best-effort overlays. Wrap all external API fetches in fail-soft `try` blocks that log warnings but never raise exceptions or alter command exit codes when network or API limits are hit.
 
 ## CI execution specifics (Node 2.2)
 

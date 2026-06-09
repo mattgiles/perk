@@ -11,6 +11,9 @@ read_when: You are adding a managed piece (so a doctor check), adding a new tran
   `perk/init.py` (`GITIGNORE_BODY`, `converge()`).
 - **`perk doctor --fix` repairs legacy oddities**: one-off fixes for things `init` can't undo or
   that stem from historical inconsistencies. Maps to `perk/doctor.py` (`_MIGRATIONS`).
+- **`doctor` is the diagnostic pre-flight layer**: It utilizes report-only free functions
+  (non-converging) inside `verify:` blocks. While `init` actively manages forward on-disk files,
+  `doctor` provides diagnostic gating without mutating state (unless `--fix` is explicitly run).
 
 Keep `init` a clean forward path — never a pile of version branches. New desired state goes into
 `init`'s `converge()`; one-off/legacy repairs go into `doctor`'s `_MIGRATIONS`.
@@ -114,7 +117,29 @@ only in `--json` and the exit code.
 
 This is distinct from `perk/doctor.py`'s `_MANAGED_GROUP` (which only *assigns* a managed
 convergence's group name, falling back to `"repository"`); assigning a group there does **not** make
-it render unless that group is also in `doctor_cmd._GROUP_ORDER`.
+it render unless that group is also in `doctor_cmd._GROUP_ORDER`. Any new doctor groups will remain
+completely invisible in the condensed human text unless explicitly added here.
+
+## Managed template reconvergence
+
+When you edit managed full-file templates in the codebase (for example, `PERK_RUN_WORKFLOW` in
+`perk/workflow_artifacts.py`), you must immediately trigger self-repo copy reconvergence (such as
+updating `.github/workflows/perk-run.yml` in perk's own repo) in the same turn. Run
+`perk doctor --fix` or `perk init` to apply the updated template to the self-repo, and commit the
+converged changes together with the template edits.
+
+## Click bottom-of-file imports
+
+To avoid circular imports when registering Click command subgroups, place the subgroup registration
+imports at the bottom of the parent group file, strictly *after* the parent group object (`cli` or
+`perk_group`) has been fully defined. This ensures the parent group is available in the module
+namespace when child commands attempt to import and register themselves onto it.
+
+### `register_with_aliases` single-command constraint
+
+The `register_with_aliases` helper in `perk/cli/alias.py` is strictly designed for single-command
+registration. Attempting to pass extra positionals (e.g., trying to register multiple commands in a
+single call) will fail loudly at import time.
 
 The latent trap: "mirror bindings" instructions inherit bindings' own unrendered status. A node that
 actually wants `bindings` / `skills` / `providers` to appear in the human output must extend
