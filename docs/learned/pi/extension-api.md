@@ -54,6 +54,27 @@ message list** — not once per session. So an *unconditional* strip of an injec
 remove it even on its own injection turn (defeating delivery). Any strip of injected context must be
 **conditional** — see `pi/context-injection.md` for the inject-and-conditionally-strip pattern.
 
+## `registerTool` execute results details requirement
+
+When registering custom tools via `registerTool`, the execute result object returned by the handler MUST
+include a nested `details` object containing at least `ok: boolean` (e.g., `details: { ok: boolean, ... }`).
+This is required to satisfy the TypeScript compiler type constraints for `AgentToolResult`.
+
+## Read-only gating trap
+
+Custom planning tools must be registered/listed in `READ_ONLY_TOOLS` in order to survive the
+`setActiveTools` filter during planning phases, but they must be strictly **left out** of
+`SDK_READ_ONLY_TOOLS`. Leaving them in the former allows them to remain active when planning, while
+keeping them out of the latter ensures they aren't incorrectly classified as core SDK-restricted
+read-only tools.
+
+## Strict-mode index access in tests
+
+Under the extension's strict `tsconfig.json` compiler options, indexing into arrays or tuples is
+strictly checked. To access elements by index safely in test code, you must use optional chaining
+`?.` or the `.at()` method rather than direct unsafe brackets (`[0]`), otherwise the compiler will
+raise type-safety errors.
+
 ## Sources
 
 - `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`) — verified at

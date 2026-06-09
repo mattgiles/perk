@@ -50,6 +50,36 @@ token or composes the mutation itself.
 branches the parent's history. Pick `fresh` whenever the child's judgment must not be colored by
 parent context.
 
+## Flat agent/seam-keyed config pattern
+
+perk uses a flat selection pattern under `[subagents]` in `perk.toml` to map specific agent seams to
+selected agents, mirroring the `[providers]` layout. This config is parsed in TypeScript
+(`parseSubagentsSelection`) and in Python (`_parse_subagents_selection`) via simple dict comprehension
+(or equivalent object mapping) over a fixed, known-keys tuple. Because it maps keys directly without
+complex dynamic schemas, there is no specialized doctor validation required for these selections.
+
+## Cross-plane parity literals
+
+For shared subagent subsystems that are executed on both planes (like `review-classifier` in
+`extension/worker.ts` and `perk/launch.py`), the model and prompt clauses must remain byte-identical
+across TypeScript and Python. This parity must be strictly pinned by reciprocal tests in both test
+suites (e.g., `worker.test.ts` asserting `ADDRESS_MODEL_CLAUSE` and
+`test_worker_prompt_parity.py` asserting `_ADDRESS_MODEL_CLAUSE` against the same expected prompt
+template or model string).
+
+## Guidance testing
+
+To ensure warm-door pure guidance builders (such as `addressGuidance` or `factoryGuidance`) can be
+thoroughly verified without launching heavy live sessions, they must be exported from their
+defining modules. This makes it possible to unit-test the prompt generation logic offline in standard
+test suites.
+
+## TS TOML trailing-backslash continuation restriction
+
+The simplified TOML subset parser implemented in the TypeScript plane does not support trailing-backslash
+(`\`) multiline string continuation. When defining strings in `perk.toml` (or any other TOML file parsed
+by TS), you must use either a single unbroken line or other narrow subset escapes supported by the parser.
+
 ## Resilience for inline-anchored GitHub review submission
 
 `POST .../pulls/{n}/reviews` with `event=COMMENT` + `comments[]` can **422** when a `line` isn't in

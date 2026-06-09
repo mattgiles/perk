@@ -32,10 +32,27 @@ A `# noqa: N801` on a class name with an underscore (`ReviewComment_Inline`) dre
 flags it as unused. **Don't paper over a lint with a noqa for a rule the config doesn't run**; pick a
 clean name instead (e.g. rename `ReviewComment_Inline` → `InlineReviewComment`).
 
+Similarly, pre-emptively adding `# noqa` to a broad `except Exception:` block before any specific lint
+rules are enabled/triggered for it will cause Ruff to raise a `RUF100` (unused noqa) error, because the
+block is not actively violating any active lint rules.
+
 And tie the multi-line-collapse case to the format-on-commit trap above: the pre-commit `ruff-format`
 hook reformats (e.g. collapses a multi-line call) on commit, and `just lint` / `ruff check` won't
 catch what `ruff format` *changes* — expect a first-commit "files modified", then `git add -A` +
 re-commit.
+
+## Template string E501 (line length) rule
+
+Embedded multiline string templates (such as inline workflow YAML blocks defined inside Python files)
+are still subject to standard lint checks. If any line inside an embedded multiline string exceeds
+the 100-column limit, Ruff will raise an `E501` lint error. You must shorten or wrap lines within
+these multiline templates to stay under the column limit.
+
+## `ruff SIM105`: replace `try/except: pass` with `contextlib.suppress`
+
+Ruff rule `SIM105` flags standard `try: ... except Exception: pass` (or `except baseclass: pass`)
+patterns. Instead of a manual pass block, use `contextlib.suppress(...)` to cleanly and idiomatically
+ignore exceptions. It reduces boilerplate and makes the exception suppression intent explicit.
 
 ## Summary
 
