@@ -19,3 +19,5 @@ skills:
           name: ruff
         - source: mattpocock
           name: grill-with-docs
+        - source: mattpocock
+          name: improve-codebase-architecture

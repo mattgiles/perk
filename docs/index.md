@@ -6,7 +6,7 @@ Pi extension (the session *interior*), sequenced so that **perk bootstraps itsel
 project is in the **planning stage**; the documents below are the research and the plan, not
 shipped behavior.
 
-Read order for someone new: **ROADMAP** (the plan) → **foundation-open-questions** (the
+Read order for someone new: **ROADMAP** (the plan) → **guiding-principles/foundation-open-questions** (the
 locked decisions and their rationale) → the research inputs and pattern studies as needed.
 
 ## The plan (living documents)
@@ -14,7 +14,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 | Doc | What it is |
 |---|---|
 | [ROADMAP.md](./ROADMAP.md) | **Start here.** The phased build plan: core thesis, context strategy, implementation-craft constraints, the seven **locked foundational decisions**, Phases 0–3 with **dogfood gates**, default-package strategy, non-goals, open decisions. |
-| [foundation-open-questions.md](./foundation-open-questions.md) | The thirteen questions (Q1–Q13) that had to be settled before Phase 0, each with options, rationale, and the **recorded resolution**. This is the *why* behind the ROADMAP's "Foundational decisions (locked)" section — read it when you need the reasoning behind a decision. |
+| [foundation-open-questions.md](./guiding-principles/foundation-open-questions.md) | The thirteen questions (Q1–Q13) that had to be settled before Phase 0, each with options, rationale, and the **recorded resolution**. This is the *why* behind the ROADMAP's "Foundational decisions (locked)" section — read it when you need the reasoning behind a decision. |
 | [planning/phase-0-plan.md](./planning/phase-0-plan.md) | Phase 0 decomposed into seven landable turns (T1–T7), each with deliverables, an acceptance gate, and dependencies. The execution plan for the first phase. |
 | [phase-1-plan.md](./docs/phase-1-plan.md) | Phase 1 ("close the thin loop — own the spine") decomposed at phase granularity into six landable turns (P1.T1–T6): objective, the dogfood acceptance gate (perk ships perk), dependencies on Phase 0, and deferrals. **Authored on the perk-scaffolded substrate as the Phase-0 dogfood gate.** |
 | [phase-2-plan.md](./phase-2-plan.md) | Phase 2 ("deepen the loop — objectives, CI, review") decomposed at phase granularity into twelve landable turns (P2.T1–T12): the **tool-gating primitive** keystone (T1) and perk-owned plan mode (T2), the two **context-isolation shapes** (in-process SDK session T4 / borrowed `pi-subagents` engine T6), the **read-only CI executor** (T5), the **`/address`** review loop (T7, new stage), deepened submit/land/learn (T8), and — deferred latest — **objectives as plan factories** (T9–T11, new `objective-plan` stage) with reconciliation-after-landing; objective, the full-workflow dogfood gate, dependencies, and the Phase-3 deferral boundary. **Authored on the validated Phase-1 spine — every turn rides perk's own loop.** |
@@ -55,23 +55,23 @@ locked decisions and their rationale) → the research inputs and pattern studie
 
 | Doc | What it is |
 |---|---|
-| [RESEARCH.md](./RESEARCH.md) | The seed document: original problem analysis and the Pi-native architecture rationale the roadmap is built on. |
-| [PRIOR_ART.md](./PRIOR_ART.md) | erk distilled into findings for perk (12 sections: state tiers, plan storage, objectives, PR operations, CI/review, context injection, hooks, capability model, etc.). |
-| [erk-subagent-usage.md](./erk-subagent-usage.md) | How erk used subagents, and the governing principle perk adopts: a subagent is a **context-and-capability device, not a parallelism trick** (11 sections — route-don't-relay, double-delivery, the three never-delegate boundaries, model tiering). |
+| [RESEARCH.md](./guiding-principles/RESEARCH.md) | The seed document: original problem analysis and the Pi-native architecture rationale the roadmap is built on. |
+| [PRIOR_ART.md](./guiding-principles/PRIOR_ART.md) | erk distilled into findings for perk (12 sections: state tiers, plan storage, objectives, PR operations, CI/review, context injection, hooks, capability model, etc.). |
+| [erk-subagent-usage.md](./guiding-principles/erk-subagent-usage.md) | How erk used subagents, and the governing principle perk adopts: a subagent is a **context-and-capability device, not a parallelism trick** (11 sections — route-don't-relay, double-delivery, the three never-delegate boundaries, model tiering). |
 
 ## Pattern studies (how to build it in Pi)
 
 | Doc | What it is |
 |---|---|
-| [pi-best-practices.md](./pi-best-practices.md) | The **authoritative** patterns, from Pi's own `examples/` and the SDK (plan-mode recipe, presets, subagent spawn, handoff, goal/loop/review controllers, `createAgentSession`/`SessionManager`). The templates perk follows. |
-| [agent-stuff-best-practices.md](./agent-stuff-best-practices.md) | Corroborating real-world patterns from `mitsuhiko/agent-stuff` (packaging idiom, structural command safety, `go-to-bed.ts`/`uv.ts`, `goal.ts` budget + completion-audit). Independent confirmation of the same bets. |
+| [pi-best-practices.md](./guiding-principles/pi-best-practices.md) | The **authoritative** patterns, from Pi's own `examples/` and the SDK (plan-mode recipe, presets, subagent spawn, handoff, goal/loop/review controllers, `createAgentSession`/`SessionManager`). The templates perk follows. |
+| [agent-stuff-best-practices.md](./guiding-principles/agent-stuff-best-practices.md) | Corroborating real-world patterns from `mitsuhiko/agent-stuff` (packaging idiom, structural command safety, `go-to-bed.ts`/`uv.ts`, `goal.ts` budget + completion-audit). Independent confirmation of the same bets. |
 
 ## Architecture / design principle
 
 | Doc | What it is |
 |---|---|
-| [python-cli-guidelines.md](./python-cli-guidelines.md) | House style for perk's **Click**-based Python CLI: the three-layer command pattern, context DI, option/flag conventions, two-tier validation, `UserFacingCliError`, `\b` help text, human-vs-machine output, group structure, and testing. Distilled from the erk prior-art. |
-| [cli-vs-pi.md](./cli-vs-pi.md) | The CLI/extension separation: **boundary = the session; authority follows the actor.** The CLI owns the exterior, the extension owns the interior; they coordinate only through durable state, process launch, and a shared static schema. Defines **stage parity** (warm/cold-local/cold-remote doors from one stage registry). |
+| [python-cli-guidelines.md](./guiding-principles/python-cli-guidelines.md) | House style for perk's **Click**-based Python CLI: the three-layer command pattern, context DI, option/flag conventions, two-tier validation, `UserFacingCliError`, `\b` help text, human-vs-machine output, group structure, and testing. Distilled from the erk prior-art. |
+| [cli-vs-pi.md](./guiding-principles/cli-vs-pi.md) | The CLI/extension separation: **boundary = the session; authority follows the actor.** The CLI owns the exterior, the extension owns the interior; they coordinate only through durable state, process launch, and a shared static schema. Defines **stage parity** (warm/cold-local/cold-remote doors from one stage registry). |
 | [design/headless-worker.md](./design/headless-worker.md) | The Phase-1 autonomy spike (Objective #137 node 1.1): the gap list for the in-process SDK headless drive pathway, and the headless-worker contract — inputs, terminal-signal, outcome shape — that node 1.2 builds against. |
 
 ## Explainers (interactive HTML)
@@ -86,13 +86,13 @@ locked decisions and their rationale) → the research inputs and pattern studie
 
 ## How the documents relate
 
-- **ROADMAP § Foundational decisions (locked)** ⟷ **foundation-open-questions Q1–Q13** —
+- **ROADMAP § Foundational decisions (locked)** ⟷ **guiding-principles/foundation-open-questions Q1–Q13** —
   the ROADMAP carries the summary; the open-questions doc carries the full options/rationale
   and any qualifications. Keep them in sync (the Q5 stage-set decision, for example,
   reshaped the ROADMAP's Phase-1 spine to `plan → save → implement → submit → land → learn`).
-- **cli-vs-pi.md** feeds the ROADMAP's stage-registry decision (#3) and the CLI/extension
+- **guiding-principles/cli-vs-pi.md** feeds the ROADMAP's stage-registry decision (#3) and the CLI/extension
   split throughout.
-- **PRIOR_ART / RESEARCH** are the source findings; **pi- / agent-stuff best-practices** are
+- **guiding-principles/PRIOR_ART / guiding-principles/RESEARCH** are the source findings; **pi- / agent-stuff best-practices** are
   the build templates; the ROADMAP cites all four at the point each pattern is used.
 
 ## External references (not in this repo)
