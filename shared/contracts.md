@@ -1988,7 +1988,14 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
 - **`.github/workflows/perk-run.yml`** — the runner workflow. It honors §8.13's `workflow_dispatch`
   input contract: a `run-name` embedding **`${{ inputs.run_id }}`** (verify-by-discovery); typed
   inputs **`run_id`, `stage`, `plan`, `base`** (`base` is `required: true` with no default — the
-  dispatcher always sends it); a per-plan `concurrency` group `perk-run-${{ inputs.plan }}`. The
+  dispatcher always sends it); a per-plan `concurrency` group `perk-run-${{ inputs.plan }}`. An
+  additive **`smoke`** input (`required: false`, `default: "false"`, `type: string`) drives the
+  doctor smoke short-circuit (§8.19): when `smoke == 'true'` the `drive` job runs only `Validate
+  required secrets` + a `Smoke check` echo step and exits **success** — every subsequent step
+  (`actions/checkout`, the composite setup `uses:`, `Check out the plan branch`, `Drive the stage
+  headlessly`) carries `if: inputs.smoke != 'true'`, so a smoke run does no plan checkout, no setup,
+  no worker drive, and spends no model budget. Real dispatches omit `smoke` and inherit the
+  `"false"` default (backward-compatible). The
   `drive` job validates required secrets — it fails fast when `PERK_GH_PAT` is missing **and** when
   **both** `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are empty (pre-empting the worker's late
   `no_model`) — checks out the plan branch (`plan-<plan>`), runs the composite setup, then `perk
@@ -2289,3 +2296,69 @@ fail-soft `list`), the shared `_resolve_target` helper resolves it:
 `not_a_repo` → 2; `github_unauthed`, `run_not_found`, `run_not_dispatched`, `cancel_failed`,
 `retry_failed`, `invalid_input` → 1. The only free text in a failure payload is gh's own error
 string (wrapped via `RunnerError`) — no model-authored interpretation.
+
+---
+
+## §8.19 · `perk doctor workflow` — static prereq checks + a live CI smoke (Node 3.3)
+
+The workflow-focused diagnostic twin: a Click **subgroup** on the `doctor` group (the reserved
+`invoked_subcommand` hook §8.6 left open). A dev/CI/supervisor surface, not an agent affordance. Bare
+`perk doctor workflow` prints help; the two commands are `check` and `smoke-test [--wait]`. Both take
+`-v/--verbose` + `--json` (stable machine report on **stdout**; grouped human render to **stderr**).
+
+### `check` — the static layer (`doctor.workflow_checks`)
+
+Composes the **same builders** as bare `perk doctor` (doctor's SSOT — no duplication): `_github_checks`
+(GitHub readiness) ⊕ `_runner_checks` (the §8.16 remote-runner prereqs; a `GitHubError` degrades to a
+single `info` `runner-prereqs`) — both under `verify=True` — ⊕ the **`runner-workflow`
+managed-artifact-present** check (always): locate the `runner-workflow` `ManagedConvergence`, dry-run
+it, and emit `ok` (converged) / `fail` (drift — detail = joined drift, remediation `perk doctor
+--fix`; or unverifiable). Rendered grouped over `("github", "runner", "repository")`. Exit codes
+mirror §8.6: **1** if any `fail`, else **0** (warns allowed); **2** only on not-a-repo.
+
+### `smoke-test [--wait]` — the live proof (`perk/workflow_smoke.py`)
+
+Proves the genuinely CI-only prerequisites a static check cannot: that the managed workflow is
+**dispatchable**, the runner actually **starts a job**, and the secrets are **readable in the Actions
+context** (environment-protection rules can hide an existing secret). It does **not** exercise the
+composite setup or the worker/model drive (the consumer worker-deps step is a loud Node-2.2
+deferral, so including it would make the smoke self-repo-only) — the `smoke=true` short-circuit keeps
+it universal and ~0-cost. A future "full" smoke is out of scope.
+
+Flow: `require_repo` + `require_github`; run `workflow_checks` (rendered like `check`). **Gate (refuse
+→ exit 1):** if the `github-auth` check is not `ok` → `github_unauthed`; if
+`get_repo_variable(PERK_ENABLED) == "false"` → `runner_disabled` (the job would be skipped and
+verify-by-discovery would raise). PAT/model **warns do not block** — the live run is what verifies
+them. Then `dispatch_smoke` triggers the managed workflow **directly** (`trigger_workflow` with
+`stage=smoke`, `plan=smoke`, `smoke="true"`, ref/`base` = `default_branch` with a `"main"` fallback),
+verifying by discovery on the minted `run_id`. It writes **no** `DispatchRecord` and creates **no**
+GitHub artifacts (no branch/PR/issue), so `perk workflow run list` (§8.17) is unaffected and the smoke
+stays a pure doctor diagnostic. Without `--wait`: print the run URL, **exit 0**. With `--wait`:
+`poll_smoke` loops to `completed` or `POLL_TIMEOUT_S` (600s, every `POLL_INTERVAL_S`=15s) —
+`success` → exit 0; any other conclusion → exit 1; **timeout → `cancel_smoke` (best-effort
+self-cancel) + exit 0** (inconclusive, not unhealthy).
+
+### No `cleanup` command (deviation from erk)
+
+erk's `doctor_workflow` ships `check`/`smoke-test`/`cleanup` because its smoke opens a one-shot PR.
+perk's smoke creates nothing durable, so a `cleanup` would be fiction — only `check` + `smoke-test`
+are built; `smoke-test --wait` self-cancels its own in-flight run on a poll timeout (the sole real
+leftover).
+
+### `--json` payloads (stdout, stable)
+
+```jsonc
+// check
+{ "success": true, "healthy": true, "self_repo": false,
+  "checks": [ { "name": "runner-workflow", "group": "repository", "status": "ok", … } ],
+  "summary": { "passed": 1, "warnings": 0, "failed": 0 } }
+// smoke-test (dispatch)
+{ "success": true, "action": "smoke-test", "run_id": "01J…", "run_ref": "555",
+  "url": "https://…/actions/runs/555", "waited": false, "conclusion": null, "timed_out": false }
+// smoke-test (--wait) — "waited": true, "conclusion": "success"|…, "timed_out": bool
+// refusal / dispatch error — the shared _fail shape:
+{ "success": false, "error_type": "<type>", "message": "<reason>" }
+```
+
+Error types + exits: `not_a_repo` → 2; `github_unauthed`, `runner_disabled`, `smoke_dispatch_failed`
+→ 1.

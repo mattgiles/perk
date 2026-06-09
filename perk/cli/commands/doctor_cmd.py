@@ -130,3 +130,13 @@ def doctor(ctx: click.Context, fix: bool, verbose: bool, as_json: bool) -> None:
     else:
         _render(report, verbose=verbose)
     ctx.exit(report.exit_code)
+
+
+# Register the Phase-3 workflow subgroup onto the `doctor` group (the reserved
+# `invoked_subcommand` hook). Imported at the bottom of the file so the `doctor` group object
+# already exists; `doctor_workflow_cmd` imports this module's render helpers (no cycle).
+from perk.cli.commands.doctor_workflow_cmd import (  # noqa: E402
+    workflow_group as _doctor_workflow_group,
+)
+
+doctor.add_command(_doctor_workflow_group)

@@ -21,13 +21,16 @@ def test_workflow_honors_the_dispatch_input_contract():
     assert "${{ inputs.run_id }}" in doc["run-name"]
     # The four typed workflow_dispatch inputs.
     inputs = doc[True]["workflow_dispatch"]["inputs"]  # PyYAML parses bare `on:` as the bool True
-    assert set(inputs) == {"run_id", "stage", "plan", "base"}
+    assert set(inputs) == {"run_id", "stage", "plan", "base", "smoke"}
     assert inputs["run_id"]["required"] is True
     assert inputs["stage"]["required"] is True
     assert inputs["plan"]["required"] is True
     # `base` is required with no default — the dispatcher always sends it (B6, the tight contract).
     assert inputs["base"]["required"] is True
     assert "default" not in inputs["base"]
+    # The additive `smoke` input is optional and defaults off (Node 3.3); real dispatches omit it.
+    assert inputs["smoke"]["required"] is False
+    assert inputs["smoke"]["default"] == "false"
     # A per-plan concurrency group (mirrors erk's implement-plan-${{ … }}).
     assert doc["concurrency"]["group"] == "perk-run-${{ inputs.plan }}"
 
@@ -40,6 +43,21 @@ def test_workflow_validates_the_secret_and_invokes_run_worker():
     assert "plan-$PLAN" in wa.PERK_RUN_WORKFLOW
     # References its own composite setup action.
     assert "./.github/actions/perk-remote-setup" in wa.PERK_RUN_WORKFLOW
+
+
+def test_smoke_short_circuit_guards_the_drive_steps():
+    # Node 3.3: `smoke=true` runs only Validate + Smoke check; every later step is guarded off.
+    doc = yaml.safe_load(wa.PERK_RUN_WORKFLOW)
+    steps = doc["jobs"]["drive"]["steps"]
+    by_name = {s.get("name"): s for s in steps}
+    assert by_name["Smoke check"]["if"] == "inputs.smoke == 'true'"
+    # The checkout/setup steps are `uses:` (no name) — find them by their `uses` value.
+    checkout = next(s for s in steps if s.get("uses") == "actions/checkout@v4")
+    setup = next(s for s in steps if s.get("uses") == "./.github/actions/perk-remote-setup")
+    assert checkout["if"] == "inputs.smoke != 'true'"
+    assert setup["if"] == "inputs.smoke != 'true'"
+    assert by_name["Check out the plan branch"]["if"] == "inputs.smoke != 'true'"
+    assert by_name["Drive the stage headlessly"]["if"] == "inputs.smoke != 'true'"
 
 
 def test_composite_action_installs_perk_and_pi():

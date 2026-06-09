@@ -512,3 +512,56 @@ def test_every_required_capability_has_a_doctor_check(git_repo):
 
     applicable = {cap.name for cap in capabilities.applicable(False)}
     assert applicable <= covered  # no required capability is left unverified
+
+
+# --- workflow_checks (Node 3.3, §8.19 static layer) -----------------------------------------
+
+
+def test_workflow_checks_verify_false_only_managed(git_repo):
+    from perk import doctor
+
+    _scaffold(git_repo)
+    checks = doctor.workflow_checks(git_repo, False, verify=False)
+    assert [c.name for c in checks] == ["runner-workflow"]
+    assert checks[0].status == "ok" and checks[0].group == "repository"
+
+
+def test_workflow_checks_managed_fail_on_deleted_workflow(git_repo):
+    from perk import doctor, workflow_artifacts
+
+    _scaffold(git_repo)
+    (git_repo / workflow_artifacts.RUNNER_WORKFLOW_PATH).unlink()
+    check = doctor.workflow_checks(git_repo, False, verify=False)[0]
+    assert check.name == "runner-workflow" and check.status == "fail"
+    assert check.remediation == "perk doctor --fix"
+
+
+def test_workflow_checks_composes_github_and_runner_under_verify(monkeypatch, git_repo):
+    from perk import doctor
+
+    _scaffold(git_repo)
+    _runner_env(monkeypatch, authed=True)
+    monkeypatch.setattr(
+        github,
+        "check_repo_access",
+        lambda root: github.RepoAccess(ok=True, repo="octocat/repo", can_push=True, error=None),
+    )
+    checks = doctor.workflow_checks(git_repo, False, verify=True)
+    groups = {c.group for c in checks}
+    assert {"github", "runner", "repository"} <= groups
+    assert any(c.name == "runner-workflow" for c in checks)
+
+
+def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
+    from perk import doctor
+
+    _scaffold(git_repo)
+    monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
+
+    def boom(root, self_repo):
+        raise github.GitHubError("gh not found")
+
+    monkeypatch.setattr(doctor, "_runner_checks", boom)
+    checks = doctor.workflow_checks(git_repo, False, verify=True)
+    runner_checks = [c for c in checks if c.name == "runner-prereqs"]
+    assert len(runner_checks) == 1 and runner_checks[0].status == "info"
