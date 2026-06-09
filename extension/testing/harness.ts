@@ -22,7 +22,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { getModel } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
@@ -33,7 +34,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, workflowDir } from "../cache.ts";
+import { type PlanRef, workflowDir, writePlanRef } from "../cache.ts";
 import perk from "../index.ts";
 import { type BranchEntry, rebuildWorkflowState, type WorkflowState } from "../workflowState.ts";
 
@@ -256,6 +257,101 @@ export function fakePerk(
   );
   chmodSync(path, 0o755);
   return path;
+}
+
+/**
+ * Scaffold a temp worktree that loads the REAL `@perk/pi` extension end-to-end (Node 4.1). The
+ * worktree's `.pi/settings.json` references the live checkout by ABSOLUTE path (offline, no install),
+ * so pi reads `<repoRoot>/package.json` `pi.extensions` and binds the real extension. Plants the
+ * handoff + plan-ref + PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor
+ * `.agents/skills` walk stops here (never leaking the dev machine's ancestor dirs).
+ */
+export function scaffoldWorkerWorktree(opts: {
+  runId: string;
+  stage: "implement" | "address";
+  planRef?: PlanRef;
+}): string {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-worker-wt-"));
+  // extension/testing/harness.ts -> repo root is two levels up.
+  const repoRoot = resolve(import.meta.dirname, "..", "..");
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "settings.json"),
+    `${JSON.stringify({ packages: [repoRoot] }, null, 2)}\n`,
+    "utf8",
+  );
+  mkdirSync(join(workflowDir(cwd), "handoff"), { recursive: true });
+  writeFileSync(
+    join(workflowDir(cwd), "handoff", `${opts.runId}.json`),
+    `${JSON.stringify({ run_id: opts.runId, consumed: false, mode: "read-write", stage: opts.stage }, null, 2)}\n`,
+    "utf8",
+  );
+  writePlanRef(
+    cwd,
+    opts.planRef ?? {
+      provider: "github",
+      pr_id: "148",
+      url: "https://github.com/mattgiles/perk/issues/148",
+      labels: [],
+      objective_id: "137",
+    },
+  );
+  execFileSync("git", ["init", "-q"], { cwd, stdio: "ignore" });
+  return cwd;
+}
+
+/**
+ * Write an executable fake `perk` that ROUTES on the subcommand (`$1`): a matched route prints its
+ * JSON and exits `code` (default 0); an unmatched subcommand errors loudly (exit 2). Returns the
+ * path (for PERK_BIN). The GitHub-free seam both terminating tools shell out through (`pr-submit`,
+ * `pr-resolve-threads`). Leaves the simpler `fakePerk` untouched.
+ */
+export function fakePerkRouter(
+  cwd: string,
+  routes: Record<string, { json: unknown; code?: number }>,
+): string {
+  const path = join(cwd, "fake-perk.sh");
+  const branches = Object.entries(routes)
+    .map(([sub, { json, code }]) => {
+      const body = JSON.stringify(json).replace(/'/g, "'\\''");
+      return `  ${sub}) printf '%s' '${body}'; exit ${code ?? 0} ;;`;
+    })
+    .join("\n");
+  writeFileSync(
+    path,
+    `#!/usr/bin/env bash\ncase "$1" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $1"; exit 2 ;;\nesac\n`,
+    "utf8",
+  );
+  chmodSync(path, 0o755);
+  return path;
+}
+
+/**
+ * Register a faux pi-ai provider in the SAME `@earendil-works/pi-ai` module instance that
+ * `pi-coding-agent`'s session runtime streams through. pi-coding-agent ships its own bundled copy of
+ * pi-ai (separate `node_modules/.../pi-coding-agent/node_modules/@earendil-works/pi-ai`), so a faux
+ * provider registered via the TOP-LEVEL pi-ai import lands in a DIFFERENT api-registry than the one
+ * the runtime resolves — yielding "No API provider registered for api: faux…". This helper resolves
+ * pi-ai *as pi-coding-agent sees it* (nested copy when present, else the deduped top-level) and
+ * registers there. Async (dynamic import): callers `await fauxModelRegistration()`.
+ */
+export async function fauxModelRegistration(): Promise<{
+  getModel(): unknown;
+  setResponses(responses: unknown[]): void;
+  unregister(): void;
+}> {
+  const pcaIndex = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  // pcaIndex is <…>/pi-coding-agent/dist/index.js → the package root is one level up from dist/.
+  const pcaRoot = resolve(dirname(pcaIndex), "..");
+  const nested = join(pcaRoot, "node_modules", "@earendil-works", "pi-ai", "dist", "index.js");
+  const piAi = existsSync(nested)
+    ? ((await import(pathToFileURL(nested).href)) as typeof import("@earendil-works/pi-ai"))
+    : await import("@earendil-works/pi-ai");
+  return piAi.registerFauxProvider() as unknown as {
+    getModel(): unknown;
+    setResponses(responses: unknown[]): void;
+    unregister(): void;
+  };
 }
 
 function headfulUIContext(
