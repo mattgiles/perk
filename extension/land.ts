@@ -7,6 +7,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
 import { reconcileGuidance } from "./objectivePlan.ts";
+import { report } from "./report.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
@@ -59,9 +60,7 @@ interface PrLandJson {
  */
 export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<LandResult> {
   const reportError = (message: string): void => {
-    const full = `perk: land — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "land", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): LandResult => {
     reportError(message);

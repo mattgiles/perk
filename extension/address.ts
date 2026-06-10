@@ -15,6 +15,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
+import { report } from "./report.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 interface ThreadInput {
@@ -83,9 +84,7 @@ export async function resolveReviewThreads(
   params: ResolveParams,
 ): Promise<ResolveResult> {
   const reportError = (message: string): void => {
-    const full = `perk: address — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "address", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): ResolveResult => {
     reportError(message);

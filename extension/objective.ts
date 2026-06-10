@@ -20,6 +20,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPerkConfig } from "./config.ts";
+import { report } from "./report.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
@@ -159,9 +160,7 @@ function renderStatus(ctx: ExtensionContext): void {
 }
 
 function reportError(ctx: ExtensionContext, message: string): void {
-  const full = `perk: objective — ${message}`;
-  if (ctx.hasUI) ctx.ui.notify(full, "error");
-  else console.error(full);
+  report(ctx, "objective", "error", message);
 }
 
 /** The `/objective [<id>|clear]` handler (set/clear active_objective + seed/clear the marker). */
@@ -173,19 +172,16 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
       const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
       const message =
         active === null
-          ? "perk: no active objective. Use `/objective <id>` to activate one."
-          : `perk: active objective ${active} · ${formatBudgetLine(budget)}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
+          ? "no active objective. Use `/objective <id>` to activate one."
+          : `active objective ${active} · ${formatBudgetLine(budget)}`;
+      report(ctx, "objective", "info", message);
       return;
     }
 
     if (arg === "clear") {
       pi.appendEntry(WORKFLOW_STATE_TYPE, { active_objective: null });
       renderStatus(ctx);
-      const message = "perk: cleared the active objective.";
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
+      report(ctx, "objective", "info", "cleared the active objective.");
       return;
     }
 
@@ -196,9 +192,7 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
       activated_at: new Date().toISOString(),
     });
     renderStatus(ctx);
-    const message = `perk: activated objective ${arg} (budget tracking started).`;
-    if (ctx.hasUI) ctx.ui.notify(message, "info");
-    else console.error(message);
+    report(ctx, "objective", "info", `activated objective ${arg} (budget tracking started).`);
   } catch (error) {
     reportError(ctx, `command failed: ${error}`);
   }

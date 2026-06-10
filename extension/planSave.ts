@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
 import { generatePlanTitle } from "./planTitle.ts";
+import { report, type Severity } from "./report.ts";
 import type { ToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
@@ -124,9 +125,7 @@ export async function savePlan(
   },
 ): Promise<SaveResult> {
   const reportError = (message: string): void => {
-    const full = `perk: plan-save — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "plan-save", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): SaveResult => {
     reportError(message);
@@ -320,10 +319,13 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
     handler: async (args, ctx) => {
       const plan = extractPlanMarkdown(ctx.sessionManager.getBranch());
       if (plan === null) {
-        const message =
-          "perk: plan-save — no plan to save; propose a plan first, or call the plan_save tool with the markdown.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        console.error(message);
+        report(
+          ctx,
+          "plan-save",
+          "warning",
+          "no plan to save; propose a plan first, or call the plan_save tool with the markdown.",
+          { alsoLog: true },
+        );
         return;
       }
       const title = args.trim() || undefined;
@@ -339,16 +341,12 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
       // saved) — but it MUST surface (the #124 silent-partial-failure fix), in headless runs too.
       const message = result.content[0]?.text ?? "plan-save done";
-      const severity = !result.details.ok
+      const severity: Severity = !result.details.ok
         ? "error"
         : result.details.objective_node?.linked === false
           ? "warning"
           : "info";
-      if (ctx.hasUI) {
-        ctx.ui.notify(message, severity);
-      } else if (severity !== "info") {
-        console.error(`perk: plan-save — ${message}`);
-      }
+      report(ctx, "plan-save", severity, message);
     },
   });
 }

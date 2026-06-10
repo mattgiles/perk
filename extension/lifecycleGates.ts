@@ -15,12 +15,12 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
+import { report } from "./report.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
-const DIRTY_MESSAGE =
-  "perk: uncommitted changes — commit or stash before switching/forking this stage.";
+const DIRTY_MESSAGE = "uncommitted changes — commit or stash before switching/forking this stage.";
 const HANDOFF_DIRTY_MESSAGE =
-  "perk: uncommitted changes — commit before a fresh-context /implement handoff (the plan is the " +
+  "uncommitted changes — commit before a fresh-context /implement handoff (the plan is the " +
   "only artifact that crosses the boundary).";
 
 /**
@@ -50,8 +50,7 @@ async function guardTransition(
   const res = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
   const dirty = res.code === 0 && res.stdout.trim().length > 0;
   if (!gateDecision({ active, dirty }).cancel) return undefined;
-  if (ctx.hasUI) ctx.ui.notify(DIRTY_MESSAGE, "warning");
-  else console.error(DIRTY_MESSAGE); // fail-safe-headless: loud, still cancels
+  report(ctx, "lifecycle", "warning", DIRTY_MESSAGE); // fail-safe-headless: loud, still cancels
   return { cancel: true };
 }
 
@@ -92,26 +91,30 @@ function registerImplementGuard(pi: ExtensionAPI): void {
       const ref = state.active_plan_ref;
       const inImpl = state.mode === "read-write" && ref != null;
       if (!inImpl) {
-        const message =
-          "perk: /implement is cold-only here — run `perk implement` from a shell for fresh context.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else console.error(message);
+        report(
+          ctx,
+          "implement",
+          "warning",
+          "/implement is cold-only here — run `perk implement` from a shell for fresh context.",
+        );
         return;
       }
 
       // Dirty-tree gate (manual; see the doc comment). Refuse the handoff with uncommitted work.
       const status = await pi.exec("git", ["status", "--porcelain"], { cwd: ctx.cwd });
       if (status.code === 0 && status.stdout.trim().length > 0) {
-        if (ctx.hasUI) ctx.ui.notify(HANDOFF_DIRTY_MESSAGE, "warning");
-        else console.error(HANDOFF_DIRTY_MESSAGE);
+        report(ctx, "implement", "warning", HANDOFF_DIRTY_MESSAGE);
         return;
       }
 
       const commandCtx = ctx as ExtensionCommandContext;
       if (typeof commandCtx.newSession !== "function") {
-        const message = "perk: a fresh-context /implement handoff needs an interactive session.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else console.error(message);
+        report(
+          ctx,
+          "implement",
+          "warning",
+          "a fresh-context /implement handoff needs an interactive session.",
+        );
         return;
       }
 
@@ -126,14 +129,15 @@ function registerImplementGuard(pi: ExtensionAPI): void {
 
       // Verify + cap model-visible output (the full state lives in the worktree + the plan issue).
       if (result.cancelled) {
-        const message = "perk: /implement handoff cancelled — staying in this session.";
-        if (ctx.hasUI) ctx.ui.notify(message, "info");
-        else console.error(message);
+        report(ctx, "implement", "info", "/implement handoff cancelled — staying in this session.");
         return;
       }
-      const ok = `perk: fresh implement session started for plan #${(ref as PlanRef).pr_id} — the plan is carried forward, not summarized.`;
-      if (ctx.hasUI) ctx.ui.notify(ok, "info");
-      else console.error(ok);
+      report(
+        ctx,
+        "implement",
+        "info",
+        `fresh implement session started for plan #${(ref as PlanRef).pr_id} — the plan is carried forward, not summarized.`,
+      );
     },
   });
 }

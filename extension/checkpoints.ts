@@ -27,6 +27,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readHandoff, readPlanBody } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
+import { report } from "./report.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -348,11 +349,10 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
       // Todo-provider deferral (Node 3.1): announce the deferral headless-safe and step aside when a
       // foreign `[providers] todo` is selected (the surface-facing mirror of the silent handlers).
       if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) {
-        const deferral = `perk: checkpoints deferred — a foreign todo provider (\`${resolvedTodoProviderId(
+        const deferral = `checkpoints deferred — a foreign todo provider (\`${resolvedTodoProviderId(
           ctx.cwd,
         )}\`) is selected via [providers] todo.`;
-        if (ctx.hasUI) ctx.ui.notify(deferral, "info");
-        else console.error(deferral);
+        report(ctx, "checkpoints", "info", deferral);
         return;
       }
       const state = rebuildCheckpoint(branchOf(ctx));

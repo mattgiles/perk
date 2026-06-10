@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
+import { report } from "./report.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -49,9 +50,7 @@ export async function saveObjective(
   opts: { prose: string; title?: string; roadmap?: unknown[] },
 ): Promise<ObjectiveSaveResult> {
   const reportError = (message: string): void => {
-    const full = `perk: objective-save — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "objective-save", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): ObjectiveSaveResult => {
     reportError(message);

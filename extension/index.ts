@@ -33,6 +33,7 @@ import { registerPlanSave } from "./planSave.ts";
 import { registerPrReview } from "./prReview.ts";
 import { registerReady } from "./ready.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
+import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
@@ -129,9 +130,7 @@ export default function (pi: ExtensionAPI) {
 
     // Headless-safe linkage failure: loud (notify if UI + stderr), non-fatal, leaves unclaimed.
     const reportError = (message: string) => {
-      const full = `perk: workflow-state linkage error — ${message}`;
-      if (ctx.hasUI) ctx.ui.notify(full, "error");
-      console.error(full);
+      report(ctx, "workflow-state linkage error", "error", message, { alsoLog: true });
     };
 
     const decision = decideClaim({
