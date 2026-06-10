@@ -16,6 +16,7 @@ import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 interface ThreadInput {
@@ -36,30 +37,34 @@ interface ResolveParams {
   counts?: ResolveCounts;
 }
 
-export interface ResolveDetails {
-  ok: boolean;
-  results?: {
-    thread_id: string;
-    success: boolean;
-    comment_added: boolean;
-    error?: string | null;
-  }[];
-  resolved_thread_ids?: string[];
-  error?: string;
-  error_type?: string;
+/** One per-thread outcome row from the cold door's batch result. */
+export interface ThreadResultRow {
+  thread_id: string;
+  success: boolean;
+  comment_added: boolean;
+  error?: string | null;
 }
 
-export interface ResolveResult {
-  content: { type: "text"; text: string }[];
-  details: ResolveDetails;
+/** The ok-arm fields. */
+export interface ResolveOk {
+  results: ThreadResultRow[];
+  resolved_thread_ids: string[];
 }
+
+/** The partial-failure branch carries the per-thread detail on the fail arm too. */
+export interface ResolveFailExtras {
+  results?: ThreadResultRow[];
+  resolved_thread_ids?: string[];
+}
+
+export type ResolveResult = Result<ResolveOk, ResolveFailExtras>;
 
 /** The `perk pr-resolve-threads --json` shape (the contract the warm door consumes). */
 interface PrResolveJson {
   success: boolean;
   error_type: string | null;
   message: string | null;
-  results?: { thread_id: string; success: boolean; comment_added: boolean; error: string | null }[];
+  results?: ThreadResultRow[];
 }
 
 /** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
@@ -83,16 +88,7 @@ export async function resolveReviewThreads(
   ctx: ExtensionContext,
   params: ResolveParams,
 ): Promise<ResolveResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "address", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): ResolveResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `resolve_review_threads failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "address", "resolve_review_threads");
 
   const threads = Array.isArray(params?.threads) ? params.threads : [];
   if (threads.length === 0) {
@@ -143,7 +139,8 @@ export async function resolveReviewThreads(
   if (!parsed.success) {
     // A partial/failed batch is loud-but-soft: surface the per-thread detail, do not throw.
     const failed = results.filter((r) => !r.success).length;
-    reportError(parsed.message ?? `${failed} thread(s) did not resolve`);
+    const error = parsed.message ?? `${failed} thread(s) did not resolve`;
+    report(ctx, "address", "error", error, { alsoLog: true });
     return {
       content: [
         {
@@ -153,6 +150,7 @@ export async function resolveReviewThreads(
       ],
       details: {
         ok: false,
+        error,
         error_type: parsed.error_type ?? "partial_failure",
         results,
         resolved_thread_ids: resolvedIds,
@@ -174,10 +172,10 @@ export async function resolveReviewThreads(
     console.error(`perk: address — could not record last_review_batch: ${String(err)}`);
   }
 
-  return {
-    content: [{ type: "text", text: `Resolved ${resolvedIds.length} review thread(s).` }],
-    details: { ok: true, results, resolved_thread_ids: resolvedIds },
-  };
+  return ok(`Resolved ${resolvedIds.length} review thread(s).`, {
+    results,
+    resolved_thread_ids: resolvedIds,
+  });
 }
 
 const TOOL_GUIDELINES = [
