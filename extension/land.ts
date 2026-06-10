@@ -7,7 +7,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
 import { reconcileGuidance } from "./objectivePlan.ts";
-import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
@@ -24,23 +24,18 @@ export interface LearnConsumeUpdate {
   skipped_reason: string | null;
 }
 
-export interface LandDetails {
-  ok: boolean;
-  pr?: { number: number; state: string };
+/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
+export interface LandOk {
+  pr: { number: number; state: string };
   branch?: string;
   issue?: number;
-  pending_learn?: boolean;
+  pending_learn: boolean;
   objective?: ObjectiveLandUpdate;
   learn?: LearnConsumeUpdate;
-  error?: string;
-  error_type?: string;
 }
 
-export interface LandResult {
-  content: { type: "text"; text: string }[];
-  details: LandDetails;
-  terminate?: boolean;
-}
+export type LandResult = Result<LandOk>;
+export type LandDetails = LandResult["details"];
 
 interface PrLandJson {
   success: boolean;
@@ -59,16 +54,7 @@ interface PrLandJson {
  * then sets `pending-learn` (in-session path). Returns a soft result (never throws).
  */
 export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<LandResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "land", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): LandResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `land failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "land");
 
   const perkBin = process.env.PERK_BIN ?? "perk";
   let res: ExecResult;
@@ -128,10 +114,9 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
     lines.push(`Warning: learn consume incomplete — ${learn.skipped_reason}.`);
   }
 
-  return {
-    content: [{ type: "text", text: lines.join("\n") }],
-    details: {
-      ok: true,
+  return ok(
+    lines.join("\n"),
+    {
       pr: parsed.pr,
       branch: parsed.branch,
       issue: parsed.issue,
@@ -139,8 +124,8 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
       objective: parsed.objective,
       learn: parsed.learn,
     },
-    terminate: true,
-  };
+    { terminate: true },
+  );
 }
 
 /**
@@ -156,8 +141,9 @@ export function driveReconcileAfterLand(
   ctx: ExtensionContext,
   details: LandDetails,
 ): void {
+  if (!details.ok) return;
   const obj = details.objective;
-  if (!details.ok || !obj || obj.number === null || obj.nodes_marked.length === 0) return;
+  if (!obj || obj.number === null || obj.nodes_marked.length === 0) return;
   const message =
     reconcileGuidance(String(obj.number)) + bindingSuffix(ctx.cwd, "command:objective-reconcile");
   if (ctx.isIdle()) {

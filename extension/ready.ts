@@ -5,22 +5,15 @@
 // nothing, delegate via `pi.exec`, surface the structured result, never throw.
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 
-/** The structured `details` surface — doubles as branch-safe persisted state. */
-export interface ReadyDetails {
-  ok: boolean;
-  pr?: { number: number; url: string };
+/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
+export interface ReadyOk {
+  pr: { number: number; url: string };
   was_draft?: boolean;
-  error?: string;
-  error_type?: string;
 }
 
-export interface ReadyResult {
-  content: { type: "text"; text: string }[];
-  details: ReadyDetails;
-  terminate?: boolean;
-}
+export type ReadyResult = Result<ReadyOk>;
 
 /** The `perk pr-ready --json` success shape (the contract the warm door consumes). */
 interface PrReadyJson {
@@ -36,16 +29,7 @@ interface PrReadyJson {
  * soft result (never throws) — failures set `details.ok = false`.
  */
 export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promise<ReadyResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "ready", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): ReadyResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `ready failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "ready");
 
   const perkBin = process.env.PERK_BIN ?? "perk";
   let res: ExecResult;
@@ -79,11 +63,11 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
   }
 
   const verb = parsed.was_draft ? "Marked ready" : "Already ready";
-  return {
-    content: [{ type: "text", text: `${verb}: PR #${parsed.pr.number} is open for review.` }],
-    details: { ok: true, pr: parsed.pr, was_draft: parsed.was_draft },
-    terminate: true,
-  };
+  return ok(
+    `${verb}: PR #${parsed.pr.number} is open for review.`,
+    { pr: parsed.pr, was_draft: parsed.was_draft },
+    { terminate: true },
+  );
 }
 
 const TOOL_GUIDELINES = [

@@ -17,23 +17,17 @@ import {
   type PlanRef,
   readPlanRef,
 } from "./cache.ts";
-import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
-export interface LearnDetails {
-  ok: boolean;
+/** The ok-arm fields. */
+export interface LearnOk {
   was_pending: boolean;
-  captured?: boolean;
+  captured: boolean;
   learn_issue?: { number: number; url: string; existed: boolean };
-  error?: string;
-  error_type?: string;
 }
 
-export interface LearnResult {
-  content: { type: "text"; text: string }[];
-  details: LearnDetails;
-  terminate?: boolean;
-}
+export type LearnResult = Result<LearnOk>;
 
 /** The `perk learn-capture --json` shape (the contract the warm door consumes). */
 interface LearnCaptureJson {
@@ -81,16 +75,10 @@ export async function learnDone(
     const text = wasPending
       ? "Cleared pending-learn — the worktree is releasable. (No summary given; no learn issue created.)"
       : "No pending-learn set — nothing to clear.";
-    return {
-      content: [{ type: "text", text }],
-      details: { ok: true, was_pending: wasPending, captured: false },
-      terminate: true,
-    };
+    return ok(text, { was_pending: wasPending, captured: false }, { terminate: true });
   }
 
-  const reportError = (message: string): void => {
-    report(ctx, "learn", "error", message, { alsoLog: true });
-  };
+  const fail = failFor(ctx, "learn");
 
   // Stage the captured learnings to a run-scoped scratch file (pi.exec has no stdin channel).
   let bodyPath: string;
@@ -99,11 +87,7 @@ export async function learnDone(
     bodyPath = join(dir, `learn-${Date.now()}.md`);
     writeFileSync(bodyPath, `${trimmed}\n`, "utf8");
   } catch (err) {
-    reportError(`could not stage the learnings: ${String(err)}`);
-    return {
-      content: [{ type: "text", text: `learn failed: could not stage the learnings` }],
-      details: { ok: false, was_pending: false, error_type: "scratch_failed" },
-    };
+    return fail(`could not stage the learnings: ${String(err)}`, "scratch_failed");
   }
 
   const perkBin = process.env.PERK_BIN ?? "perk";
@@ -114,62 +98,40 @@ export async function learnDone(
       signal: ctx.signal,
     });
   } catch (err) {
-    reportError(`could not run '${perkBin}': ${String(err)}`);
-    return {
-      content: [{ type: "text", text: `learn failed: could not run '${perkBin}'` }],
-      details: { ok: false, was_pending: false, error_type: "exec_failed" },
-    };
+    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
   }
 
   if (res.killed || res.code !== 0) {
     const tail = res.stderr.trim();
-    reportError(
+    return fail(
       tail
         ? `perk learn-capture failed (exit ${res.code}): ${tail}`
         : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
+      "exec_failed",
     );
-    return {
-      content: [{ type: "text", text: `learn failed (exit ${res.code})` }],
-      details: { ok: false, was_pending: false, error_type: "exec_failed" },
-    };
   }
 
   let parsed: LearnCaptureJson;
   try {
     parsed = JSON.parse(res.stdout) as LearnCaptureJson;
   } catch {
-    reportError("perk learn-capture returned unparseable JSON");
-    return {
-      content: [{ type: "text", text: "learn failed: unparseable worker output" }],
-      details: { ok: false, was_pending: false, error_type: "bad_output" },
-    };
+    return fail("perk learn-capture returned unparseable JSON", "bad_output");
   }
   if (!parsed.success || !parsed.learn_issue) {
-    reportError(parsed.message ?? "perk learn-capture reported failure");
-    return {
-      content: [{ type: "text", text: parsed.message ?? "learn capture failed" }],
-      details: { ok: false, was_pending: false, error_type: parsed.error_type ?? "github_error" },
-    };
+    return fail(
+      parsed.message ?? "perk learn-capture reported failure",
+      parsed.error_type ?? "github_error",
+    );
   }
 
   // Mirror the marker-clear in-session (idempotent; the worker also cleared it on disk).
   const { wasPending } = clearPending(ctx);
   const verb = parsed.learn_issue.existed ? "Found existing" : "Created";
-  return {
-    content: [
-      {
-        type: "text",
-        text: `${verb} learn issue #${parsed.learn_issue.number}; pending-learn cleared.`,
-      },
-    ],
-    details: {
-      ok: true,
-      was_pending: wasPending,
-      captured: true,
-      learn_issue: parsed.learn_issue,
-    },
-    terminate: true,
-  };
+  return ok(
+    `${verb} learn issue #${parsed.learn_issue.number}; pending-learn cleared.`,
+    { was_pending: wasPending, captured: true, learn_issue: parsed.learn_issue },
+    { terminate: true },
+  );
 }
 
 const TOOL_GUIDELINES = [

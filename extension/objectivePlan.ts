@@ -22,6 +22,7 @@ import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch, readPlanRef } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
@@ -40,19 +41,14 @@ interface ObjectiveNodeParams {
   audit?: string;
 }
 
-export interface ObjectiveNodeDetails {
-  ok: boolean;
-  objective?: number;
-  node?: string;
-  comment_updated?: boolean;
-  error?: string;
-  error_type?: string;
+/** The ok-arm fields. */
+export interface ObjectiveNodeOk {
+  objective: number;
+  node: string;
+  comment_updated: boolean;
 }
 
-export interface ObjectiveNodeResult {
-  content: { type: "text"; text: string }[];
-  details: ObjectiveNodeDetails;
-}
+export type ObjectiveNodeResult = Result<ObjectiveNodeOk>;
 
 /** The `perk objective node --json` success shape (the contract the warm door consumes). */
 interface ObjectiveNodeJson {
@@ -96,16 +92,7 @@ export async function objectiveNode(
   ctx: ExtensionContext,
   params: ObjectiveNodeParams,
 ): Promise<ObjectiveNodeResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "objective-plan", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): ObjectiveNodeResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `objective_node failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "objective-plan", "objective_node");
 
   if (typeof params?.objective !== "number" || typeof params?.node !== "string" || !params.node) {
     return fail("objective_node needs { objective: <number>, node: <id> }", "bad_input");
@@ -164,15 +151,11 @@ export async function objectiveNode(
     : params.pr !== undefined && params.pr !== null
       ? `linked node ${params.node} to ${params.pr}`
       : `updated node ${params.node} description`;
-  return {
-    content: [{ type: "text", text: `Updated objective #${params.objective}: ${detail}.` }],
-    details: {
-      ok: true,
-      objective: params.objective,
-      node: params.node,
-      comment_updated: parsed.comment_updated ?? false,
-    },
-  };
+  return ok(`Updated objective #${params.objective}: ${detail}.`, {
+    objective: params.objective,
+    node: params.node,
+    comment_updated: parsed.comment_updated ?? false,
+  });
 }
 
 interface ReconcileObjectiveParams {
@@ -180,18 +163,13 @@ interface ReconcileObjectiveParams {
   prose: string;
 }
 
-export interface ReconcileObjectiveDetails {
-  ok: boolean;
-  objective?: number;
-  updated?: boolean;
-  error?: string;
-  error_type?: string;
+/** The ok-arm fields. */
+export interface ReconcileObjectiveOk {
+  objective: number;
+  updated: boolean;
 }
 
-export interface ReconcileObjectiveResult {
-  content: { type: "text"; text: string }[];
-  details: ReconcileObjectiveDetails;
-}
+export type ReconcileObjectiveResult = Result<ReconcileObjectiveOk>;
 
 /** The `perk objective reconcile --json` success shape (the contract the warm door consumes). */
 interface ObjectiveReconcileJson {
@@ -225,16 +203,7 @@ export async function reconcileObjective(
   ctx: ExtensionContext,
   params: ReconcileObjectiveParams,
 ): Promise<ReconcileObjectiveResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "objective-reconcile", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): ReconcileObjectiveResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `reconcile_objective failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "objective-reconcile", "reconcile_objective");
 
   if (typeof params?.objective !== "number" || typeof params?.prose !== "string") {
     return fail("reconcile_objective needs { objective: <number>, prose: <string> }", "bad_input");
@@ -285,10 +254,10 @@ export async function reconcileObjective(
     );
   }
 
-  return {
-    content: [{ type: "text", text: `Reconciled objective #${params.objective} prose region.` }],
-    details: { ok: true, objective: params.objective, updated: parsed.updated ?? false },
-  };
+  return ok(`Reconciled objective #${params.objective} prose region.`, {
+    objective: params.objective,
+    updated: parsed.updated ?? false,
+  });
 }
 
 /** Resolve the active objective number from the rebuilt workflow-state (for the warm command). */

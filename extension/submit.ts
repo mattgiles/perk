@@ -5,24 +5,18 @@
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 
-/** The structured `details` surface — doubles as branch-safe persisted state. */
-export interface SubmitDetails {
-  ok: boolean;
-  pr?: { number: number; url: string; is_draft: boolean; existed: boolean };
+/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
+export interface SubmitOk {
+  pr: { number: number; url: string; is_draft: boolean; existed: boolean };
   branch?: string;
   issue?: number;
   plan_embedded?: boolean;
-  error?: string;
-  error_type?: string;
 }
 
-export interface SubmitResult {
-  content: { type: "text"; text: string }[];
-  details: SubmitDetails;
-  terminate?: boolean;
-}
+export type SubmitResult = Result<SubmitOk>;
+export type SubmitDetails = SubmitResult["details"];
 
 /** The `perk pr-submit --json` success shape (the contract the warm door consumes). */
 interface PrSubmitJson {
@@ -40,16 +34,7 @@ interface PrSubmitJson {
  * soft result (never throws) — failures set `details.ok = false`.
  */
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "submit", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): SubmitResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `submit failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "submit");
 
   const perkBin = process.env.PERK_BIN ?? "perk";
   // pi.exec returns (does not throw) on spawn/non-zero exit — turn-3 §3.5 S2.
@@ -85,19 +70,16 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
 
   const verb = parsed.pr.existed ? "Found existing" : "Opened draft";
   const embed = parsed.plan_embedded ? "plan embedded" : "no plan embed";
-  return {
-    content: [
-      { type: "text", text: `${verb} PR #${parsed.pr.number} → ${parsed.pr.url} (${embed})` },
-    ],
-    details: {
-      ok: true,
+  return ok(
+    `${verb} PR #${parsed.pr.number} → ${parsed.pr.url} (${embed})`,
+    {
       pr: parsed.pr,
       branch: parsed.branch,
       issue: parsed.issue,
       plan_embedded: parsed.plan_embedded,
     },
-    terminate: true,
-  };
+    { terminate: true },
+  );
 }
 
 const TOOL_GUIDELINES = [

@@ -19,6 +19,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import type { PlanRef } from "./cache.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { report, type Severity } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
 import {
   type BranchEntry,
@@ -28,17 +29,14 @@ import {
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
 
-/** The structured `details` surface (turn-3 D6) — doubles as branch-safe persisted state. */
-export interface PlanSaveDetails {
-  ok: boolean;
-  issue?: { number: number; url: string };
-  plan_ref?: PlanRef;
-  cached?: boolean;
-  existed?: boolean | null;
-  updated?: boolean;
-  objective_node?: ObjectiveNodeLink | null;
-  error?: string;
-  error_type?: string;
+/** The ok-arm fields (turn-3 D6) — the `details` surface doubles as branch-safe persisted state. */
+export interface PlanSaveOk {
+  issue: { number: number; url: string };
+  plan_ref: PlanRef;
+  cached: boolean;
+  existed: boolean | null;
+  updated: boolean;
+  objective_node: ObjectiveNodeLink | null;
 }
 
 /** The atomic objective node→plan commit surfaced by `perk plan-save` (P2.T10). */
@@ -50,11 +48,8 @@ export interface ObjectiveNodeLink {
 }
 
 /** A tool result patch (AgentToolResult has no `isError`; failure is signaled via details.ok). */
-export interface SaveResult {
-  content: { type: "text"; text: string }[];
-  details: PlanSaveDetails;
-  terminate?: boolean;
-}
+export type SaveResult = Result<PlanSaveOk>;
+export type PlanSaveDetails = SaveResult["details"];
 
 /** The T2a `perk plan-save --json` success shape (the contract the warm door consumes). */
 interface PlanSaveJson {
@@ -124,16 +119,7 @@ export async function savePlan(
     consumedLearn?: number[];
   },
 ): Promise<SaveResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "plan-save", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): SaveResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `plan-save failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "plan-save");
 
   const plan = opts.plan.trim();
   if (!plan) return fail("no plan markdown to save (propose a plan first)", "invalid_input");
@@ -209,7 +195,15 @@ export async function savePlan(
   if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
     pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: ref });
     if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
-      reportError(`plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`);
+      report(
+        ctx,
+        "plan-save",
+        "error",
+        `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`,
+        {
+          alsoLog: true,
+        },
+      );
     }
   }
 
@@ -228,10 +222,9 @@ export async function savePlan(
       nodeLink.error ? ` (${nodeLink.error})` : ""
     }`;
   }
-  return {
-    content: [{ type: "text", text: `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}` }],
-    details: {
-      ok: true,
+  return ok(
+    `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}`,
+    {
       issue: { number: parsed.issue.number, url: parsed.issue.url },
       plan_ref: ref,
       cached: parsed.cached ?? false,
@@ -239,8 +232,8 @@ export async function savePlan(
       updated: parsed.updated ?? false,
       objective_node: nodeLink,
     },
-    terminate: true,
-  };
+    { terminate: true },
+  );
 }
 
 const TOOL_GUIDELINES = [

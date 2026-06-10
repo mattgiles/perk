@@ -13,23 +13,17 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { report } from "./report.ts";
+import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
-/** The structured `details` surface (doubles as branch-safe persisted state). */
-export interface ObjectiveSaveDetails {
-  ok: boolean;
-  objective?: { number: number; url: string };
-  existed?: boolean | null;
-  error?: string;
-  error_type?: string;
+/** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
+export interface ObjectiveSaveOk {
+  objective: { number: number; url: string };
+  existed: boolean | null;
 }
 
-export interface ObjectiveSaveResult {
-  content: { type: "text"; text: string }[];
-  details: ObjectiveSaveDetails;
-  terminate?: boolean;
-}
+export type ObjectiveSaveResult = Result<ObjectiveSaveOk>;
 
 /** The `perk objective create --json` success shape (the contract the warm door consumes). */
 interface ObjectiveCreateJson {
@@ -49,16 +43,7 @@ export async function saveObjective(
   ctx: ExtensionContext,
   opts: { prose: string; title?: string; roadmap?: unknown[] },
 ): Promise<ObjectiveSaveResult> {
-  const reportError = (message: string): void => {
-    report(ctx, "objective-save", "error", message, { alsoLog: true });
-  };
-  const fail = (message: string, errorType: string): ObjectiveSaveResult => {
-    reportError(message);
-    return {
-      content: [{ type: "text", text: `objective-save failed: ${message}` }],
-      details: { ok: false, error: message, error_type: errorType },
-    };
-  };
+  const fail = failFor(ctx, "objective-save");
 
   const prose = opts.prose.trim();
   if (!prose)
@@ -122,20 +107,27 @@ export async function saveObjective(
       activated_at: new Date().toISOString(),
     });
     if ((rebuildWorkflowState(branch()).active_objective ?? null) !== objectiveId) {
-      reportError(`active_objective read-back failed for #${objectiveId}`);
+      report(
+        ctx,
+        "objective-save",
+        "error",
+        `active_objective read-back failed for #${objectiveId}`,
+        {
+          alsoLog: true,
+        },
+      );
     }
   }
 
   const verb = objective.existed ? "Found existing" : "Saved";
-  return {
-    content: [{ type: "text", text: `${verb} objective #${objective.number} → ${objective.url}` }],
-    details: {
-      ok: true,
+  return ok(
+    `${verb} objective #${objective.number} → ${objective.url}`,
+    {
       objective: { number: objective.number, url: objective.url },
       existed: objective.existed ?? null,
     },
-    terminate: true,
-  };
+    { terminate: true },
+  );
 }
 
 const TOOL_GUIDELINES = [
