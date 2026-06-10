@@ -16,8 +16,8 @@ from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn_capture_cmd import learn_capture
 from perk.cli.commands.learn_docs_cmd import learn_docs
+from perk.cli.commands.objective import objective_group
 from perk.cli.commands.objective_author_cmd import objective_author
-from perk.cli.commands.objective_cmd import objective_group
 from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan_save_cmd import plan_save
 from perk.cli.commands.pr_check_cmd import pr_check

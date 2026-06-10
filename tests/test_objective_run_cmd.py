@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 from perk import cache, github, launch, objective, run_report, runner
 from perk.cli.cli import cli
-from perk.cli.commands import objective_cmd
+from perk.cli.commands.objective import run_cmd
 
 N = objective.NodeStatus
 
@@ -198,16 +198,16 @@ def test_in_flight_merged_pr_is_pending_reconcile(monkeypatch):
 
 
 def test_needs_address_unresolved_thread_true():
-    assert objective_cmd.needs_address(_feedback(threads=(_thread(False),))) is True
+    assert run_cmd.needs_address(_feedback(threads=(_thread(False),))) is True
 
 
 def test_needs_address_resolved_thread_false():
-    assert objective_cmd.needs_address(_feedback(threads=(_thread(True),))) is False
+    assert run_cmd.needs_address(_feedback(threads=(_thread(True),))) is False
 
 
 def test_needs_address_latest_changes_requested_true():
     fb = _feedback(reviews=(_review("alice", "CHANGES_REQUESTED", "2024-01-02"),))
-    assert objective_cmd.needs_address(fb) is True
+    assert run_cmd.needs_address(fb) is True
 
 
 def test_needs_address_changes_requested_superseded_by_approved_false():
@@ -217,12 +217,12 @@ def test_needs_address_changes_requested_superseded_by_approved_false():
             _review("alice", "APPROVED", "2024-01-02"),
         )
     )
-    assert objective_cmd.needs_address(fb) is False
+    assert run_cmd.needs_address(fb) is False
 
 
 def test_needs_address_only_discussion_comments_false():
     comment = github.DiscussionComment(comment_id=1, body="nit", author="bob", created_at=None)
-    assert objective_cmd.needs_address(_feedback(comments=(comment,))) is False
+    assert run_cmd.needs_address(_feedback(comments=(comment,))) is False
 
 
 # --------------------------------------------------------------------------- completion
@@ -386,7 +386,7 @@ def test_active_run_with_wait_timeout_is_inconclusive(monkeypatch):
     monkeypatch.setattr(runner, "select_runner", lambda ref: _FakeRunner(["in_progress"]))
     monkeypatch.setattr(run_report, "read_outcome", lambda root, rid: None)
     monkeypatch.setattr("time.sleep", lambda _s: None)
-    monkeypatch.setattr(objective_cmd, "POLL_TIMEOUT_S", 30)
+    monkeypatch.setattr(run_cmd, "POLL_TIMEOUT_S", 30)
     result = _invoke(
         monkeypatch,
         ["137", "--wait", "--json"],
