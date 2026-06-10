@@ -21,7 +21,7 @@ you classify and report.
 1. **Fetch the feedback yourself.** Run exactly:
 
    ```
-   perk pr-feedback --json
+   perk pr feedback --json
    ```
 
    This is read-only. It resolves the active plan's PR (from the local plan-ref) and returns the
