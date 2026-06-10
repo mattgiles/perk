@@ -11,8 +11,21 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
-/** Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS). */
-export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash", "ask_user_question"];
+/**
+ * Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS).
+ * `plan_review` is the plannotator review bridge (planAdapterPlannotator) — allowlisted so the
+ * model can request a human plan review INSIDE plan mode (review happens before the gate ever
+ * comes off); safe on the default path because the tool soft-skips unless plannotator is selected.
+ */
+export const READ_ONLY_TOOLS = [
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "bash",
+  "ask_user_question",
+  "plan_review",
+];
 
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
