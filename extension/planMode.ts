@@ -67,8 +67,10 @@ implement it without guessing. Anchor every change durably — function/class na
 descriptions, structural locations — never line numbers. Resolve every open choice before saving;
 a saved plan must leave no decisions to the implementer.
 
-When the plan is decision-complete: disable plan mode (/plan off), then call the plan_save tool
-with the finalized plan markdown.`;
+When the plan is decision-complete: write the COMPLETE final plan as your last message and present
+it to the user for review. Do NOT attempt to save it yourself — the user runs /plan-save when
+satisfied (it scrapes your latest message, so that final message must be the clean, complete plan
+and nothing else).`;
 
 /** Build the full plan-authoring injection, appending the project config addendum when present. */
 export function planContextContent(cwd: string): string {
@@ -120,7 +122,7 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
 
   function announce(ctx: ExtensionContext, on: boolean): void {
     const message = on
-      ? "plan mode ON — read-only exploration; author the plan, then /plan off + plan_save."
+      ? "plan mode ON — read-only exploration; author the plan and present it for review; save with /plan-save when satisfied."
       : "plan mode OFF — full tool access restored.";
     report(ctx, "plan-mode", "info", message);
   }
