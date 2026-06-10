@@ -90,6 +90,7 @@ test("landPr: objective node-done reports auto-reconciliation (no manual nudge)"
   assert.match(text, /Objective #5 node\(s\) 1\.2 marked done/);
   assert.match(text, /reconciling/i);
   assert.doesNotMatch(text, /\/objective-reconcile #/);
+  assert.ok(result.details.ok);
   assert.deepEqual(result.details.objective?.nodes_marked, ["1.2"]);
 });
 
@@ -110,20 +111,26 @@ function spyPi(): {
 
 const OBJECTIVE_DETAILS: LandDetails = {
   ok: true,
+  pr: { number: 9, state: "MERGED" },
+  pending_learn: true,
   objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
 };
 
 test("driveReconcileAfterLand: no objective → not driven", () => {
   const { pi, calls } = spyPi();
   const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
-  driveReconcileAfterLand(pi, ctx, { ok: true });
+  driveReconcileAfterLand(pi, ctx, {
+    ok: true,
+    pr: { number: 9, state: "MERGED" },
+    pending_learn: true,
+  });
   assert.equal(calls.length, 0);
 });
 
 test("driveReconcileAfterLand: failed land → not driven", () => {
   const { pi, calls } = spyPi();
   const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
-  driveReconcileAfterLand(pi, ctx, { ...OBJECTIVE_DETAILS, ok: false });
+  driveReconcileAfterLand(pi, ctx, { ok: false, error: "boom", error_type: "github_error" });
   assert.equal(calls.length, 0);
 });
 
