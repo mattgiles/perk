@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 
 from perk import __version__
-from perk.cli.alias import AliasGroup, register_with_aliases
+from perk.cli.alias import SectionedGroup, register_with_aliases
 from perk.cli.commands.doctor_cmd import doctor
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
@@ -39,7 +39,7 @@ from perk.cli.context import PerkContext
 from perk.cli.stages import register_stage_commands
 
 
-@click.group(cls=AliasGroup)
+@click.group(cls=SectionedGroup)
 @click.version_option(__version__, prog_name="perk", message="%(prog)s %(version)s")
 @click.pass_context
 def cli(ctx: click.Context) -> None:

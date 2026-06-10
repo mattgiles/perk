@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 from click.testing import CliRunner
 
-from perk.cli.alias import AliasGroup, get_aliases
+from perk.cli.alias import AliasGroup, SectionedGroup, get_aliases
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
 from perk.config import Config
@@ -114,8 +114,10 @@ def test_subgroup_help_dedups_aliases():
 
 def test_root_and_subgroups_use_alias_group():
     assert isinstance(cli, AliasGroup)
+    assert isinstance(cli, SectionedGroup)
     for name in ("worktree", "objective", "registry", "state"):
         assert isinstance(cli.commands[name], AliasGroup)
+        assert not isinstance(cli.commands[name], SectionedGroup)
 
 
 def test_objective_run_and_alias_resolve():
