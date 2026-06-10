@@ -1740,6 +1740,45 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > the lighter bridge the todo seam's lack of a downstream consumer permits. The shim **never** owns
 > the read-only gate, **never** `setActiveTools`, and **never** restamps any provider field.
 > Validation record: `docs/design/provider-smoke-juicesharp-todo.md`.
+>
+> **Status (plannotator-plan):** the **second 3rd-party plan adapter** lands `plannotator-plan`
+> (→ `npm:@plannotator/pi-extension`, `adapter: planAdapterPlannotator`) — the first provider with
+> the **AUGMENT posture** (contrast tombell's REPLACE posture). (1) Plannotator does **not** replace
+> perk's plan surface: perk's `/plan` command, the `perk:plan-context` authoring injection, and the
+> read-only gate **stay registered**; `registerPlanMode` is now a **three-tier** branch — full
+> registration for `perk-plan` (and the fail-safe error path), a **partial vacate** under
+> `plannotator-plan` (skip only the `--plan` flag + the `Ctrl+Alt+P` shortcut + the `--plan`
+> session_start handler — the two real registration collisions; duplicate flag/shortcut
+> registration is the potentially-fatal Pi behavior), and the full vacate for any other foreign id
+> (tombell, unchanged). (2) The bridge is the model-callable **`plan_review` tool**
+> (`extension/planAdapterPlannotator.ts`): parameter `plan` (the complete plan markdown); it emits
+> plannotator's published `plannotator:request` plan-review envelope on the in-process `pi.events`
+> bus (pinned against `@plannotator/pi-extension@0.20.0`), awaits the in-payload `respond`
+> handshake bounded at 5s, then awaits the human decision on `plannotator:review-result` (no
+> decision timeout; honors the turn-abort signal). **Fail-open semantics:** not-selected /
+> headless (`!ctx.hasUI`) / handshake-timeout / `unavailable` / `error` all **soft-skip** with a
+> result instructing the model to present the plan to the user directly — plan authoring never
+> wedges; a human **deny** is strict (feedback returned for revision + a re-review).
+> `plan_review` is in `READ_ONLY_TOOLS` so review happens **inside** plan mode, before the gate
+> ever comes off; the tool is safe on the default path (soft-skip unless plannotator is selected).
+> (3) The shim also injects a hidden `perk:plan-adapter-plannotator` context (gate-active AND
+> selected AND not objective-author) and is otherwise the standard injection-only hygiene: never
+> `setActiveTools`, never a `tool_call` handler, never touches the gate, never restamps
+> `cache.plan-ref.provider` (stays `"github"`), never saves anything. The catalog entry carries no
+> `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
+>
+> **Corrected interactive save discipline (landed with plannotator-plan, applies to ALL
+> interactive plan surfaces):** the prior `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode
+> (/plan off), then call the plan_save tool") was structurally broken — `/plan` is a user command
+> the model cannot run, and the `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while
+> the gate is on). The corrected discipline, now spoken by `PLAN_AUTHORING_CONTEXT`,
+> `PLAN_ADAPTER_TOMBELL_CONTEXT`, `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, and
+> `skills/perk-plan/SKILL.md`: the model **presents the complete plan as its final message and
+> never attempts to save**; the **human** runs `/plan-save` when satisfied (its
+> `extractPlanMarkdown` scrape is now reliable by construction — the final message is the clean
+> plan). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched** (no browser launch on
+> a manual save), and the orchestrated **factory flows** (objective-plan, learn-docs, replan) still
+> instruct an autonomous `plan_save` tool call — unchanged.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 
