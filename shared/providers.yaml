@@ -71,6 +71,20 @@ providers:
     # No `package_filter`: `@tombell/pi-plan`'s sole extension is its root `index.ts` (not under
     # `extensions/`), so omitting the filter ("load all of that type") loads exactly that one
     # extension. The `package_filter` field stays in the vocabulary for future providers.
+  - id: plannotator-plan   # REAL plan provider — planAdapterPlannotator bridges its browser review
+    seam: plan
+    package: "npm:@plannotator/pi-extension"   # the foreign Pi package to add to `packages`
+    adapter: "planAdapterPlannotator"          # the perk-owned shim bridging plan_review → its event API
+    default: false
+    # AUGMENT posture (contrast with tombell-plan's REPLACE posture): plannotator does not replace
+    # perk's plan surface — perk's `/plan` command, authoring injection, and read-only gate STAY
+    # registered; perk skips only the two real registration collisions (`--plan` flag and the
+    # `Ctrl+Alt+P` shortcut, both of which plannotator also registers — duplicate flag/shortcut
+    # registration is the known potentially-fatal Pi behavior). The bridge is the model-callable
+    # `plan_review` tool (planAdapterPlannotator) → plannotator's `plannotator:request` plan-review
+    # event flow (its browser review UI). Saving stays the human-run `/plan-save`.
+    # No `package_filter`: `@plannotator/pi-extension`'s `pi.extensions` is `["./"]` (the sole
+    # extension is the package root), so omitting the filter loads exactly that one extension.
   - id: juicesharp-todo      # REAL todo provider (Node 3.2) — todoAdapterJuicesharp bridges it
     seam: todo
     package: "npm:@juicesharp/rpiv-todo"   # the foreign Pi package to add to `packages`

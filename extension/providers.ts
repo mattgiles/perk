@@ -33,6 +33,9 @@ export const PERK_CHECKPOINTS_PROVIDER_ID = "perk-checkpoints";
 /** The foreign `@tombell/pi-plan` plan-provider id (Node 2.3 adapter selection check). */
 export const TOMBELL_PLAN_PROVIDER_ID = "tombell-plan";
 
+/** The foreign `@plannotator/pi-extension` plan-provider id (augment-posture adapter selection check). */
+export const PLANNOTATOR_PLAN_PROVIDER_ID = "plannotator-plan";
+
 /** The foreign `@juicesharp/rpiv-todo` todo-provider id (Node 3.2 adapter selection check). */
 export const JUICESHARP_TODO_PROVIDER_ID = "juicesharp-todo";
 

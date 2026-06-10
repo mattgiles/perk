@@ -10,10 +10,11 @@ import {
   loadProviders,
   PERK_CHECKPOINTS_PROVIDER_ID,
   PERK_PLAN_PROVIDER_ID,
+  PLANNOTATOR_PLAN_PROVIDER_ID,
   resolveProviders,
 } from "./providers.ts";
 
-test("loadProviders: returns the four shipped supported-set entries", () => {
+test("loadProviders: returns the five shipped supported-set entries", () => {
   const providers = loadProviders();
   assert.deepEqual(
     providers.map((p) => [p.id, p.seam, p.package, p.default]),
@@ -21,6 +22,7 @@ test("loadProviders: returns the four shipped supported-set entries", () => {
       ["perk-plan", "plan", null, true],
       ["perk-checkpoints", "todo", null, true],
       ["tombell-plan", "plan", "npm:@tombell/pi-plan", false],
+      ["plannotator-plan", "plan", "npm:@plannotator/pi-extension", false],
       ["juicesharp-todo", "todo", "npm:@juicesharp/rpiv-todo", false],
     ],
   );
@@ -46,6 +48,18 @@ test("loadProviders: the real tombell-plan entry carries adapter + NO package_fi
   assert.equal(tombell?.seam, "plan");
   assert.equal(tombell?.default, false);
   assert.equal(tombell?.packageFilter, undefined);
+});
+
+test("loadProviders: the real plannotator-plan entry carries adapter + NO package_filter", () => {
+  // Augment posture: planAdapterPlannotator bridges the browser review via the plan_review tool;
+  // perk's plan surface + gate stay registered. No `package_filter` (`pi.extensions: ["./"]` —
+  // the sole extension is the package root), so omitting the filter loads exactly that one.
+  const plannotator = loadProviders().find((p) => p.id === PLANNOTATOR_PLAN_PROVIDER_ID);
+  assert.equal(plannotator?.adapter, "planAdapterPlannotator");
+  assert.equal(plannotator?.package, "npm:@plannotator/pi-extension");
+  assert.equal(plannotator?.seam, "plan");
+  assert.equal(plannotator?.default, false);
+  assert.equal(plannotator?.packageFilter, undefined);
 });
 
 test("loadProviders: the real juicesharp-todo entry carries adapter + NO package_filter", () => {
