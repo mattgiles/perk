@@ -27,6 +27,7 @@ import { registerObjective } from "./objective.ts";
 import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
 import { registerObjectivePlan } from "./objectivePlan.ts";
 import { registerObjectiveSave } from "./objectiveSave.ts";
+import { registerPlanAdapterPlannotator } from "./planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./planAdapterTombell.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanSave } from "./planSave.ts";
@@ -100,6 +101,13 @@ export default function (pi: ExtensionAPI) {
   // perk's canonical `plan_save` → `cache.plan-ref` contract. It needs no `gating` (Invariant 1: the
   // read-only gate stays perk's, engaged by the cold-door launch — the shim never arbitrates tools).
   registerPlanAdapterTombell(pi);
+
+  // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
+  // its browser plan-review UI via the `plan_review` bridge tool while perk's plan surface + gate
+  // stay (planMode skips only `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but
+  // INERT unless `[providers] plan = "plannotator-plan"`. It needs no `gating` (Invariant 1: the
+  // read-only gate stays perk's — the shim never arbitrates tools, and never saves anything).
+  registerPlanAdapterPlannotator(pi);
 
   // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.

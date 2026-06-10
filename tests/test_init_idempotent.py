@@ -98,6 +98,45 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     assert "npm:@tombell/pi-status" in _identities(packages)
 
 
+def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path):
+    # The augment-posture plan provider: the init wiring is selection-shape-generic, so selecting
+    # `plannotator-plan` wires `npm:@plannotator/pi-extension` (object form, no filter — its
+    # `pi.extensions` is the package root) and deselecting removes it; an idempotent re-run is a
+    # no-op. Mirrors the tombell case — no Python source change was needed for this entry.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nplan = "plannotator-plan"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    entry = next(
+        p
+        for p in packages
+        if isinstance(p, dict) and p.get("source") == "npm:@plannotator/pi-extension"
+    )
+    assert entry == {"source": "npm:@plannotator/pi-extension"}
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+
+    # An idempotent re-run with the selection in place changes nothing.
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)
+
+    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
+    pi_dir.joinpath("perk.toml").write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@plannotator/pi-extension" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-status" in _identities(packages)
+
+
 def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):
     # The todo-seam analogue (Node 3.2): the init wiring is already seam-generic, so selecting the
     # real `juicesharp-todo` provider wires `npm:@juicesharp/rpiv-todo` (object form, no filter) and

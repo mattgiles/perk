@@ -5,7 +5,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import { isReadOnlyBashCommand } from "./toolGating.ts";
+import { isReadOnlyBashCommand, READ_ONLY_TOOLS } from "./toolGating.ts";
+
+test("READ_ONLY_TOOLS: contains plan_review (the plannotator review bridge is callable in plan mode)", () => {
+  assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
+});
 
 test("isReadOnlyBashCommand: allows read-only commands", () => {
   for (const cmd of [

@@ -50,10 +50,16 @@ def _messages(tmp_path, text):
 # --- load (real bundled file) ---------------------------------------------------------------
 
 
-def test_real_providers_load_the_four_entries():
+def test_real_providers_load_the_five_entries():
     providers = load_providers()
     by_id = providers.by_id()
-    assert set(by_id) == {"perk-plan", "perk-checkpoints", "tombell-plan", "juicesharp-todo"}
+    assert set(by_id) == {
+        "perk-plan",
+        "perk-checkpoints",
+        "tombell-plan",
+        "plannotator-plan",
+        "juicesharp-todo",
+    }
     plan = by_id["perk-plan"]
     assert (plan.seam, plan.package, plan.adapter, plan.default) == ("plan", None, None, True)
     tombell = by_id["tombell-plan"]
@@ -64,6 +70,15 @@ def test_real_providers_load_the_four_entries():
     # Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
     # nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`; omitting it loads all).
     assert tombell.package_filter is None
+    # plannotator-plan: a REAL plan provider with the AUGMENT posture (planAdapterPlannotator
+    # bridges its browser review via the plan_review tool; perk's plan surface + gate stay).
+    plannotator = by_id["plannotator-plan"]
+    assert plannotator.seam == "plan"
+    assert plannotator.package == "npm:@plannotator/pi-extension"
+    assert plannotator.adapter == "planAdapterPlannotator"
+    assert plannotator.default is False
+    # No `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
+    assert plannotator.package_filter is None
     # Node 3.2: `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it).
     juicesharp = by_id["juicesharp-todo"]
     assert juicesharp.seam == "todo"

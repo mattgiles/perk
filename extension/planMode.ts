@@ -15,20 +15,30 @@
 // (read-only session) from implement (cold-door fresh worktree session), and `[DONE:n]` tracking
 // lives in the implement session (T2c).
 //
-// REGISTRATION-TIME DEFERRAL (Node 2.3). When a foreign `[providers] plan` is selected, perk's
-// surface is NOT registered at all: `registerPlanMode` resolves the plan provider id once at
-// factory time and, when it is not `perk-plan`, registers NONE of the `--plan` flag, the `/plan`
-// command, the `Ctrl+Alt+P` shortcut, the `--plan` session_start entry, or the `before_agent_start`
-// injection / its `context` strip. The foreign package then owns those surfaces with no collision
-// (Pi suffixes duplicate command names, so handler-time deferral alone is insufficient once the
-// foreign package is loaded). Fail-safe: any config-read error → treated as `perk-plan` → everything
-// registers exactly as today (the default path is the hard guarantee, zero behavior change).
+// REGISTRATION-TIME DEFERRAL (Node 2.3), now THREE-TIER. `registerPlanMode` resolves the plan
+// provider id once at factory time and branches:
+//   - `perk-plan` (and the fail-safe error path) → register EVERYTHING (the default path is the
+//     hard guarantee, zero behavior change).
+//   - `plannotator-plan` (AUGMENT posture) → register everything EXCEPT the `--plan` flag, the
+//     `Ctrl+Alt+P` shortcut, and the `--plan` session_start handler: `@plannotator/pi-extension`
+//     also registers that flag + shortcut, and duplicate flag/shortcut registration is the known
+//     potentially-fatal Pi behavior — plannotator owns `--plan`/`Ctrl+Alt+P` exclusively while
+//     perk keeps `/plan`, the authoring injection, and the read-only gate (plannotator augments
+//     perk's plan flow via the planAdapterPlannotator `plan_review` bridge; it does not replace it).
+//   - any other foreign id (tombell, REPLACE posture) → register NOTHING; the foreign package owns
+//     `/plan`/`Ctrl+Alt+P`/`--plan` unambiguously (Pi suffixes duplicate command names, so
+//     handler-time deferral alone is insufficient once the foreign package is loaded).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 import { loadPerkConfig } from "./config.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
-import { loadProviders, PERK_PLAN_PROVIDER_ID, resolveProviders } from "./providers.ts";
+import {
+  loadProviders,
+  PERK_PLAN_PROVIDER_ID,
+  PLANNOTATOR_PLAN_PROVIDER_ID,
+  resolveProviders,
+} from "./providers.ts";
 import { report } from "./report.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
@@ -57,8 +67,10 @@ implement it without guessing. Anchor every change durably — function/class na
 descriptions, structural locations — never line numbers. Resolve every open choice before saving;
 a saved plan must leave no decisions to the implementer.
 
-When the plan is decision-complete: disable plan mode (/plan off), then call the plan_save tool
-with the finalized plan markdown.`;
+When the plan is decision-complete: write the COMPLETE final plan as your last message and present
+it to the user for review. Do NOT attempt to save it yourself — the user runs /plan-save when
+satisfied (it scrapes your latest message, so that final message must be the clean, complete plan
+and nothing else).`;
 
 /** Build the full plan-authoring injection, appending the project config addendum when present. */
 export function planContextContent(cwd: string): string {
@@ -93,20 +105,24 @@ export function isPerkPlanReferenceSelected(cwd: string): boolean {
  * tracks its own on/off transition), fail-safe-headless (notify when UI, else stderr).
  */
 export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
-  // Registration-time deferral (Node 2.3): resolve the plan provider once at factory time. Under a
-  // foreign plan selection, register NOTHING here so the foreign package owns `/plan`/`Ctrl+Alt+P`/
-  // `--plan` unambiguously. Fail-safe to the reference (any read error registers everything).
-  if (!isPerkPlanReferenceSelected(process.cwd())) return;
+  // Three-tier registration branch (see the header comment): full registration for the reference
+  // (fail-safe default), a PARTIAL vacate (skip only `--plan` + `Ctrl+Alt+P`) under the augment-
+  // posture plannotator selection, and a full vacate under any other foreign selection (tombell).
+  const providerId = resolvedPlanProviderId(process.cwd());
+  const plannotatorSelected = providerId === PLANNOTATOR_PLAN_PROVIDER_ID;
+  if (providerId !== PERK_PLAN_PROVIDER_ID && !plannotatorSelected) return;
 
-  pi.registerFlag("plan", {
-    description: "Start in perk plan mode (read-only exploration + plan authoring).",
-    type: "boolean",
-    default: false,
-  });
+  if (!plannotatorSelected) {
+    pi.registerFlag("plan", {
+      description: "Start in perk plan mode (read-only exploration + plan authoring).",
+      type: "boolean",
+      default: false,
+    });
+  }
 
   function announce(ctx: ExtensionContext, on: boolean): void {
     const message = on
-      ? "plan mode ON — read-only exploration; author the plan, then /plan off + plan_save."
+      ? "plan mode ON — read-only exploration; author the plan and present it for review; save with /plan-save when satisfied."
       : "plan mode OFF — full tool access restored.";
     report(ctx, "plan-mode", "info", message);
   }
@@ -126,20 +142,23 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     handler: async (_args, ctx) => toggle(ctx),
   });
 
-  pi.registerShortcut(Key.ctrlAlt("p"), {
-    description: "Toggle perk plan mode",
-    handler: async (ctx) => toggle(ctx),
-  });
+  if (!plannotatorSelected) {
+    pi.registerShortcut(Key.ctrlAlt("p"), {
+      description: "Toggle perk plan mode",
+      handler: async (ctx) => toggle(ctx),
+    });
 
-  // `--plan` cold start: enter read-only on session_start when the flag is set and the gate is off.
-  // (index.ts's session_start already syncs the gate from the rebuilt `mode`; this layers the flag
-  // on top for ad-hoc `pi --plan` interactive starts — the cold plan door drives read-only via the
-  // handoff `mode`, not this flag.)
-  pi.on("session_start", async (_event, ctx) => {
-    if (pi.getFlag("plan") === true && !gating.isActive()) {
-      gating.enter(ctx);
-    }
-  });
+    // `--plan` cold start: enter read-only on session_start when the flag is set and the gate is
+    // off. (index.ts's session_start already syncs the gate from the rebuilt `mode`; this layers
+    // the flag on top for ad-hoc `pi --plan` interactive starts — the cold plan door drives
+    // read-only via the handoff `mode`, not this flag.) Skipped under the plannotator selection
+    // along with the flag itself (the flag no longer exists on perk's side).
+    pi.on("session_start", async (_event, ctx) => {
+      if (pi.getFlag("plan") === true && !gating.isActive()) {
+        gating.enter(ctx);
+      }
+    });
+  }
 
   // Inject the plan-authoring context while the read-only gate is active (display:false). The one
   // exception: an objective-author session is ALSO read-only, but objectiveAuthor.ts injects its

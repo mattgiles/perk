@@ -1,6 +1,6 @@
 ---
 name: perk-plan
-description: Authoring a perk implementation plan before saving it with the plan_save tool or the /plan-save command. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
+description: Authoring a perk implementation plan and presenting it for review before the human saves it with the /plan-save command. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
 ---
 
 # Authoring a perk plan
@@ -10,21 +10,30 @@ mode, read-only), then save it **verbatim** to GitHub. The save step is purely m
 the judgment lives here**. Write the plan so an executor (a future session, or another engineer)
 with **zero prior context** can implement it without guessing.
 
-## Saving: exit plan mode, then call the `plan_save` tool
+## Saving: present the complete plan; the human runs `/plan-save`
 
-The **robust** save path is the `plan_save` **tool** — you pass the finalized plan markdown in its
-`plan` parameter, so the exact plan is stored (no guessing what "the plan" was). Because plan mode
-hides custom tools, the flow is:
+In interactive plan authoring your deliverable is the **complete plan as your final message** —
+you never attempt to save it yourself (`/plan` is a user command you cannot run, and the
+`plan_save` tool is hidden while plan mode is on). The flow is:
 
 1. Explore read-only and converge on the plan (`/plan` on).
-2. **Disable plan mode** (`/plan` off) so the `plan_save` tool becomes available.
-3. Call **`plan_save`** with the complete plan markdown (and an optional `title`).
+2. When the plan is decision-complete, write the **complete final plan as your last message** and
+   present it to the user for review. The message must be the clean plan and nothing else — no
+   preamble, no conversation — because the save scrapes it verbatim.
+3. The **human** runs **`/plan-save`** when satisfied: it scrapes your latest message as the plan,
+   saves it to GitHub, and on success automatically exits plan mode (the read-only → read-write
+   boundary in one gesture).
 
-The `/plan-save` **command** is a fallback that scrapes your most recent message as the plan; it is
-fragile (it can't tell a clean plan from conversation). It *can* run while plan mode is active, and
-on a successful save it **automatically exits plan mode** (the read-only → read-write boundary in
-one gesture). Prefer the tool. There is no tag or marker convention to use — just author a clean plan
-and hand it to the tool.
+When the `plannotator-plan` provider is selected, add a review step before presenting: call the
+**`plan_review`** tool with the complete plan markdown — the Plannotator browser UI opens for the
+human; on a deny, revise per the returned annotations and call `plan_review` again; on approve,
+present the final plan as above. (When that provider is not selected, `plan_review` is a no-op
+skip — just present the plan.)
+
+The `plan_save` **tool** remains the canonical save surface for **orchestrated factory flows**
+(objective-plan, learn-docs, replan), where the factory prompt explicitly instructs an autonomous
+save — those flows are unchanged. There is no tag or marker convention to use — just author a
+clean plan.
 
 ## Structure
 

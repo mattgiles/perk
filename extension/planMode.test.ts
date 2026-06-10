@@ -116,6 +116,55 @@ test("deferral: a foreign [providers] plan selection makes perk NOT register the
   }
 });
 
+test("partial vacate: a plannotator-plan selection keeps /plan + injection but drops --plan", async () => {
+  const cwd = scaffoldRepo();
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[providers]\nplan = "plannotator-plan"\n', "utf8");
+  // Registration-time branching resolves `process.cwd()` at factory time — point it at the scaffold.
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    // Augment posture: perk's `/plan` command IS registered…
+    assert.equal(
+      h.registeredCommands().includes("plan"),
+      true,
+      "perk keeps /plan under the plannotator selection",
+    );
+    // …and the toggle + authoring injection still work end-to-end.
+    await h.invokeCommand("plan");
+    assert.equal(h.workflowState().mode, "read-only", "/plan still flips read-only");
+    assert.ok(
+      (await h.emitBeforeAgentStart()).some((m) => m.customType === PLAN_CONTEXT_TYPE),
+      "plan-authoring context still injected",
+    );
+    await h.invokeCommand("plan");
+    // …but the `--plan` flag and the Ctrl+Alt+P shortcut are NOT registered (plannotator owns
+    // them exclusively — duplicate flag/shortcut registration is the potentially-fatal collision).
+    const runner = h.session.extensionRunner as unknown as {
+      getFlags: () => Map<string, unknown>;
+      getShortcuts: (kb: Record<string, unknown>) => Map<string, unknown>;
+    };
+    assert.equal(runner.getFlags().has("plan"), false, "--plan flag not registered");
+    assert.equal(runner.getShortcuts({}).size, 0, "no perk shortcut registered");
+    // Setting the (unregistered) flag + reload is inert.
+    h.setFlag("plan", true);
+    await h.reload();
+    assert.notEqual(
+      h.workflowState().mode,
+      "read-only",
+      "--plan is inert (unregistered) under the plannotator selection",
+    );
+  } finally {
+    h.dispose();
+    process.chdir(savedCwd);
+  }
+});
+
 test("--plan cold start enters read-only on session_start", async () => {
   const cwd = scaffoldRepo();
   // Unset PERK_RUN_ID so session_start takes the no-op "none" path (ad-hoc `pi --plan`, no run).

@@ -10,10 +10,10 @@
 // WHAT IT DOES (and does NOT do):
 //   - It injects a hidden (`display:false`) `perk:plan-adapter-tombell` context that tells the model
 //     the foreign `/plan` surface authors a FREE-FORM PROSE plan, and that when the plan is
-//     decision-complete it must be persisted through perk's canonical save (the `/plan-save` command
-//     — which scrapes the latest plan prose — or the `plan_save` tool) so it lands at the
-//     provider-agnostic `cache.plan-ref`, carrying any objective/node/consumed-learn the cold door
-//     stashed in the handoff. The mechanical prose→plan-ref bridge is the EXISTING `/plan-save`
+//     decision-complete it must be PRESENTED to the user as the final message; the human persists
+//     it through perk's canonical save (the `/plan-save` command — which scrapes the latest plan
+//     prose) so it lands at the provider-agnostic `cache.plan-ref`, carrying any objective/node/
+//     consumed-learn the cold door stashed in the handoff. The mechanical prose→plan-ref bridge is the EXISTING `/plan-save`
 //     `extractPlanMarkdown` scrape (planSave.ts) — no new save machinery; the shim only directs flow.
 //   - It does NOT own, replace, or duplicate the read-only gate (Invariant 1) and NEVER calls
 //     `setActiveTools` / registers a `tool_call` handler. The read-only tier during foreign planning
@@ -46,12 +46,13 @@ Gather before you plan, then write the plan so an executor with zero prior conte
 without guessing: anchor every change durably — function/class names, behavioral descriptions,
 structural locations — never line numbers, and resolve every open choice before you save.
 
-When the plan is decision-complete, persist it through perk's canonical save so it lands at the
-provider-agnostic plan reference (cache.plan-ref): run the /plan-save command (it scrapes your
-latest plan prose), or call the plan_save tool with the finalized plan markdown once read-only is
-off. perk records the saved plan and links this session to it; the objective/node linkage and any
+When the plan is decision-complete, write the COMPLETE final plan as your last message and present
+it to the user for review — do NOT attempt to save it yourself. The user runs the /plan-save
+command when satisfied: it scrapes your latest message (so that final message must be the clean,
+complete plan) and persists it to the provider-agnostic plan reference (cache.plan-ref). perk
+records the saved plan and links this session to it; the objective/node linkage and any
 consumed-learn numbers are recovered automatically from the launch handoff. Do not try to write the
-plan reference yourself — only /plan-save or the plan_save tool produce it.`;
+plan reference yourself — only the /plan-save save path produces it.`;
 
 /** Whether the foreign `tombell-plan` provider is the selected plan provider for `cwd`. */
 export function isTombellPlanSelected(cwd: string): boolean {
