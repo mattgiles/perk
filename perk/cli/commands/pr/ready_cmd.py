@@ -1,6 +1,6 @@
-"""`perk pr-ready` — the deliberate draft→ready review gate (the cold ready door; P2.T8a, D6).
+"""`perk pr ready` — the deliberate draft→ready review gate (the cold ready door; P2.T8a, D6).
 
-perk deliberately does NOT auto-publish on submit (the PR stays draft). `/ready` (`perk pr-ready`)
+perk deliberately does NOT auto-publish on submit (the PR stays draft). `/ready` (`perk pr ready`)
 is the explicit gesture that opens the PR for review: resolve the active plan-ref → find the PR →
 `mark_pr_ready` if it is still a draft. Idempotent — an already-ready PR is success.
 
@@ -14,12 +14,11 @@ from pathlib import Path
 import click
 
 from perk import cache, github, launch
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -29,11 +28,11 @@ class PrReadyResult:
     dry_run: bool
 
 
-@click.command("pr-ready")
+@click.command("ready")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Resolve the PR without marking it ready.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_ready(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
+def ready_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
     """Mark the active plan's draft PR ready for review (the deliberate review gate).
 
     \b
@@ -45,14 +44,21 @@ def pr_ready(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
             require_github(ctx)
         result = _pr_ready_impl(repo_root=repo_root, dry_run=dry_run)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"pr-ready failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"pr ready failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -104,7 +110,7 @@ def _result_to_dict(result: PrReadyResult) -> dict[str, object]:
 
 def _render_human(result: PrReadyResult) -> None:
     if result.dry_run:
-        user_output(click.style("pr-ready --dry-run (no GitHub writes)", dim=True))
+        user_output(click.style("pr ready --dry-run (no GitHub writes)", dim=True))
         user_output("  would: mark the PR ready for review (if draft)")
         return
     verb = "Marked ready" if result.was_draft else "Already ready"
@@ -114,15 +120,3 @@ def _render_human(result: PrReadyResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + " is open for review"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

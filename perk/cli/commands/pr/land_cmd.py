@@ -1,4 +1,4 @@
-"""`perk pr-land` — the Python/worker PR merge (the cold land door; P1.T5b).
+"""`perk pr land` — the Python/worker PR merge (the cold land door; P1.T5b).
 
 Finds the active plan's PR, marks it ready (if draft), squash-merges it (the `Closes #N` in the
 PR body closes the plan issue), and sets the `pending-learn` semaphore. Idempotent: an already
@@ -16,12 +16,11 @@ from pathlib import Path
 import click
 
 from perk import cache, github, launch, objective
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 # `consumed_learn` (so `no_consumed_learn` is expected) and a dry run early-returns `dry_run`.
@@ -67,13 +66,13 @@ class PrLandResult:
     learn: LearnConsumeUpdate
 
 
-@click.command("pr-land")
+@click.command("land")
 @click.option(
     "--dry-run", "dry_run", is_flag=True, help="Compose the plan without touching GitHub."
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_land(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
+def land_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
     """Merge the active plan's PR and set the pending-learn semaphore (submit → land).
 
     \b
@@ -85,14 +84,21 @@ def pr_land(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
             require_github(ctx)
         result = _pr_land_impl(repo_root=repo_root, dry_run=dry_run)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"PR land failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"PR land failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -106,7 +112,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
     """Resolves the plan's PR, marks ready + squash-merges, sets pending-learn.
 
     A dry run is fully **offline** (no `gh`, no marker write): it composes the preview from the
-    local `cache.plan-ref` only (mirroring `pr-submit --dry-run`).
+    local `cache.plan-ref` only (mirroring `pr submit --dry-run`).
     """
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
@@ -194,7 +200,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         return ObjectiveLandUpdate(number, tuple(marked), None)
     except Exception as exc:  # fail-open: objective tracking never blocks landing
         print(
-            f"perk pr-land: objective reconciliation skipped (non-fatal): {exc}",
+            f"perk pr land: objective reconciliation skipped (non-fatal): {exc}",
             file=sys.stderr,
         )
         return ObjectiveLandUpdate(number, (), f"error: {exc}")
@@ -228,7 +234,7 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
             closed.append(number)
         except Exception as exc:  # fail-open: consuming learn issues never blocks landing
             print(
-                f"perk pr-land: learn consume skipped issue #{number} (non-fatal): {exc}",
+                f"perk pr land: learn consume skipped issue #{number} (non-fatal): {exc}",
                 file=sys.stderr,
             )
             failed.append(number)
@@ -276,7 +282,7 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
 
 def _render_human(result: PrLandResult) -> None:
     if result.dry_run:
-        user_output(click.style("pr-land --dry-run (no GitHub writes, no marker)", dim=True))
+        user_output(click.style("pr land --dry-run (no GitHub writes, no marker)", dim=True))
         user_output(f"  branch={result.branch}  plan=#{result.issue}")
         user_output("  would: mark ready (if draft) → squash-merge → set pending-learn")
         return
@@ -299,15 +305,3 @@ def _render_human(result: PrLandResult) -> None:
         user_output(
             click.style(f"  ⚠ learn consume incomplete: {result.learn.skipped_reason}", fg="yellow")
         )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

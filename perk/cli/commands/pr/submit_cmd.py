@@ -1,4 +1,4 @@
-"""`perk pr-submit` — the Python/worker PR open (the cold submit door; P1.T5a).
+"""`perk pr submit` — the Python/worker PR open (the cold submit door; P1.T5a).
 
 Pushes the active plan's branch and opens a **draft** PR linking the plan (`Closes #N`), then
 populates the staged `branch`/`pr`/`lifecycle_stage` plan-header fields. Reuses T2a's write
@@ -15,12 +15,11 @@ from pathlib import Path
 import click
 
 from perk import cache, git, github, launch, plan
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -34,13 +33,13 @@ class PrSubmitResult:
     dry_run: bool
 
 
-@click.command("pr-submit")
+@click.command("submit")
 @click.option(
     "--dry-run", "dry_run", is_flag=True, help="Compose the plan without pushing or hitting GitHub."
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_submit(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
+def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
     """Open a draft PR for the active plan's branch (the implement → submit boundary).
 
     \b
@@ -52,10 +51,16 @@ def pr_submit(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
             require_github(ctx)
         result = _pr_submit_impl(repo_root=repo_root, dry_run=dry_run)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"PR submit failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"PR submit failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except git.PushRejectedError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="push_rejected",
@@ -63,17 +68,25 @@ def pr_submit(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
                 "Push rejected — the remote branch moved unexpectedly.\n"
                 "Fetch/rebase onto the latest origin and re-submit.\n" + str(exc)
             ),
+            extra={"dry_run": False},
         )
         return
     except git.GitError as exc:
-        _fail(ctx, as_json=as_json, error_type="git_error", message=f"git push failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="git_error",
+            message=f"git push failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -219,7 +232,7 @@ def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
 
 def _render_human(result: PrSubmitResult) -> None:
     if result.dry_run:
-        user_output(click.style("pr-submit --dry-run (no push, no GitHub writes)", dim=True))
+        user_output(click.style("pr submit --dry-run (no push, no GitHub writes)", dim=True))
         user_output(f"  branch={result.branch}  base-plan=#{result.issue}")
         user_output(f"  would set plan-header: {', '.join(result.header_update.fields_updated)}")
         return
@@ -231,15 +244,3 @@ def _render_human(result: PrSubmitResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + f" → {result.pr.url} ({embed}; footer checked)"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

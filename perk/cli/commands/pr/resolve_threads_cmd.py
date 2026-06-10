@@ -1,10 +1,10 @@
-"""`perk pr-resolve-threads` — the batched review-thread resolution (the §8.4 op; P2.T7).
+"""`perk pr resolve-threads` — the batched review-thread resolution (the §8.4 op; P2.T7).
 
 Reads a JSON batch (`[{thread_id, comment?}]`) from a `--batch <file>` arg (pi.exec has no stdin
 channel, so the warm TS tool writes a run-scoped scratch file and passes its path here), then for
 each thread does an optional reply followed by `resolveReviewThread` (GraphQL). The warm in-session
 twin is the TS `resolve_review_threads` tool, which delegates here via `pi.exec` (D1 — GitHub
-mutations are canonical in the Python gateway). Mirrors `pr_submit_cmd.py` structure.
+mutations are canonical in the Python gateway). Mirrors `submit_cmd.py` structure.
 
 Exit codes: 0 ok (batch processed; per-item failures ride inside the result) · 1 invalid input /
 unauthed / bad batch file / op failure · 2 not-a-repo.
@@ -17,15 +17,14 @@ from typing import cast
 import click
 
 from perk import github
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
-
-@click.command("pr-resolve-threads")
+@click.command("resolve-threads")
 @click.option(
     "--batch",
     "batch_file",
@@ -38,7 +37,7 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_resolve_threads(
+def resolve_threads_pr(
     ctx: click.Context, *, batch_file: Path, dry_run: bool, as_json: bool
 ) -> None:
     """Reply-then-resolve a batch of PR review threads (the parent's resolve step).
@@ -53,14 +52,21 @@ def pr_resolve_threads(
         batch = _load_batch(batch_file)
         result = github.resolve_review_threads(batch=batch, repo_root=repo_root, dry_run=dry_run)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"resolve failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"resolve failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -120,7 +126,7 @@ def _result_to_dict(result: github.BatchResolveResult, *, dry_run: bool) -> dict
 
 def _render_human(result: github.BatchResolveResult, *, dry_run: bool) -> None:
     if dry_run:
-        user_output(click.style("pr-resolve-threads --dry-run (no GitHub writes)", dim=True))
+        user_output(click.style("pr resolve-threads --dry-run (no GitHub writes)", dim=True))
         user_output(f"  would resolve {len(result.results)} thread(s)")
         return
     ok = sum(1 for r in result.results if r.success)
@@ -129,15 +135,3 @@ def _render_human(result: github.BatchResolveResult, *, dry_run: bool) -> None:
         click.style("✓ " if result.success else "~ ", fg=style)
         + f"Resolved {ok}/{len(result.results)} review thread(s)"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

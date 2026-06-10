@@ -1,6 +1,6 @@
-"""`perk pr-check` — the deterministic PR-body checkout-footer validator (the cold check; P2.T8a).
+"""`perk pr check` — the deterministic PR-body checkout-footer validator (the cold check; P2.T8a).
 
-The supervisor surface for the post-write self-check `pr-submit` runs inline: resolve the active
+The supervisor surface for the post-write self-check `pr submit` runs inline: resolve the active
 plan-ref → find the PR → read its body → `github.validate_pr_body` (footer-scoped). This is exactly
 what catches the issue-numbered-footer bug (a footer carrying the *issue* number, not the PR's).
 
@@ -13,18 +13,17 @@ from pathlib import Path
 import click
 
 from perk import cache, github, launch
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
-
-@click.command("pr-check")
+@click.command("check")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_check(ctx: click.Context, *, as_json: bool) -> None:
+def check_pr(ctx: click.Context, *, as_json: bool) -> None:
     """Validate the active plan's PR checkout footer (the deterministic `pr check`).
 
     \b
@@ -35,10 +34,10 @@ def pr_check(ctx: click.Context, *, as_json: bool) -> None:
         require_github(ctx)
         errors = _pr_check_impl(repo_root=repo_root)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"pr-check failed\n{exc}")
+        fail(ctx, as_json=as_json, error_type="github_error", message=f"pr check failed\n{exc}")
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -47,7 +46,7 @@ def pr_check(ctx: click.Context, *, as_json: bool) -> None:
         return
 
     if errors:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="pr_check_failed",
@@ -76,11 +75,3 @@ def _pr_check_impl(*, repo_root: Path) -> tuple[str, ...]:
         )
     body = github.get_pr_body(number=pr.number, repo_root=repo_root)
     return github.validate_pr_body(body or "", pr_number=pr.number)
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

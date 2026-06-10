@@ -86,7 +86,7 @@ TOP_LEVEL_COMMANDS = [
     "objective-save",
     "doctor",
 ]
-COMMAND_GROUPS = ["objective", "registry", "state", "worktree", "workflow"]
+COMMAND_GROUPS = ["objective", "pr", "registry", "state", "worktree", "workflow"]
 INITIALIZATION = ["init"]
 
 

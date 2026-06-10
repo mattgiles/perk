@@ -1,6 +1,6 @@
-"""`perk pr-review-context` — the read-only PR-review context fetch (#175).
+"""`perk pr review-context` — the read-only PR-review context fetch (#175).
 
-Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr-feedback` does),
+Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback` does),
 gathers everything the fresh-context `perk.pr-reviewer` child needs to review it (the diff, the PR
 title/body, and the plan body), and emits `--json`. Read-only — no GitHub mutation; the verbose
 payload is consumed by the spawned reviewer child so it never transits the parent session.
@@ -16,12 +16,11 @@ from pathlib import Path
 import click
 
 from perk import cache, github, launch
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -30,10 +29,10 @@ class PrReviewContextResult:
     branch: str
 
 
-@click.command("pr-review-context")
+@click.command("review-context")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_review_context(ctx: click.Context, *, as_json: bool) -> None:
+def review_context_pr(ctx: click.Context, *, as_json: bool) -> None:
     """Fetch the active plan's PR review context (read-only; the pr-reviewer child runs this).
 
     \b
@@ -43,7 +42,7 @@ def pr_review_context(ctx: click.Context, *, as_json: bool) -> None:
         repo_root = require_repo(ctx)
         result = _impl(repo_root=repo_root)
     except GitHubError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type="github_error",
@@ -51,7 +50,7 @@ def pr_review_context(ctx: click.Context, *, as_json: bool) -> None:
         )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -107,11 +106,3 @@ def _render_human(result: PrReviewContextResult) -> None:
         + f"{len(c.diff)} diff byte(s), "
         + ("plan body present" if c.plan_body else "no plan body")
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

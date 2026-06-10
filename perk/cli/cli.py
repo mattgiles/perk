@@ -20,14 +20,7 @@ from perk.cli.commands.objective import objective_group
 from perk.cli.commands.objective_author_cmd import objective_author
 from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan_save_cmd import plan_save
-from perk.cli.commands.pr_check_cmd import pr_check
-from perk.cli.commands.pr_feedback_cmd import pr_feedback
-from perk.cli.commands.pr_land_cmd import pr_land
-from perk.cli.commands.pr_ready_cmd import pr_ready
-from perk.cli.commands.pr_resolve_threads_cmd import pr_resolve_threads
-from perk.cli.commands.pr_review_context_cmd import pr_review_context
-from perk.cli.commands.pr_review_post_cmd import pr_review_post
-from perk.cli.commands.pr_submit_cmd import pr_submit
+from perk.cli.commands.pr import pr_group
 from perk.cli.commands.registry import registry_group
 from perk.cli.commands.replan_cmd import replan
 from perk.cli.commands.resume_cmd import resume_cmd
@@ -52,15 +45,8 @@ def cli(ctx: click.Context) -> None:
 
 cli.add_command(init_perk)
 register_with_aliases(cli, plan_save)
-cli.add_command(pr_submit)
-cli.add_command(pr_check)
-cli.add_command(pr_ready)
-cli.add_command(pr_land)
+cli.add_command(pr_group)
 register_with_aliases(cli, learn_capture)
-cli.add_command(pr_feedback)
-cli.add_command(pr_resolve_threads)
-cli.add_command(pr_review_context)
-cli.add_command(pr_review_post)
 register_with_aliases(cli, resume_cmd)
 register_with_aliases(cli, implement)
 cli.add_command(doctor_group)

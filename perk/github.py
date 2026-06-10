@@ -1218,7 +1218,7 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
 
 def get_pr_body(*, number: int, repo_root: Path) -> str | None:
     """Fetch a PR's body markdown (REST). ``None`` if the PR does not exist; raises on infra
-    failure. Used by ``perk pr-check`` to re-validate the live checkout footer (P2.T8a)."""
+    failure. Used by ``perk pr check`` to re-validate the live checkout footer (P2.T8a)."""
     proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".body"], cwd=repo_root)
     if proc.returncode != 0:
         if "404" in (proc.stderr + proc.stdout):
@@ -1642,7 +1642,7 @@ def _parse_reviews(payload: dict[str, Any]) -> tuple[Review, ...]:
 def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
     """Fetch a PR's reviewer feedback: review threads + PR-level reviews (GraphQL) and discussion
     comments (REST). The three sources are kept **separate** (counted apart). Read-only; raises
-    ``GitHubError`` on an infra failure. This is what the classify child runs (`perk pr-feedback`).
+    ``GitHubError`` on an infra failure. This is what the classify child runs (`perk pr feedback`).
     """
     owner, repo = _owner_repo(repo_root)
     threads_payload = _graphql(
