@@ -81,7 +81,7 @@ def _run(monkeypatch, args, *, write_ref=True):
 
 def test_dry_run_is_offline_and_well_formed(monkeypatch):
     # No gh stubs at all — a dry run must not shell anything.
-    result = _run(monkeypatch, ["pr-submit", "--dry-run", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--dry-run", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
@@ -91,7 +91,7 @@ def test_dry_run_is_offline_and_well_formed(monkeypatch):
 
 
 def test_no_plan_ref_exits_1(monkeypatch):
-    result = _run(monkeypatch, ["pr-submit", "--dry-run", "--json"], write_ref=False)
+    result = _run(monkeypatch, ["pr", "submit", "--dry-run", "--json"], write_ref=False)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_plan_ref"
 
@@ -99,7 +99,7 @@ def test_no_plan_ref_exits_1(monkeypatch):
 def test_not_a_repo_exits_2(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["pr-submit", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["pr", "submit", "--dry-run", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 
@@ -107,7 +107,7 @@ def test_not_a_repo_exits_2(monkeypatch):
 def test_real_submit_opens_pr_and_updates_header(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["pr"]["number"] == 42 and data["pr"]["existed"] is False
@@ -122,7 +122,7 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
 def test_real_submit_embeds_plan_when_available(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch, plan_body="# My Plan\n\nbody text")
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["plan_embedded"] is True
@@ -134,7 +134,7 @@ def test_real_submit_embeds_plan_when_available(monkeypatch):
 def test_real_submit_idempotent_existing_pr(monkeypatch):
     _authed(monkeypatch)
     _stub_gh(monkeypatch, existed=True)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["pr"]["existed"] is True
 
@@ -143,7 +143,7 @@ def test_real_submit_plan_not_found_exits_1(monkeypatch):
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
     monkeypatch.setattr(github, "get_plan", lambda **k: None)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "plan_not_found"
 
@@ -151,7 +151,7 @@ def test_real_submit_plan_not_found_exits_1(monkeypatch):
 def test_real_submit_force_pushes(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     assert calls["pushed"] is True
     assert calls["push_kwargs"] == {"force": True}
@@ -161,7 +161,7 @@ def test_dirty_tree_refuses_before_push(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_gh(monkeypatch)
     monkeypatch.setattr(git, "is_dirty", lambda root: True)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "dirty_tree"
     assert calls["pushed"] is False
@@ -175,6 +175,6 @@ def test_push_rejected_maps_to_stable_error(monkeypatch):
         raise git.PushRejectedError("! [rejected] plan-7 -> plan-7 (non-fast-forward)")
 
     monkeypatch.setattr(git, "push", _reject)
-    result = _run(monkeypatch, ["pr-submit", "--json"])
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "push_rejected"

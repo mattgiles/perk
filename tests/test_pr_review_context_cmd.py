@@ -43,7 +43,7 @@ def test_context_success_json(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        result = runner.invoke(cli, ["pr-review-context", "--json"])
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True
@@ -57,7 +57,7 @@ def test_context_no_plan_ref_exits_1():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["pr-review-context", "--json"])
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_plan_ref"
 
@@ -68,7 +68,7 @@ def test_context_no_pr_exits_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        result = runner.invoke(cli, ["pr-review-context", "--json"])
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
 
@@ -76,7 +76,7 @@ def test_context_no_pr_exits_1(monkeypatch):
 def test_context_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["pr-review-context", "--json"])
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 
@@ -92,6 +92,6 @@ def test_context_github_error_exits_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        result = runner.invoke(cli, ["pr-review-context", "--json"])
+        result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"

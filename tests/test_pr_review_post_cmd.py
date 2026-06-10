@@ -61,7 +61,7 @@ def test_post_success_json(monkeypatch):
         batch = _write_batch(
             d, {"summary": "looks good", "comments": [{"path": "x.py", "line": 3, "body": "nit"}]}
         )
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["pr"] == 42
@@ -74,7 +74,7 @@ def test_post_dry_run_offline():
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         batch = _write_batch(d, {"summary": "ok"})
-        result = runner.invoke(cli, ["pr-review-post", "--dry-run", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--dry-run", "--json", "--batch", batch])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
@@ -87,7 +87,7 @@ def test_post_bad_batch_not_object(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         batch = _write_batch(d, ["not", "an", "object"])
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "bad_batch"
 
@@ -99,7 +99,7 @@ def test_post_bad_batch_missing_summary(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         batch = _write_batch(d, {"comments": []})
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "bad_batch"
 
@@ -112,7 +112,7 @@ def test_post_bad_batch_malformed_comment(monkeypatch):
         cache.write_plan_ref(Path(d), _REF)
         bad = {"summary": "ok", "comments": [{"path": "x.py", "body": "no line"}]}
         batch = _write_batch(d, bad)
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "bad_batch"
 
@@ -123,7 +123,7 @@ def test_post_no_plan_ref_exits_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         batch = _write_batch(d, {"summary": "ok"})
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_plan_ref"
 
@@ -136,7 +136,7 @@ def test_post_no_pr_exits_1(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         batch = _write_batch(d, {"summary": "ok"})
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
 
@@ -145,7 +145,7 @@ def test_post_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         batch = _write_batch(d, {"summary": "ok"})
-        result = runner.invoke(cli, ["pr-review-post", "--json", "--batch", batch])
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 

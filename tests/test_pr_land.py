@@ -6,7 +6,7 @@ from click.testing import CliRunner
 
 from perk import cache, github, objective
 from perk.cli.cli import cli
-from perk.cli.commands.pr_land_cmd import (
+from perk.cli.commands.pr.land_cmd import (
     LearnConsumeUpdate,
     ObjectiveLandUpdate,
     PrLandResult,
@@ -82,7 +82,7 @@ def test_dry_run_is_offline_and_sets_no_marker():
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["success"] is True and data["dry_run"] is True
@@ -91,7 +91,7 @@ def test_dry_run_is_offline_and_sets_no_marker():
 
 
 def test_no_plan_ref_exits_1():
-    result = _run(["pr-land", "--dry-run", "--json"], write_ref=False)
+    result = _run(["pr", "land", "--dry-run", "--json"], write_ref=False)
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_plan_ref"
 
@@ -99,7 +99,7 @@ def test_no_plan_ref_exits_1():
 def test_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
 
@@ -111,7 +111,7 @@ def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         calls = _stub_land(monkeypatch, draft=True)
-        result = runner.invoke(cli, ["pr-land", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["pr"]["state"] == "MERGED" and data["pending_learn"] is True
@@ -128,7 +128,7 @@ def test_real_land_empty_title_falls_back_to_closes(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         calls = _stub_land(monkeypatch, draft=False, title="")
-        result = runner.invoke(cli, ["pr-land", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         assert calls["commit_message"] == "Closes #7"
 
@@ -140,7 +140,7 @@ def test_real_land_ready_pr_skips_mark_ready(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         calls = _stub_land(monkeypatch, draft=False)
-        result = runner.invoke(cli, ["pr-land", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         assert calls["readied"] is False and calls["merged"] is True
 
@@ -152,7 +152,7 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         calls = _stub_land(monkeypatch, draft=False, merged=True)
-        result = runner.invoke(cli, ["pr-land", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
         # already MERGED -> no mark-ready, no merge call, but the marker is still set
         assert calls["readied"] is False and calls["merged"] is False
@@ -352,7 +352,7 @@ def test_dry_run_learn_is_inert():
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), {**_REF, "consumed_learn": [45]})
-        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["learn"] == {"closed": [], "skipped_reason": "dry_run"}
@@ -363,7 +363,7 @@ def test_dry_run_objective_is_inert():
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), {**_REF, "objective_id": "5"})
-        result = runner.invoke(cli, ["pr-land", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["objective"] == {
@@ -380,6 +380,6 @@ def test_real_land_no_pr_exits_1(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
-        result = runner.invoke(cli, ["pr-land", "--json"])
+        result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "no_pr"

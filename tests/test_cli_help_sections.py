@@ -37,7 +37,14 @@ def test_command_groups_section_lists_groups():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     groups_slice = _between(result.output, "Command Groups:", "Initialization:")
-    for entry in ("worktree (wt)", "objective (obj)", "registry (reg)", "state (st)", "workflow"):
+    for entry in (
+        "worktree (wt)",
+        "objective (obj)",
+        "pr",
+        "registry (reg)",
+        "state (st)",
+        "workflow",
+    ):
         assert entry in groups_slice, entry
     top_slice = _between(result.output, "Top-Level Commands:", "Command Groups:")
     # The group rows (with their parenthetical aliases) must not appear under Top-Level Commands.
@@ -56,7 +63,29 @@ def test_workers_render_under_other():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     other_slice = _between(result.output, "Other:", None)
-    assert "pr-submit" in other_slice
+    assert "run-worker" in other_slice
+
+
+def test_pr_group_lists_all_verbs():
+    result = CliRunner().invoke(cli, ["pr", "--help"])
+    assert result.exit_code == 0
+    for verb in (
+        "submit",
+        "check",
+        "ready",
+        "land",
+        "feedback",
+        "resolve-threads",
+        "review-context",
+        "review-post",
+    ):
+        assert verb in result.output, verb
+
+
+def test_flat_pr_spellings_are_gone():
+    # No backwards-compat alias survives the pr-* → `pr <verb>` fold.
+    result = CliRunner().invoke(cli, ["pr-submit"])
+    assert result.exit_code != 0
 
 
 def test_aliases_still_parenthetical():

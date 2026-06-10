@@ -49,7 +49,7 @@ def _run(monkeypatch, args, *, write_ref=True):
 def test_pr_check_valid_exits_0(monkeypatch):
     _authed(monkeypatch)
     _stub_pr(monkeypatch, body="Closes #7\n\n`gh pr checkout 42`\n")
-    result = _run(monkeypatch, ["pr-check", "--json"])
+    result = _run(monkeypatch, ["pr", "check", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["success"] is True
 
@@ -57,7 +57,7 @@ def test_pr_check_valid_exits_0(monkeypatch):
 def test_pr_check_invalid_footer_exits_1(monkeypatch):
     _authed(monkeypatch)
     _stub_pr(monkeypatch, body="Closes #7\n\n`gh pr checkout 7`\n")  # issue number, not PR
-    result = _run(monkeypatch, ["pr-check", "--json"])
+    result = _run(monkeypatch, ["pr", "check", "--json"])
     assert result.exit_code == 1
     data = json.loads(result.output)
     assert data["success"] is False and data["error_type"] == "pr_check_failed"
@@ -66,7 +66,7 @@ def test_pr_check_invalid_footer_exits_1(monkeypatch):
 def test_pr_check_no_pr_exits_1(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
-    result = _run(monkeypatch, ["pr-check", "--json"])
+    result = _run(monkeypatch, ["pr", "check", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
 
@@ -74,6 +74,6 @@ def test_pr_check_no_pr_exits_1(monkeypatch):
 def test_pr_check_not_a_repo_exits_2(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["pr-check", "--json"])
+        result = runner.invoke(cli, ["pr", "check", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
