@@ -33,7 +33,7 @@ from perk.cli.commands.replan_cmd import replan
 from perk.cli.commands.resume_cmd import resume_cmd
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
 from perk.cli.commands.state import state_group
-from perk.cli.commands.workflow_cmd import workflow_group
+from perk.cli.commands.workflow import workflow_group
 from perk.cli.commands.worktree import worktree_group
 from perk.cli.context import PerkContext
 from perk.cli.stages import register_stage_commands
