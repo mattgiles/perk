@@ -11,6 +11,7 @@
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
+import { report } from "./report.ts";
 
 /** The `perk learn-docs --gather --json` success shape (the contract the warm door consumes). */
 interface LearnDocsGatherJson {
@@ -59,9 +60,7 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
           signal: ctx.signal,
         });
       } catch (err) {
-        const message = `perk: /learn-docs — could not run '${perkBin}': ${String(err)}`;
-        if (ctx.hasUI) ctx.ui.notify(message, "error");
-        else console.error(message);
+        report(ctx, "learn-docs", "error", `could not run '${perkBin}': ${String(err)}`);
         return;
       }
 
@@ -76,12 +75,9 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
         }
         const noIssues = parsedErr?.error_type === "no_learn_issues";
         const message = noIssues
-          ? "perk: /learn-docs — nothing to consolidate (no open perk:learn issues)."
-          : `perk: /learn-docs — gather failed: ${
-              parsedErr?.message ?? res.stderr.trim() ?? `exit ${res.code}`
-            }`;
-        if (ctx.hasUI) ctx.ui.notify(message, noIssues ? "warning" : "error");
-        else console.error(message);
+          ? "nothing to consolidate (no open perk:learn issues)."
+          : `gather failed: ${parsedErr?.message ?? res.stderr.trim() ?? `exit ${res.code}`}`;
+        report(ctx, "learn-docs", noIssues ? "warning" : "error", message);
         return;
       }
 
@@ -89,15 +85,11 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
       try {
         parsed = JSON.parse(res.stdout) as LearnDocsGatherJson;
       } catch {
-        const message = "perk: /learn-docs — gather returned unparseable JSON.";
-        if (ctx.hasUI) ctx.ui.notify(message, "error");
-        else console.error(message);
+        report(ctx, "learn-docs", "error", "gather returned unparseable JSON.");
         return;
       }
       if (!parsed.success || !parsed.inbox_path || !parsed.learn_numbers) {
-        const message = `perk: /learn-docs — ${parsed.message ?? "gather reported failure"}`;
-        if (ctx.hasUI) ctx.ui.notify(message, "error");
-        else console.error(message);
+        report(ctx, "learn-docs", "error", parsed.message ?? "gather reported failure");
         return;
       }
 

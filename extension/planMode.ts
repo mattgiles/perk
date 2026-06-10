@@ -29,6 +29,7 @@ import { Key } from "@earendil-works/pi-tui";
 import { loadPerkConfig } from "./config.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { loadProviders, PERK_PLAN_PROVIDER_ID, resolveProviders } from "./providers.ts";
+import { report } from "./report.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -105,10 +106,9 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
 
   function announce(ctx: ExtensionContext, on: boolean): void {
     const message = on
-      ? "perk: plan mode ON — read-only exploration; author the plan, then /plan off + plan_save."
-      : "perk: plan mode OFF — full tool access restored.";
-    if (ctx.hasUI) ctx.ui.notify(message, "info");
-    else console.error(message);
+      ? "plan mode ON — read-only exploration; author the plan, then /plan off + plan_save."
+      : "plan mode OFF — full tool access restored.";
+    report(ctx, "plan-mode", "info", message);
   }
 
   function toggle(ctx: ExtensionContext): void {

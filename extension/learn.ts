@@ -17,6 +17,7 @@ import {
   type PlanRef,
   readPlanRef,
 } from "./cache.ts";
+import { report } from "./report.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 export interface LearnDetails {
@@ -88,9 +89,7 @@ export async function learnDone(
   }
 
   const reportError = (message: string): void => {
-    const full = `perk: learn — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "learn", "error", message, { alsoLog: true });
   };
 
   // Stage the captured learnings to a run-scoped scratch file (pi.exec has no stdin channel).

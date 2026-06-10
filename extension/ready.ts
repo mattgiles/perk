@@ -5,6 +5,7 @@
 // nothing, delegate via `pi.exec`, surface the structured result, never throw.
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { report } from "./report.ts";
 
 /** The structured `details` surface — doubles as branch-safe persisted state. */
 export interface ReadyDetails {
@@ -36,9 +37,7 @@ interface PrReadyJson {
  */
 export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promise<ReadyResult> {
   const reportError = (message: string): void => {
-    const full = `perk: ready — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "ready", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): ReadyResult => {
     reportError(message);

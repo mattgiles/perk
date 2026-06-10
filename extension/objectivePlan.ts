@@ -21,6 +21,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { ensureRunScratch, readPlanRef } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
+import { report } from "./report.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
@@ -96,9 +97,7 @@ export async function objectiveNode(
   params: ObjectiveNodeParams,
 ): Promise<ObjectiveNodeResult> {
   const reportError = (message: string): void => {
-    const full = `perk: objective-plan — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "objective-plan", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): ObjectiveNodeResult => {
     reportError(message);
@@ -227,9 +226,7 @@ export async function reconcileObjective(
   params: ReconcileObjectiveParams,
 ): Promise<ReconcileObjectiveResult> {
   const reportError = (message: string): void => {
-    const full = `perk: objective-reconcile — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "objective-reconcile", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): ReconcileObjectiveResult => {
     reportError(message);
@@ -475,11 +472,12 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const objective = resolveReconcileObjective(args ?? "", ctx);
       if (objective === null) {
-        const message =
-          "perk: /objective-reconcile — no objective given and none active or linked. Use " +
-          "`/objective-reconcile <number>`.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else console.error(message);
+        report(
+          ctx,
+          "objective-reconcile",
+          "warning",
+          "no objective given and none active or linked. Use `/objective-reconcile <number>`.",
+        );
         return;
       }
       if (ctx.hasUI) {
@@ -501,11 +499,12 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       const { number, node } = parseCommandArgs(args ?? "");
       const objective = number ?? activeObjective(ctx);
       if (objective === null) {
-        const message =
-          "perk: /objective-plan — no objective given and none active. Use `/objective-plan <number>` " +
-          "or `/objective <id>` first.";
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
-        else console.error(message);
+        report(
+          ctx,
+          "objective-plan",
+          "warning",
+          "no objective given and none active. Use `/objective-plan <number>` or `/objective <id>` first.",
+        );
         return;
       }
       if (ctx.hasUI) {

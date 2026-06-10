@@ -5,6 +5,7 @@
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { report } from "./report.ts";
 
 /** The structured `details` surface — doubles as branch-safe persisted state. */
 export interface SubmitDetails {
@@ -40,9 +41,7 @@ interface PrSubmitJson {
  */
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
   const reportError = (message: string): void => {
-    const full = `perk: submit — ${message}`;
-    if (ctx.hasUI) ctx.ui.notify(full, "error");
-    console.error(full);
+    report(ctx, "submit", "error", message, { alsoLog: true });
   };
   const fail = (message: string, errorType: string): SubmitResult => {
     reportError(message);
