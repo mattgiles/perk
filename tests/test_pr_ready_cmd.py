@@ -55,7 +55,7 @@ def _run(monkeypatch, args, *, write_ref=True):
 def test_pr_ready_marks_draft(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_pr(monkeypatch, is_draft=True)
-    result = _run(monkeypatch, ["pr-ready", "--json"])
+    result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["was_draft"] is True
@@ -65,7 +65,7 @@ def test_pr_ready_marks_draft(monkeypatch):
 def test_pr_ready_idempotent_already_ready(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_pr(monkeypatch, is_draft=False)
-    result = _run(monkeypatch, ["pr-ready", "--json"])
+    result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["was_draft"] is False
@@ -75,13 +75,13 @@ def test_pr_ready_idempotent_already_ready(monkeypatch):
 def test_pr_ready_no_pr_exits_1(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
-    result = _run(monkeypatch, ["pr-ready", "--json"])
+    result = _run(monkeypatch, ["pr", "ready", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
 
 
 def test_pr_ready_dry_run_offline(monkeypatch):
-    result = _run(monkeypatch, ["pr-ready", "--dry-run", "--json"])
+    result = _run(monkeypatch, ["pr", "ready", "--dry-run", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
@@ -90,6 +90,6 @@ def test_pr_ready_dry_run_offline(monkeypatch):
 def test_pr_ready_not_a_repo_exits_2(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, ["pr-ready", "--json"])
+        result = runner.invoke(cli, ["pr", "ready", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"

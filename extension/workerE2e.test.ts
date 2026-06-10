@@ -116,7 +116,7 @@ function assertMonotonicSeq(events: RunEvent[]): void {
 // --- Scenario 1: implement HAPPY (the load-bearing assumption) ----------------------------------
 
 const implementHappyRoutes = {
-  "pr-submit": {
+  "pr submit": {
     json: {
       success: true,
       pr: { number: 42, url: "https://github.com/x/pull/42", is_draft: true, existed: false },
@@ -197,7 +197,7 @@ test("e2e: address HAPPY — resolve_review_threads ok → completed/address_res
   const { outcome, events } = await runDrive({
     stage: "address",
     routes: {
-      "pr-resolve-threads": {
+      "pr resolve-threads": {
         json: { success: true, results: [{ thread_id: "T1", success: true }] },
       },
     },
@@ -252,7 +252,7 @@ test("e2e: FAILING-TOOL — submit fails → capped tool_outcome summary + faile
   const { outcome, events } = await runDrive({
     stage: "implement",
     routes: {
-      "pr-submit": {
+      "pr submit": {
         json: { success: false, error_type: "github_error", message: "X".repeat(5000) },
       },
     },

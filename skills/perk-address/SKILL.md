@@ -13,7 +13,7 @@ layer — the mechanics live in deterministic tools.
 ## The loop
 
 1. **Classify in isolation.** Spawn the perk-owned agent **`perk.review-classifier`** via the
-   `subagent` tool. The child runs `perk pr-feedback --json` itself, wraps all GitHub text as
+   `subagent` tool. The child runs `perk pr feedback --json` itself, wraps all GitHub text as
    untrusted, and returns a compact prose table **plus** a structured JSON block
    (`pr`, `review_threads[]`, `discussion_comments[]`, `counts`). You receive only that compact
    classification — never the raw comment bodies (route, don't relay). Invoke it by its **explicit

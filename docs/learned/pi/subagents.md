@@ -40,7 +40,7 @@ injects it inline — **no committed-file churn**.
 **Decision rule:** child-posts-own-mutation **iff** the spawned work's only output sink is the
 external surface and there's no parent-side action; otherwise read-only child + parent mutates.
 
-**D1 holds in both:** the GitHub mutation stays canonical in Python (`perk pr-review-post`); the
+**D1 holds in both:** the GitHub mutation stays canonical in Python (`perk pr review-post`); the
 child only has `bash` (run the CLI) + `write` (stage the payload file). It never holds a GitHub
 token or composes the mutation itself.
 

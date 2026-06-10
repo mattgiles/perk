@@ -1,6 +1,6 @@
-"""`perk pr-feedback` — the read-only PR-feedback fetch (the classify child runs this; P2.T7).
+"""`perk pr feedback` — the read-only PR-feedback fetch (the classify child runs this; P2.T7).
 
-Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr-land` does), fetches
+Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr land` does), fetches
 its reviewer feedback (review threads + PR-level reviews via GraphQL, discussion comments via REST),
 and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by the spawned
 `perk.review-classifier` child so it never transits the parent session (route-don't-relay).
@@ -16,12 +16,11 @@ from pathlib import Path
 import click
 
 from perk import cache, github, launch
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -30,10 +29,10 @@ class PrFeedbackResult:
     branch: str
 
 
-@click.command("pr-feedback")
+@click.command("feedback")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_feedback(ctx: click.Context, *, as_json: bool) -> None:
+def feedback_pr(ctx: click.Context, *, as_json: bool) -> None:
     """Fetch the active plan's PR review feedback (read-only; the classify child runs this).
 
     \b
@@ -43,10 +42,10 @@ def pr_feedback(ctx: click.Context, *, as_json: bool) -> None:
         repo_root = require_repo(ctx)
         result = _pr_feedback_impl(repo_root=repo_root)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"PR feedback failed\n{exc}")
+        fail(ctx, as_json=as_json, error_type="github_error", message=f"PR feedback failed\n{exc}")
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -143,11 +142,3 @@ def _render_human(result: PrFeedbackResult) -> None:
         + f"{len(fb.review_threads)} thread(s) [{unresolved} unresolved], "
         + f"{len(fb.discussion_comments)} comment(s), {len(fb.reviews)} review(s)"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

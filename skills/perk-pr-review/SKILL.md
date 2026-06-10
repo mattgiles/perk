@@ -21,11 +21,11 @@ text, and the plan — exactly what a human reviewer would.
 
 1. **Spawn the reviewer.** Use the `subagent` tool to spawn the perk-owned agent
    **`perk.pr-reviewer`** with `context: "fresh"`. Invoke it by its **explicit runtime name**
-   (perk's agents are namespaced `perk.*`). The child runs `perk pr-review-context` itself (the diff
+   (perk's agents are namespaced `perk.*`). The child runs `perk pr review-context` itself (the diff
    + PR title/body + plan body never enter this session — route, don't relay).
 
 2. **The child posts its own review.** Unlike `/address`'s read-only classifier, the reviewer
-   **posts** its review back to the PR via `perk pr-review-post` — an **advisory `COMMENT` review**
+   **posts** its review back to the PR via `perk pr review-post` — an **advisory `COMMENT` review**
    (it can never approve or request-changes; the CLI hardcodes `event=COMMENT`). The GitHub mutation
    stays canonical in the Python gateway (D1); the child is just the only caller with the review in
    hand.

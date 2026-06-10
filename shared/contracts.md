@@ -597,7 +597,7 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
 
 - **Classify in an isolated child.** The verbose feedback fetch + classification runs in a **spawned
   read-only child** (the borrowed `pi-subagents` engine running perk's `perk.review-classifier`
-  agent). The child itself runs `perk pr-feedback --json`, so the raw GitHub JSON **never transits
+  agent). The child itself runs `perk pr feedback --json`, so the raw GitHub JSON **never transits
   the parent** (route-don't-relay). It honors the **same handoff contract** as the T4/T6 amendments
   (double-delivery: a compact prose table + a structured block; untrusted-text wrapping; fail-closed)
   and returns `{ pr, review_threads[], discussion_comments[], counts }`.
@@ -605,7 +605,7 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   turn. The fix is **never delegated** (the three never-delegate boundaries: judgment, the fix,
   durable writes).
 - **Resolve = one batched op.** The warm `resolve_review_threads` tool writes `[{thread_id, comment}]`
-  to a run-scoped scratch file and delegates to `perk pr-resolve-threads` (D1), then appends
+  to a run-scoped scratch file and delegates to `perk pr resolve-threads` (D1), then appends
   `last_review_batch` to workflow-state (now in **live use**; shape above).
 - **Plan File Mode.** When the PR's only diff is the plan file, feedback is reinterpreted as edits to
   the plan *text*, not code to implement (parent judgment; captured in the `perk-address` skill).
@@ -632,7 +632,7 @@ implementation session's history never biases the review.
   is the sole output sink and there is no parent-side fix to apply, so relaying the review back
   through the parent would reintroduce exactly the session pollution this command avoids. D1 is
   still honored — the mutation stays canonical in the **Python gateway**: the child posts via
-  `perk pr-review-post` (the child has `write` only to stage the payload file + `bash` to run the
+  `perk pr review-post` (the child has `write` only to stage the payload file + `bash` to run the
   CLI). The review is **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway,
   so the agent can never approve/request-changes.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
@@ -858,13 +858,13 @@ get_pr_feedback{ pr_number }                        -> PrFeedback{ pr_number, re
     # review threads + PR-level reviews via `gh api graphql`; discussion comments via REST
     # GET .../issues/{n}/comments. The three sources are kept SEPARATE (counted apart) — review
     # threads (inline, with a resolvable thread_id) are a distinct API from discussion comments.
-    # Read-only; what the spawned `perk.review-classifier` child runs (via `perk pr-feedback`).
+    # Read-only; what the spawned `perk.review-classifier` child runs (via `perk pr feedback`).
 resolve_review_threads{ batch:[{thread_id, comment?}] } -> BatchResolveResult{ success, results[] }
     # for each item: optional reply (addPullRequestReviewThreadReply) THEN resolveReviewThread,
     # both GraphQL. results[] is per-item {thread_id, success, comment_added, error}; top-level
     # success = all resolved. An already-resolved thread re-resolves to success (idempotent).
     # The warm TS twin writes the batch to a run-scoped scratch file (pi.exec has no stdin) and
-    # delegates via `perk pr-resolve-threads --json --batch <path>`.
+    # delegates via `perk pr resolve-threads --json --batch <path>`.
 ```
 
 - **Batch shape (PRIOR_ART §5/§11):** `[{ thread_id, comment }]` (objects, not a flat list).
@@ -880,16 +880,16 @@ comment, so a review **always** lands on the PR:
 get_pr_review_context{ pr_number, branch }          -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
     # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. `plan_body` is
     # best-effort: the materialized `cache.plan` body if present, else the plan issue body, else
-    # null (the review still runs from the diff). What the spawned child runs (`perk pr-review-context`).
+    # null (the review still runs from the diff). What the spawned child runs (`perk pr review-context`).
 post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
     # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
     # comment when the review submission fails)}. The warm twin is the /pr-review child, which
-    # delegates via `perk pr-review-post --json --batch <path>`.
+    # delegates via `perk pr review-post --json --batch <path>`.
 ```
 
 **Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
-in `perk pr-submit` via **create-then-update** (the checkout footer needs the PR number, unknown
+in `perk pr submit` via **create-then-update** (the checkout footer needs the PR number, unknown
 until `create_pr` returns), which also fixes a latent correctness bug (the Phase-1 footer carried
 the **issue** number, not the PR's — erk's single most common agent mistake):
 
@@ -899,7 +899,7 @@ update_pr_body{ number, body }                      -> PrBodyUpdate{ number, dry
     # Re-writes the full body WITH the plain-backtick `gh pr checkout <pr_number>` footer once the
     # PR number is known. Idempotent (overwrites).
 get_pr_body{ number }                               -> string | null
-    # GET .../pulls/{n} --jq .body; the read `perk pr-check` re-validates against.
+    # GET .../pulls/{n} --jq .body; the read `perk pr check` re-validates against.
 validate_pr_body(body, *, pr_number)                -> string[]   (empty == valid)
     # PURE (no gh). Footer-scoped ONLY (the <details> embed is explicitly fine): the footer must be
     # present, plain-backtick (not HTML-wrapped), and carry the PR number (word-boundary: #12 ≠
@@ -910,18 +910,18 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
   **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
   target: plain text, set at land (T8b) so HTML never leaks into `git log`.
-- **`pr check` (D5).** `perk pr-submit` runs `validate_pr_body` as a **post-write self-check** and
-  **raises** (`error_type: pr_check_failed`) on failure. A thin `perk pr-check --json` (active
+- **`pr check` (D5).** `perk pr submit` runs `validate_pr_body` as a **post-write self-check** and
+  **raises** (`error_type: pr_check_failed`) on failure. A thin `perk pr check --json` (active
   plan-ref → find PR → `get_pr_body` → `validate_pr_body`) is the supervisor surface (exit 0 valid /
   1 invalid·op-failure / 2 not-a-repo).
 - **Draft → ready is a deliberate gesture (D6).** Submit keeps the PR **draft**; perk does **not**
-  auto-publish (unlike erk's `finalize_pr`). The new `perk pr-ready` (warm `/ready`, `extension/
+  auto-publish (unlike erk's `finalize_pr`). The new `perk pr ready` (warm `/ready`, `extension/
   ready.ts`) is the explicit review gate — `mark_pr_ready` if draft, idempotent. Land's
   mark-ready-if-draft stays a safety net. **Correction:** perk plans are GitHub *issues*, not repo
   files, so erk's plan-file-diff completion heuristic does **not** map — the explicit draft→ready
   transition is the gate, and no plan-file-diff detector is built (never infer completion from PR
   open/closed state alone).
-- **Re-submit on rewritten history (P2.T8a follow-up).** `perk pr-submit` **force-pushes the
+- **Re-submit on rewritten history (P2.T8a follow-up).** `perk pr submit` **force-pushes the
   perk-owned plan branch with `--force-with-lease`** (auto-force; a no-op on the first push). Plan
   branches (`plan-<n>`) are single-author and expected to diverge after amend/squash/rebase, so a
   plain push would be rejected non-fast-forward on every re-submit after a history rewrite. The
@@ -1026,7 +1026,7 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > **T3 deviated** (the warm `/plan-save` delegates to `perk plan-save` via `pi.exec`), and T5
 > **confirms delegation as the standing pattern for GitHub mutations**: the **Python gateway is
 > canonical**; the TS warm doors (`/submit`, and `/land` in T5b) **delegate** to thin Python workers
-> (`perk pr-submit`/`perk pr-land --json`) over the §3.2 machine-JSON channel — they do **not**
+> (`perk pr submit`/`perk pr land --json`) over the §3.2 machine-JSON channel — they do **not**
 > reimplement the writes. (Cache/session tiers keep their per-plane I/O — `cache.ts`/`cache.py` —
 > because those are *files*, not GitHub.) The "two gh gateways" idea is retired; there is **one
 > canonical Python GitHub gateway**. So **T5a** opens a **draft** PR (`Closes #<issue>` so the
@@ -1034,7 +1034,7 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > `pr=<number>`, `lifecycle_stage=impl`. `submit` reads `cache.plan-ref` + `github.plan` and writes
 > `github.pr` + `github.plan`.
 >
-> **Status (P1.T5b):** the **land path** is built. `land` (warm `/land` + cold `perk pr-land`)
+> **Status (P1.T5b):** the **land path** is built. `land` (warm `/land` + cold `perk pr land`)
 > marks the PR ready (if draft), **squash-merges** it (idempotent — `already merged` ⇒ success), and
 > sets the **`pending-learn`** marker; `learn` (warm `/learn`, TS-only) clears it. The cold worker
 > sets the marker on its real run; the warm door also sets it post-delegate (idempotent existence
@@ -1064,11 +1064,11 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > all six spine stages.
 >
 > **Status (P2.T8a):** the **submit body is deepened + the issue-numbered-footer bug is fixed**.
-> `perk pr-submit` composes an HTML-enhanced GitHub PR body (best-effort verbatim-plan `<details>`
+> `perk pr submit` composes an HTML-enhanced GitHub PR body (best-effort verbatim-plan `<details>`
 > embed via `get_plan_body`) and appends the checkout footer via **create-then-update**
 > (`update_pr_body`) carrying the **PR** number, then runs `validate_pr_body` as a post-write
-> self-check (`pr_check_failed` on failure). A thin `perk pr-check --json` is the supervisor surface.
-> Submit keeps the PR **draft**; the new `perk pr-ready` (warm `/ready`) is the deliberate review
+> self-check (`pr_check_failed` on failure). A thin `perk pr check --json` is the supervisor surface.
+> Submit keeps the PR **draft**; the new `perk pr ready` (warm `/ready`) is the deliberate review
 > gate. The two-target split is explicit: HTML in the GitHub body, plain text in the squash commit
 > (deepened at T8b). `submit`'s registry I/O is unchanged.
 >
@@ -1178,7 +1178,7 @@ The objective **transition** layer on top of T9's mechanics — the plan factory
 Close the objective loop: when a PR linked to an objective node merges, the roadmap reconciles
 against what was *actually* built. Two seams (PRIOR_ART §3), matching the D9 section-boundary typing:
 
-**T11a — Mechanical (deterministic, on land).** The cold land path (`perk pr-land`) auto-marks the
+**T11a — Mechanical (deterministic, on land).** The cold land path (`perk pr land`) auto-marks the
 objective node(s) backlinked to the just-merged plan `done` — **fail-open** (the merge already
 succeeded; objective tracking must never block landing) and **deliberately non-audited** (per the
 T10 §8.3 note, the audit gate protects the model-facing tool path only).

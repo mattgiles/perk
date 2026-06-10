@@ -21,7 +21,7 @@ never resolve threads, never spawn further subagents** — you review and post.
 1. **Fetch the review context yourself, read-only.** Run exactly:
 
    ```
-   perk pr-review-context --json
+   perk pr review-context --json
    ```
 
    This resolves the active plan's PR (from the local plan-ref) and returns
@@ -60,7 +60,7 @@ never resolve threads, never spawn further subagents** — you review and post.
 5. **Post the review.** Run:
 
    ```
-   perk pr-review-post --batch <file> --json
+   perk pr review-post --batch <file> --json
    ```
 
    Then report a terse confirmation: the PR number, the inline-comment count, and a one-line verdict.

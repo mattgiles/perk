@@ -1,4 +1,4 @@
-"""`perk pr-review-post` — submit a `/pr-review` to the PR (#175).
+"""`perk pr review-post` — submit a `/pr-review` to the PR (#175).
 
 Reads a JSON review batch (`{summary, comments?}`) from a `--batch <file>` arg (pi.exec has no stdin
 channel, so the spawned reviewer child writes a temp file and passes its path here), resolves the
@@ -17,15 +17,14 @@ from typing import cast
 import click
 
 from perk import cache, github, launch
+from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
-
-@click.command("pr-review-post")
+@click.command("review-post")
 @click.option(
     "--batch",
     "batch_file",
@@ -38,7 +37,7 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def pr_review_post(ctx: click.Context, *, batch_file: Path, dry_run: bool, as_json: bool) -> None:
+def review_post_pr(ctx: click.Context, *, batch_file: Path, dry_run: bool, as_json: bool) -> None:
     """Submit a `/pr-review` (advisory COMMENT review) to the active plan's PR.
 
     \b
@@ -60,14 +59,21 @@ def pr_review_post(ctx: click.Context, *, batch_file: Path, dry_run: bool, as_js
             dry_run=dry_run,
         )
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=f"review post failed\n{exc}")
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"review post failed\n{exc}",
+            extra={"dry_run": False},
+        )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -151,7 +157,7 @@ def _result_to_dict(result: github.ReviewPostResult, *, dry_run: bool) -> dict[s
 
 def _render_human(result: github.ReviewPostResult, *, dry_run: bool) -> None:
     if dry_run:
-        user_output(click.style("pr-review-post --dry-run (no GitHub writes)", dim=True))
+        user_output(click.style("pr review-post --dry-run (no GitHub writes)", dim=True))
         user_output(f"  would post a review with {result.comment_count} inline comment(s)")
         return
     label = "review" if result.mode == "review" else "comment (fallback)"
@@ -160,15 +166,3 @@ def _render_human(result: github.ReviewPostResult, *, dry_run: bool) -> None:
         + f"Posted {label} to PR #{result.pr_number} "
         + f"({result.comment_count} inline comment(s))"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

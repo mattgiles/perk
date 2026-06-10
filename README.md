@@ -54,8 +54,8 @@ is verified but never required (it is reported, never fatal).
 | `perk implement [PLAN]` | Materialize the plan's worktree/branch and launch a fresh `pi` **primed to implement it**. Optional issue number selects a specific plan; omit it to use the active saved plan. |
 | `perk objective-plan` | The **plan factory**: select the next actionable objective node (dependency-graph `next`), optionally explore it read-only, and emit a bounded plan through the `plan → save` spine. The new initial node of the deepened graph. |
 | `perk objective create/show/node/next/reconcile` | Manage **objectives** (multi-plan roadmaps as GitHub issues): create an objective + its roadmap nodes, show it, advance a node's status, pick the next actionable node, and reconcile its prose against a merged diff. |
-| `perk plan-save` / `pr-submit` / `pr-check` / `pr-ready` / `pr-land` | The cold/worker GitHub doors (the in-session twins are the `plan_save` / `submit` / `land` tools): create the plan issue, open + run CI on + flip-ready + squash-merge the draft PR. `--json` + `--dry-run`. |
-| `perk pr-feedback` / `pr-resolve-threads` / `learn-capture` | The `/address` review-loop workers (classify PR feedback, reply-then-resolve threads) and the `/learn` capture worker. |
+| `perk plan-save` / `pr submit` / `pr check` / `pr ready` / `pr land` | The cold/worker GitHub doors (the in-session twins are the `plan_save` / `submit` / `land` tools): create the plan issue, open + run CI on + flip-ready + squash-merge the draft PR. `--json` + `--dry-run`. |
+| `perk pr feedback` / `pr resolve-threads` / `learn-capture` | The `/address` review-loop workers (classify PR feedback, reply-then-resolve threads) and the `/learn` capture worker. |
 | `perk resume <plan>` | Resolve any plan to its current actionable stage (no PR → implement, open → submit, merged+pending-learn → learn) and launch it. |
 | `perk worktree create/list/remove` | Manage git worktrees under the configured root. |
 | `perk state` / `perk registry` | Inspect the local `.pi/workflow/` cache + run ids; inspect/validate the shared stage registry. |

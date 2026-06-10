@@ -3,7 +3,7 @@
 // Unlike `/address` (which spawns a read-only classifier and the PARENT applies fixes), `/pr-review`
 // has no parent-side action: the review's only output sink is the PR itself. So the spawned
 // `perk.pr-reviewer` child — running in a FRESH context so the implementation session's history
-// never biases it — POSTS its own review to the PR through the Python gateway (`perk pr-review-post`,
+// never biases it — POSTS its own review to the PR through the Python gateway (`perk pr review-post`,
 // D1: GitHub mutations stay canonical in Python). The parent merely surfaces the child's terse
 // confirmation. This deliberate departure from the read-only-child convention is documented in
 // shared/contracts.md §8.3.
@@ -34,8 +34,8 @@ export function prReviewGuidance(model?: string): string {
     "perk /pr-review — automated code review of the active PR in a FRESH, isolated session.",
     `1. Spawn the \`perk.pr-reviewer\` agent via the \`subagent\` tool with \`context: "fresh"\`${modelClause}. ` +
       "A fresh context keeps this implementation session's history from biasing the review.",
-    "2. The child reviews the active plan's PR (it runs `perk pr-review-context` itself) and POSTS " +
-      "its review back to the PR as advisory COMMENT feedback (via `perk pr-review-post`). The raw " +
+    "2. The child reviews the active plan's PR (it runs `perk pr review-context` itself) and POSTS " +
+      "its review back to the PR as advisory COMMENT feedback (via `perk pr review-post`). The raw " +
       "diff never enters this session.",
     "3. Take NO further action: simply surface the child's terse confirmation (PR number, comment " +
       "count, one-line verdict). The review lives on the PR; you neither apply fixes nor resolve " +

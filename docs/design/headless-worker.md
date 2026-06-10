@@ -88,7 +88,7 @@ anchored to real symbols.
   must reach in-flight tool execs.
 - **What exists:** `AgentSession.abort(): Promise<void>` (`docs/sdk.md`). perk tools already thread
   `ctx.signal` into shelled work — e.g. `extension/submit.ts` calls
-  `pi.exec(perkBin, ["pr-submit","--json"], { cwd: ctx.cwd, signal: ctx.signal })`.
+  `pi.exec(perkBin, ["pr","submit","--json"], { cwd: ctx.cwd, signal: ctx.signal })`.
   `extension/readOnlySession.ts` `runReadOnlyChild` already models an external
   `opts.signal: AbortSignal`, checking `signal.aborted` before start and after the task. **But there
   is no existing code wiring an external `AbortSignal` → `session.abort()` for a full read-write

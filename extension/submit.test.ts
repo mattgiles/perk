@@ -1,5 +1,5 @@
 // P1.T5a — live warm-door tests (turn-5 §10). Drive a REAL bound AgentSession via the T1 harness
-// and prove the `perk pr-submit` delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
+// and prove the `perk pr submit` delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
 // for the GitHub write, so no LLM / network / gh / Python is invoked.
 
 import assert from "node:assert/strict";
