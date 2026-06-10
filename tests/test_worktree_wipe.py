@@ -5,7 +5,7 @@ from click.testing import CliRunner
 
 from perk import cache, git, github
 from perk.cli.cli import cli
-from perk.cli.commands.worktree_cmd import _classify_worktree
+from perk.cli.commands.worktree.wipe_cmd import _classify_worktree
 from perk.cli.context import PerkContext
 from perk.config import Config
 

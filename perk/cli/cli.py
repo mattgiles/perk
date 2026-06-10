@@ -34,7 +34,7 @@ from perk.cli.commands.resume_cmd import resume_cmd
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
 from perk.cli.commands.state import state_group
 from perk.cli.commands.workflow_cmd import workflow_group
-from perk.cli.commands.worktree_cmd import worktree
+from perk.cli.commands.worktree import worktree_group
 from perk.cli.context import PerkContext
 from perk.cli.stages import register_stage_commands
 
@@ -67,7 +67,7 @@ cli.add_command(doctor)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
 register_with_aliases(cli, registry_group)
 register_with_aliases(cli, state_group)
-register_with_aliases(cli, worktree)
+register_with_aliases(cli, worktree_group)
 register_with_aliases(cli, objective_group)
 register_with_aliases(cli, objective_author)
 register_with_aliases(cli, objective_plan)
