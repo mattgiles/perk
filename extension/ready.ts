@@ -1,5 +1,5 @@
 // P2.T8a — the warm `/ready` door (D6): the deliberate draft→ready review gate. The in-session twin
-// of the Python cold door (`perk pr-ready`): a terminating tool + command that DELEGATE the GitHub
+// of the Python cold door (`perk pr ready`): a terminating tool + command that DELEGATE the GitHub
 // mark-ready (D1 — mutations canonical in Python). perk deliberately does NOT auto-publish on
 // submit; `/ready` is the explicit gesture that opens the PR for review. Mirrors `submit.ts`: write
 // nothing, delegate via `pi.exec`, surface the structured result, never throw.
@@ -15,7 +15,7 @@ export interface ReadyOk {
 
 export type ReadyResult = Result<ReadyOk>;
 
-/** The `perk pr-ready --json` success shape (the contract the warm door consumes). */
+/** The `perk pr ready --json` success shape (the contract the warm door consumes). */
 interface PrReadyJson {
   success: boolean;
   error_type: string | null;
@@ -34,7 +34,7 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
   const perkBin = process.env.PERK_BIN ?? "perk";
   let res: ExecResult;
   try {
-    res = await pi.exec(perkBin, ["pr-ready", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
+    res = await pi.exec(perkBin, ["pr", "ready", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
   } catch (err) {
     return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
   }
@@ -43,7 +43,7 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
     const tail = res.stderr.trim();
     return fail(
       tail
-        ? `perk pr-ready failed (exit ${res.code}): ${tail}`
+        ? `perk pr ready failed (exit ${res.code}): ${tail}`
         : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
       "exec_failed",
     );
@@ -53,11 +53,11 @@ export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promis
   try {
     parsed = JSON.parse(res.stdout) as PrReadyJson;
   } catch {
-    return fail("perk pr-ready returned unparseable JSON", "bad_output");
+    return fail("perk pr ready returned unparseable JSON", "bad_output");
   }
   if (!parsed.success || !parsed.pr) {
     return fail(
-      parsed.message ?? "perk pr-ready reported failure",
+      parsed.message ?? "perk pr ready reported failure",
       parsed.error_type ?? "github_error",
     );
   }

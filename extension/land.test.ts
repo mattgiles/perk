@@ -1,5 +1,5 @@
 // P1.T5b — live warm-door tests for `/land` (turn-5 §10). Drive a REAL bound AgentSession via the
-// T1 harness; the `perk pr-land` merge is faked via PERK_BIN, so no LLM / network / gh / Python.
+// T1 harness; the `perk pr land` merge is faked via PERK_BIN, so no LLM / network / gh / Python.
 // The warm door's own effect (setting pending-learn for the in-session path) is verified on disk.
 
 import assert from "node:assert/strict";

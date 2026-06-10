@@ -1,5 +1,5 @@
 // P1.T5b — the warm `/land` door (turn-5 §7). The in-session twin of the Python cold door
-// (`perk pr-land`): a terminating tool + command that DELEGATE the GitHub merge (D1 — mutations
+// (`perk pr land`): a terminating tool + command that DELEGATE the GitHub merge (D1 — mutations
 // canonical in Python), then set the `pending-learn` marker for the in-session path (the worker
 // sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
 
@@ -59,7 +59,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   const perkBin = process.env.PERK_BIN ?? "perk";
   let res: ExecResult;
   try {
-    res = await pi.exec(perkBin, ["pr-land", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
+    res = await pi.exec(perkBin, ["pr", "land", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
   } catch (err) {
     return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
   }
@@ -68,7 +68,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
     const tail = res.stderr.trim();
     return fail(
       tail
-        ? `perk pr-land failed (exit ${res.code}): ${tail}`
+        ? `perk pr land failed (exit ${res.code}): ${tail}`
         : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
       "exec_failed",
     );
@@ -78,11 +78,11 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
   try {
     parsed = JSON.parse(res.stdout) as PrLandJson;
   } catch {
-    return fail("perk pr-land returned unparseable JSON", "bad_output");
+    return fail("perk pr land returned unparseable JSON", "bad_output");
   }
   if (!parsed.success || !parsed.pr) {
     return fail(
-      parsed.message ?? "perk pr-land reported failure",
+      parsed.message ?? "perk pr land reported failure",
       parsed.error_type ?? "github_error",
     );
   }

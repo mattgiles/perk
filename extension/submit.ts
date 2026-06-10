@@ -1,7 +1,7 @@
 // P1.T5a — the warm `/submit` door (turn-5 §7). The in-session twin of the Python cold door
-// (`perk pr-submit`): a deterministic, terminating tool + command that DELEGATE the GitHub write —
+// (`perk pr submit`): a deterministic, terminating tool + command that DELEGATE the GitHub write —
 // they do NOT reimplement it (D1: GitHub mutations are canonical in the Python gateway). Mirrors
-// `planSave.ts`: write nothing, delegate to `perk pr-submit --json` via `pi.exec`, surface the
+// `planSave.ts`: write nothing, delegate to `perk pr submit --json` via `pi.exec`, surface the
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
 
 import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -18,7 +18,7 @@ export interface SubmitOk {
 export type SubmitResult = Result<SubmitOk>;
 export type SubmitDetails = SubmitResult["details"];
 
-/** The `perk pr-submit --json` success shape (the contract the warm door consumes). */
+/** The `perk pr submit --json` success shape (the contract the warm door consumes). */
 interface PrSubmitJson {
   success: boolean;
   error_type: string | null;
@@ -40,7 +40,7 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   // pi.exec returns (does not throw) on spawn/non-zero exit — turn-3 §3.5 S2.
   let res: ExecResult;
   try {
-    res = await pi.exec(perkBin, ["pr-submit", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
+    res = await pi.exec(perkBin, ["pr", "submit", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
   } catch (err) {
     return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
   }
@@ -49,7 +49,7 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
     const tail = res.stderr.trim();
     return fail(
       tail
-        ? `perk pr-submit failed (exit ${res.code}): ${tail}`
+        ? `perk pr submit failed (exit ${res.code}): ${tail}`
         : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
       "exec_failed",
     );
@@ -59,11 +59,11 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   try {
     parsed = JSON.parse(res.stdout) as PrSubmitJson;
   } catch {
-    return fail("perk pr-submit returned unparseable JSON", "bad_output");
+    return fail("perk pr submit returned unparseable JSON", "bad_output");
   }
   if (!parsed.success || !parsed.pr) {
     return fail(
-      parsed.message ?? "perk pr-submit reported failure",
+      parsed.message ?? "perk pr submit reported failure",
       parsed.error_type ?? "github_error",
     );
   }

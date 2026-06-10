@@ -306,10 +306,12 @@ export function scaffoldWorkerWorktree(opts: {
 }
 
 /**
- * Write an executable fake `perk` that ROUTES on the subcommand (`$1`): a matched route prints its
- * JSON and exits `code` (default 0); an unmatched subcommand errors loudly (exit 2). Returns the
- * path (for PERK_BIN). The GitHub-free seam both terminating tools shell out through (`pr-submit`,
- * `pr-resolve-threads`). Leaves the simpler `fakePerk` untouched.
+ * Write an executable fake `perk` that ROUTES on the subcommand: the first two non-flag argv
+ * tokens (`"$1 $2"` for grouped commands like `pr submit`, falling back to `"$1"` when `$2` is
+ * absent or a `-`-prefixed flag). A matched route prints its JSON and exits `code` (default 0);
+ * an unmatched subcommand errors loudly (exit 2). Returns the path (for PERK_BIN). The
+ * GitHub-free seam both terminating tools shell out through (`pr submit`, `pr resolve-threads`).
+ * Leaves the simpler `fakePerk` untouched.
  */
 export function fakePerkRouter(
   cwd: string,
@@ -319,12 +321,12 @@ export function fakePerkRouter(
   const branches = Object.entries(routes)
     .map(([sub, { json, code }]) => {
       const body = JSON.stringify(json).replace(/'/g, "'\\''");
-      return `  ${sub}) printf '%s' '${body}'; exit ${code ?? 0} ;;`;
+      return `  "${sub}") printf '%s' '${body}'; exit ${code ?? 0} ;;`;
     })
     .join("\n");
   writeFileSync(
     path,
-    `#!/usr/bin/env bash\ncase "$1" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $1"; exit 2 ;;\nesac\n`,
+    `#!/usr/bin/env bash\nkey="$1"\nif [ -n "$2" ] && [ "\${2#-}" = "$2" ]; then key="$1 $2"; fi\ncase "$key" in\n${branches}\n  *) >&2 echo "unexpected subcommand: $key"; exit 2 ;;\nesac\n`,
     "utf8",
   );
   chmodSync(path, 0o755);
