@@ -28,11 +28,11 @@ from perk.cli.commands.pr_resolve_threads_cmd import pr_resolve_threads
 from perk.cli.commands.pr_review_context_cmd import pr_review_context
 from perk.cli.commands.pr_review_post_cmd import pr_review_post
 from perk.cli.commands.pr_submit_cmd import pr_submit
-from perk.cli.commands.registry_cmd import registry
+from perk.cli.commands.registry import registry_group
 from perk.cli.commands.replan_cmd import replan
 from perk.cli.commands.resume_cmd import resume_cmd
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
-from perk.cli.commands.state_cmd import state
+from perk.cli.commands.state import state_group
 from perk.cli.commands.workflow_cmd import workflow_group
 from perk.cli.commands.worktree_cmd import worktree
 from perk.cli.context import PerkContext
@@ -65,8 +65,8 @@ register_with_aliases(cli, resume_cmd)
 register_with_aliases(cli, implement)
 cli.add_command(doctor)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
-register_with_aliases(cli, registry)
-register_with_aliases(cli, state)
+register_with_aliases(cli, registry_group)
+register_with_aliases(cli, state_group)
 register_with_aliases(cli, worktree)
 register_with_aliases(cli, objective_group)
 register_with_aliases(cli, objective_author)
