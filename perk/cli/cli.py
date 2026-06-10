@@ -11,7 +11,7 @@ import click
 
 from perk import __version__
 from perk.cli.alias import SectionedGroup, register_with_aliases
-from perk.cli.commands.doctor_cmd import doctor
+from perk.cli.commands.doctor import doctor_group
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn_capture_cmd import learn_capture
@@ -63,7 +63,7 @@ cli.add_command(pr_review_context)
 cli.add_command(pr_review_post)
 register_with_aliases(cli, resume_cmd)
 register_with_aliases(cli, implement)
-cli.add_command(doctor)
+cli.add_command(doctor_group)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
 register_with_aliases(cli, registry_group)
 register_with_aliases(cli, state_group)

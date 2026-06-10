@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 from perk import capabilities, git, github, init
-from perk.cli.commands import doctor_cmd
+from perk.cli.commands.doctor import render
 from perk.doctor import Check, DoctorReport, _runner_checks, report_to_dict, run_doctor
 from perk.init import run_init
 
@@ -65,7 +65,7 @@ def test_render_three_way_condensed(capsys):
         ),
         _check("github-auth", "github", "warn", remediation="Run: gh auth login"),
     ]
-    doctor_cmd._render(DoctorReport(checks=checks, fixed=[], self_repo=False), verbose=False)
+    render.render_report(DoctorReport(checks=checks, fixed=[], self_repo=False), verbose=False)
     err = capsys.readouterr().err
     assert "environment (2 checks)" in err  # clean group collapses
     assert "repository (0/1 checks)" in err  # failing group expands its failure
@@ -511,7 +511,7 @@ def test_runner_group_renders_in_human_output(capsys):
         _check("runner-enabled", "runner", "info"),
         _check("runner-pat-secret", "runner", "warn", remediation="gh secret set PERK_GH_PAT"),
     ]
-    doctor_cmd._render(DoctorReport(checks=checks, fixed=[], self_repo=False), verbose=False)
+    render.render_report(DoctorReport(checks=checks, fixed=[], self_repo=False), verbose=False)
     err = capsys.readouterr().err
     assert "runner (" in err  # the runner group is visible (D7 — added to _GROUP_ORDER)
     assert "gh secret set PERK_GH_PAT" in err
