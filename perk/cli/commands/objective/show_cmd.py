@@ -43,6 +43,7 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
     graph = objective.build_graph(nodes)
     next_node = graph.next_plannable()
     selection = graph.classify_for_planning()
+    claims = graph.resumable_claims()
     payload = {
         "success": True,
         "error_type": None,
@@ -55,6 +56,7 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
         "summary": objective.summary(nodes),
         "nodes": [node_to_dict(n) for n in nodes],
         "next_node": node_to_dict(next_node) if next_node else None,
+        "resumable_claims": [node_to_dict(n) for n in claims],
         "selection_kind": selection.kind,
         "all_complete": graph.is_complete(),
     }
@@ -74,3 +76,11 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
             )
         else:
             user_output("  next: — (blocked)")
+        unresumed = [n.id for n in claims if next_node is None or n.id != next_node.id]
+        if unresumed:
+            user_output(
+                click.style(
+                    f"  claims: {', '.join(unresumed)} (planning, unresumed — resume with --node)",
+                    dim=True,
+                )
+            )

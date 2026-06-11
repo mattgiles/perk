@@ -126,6 +126,7 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         payload = json.loads(result.output)
         assert payload["success"] is True and payload["dry_run"] is True
         assert payload["node"] == "1.2" and payload["marked_status"] == "planning"
+        assert payload["skipped_claims"] == []  # always present, empty when no claims exist
 
 
 def test_objective_required_when_number_omitted(monkeypatch):
@@ -172,8 +173,77 @@ def test_no_actionable_node(monkeypatch):
         assert json.loads(result2.output)["error_type"] == "no_actionable_node"
 
 
+def _parallel_state():
+    # Node 1.1 carries a planning claim (possibly live in another terminal); 1.2 is an
+    # INDEPENDENT unblocked pending node (explicit deps) -> pending-first selection takes 1.2.
+    return github.ObjectiveState(
+        number=7,
+        url="u/7",
+        title="Parallel",
+        header={},
+        nodes=(
+            objective.ObjectiveNode(
+                id="1.1", description="A", status=N.PLANNING, pr=None, depends_on=()
+            ),
+            objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=()),
+        ),
+    )
+
+
+def test_parallel_second_launch_selects_next_pending(monkeypatch):
+    # The second parallel launch skips the (possibly live) claim, takes the pending node, and
+    # notes the skipped claim on stderr.
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_objective", lambda **k: _parallel_state())
+    marked: dict = {}
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: (
+            marked.update(k)
+            or github.ObjectiveNodeUpdate(
+                number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+            )
+        ),
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+        assert "node(s) 1.1 have unresumed planning claims" in result.stderr
+        assert "--node <id>" in result.stderr
+    assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
+    assert launched["stage"] == "objective-plan"
+
+
+def test_dry_run_reports_skipped_claims(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_objective", lambda **k: _parallel_state())
+
+    def boom_update(**k):
+        raise AssertionError("dry run must not mark")
+
+    def boom_launch(**k):
+        raise AssertionError("dry run must not launch")
+
+    monkeypatch.setattr(github, "update_objective_node", boom_update)
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective-plan", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["node"] == "1.2"
+        assert payload["skipped_claims"] == ["1.1"]
+
+
 def test_resumes_orphaned_planning_claim(monkeypatch):
-    # A `planning` head node with no pr (an abandoned claim) is re-selected and re-marked planning.
+    # A `planning` head node with no pr (an abandoned claim) with 1.2 sequentially blocked
+    # behind it is the ONLY plannable node -> the fallback re-selects + re-marks it planning.
     _authed(monkeypatch)
     orphaned = github.ObjectiveState(
         number=7,

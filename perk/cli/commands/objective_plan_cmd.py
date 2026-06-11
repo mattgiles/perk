@@ -1,7 +1,9 @@
 """``perk objective-plan [NUMBER] [--node ID]`` — the objective plan-factory cold door (P2.T10).
 
 The objective **transition** surface on top of T9's deterministic mechanics: select the next
-actionable objective node (dependency-graph order, or an explicit ``--node``), mark it
+actionable objective node (**pending-first** dependency-graph order — unblocked ``pending`` nodes
+win, a resumable ``planning`` claim is only a fallback so parallel launches never steal a
+possibly-live claim — or an explicit ``--node``), mark it
 ``planning``, and launch a **read-only** plan-mode session seeded with that node so the model
 authors a *bounded* plan through the existing ``plan → save`` spine.
 
@@ -196,12 +198,24 @@ def objective_plan(
                     error_type="no_actionable_node",
                 )
 
+        # Claims skipped by pending-first selection (possibly live in another terminal, possibly
+        # abandoned) — surfaced so a multi-terminal user can coordinate / explicitly resume.
+        skipped = [n.id for n in graph.resumable_claims() if n.id != node.id]
+
         stage = _objective_plan_stage()
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any mutation (mirrors launch_stage, which re-resolves it harmlessly).
         launch.resolve_target(stage, remote)
 
         marked_status = objective.NodeStatus.PLANNING
+        if skipped and not (dry_run and as_json):
+            user_output(
+                click.style(
+                    f"note: node(s) {', '.join(skipped)} have unresumed planning claims "
+                    "(resume with --node <id>)",
+                    dim=True,
+                )
+            )
         if not dry_run:
             github.update_objective_node(
                 number=number,
@@ -235,6 +249,7 @@ def objective_plan(
                         "objective": number,
                         "node": node.id,
                         "marked_status": marked_status.value,
+                        "skipped_claims": skipped,
                         "dry_run": True,
                     }
                 )

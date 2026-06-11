@@ -177,7 +177,38 @@ def test_show_json(monkeypatch):
     payload = json.loads(result.output)
     assert payload["summary"]["total"] == 2
     assert payload["next_node"]["id"] == "1.2"
+    assert payload["resumable_claims"] == []  # always present, empty when no claims exist
     assert payload["all_complete"] is False
+
+
+def test_show_json_reports_resumable_claims(monkeypatch):
+    # An unblocked planning-no-pr claim is surfaced for multi-terminal coordination.
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: github.ObjectiveState(
+            number=42,
+            url="u/42",
+            title="Obj",
+            header={},
+            nodes=(
+                objective.ObjectiveNode(
+                    id="1.1", description="A", status=N.PLANNING, pr=None, depends_on=()
+                ),
+                objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=()),
+            ),
+        ),
+    )
+    result = _invoke(["objective", "show", "42", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert [n["id"] for n in payload["resumable_claims"]] == ["1.1"]
+    assert payload["next_node"]["id"] == "1.2"  # pending-first selection
+    # Human render notes the unresumed claim after the next: line.
+    human = _invoke(["objective", "show", "42"])
+    assert human.exit_code == 0
+    assert "next: 1.2" in human.stderr
+    assert "claims: 1.1 (planning, unresumed — resume with --node)" in human.stderr
 
 
 def test_show_not_found(monkeypatch):
