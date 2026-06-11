@@ -44,10 +44,13 @@ GIT_PACKAGE = "git:github.com/mattgiles/perk"
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
 # `ctx.hasUI`-clean (children run `--mode json -p`).
+# `pi-web-access` is the borrowed *web-research engine* (zero-config Exa search + content
+# fetch, no API keys required); perk borrows it wholesale (extension + its `librarian` skill).
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:@tombell/pi-status",
     "npm:pi-subagents",
+    "npm:pi-web-access",
 ]
 
 # The canonical perk skill names (directory names under `skills/`). This list is the SSOT

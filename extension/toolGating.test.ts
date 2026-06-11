@@ -11,6 +11,12 @@ test("READ_ONLY_TOOLS: contains plan_review (the plannotator review bridge is ca
   assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
 });
 
+test("READ_ONLY_TOOLS: contains the four pi-web-access research tools (web research during planning)", () => {
+  for (const tool of ["web_search", "code_search", "fetch_content", "get_search_content"]) {
+    assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
+  }
+});
+
 test("isReadOnlyBashCommand: allows read-only commands", () => {
   for (const cmd of [
     "cat README.md",
