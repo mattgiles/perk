@@ -170,7 +170,7 @@ def test_gateway_review_path_sends_event_comment(monkeypatch):
         pr_number=42,
         summary="ok",
         comments=[github.InlineReviewComment(path="x.py", line=3, body="nit")],
-        repo_root=Path("."),
+        repo_root=Path(),
     )
     assert result.ok is True and result.mode == "review"
     assert seen["event"] == "COMMENT"
@@ -194,7 +194,7 @@ def test_gateway_falls_back_to_comment_on_review_failure(monkeypatch):
         pr_number=42,
         summary="ok",
         comments=[github.InlineReviewComment(path="x.py", line=999, body="bad anchor")],
-        repo_root=Path("."),
+        repo_root=Path(),
     )
     assert result.ok is True and result.mode == "comment_fallback"
     assert calls == ["review", "comment"]
@@ -206,7 +206,7 @@ def test_gateway_raises_when_even_fallback_fails(monkeypatch):
 
     monkeypatch.setattr(github, "_run", fake_run)
     try:
-        github.post_pr_review(pr_number=42, summary="ok", comments=[], repo_root=Path("."))
+        github.post_pr_review(pr_number=42, summary="ok", comments=[], repo_root=Path())
     except github.GitHubError:
         return
     raise AssertionError("expected GitHubError when both review and fallback fail")
@@ -218,6 +218,6 @@ def test_gateway_dry_run_does_not_shell(monkeypatch):
 
     monkeypatch.setattr(github, "_run", boom)
     result = github.post_pr_review(
-        pr_number=42, summary="ok", comments=[], repo_root=Path("."), dry_run=True
+        pr_number=42, summary="ok", comments=[], repo_root=Path(), dry_run=True
     )
     assert result.ok is True and result.mode == "review"

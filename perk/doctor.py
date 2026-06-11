@@ -26,6 +26,7 @@ from perk import bindings, cache, capabilities, env, git, github, init, provider
 from perk.cli.ensure import UserFacingCliError
 from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
 from perk.github import GitHubError
+from perk.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
 
 Status = Literal["ok", "warn", "info", "fail"]
 
@@ -159,8 +160,6 @@ def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
     runs only under ``verify=True``; a ``GitHubError`` is degraded by ``_build_checks`` to a single
     ``info``. Kept a free function so Node 3.3's ``perk doctor workflow`` can compose it directly.
     """
-    from perk.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
-
     # D6 — same check set for both repo kinds (the runner-workflow capability is scope="both");
     # only the `detail` wording adapts.
     if self_repo:

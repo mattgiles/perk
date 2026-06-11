@@ -173,14 +173,14 @@ def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
 
 def test_reconcile_on_land_no_objective_link():
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": None, "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": None, "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(None, (), "no_objective_link")
 
 
 def test_reconcile_on_land_bad_objective_id():
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "not-a-number", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "not-a-number", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(None, (), "bad_objective_id")
 
@@ -188,7 +188,7 @@ def test_reconcile_on_land_bad_objective_id():
 def test_reconcile_on_land_objective_not_found(monkeypatch):
     monkeypatch.setattr(github, "get_objective", lambda **k: None)
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(5, (), "objective_not_found")
 
@@ -198,7 +198,7 @@ def test_reconcile_on_land_no_linked_node(monkeypatch):
         github, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
     )
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(5, (), "no_linked_node")
 
@@ -220,7 +220,7 @@ def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
 
     monkeypatch.setattr(github, "update_objective_node", _update)
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(5, ("1.1",), None)
     assert marked == ["1.1"]
@@ -233,7 +233,7 @@ def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
         lambda **k: _objective_state([_node("1.1", pr="#7", status=objective.NodeStatus.DONE)]),
     )
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(5, (), None)
 
@@ -244,7 +244,7 @@ def test_reconcile_on_land_is_fail_open(monkeypatch):
 
     monkeypatch.setattr(github, "get_objective", _boom)
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
     assert out.objective == 5 and out.nodes_marked == ()
     assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
@@ -296,7 +296,7 @@ def test_render_human_quiet_on_benign_learn_skip(capsys):
 
 
 def test_consume_learn_on_land_no_consumed():
-    out = _consume_learn_on_land(plan_ref={"pr_id": "7"}, repo_root=Path("."))
+    out = _consume_learn_on_land(plan_ref={"pr_id": "7"}, repo_root=Path())
     assert out.closed == () and out.skipped_reason == "no_consumed_learn"
 
 
@@ -308,7 +308,7 @@ def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
         lambda *, issue, repo_root, **k: closed.append(issue) or True,
     )
     out = _consume_learn_on_land(
-        plan_ref={"consumed_learn": [45, 50], "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"consumed_learn": [45, 50], "pr_id": "7"}, repo_root=Path()
     )
     assert out.closed == (45, 50) and out.skipped_reason is None
     assert closed == [45, 50]
@@ -320,9 +320,7 @@ def test_consume_learn_on_land_is_fail_open(monkeypatch):
         raise github.GitHubError("gh exploded")
 
     monkeypatch.setattr(github, "close_and_label_consolidated", _boom)
-    out = _consume_learn_on_land(
-        plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path(".")
-    )
+    out = _consume_learn_on_land(plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path())
     assert out.closed == ()
     assert out.skipped_reason == "failed: #45"
 
@@ -340,7 +338,7 @@ def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
 
     monkeypatch.setattr(github, "close_and_label_consolidated", _close)
     out = _consume_learn_on_land(
-        plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path(".")
+        plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path()
     )
     assert out.closed == (45, 51)
     assert closed == [45, 51]

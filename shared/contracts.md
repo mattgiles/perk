@@ -327,8 +327,9 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
   awaiting land). `done` is set by the land path (`nodes_for_pr`) or the audited tool. Factory
   selection lives in `objective.DependencyGraph`: `plannable_nodes()` / `next_plannable()` (unblocked
   ∧ (`pending`, or `planning` with **no** `pr`)); a `planning` node **with** a `pr` and any
-  `in_progress` node are `in_flight_nodes()`. `next_node()` now delegates to `next_plannable()` (so
-  `objective next`/`show` resume a claim). `classify_for_planning()` returns
+  `in_progress` node are `in_flight_nodes()`. `next_plannable()` is the single selection method (so
+  `objective next`/`show` resume a claim; the `--json` field name stays `next_node`).
+  `classify_for_planning()` returns
   `plannable`/`in_flight`/`blocked`/`complete` and drives the cold door's honest errors
   (`objective_in_flight` is a new `error_type`, exit 1, in place of the old misleading "all blocked
   or complete"). `objective show --json` gains `selection_kind`.
@@ -1142,7 +1143,7 @@ column** — `update_node` takes `status` verbatim or preserves it; setting `pr`
 
 **Cold-door workers (`perk objective …` — a dev/CI/T10 surface, not an agent affordance):**
 `create --body @FILE [--title]`, `show NUMBER`, `node NUMBER --node ID [--status][--pr][--description]`,
-`next NUMBER` (the dependency-graph `build_graph(nodes).next_node()` selection T10's
+`next NUMBER` (the dependency-graph `build_graph(nodes).next_plannable()` selection T10's
 `/objective-plan` consumes). All supervisor surfaces (`--json` → stdout, human → stderr, exit
 `0`/`1`/`2`). The objective issues are pure REST (issues + comments), no GraphQL.
 

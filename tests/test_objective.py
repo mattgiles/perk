@@ -144,21 +144,21 @@ def test_build_graph_explicit_depends_on():
     assert by_id["1.3"].depends_on == ("9.9",)
 
 
-def test_next_node_first_unblocked_pending():
+def test_next_plannable_first_unblocked_pending():
     # 1.1 done -> 1.2 pending unblocked is next.
     graph = o.build_graph(_nodes())
-    nxt = graph.next_node()
+    nxt = graph.next_plannable()
     assert nxt is not None and nxt.id == "1.2"
 
 
-def test_next_node_blocked_by_unfinished_dep():
+def test_next_plannable_blocked_by_unfinished_dep():
     nodes = [
         o.ObjectiveNode(id="1.1", description="A", status=N.IN_PROGRESS),
         o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
     ]
     graph = o.build_graph(nodes)
     # 1.2 depends on 1.1 (sequential) which is not terminal -> blocked -> no next.
-    assert graph.next_node() is None
+    assert graph.next_plannable() is None
 
 
 def test_next_plannable_resumes_orphaned_planning_claim():
@@ -170,9 +170,6 @@ def test_next_plannable_resumes_orphaned_planning_claim():
     graph = o.build_graph(nodes)
     nxt = graph.next_plannable()
     assert nxt is not None and nxt.id == "1.1"
-    # next_node() delegates to next_plannable()
-    delegated = graph.next_node()
-    assert delegated is not None and delegated.id == "1.1"
     assert [n.id for n in graph.plannable_nodes()] == ["1.1"]  # 1.2 blocked behind 1.1
     assert graph.in_flight_nodes() == []
 

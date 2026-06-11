@@ -6,6 +6,7 @@ One implementation per plane (cli-vs-pi §3); shells ``git`` via subprocess, nev
 returning ``None`` on failure (the operation is the authoritative test).
 """
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,9 +34,16 @@ _REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to pu
 
 def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
     # check=False: we inspect returncode ourselves to raise a domain GitError with stderr.
+    # GIT_TERMINAL_PROMPT=0: credential prompts fail fast instead of hanging to the timeout.
     try:
         proc = subprocess.run(
-            ["git", *args], cwd=cwd, check=False, capture_output=True, text=True, timeout=timeout
+            ["git", *args],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
     except subprocess.TimeoutExpired as exc:
         raise GitError(f"git {' '.join(args)} timed out") from exc

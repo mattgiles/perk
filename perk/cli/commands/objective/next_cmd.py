@@ -39,7 +39,7 @@ def next_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
         )
         return
 
-    next_node = objective.build_graph(list(state.nodes)).next_node()
+    next_node = objective.build_graph(list(state.nodes)).next_plannable()
     payload = {
         "success": True,
         "error_type": None,
