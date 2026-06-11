@@ -5,15 +5,33 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { handoffPath, type PlanRef, workflowDir } from "./cache.ts";
 import {
+  appendWorkflowState,
   type BranchEntry,
   branchOf,
   decideClaim,
   deriveForkRunId,
+  type EntrySink,
   planRefsEqual,
   rebuildWorkflowState,
   resolveRunStage,
   WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
+
+/** A live fake: appends land in `entries`, which also backs the BranchSource + ReportTarget. */
+function fakeWorld() {
+  const entries: BranchEntry[] = [];
+  const notifications: string[] = [];
+  const sink: EntrySink = {
+    appendEntry: (customType, data) =>
+      entries.push({ type: "custom", customType, data: data as Record<string, unknown> }),
+  };
+  const source = {
+    sessionManager: { getBranch: () => entries },
+    hasUI: true,
+    ui: { notify: (message: string) => notifications.push(message) },
+  };
+  return { entries, notifications, sink, source };
+}
 
 /** Plant a handoff blob (optionally carrying `stage`) for resolveRunStage tests. */
 function plantHandoff(runId: string, stage?: string): string {
@@ -170,6 +188,98 @@ test("resolveRunStage: fork and none carry no launched stage", () => {
   const none = decideClaim({ state: {}, currentSessionId: "s1", envRunId: null, cwd });
   assert.equal(none.action, "none");
   assert.equal(resolveRunStage(none, cwd), null);
+});
+
+test("appendWorkflowState: success — appends, reads back, no report", () => {
+  const { notifications, sink, source } = fakeWorld();
+  const ok = appendWorkflowState(sink, source, {
+    data: { active_objective: "42" },
+    field: "active_objective",
+    expected: "42",
+    scope: "objective-save",
+    failure: "active_objective read-back failed for #42",
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(notifications, []);
+});
+
+test("appendWorkflowState: dropped write — false + one prefixed report", () => {
+  const { notifications, source } = fakeWorld();
+  const droppingSink: EntrySink = { appendEntry: () => {} };
+  const ok = appendWorkflowState(droppingSink, source, {
+    data: { active_objective: "42" },
+    field: "active_objective",
+    expected: "42",
+    scope: "objective-save",
+    failure: "active_objective read-back failed for #42",
+  });
+  assert.equal(ok, false);
+  assert.equal(notifications.length, 1);
+  assert.ok(notifications[0]?.startsWith("perk: objective-save — "));
+  assert.ok(notifications[0]?.includes("active_objective read-back failed for #42"));
+});
+
+test("appendWorkflowState: custom equals — planRefsEqual ignores non-identity drift", () => {
+  const { entries, notifications, source } = fakeWorld();
+  const expected: PlanRef = {
+    provider: "github",
+    pr_id: "7",
+    url: "https://a",
+    labels: [],
+    objective_id: null,
+  };
+  // The sink writes a ref differing only in `url` — identity (provider, pr_id) still matches.
+  const driftingSink: EntrySink = {
+    appendEntry: (customType) =>
+      entries.push({
+        type: "custom",
+        customType,
+        data: { active_plan_ref: { provider: "github", pr_id: "7", url: "https://b" } },
+      }),
+  };
+  const ok = appendWorkflowState(driftingSink, source, {
+    data: { active_plan_ref: expected },
+    field: "active_plan_ref",
+    expected,
+    scope: "plan-save",
+    failure: "plan-ref read-back failed for github:7",
+    equals: planRefsEqual,
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(notifications, []);
+});
+
+test("appendWorkflowState: never throws — a throwing sink reports and returns false", () => {
+  const { notifications, source } = fakeWorld();
+  const throwingSink: EntrySink = {
+    appendEntry: () => {
+      throw new Error("disk full");
+    },
+  };
+  const ok = appendWorkflowState(throwingSink, source, {
+    data: { run_id: "01RID" },
+    field: "run_id",
+    expected: "01RID",
+    scope: "workflow-state linkage error",
+    failure: "read-back failed for run 01RID",
+  });
+  assert.equal(ok, false);
+  assert.equal(notifications.length, 1);
+  assert.ok(notifications[0]?.includes("run_id append threw"));
+  assert.ok(notifications[0]?.includes("disk full"));
+});
+
+test("appendWorkflowState: multi-field data verifies only the named field", () => {
+  const { notifications, sink, source } = fakeWorld();
+  const ok = appendWorkflowState(sink, source, {
+    data: { run_id: "01RID", pi_session_id: "s1", mode: "read-only", stage: "plan" },
+    field: "run_id",
+    expected: "01RID",
+    scope: "workflow-state linkage error",
+    failure: "read-back failed for run 01RID",
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(notifications, []);
 });
 
 test("deriveForkRunId: increments past existing siblings", () => {

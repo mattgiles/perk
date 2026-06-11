@@ -17,10 +17,9 @@ import {
   stringField,
 } from "./coldDoor.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
-import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
-import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface ObjectiveSaveOk {
@@ -86,22 +85,17 @@ export async function saveObjective(
   const objectiveId = String(objective.number);
   const linked = rebuildWorkflowState(branch()).active_objective ?? null;
   if (linked !== objectiveId) {
-    pi.appendEntry(WORKFLOW_STATE_TYPE, { active_objective: objectiveId });
+    appendWorkflowState(pi, ctx, {
+      data: { active_objective: objectiveId },
+      field: "active_objective",
+      expected: objectiveId,
+      scope: "objective-save",
+      failure: `active_objective read-back failed for #${objectiveId}`,
+    });
     pi.appendEntry(OBJECTIVE_BUDGET_TYPE, {
       objective_id: objectiveId,
       activated_at: new Date().toISOString(),
     });
-    if ((rebuildWorkflowState(branch()).active_objective ?? null) !== objectiveId) {
-      report(
-        ctx,
-        "objective-save",
-        "error",
-        `active_objective read-back failed for #${objectiveId}`,
-        {
-          alsoLog: true,
-        },
-      );
-    }
   }
 
   const verb = objective.existed ? "Found existing" : "Saved";

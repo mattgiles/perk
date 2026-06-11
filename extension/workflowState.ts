@@ -1,10 +1,14 @@
-// The `perk:workflow-state` session tier (contracts.md §8.3) — rebuild, claim, fork-derive.
+// The `perk:workflow-state` session tier (contracts.md §8.3) — rebuild, claim, fork-derive,
+// and the strict-append seam (appendWorkflowState).
 //
-// Pure, fs-light logic kept separate from the `pi`/`ctx` effects (in index.ts) so it is
-// unit-testable under `node --test`. The reconstruction discipline (scan getBranch on
-// session_start AND session_tree, per-field LWW) and the verified-linkage claim (Q3) live here.
+// Mostly pure, fs-light logic kept separate from the `pi`/`ctx` effects (in index.ts); the
+// strict-append seam touches effects only through structural slices (`EntrySink`, `BranchSource`,
+// `ReportTarget`), so the whole module stays unit-testable under `node --test` with fakes. The
+// reconstruction discipline (scan getBranch on session_start AND session_tree, per-field LWW)
+// and the verified-linkage claim (Q3) live here.
 
 import { listRunIds, type PlanRef, readHandoff } from "./cache.ts";
+import { type ReportTarget, report } from "./report.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
@@ -56,6 +60,52 @@ export function rebuildWorkflowState(entries: readonly BranchEntry[]): WorkflowS
     }
   }
   return state as WorkflowState;
+}
+
+/** The structural append surface the strict-append seam needs; ExtensionAPI satisfies it. */
+export interface EntrySink {
+  appendEntry(customType: string, data?: unknown): void;
+}
+
+/**
+ * The one strict-append seam over `perk:workflow-state` (contracts §8.3 verified-linkage tier):
+ * append → rebuild → compare → report. Loud-but-non-fatal and NEVER throws: a mismatch or a
+ * throwing append/rebuild is reported via the report() seam ({ alsoLog: true }) and returns
+ * false. Idempotence pre-checks ("append iff the rebuilt value differs") stay at call sites.
+ */
+export function appendWorkflowState<K extends keyof WorkflowState>(
+  sink: EntrySink,
+  source: BranchSource & ReportTarget,
+  opts: {
+    /** The entry payload — may carry extra fields beyond the verified one (the claim record). */
+    data: WorkflowState;
+    /** The field verified on read-back. */
+    field: K;
+    /** The value the rebuilt field must equal. */
+    expected: WorkflowState[K];
+    /** report() scope, e.g. "plan-save", "workflow-state linkage error". */
+    scope: string;
+    /** The mismatch message (byte-preserved per site). */
+    failure: string;
+    /** Comparator; default: (a, b) => Object.is(a ?? null, b ?? null). */
+    equals?: (rebuilt: WorkflowState[K] | undefined, expected: WorkflowState[K]) => boolean;
+  },
+): boolean {
+  const equals =
+    opts.equals ??
+    ((a: WorkflowState[K] | undefined, b: WorkflowState[K]) => Object.is(a ?? null, b ?? null));
+  try {
+    sink.appendEntry(WORKFLOW_STATE_TYPE, opts.data);
+    const rebuilt = rebuildWorkflowState(branchOf(source))[opts.field];
+    if (equals(rebuilt, opts.expected)) return true;
+    report(source, opts.scope, "error", opts.failure, { alsoLog: true });
+    return false;
+  } catch (error) {
+    report(source, opts.scope, "error", `${String(opts.field)} append threw — ${String(error)}`, {
+      alsoLog: true,
+    });
+    return false;
+  }
 }
 
 /**

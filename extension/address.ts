@@ -22,7 +22,7 @@ import {
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
-import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { appendWorkflowState } from "./workflowState.ts";
 
 interface ThreadInput {
   thread_id: string;
@@ -147,19 +147,21 @@ export async function resolveReviewThreads(
   const results = r.data;
   const resolvedIds = results.filter((row) => row.success).map((row) => row.thread_id);
 
-  // Record the batch (tier-3, best-effort, idempotent, headless-safe). Strict read-back via rebuild.
-  try {
-    pi.appendEntry(WORKFLOW_STATE_TYPE, {
-      last_review_batch: {
-        pr: params.pr ?? null,
-        counts: params.counts ?? null,
-        resolved_thread_ids: resolvedIds,
-        at: new Date().toISOString(),
-      },
-    });
-  } catch (err) {
-    console.error(`perk: address — could not record last_review_batch: ${String(err)}`);
-  }
+  // Record the batch (tier-3, best-effort-with-logging, idempotent, headless-safe). Strict
+  // read-back via rebuild — loud-but-non-fatal, the resolve already succeeded.
+  const recordedBatch = {
+    pr: params.pr ?? null,
+    counts: params.counts ?? null,
+    resolved_thread_ids: resolvedIds,
+    at: new Date().toISOString(),
+  };
+  appendWorkflowState(pi, ctx, {
+    data: { last_review_batch: recordedBatch },
+    field: "last_review_batch",
+    expected: recordedBatch,
+    scope: "address",
+    failure: "last_review_batch read-back failed",
+  });
 
   return ok(`Resolved ${resolvedIds.length} review thread(s).`, {
     results,
