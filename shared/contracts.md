@@ -465,7 +465,10 @@ composed-status handle and `setStandingWidget` no-op without UI — headless nev
 UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
 `perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` **is** retired in
 P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
-implement-progress overlay via this perk-owned `perk:checkpoint` seam.
+implement-progress overlay via this perk-owned `perk:checkpoint` seam. `@tombell/pi-status` is
+likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single last-wins slot, and
+pi-status's `session_start` footer install replaced perk's footer — borrowed packages must not own
+the footer.
 
 **Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
 `setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces.ts` +
@@ -1762,7 +1765,7 @@ issues }`: an absent key falls back to the default **silently**; an unknown id o
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
-`_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`, `npm:@tombell/pi-status`,
+`_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
 `npm:pi-subagents`, `npm:pi-web-access` — the borrowed web-research engine, zero-config Exa
 search + content fetch) layer within the same `_converge_settings` body,
 so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
