@@ -3,9 +3,10 @@
 // canonical in Python), then set the `pending-learn` marker for the in-session path (the worker
 // sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
 
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
+import { type ColdJson, numberField, objectField, runColdDoor, stringField } from "./coldDoor.ts";
 import { reconcileGuidance } from "./objectivePlan.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
@@ -37,16 +38,65 @@ export interface LandOk {
 export type LandResult = Result<LandOk>;
 export type LandDetails = LandResult["details"];
 
-interface PrLandJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  pr?: { number: number; state: string };
+/** The decoded `perk pr land --json` payload — `LandOk` minus the warm-door-owned `pending_learn`. */
+interface LandPayload {
+  pr: { number: number; state: string };
   branch?: string;
   issue?: number;
-  pending_learn?: boolean;
   objective?: ObjectiveLandUpdate;
   learn?: LearnConsumeUpdate;
+}
+
+/** A nullable-string field: string or null accepted; anything else rejects the sub-object. */
+function nullableString(obj: ColdJson, key: string): string | null | undefined {
+  const value = obj[key];
+  return typeof value === "string" || value === null ? value : undefined;
+}
+
+/** Validate the optional `objective` sub-object; malformed → undefined (advisory, never fatal). */
+function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
+  const obj = objectField(payload, "objective");
+  if (obj === undefined) return undefined;
+  const number = obj.number;
+  if (typeof number !== "number" && number !== null) return undefined;
+  const nodesMarked = obj.nodes_marked;
+  if (!Array.isArray(nodesMarked) || !nodesMarked.every((n) => typeof n === "string")) {
+    return undefined;
+  }
+  const skippedReason = nullableString(obj, "skipped_reason");
+  if (skippedReason === undefined && obj.skipped_reason !== undefined) return undefined;
+  return { number, nodes_marked: nodesMarked, skipped_reason: skippedReason ?? null };
+}
+
+/** Validate the optional `learn` sub-object; malformed → undefined (advisory, never fatal). */
+function decodeLearn(payload: ColdJson): LearnConsumeUpdate | undefined {
+  const learn = objectField(payload, "learn");
+  if (learn === undefined) return undefined;
+  const closed = learn.closed;
+  if (!Array.isArray(closed) || !closed.every((n) => typeof n === "number")) return undefined;
+  const skippedReason = nullableString(learn, "skipped_reason");
+  if (skippedReason === undefined && learn.skipped_reason !== undefined) return undefined;
+  return { closed, skipped_reason: skippedReason ?? null };
+}
+
+/**
+ * Narrow the `perk pr land --json` success payload. Strict on `pr` (malformed → bad_output);
+ * the optional `objective`/`learn` sub-objects are validated but dropped when malformed — the
+ * merge already succeeded, so the success report must survive a malformed advisory field.
+ */
+function decodeLand(payload: ColdJson): LandPayload | null {
+  const pr = objectField(payload, "pr");
+  if (pr === undefined) return null;
+  const number = numberField(pr, "number");
+  const state = stringField(pr, "state");
+  if (number === undefined || state === undefined) return null;
+  return {
+    pr: { number, state },
+    branch: stringField(payload, "branch"),
+    issue: numberField(payload, "issue"),
+    objective: decodeObjective(payload),
+    learn: decodeLearn(payload),
+  };
 }
 
 /**
@@ -56,42 +106,17 @@ interface PrLandJson {
 export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<LandResult> {
   const fail = failFor(ctx, "land");
 
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, ["pr", "land", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk pr land failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: PrLandJson;
-  try {
-    parsed = JSON.parse(res.stdout) as PrLandJson;
-  } catch {
-    return fail("perk pr land returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.pr) {
-    return fail(
-      parsed.message ?? "perk pr land reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  const r = await runColdDoor<LandPayload>(pi, ctx, ["pr", "land", "--json"], {
+    label: "perk pr land",
+    decode: decodeLand,
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
   // Set the semaphore for the in-session path (idempotent; the worker also set it on disk).
   setMarker(ctx.cwd, PENDING_LEARN);
 
-  const lines = [`Landed PR #${parsed.pr.number}; run /learn to release the worktree.`];
-  const obj = parsed.objective;
+  const lines = [`Landed PR #${r.data.pr.number}; run /learn to release the worktree.`];
+  const obj = r.data.objective;
   if (obj?.nodes_marked.length && obj.number !== null) {
     // The reconcile pass is auto-driven after land (see driveReconcileAfterLand); just report it.
     lines.push(
@@ -99,7 +124,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
         `reconciling the roadmap against the merged diff.`,
     );
   }
-  const learn = parsed.learn;
+  const learn = r.data.learn;
   if (learn?.closed.length) {
     // hop-2: the consumed perk:learn issues were closed + labelled perk:consolidated on land.
     lines.push(
@@ -114,18 +139,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
     lines.push(`Warning: learn consume incomplete — ${learn.skipped_reason}.`);
   }
 
-  return ok(
-    lines.join("\n"),
-    {
-      pr: parsed.pr,
-      branch: parsed.branch,
-      issue: parsed.issue,
-      pending_learn: true,
-      objective: parsed.objective,
-      learn: parsed.learn,
-    },
-    { terminate: true },
-  );
+  return ok(lines.join("\n"), { ...r.data, pending_learn: true }, { terminate: true });
 }
 
 /**

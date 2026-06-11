@@ -227,6 +227,59 @@ test("tool: land stays quiet on a benign learn-consume skip", async () => {
   }
 });
 
+test("tool: success:true with a malformed pr fails as bad_output (unexpected payload)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42 }, // missing `state`
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("land", {});
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.match(details.error ?? "", /unexpected payload/);
+    assert.ok(
+      !existsSync(join(cwd, ".pi", "workflow", "markers", PENDING_LEARN)),
+      "no marker on a bad payload",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("landPr: a malformed objective is dropped, land still succeeds", async () => {
+  // The merge already succeeded — a malformed advisory `objective` must not fail the door.
+  // (The old unchecked cast would instead crash the composer on a non-array nodes_marked.)
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformedObjective = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    pending_learn: true,
+    objective: { number: 5, nodes_marked: "1.2", skipped_reason: null }, // non-array
+  });
+  const piStub = {
+    exec: async () => ({ code: 0, killed: false, stdout: malformedObjective, stderr: "" }),
+  } as unknown as ExtensionAPI;
+  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  const result = await landPr(piStub, ctx);
+  assert.ok(result.details.ok, "land still succeeds");
+  assert.equal(result.details.objective, undefined, "the malformed objective is dropped");
+  const text = result.content[0]?.text ?? "";
+  assert.match(text, /Landed PR #42/);
+  assert.doesNotMatch(text, /Objective/, "no objective line in the text");
+  // ...and the drive short-circuits: no reconcile turn for a dropped objective.
+  const { pi, calls } = spyPi();
+  driveReconcileAfterLand(pi, ctx, result.details);
+  assert.equal(calls.length, 0, "driveReconcileAfterLand not driven");
+});
+
 test("/land command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: LAND_JSON });

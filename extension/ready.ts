@@ -4,7 +4,15 @@
 // submit; `/ready` is the explicit gesture that opens the PR for review. Mirrors `submit.ts`: write
 // nothing, delegate via `pi.exec`, surface the structured result, never throw.
 
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  booleanField,
+  type ColdJson,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -15,13 +23,14 @@ export interface ReadyOk {
 
 export type ReadyResult = Result<ReadyOk>;
 
-/** The `perk pr ready --json` success shape (the contract the warm door consumes). */
-interface PrReadyJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  pr?: { number: number; url: string };
-  was_draft?: boolean;
+/** Narrow the `perk pr ready --json` success payload; strict on `pr`, lenient on the rest. */
+function decodeReady(payload: ColdJson): ReadyOk | null {
+  const pr = objectField(payload, "pr");
+  if (pr === undefined) return null;
+  const number = numberField(pr, "number");
+  const url = stringField(pr, "url");
+  if (number === undefined || url === undefined) return null;
+  return { pr: { number, url }, was_draft: booleanField(payload, "was_draft") };
 }
 
 /**
@@ -31,43 +40,14 @@ interface PrReadyJson {
 export async function markReady(pi: ExtensionAPI, ctx: ExtensionContext): Promise<ReadyResult> {
   const fail = failFor(ctx, "ready");
 
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, ["pr", "ready", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
+  const r = await runColdDoor<ReadyOk>(pi, ctx, ["pr", "ready", "--json"], {
+    label: "perk pr ready",
+    decode: decodeReady,
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk pr ready failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: PrReadyJson;
-  try {
-    parsed = JSON.parse(res.stdout) as PrReadyJson;
-  } catch {
-    return fail("perk pr ready returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.pr) {
-    return fail(
-      parsed.message ?? "perk pr ready reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
-
-  const verb = parsed.was_draft ? "Marked ready" : "Already ready";
-  return ok(
-    `${verb}: PR #${parsed.pr.number} is open for review.`,
-    { pr: parsed.pr, was_draft: parsed.was_draft },
-    { terminate: true },
-  );
+  const verb = r.data.was_draft ? "Marked ready" : "Already ready";
+  return ok(`${verb}: PR #${r.data.pr.number} is open for review.`, r.data, { terminate: true });
 }
 
 const TOOL_GUIDELINES = [

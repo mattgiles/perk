@@ -4,7 +4,15 @@
 // `planSave.ts`: write nothing, delegate to `perk pr submit --json` via `pi.exec`, surface the
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
 
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  booleanField,
+  type ColdJson,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -18,15 +26,23 @@ export interface SubmitOk {
 export type SubmitResult = Result<SubmitOk>;
 export type SubmitDetails = SubmitResult["details"];
 
-/** The `perk pr submit --json` success shape (the contract the warm door consumes). */
-interface PrSubmitJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  pr?: { number: number; url: string; is_draft: boolean; existed: boolean };
-  branch?: string;
-  issue?: number;
-  plan_embedded?: boolean;
+/** Narrow the `perk pr submit --json` success payload; strict on `pr`, lenient on the rest. */
+function decodeSubmit(payload: ColdJson): SubmitOk | null {
+  const pr = objectField(payload, "pr");
+  if (pr === undefined) return null;
+  const number = numberField(pr, "number");
+  const url = stringField(pr, "url");
+  const isDraft = booleanField(pr, "is_draft");
+  const existed = booleanField(pr, "existed");
+  if (number === undefined || url === undefined || isDraft === undefined || existed === undefined) {
+    return null;
+  }
+  return {
+    pr: { number, url, is_draft: isDraft, existed },
+    branch: stringField(payload, "branch"),
+    issue: numberField(payload, "issue"),
+    plan_embedded: booleanField(payload, "plan_embedded"),
+  };
 }
 
 /**
@@ -36,50 +52,17 @@ interface PrSubmitJson {
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
   const fail = failFor(ctx, "submit");
 
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  // pi.exec returns (does not throw) on spawn/non-zero exit — turn-3 §3.5 S2.
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, ["pr", "submit", "--json"], { cwd: ctx.cwd, signal: ctx.signal });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
+  const r = await runColdDoor<SubmitOk>(pi, ctx, ["pr", "submit", "--json"], {
+    label: "perk pr submit",
+    decode: decodeSubmit,
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk pr submit failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: PrSubmitJson;
-  try {
-    parsed = JSON.parse(res.stdout) as PrSubmitJson;
-  } catch {
-    return fail("perk pr submit returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.pr) {
-    return fail(
-      parsed.message ?? "perk pr submit reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
-
-  const verb = parsed.pr.existed ? "Found existing" : "Opened draft";
-  const embed = parsed.plan_embedded ? "plan embedded" : "no plan embed";
-  return ok(
-    `${verb} PR #${parsed.pr.number} → ${parsed.pr.url} (${embed})`,
-    {
-      pr: parsed.pr,
-      branch: parsed.branch,
-      issue: parsed.issue,
-      plan_embedded: parsed.plan_embedded,
-    },
-    { terminate: true },
-  );
+  const verb = r.data.pr.existed ? "Found existing" : "Opened draft";
+  const embed = r.data.plan_embedded ? "plan embedded" : "no plan embed";
+  return ok(`${verb} PR #${r.data.pr.number} → ${r.data.pr.url} (${embed})`, r.data, {
+    terminate: true,
+  });
 }
 
 const TOOL_GUIDELINES = [
