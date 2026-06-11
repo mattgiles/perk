@@ -161,14 +161,12 @@ def _render_table(rows: list[dict[str, Any]]) -> None:
 @click.command("list")
 @click.option(
     "--no-refresh",
-    "no_refresh",
     is_flag=True,
     help="Skip live GitHub reads; report only the durable dispatch-record state.",
 )
 @click.option(
     "--limit",
-    "limit",
-    type=int,
+    type=click.IntRange(min=1),
     default=50,
     show_default=True,
     help="Max runs to display (newest-first).",

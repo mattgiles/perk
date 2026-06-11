@@ -17,14 +17,12 @@ from perk.output import machine_output, user_output
 @click.option("--node", "node_id", required=True, help="The roadmap node id (e.g. 1.2).")
 @click.option(
     "--status",
-    "status",
     type=click.Choice([s.value for s in objective.NodeStatus]),
-    default=None,
     help="Set the node's status (explicit-only; never inferred from --pr).",
 )
-@click.option("--pr", "pr", default=None, help='Set/clear the PR ("#N" sets, "" clears).')
-@click.option("--description", "description", default=None, help="Update the node description.")
-@click.option("--dry-run", "dry_run", is_flag=True, help="Validate without writing.")
+@click.option("--pr", help='Set/clear the PR ("#N" sets, "" clears).')
+@click.option("--description", help="Update the node description.")
+@click.option("--dry-run", is_flag=True, help="Validate without writing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def node_objective(

@@ -35,11 +35,9 @@ def _implement_stage() -> Stage:
 
 @alias("impl")
 @click.command("implement", context_settings={"ignore_unknown_options": True})
-@click.argument("plan", required=False, default=None)
-@click.option("--worktree", default=None, help="Worktree to position (overrides the plan name).")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Print the launch plan without exec'ing pi."
-)
+@click.argument("plan", required=False)
+@click.option("--worktree", help="Worktree to position (overrides the plan name).")
+@click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
 @click.option(
     "--remote",
     type=str,
@@ -50,7 +48,6 @@ def _implement_stage() -> Stage:
 )
 @click.option(
     "--base",
-    default=None,
     help="Branch off this ref instead of origin/<trunk> (e.g. for stacking on an unlanded branch).",
 )
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)

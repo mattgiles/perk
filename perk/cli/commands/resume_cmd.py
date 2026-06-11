@@ -27,9 +27,7 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 @alias("res")
 @click.command("resume", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Resolve + print the stage without launching."
-)
+@click.option("--dry-run", is_flag=True, help="Resolve + print the stage without launching.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.option(
     "--remote",

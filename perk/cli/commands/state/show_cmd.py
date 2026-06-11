@@ -13,8 +13,8 @@ from perk.output import user_output
 
 @alias("s")
 @click.command("show")
-@click.option("--run-id", "rid", default=None, help="Show one run; omit to list all runs.")
-def show_state(rid: str | None) -> None:
+@click.option("--run-id", "rid", help="Show one run; omit to list all runs.")
+def show_state(*, rid: str | None) -> None:
     """Show a run's handoff + scratch, or list known runs and markers."""
     root = Path.cwd()
     wd = cache.workflow_dir(root)

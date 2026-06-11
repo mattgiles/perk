@@ -17,7 +17,7 @@ from perk.output import user_output
 @click.argument("name")
 @click.option("-f", "--force", is_flag=True, help="Remove even with uncommitted changes.")
 @click.pass_context
-def remove_worktree(ctx: click.Context, name: str, *, force: bool) -> None:
+def remove_worktree(ctx: click.Context, *, name: str, force: bool) -> None:
     """Remove the worktree NAME."""
     _remove_impl(
         repo_root=require_repo(ctx),

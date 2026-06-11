@@ -22,7 +22,7 @@ _DRIVABLE_STAGE_IDS = sorted(
 
 
 @click.command("run-worker")
-@click.option("--run-id", "run_id", required=True, help="The perk run_id (ULID) for this drive.")
+@click.option("--run-id", required=True, help="The perk run_id (ULID) for this drive.")
 @click.option(
     "--stage",
     "stage_id",
@@ -31,7 +31,7 @@ _DRIVABLE_STAGE_IDS = sorted(
     help="The stage to drive (implement | address).",
 )
 @click.option("--plan", required=True, help="The plan issue number (e.g. 42 or #42).")
-@click.option("--base", default=None, help="The base branch the plan branch targets.")
+@click.option("--base", help="The base branch the plan branch targets.")
 @click.pass_context
 def run_worker_cmd(
     ctx: click.Context,

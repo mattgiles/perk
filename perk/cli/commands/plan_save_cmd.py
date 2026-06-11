@@ -45,37 +45,27 @@ class PlanSaveResult:
 @click.command("plan-save")
 @click.option(
     "--plan-file",
-    "plan_file",
+    # Deliberately no exists=True: existence/emptiness are tier-2 (UserFacingCliError) so the
+    # --json error envelope (error_type: invalid_input) survives a missing file.
     type=click.Path(path_type=Path),
-    default=None,
     help="Path to the plan markdown to save.",
 )
-@click.option(
-    "--run-id", "run_id", default=None, help="Correlation run id (defaults to $PERK_RUN_ID)."
-)
-@click.option("--title", default=None, help="Issue title (defaults to the plan's first heading).")
+@click.option("--run-id", help="Correlation run id (defaults to $PERK_RUN_ID).")
+@click.option("--title", help="Issue title (defaults to the plan's first heading).")
 @click.option(
     "--objective-id",
-    "objective_id",
-    default=None,
     help="Link the plan to an objective (the plan→objective direction; P2.T10).",
 )
 @click.option(
     "--node-id",
-    "node_id",
-    default=None,
     help="Objective node id to commit on save (with --objective-id; sets the node→plan backlink "
     "+ advances it to in_progress).",
 )
 @click.option(
     "--consumed-learn",
-    "consumed_learn",
-    default=None,
     help="Comma-separated perk:learn issue numbers this docs plan consumes (hop-2; e.g. '45,50').",
 )
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Compose and print without touching GitHub."
-)
+@click.option("--dry-run", is_flag=True, help="Compose and print without touching GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def plan_save(

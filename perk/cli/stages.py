@@ -43,7 +43,7 @@ def make_stage_launcher(stage: Stage) -> click.Command:
         help=launcher_help,
         context_settings={"ignore_unknown_options": True},
     )
-    @click.option("--worktree", default=None, help="Worktree to position (create/reuse stages).")
+    @click.option("--worktree", help="Worktree to position (create/reuse stages).")
     @click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
     @click.option(
         "--remote",

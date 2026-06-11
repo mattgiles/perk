@@ -32,9 +32,7 @@ from perk.output import machine_output, user_output
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     help="Path to a JSON file: an array of {thread_id, comment?} objects.",
 )
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Validate the batch without touching GitHub."
-)
+@click.option("--dry-run", is_flag=True, help="Validate the batch without touching GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def resolve_threads_pr(

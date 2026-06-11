@@ -29,7 +29,7 @@ class PrReadyResult:
 
 
 @click.command("ready")
-@click.option("--dry-run", "dry_run", is_flag=True, help="Resolve the PR without marking it ready.")
+@click.option("--dry-run", is_flag=True, help="Resolve the PR without marking it ready.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def ready_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:

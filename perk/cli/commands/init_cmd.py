@@ -52,12 +52,10 @@ def _render_human(report: InitReport) -> None:
 
 @click.command("init")
 @click.option("--force", is_flag=True, help="Re-seed the user-editable config to defaults.")
-@click.option(
-    "--no-interactive", "no_interactive", is_flag=True, help="Never prompt (CI/supervisor)."
-)
+@click.option("--no-interactive", is_flag=True, help="Never prompt (CI/supervisor).")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def init_perk(ctx: click.Context, force: bool, no_interactive: bool, as_json: bool) -> None:
+def init_perk(ctx: click.Context, *, force: bool, no_interactive: bool, as_json: bool) -> None:
     """Scaffold/converge this repo for perk (idempotent; safe to re-run).
 
     Verifies the environment, wires `.pi/settings.json` + the borrowed package set, creates
