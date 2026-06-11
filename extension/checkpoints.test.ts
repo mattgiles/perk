@@ -284,6 +284,52 @@ test("coarse fallback: active prose plan sets `📋 <stage>` status; no plan cle
     assert.ok(last?.value?.startsWith("📋 implement"), `coarse status set: ${last?.value}`);
     const widget = h.widgets.filter((w) => w.slot === "perk-checkpoints").at(-1);
     assert.ok(widget?.value?.[0]?.includes("prose plan"), "widget explains prose plan");
+    assert.equal(widget?.placement, "belowEditor", "coarse widget placed belowEditor (D4)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("steps widget: themed window at belowEditor — ≤4 step lines + elision (D1/D3/D4)", async () => {
+  const cwd = scaffoldRepo();
+  const planBody = `# Big\n\n## Steps\n1. one\n2. two\n3. three\n4. four\n5. five\n6. six\n`;
+  writeFileSync(planBodyPath(cwd), planBody, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const widget = h.widgets.filter((w) => w.slot === "perk-checkpoints").at(-1);
+    assert.ok(widget?.value, "steps widget rendered");
+    assert.equal(widget?.placement, "belowEditor", "steps widget placed belowEditor (D4)");
+    const lines = widget?.value as string[];
+    const stepLines = lines.filter((l) => /^[✓▸○] /.test(l));
+    assert.equal(stepLines.length, 4, `≤4 step lines: ${JSON.stringify(lines)}`);
+    assert.ok(
+      lines.some((l) => l.includes("… +2 later")),
+      `elision marker rendered: ${JSON.stringify(lines)}`,
+    );
+    assert.ok(stepLines[0]?.startsWith("▸ 1."), "current step renders the ▸ glyph");
+    // The status chip carries the full summary with the ▸ glyph (no retired ▶).
+    const status = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    assert.equal(status?.value, "📋 0/6 · ▸1");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/checkpoints notifies a single line (D8): done/total · ▸n <current step text>", async () => {
+  const cwd = scaffoldRepo();
+  writeFileSync(planBodyPath(cwd), PLAN_WITH_STEPS, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    await h.invokeCommand("checkpoints");
+    const msg = h.notifies.find((m) => m.includes("checkpoints"));
+    assert.ok(msg, `notified: ${JSON.stringify(h.notifies)}`);
+    assert.ok(!msg.includes("\n"), `one line, no newlines: ${JSON.stringify(msg)}`);
+    assert.ok(
+      msg.includes("0/3 · ▸1 Add the retry helper"),
+      `one-line format: ${JSON.stringify(msg)}`,
+    );
   } finally {
     h.dispose();
   }
