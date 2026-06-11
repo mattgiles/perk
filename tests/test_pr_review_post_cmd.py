@@ -59,13 +59,48 @@ def test_post_success_json(monkeypatch):
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
         batch = _write_batch(
-            d, {"summary": "looks good", "comments": [{"path": "x.py", "line": 3, "body": "nit"}]}
+            d,
+            {
+                "verdict": "actionable",
+                "summary": "needs a fix",
+                "comments": [{"path": "x.py", "line": 3, "body": "nit"}],
+            },
         )
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["pr"] == 42
     assert data["mode"] == "review" and data["comment_count"] == 1
+    assert data["verdict"] == "actionable" and data["next_command"] == "/address"
+
+
+def test_post_clean_success_json(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(
+        github,
+        "add_pr_reaction",
+        lambda **k: github.ReviewPostResult(
+            ok=True, mode="reaction", pr_number=42, comment_count=0
+        ),
+    )
+
+    def boom(**_k):
+        raise AssertionError("clean path must not call post_pr_review")
+
+    monkeypatch.setattr(github, "post_pr_review", boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean"})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True and data["pr"] == 42
+    assert data["mode"] == "reaction" and data["comment_count"] == 0
+    assert data["verdict"] == "clean" and data["next_command"] == "/land"
+    assert data["fyi"] == []
 
 
 def test_post_dry_run_offline():
@@ -73,11 +108,24 @@ def test_post_dry_run_offline():
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        batch = _write_batch(d, {"summary": "ok"})
+        batch = _write_batch(d, {"verdict": "actionable", "summary": "ok"})
         result = runner.invoke(cli, ["pr", "review-post", "--dry-run", "--json", "--batch", batch])
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
+
+
+def test_post_clean_dry_run_offline():
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean"})
+        result = runner.invoke(cli, ["pr", "review-post", "--dry-run", "--json", "--batch", batch])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True and data["dry_run"] is True
+    assert data["mode"] == "reaction" and data["verdict"] == "clean"
 
 
 def test_post_bad_batch_not_object(monkeypatch):
@@ -98,7 +146,92 @@ def test_post_bad_batch_missing_summary(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        batch = _write_batch(d, {"comments": []})
+        batch = _write_batch(d, {"verdict": "actionable", "comments": []})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "bad_batch"
+
+
+def test_post_bad_batch_missing_verdict(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"summary": "ok"})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "bad_batch"
+
+
+def test_post_bad_batch_invalid_verdict(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "approve", "summary": "ok"})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "bad_batch"
+
+
+def test_post_bad_batch_clean_with_comments(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        bad = {
+            "verdict": "clean",
+            "summary": "clean",
+            "comments": [{"path": "x.py", "line": 3, "body": "nit"}],
+        }
+        batch = _write_batch(d, bad)
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "bad_batch"
+
+
+def test_post_fyi_echoed_in_json(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: _open_pr())
+    monkeypatch.setattr(
+        github,
+        "add_pr_reaction",
+        lambda **k: github.ReviewPostResult(
+            ok=True, mode="reaction", pr_number=42, comment_count=0
+        ),
+    )
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean", "fyi": ["note"]})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["fyi"] == ["note"]
+
+
+def test_post_bad_batch_fyi_not_a_list(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean", "fyi": "note"})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    assert json.loads(result.output)["error_type"] == "bad_batch"
+
+
+def test_post_bad_batch_fyi_non_string_entry(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "clean", "fyi": ["ok", 3]})
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "bad_batch"
@@ -110,7 +243,11 @@ def test_post_bad_batch_malformed_comment(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        bad = {"summary": "ok", "comments": [{"path": "x.py", "body": "no line"}]}
+        bad = {
+            "verdict": "actionable",
+            "summary": "ok",
+            "comments": [{"path": "x.py", "body": "no line"}],
+        }
         batch = _write_batch(d, bad)
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
@@ -122,7 +259,7 @@ def test_post_no_plan_ref_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        batch = _write_batch(d, {"summary": "ok"})
+        batch = _write_batch(d, {"verdict": "actionable", "summary": "ok"})
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_plan_ref"
@@ -135,7 +272,7 @@ def test_post_no_pr_exits_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         cache.write_plan_ref(Path(d), _REF)
-        batch = _write_batch(d, {"summary": "ok"})
+        batch = _write_batch(d, {"verdict": "actionable", "summary": "ok"})
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
@@ -144,7 +281,7 @@ def test_post_no_pr_exits_1(monkeypatch):
 def test_post_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
-        batch = _write_batch(d, {"summary": "ok"})
+        batch = _write_batch(d, {"verdict": "actionable", "summary": "ok"})
         result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
@@ -221,3 +358,41 @@ def test_gateway_dry_run_does_not_shell(monkeypatch):
         pr_number=42, summary="ok", comments=[], repo_root=Path(), dry_run=True
     )
     assert result.ok is True and result.mode == "review"
+
+
+# --- gateway: the clean-verdict 👍 reaction ---------------------------------------------------
+
+
+def test_gateway_add_pr_reaction_success(monkeypatch):
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(args, **_):
+        seen["args"] = list(args)
+        return _Proc(0, "{}")
+
+    monkeypatch.setattr(github, "_run", fake_run)
+    result = github.add_pr_reaction(pr_number=42, repo_root=Path())
+    assert result.ok is True and result.mode == "reaction"
+    assert result.pr_number == 42 and result.comment_count == 0
+    args = seen["args"]
+    assert "repos/{owner}/{repo}/issues/42/reactions" in args
+    assert args[args.index("-X") + 1] == "POST"
+    assert args[args.index("-f") + 1] == "content=+1"
+
+
+def test_gateway_add_pr_reaction_failure_raises(monkeypatch):
+    monkeypatch.setattr(github, "_run", lambda *a, **k: _Proc(1, "", "boom"))
+    try:
+        github.add_pr_reaction(pr_number=42, repo_root=Path())
+    except github.GitHubError:
+        return
+    raise AssertionError("expected GitHubError when the reaction POST fails")
+
+
+def test_gateway_add_pr_reaction_dry_run_does_not_shell(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("dry-run must not shell gh")
+
+    monkeypatch.setattr(github, "_run", boom)
+    result = github.add_pr_reaction(pr_number=42, repo_root=Path(), dry_run=True)
+    assert result.ok is True and result.mode == "reaction" and result.comment_count == 0

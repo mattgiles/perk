@@ -27,8 +27,20 @@ test("prReviewGuidance omits the model override when unset", () => {
 
 test("prReviewGuidance tells the parent to take no further action (the child posts)", () => {
   const text = prReviewGuidance();
-  assert.match(text, /POSTS/);
+  assert.match(text, /posts/);
   assert.match(text, /NO further action/);
+});
+
+test("prReviewGuidance renders both verdict outcomes and the next-step surfacing", () => {
+  const text = prReviewGuidance();
+  // actionable → advisory COMMENT review, next step /address
+  assert.match(text, /COMMENT review/);
+  assert.match(text, /actionable .*`\/address`/u);
+  // clean → a single 👍 reaction, next step /land
+  assert.match(text, /\u{1F44D} reaction/u);
+  assert.match(text, /clean .*`\/land`/u);
+  // FYI notes are surfaced in-session only
+  assert.match(text, /FYI notes/);
 });
 
 test("prReviewGuidance does not hardcode the perk-pr-review skill pointer (binding suffix)", () => {

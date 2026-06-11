@@ -1708,11 +1708,15 @@ def resolve_review_threads(
 # PR review ops (#175 — the `/pr-review` automated-review door; contracts.md §8.4).
 #
 # The read (`get_pr_review_context`) gathers everything the fresh-context `perk.pr-reviewer` child
-# needs to review the active PR (diff + PR text + plan body); the mutation (`post_pr_review`) sends
-# the child's review back to the PR. `event` is **hardcoded `COMMENT`** — the reviewer can never
-# approve/request-changes. Resilience: if the inline-anchored review submission fails (bad line
-# anchors), `post_pr_review` falls back to posting the summary (+ rendered findings) as one
-# discussion comment, so a review ALWAYS lands on the PR.
+# needs to review the active PR (diff + PR text + plan body); the mutations send the child's
+# verdict back to the PR. The post is **verdict-driven**: an `actionable` verdict submits an
+# advisory COMMENT review via `post_pr_review` (`event` is **hardcoded `COMMENT`** — the reviewer
+# can never approve/request-changes); a `clean` verdict posts exactly one 👍 reaction to the PR
+# description via `add_pr_reaction` — nothing review-shaped lands on the PR. Resilience: if the
+# inline-anchored review submission fails (bad line anchors), `post_pr_review` falls back to
+# posting the summary (+ rendered findings) as one discussion comment, so an actionable review
+# ALWAYS lands. The reaction has no fallback ladder (nothing review-shaped is lost) — a failure
+# raises, per the gateway's mutations-raise convention.
 # ===========================================================================
 
 
@@ -1746,7 +1750,9 @@ class ReviewPostResult:
     """The outcome of posting a `/pr-review`. ``mode`` records WHICH path landed the review."""
 
     ok: bool
-    mode: str  # "review" (inline-anchored COMMENT review) | "comment_fallback" (discussion comment)
+    # "review" (inline-anchored COMMENT review) | "comment_fallback" (discussion comment) |
+    # "reaction" (clean verdict — a single 👍 on the PR description, nothing else)
+    mode: str
     pr_number: int
     comment_count: int
     error: str | None = None
@@ -1882,6 +1888,28 @@ def post_pr_review(
     return ReviewPostResult(
         ok=True, mode="comment_fallback", pr_number=pr_number, comment_count=len(comments)
     )
+
+
+def add_pr_reaction(*, pr_number: int, repo_root: Path, dry_run: bool = False) -> ReviewPostResult:
+    """Post a single 👍 reaction to the PR description (the `clean`-verdict artifact — nothing
+    review-shaped lands on the PR). The issues reactions endpoint covers PRs; a duplicate 👍 from
+    the same user is a server-side no-op, so re-running `/pr-review` stays idempotent. A non-zero
+    exit raises ``GitHubError`` (mutations raise; no fallback ladder — nothing review-shaped is
+    lost)."""
+    if dry_run:
+        return ReviewPostResult(ok=True, mode="reaction", pr_number=pr_number, comment_count=0)
+    proc = _run(
+        _rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{pr_number}/reactions",
+            method="POST",
+            fields={"content": "+1"},
+        ),
+        cwd=repo_root,
+        timeout=_WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _failed(proc, f"failed to react to PR #{pr_number}")
+    return ReviewPostResult(ok=True, mode="reaction", pr_number=pr_number, comment_count=0)
 
 
 # ===========================================================================

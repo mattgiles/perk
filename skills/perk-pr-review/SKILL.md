@@ -1,14 +1,15 @@
 ---
 name: perk-pr-review
-description: Orchestrating the perk /pr-review door — spawn a FRESH-context reviewer subagent that reviews the active PR and POSTS its review (advisory COMMENT) to the PR itself; the parent only surfaces the confirmation. Use when running automated code review of a perk PR.
+description: Orchestrating the perk /pr-review door — spawn a FRESH-context reviewer subagent that reviews the active PR and posts a verdict-driven outcome (actionable → advisory COMMENT review; clean → a single 👍 reaction, no comments); the parent only surfaces the verdict + next step. Use when running automated code review of a perk PR.
 ---
 
 # Automated PR review (the `/pr-review` door)
 
 `/pr-review` runs an automated code review of the **active plan's PR** in a **fresh, isolated
-subagent session**, and the review lands **as comments on the PR itself**. This is deliberately
-different from `/address`: there is no parent-side fix to apply, so the review's only output sink is
-the PR — and the reviewer child posts there directly.
+subagent session**, and the review lands **as comments on the PR only when actionable**. A clean PR
+gets a single 👍 reaction (zero text on the PR) and an unambiguous "`/land` is next" confirmation.
+This is deliberately different from `/address`: there is no parent-side fix to apply, so the
+review's only output sink is the PR — and the reviewer child posts there directly.
 
 ## Why a fresh context
 
@@ -24,14 +25,19 @@ text, and the plan — exactly what a human reviewer would.
    (perk's agents are namespaced `perk.*`). The child runs `perk pr review-context` itself (the diff
    + PR title/body + plan body never enter this session — route, don't relay).
 
-2. **The child posts its own review.** Unlike `/address`'s read-only classifier, the reviewer
-   **posts** its review back to the PR via `perk pr review-post` — an **advisory `COMMENT` review**
-   (it can never approve or request-changes; the CLI hardcodes `event=COMMENT`). The GitHub mutation
-   stays canonical in the Python gateway (D1); the child is just the only caller with the review in
-   hand.
+2. **The child posts its own verdict-driven outcome.** Unlike `/address`'s read-only classifier,
+   the reviewer **posts** back to the PR itself via `perk pr review-post`. The bar is **binary**:
+   a finding becomes a PR comment only if the author should act on it before landing. On an
+   **`actionable`** verdict the child posts an **advisory `COMMENT` review** (it can never approve
+   or request-changes; the CLI hardcodes `event=COMMENT`). On a **`clean`** verdict the child posts
+   exactly one 👍 reaction to the PR description — no review text, no compliments, nothing
+   review-shaped lands on the PR. Borderline/nit notes ride the batch's optional `fyi` array —
+   echoed **in-session only**, never posted to GitHub. The GitHub mutation stays canonical in the
+   Python gateway (D1); the child is just the only caller with the review in hand.
 
 3. **Surface the confirmation — take no further action.** The parent's job is done once the child
-   reports its terse confirmation (PR number, inline-comment count, one-line verdict). You do **not**
+   reports its terse confirmation: the **verdict** and the **next step** (clean ⇒ `/land`,
+   actionable ⇒ `/address`), the PR number and comment count, plus any FYI notes. You do **not**
    apply fixes or resolve threads here; the review lives on the PR. (To then *act* on review
    feedback, that is `/address`.)
 

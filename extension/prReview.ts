@@ -35,12 +35,14 @@ export function prReviewGuidance(model?: string): string {
     "perk /pr-review — automated code review of the active PR in a FRESH, isolated session.",
     `1. Spawn the \`perk.pr-reviewer\` agent via the \`subagent\` tool with \`context: "fresh"\`${modelClause}. ` +
       "A fresh context keeps this implementation session's history from biasing the review.",
-    "2. The child reviews the active plan's PR (it runs `perk pr review-context` itself) and POSTS " +
-      "its review back to the PR as advisory COMMENT feedback (via `perk pr review-post`). The raw " +
-      "diff never enters this session.",
-    "3. Take NO further action: simply surface the child's terse confirmation (PR number, comment " +
-      "count, one-line verdict). The review lives on the PR; you neither apply fixes nor resolve " +
-      "threads here.",
+    "2. The child reviews the active plan's PR (it runs `perk pr review-context` itself) and posts " +
+      "a verdict-driven outcome via `perk pr review-post`: actionable findings land as an advisory " +
+      "COMMENT review; a clean PR gets a single \u{1F44D} reaction (no comments land on the PR). " +
+      "The raw diff never enters this session.",
+    "3. Take NO further action: simply surface the child's terse confirmation \u2014 the verdict, " +
+      "the next step (clean \u21D2 `/land`, actionable \u21D2 `/address`), the PR number and comment " +
+      "count, and any FYI notes (in-session only, never posted to GitHub). The review lives on the " +
+      "PR; you neither apply fixes nor resolve threads here.",
   ].join("\n");
 }
 
