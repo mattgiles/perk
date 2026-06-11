@@ -372,6 +372,37 @@ def _desired_packages(self_repo: bool) -> list[str]:
     return [own, *BORROWED_PACKAGES]
 
 
+def _merge_static_packages(
+    packages: list[object], desired: list[str]
+) -> tuple[list[object], list[str]]:
+    """Append-only merge of the static perk+borrowed package set; returns (packages, added)."""
+    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
+    have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
+    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
+
+    added: list[str] = []
+    for want in desired:
+        if want.startswith("npm:"):
+            name = _npm_name(want)
+            if name is None or name in have_npm:
+                continue
+            packages.append(want)
+            have_npm.add(name)
+        elif want.startswith("git:"):
+            identity = _git_identity(want)
+            if identity is None or identity in have_git:
+                continue
+            packages.append(want)
+            have_git.add(identity)
+        else:
+            if want in have_local:
+                continue
+            packages.append(want)
+            have_local.add(want)
+        added.append(want)
+    return packages, added
+
+
 def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
     settings_path = root / ".pi" / "settings.json"
 
@@ -398,30 +429,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # Migration: strip legacy npm perk entries written by earlier perk init runs.
     packages = [p for p in packages if not (isinstance(p, str) and p.startswith("npm:@perk/pi"))]
 
-    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
-    have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
-    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
-
-    added: list[str] = []
-    for want in _desired_packages(self_repo):
-        if want.startswith("npm:"):
-            name = _npm_name(want)
-            if name is None or name in have_npm:
-                continue
-            packages.append(want)
-            have_npm.add(name)
-        elif want.startswith("git:"):
-            identity = _git_identity(want)
-            if identity is None or identity in have_git:
-                continue
-            packages.append(want)
-            have_git.add(identity)
-        else:
-            if want in have_local:
-                continue
-            packages.append(want)
-            have_local.add(want)
-        added.append(want)
+    packages, added = _merge_static_packages(packages, _desired_packages(self_repo))
 
     # Provider-driven two-directional wiring (Node 2.1). Composes on top of the static layer
     # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT
