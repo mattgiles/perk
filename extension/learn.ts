@@ -1,22 +1,21 @@
 // P2.T8b — the deepened warm `/learn` door (D10). Graduates the Phase-1 thin marker-clear into a
-// real knowledge-capture pass: when a `summary` is given, write it to a run-scoped scratch file and
-// DELEGATE to `perk learn capture --json --body <path>` (D1 — GitHub writes canonical in Python),
-// which creates a `perk:learn` issue + clears `pending-learn`; then mirror the marker-clear
-// in-session (idempotent). With no `summary`, stay the thin TS-only marker-clear (graceful — no
-// empty issue). Never throws (soft `details.ok`).
+// real knowledge-capture pass: when a `summary` is given, DELEGATE to `perk learn capture --json`
+// via the shared cold-door client (`runColdDoor`, Node 1.4 — the body rides the run-scratch stdin
+// channel; D1 — GitHub writes canonical in Python), which creates a `perk:learn` issue + clears
+// `pending-learn`; then mirror the marker-clear in-session (idempotent). With no `summary`, stay
+// the thin TS-only marker-clear (graceful — no empty issue). Never throws (soft `details.ok`).
 
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
+import { clearMarker, hasMarker, PENDING_LEARN, type PlanRef, readPlanRef } from "./cache.ts";
 import {
-  clearMarker,
-  ensureRunScratch,
-  hasMarker,
-  PENDING_LEARN,
-  type PlanRef,
-  readPlanRef,
-} from "./cache.ts";
+  booleanField,
+  type ColdJson,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -29,25 +28,23 @@ export interface LearnOk {
 
 export type LearnResult = Result<LearnOk>;
 
-/** The `perk learn capture --json` shape (the contract the warm door consumes). */
-interface LearnCaptureJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  learn_issue?: { number: number; url: string; existed: boolean };
-  pending_cleared?: boolean;
+/** The decoded `perk learn capture --json` payload slice the warm door consumes. */
+interface LearnCapturePayload {
+  learn_issue: { number: number; url: string; existed: boolean };
 }
 
-/** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
-function activeRunId(ctx: ExtensionContext): string {
-  try {
-    const branch = branchOf(ctx);
-    const runId = rebuildWorkflowState(branch).run_id;
-    if (typeof runId === "string" && runId.length > 0) return runId;
-  } catch {
-    // fall through to a stamp
-  }
-  return `learn-${Date.now()}`;
+/**
+ * Narrow the `perk learn capture --json` success payload. Strict on `learn_issue` (the success
+ * message dereferences it) — any miss → null → bad_output. `pending_cleared` is unconsumed.
+ */
+function decodeLearnCapture(payload: ColdJson): LearnCapturePayload | null {
+  const issue = objectField(payload, "learn_issue");
+  if (issue === undefined) return null;
+  const number = numberField(issue, "number");
+  const url = stringField(issue, "url");
+  const existed = booleanField(issue, "existed");
+  if (number === undefined || url === undefined || existed === undefined) return null;
+  return { learn_issue: { number, url, existed } };
 }
 
 /** Clear `pending-learn` (idempotent — a no-op if it was not set). Reports whether it was set. */
@@ -80,56 +77,19 @@ export async function learnDone(
 
   const fail = failFor(ctx, "learn");
 
-  // Stage the captured learnings to a run-scoped scratch file (pi.exec has no stdin channel).
-  let bodyPath: string;
-  try {
-    const dir = ensureRunScratch(ctx.cwd, activeRunId(ctx));
-    bodyPath = join(dir, `learn-${Date.now()}.md`);
-    writeFileSync(bodyPath, `${trimmed}\n`, "utf8");
-  } catch (err) {
-    return fail(`could not stage the learnings: ${String(err)}`, "scratch_failed");
-  }
-
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, ["learn", "capture", "--json", "--body", bodyPath], {
-      cwd: ctx.cwd,
-      signal: ctx.signal,
-    });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk learn capture failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: LearnCaptureJson;
-  try {
-    parsed = JSON.parse(res.stdout) as LearnCaptureJson;
-  } catch {
-    return fail("perk learn capture returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.learn_issue) {
-    return fail(
-      parsed.message ?? "perk learn capture reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  const r = await runColdDoor<LearnCapturePayload>(pi, ctx, ["learn", "capture", "--json"], {
+    label: "perk learn capture",
+    decode: decodeLearnCapture,
+    stdin: { flag: "--body", content: `${trimmed}\n`, filename: `learn-${Date.now()}.md` },
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
   // Mirror the marker-clear in-session (idempotent; the worker also cleared it on disk).
   const { wasPending } = clearPending(ctx);
-  const verb = parsed.learn_issue.existed ? "Found existing" : "Created";
+  const verb = r.data.learn_issue.existed ? "Found existing" : "Created";
   return ok(
-    `${verb} learn issue #${parsed.learn_issue.number}; pending-learn cleared.`,
-    { was_pending: wasPending, captured: true, learn_issue: parsed.learn_issue },
+    `${verb} learn issue #${r.data.learn_issue.number}; pending-learn cleared.`,
+    { was_pending: wasPending, captured: true, learn_issue: r.data.learn_issue },
     { terminate: true },
   );
 }

@@ -5,19 +5,24 @@
 // deterministic batched op.
 //
 // `resolve_review_threads` is the mechanical half: it DELEGATES the GitHub mutation to the Python
-// cold door (`perk pr resolve-threads`, D1 — mutations canonical in Python) by writing the batch to
-// a run-scoped scratch file (pi.exec has no stdin channel) and passing its path, then appends
-// `last_review_batch` to `perk:workflow-state`. Never throws (soft `details.ok`, mirrors submitPr).
+// cold door (`perk pr resolve-threads`, D1 — mutations canonical in Python) via the shared
+// cold-door client (`runColdDoor`, Node 1.4 — the batch rides the run-scratch stdin channel), then
+// appends `last_review_batch` to `perk:workflow-state`. Never throws (soft `details.ok`, mirrors
+// submitPr).
 
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
-import { ensureRunScratch } from "./cache.ts";
+import {
+  booleanField,
+  type ColdJson,
+  nullableStringField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
-import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 interface ThreadInput {
   thread_id: string;
@@ -59,24 +64,30 @@ export interface ResolveFailExtras {
 
 export type ResolveResult = Result<ResolveOk, ResolveFailExtras>;
 
-/** The `perk pr resolve-threads --json` shape (the contract the warm door consumes). */
-interface PrResolveJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  results?: ThreadResultRow[];
-}
-
-/** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
-function activeRunId(ctx: ExtensionContext): string {
-  try {
-    const branch = branchOf(ctx);
-    const runId = rebuildWorkflowState(branch).run_id;
-    if (typeof runId === "string" && runId.length > 0) return runId;
-  } catch {
-    // fall through to a stamp
+/**
+ * Narrow the cold door's `results` array to per-thread rows. Strict per row on `thread_id`,
+ * `success`, `comment_added`; lenient on the report-only `error` (wrong-typed coerces to null).
+ * Any malformed row → null (uncertainty ⇒ no half-rendered partial table).
+ */
+function decodeRows(payload: ColdJson): ThreadResultRow[] | null {
+  const raw = payload.results;
+  if (!Array.isArray(raw)) return null;
+  const rows: ThreadResultRow[] = [];
+  for (const item of raw) {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
+    const row = item as ColdJson;
+    const threadId = stringField(row, "thread_id");
+    const success = booleanField(row, "success");
+    const commentAdded = booleanField(row, "comment_added");
+    if (threadId === undefined || success === undefined || commentAdded === undefined) return null;
+    rows.push({
+      thread_id: threadId,
+      success,
+      comment_added: commentAdded,
+      error: nullableStringField(row, "error") ?? null,
+    });
   }
-  return `address-${Date.now()}`;
+  return rows;
 }
 
 /**
@@ -96,67 +107,45 @@ export async function resolveReviewThreads(
   }
   const batch = threads.map((t) => ({ thread_id: t.thread_id, comment: t.comment ?? null }));
 
-  // pi.exec has no stdin channel → write the batch to a run-scoped scratch file, pass its path.
-  let batchPath: string;
-  try {
-    const dir = ensureRunScratch(ctx.cwd, activeRunId(ctx));
-    batchPath = join(dir, `resolve-batch-${Date.now()}.json`);
-    writeFileSync(batchPath, `${JSON.stringify(batch, null, 2)}\n`, "utf8");
-  } catch (err) {
-    return fail(`could not stage the resolve batch: ${String(err)}`, "scratch_failed");
-  }
+  const r = await runColdDoor<ThreadResultRow[]>(pi, ctx, ["pr", "resolve-threads", "--json"], {
+    label: "perk pr resolve-threads",
+    decode: decodeRows,
+    stdin: {
+      flag: "--batch",
+      content: `${JSON.stringify(batch, null, 2)}\n`,
+      filename: `resolve-batch-${Date.now()}.json`,
+    },
+  });
 
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, ["pr", "resolve-threads", "--json", "--batch", batchPath], {
-      cwd: ctx.cwd,
-      signal: ctx.signal,
-    });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk pr resolve-threads failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: PrResolveJson;
-  try {
-    parsed = JSON.parse(res.stdout) as PrResolveJson;
-  } catch {
-    return fail("perk pr resolve-threads returned unparseable JSON", "bad_output");
-  }
-  const results = parsed.results ?? [];
-  const resolvedIds = results.filter((r) => r.success).map((r) => r.thread_id);
-
-  if (!parsed.success) {
-    // A partial/failed batch is loud-but-soft: surface the per-thread detail, do not throw.
-    const failed = results.filter((r) => !r.success).length;
-    const error = parsed.message ?? `${failed} thread(s) did not resolve`;
+  if (!r.ok) {
+    // A partial/failed batch is loud-but-soft: surface the per-thread detail, do not throw. The
+    // detail rides the failure envelope's payload; absent/malformed rows ⇒ plain fail (advisory
+    // drop — never a half-rendered partial table).
+    const rows = r.payload !== undefined ? decodeRows(r.payload) : null;
+    if (r.payload === undefined || rows === null) return fail(r.message, r.errorType);
+    const resolvedIds = rows.filter((row) => row.success).map((row) => row.thread_id);
+    const failed = rows.filter((row) => !row.success).length;
+    const error = stringField(r.payload, "message") ?? `${failed} thread(s) did not resolve`;
     report(ctx, "address", "error", error, { alsoLog: true });
     return {
       content: [
         {
           type: "text",
-          text: `Resolved ${resolvedIds.length}/${results.length} thread(s); ${failed} failed.`,
+          text: `Resolved ${resolvedIds.length}/${rows.length} thread(s); ${failed} failed.`,
         },
       ],
       details: {
         ok: false,
         error,
-        error_type: parsed.error_type ?? "partial_failure",
-        results,
+        error_type: stringField(r.payload, "error_type") ?? "partial_failure",
+        results: rows,
         resolved_thread_ids: resolvedIds,
       },
     };
   }
+
+  const results = r.data;
+  const resolvedIds = results.filter((row) => row.success).map((row) => row.thread_id);
 
   // Record the batch (tier-3, best-effort, idempotent, headless-safe). Strict read-back via rebuild.
   try {

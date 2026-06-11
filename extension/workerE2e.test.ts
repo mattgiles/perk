@@ -198,7 +198,11 @@ test("e2e: address HAPPY — resolve_review_threads ok → completed/address_res
     stage: "address",
     routes: {
       "pr resolve-threads": {
-        json: { success: true, results: [{ thread_id: "T1", success: true }] },
+        // The full per-row contract shape — the Node 2.3 decode is strict on comment_added.
+        json: {
+          success: true,
+          results: [{ thread_id: "T1", success: true, comment_added: true, error: null }],
+        },
       },
     },
     responses: [

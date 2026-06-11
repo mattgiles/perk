@@ -17,6 +17,7 @@ import type { PlanRef } from "./cache.ts";
 import {
   booleanField,
   type ColdJson,
+  nullableStringField,
   numberField,
   objectField,
   runColdDoor,
@@ -65,12 +66,6 @@ interface PlanSavePayload {
   objective_node: ObjectiveNodeLink | null;
 }
 
-/** A nullable-string field: string or null accepted; anything else rejects the sub-object. */
-function nullableString(obj: ColdJson, key: string): string | null | undefined {
-  const value = obj[key];
-  return typeof value === "string" || value === null ? value : undefined;
-}
-
 /**
  * Fully strict `plan_ref` decode — a half-formed ref appended to workflow-state would poison
  * `planRefsEqual` and every downstream consumer, so any miss → null → bad_output.
@@ -82,7 +77,7 @@ function decodePlanRef(payload: ColdJson): PlanRef | null {
   const prId = stringField(ref, "pr_id");
   const url = stringField(ref, "url");
   const labels = ref.labels;
-  const objectiveId = nullableString(ref, "objective_id");
+  const objectiveId = nullableStringField(ref, "objective_id");
   if (
     provider === undefined ||
     prId === undefined ||
@@ -101,9 +96,9 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
   const node = objectField(payload, "objective_node");
   if (node === undefined) return null;
   const linked = booleanField(node, "linked");
-  const name = nullableString(node, "node");
-  const status = nullableString(node, "status");
-  const error = nullableString(node, "error");
+  const name = nullableStringField(node, "node");
+  const status = nullableStringField(node, "status");
+  const error = nullableStringField(node, "error");
   if (linked === undefined || name === undefined || status === undefined || error === undefined) {
     return null;
   }

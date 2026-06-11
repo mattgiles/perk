@@ -15,6 +15,7 @@ import {
   type ColdDoorCtx,
   type ColdJson,
   type ExecHost,
+  nullableStringField,
   numberField,
   objectField,
   runColdDoor,
@@ -104,6 +105,7 @@ test("a thrown spawn error fails soft as exec_failed with the could-not-run mess
   if (!r.ok) {
     assert.equal(r.errorType, "exec_failed");
     assert.match(r.message, /^could not run '.*': Error: ENOENT$/);
+    assert.ok(!("payload" in r), "an exec throw carries no payload");
   }
 });
 
@@ -119,7 +121,30 @@ test("non-zero exit with a success:false envelope surfaces its error_type and me
     label: "perk learn-docs",
     decode: decodeAll,
   });
-  assert.deepEqual(r, { ok: false, message: "nothing to learn", errorType: "no_learn_issues" });
+  assert.deepEqual(r, {
+    ok: false,
+    message: "nothing to learn",
+    errorType: "no_learn_issues",
+    payload: { success: false, error_type: "no_learn_issues", message: "nothing to learn" },
+  });
+});
+
+test("non-zero exit envelope carries the parsed payload on the fail arm (extra fields ride through)", async () => {
+  const { host } = fakeExec({
+    code: 1,
+    stdout:
+      '{"success": false, "error_type": null, "message": null, ' +
+      '"results": [{"thread_id": "t1", "success": false}]}',
+  });
+  const r = await runColdDoor(host, fakeCtx(tempCwd()), ["pr", "resolve-threads", "--json"], {
+    label: "perk pr resolve-threads",
+    decode: decodeAll,
+  });
+  assert.equal(r.ok, false);
+  if (!r.ok) {
+    assert.ok(r.payload !== undefined);
+    assert.deepEqual(r.payload?.results, [{ thread_id: "t1", success: false }]);
+  }
 });
 
 test("non-zero exit envelope with non-string fields falls through to the fallback text", async () => {
@@ -141,7 +166,7 @@ test("non-zero exit envelope with non-string fields falls through to the fallbac
   }
 });
 
-test("non-zero exit without an envelope uses the stderr tail", async () => {
+test("non-zero exit without an envelope uses the stderr tail (no payload)", async () => {
   const { host } = fakeExec({ code: 3, stdout: "not json", stderr: "  it broke  \n" });
   const r = await runColdDoor(host, fakeCtx(tempCwd()), ["ready", "--json"], {
     label: "perk pr-ready",
@@ -152,6 +177,7 @@ test("non-zero exit without an envelope uses the stderr tail", async () => {
     message: "perk pr-ready failed (exit 3): it broke",
     errorType: "exec_failed",
   });
+  if (!r.ok) assert.ok(!("payload" in r), "unparseable stdout carries no payload");
 });
 
 test("non-zero exit without an envelope or stderr hints at PATH/PERK_BIN", async () => {
@@ -217,7 +243,20 @@ test("success:false at exit 0 defaults to github_error with the reported-failure
     ok: false,
     message: "perk pr-submit reported failure",
     errorType: "github_error",
+    payload: { success: false },
   });
+});
+
+test("success:false at exit 0 carries the parsed envelope payload (extra fields ride through)", async () => {
+  const { host } = fakeExec({
+    stdout: '{"success": false, "results": [{"thread_id": "t2", "success": true}]}',
+  });
+  const r = await runColdDoor(host, fakeCtx(tempCwd()), ["pr", "resolve-threads", "--json"], {
+    label: "perk pr resolve-threads",
+    decode: decodeAll,
+  });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.deepEqual(r.payload?.results, [{ thread_id: "t2", success: true }]);
 });
 
 test("success:false at exit 0 honors string error_type and message", async () => {
@@ -228,7 +267,12 @@ test("success:false at exit 0 honors string error_type and message", async () =>
     label: "perk pr-submit",
     decode: decodeAll,
   });
-  assert.deepEqual(r, { ok: false, message: "not a git repo", errorType: "not_a_repo" });
+  assert.deepEqual(r, {
+    ok: false,
+    message: "not a git repo",
+    errorType: "not_a_repo",
+    payload: { success: false, error_type: "not_a_repo", message: "not a git repo" },
+  });
 });
 
 // --- validated decode ----------------------------------------------------------------------------
@@ -238,6 +282,21 @@ test("decode returning null fails as bad_output (unexpected payload)", async () 
   const r = await runColdDoor(host, fakeCtx(tempCwd()), ["pr-submit", "--json"], {
     label: "perk pr-submit",
     decode: () => null,
+  });
+  assert.deepEqual(r, {
+    ok: false,
+    message: "perk pr-submit returned an unexpected payload",
+    errorType: "bad_output",
+  });
+});
+
+test("a throwing decode fails as bad_output (no throw escapes the client)", async () => {
+  const { host } = fakeExec({ stdout: '{"success": true}' });
+  const r = await runColdDoor(host, fakeCtx(tempCwd()), ["pr-submit", "--json"], {
+    label: "perk pr-submit",
+    decode: () => {
+      throw new Error("decode blew up");
+    },
   });
   assert.deepEqual(r, {
     ok: false,
@@ -374,6 +433,14 @@ test("objectField accepts plain objects and rejects arrays/null/scalars", () => 
   assert.equal(objectField(payload, "nul"), undefined);
   assert.equal(objectField(payload, "n"), undefined);
   assert.equal(objectField(payload, "absent"), undefined);
+});
+
+test("nullableStringField accepts strings and null; wrong-typed yields undefined", () => {
+  const payload: ColdJson = { s: "hi", nul: null, n: 7 };
+  assert.equal(nullableStringField(payload, "s"), "hi");
+  assert.equal(nullableStringField(payload, "nul"), null);
+  assert.equal(nullableStringField(payload, "n"), undefined);
+  assert.equal(nullableStringField(payload, "absent"), undefined);
 });
 
 // --- activeRunId ---------------------------------------------------------------------------------
