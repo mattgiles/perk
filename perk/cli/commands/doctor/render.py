@@ -5,7 +5,18 @@ import click
 from perk.doctor import Check, DoctorReport
 from perk.output import user_output
 
-GROUP_ORDER = ("environment", "github", "runner", "package", "repository", "registry", "state")
+GROUP_ORDER = (
+    "environment",
+    "github",
+    "runner",
+    "package",
+    "repository",
+    "registry",
+    "skills",
+    "bindings",
+    "providers",
+    "state",
+)
 ICON: dict[str, tuple[str, str]] = {
     "ok": ("✓", "green"),
     "warn": ("⚠", "yellow"),
@@ -71,6 +82,12 @@ def render_report(report: DoctorReport, *, verbose: bool) -> None:
         user_output(click.style("Fixed", bold=True))
         for change in report.fixed:
             user_output(f"  - {change}")
+
+    if report.fix_errors:
+        user_output("")
+        user_output(click.style("Fix failures", bold=True))
+        for error in report.fix_errors:
+            user_output(f"  {click.style('✗', fg='red')} {error}")
 
     passed = sum(1 for c in report.checks if c.status == "ok")
     failed = sum(1 for c in report.checks if c.status == "fail")

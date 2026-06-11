@@ -21,6 +21,11 @@ def _render_human(report: InitReport) -> None:
         for check in report.env:
             if not check.ok:
                 user_output(f"  - {check.name}: {check.detail} — {check.remediation}")
+        if report.changes:
+            # e.g. skills_sync_failed: convergence already happened and stays recorded.
+            user_output("Converged before failure:")
+            for change in report.changes:
+                user_output(f"  - {change}")
         return
 
     user_output(click.style("✓", fg="green") + f" perk init ({report.mode})")

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from perk import __version__, cache, capabilities, env, git, github, workflow_artifacts
+from perk import __version__, bindings, cache, capabilities, env, git, github, workflow_artifacts
 from perk.cli.ensure import UserFacingCliError
 from perk.config import (
     CONFIG_FILENAME,
@@ -65,6 +65,20 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-plan",
     "perk-pr-review",
     "perk-replan",
+)
+
+# The skills CLI's managed runtime pathspecs, duplicated by value (no machine-readable export
+# exists) from `internal/project/project.go` + `managedRuntimeIgnoreRules` in
+# `internal/project/ownership.go` of github.com/mattgiles/skills. `skills init` hard-refuses when
+# any of these is tracked, so `perk init` pre-flights the same probe and fails fast (exit 2)
+# instead of letting the sync fail later. If the skills CLI's set drifts, the probe under-/over-
+# matches — accepted; the post-sync fatal path still catches the failure generically.
+SKILLS_MANAGED_PATHSPECS: tuple[str, ...] = (
+    ".agents/state.yaml",
+    ".agents/local.yaml",
+    ".agents/skills",
+    ".claude/skills",
+    ".agents/cache",
 )
 
 # perk manages a *slice* of the skills-CLI manifest (its own skills) via a committed fragment
@@ -220,8 +234,13 @@ class InitReport:
     def exit_code(self) -> int:
         if self.ok:
             return 0
-        if self.error_type in ("not_a_repo", "missing_tool"):
-            return 2
+        if self.error_type in (
+            "not_a_repo",
+            "missing_tool",
+            "skills_conflict",
+            "skills_sync_failed",
+        ):
+            return 2  # environment-not-ready (§3.2 supervisor taxonomy)
         return 1
 
     @classmethod
@@ -565,6 +584,31 @@ def _converge_skills_manifest(root: Path, self_repo: bool, *, apply: bool = True
     return [f"{PERK_SKILLS_MANIFEST_DIR}/{PERK_SKILLS_MANIFEST_FILENAME}: {verb}"]
 
 
+def skills_conflict_paths(root: Path) -> list[str]:
+    """Tracked paths under the skills-CLI managed pathspecs — the `skills init` hard-refusal.
+
+    Returns a deduplicated, truncated listing (first 5 + "…and N more"); ``[]`` when clean.
+    Propagates ``GitError`` — the caller decides how a failed probe degrades.
+    """
+    paths = list(dict.fromkeys(git.tracked_paths(root, list(SKILLS_MANAGED_PATHSPECS))))
+    if len(paths) > 5:
+        return [*paths[:5], f"…and {len(paths) - 5} more"]
+    return paths
+
+
+def _skills_conflict_message(conflicts: list[str]) -> str:
+    listing = "\n".join(f"  - {p}" for p in conflicts)
+    return (
+        "Tracked content found under skills-CLI managed paths:\n"
+        f"{listing}\n"
+        "These paths are managed by the `skills` CLI (perk's skill-delivery substrate); it\n"
+        "refuses to initialize over tracked Git content. Migrate the committed skill bodies\n"
+        "out of them (e.g. into a committed top-level `skills/` dir declared in\n"
+        "`.agents/manifest.yaml`), untrack the paths (`git rm --cached -r <path>`), then\n"
+        "re-run `perk init`."
+    )
+
+
 def _skill_link_state(root: Path) -> dict[str, str]:
     """Snapshot the `.agents/skills/` link set as ``{name: symlink-target}`` (target ``""`` for
     non-symlinks / unreadable). Used to detect whether a `skills sync` actually changed state,
@@ -581,7 +625,15 @@ def _skill_link_state(root: Path) -> dict[str, str]:
     return state
 
 
-def _sync_skills(root: Path, changes: list[str]) -> None:
+def _sync_failure(command: str, reason: str) -> str:
+    return (
+        f"skills delivery failed: `{command}` {reason}\n"
+        "perk's skills reach sessions only through the `skills` CLI-managed `.agents/skills/`;\n"
+        "fix the failure above, then re-run `perk init` (or `perk doctor --fix`)."
+    )
+
+
+def _sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
     """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
 
     The ``skills`` CLI is the single delivery path for perk's own skills: the ``..``/``git:`` Pi
@@ -589,37 +641,52 @@ def _sync_skills(root: Path, changes: list[str]) -> None:
     every ``perk-*`` skill reaches a session only through the CLI-managed ``.agents/skills/``
     symlinks. Runs for both self-repo and consumers under ``verify``.
 
-    Best-effort + non-fatal, exactly like the GitHub readiness probe (D3): a missing or failing
-    ``skills`` never blocks init — file convergence (incl. the perk fragment) has already
-    succeeded. ``skills init`` is idempotent (no-op once initialized); ``skills update --sync``
-    enforces the declared state by (re)linking ``.agents/skills/*``. A ``changes`` entry is
-    appended only when the link set actually changes, so a converged repo reports no churn.
+    **Load-bearing** (#289 — supersedes the old best-effort/D3 posture for skills specifically):
+    returns ``None`` on success, else a failure message naming the failing command plus its
+    stderr (or the ``OSError``/timeout text). After a successful sync, every ``PERK_SKILLS`` name
+    must be installed (``bindings.is_skill_installed``) — a sync that links nothing (e.g. an
+    outdated ``skills`` CLI) is a failure, never a silent pass. ``skills init`` is idempotent
+    (no-op once initialized); ``skills update --sync`` enforces the declared state by (re)linking
+    ``.agents/skills/*``. A ``changes`` entry is appended only when the link set actually changes,
+    so a converged repo reports no churn.
     """
+    # Defense in depth — env gating already fails exit 2 before this on verified runs.
     if shutil.which("skills") is None:
-        return
+        return (
+            "skills delivery failed: the `skills` CLI is not on PATH — "
+            "install it, then re-run `perk init`."
+        )
     before = _skill_link_state(root)
-    try:
-        # Idempotent local-state scaffold (manifest + local config + gitignore block).
-        subprocess.run(
-            ["skills", "init", "--cache=local"],
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=30,
+    for command, timeout in (("skills init --cache=local", 30), ("skills update --sync", 180)):
+        try:
+            proc = subprocess.run(
+                command.split(),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return _sync_failure(command, f"timed out after {timeout}s")
+        except OSError as exc:
+            return _sync_failure(command, f"could not run: {exc}")
+        if proc.returncode != 0:
+            stderr = "\n".join((proc.stderr or "").strip().splitlines()[:5]) or "(no stderr)"
+            return _sync_failure(command, f"exited {proc.returncode}:\n{stderr}")
+    missing = [
+        name
+        for name in PERK_SKILLS
+        if not bindings.is_skill_installed(root, name, self_repo=self_repo)
+    ]
+    if missing:
+        return (
+            f"skills sync completed but did not deliver: {', '.join(missing)}\n"
+            "the installed `skills` CLI may be outdated — upgrade it, then re-run `perk init`."
         )
-        subprocess.run(
-            ["skills", "update", "--sync"],
-            cwd=root,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return
     if _skill_link_state(root) != before:
         changes.append(".agents/skills/: synchronized via skills update --sync")
+    return None
 
 
 def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
@@ -825,6 +892,18 @@ def run_init(
             return InitReport.env_failure(
                 "missing_tool", f"Missing or outdated required tool(s): {missing}.", checks
             )
+        # Pre-flight the skills-CLI tracked-content conflict BEFORE any convergence: `skills
+        # init` would hard-refuse later, so fail fast with the migration remediation. A failed
+        # probe (GitError) degrades to *no* short-circuit — the fatal sync below fails loudly
+        # instead (no silent pass, no spurious block).
+        try:
+            conflicts = skills_conflict_paths(root)
+        except git.GitError:
+            conflicts = []
+        if conflicts:
+            return InitReport.env_failure(
+                "skills_conflict", _skills_conflict_message(conflicts), checks
+            )
 
     self_repo = is_self_repo(root)
     changes: list[str] = []
@@ -835,8 +914,21 @@ def run_init(
     # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
     # so Pi discovers `perk-*` only through `.agents/skills/`).
     # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
+    # Load-bearing (#289): a sync failure is fatal (exit 2) — but convergence already happened,
+    # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
     if verify:
-        _sync_skills(root, changes)
+        sync_error = _sync_skills(root, changes, self_repo=self_repo)
+        if sync_error is not None:
+            return InitReport(
+                ok=False,
+                mode="self" if self_repo else "consumer",
+                env=checks,
+                changes=changes,
+                github=None,
+                handoff=None,
+                error_type="skills_sync_failed",
+                message=sync_error,
+            )
 
     github_report: GitHubReport | None = None
     if verify:

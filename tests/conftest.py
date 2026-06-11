@@ -30,7 +30,25 @@ def stub_env(monkeypatch):
     monkeypatch.setattr(gh_mod, "check_repo_access", lambda root: gh_mod.RepoAccess.skipped())
     # The `skills init`/`skills sync` shells are external like env/github; stub them so verified
     # inits in tests never clone over the network.
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes: None)
+    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: None)
+
+
+@pytest.fixture
+def converge_skills_workspace():
+    """Plant a healthy skills-delivery substrate: `.agents/manifest.yaml` + every PERK_SKILLS
+    SKILL.md under `.agents/skills/` (what a successful `skills init` + `skills update --sync`
+    leaves behind, minus the symlink indirection)."""
+
+    def converge(root):
+        manifest = root / ".agents" / "manifest.yaml"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text("sources: {}\nskills: []\n", encoding="utf-8")
+        for name in init_mod.PERK_SKILLS:
+            skill = root / ".agents" / "skills" / name / "SKILL.md"
+            skill.parent.mkdir(parents=True, exist_ok=True)
+            skill.write_text("# skill\n", encoding="utf-8")
+
+    return converge
 
 
 @pytest.fixture

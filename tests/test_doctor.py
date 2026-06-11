@@ -14,7 +14,14 @@ import pytest
 
 from perk import capabilities, git, github, init
 from perk.cli.commands.doctor import render
-from perk.doctor import Check, DoctorReport, _runner_checks, report_to_dict, run_doctor
+from perk.doctor import (
+    Check,
+    DoctorReport,
+    _runner_checks,
+    _skills_delivery_check,
+    report_to_dict,
+    run_doctor,
+)
 from perk.init import run_init
 
 
@@ -270,10 +277,11 @@ def test_unreadable_managed_file_is_fail_not_crash(git_repo):
 # --- skills sync under --fix (the repair gesture) -------------------------------------------
 
 
-def test_fix_verify_stays_healthy_with_stubbed_sync(git_repo, stub_env):
+def test_fix_verify_stays_healthy_with_stubbed_sync(git_repo, stub_env, converge_skills_workspace):
     # `stub_env` no-ops `init._sync_skills`; `run_doctor(fix=True, verify=True)` must not crash
-    # and stays healthy on a freshly converged repo.
+    # and stays healthy on a freshly converged repo (with a delivered skills substrate).
     _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
     report = run_doctor(git_repo, fix=True, verify=True)
     assert report.healthy and report.exit_code == 0
 
@@ -283,7 +291,7 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
     # no-op) to observe that `--fix` materializes skills under `verify`.
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=True, verify=True)
     assert called == [git_repo]
 
@@ -291,9 +299,97 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
 def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=False, verify=True)
     assert called == []
+
+
+# --- skills-delivery check (#289 — load-bearing delivery substrate) -------------------------
+
+
+def _delivery_check(report):
+    return next(c for c in report.checks if c.name == "skills-delivery")
+
+
+def test_skills_delivery_ok_on_healthy_substrate(git_repo, converge_skills_workspace, stub_env):
+    _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "ok" and check.group == "skills"
+
+
+def test_skills_delivery_fails_on_tracked_conflict(git_repo, converge_skills_workspace, stub_env):
+    _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
+    skill = git_repo / ".claude" / "skills" / "x" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-f", ".claude"], cwd=git_repo, check=True, capture_output=True)
+    report = run_doctor(git_repo, verify=True)
+    check = _delivery_check(report)
+    assert check.status == "fail" and ".claude/skills/x/SKILL.md" in check.detail
+    assert "Migrate" in check.remediation
+    assert report.exit_code == 1
+
+
+def test_skills_delivery_giterror_degrades_to_warn(git_repo, monkeypatch, stub_env):
+    def boom(root):
+        raise git.GitError("probe failed")
+
+    monkeypatch.setattr(init, "skills_conflict_paths", boom)
+    check = _skills_delivery_check(git_repo, False)
+    assert check.status == "warn" and "not evaluated" in check.detail  # no silent pass
+
+
+def test_skills_delivery_fails_without_workspace_manifest(git_repo, stub_env):
+    # (b): the perk fragment exists but .agents/manifest.yaml does not -> skills init never ran.
+    _scaffold(git_repo)  # writes .agents/manifest.d/perk.yaml
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail" and "not initialized" in check.message
+
+
+def test_skills_delivery_fails_on_missing_skills(git_repo, converge_skills_workspace, stub_env):
+    _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
+    shutil.rmtree(git_repo / ".agents" / "skills" / "perk-plan")
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail" and "perk-plan" in check.detail
+    assert check.remediation == "Run 'perk doctor --fix'."
+
+
+def test_skills_delivery_absent_without_verify(git_repo):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert "skills-delivery" not in {c.name for c in report.checks}
+
+
+def test_fix_sync_failure_carried_on_fix_errors(git_repo, monkeypatch, stub_env):
+    _scaffold(git_repo)
+    (git_repo / ".gitignore").write_text("x\n", encoding="utf-8")  # drift to trigger fixes
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: "sync exploded")
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert report.fix_errors == ["sync exploded"]
+    # The post-fix re-verify shows the still-broken skills-delivery check (exit reflects it).
+    assert _delivery_check(report).status == "fail"
+    assert report.exit_code == 1
+    assert report_to_dict(report)["fix_errors"] == ["sync exploded"]
+
+
+def test_report_to_dict_carries_empty_fix_errors():
+    data = report_to_dict(DoctorReport(checks=[], fixed=[], self_repo=False))
+    assert data["fix_errors"] == []
+
+
+def test_render_fix_errors(capsys):
+    report = DoctorReport(
+        checks=[_check("x", "state", "ok")],
+        fixed=["a thing"],
+        self_repo=False,
+        fix_errors=["skills delivery failed: boom"],
+    )
+    render.render_report(report, verbose=False)
+    err = capsys.readouterr().err
+    assert "Fix failures" in err and "skills delivery failed: boom" in err
 
 
 # --- bindings check (Node 3.1) --------------------------------------------------------------
@@ -471,7 +567,7 @@ def test_runner_self_vs_consumer_detail(monkeypatch, tmp_path):
     assert "dogfoods" in self_.detail
 
 
-def test_runner_githuberror_degrades(monkeypatch, tmp_path):
+def test_runner_githuberror_degrades(monkeypatch, tmp_path, converge_skills_workspace):
     def boom():
         raise github.GitHubError("gh not found on PATH")
 
@@ -481,8 +577,9 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path):
 
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: None)
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: None)
     _scaffold(tmp_path_repo := _git_repo_at(tmp_path))
+    converge_skills_workspace(tmp_path_repo)
     report = run_doctor(tmp_path_repo, verify=True)
     runner = [c for c in report.checks if c.group == "runner"]
     assert len(runner) == 1 and runner[0].name == "runner-prereqs" and runner[0].status == "info"
