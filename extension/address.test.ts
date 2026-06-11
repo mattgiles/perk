@@ -72,10 +72,40 @@ test("tool: a partial batch is loud-but-soft (ok=false, no throw)", async () => 
     const result = await h.invokeTool("resolve_review_threads", {
       threads: [{ thread_id: "PRRT_1" }, { thread_id: "PRRT_2" }],
     });
-    const details = result.details as { ok: boolean; resolved_thread_ids?: string[] };
+    const details = result.details as {
+      ok: boolean;
+      error_type?: string;
+      resolved_thread_ids?: string[];
+    };
     assert.equal(details.ok, false);
+    assert.equal(details.error_type, "partial_failure");
     assert.deepEqual(details.resolved_thread_ids, ["PRRT_1"]);
+    assert.match(result.content[0]?.text ?? "", /Resolved 1\/2 thread\(s\); 1 failed\./);
     // a failed batch records NO last_review_batch.
+    assert.equal(h.workflowState().last_review_batch, undefined);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a success envelope with malformed results rows fails as bad_output", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    results: [{ thread_id: "PRRT_1", success: "yes", comment_added: false }],
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("resolve_review_threads", {
+      threads: [{ thread_id: "PRRT_1" }],
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    // No half-rendered partial table and no recorded batch.
     assert.equal(h.workflowState().last_review_batch, undefined);
   } finally {
     h.dispose();

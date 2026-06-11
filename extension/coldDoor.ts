@@ -36,7 +36,15 @@ export type ColdJson = Record<string, unknown>;
 
 export type ColdDoorResult<T> =
   | { ok: true; data: T }
-  | { ok: false; message: string; errorType: string };
+  | {
+      ok: false;
+      message: string;
+      errorType: string;
+      /** The parsed `success: false` envelope, when one was present — doors that render
+       * partial-failure detail (e.g. address's per-thread rows) narrow it themselves. Absent on
+       * exec-throw, scratch-failure, unparseable-JSON, and bad_output arms. */
+      payload?: ColdJson;
+    };
 
 export interface ColdDoorOpts<T> {
   /** Human door label for error text, e.g. "perk pr-submit" / "perk objective reconcile". */
@@ -65,6 +73,12 @@ export function activeRunId(ctx: ColdDoorCtx): string {
 export function stringField(payload: ColdJson, key: string): string | undefined {
   const value = payload[key];
   return typeof value === "string" ? value : undefined;
+}
+
+/** A nullable-string field: string or null accepted; anything else yields undefined. */
+export function nullableStringField(obj: ColdJson, key: string): string | null | undefined {
+  const value = obj[key];
+  return typeof value === "string" || value === null ? value : undefined;
 }
 
 /** Pull a number-typed field off the parsed payload; non-numbers yield undefined. */
@@ -151,6 +165,7 @@ export async function runColdDoor<T>(
         ok: false,
         message: message ?? fallbackExitMessage(opts.label, perkBin, res),
         errorType: errorType ?? "exec_failed",
+        payload: parsed,
       };
     }
     return {
@@ -174,10 +189,16 @@ export async function runColdDoor<T>(
       ok: false,
       message: stringField(parsed, "message") ?? `${opts.label} reported failure`,
       errorType: stringField(parsed, "error_type") ?? "github_error",
+      payload: parsed,
     };
   }
 
-  const data = opts.decode(parsed);
+  let data: T | null;
+  try {
+    data = opts.decode(parsed);
+  } catch {
+    data = null;
+  }
   if (data === null) {
     return {
       ok: false,

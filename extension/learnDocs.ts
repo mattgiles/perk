@@ -1,26 +1,33 @@
 // hop-2 — the learned-docs plan factory's warm transition surface: the `/learn-docs` command.
 //
 // The warm twin of the `perk learn docs` cold door. It DELEGATES the gather to the Python plane
-// (`perk learn docs --gather --json` via `pi.exec` — gate-safe, not subject to the read-only bash
-// allowlist), parses `{ inbox_path, learn_numbers }`, then injects the factory guidance via
+// (`perk learn docs --gather --json` via the shared cold-door client `runColdDoor` — gate-safe,
+// not subject to the read-only bash allowlist), decodes `{ inbox_path, learn_numbers }`, then
+// injects the factory guidance via
 // `pi.sendUserMessage` so the model reads the inbox, authors a docs plan, and calls `plan_save`
 // with `consumed_learn`. No model tool — the model uses the existing `plan_save` tool.
 //
 // Headless-safe: rich UI is guarded by `ctx.hasUI`; without a UI it logs to stderr and returns
 // (the gather still runs so the inbox is materialized, but no turn is driven).
 
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
+import { type ColdJson, runColdDoor, stringField } from "./coldDoor.ts";
 import { report } from "./report.ts";
 
-/** The `perk learn docs --gather --json` success shape (the contract the warm door consumes). */
-interface LearnDocsGatherJson {
-  success: boolean;
-  error_type: string | null;
-  message?: string | null;
-  inbox_path?: string;
-  learn_numbers?: number[];
-  launched?: boolean;
+/** The decoded `perk learn docs --gather --json` payload slice the warm door consumes. */
+interface LearnDocsGatherPayload {
+  inbox_path: string;
+  learn_numbers: number[];
+}
+
+/** Strict decode — the guidance dereferences both fields; `launched` is unconsumed. */
+function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
+  const inboxPath = stringField(payload, "inbox_path");
+  const numbers = payload.learn_numbers;
+  if (inboxPath === undefined) return null;
+  if (!Array.isArray(numbers) || !numbers.every((n) => typeof n === "number")) return null;
+  return { inbox_path: inboxPath, learn_numbers: numbers };
 }
 
 /**
@@ -52,62 +59,44 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
       "Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author " +
       "a docs/learned consolidation plan.",
     handler: async (_args, ctx: ExtensionContext) => {
-      const perkBin = process.env.PERK_BIN ?? "perk";
-      let res: ExecResult;
-      try {
-        res = await pi.exec(perkBin, ["learn", "docs", "--gather", "--json"], {
-          cwd: ctx.cwd,
-          signal: ctx.signal,
-        });
-      } catch (err) {
-        report(ctx, "learn-docs", "error", `could not run '${perkBin}': ${String(err)}`);
-        return;
-      }
-
-      if (res.killed || res.code !== 0) {
-        // A clean "nothing to consolidate" exits non-zero with error_type=no_learn_issues — surface
-        // it gently; any other failure is an error.
-        let parsedErr: LearnDocsGatherJson | null = null;
-        try {
-          parsedErr = JSON.parse(res.stdout) as LearnDocsGatherJson;
-        } catch {
-          parsedErr = null;
+      // Report-only door (no Result type): branch on `errorType` directly (the coldDoor header
+      // convention). A clean "nothing to consolidate" exits non-zero with
+      // error_type=no_learn_issues — the client's envelope-aware arm surfaces it gently.
+      const r = await runColdDoor<LearnDocsGatherPayload>(
+        pi,
+        ctx,
+        ["learn", "docs", "--gather", "--json"],
+        { label: "perk learn docs", decode: decodeGather },
+      );
+      if (!r.ok) {
+        if (r.errorType === "no_learn_issues") {
+          report(
+            ctx,
+            "learn-docs",
+            "warning",
+            "nothing to consolidate (no open perk:learn issues).",
+          );
+        } else {
+          report(ctx, "learn-docs", "error", `gather failed: ${r.message}`);
         }
-        const noIssues = parsedErr?.error_type === "no_learn_issues";
-        const message = noIssues
-          ? "nothing to consolidate (no open perk:learn issues)."
-          : `gather failed: ${parsedErr?.message ?? res.stderr.trim() ?? `exit ${res.code}`}`;
-        report(ctx, "learn-docs", noIssues ? "warning" : "error", message);
-        return;
-      }
-
-      let parsed: LearnDocsGatherJson;
-      try {
-        parsed = JSON.parse(res.stdout) as LearnDocsGatherJson;
-      } catch {
-        report(ctx, "learn-docs", "error", "gather returned unparseable JSON.");
-        return;
-      }
-      if (!parsed.success || !parsed.inbox_path || !parsed.learn_numbers) {
-        report(ctx, "learn-docs", "error", parsed.message ?? "gather reported failure");
         return;
       }
 
       if (!ctx.hasUI) {
         // Headless can't drive a turn — the inbox is materialized; log and return (fail-safe).
         console.error(
-          `perk: /learn-docs invoked (headless) — gathered ${parsed.learn_numbers.length} ` +
-            `learn issue(s) into ${parsed.inbox_path}; run interactively to author the docs plan.`,
+          `perk: /learn-docs invoked (headless) — gathered ${r.data.learn_numbers.length} ` +
+            `learn issue(s) into ${r.data.inbox_path}; run interactively to author the docs plan.`,
         );
         return;
       }
 
       ctx.ui.notify(
-        `perk: /learn-docs — gathered ${parsed.learn_numbers.length} learn issue(s)`,
+        `perk: /learn-docs — gathered ${r.data.learn_numbers.length} learn issue(s)`,
         "info",
       );
       pi.sendUserMessage(
-        learnDocsGuidance(parsed.inbox_path, parsed.learn_numbers) +
+        learnDocsGuidance(r.data.inbox_path, r.data.learn_numbers) +
           bindingSuffix(ctx.cwd, "command:learn-docs"),
       );
     },

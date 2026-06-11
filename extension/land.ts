@@ -6,7 +6,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { PENDING_LEARN, setMarker } from "./cache.ts";
-import { type ColdJson, numberField, objectField, runColdDoor, stringField } from "./coldDoor.ts";
+import {
+  type ColdJson,
+  nullableStringField,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { reconcileGuidance } from "./objectivePlan.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
@@ -47,12 +54,6 @@ interface LandPayload {
   learn?: LearnConsumeUpdate;
 }
 
-/** A nullable-string field: string or null accepted; anything else rejects the sub-object. */
-function nullableString(obj: ColdJson, key: string): string | null | undefined {
-  const value = obj[key];
-  return typeof value === "string" || value === null ? value : undefined;
-}
-
 /** Validate the optional `objective` sub-object; malformed → undefined (advisory, never fatal). */
 function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
   const obj = objectField(payload, "objective");
@@ -63,7 +64,7 @@ function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
   if (!Array.isArray(nodesMarked) || !nodesMarked.every((n) => typeof n === "string")) {
     return undefined;
   }
-  const skippedReason = nullableString(obj, "skipped_reason");
+  const skippedReason = nullableStringField(obj, "skipped_reason");
   if (skippedReason === undefined && obj.skipped_reason !== undefined) return undefined;
   return { number, nodes_marked: nodesMarked, skipped_reason: skippedReason ?? null };
 }
@@ -74,7 +75,7 @@ function decodeLearn(payload: ColdJson): LearnConsumeUpdate | undefined {
   if (learn === undefined) return undefined;
   const closed = learn.closed;
   if (!Array.isArray(closed) || !closed.every((n) => typeof n === "number")) return undefined;
-  const skippedReason = nullableString(learn, "skipped_reason");
+  const skippedReason = nullableStringField(learn, "skipped_reason");
   if (skippedReason === undefined && learn.skipped_reason !== undefined) return undefined;
   return { closed, skipped_reason: skippedReason ?? null };
 }

@@ -142,6 +142,28 @@ test("tool: learn with a summary delegates capture, surfaces the issue, and clea
   }
 });
 
+test("tool: learn with a malformed learn_issue payload fails as bad_output (marker kept)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    learn_issue: { number: "99", url: "https://gh/o/r/issues/99" },
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("learn", { summary: "something durable" });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.ok(existsSync(markerPath(cwd, PENDING_LEARN)), "marker kept on a malformed payload");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: learn with a summary but a failing worker fails soft (no terminate, marker kept)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN);
