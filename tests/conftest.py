@@ -30,7 +30,7 @@ def stub_env(monkeypatch):
     monkeypatch.setattr(gh_mod, "check_repo_access", lambda root: gh_mod.RepoAccess.skipped())
     # The `skills init`/`skills sync` shells are external like env/github; stub them so verified
     # inits in tests never clone over the network.
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes: None)
+    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: None)
 
 
 @pytest.fixture

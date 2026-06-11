@@ -283,7 +283,7 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
     # no-op) to observe that `--fix` materializes skills under `verify`.
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=True, verify=True)
     assert called == [git_repo]
 
@@ -291,7 +291,7 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
 def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: called.append(root))
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=False, verify=True)
     assert called == []
 
@@ -481,7 +481,7 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path):
 
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes: None)
+    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: None)
     _scaffold(tmp_path_repo := _git_repo_at(tmp_path))
     report = run_doctor(tmp_path_repo, verify=True)
     runner = [c for c in report.checks if c.group == "runner"]
