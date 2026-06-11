@@ -1,10 +1,11 @@
 """Mint and parse perk run ids (Q2 / contracts.md §8.2).
 
 A ``run_id`` is a canonical **ULID** (26-char Crockford base32) — time-sortable and
-self-dating, so GC-by-age and chronological ordering need no sidecar. The CLI is the
-**only** minter: a warm transition keeps the id, a cold relaunch mints a new one, and a
-fork derives a child by suffix (``<ulid>.<n>``). The extension never mints — it claims,
-restores, and derives.
+self-dating, so GC-by-age and chronological ordering need no sidecar. Mint doctrine
+(contracts.md §8.2): the CLI mints at **cold launch** (handing off via ``PERK_RUN_ID``);
+a warm transition keeps the id; a fork derives a child by suffix (``<ulid>.<n>``); and a
+**warm session with no identity** mints its own ULID in the TS plane
+(``extension/runId.ts``) — the extension otherwise claims, restores, and derives.
 """
 
 from datetime import datetime
@@ -13,7 +14,7 @@ from ulid import ULID
 
 
 def mint() -> str:
-    """Mint a fresh ``run_id`` (a new ULID). Only the CLI mints."""
+    """Mint a fresh ``run_id`` (a new ULID) — the cold-launch mint site (§8.2)."""
     return str(ULID())
 
 

@@ -36,6 +36,7 @@ import { registerReady } from "./ready.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
+import { mintRunId } from "./runId.ts";
 import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces.ts";
@@ -161,6 +162,7 @@ export default function (pi: ExtensionAPI) {
     });
 
     let resolved: WorkflowState = decision.action === "claim" ? {} : decision.state;
+    let minted = false;
 
     if (decision.action === "claim") {
       // Cold claim — establish before consume (Q3 strict).
@@ -203,6 +205,24 @@ export default function (pi: ExtensionAPI) {
       };
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
+    } else if (decision.action === "none") {
+      // Node 1.1 (objective #339): a warm session with no identity mints its own run_id so
+      // per-run state (the session data dir, nodes 1.2+) can key off it. No disk artifacts —
+      // dirs are the accessor's job (1.2); provenance is 1.3. A failed cold claim above never
+      // falls here (claim stays a loud unclaimed error).
+      const runId = mintRunId();
+      const data: WorkflowState = { run_id: runId, pi_session_id: currentSessionId ?? undefined };
+      const okAppend = appendWorkflowState(pi, ctx, {
+        data,
+        field: "run_id",
+        expected: runId,
+        scope: "workflow-state linkage error",
+        failure: `read-back failed for minted run ${runId}`,
+      });
+      if (okAppend) {
+        resolved = { ...decision.state, ...data };
+        minted = true;
+      }
     }
 
     // Plan-ref linkage (turn-2b §6, stage-gated #43): reconcile the cache.plan-ref file into
@@ -280,7 +300,7 @@ export default function (pi: ExtensionAPI) {
           `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; ` +
             `registry=${registryOk ? "ok" : "miss"} stages=${registryStages}; hasUI=${ctx.hasUI}\n`,
         );
-        writeT3Sentinel(ctx.cwd, decision.source, resolved, ctx.mode ?? null);
+        writeT3Sentinel(ctx.cwd, minted ? "mint" : decision.source, resolved, ctx.mode ?? null);
         setMarker(ctx.cwd, T3_MARKER); // cross-plane cache write (gate check 3)
       } catch {
         // never throw from a load probe

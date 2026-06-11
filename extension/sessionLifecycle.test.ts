@@ -71,6 +71,34 @@ test("fork: an inherited pi_session_id derives a child run_id", async () => {
   }
 });
 
+test("mint: a plain warm session mints its own run_id", async () => {
+  const cwd = scaffoldRepo(); // no handoff, no PERK_RUN_ID -> decideClaim's `none` arm
+  // File-backed session (no planted state) so pi_session_id is recorded with the mint.
+  const file = plantSession(cwd, []);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+    const minted = h.workflowState().run_id;
+    assert.ok(minted !== undefined, "a run_id was minted");
+    assert.match(minted, ULID_RE);
+    assert.equal(h.workflowState().pi_session_id, "planted-parent.jsonl");
+    const s = h.sentinel();
+    assert.equal(s?.source, "mint");
+    assert.equal(s?.run_id, minted);
+    assert.equal(s?.predecessor, null);
+    // Reload: the recorded pi_session_id matches the session file -> keep arm, no re-mint.
+    await h.reload({ PERK_RUN_ID: undefined });
+    assert.equal(h.sentinel()?.source, "session");
+    assert.equal(h.workflowState().run_id, minted);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("session_tree: navigateTree fires the tree-rebuild handler", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
