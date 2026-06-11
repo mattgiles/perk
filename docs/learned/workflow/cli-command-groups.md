@@ -130,8 +130,9 @@ only the `pi.exec` argv arrays in the extension change.
 
 ## Residuals
 
-- `docs/guiding-principles/python-cli-guidelines.md` reconciliation against the grouped surface is
-  deliberately deferred (a dedicated doc-reconciliation node owns it) — don't "fix" opportunistically.
+- `docs/guiding-principles/python-cli-guidelines.md` has been reconciled against the grouped
+  surface (Objective #225, node 5.1) — its §8.1 now documents the group-dir template and
+  cross-links this doc as the detailed playbook. Keep the two in sync when the structure evolves.
 - Cosmetic asymmetry: `learn capture`'s human dry-run line was respelled to the grouped form, but
   `learn docs`' human gather/dry-run label still prints the old `learn-docs {label}` spelling
   (harmless stderr human text; a future polish pass could align it).
