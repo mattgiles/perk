@@ -1,0 +1,351 @@
+"""The issue-tracking tier contract (Objective #252, Node 1.1).
+
+perk's GitHub gateway (``perk/github.py``) fuses four tiers: issue tracking (plan/learn/objective
+issues, marked comments, labels), PRs, CI/workflow, and auth. Only the **issue-tracking tier** is
+backend-selectable (GitHub Issues today; Linear later) — PRs, CI, and auth stay in
+``perk/github.py`` for **all** backends (PRs are GitHub-universal even under a Linear issue
+backend). This module is that tier's contract: the ``IssueBackend`` `Protocol`, the
+backend-neutral result dataclasses, and the one backend-neutral error type. It is deliberately
+dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracts the GitHub backend behind it
+and Node 1.3 adds the ``[issues]`` config table + resolver.
+
+Contract disciplines (every concrete backend MUST honor these):
+
+- **Constructor-bound repo context.** Methods take no ``repo_root``; a backend instance is
+  constructed for exactly one repo (GitHub carries ``repo_root`` as the ``gh`` cwd; Linear —
+  workspace-scoped, not repo-scoped — carries team/API-key config bound at construction).
+- **String ids at the boundary.** Every issue/comment id crossing this boundary is a ``str``
+  (GitHub's ints stringified; Linear's ids are natively strings).
+- **Normalized state vocabulary.** ``PlanState.state`` is the literal ``"OPEN" | "CLOSED"``
+  (GitHub's casing kept as the canonical values). Backends with richer native states map them
+  (e.g. Linear backlog/todo/in_progress → ``"OPEN"``; done/canceled → ``"CLOSED"``).
+  Symmetrically, "close" operations move an issue to the backend's terminal/done state, and the
+  ``find_*`` finders match **open** issues only.
+- **Error discipline.** Mutations raise ``IssueBackendError``; lookups return ``... | None`` for
+  not-found and **raise** on an infra failure — never mask an error as None. Concrete backends
+  map their native errors (``GitHubError``, Linear HTTP errors) into ``IssueBackendError`` at
+  their boundary.
+- **Backend-owned header values.** The ``header`` dicts are opaque ``dict[str, object]``;
+  header-embedded comment ids (e.g. ``objective_comment_id``) are backend-owned values a caller
+  must never interpret.
+
+Provenance: the erk prior art (``integrations/linear-erk-mapping.md``) proposed exactly this
+split — an issue-tracker interface with GitHub/Linear implementations selected by config, with
+PRs/worktrees staying GitHub/git regardless — and its gateway-decomposition lessons
+(``architecture/gateway-decomposition-phases.md``: breaking changes over shims; keep the
+interface to one tier, not a 40-method monolith) shaped this surface.
+"""
+
+from dataclasses import dataclass
+from typing import Protocol
+
+from perk import objective
+from perk.github import PullRequest
+
+
+class IssueBackendError(Exception):
+    """An issue-backend operation failed (infra/query/mutation).
+
+    Backend-neutral: concrete backends map their native errors (``GitHubError``, Linear HTTP
+    errors) into this at the boundary.
+    """
+
+
+@dataclass(frozen=True)
+class Label:
+    """A label ensured to exist. ``created`` is False when it already existed (idempotent)."""
+
+    name: str
+    created: bool
+
+
+@dataclass(frozen=True)
+class IssueRef:
+    """A reference to an issue (plan/learn/objective). ``existed`` is True when returned by
+    idempotent dedup (found, not freshly created)."""
+
+    id: str
+    url: str
+    existed: bool
+
+
+@dataclass(frozen=True)
+class CommentResult:
+    """An issue comment. ``posted`` is False only for a dry run."""
+
+    posted: bool
+
+
+@dataclass(frozen=True)
+class PlanUpdate:
+    """The result of an in-place ``update_plan_issue`` upsert (re-save path).
+
+    ``body_updated`` is True when the existing plan-body comment was patched; False when no such
+    comment was found and a fresh one was posted instead (legacy fallback) or on a dry run.
+    """
+
+    issue_id: str
+    body_updated: bool
+    title_updated: bool
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class PlanHeaderUpdate:
+    """The result of a staged ``plan-header`` field write."""
+
+    fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class PlanState:
+    """A plan issue's observable state: the parsed header + the resolved PR (if any).
+
+    ``state`` is the normalized ``"OPEN" | "CLOSED"`` vocabulary (see the module docstring).
+    ``header`` is the opaque plan-header mapping (backend-owned values).
+    """
+
+    id: str
+    url: str
+    title: str
+    header: dict[str, object]
+    pr: PullRequest | None
+    state: str
+
+
+@dataclass(frozen=True)
+class LearnIssueSummary:
+    """An open ``perk:learn`` issue, materialized for the learn-docs factory inbox."""
+
+    id: str
+    title: str
+    url: str
+    body: str
+
+
+@dataclass(frozen=True)
+class ObjectiveState:
+    """An objective's observable state: header + roadmap nodes (``perk objective show``)."""
+
+    id: str
+    url: str
+    title: str
+    header: dict[str, object]
+    nodes: tuple[objective.ObjectiveNode, ...]
+
+
+@dataclass(frozen=True)
+class ObjectiveHeaderUpdate:
+    """The result of a staged ``objective-header`` field write."""
+
+    fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class ObjectiveNodeUpdate:
+    """The result of an ``update_objective_node`` write (roadmap + body comment re-rendered)."""
+
+    issue_id: str
+    node_id: str
+    comment_updated: bool
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class ObjectiveBodyUpdate:
+    """The result of an ``update_objective_body`` write (the Reconcilable prose splice).
+
+    ``comment_id`` is the backend-owned id of the objective-body comment (string at the
+    boundary), or None on a path that never resolved one.
+    """
+
+    issue_id: str
+    comment_id: str | None
+    updated: bool
+    dry_run: bool
+
+
+class IssueBackend(Protocol):
+    """The issue-tracking tier contract (one instance per repo; see the module docstring).
+
+    All parameters are keyword-only. Mutations raise ``IssueBackendError``; lookups return
+    ``... | None`` for not-found and raise on an infra failure. ``dry_run`` mutations validate +
+    compose only — no backend writes.
+    """
+
+    # --- labels ---
+
+    def ensure_label(
+        self, name: str, *, color: str, description: str, dry_run: bool = False
+    ) -> Label:
+        """Idempotent create-if-missing for a label: an already-existing label is success
+        (``created=False``). Raises ``IssueBackendError`` on an infra failure."""
+        ...
+
+    # --- plan issues ---
+
+    def find_plan_issue(self, *, run_id: str) -> IssueRef | None:
+        """Find the **open** plan issue whose plan-header ``run_id`` matches (the idempotency
+        finder, scoped to the backend's plan-issue population). None for no match; raises on an
+        infra/query failure (never masks the error as None)."""
+        ...
+
+    def create_plan_issue(
+        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+    ) -> IssueRef:
+        """Create the plan issue. Idempotent on ``run_id`` (find-then-return,
+        ``existed=True``). A dry run returns ``IssueRef(id="0", url="(dry-run)",
+        existed=False)`` without touching the backend. Raises on failure."""
+        ...
+
+    def update_plan_issue(
+        self, *, issue_id: str, title: str, body_comment: str, dry_run: bool = False
+    ) -> PlanUpdate:
+        """Upsert an existing plan issue in place (the idempotent re-save path): patch the
+        plan-body comment with the revised markdown and the issue title from the (possibly
+        revised) plan H1. Legacy issues missing the plan-body comment get a fresh comment posted
+        (``body_updated=False``) so the plan body is never stranded."""
+        ...
+
+    def update_plan_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> PlanHeaderUpdate:
+        """Merge ``fields`` into the plan-header block and write it back. Rejects keys outside
+        ``plan.PLAN_HEADER_FIELDS`` (LBYL on the schema). A dry run validates + composes only."""
+        ...
+
+    def get_plan(self, *, issue_id: str) -> PlanState | None:
+        """Read a plan issue's observable state (header + PR). The PR is resolved from the
+        header's ``pr`` field via the (GitHub-universal) PR tier — legitimate for every backend.
+        ``state`` is normalized to ``"OPEN"``/``"CLOSED"``. None when the issue does not exist;
+        raises on an infra failure."""
+        ...
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        """Fetch a plan issue's verbatim plan-body block markdown, wherever the backend stores
+        it. None when the issue or block is absent; raises on an infra failure."""
+        ...
+
+    # --- learn issues ---
+
+    def find_learn_issue(self, *, run_id: str) -> IssueRef | None:
+        """Find the **open** learn issue whose learn-header ``run_id`` matches — scoped so it
+        never returns the plan issue (which shares the plan's ``run_id``). None for no match;
+        raises on an infra failure."""
+        ...
+
+    def create_learn_issue(
+        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+    ) -> IssueRef:
+        """Create the knowledge-capture (learn) issue. Idempotent via ``find_learn_issue``;
+        renders the learn-header (``run_id``/``created``/``plan``) into the body so the finder
+        can match. Raises on failure."""
+        ...
+
+    def list_learn_issues(self) -> tuple[LearnIssueSummary, ...]:
+        """Every open ``perk:learn`` issue (the learn-docs factory inbox). Raises on an
+        infra/query failure (never masks it as an empty tuple)."""
+        ...
+
+    def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        """Mark a consumed learn issue consolidated: add the ``perk:consolidated`` label
+        (additively) and move the issue to the backend's terminal/done state. Idempotent:
+        re-closing/re-labelling an already-consolidated issue is success. Returns True on
+        success; raises on an infra failure."""
+        ...
+
+    # --- generic issue ops ---
+
+    def close_issue(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        """Move an issue to the backend's terminal/done state. **Fail-loud**: raises
+        ``IssueBackendError`` on an infra failure rather than swallowing it. Idempotent:
+        re-closing an already-closed issue is success. ``dry_run`` returns False with no side
+        effects."""
+        ...
+
+    def add_issue_comment(
+        self, *, issue_id: str, body: str, dry_run: bool = False
+    ) -> CommentResult:
+        """Post a comment on an issue. Raises on failure."""
+        ...
+
+    def find_comment_id_by_marker(self, *, issue_id: str, marker: str) -> str | None:
+        """Find the id of the first comment on the issue whose body contains ``marker``. The
+        returned id MUST be usable for the backend's comment-update op. None when no comment
+        matches; raises on an infra failure."""
+        ...
+
+    def upsert_marked_comment(
+        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+    ) -> CommentResult:
+        """Post-or-patch a single marker-keyed comment (idempotent on ``marker``): patch the
+        existing comment when found, else post a fresh one. ``body`` MUST already embed
+        ``marker`` (the caller's responsibility) so the next upsert can find it — lets a single
+        comment evolve in place rather than spamming the issue. ``posted=False`` on a dry run;
+        raises on an infra failure."""
+        ...
+
+    # --- objective issues ---
+
+    def find_objective_issue(self, *, run_id: str) -> IssueRef | None:
+        """Find the **open** objective issue whose objective-header ``run_id`` matches. None for
+        no match; raises on an infra failure."""
+        ...
+
+    def create_objective_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str,
+        status: str = "active",
+        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        dry_run: bool = False,
+    ) -> IssueRef:
+        """Create the objective issue (the two-step create): compose + post the issue (header +
+        roadmap blocks), post the objective-body comment (rendered table + prose), then backfill
+        the comment id into the header. ``body`` is the authored objective prose; the roadmap
+        comes from ``roadmap_nodes`` when given (the structured path), else is parsed from
+        ``body``. Idempotent on ``run_id``. An empty roadmap raises (the storage backstop: no
+        surface may store a node-less objective)."""
+        ...
+
+    def get_objective(self, *, issue_id: str) -> ObjectiveState | None:
+        """Read an objective issue's state (header + roadmap nodes). None when absent; raises on
+        an infra failure."""
+        ...
+
+    def update_objective_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> ObjectiveHeaderUpdate:
+        """Merge ``fields`` into the objective-header block and write it back. Rejects keys
+        outside ``objective.OBJECTIVE_HEADER_FIELDS`` (LBYL). A dry run validates + composes
+        only."""
+        ...
+
+    def update_objective_node(
+        self,
+        *,
+        issue_id: str,
+        node_id: str,
+        status: objective.NodeStatus | None = None,
+        pr: str | None = None,
+        description: str | None = None,
+        dry_run: bool = False,
+    ) -> ObjectiveNodeUpdate:
+        """Update one roadmap node (explicit-status-only): re-render the roadmap block
+        (authoritative) AND best-effort re-render the table in the objective-body comment (the
+        roadmap block is the source of truth). Raises when the node is not found or the roadmap
+        is invalid."""
+        ...
+
+    def update_objective_body(
+        self, *, issue_id: str, prose: str, dry_run: bool = False
+    ) -> ObjectiveBodyUpdate:
+        """Splice ``prose`` into the Reconcilable region of the objective-body comment (the
+        Mechanical table block and any Immutable notes are untouched). Raises when the objective
+        has no body comment or the comment lacks the Reconcilable region. A dry run composes
+        only."""
+        ...
