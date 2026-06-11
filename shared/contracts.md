@@ -467,6 +467,13 @@ UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a t
 P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
 implement-progress overlay via this perk-owned `perk:checkpoint` seam.
 
+**Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
+`setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces.ts` +
+`extension/report.ts`); every other extension module reaches the UI only through the seams
+(`report()`, `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator`
+is never called anywhere (D5 rescinded). Enforced by the source-scan guard
+`extension/surfacesGuard.test.ts` (node:test, runs in `just test`/`just ci`).
+
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
 (1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
