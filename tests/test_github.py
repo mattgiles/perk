@@ -114,6 +114,19 @@ def test_secret_exists_absent_404(monkeypatch):
     assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is False
 
 
+def test_secret_exists_not_found_without_404(monkeypatch):
+    """A "Not Found" stderr with no literal 404 is a lookup miss (the sanctioned
+    ``_is_not_found`` lowercase fold, Node 4.2)."""
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Not Found"))
+    assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is False
+
+
+def test_get_pr_not_found_without_404(monkeypatch):
+    """Same fold via ``_run_json(none_on_not_found=True)``: ``get_pr`` -> ``None``."""
+    monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Not Found"))
+    assert github.get_pr(number=99, repo_root=ROOT) is None
+
+
 def test_secret_exists_unknown_403(monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Forbidden (HTTP 403)")

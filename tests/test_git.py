@@ -138,3 +138,20 @@ def test_worktree_add_with_base(git_repo_with_remote):
     wt = clone / ".worktrees" / "based"
     git.worktree_add(clone, wt, branch="based", create_branch=True, base="origin/main")
     assert _sha(wt) == advanced
+
+
+def test_run_disables_git_terminal_prompt(monkeypatch):
+    """`git._run` injects GIT_TERMINAL_PROMPT=0 (credential prompts fail fast instead of
+    hanging to the timeout — Node 4.2) while inheriting the ambient environment."""
+    captured: dict = {}
+
+    def fake_run(args, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setenv("PERK_TEST_AMBIENT", "yes")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    git._run(["status"])
+    env = captured["env"]
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["PERK_TEST_AMBIENT"] == "yes"
