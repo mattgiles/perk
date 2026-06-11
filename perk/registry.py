@@ -173,25 +173,30 @@ def validate(registry: Registry) -> list[Issue]:
     return issues
 
 
+def _err(where: str, msg: str) -> Issue:
+    """Shorthand for the validators' uniform ERROR-severity issues."""
+    return Issue(Severity.ERROR, where, msg)
+
+
 def _check_shapes(registry: Registry) -> list[Issue]:
     issues: list[Issue] = []
     seen: set[str] = set()
     for stage in registry.stages:
         where = stage.id or "<stage with no id>"
         if not stage.id:
-            issues.append(Issue(Severity.ERROR, "registry", "a stage is missing its `id`"))
+            issues.append(_err("registry", "a stage is missing its `id`"))
         elif stage.id in seen:
-            issues.append(Issue(Severity.ERROR, where, "duplicate stage id"))
+            issues.append(_err(where, "duplicate stage id"))
         seen.add(stage.id)
 
         if not stage.summary:
-            issues.append(Issue(Severity.ERROR, where, "missing `summary`"))
+            issues.append(_err(where, "missing `summary`"))
         if not stage.command:
-            issues.append(Issue(Severity.ERROR, where, "missing `command`"))
+            issues.append(_err(where, "missing `command`"))
         if stage.mode not in MODES:
-            issues.append(Issue(Severity.ERROR, where, f"`mode` must be one of {MODES}"))
+            issues.append(_err(where, f"`mode` must be one of {MODES}"))
         if stage.worktree not in WORKTREES:
-            issues.append(Issue(Severity.ERROR, where, f"`worktree` must be one of {WORKTREES}"))
+            issues.append(_err(where, f"`worktree` must be one of {WORKTREES}"))
 
         issues.extend(_check_doors_and_run_id(stage, where))
     return issues
@@ -200,24 +205,22 @@ def _check_shapes(registry: Registry) -> list[Issue]:
 def _check_doors_and_run_id(stage: Stage, where: str) -> list[Issue]:
     issues: list[Issue] = []
     if set(stage.doors) != set(DOORS):
-        issues.append(Issue(Severity.ERROR, where, f"`doors` keys must be exactly {DOORS}"))
+        issues.append(_err(where, f"`doors` keys must be exactly {DOORS}"))
     if any(not isinstance(v, bool) for v in stage.doors.values()):
-        issues.append(Issue(Severity.ERROR, where, "`doors` values must be booleans"))
+        issues.append(_err(where, "`doors` values must be booleans"))
     if set(stage.run_id) != set(DOORS):
-        issues.append(Issue(Severity.ERROR, where, f"`run_id` keys must be exactly {DOORS}"))
+        issues.append(_err(where, f"`run_id` keys must be exactly {DOORS}"))
 
     for door in DOORS:
         policy = stage.run_id.get(door)
         if policy not in RUN_ID_POLICIES:
-            issues.append(
-                Issue(Severity.ERROR, where, f"`run_id.{door}` must be one of {RUN_ID_POLICIES}")
-            )
+            issues.append(_err(where, f"`run_id.{door}` must be one of {RUN_ID_POLICIES}"))
             continue
         # Q2 invariant: warm keeps, cold mints.
         if door == "warm" and policy != "keep":
-            issues.append(Issue(Severity.ERROR, where, "`run_id.warm` must be `keep` (Q2)"))
+            issues.append(_err(where, "`run_id.warm` must be `keep` (Q2)"))
         if door != "warm" and policy != "mint":
-            issues.append(Issue(Severity.ERROR, where, f"`run_id.{door}` must be `mint` (Q2)"))
+            issues.append(_err(where, f"`run_id.{door}` must be `mint` (Q2)"))
     return issues
 
 
@@ -229,24 +232,20 @@ def _check_graph(registry: Registry) -> list[Issue]:
     for stage in registry.stages:
         for succ in stage.successors:
             if succ not in ids:
-                issues.append(Issue(Severity.ERROR, stage.id, f"successor `{succ}` is not a stage"))
+                issues.append(_err(stage.id, f"successor `{succ}` is not a stage"))
             elif stage.id not in by_id[succ].predecessors:
                 issues.append(
-                    Issue(
-                        Severity.ERROR,
+                    _err(
                         stage.id,
                         f"asymmetric edge: `{succ}` does not list `{stage.id}` as a predecessor",
                     )
                 )
         for pred in stage.predecessors:
             if pred not in ids:
-                issues.append(
-                    Issue(Severity.ERROR, stage.id, f"predecessor `{pred}` is not a stage")
-                )
+                issues.append(_err(stage.id, f"predecessor `{pred}` is not a stage"))
             elif stage.id not in by_id[pred].successors:
                 issues.append(
-                    Issue(
-                        Severity.ERROR,
+                    _err(
                         stage.id,
                         f"asymmetric edge: `{pred}` does not list `{stage.id}` as a successor",
                     )
@@ -256,17 +255,9 @@ def _check_graph(registry: Registry) -> list[Issue]:
         initials = [s.id for s in registry.stages if not s.predecessors]
         terminals = [s.id for s in registry.stages if not s.successors]
         if len(initials) != 1:
-            issues.append(
-                Issue(
-                    Severity.ERROR,
-                    "registry",
-                    f"expected exactly one initial stage, got {initials}",
-                )
-            )
+            issues.append(_err("registry", f"expected exactly one initial stage, got {initials}"))
         if not terminals:
-            issues.append(
-                Issue(Severity.ERROR, "registry", "no terminal stage (none has empty successors)")
-            )
+            issues.append(_err("registry", "no terminal stage (none has empty successors)"))
     return issues
 
 
@@ -281,8 +272,7 @@ def _check_vocabulary(registry: Registry) -> list[Issue]:
             for key in keys:
                 if key not in registry.state_keys:
                     issues.append(
-                        Issue(
-                            Severity.ERROR,
+                        _err(
                             stage.id,
                             f"`{field_name}` key `{key}` is not in the state-key vocabulary",
                         )
