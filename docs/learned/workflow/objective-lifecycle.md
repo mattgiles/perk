@@ -45,6 +45,40 @@ the warm tool's `node_id`). It is fail-open + non-fatal + idempotent on re-save 
 `_reconcile_objective_on_land`'s fail-open posture (the durable artifact already exists, never raise
 after it).
 
+### Pending-first selection over live claims
+
+`next_plannable()` prefers **pending** nodes over resumable `planning` claims (the claim set is
+`resumable_claims()` in `perk/objective.py`), so parallel plan sessions don't steal each other's
+claims while pending work exists. The fallback resume can still "steal" a live claim when it's the
+*only* plannable node — `objective show`'s `claims:` line / the `resumable_claims` JSON field is
+the coordination surface for humans running sessions in parallel. There are still **no lease
+timestamps/heartbeats**: a live claim and an abandoned claim remain indistinguishable, and
+pending-first ordering makes that acceptable only as long as implicit selection has pending work to
+prefer.
+
+**Accepted backlink race:** concurrent `update_objective_node` read-modify-writes can drop one
+node's update; recovery is an idempotent `/plan-save` re-save or a manual `perk objective node`.
+If parallel planning becomes heavy, this is the seam to harden first.
+
+The `perk objective run` supervisor stays sequential but **inherits pending-first** — its
+`plan_required` remediation points at a pending node, not a possibly-live claim; parallel dispatch
+(concurrent runs, budget aggregation) is deferred.
+
+### "JSON mode" ≠ "JSON payload emitted" in the objective-plan cold door
+
+Only `--dry-run --json` emits a JSON payload from `objective-plan`; the launch path execs pi and
+never returns, so `--json` *without* `--dry-run` still gets advisory stderr notes (e.g.
+skipped-claims). Gate advisory stderr on "would a JSON payload be emitted", not on the `--json`
+flag alone.
+
+### Parallel-node rebase friction (generalizable)
+
+When a convergence-sweep node runs in parallel with feature nodes, a mid-implementation rebase can
+remove or rename exactly the kind of small seams plans anchor on — **re-read every plan-anchored
+module after rebasing**; the first `edit` oldText mismatch is the tell. Relatedly, re-verify
+roadmap scope counts (e.g. "~6 casts" vs an actual 9) against the tree at planning time rather
+than trusting node prose.
+
 ### Scoping that held: don't over-plumb
 
 `node_id` is a **transient plan-save input only** — NOT persisted on `PlanHeader`/`PlanRef`. The land
@@ -142,7 +176,8 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 
 ## Cross-references
 
-- `perk/objective.py` — `DependencyGraph` (`plannable_nodes`, `classify_for_planning`, `PlanSelection`)
+- `perk/objective.py` — `DependencyGraph` (`plannable_nodes`, `next_plannable`, `resumable_claims`,
+  `classify_for_planning`, `PlanSelection`)
 - `perk/cli/commands/objective_cmd.py` — the `perk objective run` supervisor (`needs_address`, classification)
 - `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
 - `shared/contracts.md` §8.20 — the capstone supervisor loop contract

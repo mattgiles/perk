@@ -78,6 +78,18 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
   the flag is off.
 - Help-taxonomy upkeep when adding a group is two lines: `COMMAND_GROUPS` in `perk/cli/alias.py` +
   the groups-section test.
+- **The launcher long-help sentence reaches only half the launcher section:** the `STAGE_LAUNCHERS`
+  root section lists 12 commands, but only those built by `make_stage_launcher` carry the generated
+  "Opens a primed pi session…" long-help paragraph — the dedicated hand-written commands
+  (`implement`, the `learn` group help, `resume`, `replan`, `objective-author`, `objective-plan`)
+  do not; the section *header* is what disambiguates them. Uniform launcher help would require
+  hand-adding the sentence (or a shared helper) to the dedicated commands — don't assume the
+  factory covers the whole section.
+- **Click two-paragraph help = a free short/long split:** composing help as
+  `summary + blank line + long sentence` enriches `--help` bodies while leaving listing rows
+  untouched — `get_short_help_str()` takes only the first paragraph. This is the cheap way to add
+  disambiguating prose without churning group listings; lock it by asserting the listing row lacks
+  the sentence while the command's `--help` contains it.
 
 ## Testing patterns for CLI structure work
 
@@ -90,7 +102,9 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 - **Behavior-parity smoke (~30 seconds) for structural refactors:** dump `--help` for the root and
   every (sub)group via `CliRunner` in both the worktree and main, then diff. Rendering depends only
   on registration, so identical help ⇒ identical command/alias surface. For renaming folds the diff
-  should show exactly the planned renames and nothing else.
+  should show exactly the planned renames and nothing else. The smoke is also a **discovery tool**,
+  not just an acceptance check — a re-run of it surfaced the generated-vs-dedicated launcher split
+  above (resume/replan absent from the diff).
 - **Keep tests driving through the `cli` object** unless they genuinely unit-test a helper — only
   three test files imported command modules directly, which made the six-group migration cheap.
 - When renaming a module used in `monkeypatch.setattr(module, ...)`, grep the **bare module name**,

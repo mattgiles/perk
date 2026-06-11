@@ -54,6 +54,18 @@ Ruff rule `SIM105` flags standard `try: ... except Exception: pass` (or `except 
 patterns. Instead of a manual pass block, use `contextlib.suppress(...)` to cleanly and idiomatically
 ignore exceptions. It reduces boilerplate and makes the exception suppression intent explicit.
 
+## Preview-rule enablement drags cross-bucket fixes forward
+
+Enabling `preview = true` + `explicit-preview-rules = true` with newly selected rules surfaces
+**repo-wide** diagnostics, not just in the enabling change's module list. When a backlog assigns
+rule-*enablement* to one node and rule-*fixes* to another, enablement forcibly pulls those fixes
+forward — budget for mechanical cross-bucket collateral in the enabling node, and reconcile the
+donor node's description afterward. The same policy applies on a later **ruff version bump**: it
+may surface new diagnostics on the selected preview rules — treat them as mechanical collateral.
+
+Small addendum: after manual edits, run `ruff check --fix` + format rather than chasing orphaned
+imports by hand — F401 auto-removal handles them.
+
 ## Summary
 
 | Check | Run by | Catches |
