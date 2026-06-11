@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, or a `shared/` source change is not reflected when smoked via the global `perk` binary.
+read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, or a `shared/` source change is not reflected when smoked via the global `perk` binary.
 ---
 
 # Worktree `node_modules` resolution
@@ -35,8 +35,9 @@ root checkout, depending on which `node_modules` is resolving), or the bump is i
 
 ## Commit hygiene after installing in a worktree
 
-A **fresh `.worktrees/plan-N` has no `node_modules`** — run `npm install` first, or `tsc` /
-`node --test` cannot resolve `@earendil-works/*` (the same resolution-walk premise above).
+A **fresh `.worktrees/plan-N` has no `node_modules`** — run `npm ci` (or `npm install`) first, or
+`tsc` / `node --test` cannot resolve `@earendil-works/*` (the same resolution-walk premise above).
+The allow-scripts warnings `npm ci` prints are benign.
 
 `npm install` in a worktree **dirties `package-lock.json`** with incidental `"peer": true`
 annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width). Run
@@ -55,6 +56,13 @@ Separately, running `perk init` (e.g. `uv run perk init`) **from inside the work
 worktree repo itself** — it rewrites `.gitignore` ordering, adds manifest skill entries, and similar
 incidental dirt that must be `git checkout`-reverted before commit. **Rule:** run `perk init` smokes
 in a **scratch dir, never the worktree.**
+
+## The stale-SDK trap generalizes: per-instance module-global registries
+
+The same premise has a sharper variant: **nested vs top-level package instances each carry their
+own module-global registries**. `pi-coding-agent` bundles its own nested copy of
+`@earendil-works/pi-ai`, so anything registered against the top-level instance is invisible to the
+runtime's nested one — see `docs/learned/pi/headless-session-drive.md` for the resolution pattern.
 
 ## Cross-references
 

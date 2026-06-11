@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting.
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
 ---
 
 # Biome / tsc gotchas
@@ -14,6 +14,8 @@ rules are general.
 
 - **`useIterableCallbackReturn`** — `arr.forEach((x, i) => map.set(...))` is flagged because the
   arrow *returns* the `Map`. Use a plain `for` loop when the body's expression returns a value.
+  The same trips on a `forEach` arrow whose expression body's **callee returns a value** — e.g. an
+  assertion like `arr.forEach((e, i) => assert.equal(...))` — use a block body (`{ ... }`).
 - **`noAssignInExpressions`** — the idiomatic `(arrays[name] ??= []).push(row)` is rejected. Expand
   to an explicit `let rows = arrays[name]; if (!rows) { rows = []; arrays[name] = rows; }`.
 - **`noUselessUndefinedInitialization` → `noImplicitAnyLet` (the `let x = undefined` trap chain).**
@@ -53,7 +55,9 @@ conditional does NOT distribute.** Reusable any time you stamp common fields ont
 
 Biome formatting (line-wrapping long string literals, multi-line imports) is part of the `lint` gate.
 **Run `npx biome check --write extension` to auto-fix before `run_ci`** rather than hand-wrapping —
-hand-wrapping tends to disagree with Biome's formatter and burns an iteration. (This is the TS
+hand-wrapping tends to disagree with Biome's formatter and burns an iteration. Biome also prefers
+collapsed single-line signatures/arrays on new files — run `biome check --write` on any new file
+before CI. (This is the TS
 analogue of the Python `ruff format` pre-commit trap — see `toolchain/ruff.md`.)
 
 **Why `check --write`, not `format --write`:** `organizeImports` is an **assist** action, applied

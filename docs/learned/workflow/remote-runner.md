@@ -148,6 +148,15 @@ fiction": land the cheap/correct/unit-testable pieces now (the resolver candidat
 genuinely-unbuildable consumer worker-deps step a **loud `::error::` + `exit 1` deferral**, not a
 silently-broken `npm ci`. Self-repo keeps `npm ci`.
 
+### Open follow-up: does a real remote launch load `@perk/pi` at all?
+
+The first real execution of the runner path (the e2e worker test tier) surfaced an unresolved gap:
+`defaultCreateRuntime`'s in-memory settings **ignore disk `.pi/settings.json` packages**, so a
+remote worker as currently written would register zero extension tools. A real remote launch must
+either inject `resourceLoaderOptions.extensionFactories`, install the package, or layer disk
+settings — unresolved; recorded in the objective #137 reconcile and
+`docs/planning/phase-3-turn-11.md`. Mechanics: `docs/learned/pi/headless-session-drive.md`.
+
 ## `doctor --fix` re-converge pulls in unrelated drift
 
 Regenerating committed self-repo artifacts via `perk doctor --fix` re-converges the **whole repo**,

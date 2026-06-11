@@ -1,6 +1,6 @@
 ---
 title: The provider seam — owned-surface deferral vs always-registered substrate
-read_when: You are working on the plan/todo provider seam — the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating, the injection-only adapter shim, or `package_filter`.
+read_when: You are working on the plan/todo provider seam — the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating, the injection-only adapter shim, an augment-posture provider (the plannotator bridge), or `package_filter`.
 ---
 
 # The provider seam
@@ -218,6 +218,31 @@ extra gate unique to todo: **active-workflow scoping** (`rebuildWorkflowState(br
 != null`, the same gate the reference checkpoints provider seeds on) so the bridge never reaches
 planning/objective sessions. Invariant 1 held: never `setActiveTools`, never owns the read-only gate,
 never restamps a provider field.
+
+## The augment-posture provider (plannotator-plan)
+
+The third real provider, `plannotator-plan`, introduced a posture the catalog had not needed:
+**augment** — perk's plan surface stays live and the provider adds a human review step
+(`plan_review`, bridged to the plannotator browser UI). Mechanics worth keeping:
+
+- `registerPlanMode` now has a **three-tier branch**: full (perk's own provider), **partial-vacate**
+  (augment — perk keeps the surface, drops only the pieces the provider replaces), and full-vacate
+  (a replace-posture foreign provider). Augment-vs-replace posture is **per-provider judgment keyed
+  on the id constant inside `registerPlanMode`**, not new catalog vocabulary — generalize the
+  posture into `providers.yaml` only when a third augment-style provider appears.
+- **An always-registered shim can key behavior off the gate without holding the controller** by
+  reading the persisted workflow-state mode (`rebuildWorkflowState(branchOf(ctx)).mode ===
+  "read-only"`) — the gate's state twin. The gating argument never reaches adapter wiring
+  (Invariant 1), so the persisted mode is the sanctioned read.
+- **The present-for-review save-discipline split:** interactive plan surfaces *present* the plan for
+  review and leave the save to the human `/plan-save`; factory flows (objective-plan, learn-docs,
+  replan) keep the autonomous `plan_save` tool call. The two disciplines coexist deliberately.
+
+Residuals: the plannotator event envelope is pinned at the installed version and degrades to a
+fail-open skip on upstream change (silently losing the review step); there is **no decision
+timeout by design** (interactive-only path — headless soft-skips; an unanswered review hangs until
+turn abort); upstream npm install breakage is possible and perk's wiring is correct independent of
+it.
 
 ## Residual / interim limitation
 
