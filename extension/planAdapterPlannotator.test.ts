@@ -341,3 +341,44 @@ test("bridge: an already-aborted signal short-circuits before emitting", async (
   assert.deepEqual(outcome, { status: "aborted" });
   assert.equal(emitted, false, "no request emitted after an abort");
 });
+
+test("plan_review: missing plan -> skipped with reason bad_input, bridge not invoked", async () => {
+  // Node 3.2: tool-boundary decode (native fail-open vocabulary). Plannotator IS selected and a
+  // short handshake window is set: had the bridge been invoked, the outcome would be a loud
+  // `unavailable` after the handshake timeout — `skipped`/`bad_input` proves the decode refused
+  // before the bridge.
+  const cwd = scaffoldRepo();
+  selectPlannotator(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined, PERK_PLANNOTATOR_HANDSHAKE_MS: "50" },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    const result = await h.invokeTool("plan_review", {});
+    const details = result.details as { status?: string; reason?: string };
+    assert.equal(details.status, "skipped");
+    assert.equal(details.reason, "bad_input");
+    assert.match(String(result.content[0]?.text), /plan_review needs \{ plan: string \}/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("plan_review: mistyped plan -> skipped with reason bad_input", async () => {
+  const cwd = scaffoldRepo();
+  selectPlannotator(cwd);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: undefined, PERK_PLANNOTATOR_HANDSHAKE_MS: "50" },
+    sessionManager: SessionManager.inMemory(cwd),
+  });
+  try {
+    const result = await h.invokeTool("plan_review", { plan: 5 });
+    const details = result.details as { status?: string; reason?: string };
+    assert.equal(details.status, "skipped");
+    assert.equal(details.reason, "bad_input");
+  } finally {
+    h.dispose();
+  }
+});

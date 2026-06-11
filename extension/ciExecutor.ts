@@ -31,6 +31,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { ensureRunScratch, workflowDir } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "./readOnlySession.ts";
+import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** A named-checks map: `name -> shell command` (the whole `[ci]` config section). */
@@ -60,7 +61,7 @@ export interface CiReport {
   checks: CiCheckResult[];
   refused?: boolean;
   error?: string;
-  /** "no_checks_configured" | "unknown_check" | "project_ci_unconfirmed" | "exec_failed" */
+  /** "no_checks_configured" | "unknown_check" | "project_ci_unconfirmed" | "exec_failed" | "bad_input" */
   error_type?: string;
 }
 
@@ -407,7 +408,22 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const check = (params as { check?: string })?.check;
+      // Tool-boundary decode (Node 3.2): absent → undefined (run all); mistyped → a bad_input
+      // CiReport refusal in the executor's native vocabulary (mirrors the unknown_check shape).
+      const p = paramsOf(params);
+      const check = p === null ? undefined : stringParam(p, "check");
+      if (check === null) {
+        return {
+          content: [{ type: "text", text: "run_ci failed: `check` must be a string" }],
+          details: {
+            ok: false,
+            passed: false,
+            checks: [],
+            error_type: "bad_input",
+            error: "`check` must be a string",
+          },
+        } satisfies CiResult;
+      }
       return runCiImpl(pi, ctx, { check }, latch);
     },
   });
