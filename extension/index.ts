@@ -41,6 +41,7 @@ import { registerSubmit } from "./submit.ts";
 import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
+  appendWorkflowState,
   branchOf,
   decideClaim,
   planRefsEqual,
@@ -164,9 +165,15 @@ export default function (pi: ExtensionAPI) {
           // (both are read-only) and inject the right authoring context (planMode vs objectiveAuthor).
           stage: handoff.stage,
         };
-        pi.appendEntry(WORKFLOW_STATE_TYPE, data);
-        if (rebuildWorkflowState(branchEntries()).run_id !== decision.runId) {
-          reportError(`read-back failed for run ${decision.runId}`); // do NOT consume
+        const okAppend = appendWorkflowState(pi, ctx, {
+          data,
+          field: "run_id",
+          expected: decision.runId,
+          scope: "workflow-state linkage error",
+          failure: `read-back failed for run ${decision.runId}`,
+        });
+        if (!okAppend) {
+          // do NOT consume
         } else {
           markHandoffConsumed(ctx.cwd, decision.runId, {
             piSessionId: currentSessionId ?? undefined,
@@ -206,13 +213,17 @@ export default function (pi: ExtensionAPI) {
         if (planRefsEqual(linked, cachedRef)) {
           resolved = { ...resolved, active_plan_ref: linked };
         } else {
-          pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: cachedRef });
           if (
-            planRefsEqual(rebuildWorkflowState(branchEntries()).active_plan_ref ?? null, cachedRef)
+            appendWorkflowState(pi, ctx, {
+              data: { active_plan_ref: cachedRef },
+              field: "active_plan_ref",
+              expected: cachedRef,
+              scope: "workflow-state linkage error",
+              failure: `plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`,
+              equals: planRefsEqual,
+            })
           ) {
             resolved = { ...resolved, active_plan_ref: cachedRef };
-          } else {
-            reportError(`plan-ref read-back failed for ${cachedRef.provider}:${cachedRef.pr_id}`);
           }
         }
       } else if (linked !== null) {

@@ -28,11 +28,11 @@ import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
 import {
+  appendWorkflowState,
   type BranchEntry,
   branchOf,
   planRefsEqual,
   rebuildWorkflowState,
-  WORKFLOW_STATE_TYPE,
 } from "./workflowState.ts";
 
 /** The ok-arm fields (turn-3 D6) — the `details` surface doubles as branch-safe persisted state. */
@@ -229,18 +229,14 @@ export async function savePlan(
   // Link the live session (turn-3 D4): append iff the rebuilt ref differs, with a strict read-back.
   const ref = r.data.plan_ref;
   if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
-    pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: ref });
-    if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
-      report(
-        ctx,
-        "plan-save",
-        "error",
-        `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`,
-        {
-          alsoLog: true,
-        },
-      );
-    }
+    appendWorkflowState(pi, ctx, {
+      data: { active_plan_ref: ref },
+      field: "active_plan_ref",
+      expected: ref,
+      scope: "plan-save",
+      failure: `plan-ref read-back failed for ${ref.provider}:${ref.pr_id}`,
+      equals: planRefsEqual,
+    });
   }
 
   const verb = r.data.issue.existed ? "Updated" : "Saved";
