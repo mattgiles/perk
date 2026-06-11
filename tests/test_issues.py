@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from perk import github, issue_backend, issues
+from perk import github, issue_backend, issues, objective
 from perk.issues import GitHubIssueBackend, resolve_issue_backend
 
 
@@ -304,12 +304,16 @@ class TestDelegation:
         )
         monkeypatch.setattr(github, "update_objective_node", rec)
         result = GitHubIssueBackend(tmp_path).update_objective_node(
-            issue_id="252", node_id="1.2", status="done", pr="#325", description=None
+            issue_id="252",
+            node_id="1.2",
+            status=objective.NodeStatus.DONE,
+            pr="#325",
+            description=None,
         )
         assert rec.kwargs == {
             "number": 252,
             "node_id": "1.2",
-            "status": "done",
+            "status": objective.NodeStatus.DONE,
             "pr": "#325",
             "description": None,
             "repo_root": tmp_path,
