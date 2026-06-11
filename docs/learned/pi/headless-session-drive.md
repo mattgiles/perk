@@ -1,6 +1,6 @@
 ---
 title: Headless Pi session construction & driving — the SDK runtime-factory recipe
-read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, or offline determinism for model-availability.
+read_when: You are constructing or driving a headless (non-TUI) Pi session via the SDK — the runtime-factory path, bindExtensions, session.subscribe event facts, a single-prompt drive + budget watchdog, offline determinism for model-availability, or driving the real runtime with a faux model (the nested-pi-ai per-instance registry trap).
 ---
 
 # Headless Pi session construction & driving
@@ -112,6 +112,41 @@ extension, `session_start` claim engages) is provable **fully offline** via the 
 `loadPerkSession` harness — assert `getAllRegisteredTools()` includes `submit` /
 `resolve_review_threads` and that the rebuilt `workflow-state.run_id` matches the planted handoff.
 
+## Driving the real runtime offline with a faux model (the e2e worker tier)
+
+The e2e worker tier (`extension/workerE2e.test.ts` + `extension/testing/harness.ts`) drives a full
+stage through the production `defaultCreateRuntime` against the real `@perk/pi` extension and a
+faux pi-ai model, GitHub-free at the `PERK_BIN` seam. Three load-bearing assumptions were wrong;
+the corrections are the durable knowledge.
+
+- **pi-coding-agent bundles its own nested `@earendil-works/pi-ai`** — the api-provider registry is
+  module-global **per instance**, so a faux provider registered via the top-level import is
+  invisible to the session runtime (which streams through the nested instance). Fix pattern (the
+  harness's faux-model registration): resolve pi-ai *as pi-coding-agent sees it* —
+  `import.meta.resolve` the package, probe its nested `node_modules` for pi-ai, and
+  dynamic-`import()` that path (CJS `require.resolve` throws `ERR_PACKAGE_PATH_NOT_EXPORTED` —
+  pi-ai exposes only the `import` export condition), falling back to the top-level when deduped.
+  Faux message builders are instance-agnostic plain objects; only provider registration + the
+  `getModel()` it returns must come from the runtime's instance. **Generalize:** ANY module-global
+  SDK registry is per-instance — resolve singletons through pi-coding-agent when driving the real
+  `AgentSession`.
+- **`defaultCreateRuntime` cannot discover extensions from on-disk `.pi/settings.json`** — it
+  builds settings with `SettingsManager.inMemory`, which is NOT layered over disk, so project
+  `packages` are empty and a worktree-cwd launch registers **zero** extension tools. Deliver
+  extensions via the documented `resourceLoaderOptions.extensionFactories` seam while still driving
+  the real factory. (The production-side implication lives in
+  `docs/learned/workflow/remote-runner.md`.)
+- **The real runtime resolves an API key even for a faux provider** — seed `AuthStorage.inMemory`
+  with a dummy key for the faux provider id (the structured-output path sidesteps this; the full
+  runtime does not).
+- **Injected `eventSink` and the default NDJSON file sink are mutually exclusive per drive** — to
+  assert both the in-process stream and the on-disk NDJSON, drive the scenario twice.
+
+Process notes that held up: `git init -q` the temp worktree so the resource loader's ancestor
+skills-walk stops there; save/restore every mutated `process.env` key and unregister the faux
+provider in `finally`; real `tool_execution_end` events DO carry `result.details` — a "generic
+tool failed" symptom is usually the missing-extension path, not a shape mismatch.
+
 ## `DefaultResourceLoaderOptions` is not exported from the package root
 
 Derive the `resourceLoaderOptions` type via indexed access:
@@ -129,6 +164,7 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 - `extension/worker.ts` — `driveStage`, the runtime-factory construction + budget watchdog
 - `extension/workerMain.ts` — the worker entrypoint
 - `extension/readOnlySession.ts` — the fully-isolated read-only child this inverts
+- `extension/workerE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
 - `docs/learned/pi/extension-api.md` — `ctx.mode`/`ctx.hasUI`, the root-export-list rule
 - `docs/learned/pi/context-system.md` — the read-only child it inverts
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter

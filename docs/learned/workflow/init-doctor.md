@@ -135,6 +135,11 @@ imports at the bottom of the parent group file, strictly *after* the parent grou
 `perk_group`) has been fully defined. This ensures the parent group is available in the module
 namespace when child commands attempt to import and register themselves onto it.
 
+**Scope this idiom to genuinely registration-induced cycles.** When the cycle is *helper-induced*
+(a subgroup importing the parent's helpers), dissolve it instead by extracting the shared helpers
+into a sibling leaf module (the `doctor/render.py` pattern) so both `__init__.py`s import
+top-of-file normally — see `docs/learned/workflow/cli-command-groups.md`.
+
 ### `register_with_aliases` single-command constraint
 
 The `register_with_aliases` helper in `perk/cli/alias.py` is strictly designed for single-command

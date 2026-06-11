@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, or reasoning about whether an injected custom message persists.
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, or testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness.
 ---
 
 # Pi extension API (0.78.x)
@@ -74,6 +74,28 @@ Under the extension's strict `tsconfig.json` compiler options, indexing into arr
 strictly checked. To access elements by index safely in test code, you must use optional chaining
 `?.` or the `.at()` method rather than direct unsafe brackets (`[0]`), otherwise the compiler will
 raise type-safety errors.
+
+## `pi.events` is unreachable from the test harness
+
+The event bus is created inside pi's extension loader; the test-harness runner exposes **no
+accessor** for it. The workable split:
+
+- Factor bus-consuming logic **pure-over-the-bus** — a factory taking a minimal `{emit, on}`
+  interface (see `createPlannotatorBridge` in the plannotator adapter) — and test decision paths
+  with a fake bus.
+- Test the registered tool end-to-end only for paths needing **no foreign listener**: not-selected /
+  headless / timeout. For the timeout path, prefer **env-var injection over a module-constant
+  override** — the harness imports the extension through its own module graph (module identity is
+  uncertain) but applies env per-session.
+
+Two adjacent facts:
+
+- The harness **CAN assert flag/shortcut non-registration directly** via
+  `session.extensionRunner.getFlags()` / `getShortcuts({})` — stronger than indirect "set flag +
+  reload is inert" probes.
+- An in-payload `respond` callback plus **one persistent result listener** resolving a
+  `Map<reviewId, resolver>` avoids depending on the event-bus unsubscribe return and naturally
+  ignores mismatched ids.
 
 ## Sources
 
