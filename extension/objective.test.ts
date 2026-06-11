@@ -130,6 +130,26 @@ test("/objective clear nulls active_objective", async () => {
   }
 });
 
+test("activation renders the 🎯 segment in the composed `perk` status; no objective widget", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [ACTIVE]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    await h.invokeCommand("objective", "251");
+    // The objective segment renders under the single composed `perk` status slot (node 2.3).
+    const last = h.statuses.filter((s) => s.slot === "perk").at(-1);
+    assert.ok(last?.value?.includes("🎯 251"), `composed status carries 🎯 251: ${last?.value}`);
+    // The `perk-objective` widget is retired — nothing is EVER set under that slot.
+    assert.equal(
+      h.widgets.filter((w) => w.slot === "perk-objective").length,
+      0,
+      "no perk-objective widget set (retired in node 2.3)",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("session_tree rebuild preserves the budget marker", async () => {
   const cwd = scaffoldRepo();
   const file = plantSession(cwd, [ACTIVE]);

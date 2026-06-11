@@ -1,13 +1,16 @@
 // The perk surfaces module — Objective #251, node 2.1. The one module that owns perk's UI
-// vocabulary per the TUI charter (`docs/design/tui-charter.md` §3–§5): standing-surface slot keys,
-// footer identity marks, the §5 glyph + theming vocabulary, the §4 height bounds, the
-// `setStanding` standing-surface setter, and the pure format helpers the standing surfaces render
-// with. The notify seam itself stays in `report.ts` (re-exported here so "the surfaces module" is
-// surfaces.ts + report.ts for the node 4.1 guard).
+// vocabulary per the TUI charter (`docs/design/tui-charter.md` §3–§5): the composed `perk` status
+// slot + widget slot keys, footer identity marks, the §5 glyph + theming vocabulary, the §4 height
+// bounds, the `createPerkStatus` composed-status handle + `setStandingWidget` widget setter, and
+// the pure format helpers the standing surfaces render with. The notify seam itself stays in
+// `report.ts` (re-exported here so "the surfaces module" is surfaces.ts + report.ts for the node
+// 4.1 guard).
 //
-// Charter law mirrored here: GLYPHS + the checkpoints height bound now have a behavioral
-// consumer (checkpoints.ts renders through `renderProgressLines`/`windowProgress`, node 2.2);
-// the objective bound binds in node 2.3 and the regression guard in node 4.1.
+// Composed status (node 2.3, charter §6 D2): perk presents ONE footer status under the single
+// `perk` slot — the objective + checkpoints segments composed in fixed charter order (objective
+// first), joined with two spaces. The per-feature status slots (`perk-checkpoints`,
+// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). Node 3.1 lifts
+// this composition into `setFooter`; the regression guard binds in node 4.1.
 
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
@@ -15,10 +18,11 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 export { type ReportTarget, report, type Severity } from "./report.ts";
 
 // --- standing-surface slot keys (charter §2) ---
+// The ONE composed status slot (node 2.3 / D2): all perk status segments render under this key.
+export const STATUS_SLOT_PERK = "perk";
 // NOTE: same string as providers.ts PERK_CHECKPOINTS_PROVIDER_ID but a different concept
 // (UI slot vs provider id) — deliberately NOT merged.
-export const STATUS_SLOT_CHECKPOINTS = "perk-checkpoints";
-export const STATUS_SLOT_OBJECTIVE = "perk-objective";
+export const WIDGET_SLOT_CHECKPOINTS = "perk-checkpoints";
 
 // --- footer identity marks (charter §5 / D3: emoji are footer-only identity, 2 cells wide) ---
 export const MARK_CHECKPOINTS = "📋";
@@ -38,7 +42,6 @@ export const GLYPHS: Record<GlyphKind, { glyph: string; themeColor: string }> = 
 export const NOTIFY_MAX_LINES = 1;
 export const FOOTER_MAX_LINES = 1;
 export const CHECKPOINTS_WIDGET_MAX_LINES = 4;
-export const OBJECTIVE_WIDGET_MAX_LINES = 2;
 
 // --- the standing-surface setter -----------------------------------------------------------------
 
@@ -63,8 +66,8 @@ export type StandingWidgetFactory = (
 ) => { render(width: number): string[]; invalidate(): void };
 
 /**
- * The minimal headless-aware surface `setStanding` needs. `ExtensionContext` satisfies it; tests
- * fake it (the same minimal-structural-interface recipe as report.ts's `ReportTarget` — see
+ * The minimal headless-aware surface the standing setters need. `ExtensionContext` satisfies it;
+ * tests fake it (the same minimal-structural-interface recipe as report.ts's `ReportTarget` — see
  * `docs/learned/pi/extension-seams.md`).
  */
 export interface StandingTarget {
@@ -79,25 +82,64 @@ export interface StandingTarget {
   };
 }
 
-/** Set (or clear, with undefined) a paired status+widget slot; no-op headless. */
-export function setStanding(
+/** Set (or clear, with undefined) a standing widget slot; no-op headless. */
+export function setStandingWidget(
   target: StandingTarget,
   slot: string,
-  surface:
-    | {
-        status: string;
-        widget: string[] | StandingWidgetFactory;
-        placement?: "aboveEditor" | "belowEditor";
-      }
-    | undefined,
+  widget: string[] | StandingWidgetFactory | undefined,
+  options?: { placement?: "aboveEditor" | "belowEditor" },
 ): void {
   if (!target.hasUI) return;
-  target.ui.setStatus(slot, surface?.status);
-  if (surface?.placement) {
-    target.ui.setWidget(slot, surface.widget, { placement: surface.placement });
+  if (options?.placement) {
+    target.ui.setWidget(slot, widget, { placement: options.placement });
   } else {
-    target.ui.setWidget(slot, surface?.widget);
+    target.ui.setWidget(slot, widget);
   }
+}
+
+// --- the composed perk status (node 2.3 / charter D2) --------------------------------------------
+
+/** A named segment of the composed `perk` status. Order is fixed by `PERK_SEGMENT_ORDER` (D2). */
+export type PerkSegmentKey = "objective" | "checkpoints";
+
+/** The charter D2 segment order: objective first, checkpoints second — never insertion order. */
+export const PERK_SEGMENT_ORDER = ["objective", "checkpoints"] as const;
+
+/** The two-space segment separator: `🎯 251 · 12.3k tok · 5m  📋 3/7 · ▸4`. */
+const PERK_SEGMENT_SEPARATOR = "  ";
+
+/**
+ * The composed-status handle: each controller publishes its segment text through `set`, and the
+ * handle recomposes + republishes the single `perk` status slot.
+ */
+export interface PerkStatusHandle {
+  /** Set (or clear, with undefined) one segment; recomposes the slot. No-op headless. */
+  set(target: StandingTarget, segment: PerkSegmentKey, text: string | undefined): void;
+}
+
+/**
+ * Create the composed `perk` status handle (one per extension instance — created in index.ts and
+ * passed to the controllers; no hidden module state). Headless calls are full no-ops (never touch
+ * the segment map, so headless-era text can't resurrect in a later headful render). The composed
+ * line is the ordered present segments joined with two spaces; an empty composition clears the
+ * slot. No width handling: pi's footer truncates the joined status line itself.
+ */
+export function createPerkStatus(): PerkStatusHandle {
+  const segments = new Map<PerkSegmentKey, string>();
+  return {
+    set(target, segment, text) {
+      if (!target.hasUI) return;
+      if (text === undefined) {
+        segments.delete(segment);
+      } else {
+        segments.set(segment, text);
+      }
+      const composed = PERK_SEGMENT_ORDER.filter((key) => segments.has(key))
+        .map((key) => segments.get(key) as string)
+        .join(PERK_SEGMENT_SEPARATOR);
+      target.ui.setStatus(STATUS_SLOT_PERK, composed === "" ? undefined : composed);
+    },
+  };
 }
 
 // --- format helpers (relocated from checkpoints.ts / objective.ts, verbatim) --------------------

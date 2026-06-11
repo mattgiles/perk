@@ -195,11 +195,12 @@ test("deferral: a foreign [providers] todo steps the progress surface aside", as
       false,
       "no checkpoint entry seeded under a foreign todo selection",
     );
-    // ...and no progress status/widget rendered.
+    // ...and no progress status/widget rendered. (The objective controller may clear its own
+    // absent segment — composing `perk` to undefined — so assert no *text* ever rendered.)
     assert.equal(
-      h.statuses.filter((s) => s.slot === "perk-checkpoints").length,
+      h.statuses.filter((s) => s.slot === "perk" && s.value !== undefined).length,
       0,
-      "no status rendered while deferred",
+      "no status text rendered while deferred",
     );
 
     // /checkpoints ANNOUNCES the deferral (the surface-facing mirror of the silent handlers).
@@ -280,7 +281,7 @@ test("coarse fallback: active prose plan sets `📋 <stage>` status; no plan cle
   const file = plantSession(cwd, [ACTIVE]);
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {
-    const last = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    const last = h.statuses.filter((s) => s.slot === "perk").at(-1);
     assert.ok(last?.value?.startsWith("📋 implement"), `coarse status set: ${last?.value}`);
     const widget = h.widgets.filter((w) => w.slot === "perk-checkpoints").at(-1);
     assert.ok(widget?.value?.[0]?.includes("prose plan"), "widget explains prose plan");
@@ -309,7 +310,7 @@ test("steps widget: themed window at belowEditor — ≤4 step lines + elision (
     );
     assert.ok(stepLines[0]?.startsWith("▸ 1."), "current step renders the ▸ glyph");
     // The status chip carries the full summary with the ▸ glyph (no retired ▶).
-    const status = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    const status = h.statuses.filter((s) => s.slot === "perk").at(-1);
     assert.equal(status?.value, "📋 0/6 · ▸1");
   } finally {
     h.dispose();
@@ -342,7 +343,7 @@ test("coarse fallback: no active plan clears status + widget", async () => {
   const file = plantSession(cwd, []);
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {
-    const last = h.statuses.filter((s) => s.slot === "perk-checkpoints").at(-1);
+    const last = h.statuses.filter((s) => s.slot === "perk").at(-1);
     assert.equal(last?.value, undefined, "status cleared with no active plan");
   } finally {
     h.dispose();

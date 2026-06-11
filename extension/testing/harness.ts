@@ -86,7 +86,7 @@ export interface PerkSession {
   /** Fire `session_tree` by navigating to an entry. */
   navigateTo(entryId: string): Promise<void>;
   /** Invoke an extension command headlessly (no model turn). */
-  invokeCommand(name: string): Promise<void>;
+  invokeCommand(name: string, args?: string): Promise<void>;
   /**
    * Invoke a registered command's handler directly with a synthesized command context whose
    * `newSession` is recorded (it does NOT create a real session). Returns the captured handoff:
@@ -479,8 +479,8 @@ export async function loadPerkSession(opts: {
       await session.navigateTree(entryId);
       await tick();
     },
-    async invokeCommand(name: string) {
-      await session.prompt(`/${name}`);
+    async invokeCommand(name: string, args?: string) {
+      await session.prompt(args ? `/${name} ${args}` : `/${name}`);
       await tick();
     },
     async runCommandHandler(name: string, args = "") {

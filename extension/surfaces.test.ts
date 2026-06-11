@@ -1,39 +1,40 @@
-// Tests for the perk surfaces module (Objective #251, nodes 2.1/2.2): pins the charter-law
+// Tests for the perk surfaces module (Objective #251, nodes 2.1/2.2/2.3): pins the charter-law
 // vocabulary (slot keys, marks, glyphs, height bounds — `docs/design/tui-charter.md` §4/§5),
-// unit-tests the `setStanding` headless-safe setter (string[] + factory + placement forms), the
-// D1 `windowProgress` windower, the themed `renderProgressLines` renderer, and the format helpers.
+// unit-tests the composed `createPerkStatus` handle (D2 segment order + two-space join + headless
+// no-op) and the `setStandingWidget` headless-safe setter (string[] + factory + placement forms),
+// the D1 `windowProgress` windower, the themed `renderProgressLines` renderer, and the helpers.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   CHECKPOINTS_WIDGET_MAX_LINES,
+  createPerkStatus,
   FOOTER_MAX_LINES,
   formatBudgetLine,
   GLYPHS,
   MARK_CHECKPOINTS,
   MARK_OBJECTIVE,
   NOTIFY_MAX_LINES,
-  OBJECTIVE_WIDGET_MAX_LINES,
   type ProgressState,
   type ProgressWindowItem,
   progressLine,
   renderProgressLines,
   report,
-  STATUS_SLOT_CHECKPOINTS,
-  STATUS_SLOT_OBJECTIVE,
+  STATUS_SLOT_PERK,
   type StandingTarget,
-  setStanding,
+  setStandingWidget,
   stepGlyphKind,
   type ThemeLike,
+  WIDGET_SLOT_CHECKPOINTS,
   windowProgress,
 } from "./surfaces.ts";
 
 // --- charter vocabulary pins (§2/§4/§5) ----------------------------------------------------------
 
 test("slot keys + footer marks match the charter §2/§5 inventory", () => {
-  assert.equal(STATUS_SLOT_CHECKPOINTS, "perk-checkpoints");
-  assert.equal(STATUS_SLOT_OBJECTIVE, "perk-objective");
+  assert.equal(STATUS_SLOT_PERK, "perk");
+  assert.equal(WIDGET_SLOT_CHECKPOINTS, "perk-checkpoints");
   assert.equal(MARK_CHECKPOINTS, "📋");
   assert.equal(MARK_OBJECTIVE, "🎯");
 });
@@ -52,14 +53,13 @@ test("height bounds match the charter §4 / D1/D8 budgets", () => {
   assert.equal(NOTIFY_MAX_LINES, 1);
   assert.equal(FOOTER_MAX_LINES, 1);
   assert.equal(CHECKPOINTS_WIDGET_MAX_LINES, 4);
-  assert.equal(OBJECTIVE_WIDGET_MAX_LINES, 2);
 });
 
 test("surfaces.ts re-exports the report seam", () => {
   assert.equal(typeof report, "function");
 });
 
-// --- setStanding ----------------------------------------------------------------------------------
+// --- createPerkStatus (the composed `perk` status, node 2.3 / D2) ---------------------------------
 
 interface Call {
   kind: "status" | "widget";
@@ -84,44 +84,87 @@ function fakeTarget(hasUI: boolean): { target: StandingTarget; calls: Call[] } {
   return { target, calls };
 }
 
-test("setStanding (headful): sets the paired status + widget", () => {
+test("createPerkStatus: a single segment publishes alone under the `perk` slot", () => {
   const { target, calls } = fakeTarget(true);
-  setStanding(target, "perk-checkpoints", { status: "📋 1/2", widget: ["✓ 1. a", "▸ 2. b"] });
+  const status = createPerkStatus();
+  status.set(target, "objective", "🎯 251 · 1.2k tok · 5m");
+  assert.deepEqual(calls, [{ kind: "status", slot: "perk", value: "🎯 251 · 1.2k tok · 5m" }]);
+
+  const other = fakeTarget(true);
+  const status2 = createPerkStatus();
+  status2.set(other.target, "checkpoints", "📋 1/2");
+  assert.deepEqual(other.calls, [{ kind: "status", slot: "perk", value: "📋 1/2" }]);
+});
+
+test("createPerkStatus: both segments compose objective-first with a two-space join (D2)", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  // Published checkpoints-first — composition order must still be objective → checkpoints.
+  status.set(target, "checkpoints", "📋 1/2");
+  status.set(target, "objective", "🎯 251 · 1.2k tok · 5m");
+  assert.deepEqual(calls.at(-1), {
+    kind: "status",
+    slot: "perk",
+    value: "🎯 251 · 1.2k tok · 5m  📋 1/2",
+  });
+});
+
+test("createPerkStatus: clearing one segment recomposes; clearing both clears the slot", () => {
+  const { target, calls } = fakeTarget(true);
+  const status = createPerkStatus();
+  status.set(target, "objective", "🎯 251");
+  status.set(target, "checkpoints", "📋 1/2");
+  status.set(target, "objective", undefined);
+  assert.deepEqual(calls.at(-1), { kind: "status", slot: "perk", value: "📋 1/2" });
+  status.set(target, "checkpoints", undefined);
+  assert.deepEqual(calls.at(-1), { kind: "status", slot: "perk", value: undefined });
+});
+
+test("createPerkStatus (headless): a full no-op — no UI calls, no resurrected text", () => {
+  const headless = fakeTarget(false);
+  const status = createPerkStatus();
+  status.set(headless.target, "objective", "🎯 ghost");
+  assert.deepEqual(headless.calls, []);
+  // A later headful set must not resurrect headless-era text into the composition.
+  const headful = fakeTarget(true);
+  status.set(headful.target, "checkpoints", "📋 1/2");
+  assert.deepEqual(headful.calls, [{ kind: "status", slot: "perk", value: "📋 1/2" }]);
+});
+
+// --- setStandingWidget ------------------------------------------------------------------------------
+
+test("setStandingWidget (headful): string[] widget set", () => {
+  const { target, calls } = fakeTarget(true);
+  setStandingWidget(target, "perk-checkpoints", ["✓ 1. a", "▸ 2. b"]);
   assert.deepEqual(calls, [
-    { kind: "status", slot: "perk-checkpoints", value: "📋 1/2" },
     { kind: "widget", slot: "perk-checkpoints", value: ["✓ 1. a", "▸ 2. b"], options: undefined },
   ]);
 });
 
-test("setStanding (headful): factory widget + placement forwarded as setWidget options", () => {
+test("setStandingWidget (headful): factory + placement forwarded as setWidget options", () => {
   const { target, calls } = fakeTarget(true);
   const factory = (_tui: unknown, theme: ThemeLike) => ({
     render: (_width: number) => [theme.fg("dim", "line")],
     invalidate: () => {},
   });
-  setStanding(target, "perk-checkpoints", {
-    status: "📋 1/2",
-    widget: factory,
-    placement: "belowEditor",
-  });
+  setStandingWidget(target, "perk-checkpoints", factory, { placement: "belowEditor" });
   const widget = calls.find((c) => c.kind === "widget");
   assert.equal(widget?.value, factory, "the factory is forwarded as-is");
   assert.deepEqual(widget?.options, { placement: "belowEditor" });
 });
 
-test("setStanding (headful): undefined clears both slots", () => {
+test("setStandingWidget (headful): undefined clears the slot", () => {
   const { target, calls } = fakeTarget(true);
-  setStanding(target, "perk-objective", undefined);
+  setStandingWidget(target, "perk-checkpoints", undefined);
   assert.deepEqual(calls, [
-    { kind: "status", slot: "perk-objective", value: undefined },
-    { kind: "widget", slot: "perk-objective", value: undefined, options: undefined },
+    { kind: "widget", slot: "perk-checkpoints", value: undefined, options: undefined },
   ]);
 });
 
-test("setStanding (headless): a no-op — never touches the UI", () => {
+test("setStandingWidget (headless): a no-op — never touches the UI", () => {
   const { target, calls } = fakeTarget(false);
-  setStanding(target, "perk-checkpoints", { status: "📋 1/2", widget: ["☑ 1. a"] });
-  setStanding(target, "perk-checkpoints", undefined);
+  setStandingWidget(target, "perk-checkpoints", ["☑ 1. a"]);
+  setStandingWidget(target, "perk-checkpoints", undefined);
   assert.deepEqual(calls, []);
 });
 

@@ -123,7 +123,8 @@ Placement rules:
 - **Footer = 1 line.**
 - **`perk-checkpoints` widget ≤ ~4 lines** — see the D1 windowing rule below.
 - **`perk-objective` widget ≤ 2 lines** — and it is expected to fold into the footer per D2; the
-  charter notes the widget may be retired in node 2.3.
+  charter notes the widget may be retired in node 2.3. (Resolved in node 2.3: the widget **is**
+  retired; the objective surface lives as the 🎯 segment of the composed `perk` status.)
 
 **D1 — checkpoints widget windowing** (the height-bound decision this node was chartered to
 make): the per-step checklist gets a **fixed cap of ~4 lines** — a sliding window centered on the
@@ -198,7 +199,9 @@ composing, in fixed order:
   lifecycle. Guest statuses via `getExtensionStatuses()` are **best-effort fresh** — pi gives no
   repaint guarantee on guest-status change, and the charter records that as acceptable.
 - The two `setStatus` keys (`perk-checkpoints`, `perk-objective`) become footer **segments**; the
-  separate-status era ends in nodes 2.3/3.1.
+  separate-status era ends in nodes 2.3/3.1. (Node 2.3 collapsed the two keys into the **single
+  composed `perk` status slot** — ordered objective → checkpoints, two-space join, composed by
+  `surfaces.ts createPerkStatus`; node 3.1 lifts that composition into `setFooter`.)
 
 **Themed widget factories (D3/D10).** Widgets adopt the `(tui, theme) => ({ render, invalidate })`
 factory form so glyphs are theme-colored without pre-baking (§5).
@@ -225,6 +228,6 @@ keep pi's built-in styling).
 |---|---|
 | 2.1 | Surfaces module: `report()` grows into the one routing seam; every direct-notify call site in §2 conforms to the §3/§5 grammar + D7 policy. |
 | 2.2 | Checkpoints convergence: D1 windowing (≤ ~4 lines), D3 glyphs (retire `☑ ▶ ☐`), themed factories + D10, D9 truncation; amends the `shared/contracts.md` checkpoints render spec in the same turn. |
-| 2.3 | Status coordination: the two `setStatus` keys become ordered footer segments; the `perk-objective` widget may be retired (D2/D8). |
+| 2.3 | Status coordination: the two `setStatus` keys become ordered footer segments; the `perk-objective` widget may be retired (D2/D8). *(Implemented: the two per-feature status slots collapsed into one composed `perk` slot — objective → checkpoints order, two-space join — and the `perk-objective` widget is retired; the checkpoints widget keeps slot `perk-checkpoints`.)* |
 | 3.1 | Footer + indicator adoption: `setFooter` with the D2 segment spec, ownership law, and reactivity contract; D9 overflow order; `setWorkingIndicator` (D5); the version banner moves toast → footer (D7). |
 | 4.1 | Regression guard: tests pinning the charter's budgets and vocabulary so drift fails CI. |
