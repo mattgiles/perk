@@ -23,7 +23,8 @@ def test_init_converges_and_is_idempotent(tmp_path):
     settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
     packages = settings["packages"]
     assert f"git:github.com/mattgiles/perk@v{__version__}" in packages
-    assert "npm:@tombell/pi-status" in packages
+    assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
+    assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict with node 3.1
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
     assert "npm:@juicesharp/rpiv-todo" not in packages  # P2.T12: perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # P2.T6: borrowed spawned-delegation engine
@@ -72,7 +73,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     pi_dir.mkdir()
     # A user hand-added package + a borrowed package present from a prior run; both must survive.
     pi_dir.joinpath("settings.json").write_text(
-        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
     # Select the illustrative tombell-plan provider for the plan seam.
     pi_dir.joinpath("perk.toml").write_text(
@@ -88,7 +89,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     )
     assert entry == {"source": "npm:@tombell/pi-plan"}
     assert "npm:@me/custom" in _identities(packages)  # user package preserved
-    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
     pi_dir.joinpath("perk.toml").write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
@@ -96,7 +97,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@tombell/pi-plan" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
-    assert "npm:@tombell/pi-status" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
 def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path):
@@ -107,7 +108,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     pi_dir.joinpath("settings.json").write_text(
-        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
     pi_dir.joinpath("perk.toml").write_text(
         '[providers]\nplan = "plannotator-plan"\n', encoding="utf-8"
@@ -122,7 +123,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     )
     assert entry == {"source": "npm:@plannotator/pi-extension"}
     assert "npm:@me/custom" in _identities(packages)  # user package preserved
-    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # An idempotent re-run with the selection in place changes nothing.
     before = _snapshot(tmp_path)
@@ -135,7 +136,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@plannotator/pi-extension" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
-    assert "npm:@tombell/pi-status" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
 def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):
@@ -145,7 +146,7 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     pi_dir.joinpath("settings.json").write_text(
-        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
     pi_dir.joinpath("perk.toml").write_text(
         '[providers]\ntodo = "juicesharp-todo"\n', encoding="utf-8"
@@ -161,7 +162,7 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     )
     assert entry == {"source": "npm:@juicesharp/rpiv-todo"}
     assert "npm:@me/custom" in _identities(packages)  # user package preserved
-    assert "npm:@tombell/pi-status" in _identities(packages)  # borrowed package preserved
+    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
     pi_dir.joinpath("perk.toml").write_text(
@@ -171,7 +172,7 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
     assert "npm:@me/custom" in _identities(packages)
-    assert "npm:@tombell/pi-status" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
 def test_init_provider_wiring_is_idempotent(tmp_path):

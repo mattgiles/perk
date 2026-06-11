@@ -196,8 +196,8 @@ authoritative spec is `shared/contracts.md` §8.9.
 Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** on the
 **borrow-then-own** substrate. Phase 2 internalized the borrowed pieces: perk now owns plan mode
 (retiring `@tombell/pi-plan`, P2.T2a) **and** implement-progress checkpoints (retiring
-`@juicesharp/rpiv-todo`, P2.T12). The surviving borrows are `@tombell/pi-diff`, the
-`@tombell/pi-status` statusline, and the `pi-subagents` **engine** (behind perk's thin seam — perk
+`@juicesharp/rpiv-todo`, P2.T12). The surviving borrows are `@tombell/pi-diff` and the
+`pi-subagents` **engine** (behind perk's thin seam — perk
 owns the agent definitions). **Phase 3** adds the headless worker + queue (autonomy). The phasing,
 dogfood gates, and locked decisions live in [docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans (and
 the [Phase-1](docs/planning/phase-1-gate.md) / [Phase-2](docs/planning/phase-2-gate.md) gate

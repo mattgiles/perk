@@ -45,9 +45,11 @@ GIT_PACKAGE = "git:github.com/mattgiles/perk"
 # `ctx.hasUI`-clean (children run `--mode json -p`).
 # `pi-web-access` is the borrowed *web-research engine* (zero-config Exa search + content
 # fetch, no API keys required); perk borrows it wholesale (extension + its `librarian` skill).
+# `@tombell/pi-status` was retired post-node-3.1 — pi's `setFooter` is a single last-wins
+# slot, and pi-status's `session_start` footer replaced perk's charter-D2 footer (perk owns
+# the footer wholesale).
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
-    "npm:@tombell/pi-status",
     "npm:pi-subagents",
     "npm:pi-web-access",
 ]

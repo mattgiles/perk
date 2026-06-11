@@ -2,7 +2,6 @@
   "packages": [
     "..",
     "npm:@tombell/pi-diff",
-    "npm:@tombell/pi-status",
     "npm:pi-subagents",
     "npm:pi-web-access"
   ]
