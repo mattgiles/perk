@@ -11,10 +11,14 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import {
   activeRunId,
+  booleanField,
   type ColdDoorCtx,
   type ColdJson,
   type ExecHost,
+  numberField,
+  objectField,
   runColdDoor,
+  stringField,
 } from "./coldDoor.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -334,6 +338,42 @@ test("an unwritable scratch path fails soft as scratch_failed", async (t) => {
     chmodSync(piDir, 0o755);
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+// --- the payload-narrowing helpers ---------------------------------------------------------------
+
+test("stringField accepts strings and rejects everything else", () => {
+  const payload: ColdJson = { s: "hi", n: 7, missing: undefined, nul: null };
+  assert.equal(stringField(payload, "s"), "hi");
+  assert.equal(stringField(payload, "n"), undefined);
+  assert.equal(stringField(payload, "nul"), undefined);
+  assert.equal(stringField(payload, "absent"), undefined);
+});
+
+test("numberField accepts numbers and rejects everything else", () => {
+  const payload: ColdJson = { n: 42, s: "42", b: true };
+  assert.equal(numberField(payload, "n"), 42);
+  assert.equal(numberField(payload, "s"), undefined);
+  assert.equal(numberField(payload, "b"), undefined);
+  assert.equal(numberField(payload, "absent"), undefined);
+});
+
+test("booleanField accepts booleans and rejects everything else", () => {
+  const payload: ColdJson = { t: true, f: false, n: 0, s: "true" };
+  assert.equal(booleanField(payload, "t"), true);
+  assert.equal(booleanField(payload, "f"), false);
+  assert.equal(booleanField(payload, "n"), undefined);
+  assert.equal(booleanField(payload, "s"), undefined);
+  assert.equal(booleanField(payload, "absent"), undefined);
+});
+
+test("objectField accepts plain objects and rejects arrays/null/scalars", () => {
+  const payload: ColdJson = { o: { k: 1 }, a: [1, 2], nul: null, n: 7 };
+  assert.deepEqual(objectField(payload, "o"), { k: 1 });
+  assert.equal(objectField(payload, "a"), undefined);
+  assert.equal(objectField(payload, "nul"), undefined);
+  assert.equal(objectField(payload, "n"), undefined);
+  assert.equal(objectField(payload, "absent"), undefined);
 });
 
 // --- activeRunId ---------------------------------------------------------------------------------

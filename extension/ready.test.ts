@@ -64,6 +64,27 @@ test("tool: garbage worker output fails soft with bad_output", async () => {
   }
 });
 
+test("tool: success:true with a malformed pr fails as bad_output (unexpected payload)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, url: 12345 },
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("ready", {});
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.match(details.error ?? "", /unexpected payload/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/ready command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: READY_JSON });

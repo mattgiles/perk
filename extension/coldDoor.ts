@@ -8,8 +8,8 @@
 //
 // A door consumes it as (the Node 2.x migration shape):
 //
-//   const r = await runColdDoor<PrSubmitPayload>(pi, ctx, ["pr-submit", "--json"], {
-//     label: "perk pr-submit",
+//   const r = await runColdDoor<SubmitOk>(pi, ctx, ["pr", "submit", "--json"], {
+//     label: "perk pr submit",
 //     decode,
 //   });
 //   if (!r.ok) return fail(r.message, r.errorType);
@@ -62,9 +62,28 @@ export function activeRunId(ctx: ColdDoorCtx): string {
 }
 
 /** Pull a string-typed field off the parsed payload; non-strings yield undefined. */
-function stringField(payload: ColdJson, key: string): string | undefined {
+export function stringField(payload: ColdJson, key: string): string | undefined {
   const value = payload[key];
   return typeof value === "string" ? value : undefined;
+}
+
+/** Pull a number-typed field off the parsed payload; non-numbers yield undefined. */
+export function numberField(payload: ColdJson, key: string): number | undefined {
+  const value = payload[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+/** Pull a boolean-typed field off the parsed payload; non-booleans yield undefined. */
+export function booleanField(payload: ColdJson, key: string): boolean | undefined {
+  const value = payload[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/** Pull a plain-object field off the parsed payload; arrays/null/non-objects yield undefined. */
+export function objectField(payload: ColdJson, key: string): ColdJson | undefined {
+  const value = payload[key];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  return value as ColdJson;
 }
 
 /** Best-effort parse of stdout into a plain object; null on anything else. */

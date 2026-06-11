@@ -65,6 +65,49 @@ test("tool: garbage worker output fails soft with bad_output", async () => {
   }
 });
 
+test("tool: a success:false envelope at non-zero exit surfaces the structured error", async () => {
+  // The envelope-aware regression (Node 2.1): the Python plane prints a structured failure
+  // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const envelope = JSON.stringify({
+    success: false,
+    error_type: "no_plan_ref",
+    message: "no active plan-ref on this branch",
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("submit", {});
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "no_plan_ref");
+    assert.equal(details.error, "no active plan-ref on this branch");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: success:true with a malformed pr fails as bad_output (unexpected payload)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: "42", url: "https://gh/o/r/pull/42", is_draft: true, existed: false },
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("submit", {});
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.match(details.error ?? "", /unexpected payload/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/submit command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: SUBMIT_JSON });
