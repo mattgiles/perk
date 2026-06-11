@@ -75,6 +75,18 @@ export interface PerkSession {
    * through a passthrough fake theme at width 80; `placement` is captured from the options arg.
    */
   readonly widgets: readonly { slot: string; value: string[] | undefined; placement?: string }[];
+  /** Captured `ui.setWorkingIndicator(...)` args (headful only) — tests assert it stays empty. */
+  readonly workingIndicators: readonly unknown[];
+  /** The last captured `ui.setFooter` factory, or null if none was set. */
+  footerFactory(): unknown | null;
+  /**
+   * Invoke the captured footer factory with a fake tui/theme/footerData and render at `width`
+   * (default 80). Throws when no factory was captured.
+   */
+  renderFooter(
+    width?: number,
+    data?: { branch?: string | null; statuses?: Map<string, string> },
+  ): string[];
   /** The PERK_SELFCHECK sentinel, or null if not yet written. */
   sentinel(): Sentinel | null;
   /** Rebuild `perk:workflow-state` from the live session branch. */
@@ -375,10 +387,14 @@ function headfulUIContext(
   statuses: { slot: string; value: string | undefined }[] = [],
   widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [],
   notifyEvents: { message: string; severity?: string }[] = [],
+  footers: unknown[] = [],
+  workingIndicators: unknown[] = [],
 ): ExtensionUIContext {
   // Minimal context: records notify (+ severity) + setStatus/setWidget so tests can assert UI.
   // Factory widgets are invoked with a passthrough fake theme and rendered at width 80, so the
-  // recorded `value` is always a string[] (existing asserts keep working).
+  // recorded `value` is always a string[] (existing asserts keep working). setFooter captures the
+  // factory (rendered on demand via PerkSession.renderFooter); setWorkingIndicator records its
+  // args so tests can assert it is NEVER called (D5 rescinded).
   const fakeTheme = { fg: (_color: string, text: string) => text };
   return {
     notify: (message: string, severity?: string) => {
@@ -395,6 +411,12 @@ function headfulUIContext(
     ) => {
       const rendered = typeof value === "function" ? value(undefined, fakeTheme).render(80) : value;
       widgets.push({ slot, value: rendered, placement: options?.placement });
+    },
+    setFooter: (factory: unknown) => {
+      footers.push(factory);
+    },
+    setWorkingIndicator: (options?: unknown) => {
+      workingIndicators.push(options);
     },
   } as unknown as ExtensionUIContext;
 }
@@ -434,6 +456,8 @@ export async function loadPerkSession(opts: {
   const notifyEvents: { message: string; severity?: string }[] = [];
   const statuses: { slot: string; value: string | undefined }[] = [];
   const widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [];
+  const footers: unknown[] = [];
+  const workingIndicators: unknown[] = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
   await loader.reload();
   const model = getModel("anthropic", "claude-sonnet-4-5") ?? undefined;
@@ -450,7 +474,9 @@ export async function loadPerkSession(opts: {
   });
 
   await session.bindExtensions({
-    uiContext: headful ? headfulUIContext(notifies, statuses, widgets, notifyEvents) : undefined,
+    uiContext: headful
+      ? headfulUIContext(notifies, statuses, widgets, notifyEvents, footers, workingIndicators)
+      : undefined,
     // Forward the Pi run mode so `ctx.mode` (and the `run_mode` sentinel) is observable.
     mode: opts.mode,
     // Surface (don't swallow) extension-handler failures; a real bug also fails downstream asserts.
@@ -466,6 +492,29 @@ export async function loadPerkSession(opts: {
     notifyEvents,
     statuses,
     widgets,
+    workingIndicators,
+    footerFactory: () => footers.at(-1) ?? null,
+    renderFooter(width = 80, data = {}) {
+      const factory = footers.at(-1) as
+        | ((
+            tui: { requestRender(): void },
+            theme: { fg(color: string, text: string): string },
+            footerData: {
+              getGitBranch(): string | null;
+              getExtensionStatuses(): ReadonlyMap<string, string>;
+              onBranchChange(callback: () => void): () => void;
+            },
+          ) => { render(width: number): string[] })
+        | undefined;
+      if (!factory) throw new Error("no footer factory captured");
+      const fakeTheme = { fg: (_color: string, text: string) => text };
+      const component = factory({ requestRender: () => {} }, fakeTheme, {
+        getGitBranch: () => (data.branch === undefined ? "main" : data.branch),
+        getExtensionStatuses: () => data.statuses ?? new Map<string, string>(),
+        onBranchChange: () => () => {},
+      });
+      return component.render(width);
+    },
     sentinel() {
       const path = join(workflowDir(cwd), ".perk-t3.json");
       if (!existsSync(path)) return null;

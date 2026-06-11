@@ -38,7 +38,7 @@ import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
-import { createPerkStatus } from "./surfaces.ts";
+import { createPerkStatus, installPerkFooter } from "./surfaces.ts";
 import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
@@ -132,6 +132,16 @@ export default function (pi: ExtensionAPI) {
     registryStages = -1;
   }
   const registryOk = registryStages > 0;
+
+  // Node 2.3 — the composed `perk` status handle (charter D2): one slot, ordered objective →
+  // checkpoints segments. Created once here (no hidden module state) and threaded into the two
+  // segment publishers below; node 3.1's footer reads it back via get/subscribe.
+  const perkStatus = createPerkStatus();
+
+  // Node 3.1 — install the perk-owned footer once per session (charter D2/D7). Once-only: pi's
+  // dispose contract for a REPLACED footer factory is unverified, so re-installing on every
+  // session_start (reload) could leak the previous handle subscription.
+  let footerInstalled = false;
 
   pi.on("session_start", async (_event, ctx) => {
     const branchEntries = () => branchOf(ctx);
@@ -244,8 +254,21 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
-    // Headless now gains one stderr line (accepted — node 3.1 retires this toast to the footer).
-    report(ctx, "startup", "info", `v${version} loaded`);
+    // Node 3.1 (charter D7): perk identity is standing footer state, not a transition — the
+    // `v<version> loaded` toast (and its headless stderr mirror) is retired. D5 is rescinded:
+    // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
+    if (ctx.hasUI && !footerInstalled) {
+      installPerkFooter(ctx, {
+        identity: `perk v${version}`,
+        status: perkStatus,
+        getModelId: () => ctx.model?.id ?? null,
+        getContext: () => {
+          const usage = ctx.getContextUsage();
+          return usage ? { percent: usage.percent, contextWindow: usage.contextWindow } : null;
+        },
+      });
+      footerInstalled = true;
+    }
 
     if (process.env.PERK_SELFCHECK) {
       try {
@@ -313,11 +336,6 @@ export default function (pi: ExtensionAPI) {
   // P2.T5 — the read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
   registerCiExecutor(pi);
-
-  // Node 2.3 — the composed `perk` status handle (charter D2): one slot, ordered objective →
-  // checkpoints segments. Created once here (no hidden module state) and threaded into the two
-  // segment publishers below.
-  const perkStatus = createPerkStatus();
 
   // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/

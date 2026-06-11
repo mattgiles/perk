@@ -82,9 +82,10 @@ fixes).
 
 ### Not used today
 
-Themed widget factories, `placement: "belowEditor"`, `setFooter`/`footerData`,
-`setWorkingIndicator`, `ctx.ui.custom` components/overlays, `renderCall`/`renderResult` tool
-renderers, `theme.fg` anywhere, `truncateToWidth`/`visibleWidth`.
+`setWorkingIndicator` (declined — D5 rescinded in node 3.1, see §6), `ctx.ui.custom`
+components/overlays, `renderCall`/`renderResult` tool renderers. *(Charter-time entries since
+adopted: themed widget factories + `theme.fg` + `truncateToWidth`/`visibleWidth` +
+`placement: "belowEditor"` in node 2.2; `setFooter`/`footerData` in node 3.1.)*
 
 ## §3 Surface taxonomy + placement rules
 
@@ -141,8 +142,11 @@ full `done/total` summary, so no information is lost — only standing screen he
 - **The only truncation tools** are `truncateToWidth` / `visibleWidth` (from
   `@earendil-works/pi-tui`); no hand-rolled slicing. **Emoji occupy two terminal cells** — all
   width math accounts for it.
-- **Footer segment-priority overflow order**: when the footer line overflows, drop guest
-  extension statuses first, then model, then branch; **never** drop perk identity + objective.
+- **Footer segment-priority overflow order**: when the footer line overflows, drop whole
+  segments — guest extension statuses first (rightmost-first), then model, then branch, then
+  context usage, then the checkpoints segment (the node-3.1 extension for the new segments);
+  **never** drop perk identity + objective — if still over after all drops, `truncateToWidth`
+  as the last resort.
 - **Widgets truncate with ellipsis rather than wrap.** One logical line = one rendered line.
 
 ## §5 Glyph + severity vocabulary
@@ -201,26 +205,65 @@ composing, in fixed order:
 - The two `setStatus` keys (`perk-checkpoints`, `perk-objective`) become footer **segments**; the
   separate-status era ends in nodes 2.3/3.1. (Node 2.3 collapsed the two keys into the **single
   composed `perk` status slot** — ordered objective → checkpoints, two-space join, composed by
-  `surfaces.ts createPerkStatus`; node 3.1 lifts that composition into `setFooter`.)
+  `surfaces.ts createPerkStatus`; node 3.1 lifted that composition into `setFooter` —
+  `surfaces.ts perkFooter`/`installPerkFooter`, installed once per session on `session_start`,
+  headful only. The composed `perk` slot **keeps publishing**: it is the RPC-visible surface,
+  since `setFooter` is an RPC no-op.)
+
+**Node-3.1 amendments (user-confirmed in the node-3.1 planning session):**
+
+- **Context-usage segment.** The footer gains a context segment after model (extending the D2
+  list above between items 5 and 6): `<percent.toFixed(1)>%/<window>` mirroring pi's default
+  footer (e.g. `42.3%/200k`; `?/<window>` when percent is unknown), via `ctx.getContextUsage()`,
+  colored `error` when >90, `warning` when >70, else dim.
+- **Split layout.** The one footer line is split: perk segments left (identity · 🎯 objective ·
+  📋 checkpoints, two-space-joined, segments verbatim), system info right-aligned (branch ·
+  model · context · guests, two-space-joined, ≥2 spaces of padding between the groups, dim):
+
+  ```
+  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2      main  gpt-5  42.3%/200k  ◆ g
+  └─────────┘  └──────────────────────┘ └──────────┘     └──┘  └───┘  └────────┘  └──┘
+   identity      objective segment      checkpoints    branch  model   context  guest
+  ◀════════ left group (charter order 1–3) ══▶  ◀══ right group (4, 5, +context, 6) ══▶
+  ```
+
+- **Extended D9 drop order.** With the new segments, overflow drops whole segments in order:
+  guests (rightmost-first) → model → branch → context → checkpoints; identity + objective are
+  truncate-only, never dropped (see §4).
 
 **Themed widget factories (D3/D10).** Widgets adopt the `(tui, theme) => ({ render, invalidate })`
 factory form so glyphs are theme-colored without pre-baking (§5).
 
 **`belowEditor` placement (D4).** All perk widgets render below the editor (§3).
 
-**`setWorkingIndicator` (D5).** Perk adopts a branded working indicator — a light identity touch,
-cheap and reversible; the exact frames are node 3.1's call within the D3 vocabulary. Two pi facts
-bind the implementation: frames are rendered **verbatim** (perk must theme them itself via
-`ctx.ui.theme.fg(...)`), and only the **streaming spinner** is affected (compaction/retry loaders
-keep pi's built-in styling).
-
 ### Declined
 
+- **`setWorkingIndicator` (D5): RESCINDED** — a node-3.1 user decision (this entry moved from
+  Adopted; D5 originally committed to a branded working indicator). The API rationale: indicator
+  frames are rendered **verbatim** — pre-baked strings whose colors perk would have to bake in
+  itself, which collides with the D10 never-pre-bake-theme-colors law, and no theme-change hook
+  exists to rebuild them against. Perk keeps pi's default spinner; perk never calls
+  `setWorkingIndicator`.
 - **`ctx.ui.custom` components/overlays (D6): not adopted** in this objective. The existing
   `confirm`/`select`/`input` prompts suffice; recorded as out of charter scope.
 - **`renderCall`/`renderResult` tool renderers: not adopted.** Not needed yet — recorded as
   future-eligible (a later objective may render perk tool calls richly; nothing here forecloses
   it).
+
+### Recorded gaps (node 3.1) — what the pi API can't express
+
+1. **`setFooter` (and `setWorkingIndicator`) are no-ops in RPC mode.** The composed `perk` status
+   slot (`setStatus`, dual-published by `createPerkStatus`) remains the RPC-visible surface —
+   this is why the slot keeps publishing even though the TUI footer renders the segments
+   directly.
+2. **Guest-status freshness is best-effort.** Pi gives no repaint guarantee on a guest
+   `setStatus` change reaching a custom footer (already charter-accepted under D2; restated here
+   as the gap it is).
+3. **Model/context reactivity is render-driven.** No model-change or context-usage event exists
+   for extensions; the footer reads `ctx.model`/`ctx.getContextUsage()` live per render and
+   catches up on the next repaint.
+4. **Working-indicator theming.** `setWorkingIndicator` frames render verbatim with pre-baked
+   colors and cannot be live-themed — the D10 conflict that motivated declining D5.
 
 ## §7 Implementation map
 
@@ -229,5 +272,5 @@ keep pi's built-in styling).
 | 2.1 | Surfaces module: `report()` grows into the one routing seam; every direct-notify call site in §2 conforms to the §3/§5 grammar + D7 policy. |
 | 2.2 | Checkpoints convergence: D1 windowing (≤ ~4 lines), D3 glyphs (retire `☑ ▶ ☐`), themed factories + D10, D9 truncation; amends the `shared/contracts.md` checkpoints render spec in the same turn. |
 | 2.3 | Status coordination: the two `setStatus` keys become ordered footer segments; the `perk-objective` widget may be retired (D2/D8). *(Implemented: the two per-feature status slots collapsed into one composed `perk` slot — objective → checkpoints order, two-space join — and the `perk-objective` widget is retired; the checkpoints widget keeps slot `perk-checkpoints`.)* |
-| 3.1 | Footer + indicator adoption: `setFooter` with the D2 segment spec, ownership law, and reactivity contract; D9 overflow order; `setWorkingIndicator` (D5); the version banner moves toast → footer (D7). |
+| 3.1 | Footer adoption (shipped): `setFooter` with the D2 segment spec + the node-3.1 context segment + split layout, ownership law, and reactivity contract; the extended D9 overflow order; the `perk ${version} loaded` toast retired — identity is a standing footer segment (D7). D5 **rescinded** (no `setWorkingIndicator`); the API gaps recorded in §6. |
 | 4.1 | Regression guard: tests pinning the charter's budgets and vocabulary so drift fails CI. |

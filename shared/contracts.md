@@ -236,7 +236,9 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
   **objective segment of the single composed `perk` status slot** (segments ordered objective →
   checkpoints per charter D2, joined with two spaces, composed by `surfaces.ts createPerkStatus` —
   headless calls are full no-ops); the `perk-objective` **widget is retired** (node 2.3) — the
-  status segment carries id + tokens + elapsed (`🎯 <id> · <tokens> tok · <elapsed>`). Rebuilt on
+  status segment carries id + tokens + elapsed (`🎯 <id> · <tokens> tok · <elapsed>`). In TUI mode
+  the segment renders inside the **perk-owned footer** (node 3.1, see the checkpoints block below);
+  the composed `perk` status slot keeps publishing and is the RPC-visible surface. Rebuilt on
   `session_start`, `session_tree`, **and** `agent_end` (survives reload/branch/compaction for
   free). Pure helpers
   (`sumAssistantTokens` / `formatBudgetLine` / `findBudgetMarker` / `rebuildBudget`) are
@@ -439,7 +441,20 @@ width-truncated via pi-tui's `truncateToWidth` (D9). `/checkpoints` notifies a *
 (D8): `done/total · ▸n <current step text>` (the ` · ▸n <text>` tail drops when no step is
 current). **Accepted RPC caveat:** pi drops component-factory widgets in RPC mode (only string
 arrays forward), so the checkpoints widget is invisible to RPC clients — the status (now arriving
-under the composed slot `perk`) and `/checkpoints` remain the RPC-visible surfaces. The **marker protocol is taught to the implement session**
+under the composed slot `perk`) and `/checkpoints` remain the RPC-visible surfaces. **Footer
+ownership (node 3.1, charter D2):** in TUI mode perk **owns the footer wholesale** via
+`ctx.ui.setFooter` (`surfaces.ts perkFooter`/`installPerkFooter` — installed once per session on
+`session_start`, headful only): one line composing, in charter order, perk identity
+(`perk v<version>`), the 🎯 objective segment, the 📋 checkpoints segment (left group), then git
+branch, model, context usage (`<pct>%/<window>`, warning >70 / error >90), and guest extension
+statuses (right-aligned), with the extended D9 drop order on overflow (guests → model → branch →
+context → checkpoints; identity + objective never drop). The composed `perk` status slot
+**remains published** (the `createPerkStatus` dual-publish is deliberate) and is the RPC-visible
+surface — `setFooter` is an RPC no-op. The `v<version> loaded` startup notify is **retired**
+(charter D7: identity is standing footer state, not a transition) — `session_start` no longer
+emits a startup notify or its headless stderr mirror; the `PERK_SELFCHECK` `.perk-loaded` sentinel
+is unchanged. D5 (branded working indicator) is **rescinded**: perk never calls
+`setWorkingIndicator`. The **marker protocol is taught to the implement session**
 via `_implement_prompt` (the launch prompt) + the **`perk-implement` skill**, so the implementer
 knows to emit `[WIP:n]`/`[DONE:n]`. **Coarse fallback (P2.T15):** when no `## Steps` checklist exists
 but a plan is active, the status bar shows `📋 <stage>` (the stage label from the handoff,
