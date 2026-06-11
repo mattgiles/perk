@@ -9,10 +9,12 @@
 // Composed status (node 2.3, charter §6 D2): perk presents ONE footer status under the single
 // `perk` slot — the objective + checkpoints segments composed in fixed charter order (objective
 // first), joined with two spaces. The per-feature status slots (`perk-checkpoints`,
-// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). Node 3.1 lifts
-// this composition into `setFooter`; the regression guard binds in node 4.1.
+// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). Node 3.1 lifted
+// this composition into the perk-owned footer (`perkFooter`/`installPerkFooter` below); the
+// composed `perk` status slot keeps publishing — it is the RPC-visible surface (setFooter is an
+// RPC no-op). The regression guard binds in node 4.1.
 
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
 // Re-exports: the notify seam stays in report.ts; surfaces.ts is the one import for UI vocabulary.
 export { type ReportTarget, report, type Severity } from "./report.ts";
@@ -110,11 +112,20 @@ const PERK_SEGMENT_SEPARATOR = "  ";
 
 /**
  * The composed-status handle: each controller publishes its segment text through `set`, and the
- * handle recomposes + republishes the single `perk` status slot.
+ * handle recomposes + republishes the single `perk` status slot. Node 3.1: the footer reads
+ * segments back via `get` and repaints via `subscribe` — the slot's `setStatus` dual-publish is
+ * deliberate (RPC clients see the slot; setFooter is an RPC no-op).
  */
 export interface PerkStatusHandle {
   /** Set (or clear, with undefined) one segment; recomposes the slot. No-op headless. */
   set(target: StandingTarget, segment: PerkSegmentKey, text: string | undefined): void;
+  /** The current text of one segment (undefined when unset). */
+  get(segment: PerkSegmentKey): string | undefined;
+  /**
+   * Subscribe to recompositions: the listener fires after every headful `set` (headless `set`
+   * calls are full no-ops, so nothing fires). Returns an unsubscribe.
+   */
+  subscribe(listener: () => void): () => void;
 }
 
 /**
@@ -126,6 +137,7 @@ export interface PerkStatusHandle {
  */
 export function createPerkStatus(): PerkStatusHandle {
   const segments = new Map<PerkSegmentKey, string>();
+  const listeners = new Set<() => void>();
   return {
     set(target, segment, text) {
       if (!target.hasUI) return;
@@ -138,8 +150,185 @@ export function createPerkStatus(): PerkStatusHandle {
         .map((key) => segments.get(key) as string)
         .join(PERK_SEGMENT_SEPARATOR);
       target.ui.setStatus(STATUS_SLOT_PERK, composed === "" ? undefined : composed);
+      for (const listener of listeners) listener();
+    },
+    get(segment) {
+      return segments.get(segment);
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
+}
+
+// --- the perk-owned footer (node 3.1 / charter D2) -----------------------------------------------
+
+/**
+ * The raw material for one composed footer line. Left group (charter order 1–3): `identity`,
+ * `objective`, `checkpoints` — the segments render verbatim (they carry their own 🎯/📋 marks).
+ * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `context`, `guests` —
+ * right-aligned, non-segment system text dim-themed.
+ */
+export interface FooterParts {
+  /** e.g. `perk v0.0.1` — standing identity (D7), dim. */
+  identity: string;
+  /** The 🎯 objective segment, verbatim (`handle.get("objective")`). */
+  objective?: string;
+  /** The 📋 checkpoints segment, verbatim (`handle.get("checkpoints")`). */
+  checkpoints?: string;
+  /** Git branch (dim); omitted when not in a repo. */
+  branch?: string;
+  /** Model id (dim); omitted when no model. */
+  model?: string;
+  /** Context usage — rendered `<pct>%/<window>` (dim; warning >70, error >90; `?` when null). */
+  context?: { percent: number | null; contextWindow: number };
+  /** Guest extension statuses (dim), pre-sorted by slot key; sanitized here. */
+  guests: string[];
+}
+
+/** Pi's `sanitizeStatusText` behavior, reimplemented locally (pi does not export it). */
+function sanitizeGuestStatus(text: string): string {
+  return text
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+}
+
+/** The context segment, mirroring pi's default footer: `42.3%/200k`, `?/200k` when unknown. */
+function formatContextSegment(
+  context: { percent: number | null; contextWindow: number },
+  theme: ThemeLike,
+): string {
+  const pct = context.percent;
+  const text = `${pct === null ? "?" : `${pct.toFixed(1)}%`}/${formatTokens(context.contextWindow)}`;
+  if (pct !== null && pct > 90) return theme.fg("error", text);
+  if (pct !== null && pct > 70) return theme.fg("warning", text);
+  return theme.fg("dim", text);
+}
+
+/**
+ * Compose THE one footer line (FOOTER_MAX_LINES = 1): left group = identity + objective +
+ * checkpoints (two-space-joined, charter order); right group = branch + model + context + guests
+ * (two-space-joined), right-aligned with ≥2 spaces of padding. When the line exceeds `width`,
+ * whole segments drop in the extended D9 order — guests (rightmost-first) → model → branch →
+ * context → checkpoints; `identity` and `objective` are NEVER dropped — then `truncateToWidth`
+ * as the last resort (ANSI- and 2-cell-emoji-aware).
+ */
+export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: number): string {
+  const keep = {
+    guests: parts.guests.map((g) => sanitizeGuestStatus(g)),
+    model: true,
+    branch: true,
+    context: true,
+    checkpoints: true,
+  };
+  const compose = (): string => {
+    const left = [theme.fg("dim", parts.identity)];
+    if (parts.objective !== undefined) left.push(parts.objective);
+    if (keep.checkpoints && parts.checkpoints !== undefined) left.push(parts.checkpoints);
+    const right: string[] = [];
+    if (keep.branch && parts.branch !== undefined) right.push(theme.fg("dim", parts.branch));
+    if (keep.model && parts.model !== undefined) right.push(theme.fg("dim", parts.model));
+    if (keep.context && parts.context !== undefined) {
+      right.push(formatContextSegment(parts.context, theme));
+    }
+    for (const guest of keep.guests) right.push(theme.fg("dim", guest));
+    const leftText = left.join(PERK_SEGMENT_SEPARATOR);
+    if (right.length === 0) return leftText;
+    const rightText = right.join(PERK_SEGMENT_SEPARATOR);
+    const padding = Math.max(2, width - visibleWidth(leftText) - visibleWidth(rightText));
+    return `${leftText}${" ".repeat(padding)}${rightText}`;
+  };
+  let line = compose();
+  while (visibleWidth(line) > width) {
+    if (keep.guests.length > 0) keep.guests.pop();
+    else if (keep.model) keep.model = false;
+    else if (keep.branch) keep.branch = false;
+    else if (keep.context) keep.context = false;
+    else if (keep.checkpoints) keep.checkpoints = false;
+    else break; // identity + objective only — nothing left to drop
+    line = compose();
+  }
+  return truncateToWidth(line, width);
+}
+
+/**
+ * Structural mirror of pi's `ReadonlyFooterDataProvider` (keeps surfaces.ts dependency-light;
+ * the real provider satisfies it).
+ */
+export interface FooterDataLike {
+  getGitBranch(): string | null;
+  getExtensionStatuses(): ReadonlyMap<string, string>;
+  onBranchChange(callback: () => void): () => void;
+}
+
+/** What `perkFooter` needs from the extension: identity, the status handle, and live closures. */
+export interface PerkFooterDeps {
+  identity: string;
+  status: PerkStatusHandle;
+  getModelId(): string | null;
+  getContext(): { percent: number | null; contextWindow: number } | null;
+}
+
+/**
+ * The footer component factory shape `setFooter` receives. Pi's real signature —
+ * `(tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?() }`
+ * — satisfies this narrower structural type.
+ */
+export type PerkFooterFactory = (
+  tui: { requestRender(): void },
+  theme: ThemeLike,
+  footerData: FooterDataLike,
+) => { render(width: number): string[]; invalidate(): void; dispose(): void };
+
+/**
+ * The perk-owned footer factory (charter D2): replaces pi's default footer wholesale with one
+ * line in the intended split layout. `render` gathers everything live per call (D10 stateless
+ * render): segments via the handle, branch/guests via `footerData` (excluding perk's own
+ * `STATUS_SLOT_PERK` — the slot keeps publishing for RPC, but the footer renders the segments
+ * directly), model/context via the deps closures. Reactivity (the D2 contract): repaints on
+ * every handle recompose and on branch change; `dispose` detaches both.
+ */
+export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
+  return (tui, theme, footerData) => {
+    const unsubscribeStatus = deps.status.subscribe(() => tui.requestRender());
+    const unsubscribeBranch = footerData.onBranchChange(() => tui.requestRender());
+    return {
+      render(width) {
+        const guests = [...footerData.getExtensionStatuses().entries()]
+          .filter(([key]) => key !== STATUS_SLOT_PERK)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([, text]) => text);
+        const parts: FooterParts = {
+          identity: deps.identity,
+          objective: deps.status.get("objective"),
+          checkpoints: deps.status.get("checkpoints"),
+          branch: footerData.getGitBranch() ?? undefined,
+          model: deps.getModelId() ?? undefined,
+          context: deps.getContext() ?? undefined,
+          guests,
+        };
+        return [composeFooterLine(parts, theme, width)];
+      },
+      invalidate() {
+        // nothing cached — render() recomputes everything per call (D10)
+      },
+      dispose() {
+        unsubscribeStatus();
+        unsubscribeBranch();
+      },
+    };
+  };
+}
+
+/** Install the perk-owned footer (sole-owner law, D2); no-op headless. */
+export function installPerkFooter(
+  target: { hasUI: boolean; ui: { setFooter(factory: PerkFooterFactory | undefined): void } },
+  deps: PerkFooterDeps,
+): void {
+  if (!target.hasUI) return;
+  target.ui.setFooter(perkFooter(deps));
 }
 
 // --- format helpers (relocated from checkpoints.ts / objective.ts, verbatim) --------------------
@@ -227,7 +416,8 @@ export function renderProgressLines(
 
 function formatTokens(tokens: number): string {
   if (tokens < 1000) return `${tokens}`;
-  return `${(tokens / 1000).toFixed(1)}k`;
+  // Whole-k values render bare (`200k`, matching pi's footer); fractional keep one decimal.
+  return `${(tokens / 1000).toFixed(1).replace(/\.0$/, "")}k`;
 }
 
 function formatElapsed(ms: number): string {
