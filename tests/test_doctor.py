@@ -278,7 +278,7 @@ def test_unreadable_managed_file_is_fail_not_crash(git_repo):
 
 
 def test_fix_verify_stays_healthy_with_stubbed_sync(git_repo, stub_env, converge_skills_workspace):
-    # `stub_env` no-ops `init._sync_skills`; `run_doctor(fix=True, verify=True)` must not crash
+    # `stub_env` no-ops `init.sync_skills`; `run_doctor(fix=True, verify=True)` must not crash
     # and stays healthy on a freshly converged repo (with a delivered skills substrate).
     _scaffold(git_repo)
     converge_skills_workspace(git_repo)
@@ -291,7 +291,7 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
     # no-op) to observe that `--fix` materializes skills under `verify`.
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
+    monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=True, verify=True)
     assert called == [git_repo]
 
@@ -299,7 +299,7 @@ def test_fix_invokes_sync_under_verify(git_repo, monkeypatch, stub_env):
 def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
     _scaffold(git_repo)
     called = []
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: called.append(root))
+    monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: called.append(root))
     run_doctor(git_repo, fix=False, verify=True)
     assert called == []
 
@@ -366,7 +366,7 @@ def test_skills_delivery_absent_without_verify(git_repo):
 def test_fix_sync_failure_carried_on_fix_errors(git_repo, monkeypatch, stub_env):
     _scaffold(git_repo)
     (git_repo / ".gitignore").write_text("x\n", encoding="utf-8")  # drift to trigger fixes
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: "sync exploded")
+    monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: "sync exploded")
     report = run_doctor(git_repo, fix=True, verify=True)
     assert report.fix_errors == ["sync exploded"]
     # The post-fix re-verify shows the still-broken skills-delivery check (exit reflects it).
@@ -577,7 +577,7 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path, converge_skills_work
 
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
-    monkeypatch.setattr(init, "_sync_skills", lambda root, changes, **kw: None)
+    monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: None)
     _scaffold(tmp_path_repo := _git_repo_at(tmp_path))
     converge_skills_workspace(tmp_path_repo)
     report = run_doctor(tmp_path_repo, verify=True)

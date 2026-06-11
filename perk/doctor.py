@@ -794,7 +794,7 @@ _MIGRATIONS: tuple[Callable[[Path], list[str]], ...] = (_untrack_materialized_pl
 def _fix_config(root: Path) -> list[str]:
     """Re-seed *missing* config files only (never overwrite a present/edited one)."""
     changes: list[str] = []
-    init._converge_config(root, changes, force=False, interactive=False)
+    init.converge_config(root, changes, force=False, interactive=False)
     return changes
 
 
@@ -836,7 +836,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
         # tests; a sync that links missing skills clears the `bindings`/`skills-delivery`
         # findings on the post-fix re-verify.
         if verify:
-            sync_error = init._sync_skills(root, fixed, self_repo=self_repo)
+            sync_error = init.sync_skills(root, fixed, self_repo=self_repo)
             if sync_error is not None:
                 fix_errors.append(sync_error)
         if fixed or fix_errors:

@@ -48,21 +48,21 @@ def test_sync_skills_runs_for_self_repo(git_repo, monkeypatch, stub_env):
     # The `skills` CLI is the single delivery path in both trees: self-repo now syncs too.
     (git_repo / "pyproject.toml").write_text("[tool.perk]\nself = true\n", encoding="utf-8")
     called = []
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: called.append(root))
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: called.append(root))
     run_init(git_repo, verify=True)
     assert called == [git_repo]
 
 
 def test_sync_skills_runs_for_consumer_under_verify(git_repo, monkeypatch, stub_env):
     called = []
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: called.append(root))
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: called.append(root))
     run_init(git_repo, verify=True)
     assert called == [git_repo]
 
 
 def test_sync_skills_not_run_without_verify(tmp_path, monkeypatch):
     called = []
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: called.append(root))
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: called.append(root))
     run_init(tmp_path, verify=False)  # unit-test path: no external shells
     assert called == []
 
@@ -83,7 +83,7 @@ class _Proc:
 
 def test_sync_skills_fails_when_cli_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(init_mod.shutil, "which", lambda name: None)
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None and "not on PATH" in error
 
 
@@ -95,13 +95,13 @@ def test_sync_skills_reports_only_on_link_change(tmp_path, monkeypatch):
     states = iter([{}, {"perk-plan": "/cache/perk-plan"}])
     monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: next(states))
     changes: list[str] = []
-    assert init_mod._sync_skills(tmp_path, changes) is None
+    assert init_mod.sync_skills(tmp_path, changes) is None
     assert changes == [".agents/skills/: synchronized via skills update --sync"]
 
     # Link set unchanged -> no change entry (idempotent reporting).
     monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: {"perk-plan": "/cache/x"})
     changes2: list[str] = []
-    assert init_mod._sync_skills(tmp_path, changes2) is None
+    assert init_mod.sync_skills(tmp_path, changes2) is None
     assert changes2 == []
 
 
@@ -116,7 +116,7 @@ def test_sync_skills_fails_on_nonzero_skills_init(tmp_path, monkeypatch):
             else _Proc()
         ),
     )
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None
     assert "skills init --cache=local" in error and "tracked Git content" in error
 
@@ -130,7 +130,7 @@ def test_sync_skills_fails_on_nonzero_skills_update(tmp_path, monkeypatch):
             _Proc(2, "manifest not found") if args[:2] == ["skills", "update"] else _Proc()
         ),
     )
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None
     assert "skills update --sync" in error and "manifest not found" in error
 
@@ -143,14 +143,14 @@ def test_sync_skills_fails_on_subprocess_error(tmp_path, monkeypatch):
         raise OSError("skills exploded")
 
     monkeypatch.setattr(init_mod.subprocess, "run", boom)
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None and "skills exploded" in error
 
     def slow(*a, **k):
         raise subprocess.TimeoutExpired(cmd="skills", timeout=30)
 
     monkeypatch.setattr(init_mod.subprocess, "run", slow)
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None and "timed out" in error
 
 
@@ -158,7 +158,7 @@ def test_sync_skills_fails_when_delivery_missing(tmp_path, monkeypatch):
     # Post-sync presence verification: a sync that links nothing (outdated CLI) is a failure.
     monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/skills")
     monkeypatch.setattr(init_mod.subprocess, "run", lambda *a, **k: _Proc())
-    error = init_mod._sync_skills(tmp_path, [])
+    error = init_mod.sync_skills(tmp_path, [])
     assert error is not None
     assert "did not deliver" in error and "perk-plan" in error
 
@@ -189,11 +189,11 @@ def test_conflict_probe_giterror_degrades_to_no_short_circuit(git_repo, monkeypa
 
     monkeypatch.setattr(init_mod, "skills_conflict_paths", boom)
     report = run_init(git_repo, verify=True)
-    assert report.ok  # stubbed _sync_skills succeeds
+    assert report.ok  # stubbed sync_skills succeeds
 
 
 def test_sync_failure_is_fatal_and_preserves_changes(git_repo, monkeypatch, stub_env):
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: "sync exploded")
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: "sync exploded")
     report = run_init(git_repo, verify=True)
     assert not report.ok and report.error_type == "skills_sync_failed" and report.exit_code == 2
     assert report.message == "sync exploded"
@@ -215,7 +215,7 @@ def test_missing_tool_is_exit_2(git_repo, monkeypatch):
 def test_github_error_is_non_fatal(git_repo, monkeypatch):
     # A flaky/slow/broken gh (GitHubError) must not crash init (D3 — GitHub non-fatal).
     monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: True)
-    monkeypatch.setattr(init_mod, "_sync_skills", lambda root, changes, **kw: None)  # no network
+    monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)  # no network
 
     def boom():
         raise gh_mod.GitHubError("gh timed out")

@@ -20,13 +20,9 @@ class EnvCheck:
     remediation: str
 
 
-def _which(name: str) -> str | None:
-    return shutil.which(name)
-
-
 def _node_version() -> str | None:
     """`node --version` -> e.g. ``v22.19.0`` (or ``None`` if node is absent/broken)."""
-    if _which("node") is None:
+    if shutil.which("node") is None:
         return None
     try:
         proc = subprocess.run(
@@ -58,7 +54,7 @@ def _check_node() -> EnvCheck:
 
 
 def _check_tool(name: str, remediation: str) -> EnvCheck:
-    path = _which(name)
+    path = shutil.which(name)
     if path is None:
         return EnvCheck(name, False, "not found", remediation)
     return EnvCheck(name, True, path, "")

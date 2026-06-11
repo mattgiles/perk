@@ -633,7 +633,7 @@ def _sync_failure(command: str, reason: str) -> str:
     )
 
 
-def _sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
+def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
     """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
 
     The ``skills`` CLI is the single delivery path for perk's own skills: the ``..``/``git:`` Pi
@@ -723,7 +723,7 @@ def _converge_subagent_agents(root: Path, *, apply: bool = True) -> list[str]:
     return [".pi/agents/: created"]
 
 
-def _converge_config(
+def converge_config(
     root: Path, changes: list[str], *, force: bool = False, interactive: bool = True
 ) -> None:
     """Scaffold the committed + local TOML config.
@@ -909,7 +909,7 @@ def run_init(
     changes: list[str] = []
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
-    _converge_config(root, changes, force=force, interactive=interactive)
+    converge_config(root, changes, force=force, interactive=interactive)
     # Materialize the declared skills under the covers via the `skills` CLI — the single delivery
     # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
     # so Pi discovers `perk-*` only through `.agents/skills/`).
@@ -917,7 +917,7 @@ def run_init(
     # Load-bearing (#289): a sync failure is fatal (exit 2) — but convergence already happened,
     # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
     if verify:
-        sync_error = _sync_skills(root, changes, self_repo=self_repo)
+        sync_error = sync_skills(root, changes, self_repo=self_repo)
         if sync_error is not None:
             return InitReport(
                 ok=False,
