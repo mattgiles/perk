@@ -119,7 +119,7 @@ def position_worktree(
     cache.ensure_layout(repo_root)
     cache.write_handoff(repo_root, run_id, {"stage": stage.id, "mode": stage.mode})
     cache.write_plan_ref(repo_root, plan_ref)
-    launch._materialize_plan_body(repo_root, repo_root, plan_ref)
+    launch.materialize_plan_body(repo_root, repo_root, plan_ref)
 
 
 def _spawn_worker(

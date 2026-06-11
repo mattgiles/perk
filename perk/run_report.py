@@ -99,6 +99,35 @@ def _failure_section(outcome: dict[str, Any]) -> str:
     return f"\n\n**Failure summary:**\n\n{summary}"
 
 
+def _outcome_body(*, outcome: dict[str, Any] | None, exit_code: int, run_url: str | None) -> str:
+    """The shared post-head fragment (everything from ``Status:`` onward) for
+    :func:`format_outcome` and :func:`format_step_summary`.
+
+    Without an ``outcome`` (events file unreadable): a clearly-labelled degraded note derived
+    from ``exit_code`` only. With one: status, ``terminal_signal``, the budget line, the PR link
+    when present, the run URL, and on any non-``completed`` status the verbatim worker failure
+    summary.
+    """
+    if outcome is None:
+        degraded = (
+            "completed (no structured outcome on disk)"
+            if exit_code == 0
+            else "failed (no structured outcome on disk)"
+        )
+        return f"Status: {degraded}{_run_line(run_url)}"
+    status = outcome.get("status")
+    body = (
+        f"Status: {status}"
+        f"\nterminal_signal: {outcome.get('terminal_signal')}"
+        f"{_budget_line(outcome)}"
+        f"{_pr_line(outcome)}"
+        f"{_run_line(run_url)}"
+    )
+    if status != "completed":
+        body += _failure_section(outcome)
+    return body
+
+
 def format_started(*, run_id: str, stage: str, plan: int, run_url: str | None) -> str:
     """The started body (marker first). No GitHub-sourced prose."""
     marker = RUN_REPORT_MARKER.format(run_id=run_id)
@@ -129,25 +158,7 @@ def format_outcome(
     """
     marker = RUN_REPORT_MARKER.format(run_id=run_id)
     head = f"{marker}\n🤖 perk remote **{stage}** finished\n\nplan #{plan}\nrun_id: `{run_id}`"
-    if outcome is None:
-        degraded = (
-            "completed (no structured outcome on disk)"
-            if exit_code == 0
-            else "failed (no structured outcome on disk)"
-        )
-        return f"{head}\nStatus: {degraded}{_run_line(run_url)}"
-    status = outcome.get("status")
-    body = (
-        f"{head}"
-        f"\nStatus: {status}"
-        f"\nterminal_signal: {outcome.get('terminal_signal')}"
-        f"{_budget_line(outcome)}"
-        f"{_pr_line(outcome)}"
-        f"{_run_line(run_url)}"
-    )
-    if status != "completed":
-        body += _failure_section(outcome)
-    return body
+    return f"{head}\n{_outcome_body(outcome=outcome, exit_code=exit_code, run_url=run_url)}"
 
 
 def format_step_summary(
@@ -163,25 +174,7 @@ def format_step_summary(
     Self-contained (re-derives from ``outcome``/``exit_code``), not coupled to the comment body.
     """
     head = f"## perk remote {stage}\n\nplan #{plan}"
-    if outcome is None:
-        degraded = (
-            "completed (no structured outcome on disk)"
-            if exit_code == 0
-            else "failed (no structured outcome on disk)"
-        )
-        return f"{head}\n\nStatus: {degraded}{_run_line(run_url)}\n"
-    status = outcome.get("status")
-    body = (
-        f"{head}"
-        f"\n\nStatus: {status}"
-        f"\nterminal_signal: {outcome.get('terminal_signal')}"
-        f"{_budget_line(outcome)}"
-        f"{_pr_line(outcome)}"
-        f"{_run_line(run_url)}"
-    )
-    if status != "completed":
-        body += _failure_section(outcome)
-    return body + "\n"
+    return f"{head}\n\n{_outcome_body(outcome=outcome, exit_code=exit_code, run_url=run_url)}\n"
 
 
 def report_started(

@@ -106,7 +106,7 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
 
 /**
  * The materialized plan-body cache (`cache.plan`, contracts §8.1). Written by the Python cold door
- * (`perk implement` → `launch._materialize_plan_body`) when it positions the worktree; read here so
+ * (`perk implement` → `launch.materialize_plan_body`) when it positions the worktree; read here so
  * in-session checkpoints (P2.T2c) seed from its `## Steps` list (inert when absent).
  */
 export function planBodyPath(cwd: string): string {
