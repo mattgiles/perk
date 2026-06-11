@@ -25,6 +25,14 @@ export const READ_ONLY_TOOLS = [
   "bash",
   "ask_user_question",
   "plan_review",
+  // pi-web-access's research tools (borrowed package): none mutate the repo — fetch_content's
+  // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to
+  // the already-allowlisted curl. Allowlisting foreign tool names is safe when the package is
+  // absent (the plan_review precedent — setActiveTools simply has nothing to enable).
+  "web_search",
+  "code_search",
+  "fetch_content",
+  "get_search_content",
 ];
 
 /** The read-only marker / custom-message type injected into context while active. */

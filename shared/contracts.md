@@ -418,8 +418,10 @@ implement-progress overlay via this perk-owned `perk:checkpoint` seam.
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
-(1) restricts the active tool set to `["read", "grep", "find", "ls", "bash"]` via
-`pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
+(1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
+`ask_user_question` + `plan_review` + the four borrowed `pi-web-access` research tools
+`web_search`/`code_search`/`fetch_content`/`get_search_content`; foreign tool names are inert
+when their package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
 transition; restore it on on→off, falling back to the **full** configured tool set
 `pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
 (2) blocks `edit`/`write`
@@ -1625,7 +1627,9 @@ issues }`: an absent key falls back to the default **silently**; an unknown id o
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
-`_desired_packages` (perk + `BORROWED_PACKAGES`) layer within the same `_converge_settings` body,
+`_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`, `npm:@tombell/pi-status`,
+`npm:pi-subagents`, `npm:pi-web-access` — the borrowed web-research engine, zero-config Exa
+search + content fetch) layer within the same `_converge_settings` body,
 so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
 dry-runs/fixes it for free). The **whole supported set** gives the *provider-managed identity set*
 (every non-null `package`'s npm/git identity) — the discriminator separating provider packages from
