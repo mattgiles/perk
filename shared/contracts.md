@@ -1207,14 +1207,26 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
 - `objective.nodes_for_pr(nodes, pr_number) -> [ObjectiveNode]` (pure) — returns nodes whose `pr`
   backlink matches `pr_number` canonicalized to `"#<n>"` (`"#6"` / `6` / `"6"` interchangeably).
 - `pr_land_cmd._reconcile_objective_on_land(*, plan_ref, repo_root) -> ObjectiveLandUpdate`
-  (`{ objective, nodes_marked, skipped_reason }`) — best-effort, **never raises**: it parses
+  (`{ objective, nodes_marked, skipped_reason, closed }`) — best-effort, **never raises**: it parses
   `plan_ref.objective_id` (`skipped_reason` ∈ `no_objective_link` / `bad_objective_id` /
   `objective_not_found` / `no_linked_node`, or `error: <exc>` on any failure, logged loud-but-non-fatal
   to stderr), then `update_objective_node(... status=DONE)` for each non-terminal matched node. Called
   in `_pr_land_impl`'s **non-dry-run** branch only, **after** `set_marker(PENDING_LEARN)`; the
   dry-run branch sets an inert `ObjectiveLandUpdate(None, (), "dry_run")` and stays fully offline.
-  `_result_to_dict` always emits `"objective": { number, nodes_marked, skipped_reason }`;
-  `_render_human` adds an `objective #N: marked node(s) X done` line when non-empty.
+  `_result_to_dict` always emits `"objective": { number, nodes_marked, skipped_reason, closed }`;
+  `_render_human` adds an `objective #N: marked node(s) X done` line when non-empty (and an
+  `objective #N complete — closed` line when `closed`).
+- **Close-on-complete.** After the marking loop (targets non-empty only — the early-return skips
+  above never reach it), the land path checks completeness **locally** over the post-mark node
+  list (every backlinked target counts as terminal, all other nodes as fetched — the same
+  all-terminal predicate as `DependencyGraph.is_complete`, no re-fetch, no graph construction).
+  When complete it calls `github.close_issue(number=...)` — idempotent REST PATCH, **no closing
+  comment** (symmetric with the §8.20 supervisor close) — and sets `closed=True`. The check runs
+  even when zero nodes were marked (all targets already terminal), so a **re-land is idempotent**:
+  re-landing the final PR still converges the objective to closed. The close is wrapped in its own
+  **isolated fail-open** handler: a close failure preserves the already-marked `nodes_marked`,
+  logs loud-but-non-fatal to stderr, and reports `skipped_reason = "close_failed: <exc>"` with
+  `closed=False` — the land result is never affected.
 - The warm `extension/land.ts` surfaces `objective.nodes_marked` and **auto-drives** the reconcile
   pass via `driveReconcileAfterLand`, which injects
   `reconcileGuidance(...) + bindingSuffix(..., "command:objective-reconcile")` — byte-for-byte the
@@ -1224,7 +1236,11 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
   immediate turn. `land` stays **terminating** because `terminate` only skips the *automatic*
   follow-up LLM call — an injected `followUp` user message is a separate deliberate new turn, so the
   two compose. The success text reports the auto-reconciliation rather than a copy-pasteable nudge;
-  the merge itself is unchanged.
+  the merge itself is unchanged. `land.ts` decodes `objective.closed` **leniently** (missing or
+  non-boolean → `false`, sub-object kept — advisory display detail) and adds an
+  `Objective #N complete — closed.` success line when `closed`; `driveReconcileAfterLand` is
+  unchanged — the reconcile pass still auto-drives after a closing land (a closed issue's
+  body/comments remain editable).
 - The `land` stage I/O gains `github.objective` in both `reads` (the node lookup) and `writes` (the
   mechanical node-done).
 

@@ -35,11 +35,14 @@ class ObjectiveLandUpdate:
     ``objective`` is the linked objective number (``None`` when no link / unparseable).
     ``nodes_marked`` is the ids the merge marked ``done``. ``skipped_reason`` records why nothing
     was marked (or an error string) — the land result is **never** affected by this step.
+    ``closed`` is ``True`` when this land completed the roadmap (every node terminal) and the
+    objective issue was closed.
     """
 
     objective: int | None
     nodes_marked: tuple[str, ...]
     skipped_reason: str | None
+    closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -195,7 +198,30 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
                 repo_root=repo_root,
             )
             marked.append(node.id)
-        return ObjectiveLandUpdate(number, tuple(marked), None)
+        # Completeness is computed LOCALLY over the post-mark node list (no re-fetch — this path
+        # just wrote those statuses itself): every target is terminal after the loop (already-
+        # terminal targets were skipped but are terminal either way), other nodes as fetched. The
+        # predicate matches `DependencyGraph.is_complete` (completeness is dependency-agnostic).
+        # Running this even when `marked` is empty makes a re-land idempotent: re-landing the
+        # final PR still converges the objective to closed.
+        target_ids = {node.id for node in targets}
+        complete = all(
+            node.id in target_ids or node.status in objective.TERMINAL for node in state.nodes
+        )
+        if not complete:
+            return ObjectiveLandUpdate(number, tuple(marked), None)
+        try:
+            # Isolated fail-open: a close failure must NOT fall into the outer handler (which
+            # would discard the already-marked node ids). No closing comment — symmetric with the
+            # supervisor's completion close (§8.20).
+            github.close_issue(number=number, repo_root=repo_root)
+        except Exception as exc:
+            print(
+                f"perk pr land: objective close skipped (non-fatal): {exc}",
+                file=sys.stderr,
+            )
+            return ObjectiveLandUpdate(number, tuple(marked), f"close_failed: {exc}")
+        return ObjectiveLandUpdate(number, tuple(marked), None, closed=True)
     except Exception as exc:  # fail-open: objective tracking never blocks landing
         print(
             f"perk pr land: objective reconciliation skipped (non-fatal): {exc}",
@@ -270,6 +296,7 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
             "number": result.objective.objective,
             "nodes_marked": list(result.objective.nodes_marked),
             "skipped_reason": result.objective.skipped_reason,
+            "closed": result.objective.closed,
         },
         "learn": {
             "closed": list(result.learn.closed),
@@ -293,6 +320,8 @@ def _render_human(result: PrLandResult) -> None:
     if result.objective.nodes_marked:
         nodes = ", ".join(result.objective.nodes_marked)
         user_output(f"  objective #{result.objective.objective}: marked node(s) {nodes} done")
+    if result.objective.closed:
+        user_output(f"  objective #{result.objective.objective} complete — closed")
     if result.learn.closed:
         closed = ", ".join(f"#{n}" for n in result.learn.closed)
         user_output(f"  consolidated learn issue(s) {closed} into docs/learned")

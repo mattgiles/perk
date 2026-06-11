@@ -219,23 +219,91 @@ def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
         )
 
     monkeypatch.setattr(github, "update_objective_node", _update)
+    closed: list[int] = []
+    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path()
     )
+    # node 1.2 stays non-terminal → roadmap incomplete → no close.
     assert out == ObjectiveLandUpdate(5, ("1.1",), None)
+    assert out.closed is False
     assert marked == ["1.1"]
+    assert closed == []
 
 
 def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
+    # Re-land idempotency: the target is already done and the graph is complete — the close still
+    # runs (idempotent convergence) even though zero nodes were marked.
     monkeypatch.setattr(
         github,
         "get_objective",
         lambda **k: _objective_state([_node("1.1", pr="#7", status=objective.NodeStatus.DONE)]),
     )
+    closed: list[int] = []
+    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out == ObjectiveLandUpdate(5, (), None)
+    assert out == ObjectiveLandUpdate(5, (), None, closed=True)
+    assert closed == [5]
+
+
+def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatch):
+    # Landing the final non-terminal node → every node terminal → the objective issue is closed.
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: _objective_state(
+            [
+                _node("1.1", pr="#99", status=objective.NodeStatus.DONE),
+                _node("1.2", pr="#98", status=objective.NodeStatus.SKIPPED),
+                _node("1.3", pr="#7"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    closed: list[int] = []
+    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
+    )
+    assert out == ObjectiveLandUpdate(5, ("1.3",), None, closed=True)
+    assert closed == [5]
+
+
+def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
+    # A close failure must NOT discard the already-marked node ids (isolated fail-open) and must
+    # never affect the land result.
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: _objective_state([_node("1.1", pr="#7")]),
+    )
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+
+    def _boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(github, "close_issue", _boom)
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
+    )
+    assert out.nodes_marked == ("1.1",)
+    assert out.closed is False
+    assert out.skipped_reason is not None and out.skipped_reason.startswith("close_failed:")
+    assert "objective close skipped (non-fatal)" in capsys.readouterr().err
 
 
 def test_reconcile_on_land_is_fail_open(monkeypatch):
@@ -261,7 +329,12 @@ def test_result_to_dict_carries_objective():
         learn=LearnConsumeUpdate((45, 50), None),
     )
     data = _result_to_dict(result)
-    assert data["objective"] == {"number": 5, "nodes_marked": ["1.1"], "skipped_reason": None}
+    assert data["objective"] == {
+        "number": 5,
+        "nodes_marked": ["1.1"],
+        "skipped_reason": None,
+        "closed": False,
+    }
     assert data["learn"] == {"closed": [45, 50], "skipped_reason": None}
 
 
@@ -368,6 +441,7 @@ def test_dry_run_objective_is_inert():
             "number": None,
             "nodes_marked": [],
             "skipped_reason": "dry_run",
+            "closed": False,
         }
 
 
