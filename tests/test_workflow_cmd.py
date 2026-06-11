@@ -155,6 +155,20 @@ def test_empty_state():
     assert "No dispatched runs found" in result.stderr
 
 
+@pytest.mark.parametrize("bad_limit", ["0", "-1"])
+def test_limit_rejects_non_positive(bad_limit):
+    result = _invoke_in_repo(["workflow", "run", "list", "--json", "--limit", bad_limit])
+    assert result.exit_code != 0
+    assert "Invalid value" in result.output
+
+
+def test_limit_one_succeeds():
+    result = _invoke_in_repo(["workflow", "run", "list", "--json", "--limit", "1"], records=[])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+
+
 def test_not_a_repo():
     runner = CliRunner()
     with runner.isolated_filesystem():

@@ -166,7 +166,7 @@ def _render_table(rows: list[dict[str, Any]]) -> None:
 )
 @click.option(
     "--limit",
-    type=int,
+    type=click.IntRange(min=1),
     default=50,
     show_default=True,
     help="Max runs to display (newest-first).",
