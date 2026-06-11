@@ -167,7 +167,7 @@ test("partial vacate: a plannotator-plan selection keeps /plan + injection but d
 
 test("--plan cold start enters read-only on session_start", async () => {
   const cwd = scaffoldRepo();
-  // Unset PERK_RUN_ID so session_start takes the no-op "none" path (ad-hoc `pi --plan`, no run).
+  // Unset PERK_RUN_ID so session_start takes the warm-mint "none" path (ad-hoc `pi --plan`).
   const h = await loadPerkSession({
     cwd,
     env: { PERK_RUN_ID: undefined },

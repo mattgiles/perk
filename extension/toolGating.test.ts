@@ -70,7 +70,7 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
 test("live round-trip: gate enforces read-only, then releases on mode=read-write", async () => {
   const cwd = scaffoldRepo();
   // Two mode entries: navigating across them flips the gate (per-field LWW rebuild + session_tree
-  // re-sync). No run_id/pi_session_id -> session_start takes the no-op "none" path (no appends).
+  // re-sync). No run_id/pi_session_id -> session_start takes the warm-mint "none" path (mints a run_id).
   const file = plantSession(cwd, [{ mode: "read-only" }, { mode: "read-write" }]);
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {

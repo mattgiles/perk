@@ -49,7 +49,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ```
 
 - Keyed by the perk-owned **`run_id`** (a ULID — see §8.2), never the Pi session id (which
-  does not exist yet at cold-door launch time).
+  does not exist yet at cold-door launch time). The keying `run_id` may be **CLI-minted**
+  (cold launch, `perk/run_id.py`) or **extension-minted** (a warm session with no identity,
+  §8.2 — `extension/runId.ts`); handoff blobs remain cold-launch-only.
 - **Handoff blob:** `{ run_id, stage, mode, consumed }` (+ `pi_session_id` once claimed). The
   CLI's cold launch (`perk <stage>`, T4) writes it; the extension claims it on `session_start`
   and sets `consumed: true` (§8.2). `stage` is the target stage id — the launched session's
@@ -135,9 +137,16 @@ the consume mechanism independent of which save surface the model used.
 - `/tree` branches **in place** (same file / UUID / process), so `PERK_RUN_ID` in the env
   survives and the `run_id` stays **stable**.
 
-**Warm keeps / cold mints (matches the registry `run_id` policy).** A warm in-session stage
-transition keeps the `run_id`; a cold relaunch mints a **new** `run_id` that **records its
-predecessor**, so resume/relaunch chains stay traceable.
+**Mint doctrine (three-way).** A warm in-session *stage transition* **keeps** the `run_id`
+(matches the registry per-stage `run_id` policy); a *cold* relaunch **mints** a new `run_id`
+in the **Python plane** (`perk/run_id.py`) that **records its predecessor**, so resume/relaunch
+chains stay traceable; and a **warm session with no identity** (decideClaim's `none` arm — no
+branch `run_id`, no `PERK_RUN_ID`: ad-hoc `pi`, `pi --plan`, spawned subagent children) **mints
+its own ULID in the TS plane** (`extension/runId.ts`) on `session_start`, recording
+`{run_id, pi_session_id}` via the strict append seam (§8.3) — **no predecessor, no handoff, no
+disk artifacts**. A **failed cold claim never falls back to a mint** (`PERK_RUN_ID` set but the
+handoff missing/mismatched stays a loud unclaimed error — minting would mask a launcher bug).
+Under `PERK_SELFCHECK`, the T3 sentinel records a successful warm mint as `source: "mint"`.
 
 The Pi session UUID is kept as a **secondary handle** (needed for `SessionManager.open` /
 `continueRecent` on resume); the `run_id ↔ pi_session_id` mapping lives in `perk:workflow-state`.
