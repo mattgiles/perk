@@ -12,7 +12,6 @@ on a poll timeout, which ``smoke-test --wait`` self-cancels.
 """
 
 import contextlib
-import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,6 +19,7 @@ from pathlib import Path
 
 from perk import github, run_id, runner
 from perk.github import GitHubError
+from perk.output import user_output
 
 # The sentinel dispatch inputs. The run-name embeds "smoke" (as the `stage`) for human legibility;
 # `plan` is a sentinel too — the smoke short-circuit never checks out a plan branch.
@@ -74,10 +74,9 @@ def dispatch_smoke(
         base = github.default_branch(repo_root)
     except GitHubError as exc:
         base = "main"
-        print(
+        user_output(
             f"⚠ could not resolve the default branch ({exc}); basing the smoke dispatch on "
-            f"{base!r}.",
-            file=sys.stderr,
+            f"{base!r}."
         )
     inputs = {
         "run_id": rid,

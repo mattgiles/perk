@@ -372,6 +372,37 @@ def _desired_packages(self_repo: bool) -> list[str]:
     return [own, *BORROWED_PACKAGES]
 
 
+def _merge_static_packages(
+    packages: list[object], desired: list[str]
+) -> tuple[list[object], list[str]]:
+    """Append-only merge of the static perk+borrowed package set; returns (packages, added)."""
+    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
+    have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
+    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
+
+    added: list[str] = []
+    for want in desired:
+        if want.startswith("npm:"):
+            name = _npm_name(want)
+            if name is None or name in have_npm:
+                continue
+            packages.append(want)
+            have_npm.add(name)
+        elif want.startswith("git:"):
+            identity = _git_identity(want)
+            if identity is None or identity in have_git:
+                continue
+            packages.append(want)
+            have_git.add(identity)
+        else:
+            if want in have_local:
+                continue
+            packages.append(want)
+            have_local.add(want)
+        added.append(want)
+    return packages, added
+
+
 def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
     settings_path = root / ".pi" / "settings.json"
 
@@ -398,30 +429,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # Migration: strip legacy npm perk entries written by earlier perk init runs.
     packages = [p for p in packages if not (isinstance(p, str) and p.startswith("npm:@perk/pi"))]
 
-    have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
-    have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
-    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
-
-    added: list[str] = []
-    for want in _desired_packages(self_repo):
-        if want.startswith("npm:"):
-            name = _npm_name(want)
-            if name is None or name in have_npm:
-                continue
-            packages.append(want)
-            have_npm.add(name)
-        elif want.startswith("git:"):
-            identity = _git_identity(want)
-            if identity is None or identity in have_git:
-                continue
-            packages.append(want)
-            have_git.add(identity)
-        else:
-            if want in have_local:
-                continue
-            packages.append(want)
-            have_local.add(want)
-        added.append(want)
+    packages, added = _merge_static_packages(packages, _desired_packages(self_repo))
 
     # Provider-driven two-directional wiring (Node 2.1). Composes on top of the static layer
     # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT
@@ -633,7 +641,7 @@ def _sync_failure(command: str, reason: str) -> str:
     )
 
 
-def _sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
+def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
     """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
 
     The ``skills`` CLI is the single delivery path for perk's own skills: the ``..``/``git:`` Pi
@@ -723,7 +731,7 @@ def _converge_subagent_agents(root: Path, *, apply: bool = True) -> list[str]:
     return [".pi/agents/: created"]
 
 
-def _converge_config(
+def converge_config(
     root: Path, changes: list[str], *, force: bool = False, interactive: bool = True
 ) -> None:
     """Scaffold the committed + local TOML config.
@@ -909,7 +917,7 @@ def run_init(
     changes: list[str] = []
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
-    _converge_config(root, changes, force=force, interactive=interactive)
+    converge_config(root, changes, force=force, interactive=interactive)
     # Materialize the declared skills under the covers via the `skills` CLI — the single delivery
     # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
     # so Pi discovers `perk-*` only through `.agents/skills/`).
@@ -917,7 +925,7 @@ def run_init(
     # Load-bearing (#289): a sync failure is fatal (exit 2) — but convergence already happened,
     # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
     if verify:
-        sync_error = _sync_skills(root, changes, self_repo=self_repo)
+        sync_error = sync_skills(root, changes, self_repo=self_repo)
         if sync_error is not None:
             return InitReport(
                 ok=False,
