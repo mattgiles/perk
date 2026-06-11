@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
 
-from perk.plan import find_metadata_block, render_metadata_block
+from perk.plan import find_metadata_block
 
 OBJECTIVE_LABEL = "perk:objective"
 OBJECTIVE_LABEL_COLOR = "5319e7"  # indigo (distinct from plan green / learn purple)
@@ -520,12 +520,6 @@ class DependencyGraph:
             return PlanSelection(kind="in_flight", node=in_flight[0])
         return PlanSelection(kind="blocked", node=None)
 
-    def next_node(self) -> ObjectiveNode | None:
-        """The first **plannable** node (pending, or a ``planning`` claim with no saved plan),
-        else ``None``. Delegates to :meth:`next_plannable` so factory-facing surfaces
-        (``objective next``/``show``) resume an abandoned ``planning`` claim."""
-        return self.next_plannable()
-
     def is_complete(self) -> bool:
         """True when every node is terminal."""
         return all(node.status in TERMINAL for node in self.nodes)
@@ -673,9 +667,3 @@ def rerender_body_table(comment_body: str, nodes: list[ObjectiveNode]) -> str | 
         + ROADMAP_TABLE_MARKER_END
         + comment_body[end + len(ROADMAP_TABLE_MARKER_END) :]
     )
-
-
-def render_metadata_block_for(key: str, data: dict[str, object]) -> str:
-    """Thin re-export so callers can render objective blocks without importing :mod:`perk.plan`
-    directly (the block engine lives there)."""
-    return render_metadata_block(key, data)

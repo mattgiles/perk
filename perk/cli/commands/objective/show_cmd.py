@@ -41,7 +41,7 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
 
     nodes = list(state.nodes)
     graph = objective.build_graph(nodes)
-    next_node = graph.next_node()
+    next_node = graph.next_plannable()
     selection = graph.classify_for_planning()
     payload = {
         "success": True,
