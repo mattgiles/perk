@@ -162,7 +162,8 @@ def test_next_plannable_blocked_by_unfinished_dep():
 
 
 def test_next_plannable_resumes_orphaned_planning_claim():
-    # A `planning` head node with no pr is a resumable claim -> re-selectable.
+    # A `planning` head node with no pr is a resumable claim. With 1.2 sequentially blocked
+    # behind it, the claim is the only plannable node -> the fallback resumes it (self-healing).
     nodes = [
         o.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr=None),
         o.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
@@ -171,7 +172,24 @@ def test_next_plannable_resumes_orphaned_planning_claim():
     nxt = graph.next_plannable()
     assert nxt is not None and nxt.id == "1.1"
     assert [n.id for n in graph.plannable_nodes()] == ["1.1"]  # 1.2 blocked behind 1.1
+    assert [n.id for n in graph.resumable_claims()] == ["1.1"]
     assert graph.in_flight_nodes() == []
+
+
+def test_next_plannable_prefers_pending_over_live_claim():
+    # Pending-first: a possibly-live claim (1.1) is skipped while an independent unblocked
+    # pending node (1.2) exists -> parallel objective-plan launches take distinct nodes.
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="A", status=N.PLANNING, pr=None, depends_on=()),
+        o.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=()),
+    ]
+    graph = o.build_graph(nodes)
+    nxt = graph.next_plannable()
+    assert nxt is not None and nxt.id == "1.2"
+    assert [n.id for n in graph.plannable_nodes()] == ["1.1", "1.2"]  # both stay plannable
+    assert [n.id for n in graph.resumable_claims()] == ["1.1"]
+    sel = graph.classify_for_planning()
+    assert sel.kind == "plannable" and sel.node is not None and sel.node.id == "1.2"
 
 
 def test_planning_with_pr_is_in_flight_not_plannable():
@@ -184,6 +202,7 @@ def test_planning_with_pr_is_in_flight_not_plannable():
     assert graph.next_plannable() is None  # 1.1 in-flight, 1.2 blocked behind it
     assert [n.id for n in graph.in_flight_nodes()] == ["1.1"]
     assert graph.plannable_nodes() == []
+    assert graph.resumable_claims() == []  # a claim WITH a pr is not a resumable claim
 
 
 def test_classify_for_planning_kinds():

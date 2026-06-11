@@ -78,7 +78,9 @@ TERMINAL: frozenset[NodeStatus] = frozenset({NodeStatus.DONE, NodeStatus.SKIPPED
 # Lifecycle categories for factory selection (P2.T10 — the resumable-lease model). `planning` is a
 # resumable CLAIM (re-selectable until a plan is committed); `in_progress` is a COMMITTED plan (a
 # plan was saved and the node↔plan backlink set atomically by `plan-save`). A `planning` node IS
-# plannable, but only while it carries no `pr` backlink (see `plannable_nodes`).
+# plannable, but only while it carries no `pr` backlink (see `plannable_nodes`) — and implicit
+# selection takes it only as a FALLBACK when no unblocked `pending` node exists (a claim may be
+# live in another session; see `next_plannable`).
 PLANNABLE: frozenset[NodeStatus] = frozenset({NodeStatus.PENDING, NodeStatus.PLANNING})
 IN_FLIGHT: frozenset[NodeStatus] = frozenset({NodeStatus.PLANNING, NodeStatus.IN_PROGRESS})
 
@@ -487,10 +489,26 @@ class DependencyGraph:
             if n.status == NodeStatus.PENDING or (n.status == NodeStatus.PLANNING and n.pr is None)
         ]
 
+    def resumable_claims(self) -> list[ObjectiveNode]:
+        """All unblocked ``planning`` claims with no saved plan (``pr is None``), in position
+        order — the "live or abandoned claim" set the surfaces report."""
+        return [n for n in self.plannable_nodes() if n.status == NodeStatus.PLANNING]
+
     def next_plannable(self) -> ObjectiveNode | None:
-        """The first plannable node by position, else ``None``."""
-        plannable = self.plannable_nodes()
-        return plannable[0] if plannable else None
+        """The next node implicit selection should take: **pending-first, claims as fallback**.
+
+        The first unblocked ``pending`` node by position; if none exists, the first resumable
+        ``planning`` claim by position; else ``None``. Pending-first makes parallel
+        ``objective-plan`` launches safe: a claim cannot be distinguished from a session actively
+        planning in another terminal, so implicit selection never steals/duplicates a possibly-live
+        claim while safe pending work exists — while an abandoned claim still self-heals once it is
+        the only plannable thing left (and is always resumable explicitly via ``--node``).
+        """
+        pending = self.pending_unblocked_nodes()
+        if pending:
+            return pending[0]
+        claims = self.resumable_claims()
+        return claims[0] if claims else None
 
     def in_flight_nodes(self) -> list[ObjectiveNode]:
         """Nodes with a committed/in-flight plan, in position order.
@@ -508,7 +526,8 @@ class DependencyGraph:
     def classify_for_planning(self) -> PlanSelection:
         """Classify the objective's planning state (drives honest factory reporting).
 
-        Order: a plannable node wins; else complete; else an in-flight node; else blocked.
+        Order: a plannable node wins (pending-first, resumable claims as fallback — see
+        :meth:`next_plannable`); else complete; else an in-flight node; else blocked.
         """
         node = self.next_plannable()
         if node is not None:

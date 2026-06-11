@@ -325,10 +325,27 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
   (intent to plan; no saved plan yet — `objective-plan` re-selects it, an abandoned claim self-heals;
   the eager mark is idempotent). `in_progress` is a **committed plan** (saved, node→plan backlinked,
   awaiting land). `done` is set by the land path (`nodes_for_pr`) or the audited tool. Factory
-  selection lives in `objective.DependencyGraph`: `plannable_nodes()` / `next_plannable()` (unblocked
-  ∧ (`pending`, or `planning` with **no** `pr`)); a `planning` node **with** a `pr` and any
-  `in_progress` node are `in_flight_nodes()`. `next_plannable()` is the single selection method (so
-  `objective next`/`show` resume a claim; the `--json` field name stays `next_node`).
+  selection lives in `objective.DependencyGraph`: `plannable_nodes()` (membership: unblocked ∧
+  (`pending`, or `planning` with **no** `pr`), position order — feeds the explicit `--node` lookup);
+  a `planning` node **with** a `pr` and any `in_progress` node are `in_flight_nodes()`;
+  `resumable_claims()` is the unblocked `planning`-with-no-`pr` subset (the "live or abandoned
+  claim" set the surfaces report). `next_plannable()` — the single implicit-selection method (so
+  `objective next`/`show` resume a claim; the `--json` field name stays `next_node`) — is
+  **pending-first**: the first unblocked `pending` node by position, then the first resumable claim
+  by position. Rationale: a claim cannot be distinguished from a session actively planning in
+  another terminal, so implicit selection never steals/duplicates a possibly-live claim while safe
+  pending work exists; self-healing of abandoned claims is preserved as the fallback (and via
+  explicit `--node`). This makes **parallel `objective-plan` launches** on independent nodes the
+  supported behavior: the first launch marks its node `planning` (removing it from the pending
+  set), the second launch selects the next unblocked pending node. The cold door surfaces the
+  skipped-claim set (a stderr `note:` line on non-JSON-payload paths + a `skipped_claims` array in
+  the `--dry-run --json` payload), and `objective show --json` carries `resumable_claims` (full
+  node dicts) for multi-terminal coordination.
+  **Accepted backlink race:** concurrent `update_objective_node` writes (two parallel `plan_save`s,
+  or a save racing a second door's `planning` mark) are read-modify-write on the issue body, so a
+  simultaneous write can drop one node's update. Accepted, not fixed (erk shipped the same as a
+  tripwire): the loser is recoverable — `/plan-save` re-save is idempotent and retries the link,
+  and `perk objective node` is the manual repair. No optimistic-concurrency machinery.
   `classify_for_planning()` returns
   `plannable`/`in_flight`/`blocked`/`complete` and drives the cold door's honest errors
   (`objective_in_flight` is a new `error_type`, exit 1, in place of the old misleading "all blocked
@@ -1160,7 +1177,9 @@ The objective **transition** layer on top of T9's mechanics — the plan factory
   session.workflow-state]`. Its cold door is a **dedicated** command (`DEDICATED_STAGES`),
   `perk objective-plan [NUMBER] [--node ID]` (the generic launcher cannot select a node): it
   requires an explicit NUMBER (a cold session has no `active_objective`), selects the next actionable
-  node (or `--node`), marks it `planning` (`update_objective_node`), and launches a read-only
+  node (pending-first dependency-graph order — unblocked `pending` nodes by position, then resumable
+  `planning`-no-`pr` claims; or `--node`), marks it `planning` (`update_objective_node`), and launches
+  a read-only
   plan-mode session seeded with the node (via `launch_stage(prompt_override=…)`). Supervisor surface
   (`--json`/exits `0`/`1`/`2`); error types `objective_required`/`objective_not_found`/
   `no_actionable_node`/`remote_blocked`.
