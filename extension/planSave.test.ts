@@ -328,6 +328,109 @@ test("tool: a missing perk binary fails loud, appends no linkage", async () => {
   }
 });
 
+test("tool: a success:false envelope at non-zero exit surfaces the structured error", async () => {
+  // The envelope-aware regression (Node 2.2): the Python plane prints a structured failure
+  // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const envelope = JSON.stringify({
+    success: false,
+    error_type: "github_error",
+    message: "gh exploded",
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "github_error");
+    assert.equal(details.error, "gh exploded");
+    assert.equal(h.workflowState().active_plan_ref ?? null, null, "no linkage on failure");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: success:true with a malformed plan_ref fails as bad_output, no linkage", async () => {
+  // A half-formed ref appended to workflow-state would poison planRefsEqual + every downstream
+  // consumer — the decode is fully strict on plan_ref.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+    plan_ref: {
+      provider: "github",
+      pr_id: 42, // number, not string → reject
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+    },
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.match(details.error ?? "", /unexpected payload/);
+    assert.equal(h.workflowState().active_plan_ref ?? null, null, "no linkage appended");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a malformed objective_node is dropped (advisory), save still succeeds", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const advisory = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+    plan_ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+    },
+    objective_node: { linked: "yes", node: "1.2", status: null, error: null }, // malformed
+  });
+  const bin = fakePerk(cwd, { stdout: advisory });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as { ok: boolean; objective_node?: unknown };
+    assert.equal(details.ok, true, "the save itself succeeded");
+    assert.equal(details.objective_node, null, "the malformed sub-object was dropped");
+    assert.doesNotMatch(result.content[0]?.text ?? "", /objective node/, "no link suffix");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save stages the plan markdown in run scratch (mkdtemp retirement)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+    assert.ok(
+      planFile.includes(join(".pi", "workflow", "scratch", "runs", "01RID")),
+      `plan staged under run scratch (got ${planFile})`,
+    );
+    // savePlan trims the plan before staging, hence the .trim() on the expectation.
+    assert.equal(readFileSync(planFile, "utf8"), PLAN_MD.trim(), "the staged file holds the plan");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a non-zero exit / garbage stdout fails loud, no linkage", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: "not json", code: 1 });

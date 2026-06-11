@@ -1,8 +1,8 @@
 // P1.T3 — the warm `/plan-save` door (turn-3 §5/§6). The in-session twin of the Python cold
 // door (`perk plan-save`): a deterministic, terminating tool + command that WRAP T2's storage —
-// they do NOT reimplement the GitHub write. `savePlan()` writes the plan to a temp file, delegates
-// to `perk plan-save --json` via `pi.exec` (the sanctioned process-launch + cli-vs-pi §3.2
-// machine-JSON channel), then appends `active_plan_ref` so the live session is linked immediately
+// they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan-save --json` via
+// the shared cold-door client (`runColdDoor`, Node 1.4 — the plan markdown rides the run-scratch
+// stdin channel), then appends `active_plan_ref` so the live session is linked immediately
 // (strict read-back, idempotent, headless-safe). Failures are loud-but-non-fatal — never throw.
 //
 // SEAM-SHARED SUBSTRATE (Node 2.2). `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
@@ -12,11 +12,16 @@
 // — only perk's own authoring surface (`extension/planMode.ts`: `/plan`, `Ctrl+Alt+P`, `--plan`,
 // the `perk:plan-context` injection) steps aside. Deferring this substrate would break Node 2.3.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
+import {
+  booleanField,
+  type ColdJson,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
@@ -51,16 +56,80 @@ export interface ObjectiveNodeLink {
 export type SaveResult = Result<PlanSaveOk>;
 export type PlanSaveDetails = SaveResult["details"];
 
-/** The T2a `perk plan-save --json` success shape (the contract the warm door consumes). */
-interface PlanSaveJson {
-  success: boolean;
-  error_type: string | null;
-  message: string | null;
-  issue?: { number: number; url: string; existed?: boolean };
-  plan_ref?: PlanRef;
+/** The decoded `perk plan-save --json` payload slice the warm door consumes. */
+interface PlanSavePayload {
+  issue: { number: number; url: string; existed: boolean | undefined };
+  plan_ref: PlanRef;
   cached?: boolean;
   updated?: boolean;
-  objective_node?: ObjectiveNodeLink | null;
+  objective_node: ObjectiveNodeLink | null;
+}
+
+/** A nullable-string field: string or null accepted; anything else rejects the sub-object. */
+function nullableString(obj: ColdJson, key: string): string | null | undefined {
+  const value = obj[key];
+  return typeof value === "string" || value === null ? value : undefined;
+}
+
+/**
+ * Fully strict `plan_ref` decode — a half-formed ref appended to workflow-state would poison
+ * `planRefsEqual` and every downstream consumer, so any miss → null → bad_output.
+ */
+function decodePlanRef(payload: ColdJson): PlanRef | null {
+  const ref = objectField(payload, "plan_ref");
+  if (ref === undefined) return null;
+  const provider = stringField(ref, "provider");
+  const prId = stringField(ref, "pr_id");
+  const url = stringField(ref, "url");
+  const labels = ref.labels;
+  const objectiveId = nullableString(ref, "objective_id");
+  if (
+    provider === undefined ||
+    prId === undefined ||
+    url === undefined ||
+    !Array.isArray(labels) ||
+    !labels.every((l) => typeof l === "string") ||
+    objectiveId === undefined
+  ) {
+    return null;
+  }
+  return { provider, pr_id: prId, url, labels, objective_id: objectiveId };
+}
+
+/** Validate the optional `objective_node` sub-object; malformed → null (advisory, never fatal). */
+function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
+  const node = objectField(payload, "objective_node");
+  if (node === undefined) return null;
+  const linked = booleanField(node, "linked");
+  const name = nullableString(node, "node");
+  const status = nullableString(node, "status");
+  const error = nullableString(node, "error");
+  if (linked === undefined || name === undefined || status === undefined || error === undefined) {
+    return null;
+  }
+  return { linked, node: name, status, error };
+}
+
+/**
+ * Narrow the `perk plan-save --json` success payload. Strict on `issue` and (fully) on `plan_ref`
+ * (malformed → bad_output); the advisory `objective_node` sub-object is validated but dropped when
+ * malformed — the plan genuinely saved, so the success report must survive it.
+ */
+function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
+  const issue = objectField(payload, "issue");
+  if (issue === undefined) return null;
+  const number = numberField(issue, "number");
+  const url = stringField(issue, "url");
+  if (number === undefined || url === undefined) return null;
+  const ref = decodePlanRef(payload);
+  if (ref === null) return null;
+  return {
+    issue: { number, url, existed: booleanField(issue, "existed") },
+    plan_ref: ref,
+    cached: booleanField(payload, "cached"),
+    updated: booleanField(payload, "updated"),
+    objective_node: decodeObjectiveNode(payload),
+  };
 }
 
 /**
@@ -138,60 +207,32 @@ export async function savePlan(
   // already off; the `/plan-save` COMMAND is allowed to run while read-only and the command handler
   // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
-  const perkBin = process.env.PERK_BIN ?? "perk";
 
-  const dir = mkdtempSync(join(tmpdir(), "perk-plansave-"));
-  let res: ExecResult;
-  try {
-    const planFile = join(dir, "plan.md");
-    writeFileSync(planFile, plan, "utf8");
-    const args = ["plan-save", "--plan-file", planFile, "--json"];
-    if (runId) args.push("--run-id", runId);
-    // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
-    if (title) args.push("--title", title);
-    // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
-    // number; non-objective plans omit it (unchanged behavior).
-    if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
-    // P2.T10: the objective plan factory passes the node id alongside the objective id; the cold
-    // door commits the node→plan backlink + `in_progress` advance atomically. Non-factory plans
-    // omit it (unchanged behavior).
-    if (opts.nodeId) args.push("--node-id", opts.nodeId);
-    // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
-    // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
-    if (opts.consumedLearn && opts.consumedLearn.length > 0) {
-      args.push("--consumed-learn", opts.consumedLearn.join(","));
-    }
-    // pi.exec returns (does not throw) on spawn/non-zero exit — see turn-3 §3.5 S2.
-    res = await pi.exec(perkBin, args, { cwd: ctx.cwd, signal: ctx.signal });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  const args = ["plan-save", "--json"];
+  if (runId) args.push("--run-id", runId);
+  // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
+  if (title) args.push("--title", title);
+  // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
+  // number; non-objective plans omit it (unchanged behavior).
+  if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
+  // P2.T10: the objective plan factory passes the node id alongside the objective id; the cold
+  // door commits the node→plan backlink + `in_progress` advance atomically. Non-factory plans
+  // omit it (unchanged behavior).
+  if (opts.nodeId) args.push("--node-id", opts.nodeId);
+  // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
+  // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
+  if (opts.consumedLearn && opts.consumedLearn.length > 0) {
+    args.push("--consumed-learn", opts.consumedLearn.join(","));
   }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk plan-save failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: PlanSaveJson;
-  try {
-    parsed = JSON.parse(res.stdout) as PlanSaveJson;
-  } catch {
-    return fail("perk plan-save returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.plan_ref || !parsed.issue) {
-    return fail(
-      parsed.message ?? "perk plan-save reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  const r = await runColdDoor<PlanSavePayload>(pi, ctx, args, {
+    label: "perk plan-save",
+    decode: decodePlanSave,
+    stdin: { flag: "--plan-file", content: plan, filename: "plan.md" },
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
   // Link the live session (turn-3 D4): append iff the rebuilt ref differs, with a strict read-back.
-  const ref = parsed.plan_ref;
+  const ref = r.data.plan_ref;
   if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
     pi.appendEntry(WORKFLOW_STATE_TYPE, { active_plan_ref: ref });
     if (!planRefsEqual(rebuildWorkflowState(branch()).active_plan_ref ?? null, ref)) {
@@ -207,8 +248,8 @@ export async function savePlan(
     }
   }
 
-  const verb = parsed.issue.existed ? "Updated" : "Saved";
-  const nodeLink = parsed.objective_node ?? null;
+  const verb = r.data.issue.existed ? "Updated" : "Saved";
+  const nodeLink = r.data.objective_node;
   // Render all THREE node-link outcomes (the silent-partial-failure fix, #124). A failed advance
   // (`linked: false`) is a non-fatal sub-step — the plan genuinely saved — but it must be VISIBLE
   // (the §8.4 "warn + retriable" intent), not swallowed. Both surfaces render content[0].text, so
@@ -225,11 +266,11 @@ export async function savePlan(
   return ok(
     `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}`,
     {
-      issue: { number: parsed.issue.number, url: parsed.issue.url },
+      issue: { number: r.data.issue.number, url: r.data.issue.url },
       plan_ref: ref,
-      cached: parsed.cached ?? false,
-      existed: parsed.issue.existed ?? null,
-      updated: parsed.updated ?? false,
+      cached: r.data.cached ?? false,
+      existed: r.data.issue.existed ?? null,
+      updated: r.data.updated ?? false,
       objective_node: nodeLink,
     },
     { terminate: true },
