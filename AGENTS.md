@@ -42,6 +42,12 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   are historical records once written — reconcile via outcomes, don't rewrite history.
 - **Amend the contract, don't drift.** If an implementation changes cross-plane *behavior*, amend
   `shared/contracts.md` in the **same turn**.
+- **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
+  `setWidget`/`setFooter` are called only inside `extension/surfaces.ts` + `extension/report.ts`;
+  everything else uses their seams (`report()`, `createPerkStatus`, `setStandingWidget`,
+  `installPerkFooter`). `setWorkingIndicator` is never called (charter D5 rescinded).
+  `extension/surfacesGuard.test.ts` fails CI on violations — extend the surfaces module rather
+  than allowlisting a new file.
 - **`init` converges forward; `doctor --fix` repairs.** New desired state goes into `init`'s
   idempotent convergence; one-off/legacy repairs go into `doctor --fix` — keep `init` a clean
   forward path, never a pile of version branches.
