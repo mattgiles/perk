@@ -18,7 +18,7 @@ Principles (T6, from `phase-0-plan.md` §T6 + the erk prior-art pass):
 import json
 import tomllib
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
 
@@ -61,6 +61,7 @@ class DoctorReport:
     self_repo: bool
     error_type: str | None = None
     message: str | None = None
+    fix_errors: list[str] = field(default_factory=list)
 
     @property
     def healthy(self) -> bool:
@@ -627,6 +628,68 @@ def _subagent_engine_check(root: Path) -> Check:
     )
 
 
+def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
+    """The fail-level skills-delivery substrate check (#289 — skills delivery is load-bearing).
+
+    perk's own skills reach sessions only through the `skills` CLI-managed `.agents/skills/`
+    symlinks, so a broken delivery substrate is a **fail** (unlike `_bindings_check`, which owns
+    user-binding *config* and stays warn-level). Evaluated under ``verify`` only (it shells git
+    and validates external-CLI outcomes). First match wins:
+
+    (a) tracked content under the skills-CLI managed pathspecs (the `skills init` hard-refusal);
+        a ``GitError`` during the probe degrades to ``warn`` (no silent pass);
+    (b) the perk manifest fragment exists but `.agents/manifest.yaml` does not — `skills init`
+        failed or never ran (so `skills update --sync` can never run);
+    (c) any ``PERK_SKILLS`` name is not installed (``bindings.is_skill_installed``).
+    """
+    try:
+        conflicts = init.skills_conflict_paths(root)
+    except git.GitError as exc:
+        return Check(
+            "skills-delivery",
+            "skills",
+            "warn",
+            "skills delivery not fully verified",
+            f"tracked-content probe not evaluated: {exc}",
+        )
+    if conflicts:
+        return Check(
+            "skills-delivery",
+            "skills",
+            "fail",
+            "tracked content under skills-CLI managed paths",
+            ", ".join(conflicts),
+            "Migrate the committed skill bodies out of the skills-CLI managed paths "
+            "(e.g. into a committed top-level skills/ dir declared in .agents/manifest.yaml), "
+            "untrack them (git rm --cached -r <path>), then re-run 'perk init'.",
+        )
+    fragment = root / init.PERK_SKILLS_MANIFEST_DIR / init.PERK_SKILLS_MANIFEST_FILENAME
+    if fragment.is_file() and not (root / ".agents" / "manifest.yaml").is_file():
+        return Check(
+            "skills-delivery",
+            "skills",
+            "fail",
+            "skills workspace not initialized — `skills init` failed or never ran",
+            ".agents/manifest.d/perk.yaml exists but .agents/manifest.yaml does not",
+            "Run 'perk doctor --fix' (or 'perk init') and review its output.",
+        )
+    missing = [
+        name
+        for name in init.PERK_SKILLS
+        if not bindings.is_skill_installed(root, name, self_repo=self_repo)
+    ]
+    if missing:
+        return Check(
+            "skills-delivery",
+            "skills",
+            "fail",
+            f"{len(missing)} perk skill(s) not delivered",
+            ", ".join(missing),
+            "Run 'perk doctor --fix'.",
+        )
+    return Check("skills-delivery", "skills", "ok", "perk skills delivered via .agents/skills/")
+
+
 def _bad_handoffs(workflow_dir: Path) -> list[str]:
     handoff_dir = workflow_dir / "handoff"
     if not handoff_dir.is_dir():
@@ -660,6 +723,8 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
             checks.append(
                 Check("runner-prereqs", "runner", "info", f"runner prereqs not checked: {exc}")
             )
+        # Verify-gated like env/github: it shells git + validates external-CLI outcomes.
+        checks.append(_skills_delivery_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
@@ -760,17 +825,23 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     self_repo = init.is_self_repo(root)
     checks = _build_checks(root, self_repo, verify=verify)
     fixed: list[str] = []
+    fix_errors: list[str] = []
     if fix:
         fixed = _apply_fixes(root, self_repo, checks)
-        # Materialize skills under the covers (the repair gesture) via the `skills` CLI — best-
-        # effort, appends its own change entry on link change. Gated on `verify` so the external
-        # shell runs on real `--fix` runs but not in unit tests; a sync that links missing skills
-        # clears the `bindings` skill-presence warnings on the post-fix re-verify below.
+        # Materialize skills under the covers (the repair gesture) via the `skills` CLI —
+        # load-bearing (#289): a failure is carried loudly on `fix_errors` (rendered by the
+        # command + serialized in --json), and the post-fix re-verify below then also shows the
+        # failing `skills-delivery` check, so the exit code reflects the still-broken state.
+        # Gated on `verify` so the external shell runs on real `--fix` runs but not in unit
+        # tests; a sync that links missing skills clears the `bindings`/`skills-delivery`
+        # findings on the post-fix re-verify.
         if verify:
-            init._sync_skills(root, fixed)
-        if fixed:
+            sync_error = init._sync_skills(root, fixed, self_repo=self_repo)
+            if sync_error is not None:
+                fix_errors.append(sync_error)
+        if fixed or fix_errors:
             checks = _build_checks(root, self_repo, verify=verify)
-    return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo)
+    return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo, fix_errors=fix_errors)
 
 
 def report_to_dict(report: DoctorReport) -> dict[str, object]:
@@ -797,4 +868,5 @@ def report_to_dict(report: DoctorReport) -> dict[str, object]:
         ],
         "summary": {"passed": passed, "warnings": warnings, "failed": failed},
         "fixed": report.fixed,
+        "fix_errors": report.fix_errors,
     }
