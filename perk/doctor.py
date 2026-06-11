@@ -22,10 +22,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import bindings, cache, capabilities, env, git, github, init, providers, registry
+from perk import bindings, cache, capabilities, env, git, github, init, issues, providers, registry
 from perk.cli.ensure import UserFacingCliError
-from perk.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME, load_config
+from perk.config import (
+    CONFIG_FILENAME,
+    LOCAL_CONFIG_FILENAME,
+    load_committed_issues_backend,
+    load_config,
+)
 from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
 
 Status = Literal["ok", "warn", "info", "fail"]
@@ -602,6 +608,49 @@ def _providers_check(root: Path) -> Check:
     )
 
 
+def _issues_check(root: Path) -> Check:
+    """Validate the committed `[issues] backend` selection (contracts.md §8.21).
+
+    Maps ``issues.resolve_issue_backend_id``'s outcomes (never duplicates the vocabulary):
+    absent/``"github"`` → ``ok``; ``"linear"``/unknown → ``fail`` — unlike `[providers]` (which
+    falls back gracefully and only warns), a bad selection hard-breaks **every** issue-touching
+    command, so doctor must say so loudly. A malformed committed TOML → ``warn`` deferring to the
+    config check (mirrors ``_providers_check``). No ``--fix`` arm: the selection is user-owned
+    config; nothing is convergeable.
+    """
+    try:
+        load_committed_issues_backend(root)
+    except tomllib.TOMLDecodeError:
+        return Check(
+            "issues-backend",
+            "issues",
+            "warn",
+            "selection not evaluated — config invalid; see the config check",
+        )
+    try:
+        backend_id = issues.resolve_issue_backend_id(root)
+    except IssueBackendError as exc:
+        if "not yet supported" in str(exc):
+            return Check(
+                "issues-backend",
+                "issues",
+                "fail",
+                "issue backend 'linear' is selected but not yet supported",
+                str(exc),
+                'Set [issues] backend = "github" in .pi/perk.toml until objective #252 '
+                "Phase 2 ships the Linear backend.",
+            )
+        return Check(
+            "issues-backend",
+            "issues",
+            "fail",
+            str(exc),
+            "",
+            'Fix .pi/perk.toml [issues] — backend must be "github" (or "linear" once supported).',
+        )
+    return Check("issues-backend", "issues", "ok", f"issues backend: {backend_id}")
+
+
 def _subagent_engine_check(root: Path) -> Check:
     """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
 
@@ -727,6 +776,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_registry_check())
     checks.append(_bindings_check(root, self_repo))
     checks.append(_providers_check(root))
+    checks.append(_issues_check(root))
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     return checks

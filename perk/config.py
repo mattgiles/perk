@@ -126,6 +126,34 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
     return parse_compaction_table(raw.get("compaction"))
 
 
+def parse_issues_backend(raw: Any) -> str | None:
+    """Read the raw `[issues]` table's ``backend`` value when it is a non-blank ``str``.
+
+    LBYL silent-omit (mirrors ``parse_compaction_table``): a non-dict/absent table or an
+    absent/ill-typed/blank ``backend`` yields ``None`` (the resolver falls back to the
+    default backend). Vocabulary validation happens in ``perk.issues.resolve_issue_backend_id``
+    — this parser only answers "what did the user write?".
+    """
+    table = raw if isinstance(raw, dict) else {}
+    value = table.get("backend")
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def load_committed_issues_backend(repo_root: Path) -> str | None:
+    """Read the `[issues]` backend selection from **committed** `.pi/perk.toml` only (no overlay).
+
+    Deliberately bypasses ``load_config`` (and thus ``perk.local.toml``): the backend decides
+    where canonical durable state (plan/learn/objective issues) is written — a per-user override
+    would fragment the canonical store. A missing file yields ``None``; a malformed-TOML
+    ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check owns malformed
+    TOML — mirrors ``load_committed_compaction``).
+    """
+    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    return parse_issues_backend(raw.get("issues"))
+
+
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
     """Read the flat `[providers]` table into a `{plan, todo}` selection (string values only).
 

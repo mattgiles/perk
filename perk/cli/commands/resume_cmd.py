@@ -65,7 +65,7 @@ def resume_cmd(
         state = backend.get_plan(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
-        ref = resume.reconstruct_plan_ref(state)
+        ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
         stage_id = resume.resolve_resume_stage(
             state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
         )

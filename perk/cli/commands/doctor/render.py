@@ -15,6 +15,7 @@ GROUP_ORDER = (
     "skills",
     "bindings",
     "providers",
+    "issues",
     "state",
 )
 ICON: dict[str, tuple[str, str]] = {

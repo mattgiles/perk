@@ -119,6 +119,53 @@ def test_providers_check_warns_on_unknown_selection(git_repo):
     assert report.exit_code == 0  # a selection typo never fails doctor
 
 
+def test_issues_check_ok_on_default_repo(git_repo):
+    # No [issues] selection → the github default → ok.
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "issues-backend")
+    assert check.status == "ok" and check.group == "issues"
+    assert check.message == "issues backend: github"
+
+
+def test_issues_check_fails_on_linear_selection(git_repo):
+    # "linear" is reserved until Phase 2 — every issue-touching command is hard-broken → fail.
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "issues-backend")
+    assert check.status == "fail"
+    assert "not yet supported" in check.message
+    assert 'backend = "github"' in check.remediation
+    assert report.exit_code == 1
+
+
+def test_issues_check_fails_on_unknown_selection(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text('[issues]\nbackend = "jira"\n', encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "issues-backend")
+    assert check.status == "fail"
+    assert "unknown issue backend" in check.message
+
+
+def test_issues_check_warns_on_malformed_committed_toml(git_repo):
+    # Malformed TOML is the config check's finding; the issues check defers (mirrors providers).
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text("[issues\nbackend =", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "issues-backend")
+    assert check.status == "warn"
+    assert "see the config check" in check.message
+
+
+def test_issues_group_renders():
+    # The _GROUP_ORDER trap: a group missing from GROUP_ORDER silently doesn't render.
+    from perk.cli.commands.doctor.render import GROUP_ORDER
+
+    assert "issues" in GROUP_ORDER
+
+
 def test_subagent_engine_signal_and_defs_dir(git_repo):
     # P2.T6: the constant informational pointer is `ok`, and the defs-dir convergence is `ok`
     # on a freshly-converged repo.

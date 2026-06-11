@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadPerkConfig, parseTomlSubset } from "./config.ts";
+import { loadPerkConfig, parseTomlSubset, resolveIssueBackendId } from "./config.ts";
 
 function repoWith(files: Record<string, string>): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
@@ -208,4 +208,31 @@ test("loadPerkConfig: perk.local.toml [trust] overlays perk.toml (local wins)", 
     "perk.local.toml": '[trust]\nci = "true"\n',
   });
   assert.equal(loadPerkConfig(cwd).trust.ci, true);
+});
+
+// --- resolveIssueBackendId (Objective #252, Node 1.3 — fail-safe, committed-only) ------------
+
+test("resolveIssueBackendId: absent config falls safe to github", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+test('resolveIssueBackendId: committed "linear" is returned', () => {
+  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "linear"\n' });
+  assert.equal(resolveIssueBackendId(cwd), "linear");
+});
+
+test("resolveIssueBackendId: committed unknown value falls safe to github", () => {
+  const cwd = repoWith({ "perk.toml": '[issues]\nbackend = "jira"\n' });
+  assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+test("resolveIssueBackendId: a perk.local.toml-only selection is ignored (committed-only)", () => {
+  const cwd = repoWith({ "perk.local.toml": '[issues]\nbackend = "linear"\n' });
+  assert.equal(resolveIssueBackendId(cwd), "github");
+});
+
+test("resolveIssueBackendId: a malformed file falls safe to github", () => {
+  const cwd = repoWith({ "perk.toml": "[issues\nbackend = " });
+  assert.equal(resolveIssueBackendId(cwd), "github");
 });

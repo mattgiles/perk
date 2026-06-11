@@ -47,7 +47,10 @@ def test_resolve_resume_stage_matrix(state, pending, expected):
 
 
 def test_reconstruct_plan_ref():
-    ref = resume.reconstruct_plan_ref(_neutral_state(header={"objective_id": "O1"}))
+    # `provider` is a passthrough from the caller's resolved backend (no config read here).
+    ref = resume.reconstruct_plan_ref(
+        _neutral_state(header={"objective_id": "O1"}), provider="github"
+    )
     assert ref == {
         "provider": "github",
         "pr_id": "7",

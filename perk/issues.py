@@ -25,13 +25,20 @@ Adapter disciplines:
   substrings, and tests assert messages).
 """
 
+import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import github, issue_backend, objective
+from perk import config, github, issue_backend, objective
 from perk.github import GitHubError
 from perk.issue_backend import IssueBackendError
+
+# The `[issues] backend` vocabulary (contracts.md §8.21). "linear" is reserved — selecting it
+# raises until the Linear backend ships (objective #252 Phase 2).
+GITHUB_BACKEND_ID = "github"
+LINEAR_BACKEND_ID = "linear"
+KNOWN_ISSUE_BACKENDS = (GITHUB_BACKEND_ID, LINEAR_BACKEND_ID)
 
 
 @contextmanager
@@ -59,6 +66,8 @@ class GitHubIssueBackend:
     """``IssueBackend`` over GitHub Issues — a thin adapter over ``perk.github``'s issue-tier
     functions (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
     ``IssueBackendError``)."""
+
+    backend_id = GITHUB_BACKEND_ID
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
@@ -316,10 +325,42 @@ class GitHubIssueBackend:
         )
 
 
-def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
-    """Resolve the repo's issue backend — always GitHub today.
+def resolve_issue_backend_id(repo_root: Path) -> str:
+    """Resolve the repo's `[issues] backend` selection to a known backend id — or raise.
 
-    Node 1.3 reads the ``[issues]`` config table here (config-driven backend selection); until
-    then this returns ``GitHubIssueBackend(repo_root)`` unconditionally.
+    Reads the **committed** `.pi/perk.toml` only (``load_committed_issues_backend``; the local
+    overlay is deliberately never read — the backend decides where canonical durable state is
+    written). Absent or ``"github"`` → ``GITHUB_BACKEND_ID``. ``"linear"`` and unknown values
+    **raise** ``IssueBackendError`` (falling back silently would write canonical issues to the
+    wrong tracker); a malformed committed TOML is mapped into ``IssueBackendError`` too.
     """
-    return GitHubIssueBackend(repo_root)
+    try:
+        selected = config.load_committed_issues_backend(repo_root)
+    except tomllib.TOMLDecodeError as exc:
+        raise IssueBackendError(
+            f".pi/perk.toml is not valid TOML ({exc}); run `perk doctor`"
+        ) from exc
+    if selected is None or selected == GITHUB_BACKEND_ID:
+        return GITHUB_BACKEND_ID
+    if selected == LINEAR_BACKEND_ID:
+        raise IssueBackendError(
+            "issue backend 'linear' is selected but not yet supported — "
+            "the Linear backend ships in objective #252 Phase 2"
+        )
+    known = ", ".join(KNOWN_ISSUE_BACKENDS)
+    raise IssueBackendError(f"unknown issue backend {selected!r} (known: {known})")
+
+
+def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
+    """Resolve the repo's issue backend from the committed `[issues]` config table.
+
+    Config-driven selection is live (objective #252 Node 1.3): ``resolve_issue_backend_id``
+    validates the selection (raising ``IssueBackendError`` on "linear"/unknown/malformed config
+    — every caller's existing error boundary handles it) and this constructs the matching
+    backend. The Linear construction arm lands in Phase 2.
+    """
+    backend_id = resolve_issue_backend_id(repo_root)
+    if backend_id == GITHUB_BACKEND_ID:
+        return GitHubIssueBackend(repo_root)
+    # Unreachable until Phase 2: the id resolver raises on every non-GitHub selection today.
+    raise IssueBackendError(f"no backend implementation for {backend_id!r}")

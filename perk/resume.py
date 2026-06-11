@@ -35,10 +35,14 @@ def resolve_resume_stage(
     return None
 
 
-def reconstruct_plan_ref(plan_state: issue_backend.PlanState) -> dict[str, Any]:
-    """Rebuild the `cache.plan-ref` payload from a plan's GitHub state (provider-agnostic)."""
+def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) -> dict[str, Any]:
+    """Rebuild the `cache.plan-ref` payload from a plan's issue-backend state (provider-agnostic).
+
+    ``provider`` is the resolved issue backend's ``backend_id`` (contracts.md §8.21) — callers
+    pass it from their resolved backend so this module stays pure (no config read here).
+    """
     return {
-        "provider": "github",
+        "provider": provider,
         "pr_id": plan_state.id,
         "url": plan_state.url,
         "labels": [plan.PLAN_LABEL],
