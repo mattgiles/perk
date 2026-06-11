@@ -1331,8 +1331,12 @@ stable exit codes. The agent never parses it (it calls extension tools); the con
 process orchestrating sessions.
 
 **Exit codes.** `0` converged · `1` invalid input (`invalid_settings` / `invalid_config`) ·
-`2` environment-not-ready (`not_a_repo` / `missing_tool`). GitHub-unauthed is **non-fatal** in
-`init` (reported, exit 0); `github_unauthed` is reserved for the strict `require_github` path.
+`2` environment-not-ready (`not_a_repo` / `missing_tool` / `skills_conflict` /
+`skills_sync_failed` — see the skills-delivery substrate clause in §8.9). GitHub-unauthed is
+**non-fatal** in `init` (reported, exit 0); `github_unauthed` is reserved for the strict
+`require_github` path. On `skills_sync_failed` the report **preserves `changes`** (convergence
+already happened before the sync); `skills_conflict` short-circuits before any convergence
+(`changes` is `[]`).
 
 **`--json` object.**
 ```
@@ -1383,13 +1387,18 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
   message: string|null,
   checks: [ { name, group, status, message, detail, remediation } ],   # status ∈ ok|warn|info|fail
   summary: { passed: int, warnings: int, failed: int },
-  fixed: string[] }                      # repairs applied by --fix ([] otherwise)
+  fixed: string[],                       # repairs applied by --fix ([] otherwise)
+  fix_errors: string[] }                 # --fix repairs that FAILED (e.g. a skills sync error;
+                                         # rendered loudly; the post-fix re-verify keeps the
+                                         # failing check, so the exit code stays honest)
 ```
 
 **Groups.** `environment` (tools; missing = `fail`) · `github` (auth/access; non-fatal `warn`) ·
 `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
-`registry` (the registry self-check) · `state` (the `.pi/workflow/` cache layout + handoff-blob
+`registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
+fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
+non-fatal config checks — §8.9/§8.10) · `state` (the `.pi/workflow/` cache layout + handoff-blob
 integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
@@ -1556,11 +1565,42 @@ Pi package no longer declares `pi.skills`, so Pi never discovers the package `sk
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
 `DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs}` (the only command triggers perk's
 delivery layer fires; a `command:<id>` outside it never fires). Every binding finding is a **`warn`**
-(loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration (a consumer that
-has not run `skills update --sync` yet is not failed). A `BindingsError` on the *bundled* file is a `fail`
+(loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration — the
+`bindings` check owns user-binding *config* only. The delivery **substrate** (perk's own skills
+actually reaching `.agents/skills/`) is load-bearing and owned by the fail-level
+**`skills-delivery`** check below, not by `bindings`. A `BindingsError` on the *bundled* file is a `fail`
 ("Reinstall perk"; cannot occur in a healthy install). A `RegistryError`/bad-TOML during the check
 degrades to a warn note rather than failing (the registry/config checks own those failures). The
 check is report-only — no `--fix` for bindings.
+
+**Skills-delivery substrate (load-bearing; #289).** Skills delivery via the `skills` CLI is
+**load-bearing**, not best-effort: a consumer where perk's skills cannot be materialized is a
+broken environment, surfaced at `init`/`doctor` time (never first at `perk plan` via the warm
+dangling-pointer warning, which stays a last-resort signal).
+
+- **`perk init` pre-flight:** before any convergence, `init` probes the five skills-CLI managed
+  runtime pathspecs (`SKILLS_MANAGED_PATHSPECS` = `.agents/state.yaml`, `.agents/local.yaml`,
+  `.agents/skills`, `.claude/skills`, `.agents/cache` — duplicated by value from the skills CLI's
+  `internal/project/project.go`) for **tracked Git content** (`git ls-files`). Any hit
+  short-circuits exit 2 (`skills_conflict`) with a migrate-then-rerun remediation; perk never
+  auto-untracks (the migration is a human, per-repo task). A `GitError` during the probe degrades
+  to *no* short-circuit — the fatal sync below fails loudly instead.
+- **Fatal sync:** any `skills init --cache=local` / `skills update --sync` failure (non-zero exit,
+  missing CLI, OSError, timeout) is fatal — `init` returns `skills_sync_failed` (exit 2) with the
+  failing command + first stderr lines in `message`, **preserving `changes`** (convergence already
+  happened). After a successful sync, every `PERK_SKILLS` name must pass
+  `bindings.is_skill_installed` — a sync that delivers nothing (e.g. an outdated `skills` CLI) is
+  the same fatal failure, never a silent pass.
+- **`doctor` check:** a fail-level **`skills-delivery`** check (group `skills`, evaluated under
+  `verify` only — it shells git + validates external-CLI outcomes). Fail conditions, first match
+  wins: (a) tracked content under the managed pathspecs (a `GitError` degrades to `warn`, no
+  silent pass); (b) the perk fragment (`.agents/manifest.d/perk.yaml`) exists but
+  `.agents/manifest.yaml` does not (`skills init` failed or never ran, so `skills update --sync`
+  can never run); (c) any `PERK_SKILLS` name not installed per `bindings.is_skill_installed`.
+- **`doctor --fix`:** the repair-gesture sync's failure message is carried on
+  `DoctorReport.fix_errors` (rendered loudly; `fix_errors` in the `--json` report — §8.6); the
+  post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
+  still-broken state.
 
 > **Status (Node 3.1):** `doctor` target-existence/skill-presence validation landed (the non-fatal
 > `bindings` check), plus the injection-time skill-presence mirror (the `nudge` path warns;
