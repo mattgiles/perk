@@ -14,8 +14,7 @@ from perk.cli.alias import SectionedGroup, register_with_aliases
 from perk.cli.commands.doctor import doctor_group
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
-from perk.cli.commands.learn_capture_cmd import learn_capture
-from perk.cli.commands.learn_docs_cmd import learn_docs
+from perk.cli.commands.learn import learn_group
 from perk.cli.commands.objective import objective_group
 from perk.cli.commands.objective_author_cmd import objective_author
 from perk.cli.commands.objective_plan_cmd import objective_plan
@@ -46,7 +45,10 @@ def cli(ctx: click.Context) -> None:
 cli.add_command(init_perk)
 register_with_aliases(cli, plan_save)
 cli.add_command(pr_group)
-register_with_aliases(cli, learn_capture)
+cli.add_command(learn_group)
+# The `learn` group is hybrid (Node 2.2): bare `perk learn` default-dispatches to the hidden
+# stage launcher, while `capture` and `docs` are the cold workers. `docs` is a dedicated cold
+# door but NOT a registry stage (hop-2): it borrows the `plan` stage to launch.
 register_with_aliases(cli, resume_cmd)
 register_with_aliases(cli, implement)
 cli.add_command(doctor_group)
@@ -59,9 +61,6 @@ register_with_aliases(cli, objective_author)
 register_with_aliases(cli, objective_plan)
 # objective-author + objective-plan are registered above; register_stage_commands skips them
 # (DEDICATED_STAGES).
-register_with_aliases(cli, learn_docs)
-# learn-docs is a dedicated cold door but NOT a registry stage (hop-2): it borrows the `plan` stage
-# to launch, so DEDICATED_STAGES is unchanged (it only suppresses generic same-named launchers).
 register_with_aliases(cli, replan)
 register_with_aliases(cli, workflow_group)
 cli.add_command(run_worker_cmd)

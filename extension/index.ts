@@ -334,7 +334,7 @@ export default function (pi: ExtensionAPI) {
   registerObjectivePlan(pi);
 
   // hop-2 — the learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
-  // perk:learn issues into an inbox (via the `perk learn-docs --gather` cold door) and injects the
+  // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
   registerLearnDocs(pi);
 

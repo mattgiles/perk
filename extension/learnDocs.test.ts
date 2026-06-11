@@ -1,5 +1,5 @@
 // hop-2 — unit tests for the pure `learnDocsGuidance` (the warm `/learn-docs` factory seed). The
-// command's delegation to `perk learn-docs --gather` is exercised offline elsewhere; here we pin
+// command's delegation to `perk learn docs --gather` is exercised offline elsewhere; here we pin
 // the guidance shape (inbox path, consumed numbers). The skill pointer is no longer in the pure
 // guidance — Node 2.3 delivers it via the skill-binding suffix (command:learn-docs).
 

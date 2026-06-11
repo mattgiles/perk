@@ -1,4 +1,4 @@
-"""hop-2 — `perk learn-docs`: the learned-docs plan-factory cold door.
+"""hop-2 — `perk learn docs`: the learned-docs plan-factory cold door.
 
 `github.list_learn_issues` + `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring
 test_objective_plan_cmd.py.
@@ -63,7 +63,7 @@ def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["learn-docs", "--gather", "--json"])
+        result = runner.invoke(cli, ["learn", "docs", "--gather", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["success"] is True and payload["launched"] is False
@@ -86,7 +86,7 @@ def test_dry_run_gathers_prints_seed_and_does_not_launch(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["learn-docs", "--dry-run"])
+        result = runner.invoke(cli, ["learn", "docs", "--dry-run"])
         assert result.exit_code == 0, result.output
         assert (Path(d) / _INBOX_REL).is_file()
         # The seed names the inbox path + the gathered numbers.
@@ -102,7 +102,7 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["learn-docs", "--json"])
+        result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "plan"  # borrows the plan stage to launch
     # Node 2.1: learn-docs borrows `plan` but overrides the binding trigger to its command — so a
@@ -125,7 +125,7 @@ def test_no_learn_issues_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["learn-docs", "--json"])
+        result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "no_learn_issues"
 
@@ -136,7 +136,7 @@ def test_remote_blocked(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["learn-docs", "--remote", "--json"])
+        result = runner.invoke(cli, ["learn", "docs", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "remote_blocked"
 
@@ -144,6 +144,6 @@ def test_remote_blocked(monkeypatch):
 def test_not_a_repo_exit_2():
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["learn-docs", "--json"])
+        result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 2
         assert json.loads(result.output)["error_type"] == "not_a_repo"

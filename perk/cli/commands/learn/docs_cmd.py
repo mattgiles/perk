@@ -1,4 +1,4 @@
-"""``perk learn-docs`` — the learned-docs plan-factory cold door (hop-2).
+"""``perk learn docs`` — the learned-docs plan-factory cold door (hop-2).
 
 The missing consumer of the terminal ``perk:learn`` issues (`/learn` synthesizes them; nothing
 consumed them — `contracts.md` §8.4 deferred "the `docs/learned/*.md` documentation-plan loop").
@@ -24,28 +24,18 @@ from pathlib import Path
 import click
 
 from perk import github, launch
-from perk.cli.alias import alias
+from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError, LearnIssueSummary
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
-
 _INBOX_REL = Path(".pi/workflow/scratch/learn-docs-inbox.md")
 
 
 def _plan_stage() -> Stage:
     return next(s for s in load_registry().stages if s.id == "plan")
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 def _render_inbox(issues: tuple[LearnIssueSummary, ...]) -> str:
@@ -105,7 +95,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
     if not issues:
         raise UserFacingCliError(
             "No open perk:learn issues to consolidate.\n"
-            "Run /learn on some landed plans first, then re-run perk learn-docs.",
+            "Run /learn on some landed plans first, then re-run perk learn docs.",
             error_type="no_learn_issues",
         )
     inbox_path = repo_root / _INBOX_REL
@@ -114,8 +104,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
     return inbox_path, issues
 
 
-@alias("ldocs")
-@click.command("learn-docs", context_settings={"ignore_unknown_options": True})
+@click.command("docs", context_settings={"ignore_unknown_options": True})
 @click.option(
     "--gather",
     "gather_only",
@@ -139,7 +128,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def learn_docs(
+def docs_learn(
     ctx: click.Context,
     *,
     gather_only: bool,
@@ -153,9 +142,9 @@ def learn_docs(
 
     \b
     Examples:
-      perk learn-docs               # gather + launch the read-only docs plan factory
-      perk learn-docs --gather --json   # materialize the inbox + emit numbers (no launch)
-      perk learn-docs --dry-run     # gather + print the inbox/seed, launch nothing
+      perk learn docs               # gather + launch the read-only docs plan factory
+      perk learn docs --gather --json   # materialize the inbox + emit numbers (no launch)
+      perk learn docs --dry-run     # gather + print the inbox/seed, launch nothing
     """
     try:
         repo_root = require_repo(ctx)
@@ -170,10 +159,10 @@ def learn_docs(
 
         inbox_path, issues = _gather(repo_root)
     except GitHubError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
