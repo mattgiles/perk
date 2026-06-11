@@ -38,6 +38,7 @@ import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { registerSelfcheck } from "./selfcheck.ts";
 import { registerSubmit } from "./submit.ts";
+import { createPerkStatus } from "./surfaces.ts";
 import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
@@ -313,13 +314,18 @@ export default function (pi: ExtensionAPI) {
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
   registerCiExecutor(pi);
 
+  // Node 2.3 — the composed `perk` status handle (charter D2): one slot, ordered objective →
+  // checkpoints segments. Created once here (no hidden module state) and threaded into the two
+  // segment publishers below.
+  const perkStatus = createPerkStatus();
+
   // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
   // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
   // Node 3.1 todo-seam deferral: perk is the reference todo provider (`perk-checkpoints`); these
   // runtime surfaces step aside when a foreign `[providers] todo` is selected (the todo-seam mirror
   // of planMode's plan-seam deferral) — silent on the event handlers, announced on `/checkpoints`.
-  registerCheckpoints(pi);
+  registerCheckpoints(pi, perkStatus);
 
   // Node 3.2 — the FIRST 3rd-party todo adapter (the todo-seam mirror of registerPlanAdapterTombell).
   // Injection-only: inert unless `[providers] todo = "juicesharp-todo"` is selected AND the session
@@ -332,7 +338,7 @@ export default function (pi: ExtensionAPI) {
   // P2.T9 — the objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
-  registerObjective(pi);
+  registerObjective(pi, perkStatus);
 
   // P3.T2 — the warm `objective_save` door: the `objective_save` tool + `/objective-save` command
   // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.

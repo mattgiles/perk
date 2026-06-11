@@ -9,10 +9,12 @@
 //
 // The pure helpers (extractDoneSteps / markCompletedSteps + the step extractor) are perk-owned
 // copies of pi's official `examples/extensions/plan-mode/utils.ts` (as T1 copied the regex tables),
-// adapted to key off `## Steps` rather than plan-mode's `Plan:` header. Status is surfaced via
-// `setStanding` guarded by `ctx.hasUI` (headless-safe): a `📋 done/total · ▸n` status chip plus a
-// themed `belowEditor` widget factory (charter D3/D4/D10 — stateless render, lines windowed to ≤4
-// steps per D1 and width-truncated per D9); `/checkpoints` notifies a one-line summary (D8).
+// adapted to key off `## Steps` rather than plan-mode's `Plan:` header. Progress is surfaced
+// headless-safe as the checkpoints segment of the composed `perk` status (node 2.3 — a
+// `📋 done/total · ▸n` segment published through the shared `PerkStatusHandle`) plus a themed
+// `belowEditor` widget factory via `setStandingWidget` (charter D3/D4/D10 — stateless render,
+// lines windowed to ≤4 steps per D1 and width-truncated per D9); `/checkpoints` notifies a
+// one-line summary (D8).
 // Accepted trade-off: pi's RPC mode drops factory widgets — the status chip + `/checkpoints`
 // remain the RPC-visible surfaces (recorded in shared/contracts.md P2.T2c).
 //
@@ -34,12 +36,13 @@ import { loadPerkConfig } from "./config.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
 import {
   MARK_CHECKPOINTS,
+  type PerkStatusHandle,
   progressLine,
   renderProgressLines,
   report,
-  STATUS_SLOT_CHECKPOINTS,
-  setStanding,
+  setStandingWidget,
   type ThemeLike,
+  WIDGET_SLOT_CHECKPOINTS,
 } from "./surfaces.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
@@ -243,9 +246,10 @@ function coarseDescriptor(
   return { stage, planId: wf.active_plan_ref.pr_id };
 }
 
-/** Surface progress in the UI (guarded — headless never touches setStatus/setWidget). */
+/** Surface progress in the UI (headless-safe — the handle + widget setter no-op without UI). */
 function renderStatus(
   ctx: ExtensionContext,
+  status: PerkStatusHandle,
   state: CheckpointState,
   branch: readonly BranchEntry[],
 ): void {
@@ -253,38 +257,41 @@ function renderStatus(
     // Coarse fallback: an active prose plan (no `## Steps`) still surfaces SOMETHING — the same
     // themed factory path as the steps widget (one dim line, stateless render, belowEditor).
     const coarse = coarseDescriptor(ctx, branch);
-    setStanding(
-      ctx,
-      STATUS_SLOT_CHECKPOINTS,
-      coarse
-        ? {
-            status: `${MARK_CHECKPOINTS} ${coarse.stage}`,
-            widget: (_tui: unknown, theme: ThemeLike) => ({
-              render: (width: number) => [
-                truncateToWidth(
-                  theme.fg("dim", `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`),
-                  width,
-                ),
-              ],
-              invalidate: () => {},
-            }),
-            placement: "belowEditor",
-          }
-        : undefined,
-    );
+    if (coarse) {
+      status.set(ctx, "checkpoints", `${MARK_CHECKPOINTS} ${coarse.stage}`);
+      setStandingWidget(
+        ctx,
+        WIDGET_SLOT_CHECKPOINTS,
+        (_tui: unknown, theme: ThemeLike) => ({
+          render: (width: number) => [
+            truncateToWidth(
+              theme.fg("dim", `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`),
+              width,
+            ),
+          ],
+          invalidate: () => {},
+        }),
+        { placement: "belowEditor" },
+      );
+    } else {
+      status.set(ctx, "checkpoints", undefined);
+      setStandingWidget(ctx, WIDGET_SLOT_CHECKPOINTS, undefined);
+    }
     return;
   }
   // Themed component factory (D3/D10): lines are computed inside render() per call — never cached
   // — over the freshly-rebuilt state snapshot; windowed (D1) + width-truncated (D9) in surfaces.ts.
   const snapshot = state;
-  setStanding(ctx, STATUS_SLOT_CHECKPOINTS, {
-    status: `${MARK_CHECKPOINTS} ${progressLine(state)}`,
-    widget: (_tui: unknown, theme: ThemeLike) => ({
+  status.set(ctx, "checkpoints", `${MARK_CHECKPOINTS} ${progressLine(state)}`);
+  setStandingWidget(
+    ctx,
+    WIDGET_SLOT_CHECKPOINTS,
+    (_tui: unknown, theme: ThemeLike) => ({
       render: (width: number) => renderProgressLines(snapshot, theme, width),
       invalidate: () => {},
     }),
-    placement: "belowEditor",
-  });
+    { placement: "belowEditor" },
+  );
 }
 
 /**
@@ -292,7 +299,7 @@ function renderStatus(
  * an active workflow, and only once — a later session keeps the existing entry); rebuilds on
  * `session_start` AND `session_tree`; advances on `turn_end`; lists via `/checkpoints`.
  */
-export function registerCheckpoints(pi: ExtensionAPI): void {
+export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle): void {
   pi.on("session_start", async (_event, ctx) => {
     try {
       // Todo-provider deferral (Node 3.1): when a foreign `[providers] todo` is selected, step the
@@ -307,11 +314,11 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         const steps = active ? extractSteps(readPlanBody(ctx.cwd)) : [];
         if (steps.length > 0) {
           pi.appendEntry(CHECKPOINT_TYPE, { steps });
-          renderStatus(ctx, { steps, current: computeCurrent(steps, null) }, branch);
+          renderStatus(ctx, status, { steps, current: computeCurrent(steps, null) }, branch);
           return;
         }
       }
-      renderStatus(ctx, existing, branch);
+      renderStatus(ctx, status, existing, branch);
     } catch (error) {
       console.error(`perk: checkpoint seed/rebuild failed on session_start — ${error}`);
     }
@@ -321,7 +328,7 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
     try {
       if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
-      renderStatus(ctx, rebuildCheckpoint(branch), branch);
+      renderStatus(ctx, status, rebuildCheckpoint(branch), branch);
     } catch (error) {
       console.error(`perk: checkpoint rebuild failed on session_tree — ${error}`);
     }
@@ -334,12 +341,12 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
       const state = rebuildCheckpoint(branch);
       if (isInert(state)) {
         // Coarse path: an active prose plan still surfaces a status (no entry to advance).
-        renderStatus(ctx, state, branch);
+        renderStatus(ctx, status, state, branch);
         return;
       }
       const text = isAssistantText(event.message as never);
       if (text === null) {
-        renderStatus(ctx, state, branch);
+        renderStatus(ctx, status, state, branch);
         return;
       }
       const advanced = markCompletedSteps(text, state.steps) > 0;
@@ -353,7 +360,7 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         pi.appendEntry(CHECKPOINT_TYPE, { steps: state.steps });
       }
       // Always re-render: `current` can change without completion advancing.
-      renderStatus(ctx, state, branch);
+      renderStatus(ctx, status, state, branch);
     } catch (error) {
       console.error(`perk: checkpoint advance failed on turn_end — ${error}`);
     }

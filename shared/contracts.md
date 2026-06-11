@@ -232,9 +232,13 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
   dedicated entry).
 - **Budget accounting** — a stateless rebuild (the `goal.ts` pattern): scan the branch for
   `role === "assistant"` messages **after** the latest `perk:objective-budget` marker, summing
-  `max(0, usage.input) + max(0, usage.output)`; elapsed = `now − activated_at`. Surfaced via
-  `ctx.ui.setStatus`/`setWidget` **guarded by `ctx.hasUI`**; rebuilt on `session_start`,
-  `session_tree`, **and** `agent_end` (survives reload/branch/compaction for free). Pure helpers
+  `max(0, usage.input) + max(0, usage.output)`; elapsed = `now − activated_at`. Surfaced as the
+  **objective segment of the single composed `perk` status slot** (segments ordered objective →
+  checkpoints per charter D2, joined with two spaces, composed by `surfaces.ts createPerkStatus` —
+  headless calls are full no-ops); the `perk-objective` **widget is retired** (node 2.3) — the
+  status segment carries id + tokens + elapsed (`🎯 <id> · <tokens> tok · <elapsed>`). Rebuilt on
+  `session_start`, `session_tree`, **and** `agent_end` (survives reload/branch/compaction for
+  free). Pure helpers
   (`sumAssistantTokens` / `formatBudgetLine` / `findBudgetMarker` / `rebuildBudget`) are
   offline-tested.
 - **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
@@ -421,8 +425,11 @@ appends a new `perk:checkpoint` marker carrying completion forward. The rebuild 
 execution cannot resurrect a step). An **in-progress (`current`) step** is derived (not persisted):
 the latest live `[WIP:n]` after the marker whose step exists and is incomplete, falling back to the
 lowest incomplete step, else `null`; completion always wins (`▸` never renders on a completed step).
-Status renders `📋 done/total` plus ` · ▸n` when current. The widget is a **themed component
-factory** (`(tui, theme) => { render, invalidate }`, stateless render per charter D10 — themed
+The `📋 done/total` (plus ` · ▸n` when current) text renders as the **checkpoints segment of the
+single composed `perk` status slot** (ordered objective → checkpoints per charter D2, two-space
+join, composed by `surfaces.ts createPerkStatus` — node 2.3 retired the per-feature
+`perk-checkpoints`/`perk-objective` status slots). The widget keeps its own `perk-checkpoints`
+slot and is a **themed component factory** (`(tui, theme) => { render, invalidate }`, stateless render per charter D10 — themed
 lines are computed inside `render()` per call, never cached) placed **`belowEditor`** (D4); lines
 are `✓/▸/○ <n>. <text>` colored per the charter §5 table (`success`/`accent`/`dim`) with
 completed-step text muted, **windowed to ≤ 4 step lines** (D1: a sliding window anchored on the
@@ -431,15 +438,15 @@ render *in addition* to the step lines, ≤ 6 rendered lines worst case), and ev
 width-truncated via pi-tui's `truncateToWidth` (D9). `/checkpoints` notifies a **single line**
 (D8): `done/total · ▸n <current step text>` (the ` · ▸n <text>` tail drops when no step is
 current). **Accepted RPC caveat:** pi drops component-factory widgets in RPC mode (only string
-arrays forward), so the checkpoints widget is invisible to RPC clients — the status chip and
-`/checkpoints` remain the RPC-visible surfaces. The **marker protocol is taught to the implement session**
+arrays forward), so the checkpoints widget is invisible to RPC clients — the status (now arriving
+under the composed slot `perk`) and `/checkpoints` remain the RPC-visible surfaces. The **marker protocol is taught to the implement session**
 via `_implement_prompt` (the launch prompt) + the **`perk-implement` skill**, so the implementer
 knows to emit `[WIP:n]`/`[DONE:n]`. **Coarse fallback (P2.T15):** when no `## Steps` checklist exists
 but a plan is active, the status bar shows `📋 <stage>` (the stage label from the handoff,
 `readHandoff(cwd, run_id).stage`, falling back to `"active"`) with a single dim widget line (the
 same themed-factory path, `belowEditor`) noting the plan is prose — so an active plan never goes
-dark; with no active plan, status/widget clear. Status
-surfaces via `ctx.ui.setStatus`/`setWidget` **guarded by `ctx.hasUI`** (headless never touches rich
+dark; with no active plan, the segment and widget clear. All surfaces are headless-safe (the
+composed-status handle and `setStandingWidget` no-op without UI — headless never touches rich
 UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a transient tier-3 session entry (not in the registry vocabulary, like
 `perk:workflow-state`'s sibling execution/todo entries). `@juicesharp/rpiv-todo` **is** retired in
 P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the

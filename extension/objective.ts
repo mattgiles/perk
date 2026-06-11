@@ -20,13 +20,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPerkConfig } from "./config.ts";
-import {
-  formatBudgetLine,
-  MARK_OBJECTIVE,
-  report,
-  STATUS_SLOT_OBJECTIVE,
-  setStanding,
-} from "./surfaces.ts";
+import { formatBudgetLine, MARK_OBJECTIVE, type PerkStatusHandle, report } from "./surfaces.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
@@ -125,20 +119,21 @@ function activeObjective(ctx: ExtensionContext): string | null {
   }
 }
 
-/** Surface the budget in the UI (guarded — headless never touches setStatus/setWidget). */
-function renderStatus(ctx: ExtensionContext): void {
+/**
+ * Surface the budget as the objective segment of the composed `perk` status (node 2.3 — the
+ * `perk-objective` widget is retired; the segment carries id + tokens + elapsed). Headless-safe:
+ * the handle no-ops without UI.
+ */
+function renderStatus(ctx: ExtensionContext, status: PerkStatusHandle): void {
   if (!ctx.hasUI) return;
   try {
     const active = activeObjective(ctx);
     if (active === null) {
-      setStanding(ctx, STATUS_SLOT_OBJECTIVE, undefined);
+      status.set(ctx, "objective", undefined);
       return;
     }
     const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
-    setStanding(ctx, STATUS_SLOT_OBJECTIVE, {
-      status: `${MARK_OBJECTIVE} ${active} · ${formatBudgetLine(budget)}`,
-      widget: [`objective: ${active}`, `budget: ${formatBudgetLine(budget)}`],
-    });
+    status.set(ctx, "objective", `${MARK_OBJECTIVE} ${active} · ${formatBudgetLine(budget)}`);
   } catch (error) {
     console.error(`perk: objective status render failed — ${error}`);
   }
@@ -149,7 +144,12 @@ function reportError(ctx: ExtensionContext, message: string): void {
 }
 
 /** The `/objective [<id>|clear]` handler (set/clear active_objective + seed/clear the marker). */
-function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string): void {
+function objectiveCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  args: string,
+  status: PerkStatusHandle,
+): void {
   const arg = args.trim();
   try {
     if (arg === "") {
@@ -165,7 +165,7 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
 
     if (arg === "clear") {
       pi.appendEntry(WORKFLOW_STATE_TYPE, { active_objective: null });
-      renderStatus(ctx);
+      renderStatus(ctx, status);
       report(ctx, "objective", "info", "cleared the active objective.");
       return;
     }
@@ -176,7 +176,7 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
       objective_id: arg,
       activated_at: new Date().toISOString(),
     });
-    renderStatus(ctx);
+    renderStatus(ctx, status);
     report(ctx, "objective", "info", `activated objective ${arg} (budget tracking started).`);
   } catch (error) {
     reportError(ctx, `command failed: ${error}`);
@@ -188,18 +188,18 @@ function objectiveCommand(pi: ExtensionAPI, ctx: ExtensionContext, args: string)
  * session_tree / agent_end), and threshold compaction (turn_end). All inert when no objective is
  * active; never throws.
  */
-export function registerObjective(pi: ExtensionAPI): void {
+export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): void {
   pi.on("session_start", async (_event, ctx) => {
-    renderStatus(ctx);
+    renderStatus(ctx, status);
   });
 
   pi.on("session_tree", async (_event, ctx) => {
-    renderStatus(ctx);
+    renderStatus(ctx, status);
   });
 
   pi.on("agent_end", async (_event, ctx) => {
     // Recompute the budget after each agent loop (stateless rebuild from the branch).
-    renderStatus(ctx);
+    renderStatus(ctx, status);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
@@ -218,7 +218,7 @@ export function registerObjective(pi: ExtensionAPI): void {
           console.error(`perk: objective compaction failed — ${error}`);
         },
         onComplete: () => {
-          renderStatus(ctx);
+          renderStatus(ctx, status);
         },
       });
     } catch (error) {
@@ -229,7 +229,7 @@ export function registerObjective(pi: ExtensionAPI): void {
   pi.registerCommand("objective", {
     description: "Show, set (`<id>`), or clear (`clear`) the active perk objective + budget.",
     handler: async (args, ctx) => {
-      objectiveCommand(pi, ctx, args);
+      objectiveCommand(pi, ctx, args, status);
     },
   });
 }
