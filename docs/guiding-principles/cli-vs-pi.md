@@ -152,6 +152,16 @@ consumer** still parses CLI output. So:
   call.
 - Net: `--json` is for *machines that launch perk*, never for *the agent perk launches*.
 
+> **Status (Objective #225) — the surviving surface grew, the principle held.** The
+> dual-surface set is no longer the short list above: **every cold worker/door** ships
+> `--json` + stable exit codes + `{success, error_type, message}` (the pr/learn/objective
+> verbs, `plan-save`, `run-worker`, `replan`, registry/state/doctor, the stage launchers,
+> `workflow run`, `init`). And a second machine consumer emerged alongside the supervisor:
+> the **extension's warm tools are themselves `pi.exec` clients** of those cold workers —
+> they shell the worker and parse its JSON. Both consumers are *machines that launch perk*,
+> so the principle stands unchanged: the agent never reads `--json` mid-turn, and no
+> `schema`/MCP agent affordance was rebuilt.
+
 ---
 
 ## 4. CLI ↔ Pi stage parity

@@ -1,5 +1,11 @@
 # The dignified-Python convergence checklist + per-module friction backlog
 
+> **Status: executed.** The Phase-4 sweeps this doc scoped have all landed — node 4.2
+> (core domain, PR #288), node 4.3 (launch/run, PR #305), node 4.4
+> (provider/registry/binding, PR #300), node 4.5 (init/doctor/env + misc, PR #313). The §3
+> backlog entries are now historical record, and the open rulings were resolved as recorded
+> in the Objective #225 node descriptions (each node's prose carries its landed summary).
+
 **Objective #225, Node 4.1.** This doc is the *bounded scope* for the Phase-4 convergence sweeps
 (Nodes 4.2–4.5): §1 fixes the checklist every sweep applies, §2 rules on the ruff rules that keep
 it enforced, §3 records the per-module friction backlog (one entry per non-CLI `perk/` module,
