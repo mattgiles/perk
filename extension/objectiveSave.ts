@@ -1,16 +1,21 @@
 // P3.T2 — the warm `objective_save` door, the objective mirror of planSave.ts. The in-session twin
 // of the Python cold door (`perk objective create`): a deterministic, terminating tool + command
 // that WRAP the existing storage — they do NOT reimplement the GitHub write. `saveObjective()`
-// writes the prose to a temp file, passes the STRUCTURED roadmap as `--roadmap <json>` (the agent
-// never hand-writes roadmap YAML), delegates to `perk objective create --json` via `pi.exec`, then
-// links the live session: `active_objective` + a fresh `perk:objective-budget` activation marker
+// passes the STRUCTURED roadmap as `--roadmap <json>` (the agent never hand-writes roadmap YAML)
+// and delegates to `perk objective create --json` via the shared cold-door client (`runColdDoor`,
+// Node 1.4 — the prose rides the run-scratch stdin channel), then links the live session: `active_objective` + a fresh `perk:objective-budget` activation marker
 // (mirrors the `/objective <id>` activation in objective.ts). Failures are loud-but-non-fatal.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
+import {
+  booleanField,
+  type ColdJson,
+  numberField,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "./coldDoor.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
@@ -25,12 +30,19 @@ export interface ObjectiveSaveOk {
 
 export type ObjectiveSaveResult = Result<ObjectiveSaveOk>;
 
-/** The `perk objective create --json` success shape (the contract the warm door consumes). */
-interface ObjectiveCreateJson {
-  success: boolean;
-  error_type: string | null;
-  message?: string | null;
-  objective?: { number: number; url: string; existed?: boolean };
+/** The decoded `perk objective create --json` payload slice the warm door consumes. */
+interface ObjectiveCreatePayload {
+  objective: { number: number; url: string; existed: boolean | undefined };
+}
+
+/** Narrow the `perk objective create --json` success payload; strict on `objective`. */
+function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null {
+  const objective = objectField(payload, "objective");
+  if (objective === undefined) return null;
+  const number = numberField(objective, "number");
+  const url = stringField(objective, "url");
+  if (number === undefined || url === undefined) return null;
+  return { objective: { number, url, existed: booleanField(objective, "existed") } };
 }
 
 /**
@@ -54,50 +66,23 @@ export async function saveObjective(
 
   const branch = () => branchOf(ctx);
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
-  const perkBin = process.env.PERK_BIN ?? "perk";
 
-  const dir = mkdtempSync(join(tmpdir(), "perk-objsave-"));
-  let res: ExecResult;
-  try {
-    const bodyFile = join(dir, "objective.md");
-    writeFileSync(bodyFile, prose, "utf8");
-    const args = ["objective", "create", "--body", bodyFile, "--json"];
-    if (opts.title) args.push("--title", opts.title);
-    if (runId) args.push("--run-id", runId);
-    if (opts.roadmap && opts.roadmap.length > 0) {
-      args.push("--roadmap", JSON.stringify(opts.roadmap));
-    }
-    res = await pi.exec(perkBin, args, { cwd: ctx.cwd, signal: ctx.signal });
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  const args = ["objective", "create", "--json"];
+  if (opts.title) args.push("--title", opts.title);
+  if (runId) args.push("--run-id", runId);
+  if (opts.roadmap && opts.roadmap.length > 0) {
+    args.push("--roadmap", JSON.stringify(opts.roadmap));
   }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk objective create failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: ObjectiveCreateJson;
-  try {
-    parsed = JSON.parse(res.stdout) as ObjectiveCreateJson;
-  } catch {
-    return fail("perk objective create returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success || !parsed.objective) {
-    return fail(
-      parsed.message ?? "perk objective create reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  const r = await runColdDoor<ObjectiveCreatePayload>(pi, ctx, args, {
+    label: "perk objective create",
+    decode: decodeObjectiveCreate,
+    stdin: { flag: "--body", content: prose, filename: "objective.md" },
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
   // Link the live session: set active_objective (LWW) + seed a fresh budget activation marker
   // (mirrors objective.ts's `/objective <id>` activation), so budget tracking starts immediately.
-  const objective = parsed.objective;
+  const objective = r.data.objective;
   const objectiveId = String(objective.number);
   const linked = rebuildWorkflowState(branch()).active_objective ?? null;
   if (linked !== objectiveId) {

@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { objectiveSaveGuidance } from "./objectiveSave.ts";
@@ -72,7 +73,9 @@ test("tool: objective_save passes the structured roadmap as --roadmap <json>", a
   }
 });
 
-test("tool: objective_save surfaces a cold-door failure as details.ok=false (no linkage)", async () => {
+test("tool: a success:false envelope at non-zero exit surfaces the structured error (no linkage)", async () => {
+  // The envelope-aware regression (Node 2.2): the Python plane prints a structured failure
+  // envelope to stdout before exiting non-zero — the door surfaces it, not the stderr tail.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, {
     stdout: JSON.stringify({ success: false, error_type: "github_error", message: "boom" }),
@@ -81,10 +84,52 @@ test("tool: objective_save surfaces a cold-door failure as details.ok=false (no 
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     const result = await h.invokeTool("objective_save", { prose: PROSE });
-    const details = result.details as { ok: boolean; error_type?: string };
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
     assert.equal(details.ok, false);
-    assert.equal(details.error_type, "exec_failed");
+    assert.equal(details.error_type, "github_error");
+    assert.equal(details.error, "boom");
     assert.equal(h.workflowState().active_objective ?? null, null, "no linkage on failure");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: success:true with a malformed objective fails as bad_output (no linkage)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const malformed = JSON.stringify({
+    success: true,
+    error_type: null,
+    objective: { number: "7", url: "https://gh/o/r/issues/7" }, // number a string → reject
+  });
+  const bin = fakePerk(cwd, { stdout: malformed });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_save", { prose: PROSE });
+    const details = result.details as { ok: boolean; error?: string; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_output");
+    assert.match(details.error ?? "", /unexpected payload/);
+    assert.equal(h.workflowState().active_objective ?? null, null, "no linkage on bad output");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: objective_save stages the prose in run scratch (mkdtemp retirement)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = `${cwd}/argv.txt`;
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_save", { prose: PROSE });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    const bodyFile = argv[argv.indexOf("--body") + 1] ?? "";
+    assert.ok(
+      bodyFile.includes(join(".pi", "workflow", "scratch", "runs", "01RID")),
+      `prose staged under run scratch (got ${bodyFile})`,
+    );
+    // saveObjective trims the prose before staging, hence the .trim() on the expectation.
+    assert.equal(readFileSync(bodyFile, "utf8"), PROSE.trim(), "the staged file holds the prose");
   } finally {
     h.dispose();
   }
