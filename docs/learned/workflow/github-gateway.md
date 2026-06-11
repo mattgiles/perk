@@ -1,6 +1,6 @@
 ---
-title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold
-read_when: You are touching `perk/github.py`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, or adding a REST/GraphQL call.
+title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
+read_when: You are touching `perk/github.py`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call, or designing a mutation-posting policy (failure ladders, verdict-driven artifacts).
 ---
 
 # The github.py gateway
@@ -45,6 +45,27 @@ that merely *mentions* "not found" for a non-404 failure reads as a lookup miss 
 that previously matched a plain 404. Sanctioned and regression-pinned — but **if a phantom-`None`
 GitHub lookup bug ever surfaces, `_is_not_found` is the place to look.** This doc exists largely to
 give that bug a findable home.
+
+## Mutation-posting policies (the /pr-review verdict split)
+
+The verdict-driven `/pr-review` work established three policy patterns for gateway mutations:
+
+- **The verdict-driven mutation split**: when an agent-posted artifact has a "nothing to say"
+  outcome, give it a *distinct minimal* artifact — one 👍 reaction via the issues-reactions
+  endpoint (which covers PRs and is idempotent for same-user duplicates) — rather than a
+  degenerate version of the rich artifact. A shared result type absorbing a third `mode` value
+  keeps the CLI branch trivial.
+- **Asymmetric failure policies coexist in one gateway section**: the review poster keeps a
+  fallback ladder (a review must never be lost), while the reaction poster is hard-fail with no
+  fallback (nothing review-shaped is lost if it fails). Record the rationale in the section
+  banner and pin both policies in tests.
+- **In-session-only fields are enforced structurally**: the gateway functions simply have no
+  parameter for the in-session `fyi` channel, so it *cannot* reach a GitHub payload. Prefer that
+  shape over prompt-level "don't post it" policy.
+
+Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-def delivery to
+consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
+bad-batch error. Acceptable at 0.0.1; remember it when the delivery gap closes.
 
 ## The resolved `dry_run` ruling (record)
 

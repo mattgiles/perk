@@ -25,6 +25,11 @@ Recovery:
 2. Re-commit with the same message.
 3. `git log` — verify the commit actually advanced (new hash at HEAD).
 
+Recurrence variant: **`run_ci` green ≠ committable.** The pre-commit format hook can reformat
+*after* CI passed — e.g. collapsing a habit-wrapped signature back to one line because the
+project's line length actually permits it. Treat the first commit attempt as part of verification,
+not an afterthought: commit → hook rewrites → re-add → re-commit → re-run CI.
+
 ## `RUF100` fires on a `# noqa` for a non-enabled rule
 
 A `# noqa: N801` on a class name with an underscore (`ReviewComment_Inline`) drew a **`RUF100`**

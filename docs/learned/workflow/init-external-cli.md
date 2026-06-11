@@ -1,6 +1,6 @@
 ---
 title: perk init shelling out to external CLIs (the skills-manifest pattern)
-read_when: You are making perk init shell out to an external CLI (skills, gh, …), declaring a committed manifest fragment, pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
+read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), declaring a committed manifest fragment, pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
 ---
 
 # `perk init` and external CLIs
@@ -9,24 +9,47 @@ perk authored skills (`skills/perk-*`) are declared in a committed manifest frag
 (`.agents/manifest.d/perk.yaml`) and materialized by `perk init` shelling out to the external
 `skills` CLI (plan #51, PR #55). The patterns below generalize to any external CLI perk drives.
 
-## Best-effort / non-fatal posture (D3)
+## Failure posture: D3 superseded for the skills CLI (GitHub readiness stays non-fatal)
 
-Shelling out to an external CLI must **never block init** — file convergence has already
-succeeded by the time the shell runs. `_sync_skills` mirrors the GitHub readiness probe:
+The original D3 posture — "shelling out to an external CLI must never block init" — **no longer
+applies to the skills CLI**. Skills delivery is perk's own load-bearing substrate (perk's skills
+are how sessions get their instructions), so a silent no-op there is a broken install, not a
+degraded nicety. GitHub readiness remains best-effort/non-fatal (a flaky `gh` still degrades to an
+unauthed report).
 
-- Guard on presence: `if shutil.which("skills") is None: return`.
-- Wrap the subprocess calls against `OSError` / `subprocess.TimeoutExpired` and return on failure.
-- Use explicit `check=False`, `capture_output=True`, `timeout=…` on every `subprocess.run`.
+The skills shell now uses a **two-tier loud-failure posture**:
 
-A missing, stale, or failing CLI degrades to a no-op, exactly like a flaky `gh` degrading to an
-unauthed GitHub report.
+1. **A pre-flight probe** replicating the foreign tool's own refusal condition (tracked content
+   under its managed pathspecs), failing fast with remediation **before any convergence** —
+   env-failure, exit 2, empty changes list. A probe *error* degrades to no-short-circuit (the
+   fatal post-step catches the real failure) rather than a false block.
+2. **A fatal post-step** that surfaces the tool's stderr while **preserving** the changes list
+   (an inline failed report, not env-failure — which would zero the changes).
+
+Further hardening that generalizes:
+
+- **Post-sync presence verification de-fangs version drift generically**: verifying every expected
+  skill is installed after a "successful" sync catches any failure mode — including the documented
+  no-version-floor residual below (an outdated CLI that links nothing is now caught).
+- **The config-vs-substrate check split keeps "loud-but-non-fatal" honest**: user-config checks
+  (`bindings`) stay warn-level; perk-substrate checks (`skills-delivery`) are fail-level. Split by
+  ownership.
+- **The posture flip is consumer-visible**: consumers with a missing/never-synced skills CLI now
+  get `perk init` exit 2 / `perk doctor` exit 1 where they previously got 0 — supervisors/CI that
+  tolerated the old silent pass newly fail. Intentional.
+
+The mechanics that survive from D3 for any external shell: explicit `check=False`,
+`capture_output=True`, `timeout=…` on every `subprocess.run`, and one patchable seam (below).
 
 ## A single patchable seam keeps the suite offline
 
 `skills init` / `skills update --sync` would clone over the network during *verified* init tests
 (the ones that run `verify=True`). The pattern that keeps the test suite offline:
 
-- Route the whole shell through **one module-level function** (`init._sync_skills(root, changes)`).
+- Route the whole shell through **one module-level function** (`init._sync_skills`). Note the
+  seam's signature has widened since the original landing (self-repo awareness for installed-skill
+  checks, an optional error-string return for the fatal post-step) — grep tests for the seam name
+  before changing it again (see `init-doctor.md` on seam-signature ripple).
 - Gate the call site `if verify:` in `run_init` — the pure unit-test path (`verify=False`) already
   skips it. (The sync runs in **both** self-repo and consumer trees — see below.)
 - Stub that one seam in `tests/conftest.py`'s `stub_env`
@@ -92,9 +115,11 @@ and treat the other repo as an external dependency / precondition, not part of t
 
 `env.check_environment` only checks **presence** of `skills`, not its version. Fragment support is
 a *version* capability: during #56 the brew-installed binary (0.5.0) predated the fragment support
-that already existed in source and had to be rebuilt. If a consumer's installed `skills` predates
-fragment support, `perk init`'s sync **silently links nothing** (no error). A minimum-version gate
-is an untracked gap — keep it in mind before relying on an external CLI's newer behavior.
+that already existed in source and had to be rebuilt. A minimum-version gate is still untracked —
+but the post-sync presence verification (above) now catches the worst failure mode generically: an
+outdated CLI whose sync links nothing fails loudly instead of silently passing. Pathspec drift vs.
+the skills CLI (under-/over-match of the pre-flight probe) remains possible; the generic post-sync
+net is the backstop.
 
 ## Cross-references
 

@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, or composing/testing a Python surface that nests a command emitting machine_output.
+read_when: You are touching launch_stage's argv construction, pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -64,6 +64,23 @@ parsing or CLI trust resolution — so this is purely **local cold-door launch**
 It ends in `os.execvpe("pi", …)` — the CLI *becomes* pi, and nothing after that runs. A supervisor
 **cannot** compose a *local* launch (it would never come back); landing therefore stays the
 human/interactive path (see `objective-lifecycle.md`).
+
+## Refactoring launch/run behind byte-exact pins
+
+The node-4.3 dignified sweep of `perk/launch.py` / the run worker established three constraints:
+
+- **`perk/cache.py` is a deliberate import-leaf** (it imports only `perk.output`), and
+  `github.py` *lazily* imports `cache` for cycle avoidance — so any helper that calls *into*
+  `github` cannot live in `cache.py` without creating a real import cycle. When a backlog says
+  "move helper X to a shared home", check the candidate home's import posture first:
+  **promote-in-place in the consumer-owning module** is the correct move when the shared home is
+  a leaf. This is why the public plan-body materializer lives in `launch.py`, with the run worker
+  as the documented second consumer, rather than relocated.
+- **Frozen-dataclass state transitions**: keep the initial construction, then use
+  `dataclasses.replace` for every subsequent status evolution — unchanged fields carry by
+  construction and the persisted dicts stay byte-identical.
+- **When refactoring behind exact-string test pins, the pins themselves are sufficient proof of
+  behavior preservation** — zero test edits is the success signal; don't add helper-level tests.
 
 ## Composing a launcher that emits `machine_output` inside a `--json` surface
 
