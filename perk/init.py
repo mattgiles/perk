@@ -11,7 +11,6 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 """
 
 import json
-import os
 import shutil
 import subprocess
 import tomllib
@@ -576,7 +575,7 @@ def _skill_link_state(root: Path) -> dict[str, str]:
     state: dict[str, str] = {}
     for entry in sorted(skills_dir.iterdir()):
         try:
-            state[entry.name] = os.readlink(entry) if entry.is_symlink() else ""
+            state[entry.name] = str(entry.readlink()) if entry.is_symlink() else ""
         except OSError:
             state[entry.name] = ""
     return state

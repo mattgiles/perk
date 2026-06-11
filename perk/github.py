@@ -1837,7 +1837,8 @@ def get_pr_review_context(*, pr_number: int, branch: str, repo_root: Path) -> Pr
 
 def _read_plan_body(*, branch: str, repo_root: Path) -> str | None:
     """Best-effort plan body: the materialized `cache.plan` mirror, else the plan issue body."""
-    from perk import cache  # local import: avoid a module-load cycle (cache imports nothing of us)
+    # local import: avoid a module-load cycle (cache imports nothing of us)
+    from perk import cache  # noqa: PLC0415
 
     materialized = cache.plan_body_path(repo_root)
     if materialized.is_file():

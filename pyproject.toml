@@ -58,4 +58,12 @@ include = ["perk/**/*.py", "tests/**/*.py"]
 extend-exclude = [".prior-art"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PLW1514", "PTH", "PLR1702", "PLC0415"]
+# Activate only the explicitly selected preview rules (PLW1514/PLR1702/PLC0415);
+# stable rules keep their stable behavior.
+preview = true
+explicit-preview-rules = true
+
+[tool.ruff.lint.per-file-ignores]
+# Test-local imports are idiomatic (fixtures, monkeypatch targets).
+"tests/**" = ["PLC0415"]
