@@ -20,12 +20,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from perk import cache, git, github, run_id, runner
+from perk import cache, git, github, issues, run_id, runner
 from perk.binding_delivery import render_cold_bindings
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
 from perk.git import GitError
 from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import Stage
 
@@ -596,8 +597,8 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, A
     if not pr_id.isdigit():
         return
     try:
-        body = github.get_plan_body(number=int(pr_id), repo_root=repo_root)
-    except GitHubError as exc:
+        body = issues.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
+    except (GitHubError, IssueBackendError) as exc:
         user_output(f"  (checkpoints: could not fetch plan #{pr_id} body — {exc})")
         return
     if body:

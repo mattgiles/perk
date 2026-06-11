@@ -18,10 +18,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, github, launch, resume, run_report
+from perk import cache, issues, launch, resume, run_report
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
 from perk.init import GIT_PACKAGE
+from perk.issue_backend import IssueBackendError
 from perk.output import user_output
 from perk.registry import Stage, load_registry
 
@@ -164,8 +164,8 @@ def run_worker(
     """
     stage = _drivable_stage(stage_id)
     try:
-        state = github.get_plan(number=plan, repo_root=repo_root)
-    except GitHubError as exc:
+        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(plan))
+    except IssueBackendError as exc:
         raise UserFacingCliError(
             f"run-worker failed to resolve plan #{plan}\n{exc}", error_type="github_error"
         ) from exc

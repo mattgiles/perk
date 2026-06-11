@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import cache, github, launch, resume
+from perk import cache, github, issue_backend, launch, resume
 from perk.cli.cli import cli
 
 
@@ -13,7 +13,17 @@ def _pr(state: str) -> github.PullRequest:
     return github.PullRequest(number=55, url="u/pr/55", is_draft=False, state=state, existed=True)
 
 
+def _neutral_state(
+    *, header: dict | None = None, pr: github.PullRequest | None = None
+) -> issue_backend.PlanState:
+    """The backend-neutral shape consumed by the pure resolution functions (Node 1.2)."""
+    return issue_backend.PlanState(
+        id="7", url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr, state="OPEN"
+    )
+
+
 def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) -> github.PlanState:
+    """The github-native shape returned by monkeypatched ``github.get_plan`` fakes."""
     return github.PlanState(
         number=7, url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr
     )
@@ -25,11 +35,11 @@ def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) 
 @pytest.mark.parametrize(
     ("state", "pending", "expected"),
     [
-        (_state(header={"lifecycle_stage": "planned"}), False, "implement"),
-        (_state(header={"lifecycle_stage": "impl"}), False, "implement"),  # impl, no PR yet
-        (_state(pr=_pr("OPEN")), False, "submit"),
-        (_state(pr=_pr("MERGED")), True, "learn"),
-        (_state(pr=_pr("MERGED")), False, None),  # merged + learned -> nothing
+        (_neutral_state(header={"lifecycle_stage": "planned"}), False, "implement"),
+        (_neutral_state(header={"lifecycle_stage": "impl"}), False, "implement"),  # no PR yet
+        (_neutral_state(pr=_pr("OPEN")), False, "submit"),
+        (_neutral_state(pr=_pr("MERGED")), True, "learn"),
+        (_neutral_state(pr=_pr("MERGED")), False, None),  # merged + learned -> nothing
     ],
 )
 def test_resolve_resume_stage_matrix(state, pending, expected):
@@ -37,7 +47,7 @@ def test_resolve_resume_stage_matrix(state, pending, expected):
 
 
 def test_reconstruct_plan_ref():
-    ref = resume.reconstruct_plan_ref(_state(header={"objective_id": "O1"}))
+    ref = resume.reconstruct_plan_ref(_neutral_state(header={"objective_id": "O1"}))
     assert ref == {
         "provider": "github",
         "pr_id": "7",
