@@ -1,7 +1,7 @@
 """Sectioned root-group help (``SectionedGroup``).
 
-The root ``perk --help`` renders curated sections (Top-Level Commands / Command Groups /
-Initialization / Other / Hidden) while preserving the parenthetical alias display; subgroups
+The root ``perk --help`` renders curated sections (Stage Launchers / Command Groups /
+Setup & Health / Other / Hidden) while preserving the parenthetical alias display; subgroups
 stay flat. A drift guard walks the live root surface so the curated lists partition it cleanly.
 """
 
@@ -10,8 +10,8 @@ from click.testing import CliRunner
 
 from perk.cli.alias import (
     COMMAND_GROUPS,
-    INITIALIZATION,
-    TOP_LEVEL_COMMANDS,
+    SETUP_HEALTH,
+    STAGE_LAUNCHERS,
     SectionedGroup,
     get_aliases,
 )
@@ -28,15 +28,16 @@ def _between(output: str, start_header: str, end_header: str | None) -> str:
 def test_root_help_renders_section_headers():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    assert "Top-Level Commands:" in result.output
+    assert "Stage Launchers" in result.output
+    assert "each opens a primed pi session" in result.output
     assert "Command Groups:" in result.output
-    assert "Initialization:" in result.output
+    assert "Setup & Health:" in result.output
 
 
 def test_command_groups_section_lists_groups():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    groups_slice = _between(result.output, "Command Groups:", "Initialization:")
+    groups_slice = _between(result.output, "Command Groups:", "Setup & Health:")
     for entry in (
         "worktree (wt)",
         "objective (obj)",
@@ -46,17 +47,32 @@ def test_command_groups_section_lists_groups():
         "workflow",
     ):
         assert entry in groups_slice, entry
-    top_slice = _between(result.output, "Top-Level Commands:", "Command Groups:")
-    # The group rows (with their parenthetical aliases) must not appear under Top-Level Commands.
+    launchers_slice = _between(result.output, "Stage Launchers", "Command Groups:")
+    # The group rows (with their parenthetical aliases) must not appear under Stage Launchers.
     for entry in ("worktree (wt)", "objective (obj)", "registry (reg)", "state (st)"):
-        assert entry not in top_slice, entry
+        assert entry not in launchers_slice, entry
 
 
-def test_init_under_initialization():
+def test_init_and_doctor_under_setup_health():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    init_slice = _between(result.output, "Initialization:", "Other:")
-    assert "init" in init_slice
+    setup_slice = _between(result.output, "Setup & Health:", "Other:")
+    rows = [line.strip().split()[0] for line in setup_slice.splitlines() if line.strip()]
+    assert "init" in rows
+    assert "doctor" in rows
+
+
+def test_launchers_section_contents():
+    result = CliRunner().invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    launchers_slice = _between(result.output, "Stage Launchers", "Command Groups:")
+    rows = [line.strip().split()[0] for line in launchers_slice.splitlines() if line.strip()]
+    for name in ("submit", "land", "learn", "plan", "implement"):
+        assert name in rows, name
+    assert "implement (impl)" in launchers_slice
+    assert "doctor" not in rows
+    for group_name in COMMAND_GROUPS:
+        assert group_name not in rows, group_name
 
 
 def test_workers_render_under_other():
@@ -64,6 +80,22 @@ def test_workers_render_under_other():
     assert result.exit_code == 0
     other_slice = _between(result.output, "Other:", None)
     assert "run-worker" in other_slice
+    assert "plan-save (psave)" in other_slice
+    launchers_slice = _between(result.output, "Stage Launchers", "Command Groups:")
+    assert "plan-save (psave)" not in launchers_slice
+
+
+def test_stage_launcher_long_help_mentions_pi_session():
+    result = CliRunner().invoke(cli, ["submit", "--help"])
+    assert result.exit_code == 0
+    assert "Opens a primed pi session for the 'submit' stage" in result.output
+    assert "Push the branch and open a draft PR" in result.output
+    # The root listing row stays the bare registry summary (no launcher sentence).
+    root = CliRunner().invoke(cli, ["--help"])
+    submit_rows = [line for line in root.output.splitlines() if line.strip().startswith("submit")]
+    assert submit_rows
+    for line in submit_rows:
+        assert "primed pi session" not in line
 
 
 def test_pr_group_lists_all_verbs():
@@ -140,7 +172,7 @@ def test_section_lists_drift_guard():
             continue
         visible.add(name)
 
-    curated = [set(TOP_LEVEL_COMMANDS), set(COMMAND_GROUPS), set(INITIALIZATION)]
+    curated = [set(STAGE_LAUNCHERS), set(COMMAND_GROUPS), set(SETUP_HEALTH)]
 
     # (a) No stale entries: every curated name resolves to a live root command.
     for bucket in curated:

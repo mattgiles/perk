@@ -9,7 +9,9 @@ stage launcher.
 
 Default-dispatch edge: launcher pi-args whose *first* token is literally ``capture`` or ``docs``
 would route to the verb instead of the launcher — accepted; in practice launcher pi-args start
-with ``-``. Launcher-vs-group help presentation polish is Node 2.3's job.
+with ``-``. Launcher-vs-group presentation (Node 2.3): the root ``Stage Launchers`` section
+header plus the generated launcher help sentence (``make_stage_launcher``) carry the
+disambiguation; the hidden ``launch`` verb intentionally stays out of subgroup help.
 """
 
 import click

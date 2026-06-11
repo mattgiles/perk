@@ -13,7 +13,7 @@ perk has no shared CLI package, so the whole (small) mechanism lives here:
   is listed once as ``primary (alias, …)`` and alias names are not rendered as separate rows.
   Used by the subgroups (flat verb lists).
 - ``SectionedGroup`` extends ``AliasGroup`` for the **root** group only: it renders sectioned
-  help (Top-Level Commands / Command Groups / Initialization / Other / Hidden) while preserving
+  help (Stage Launchers / Command Groups / Setup & Health / Other / Hidden) while preserving
   the parenthetical alias display. Hidden-command visibility is gated by the ``PERK_SHOW_HIDDEN``
   environment variable.
 """
@@ -67,25 +67,24 @@ def register_with_aliases(group: click.Group, cmd: click.Command, name: str | No
 
 
 # Root-group section taxonomy (curated, erk-faithful). Anything live but unlisted falls into
-# the ``Other`` catch-all; ``cmd.hidden`` commands fall into ``Hidden`` (gated by env, see below).
-TOP_LEVEL_COMMANDS = [
+# the ``Other`` catch-all (e.g. the `plan-save` / `run-worker` worker doors); ``cmd.hidden``
+# commands fall into ``Hidden`` (gated by env, see below).
+STAGE_LAUNCHERS = [
     "plan",
     "save",
+    "implement",
     "submit",
     "address",
     "land",
-    "learn",  # the hybrid learn group still reads as the stage launcher; presentation → Node 2.3
-    "implement",
+    "learn",  # the hybrid learn group still reads as the stage launcher
     "resume",
     "replan",
-    "plan-save",
     "objective-author",
     "objective-plan",
     "objective-save",
-    "doctor",
 ]
 COMMAND_GROUPS = ["objective", "pr", "registry", "state", "worktree", "workflow"]
-INITIALIZATION = ["init"]
+SETUP_HEALTH = ["init", "doctor"]
 
 
 def _show_hidden() -> bool:
@@ -143,7 +142,7 @@ class AliasGroup(click.Group):
 class SectionedGroup(AliasGroup):
     """A root group that renders sectioned ``--help`` (curated name lists + ``Other`` catch-all).
 
-    Sections render in a fixed order — Top-Level Commands, Command Groups, Initialization, Other,
+    Sections render in a fixed order — Stage Launchers, Command Groups, Setup & Health, Other,
     Hidden — and any section with no rows is omitted. Alias display and command resolution are
     inherited unchanged from ``AliasGroup``; the ``Hidden`` section is only rendered when
     ``PERK_SHOW_HIDDEN`` is set.
@@ -153,9 +152,9 @@ class SectionedGroup(AliasGroup):
         alias_names = _collect_alias_names(self, ctx)
         show_hidden = _show_hidden()
 
-        top_level: list[tuple[str, click.Command]] = []
+        launchers: list[tuple[str, click.Command]] = []
         groups: list[tuple[str, click.Command]] = []
-        init: list[tuple[str, click.Command]] = []
+        setup: list[tuple[str, click.Command]] = []
         other: list[tuple[str, click.Command]] = []
         hidden: list[tuple[str, click.Command]] = []
 
@@ -169,17 +168,17 @@ class SectionedGroup(AliasGroup):
                 continue
             if name in COMMAND_GROUPS:
                 groups.append((name, cmd))
-            elif name in INITIALIZATION:
-                init.append((name, cmd))
-            elif name in TOP_LEVEL_COMMANDS:
-                top_level.append((name, cmd))
+            elif name in SETUP_HEALTH:
+                setup.append((name, cmd))
+            elif name in STAGE_LAUNCHERS:
+                launchers.append((name, cmd))
             else:
                 other.append((name, cmd))
 
         sections: list[tuple[str, list[tuple[str, click.Command]]]] = [
-            ("Top-Level Commands", top_level),
+            ("Stage Launchers (each opens a primed pi session)", launchers),
             ("Command Groups", groups),
-            ("Initialization", init),
+            ("Setup & Health", setup),
             ("Other", other),
             ("Hidden", hidden),
         ]
