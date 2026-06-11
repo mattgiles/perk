@@ -5,9 +5,11 @@
 // with. The notify seam itself stays in `report.ts` (re-exported here so "the surfaces module" is
 // surfaces.ts + report.ts for the node 4.1 guard).
 //
-// Charter law mirrored here (no behavioral consumers yet for GLYPHS / the height bounds — they
-// are pinned by surfaces.test.ts now and enforced in nodes 2.2/2.3/4.1; locked shape, not
-// fiction).
+// Charter law mirrored here: GLYPHS + the checkpoints height bound now have a behavioral
+// consumer (checkpoints.ts renders through `renderProgressLines`/`windowProgress`, node 2.2);
+// the objective bound binds in node 2.3 and the regression guard in node 4.1.
+
+import { truncateToWidth } from "@earendil-works/pi-tui";
 
 // Re-exports: the notify seam stays in report.ts; surfaces.ts is the one import for UI vocabulary.
 export { type ReportTarget, report, type Severity } from "./report.ts";
@@ -41,6 +43,26 @@ export const OBJECTIVE_WIDGET_MAX_LINES = 2;
 // --- the standing-surface setter -----------------------------------------------------------------
 
 /**
+ * The minimal theme surface perk's themed renderers need (`theme.fg(color, text)`). Pi's real
+ * `Theme` satisfies it structurally; tests fake it with a tagging `fg`. Keeping the structural
+ * type here keeps surfaces.ts dependency-light (no `Theme` import).
+ */
+export interface ThemeLike {
+  fg(color: string, text: string): string;
+}
+
+/**
+ * A standing-widget component factory in pi's `setWidget` factory shape: invoked with the live
+ * `(tui, theme)`, returns a component whose `render(width)` computes themed lines **per call**
+ * (the D10 stateless-render pattern — never cache themed strings). NOTE: pi's RPC mode drops
+ * factory widgets (only string[] forwards) — an accepted trade-off recorded in contracts.md.
+ */
+export type StandingWidgetFactory = (
+  tui: unknown,
+  theme: ThemeLike,
+) => { render(width: number): string[]; invalidate(): void };
+
+/**
  * The minimal headless-aware surface `setStanding` needs. `ExtensionContext` satisfies it; tests
  * fake it (the same minimal-structural-interface recipe as report.ts's `ReportTarget` — see
  * `docs/learned/pi/extension-seams.md`).
@@ -49,7 +71,11 @@ export interface StandingTarget {
   hasUI: boolean;
   ui: {
     setStatus(slot: string, value: string | undefined): void;
-    setWidget(slot: string, value: string[] | undefined): void;
+    setWidget(
+      slot: string,
+      value: string[] | StandingWidgetFactory | undefined,
+      options?: { placement?: "aboveEditor" | "belowEditor" },
+    ): void;
   };
 }
 
@@ -57,11 +83,21 @@ export interface StandingTarget {
 export function setStanding(
   target: StandingTarget,
   slot: string,
-  surface: { status: string; widget: string[] } | undefined,
+  surface:
+    | {
+        status: string;
+        widget: string[] | StandingWidgetFactory;
+        placement?: "aboveEditor" | "belowEditor";
+      }
+    | undefined,
 ): void {
   if (!target.hasUI) return;
   target.ui.setStatus(slot, surface?.status);
-  target.ui.setWidget(slot, surface?.widget);
+  if (surface?.placement) {
+    target.ui.setWidget(slot, surface.widget, { placement: surface.placement });
+  } else {
+    target.ui.setWidget(slot, surface?.widget);
+  }
 }
 
 // --- format helpers (relocated from checkpoints.ts / objective.ts, verbatim) --------------------
@@ -80,21 +116,71 @@ export interface ProgressState {
   current: number | null;
 }
 
-/** The `done/total` checkpoint progress summary (with `· ▶n` when a step is current). */
+/** The `done/total` checkpoint progress summary (with `· ▸n` when a step is current). */
 export function progressLine(state: ProgressState): string {
   const done = state.steps.filter((s) => s.completed).length;
   const base = `${done}/${state.steps.length}`;
-  return state.current != null ? `${base} · ▶${state.current}` : base;
+  return state.current != null ? `${base} · ▸${state.current}` : base;
+}
+
+/** The `GLYPHS` kind for a step: done if completed, current if it IS the current step, else pending. */
+export function stepGlyphKind(state: ProgressState, s: ProgressStep): GlyphKind {
+  if (s.completed) return "done";
+  if (s.step === state.current) return "current";
+  return "pending";
+}
+
+/** A windowed progress item: a visible step, or an elision marker for the hidden steps. */
+export type ProgressWindowItem =
+  | { kind: "step"; step: ProgressStep }
+  | { kind: "elision"; hidden: number; side: "earlier" | "later" };
+
+/**
+ * The D1 sliding window: at most `cap` step items (elision markers extra). For `n ≤ cap` all
+ * steps show with no markers. Otherwise the window anchors on the current step (`current == null`
+ * ⟹ all complete ⟹ anchor at the end) sitting second when possible — one earlier step above,
+ * the rest below — with `… +N earlier` / `… +N later` markers for the hidden steps.
+ */
+export function windowProgress(state: ProgressState, cap: number): ProgressWindowItem[] {
+  const n = state.steps.length;
+  if (n <= cap) return state.steps.map((step) => ({ kind: "step", step }));
+  const anchorIdx =
+    state.current != null
+      ? Math.max(
+          state.steps.findIndex((s) => s.step === state.current),
+          0,
+        )
+      : n - 1;
+  const start = Math.min(Math.max(anchorIdx - 1, 0), n - cap);
+  const items: ProgressWindowItem[] = [];
+  if (start > 0) items.push({ kind: "elision", hidden: start, side: "earlier" });
+  for (const step of state.steps.slice(start, start + cap)) items.push({ kind: "step", step });
+  const later = n - start - cap;
+  if (later > 0) items.push({ kind: "elision", hidden: later, side: "later" });
+  return items;
 }
 
 /**
- * The glyph for a step: ☑ completed, ▶ the current step, ☐ otherwise. NOTE: `☑ ▶ ☐` are
- * charter-retired (§5 / D3) — node 2.2 replaces them with the `GLYPHS` vocabulary above.
+ * The themed checkpoints-widget lines (charter D1/D3/D9/D10): the `windowProgress` window mapped
+ * to `✓/▸/○ <n>. <text>` lines colored per the §5 table (completed text muted, elision markers
+ * dim), every line width-truncated via pi-tui's `truncateToWidth` (ANSI- and wide-glyph-aware).
+ * Pure per call — call it inside a component's `render()` so theming stays live (D10).
  */
-export function stepGlyph(state: ProgressState, s: ProgressStep): string {
-  if (s.completed) return "☑";
-  if (s.step === state.current) return "▶";
-  return "☐";
+export function renderProgressLines(
+  state: ProgressState,
+  theme: ThemeLike,
+  width: number,
+): string[] {
+  return windowProgress(state, CHECKPOINTS_WIDGET_MAX_LINES).map((item) => {
+    if (item.kind === "elision") {
+      return truncateToWidth(theme.fg("dim", `… +${item.hidden} ${item.side}`), width);
+    }
+    const kind = stepGlyphKind(state, item.step);
+    const glyph = theme.fg(GLYPHS[kind].themeColor, GLYPHS[kind].glyph);
+    const text = `${item.step.step}. ${item.step.text}`;
+    const line = `${glyph} ${kind === "done" ? theme.fg("muted", text) : text}`;
+    return truncateToWidth(line, width);
+  });
 }
 
 function formatTokens(tokens: number): string {

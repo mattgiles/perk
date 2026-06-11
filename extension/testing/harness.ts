@@ -70,8 +70,11 @@ export interface PerkSession {
   readonly notifyEvents: readonly { message: string; severity?: string }[];
   /** Captured `ui.setStatus(slot, value)` calls (headful only). */
   readonly statuses: readonly { slot: string; value: string | undefined }[];
-  /** Captured `ui.setWidget(slot, value)` calls (headful only). */
-  readonly widgets: readonly { slot: string; value: string[] | undefined }[];
+  /**
+   * Captured `ui.setWidget(slot, value)` calls (headful only). Factory widgets are rendered
+   * through a passthrough fake theme at width 80; `placement` is captured from the options arg.
+   */
+  readonly widgets: readonly { slot: string; value: string[] | undefined; placement?: string }[];
   /** The PERK_SELFCHECK sentinel, or null if not yet written. */
   sentinel(): Sentinel | null;
   /** Rebuild `perk:workflow-state` from the live session branch. */
@@ -361,13 +364,22 @@ export async function fauxModelRegistration(): Promise<{
   };
 }
 
+/** A widget component factory as the harness sees it (pi's `setWidget` factory form). */
+type WidgetFactory = (
+  tui: unknown,
+  theme: { fg(color: string, text: string): string },
+) => { render(width: number): string[] };
+
 function headfulUIContext(
   notifies: string[],
   statuses: { slot: string; value: string | undefined }[] = [],
-  widgets: { slot: string; value: string[] | undefined }[] = [],
+  widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [],
   notifyEvents: { message: string; severity?: string }[] = [],
 ): ExtensionUIContext {
   // Minimal context: records notify (+ severity) + setStatus/setWidget so tests can assert UI.
+  // Factory widgets are invoked with a passthrough fake theme and rendered at width 80, so the
+  // recorded `value` is always a string[] (existing asserts keep working).
+  const fakeTheme = { fg: (_color: string, text: string) => text };
   return {
     notify: (message: string, severity?: string) => {
       notifies.push(message);
@@ -376,8 +388,13 @@ function headfulUIContext(
     setStatus: (slot: string, value: string | undefined) => {
       statuses.push({ slot, value });
     },
-    setWidget: (slot: string, value: string[] | undefined) => {
-      widgets.push({ slot, value });
+    setWidget: (
+      slot: string,
+      value: string[] | WidgetFactory | undefined,
+      options?: { placement?: string },
+    ) => {
+      const rendered = typeof value === "function" ? value(undefined, fakeTheme).render(80) : value;
+      widgets.push({ slot, value: rendered, placement: options?.placement });
     },
   } as unknown as ExtensionUIContext;
 }
@@ -416,7 +433,7 @@ export async function loadPerkSession(opts: {
   const notifies: string[] = [];
   const notifyEvents: { message: string; severity?: string }[] = [];
   const statuses: { slot: string; value: string | undefined }[] = [];
-  const widgets: { slot: string; value: string[] | undefined }[] = [];
+  const widgets: { slot: string; value: string[] | undefined; placement?: string }[] = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
   await loader.reload();
   const model = getModel("anthropic", "claude-sonnet-4-5") ?? undefined;

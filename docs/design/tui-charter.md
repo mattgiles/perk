@@ -128,7 +128,9 @@ Placement rules:
 **D1 — checkpoints widget windowing** (the height-bound decision this node was chartered to
 make): the per-step checklist gets a **fixed cap of ~4 lines** — a sliding window centered on the
 current step, with elision markers (e.g. `… +N earlier` / `… +N later`). Completed history
-collapses; local context around the current step stays visible. The status/footer chip keeps the
+collapses; local context around the current step stays visible. (Resolved in node 2.2: the cap
+counts **step lines** — 4 — with the elision markers rendering *in addition*, ≤ 6 rendered lines
+worst case.) The status/footer chip keeps the
 full `done/total` summary, so no information is lost — only standing screen height.
 
 ### Width (D9)

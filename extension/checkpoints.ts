@@ -10,7 +10,11 @@
 // The pure helpers (extractDoneSteps / markCompletedSteps + the step extractor) are perk-owned
 // copies of pi's official `examples/extensions/plan-mode/utils.ts` (as T1 copied the regex tables),
 // adapted to key off `## Steps` rather than plan-mode's `Plan:` header. Status is surfaced via
-// `ctx.ui.setStatus`/`setWidget` guarded by `ctx.hasUI` (headless-safe); `/checkpoints` lists it.
+// `setStanding` guarded by `ctx.hasUI` (headless-safe): a `📋 done/total · ▸n` status chip plus a
+// themed `belowEditor` widget factory (charter D3/D4/D10 — stateless render, lines windowed to ≤4
+// steps per D1 and width-truncated per D9); `/checkpoints` notifies a one-line summary (D8).
+// Accepted trade-off: pi's RPC mode drops factory widgets — the status chip + `/checkpoints`
+// remain the RPC-visible surfaces (recorded in shared/contracts.md P2.T2c).
 //
 // TODO-PROVIDER DEFERRAL (Node 3.1). perk's checkpoints are the *reference* todo provider
 // (`perk-checkpoints`). They now *consume* the resolved `[providers] todo` selection and **step the
@@ -24,16 +28,18 @@
 // as the reference → behavior-preserving, zero change on the default selection.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { readHandoff, readPlanBody } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
 import {
   MARK_CHECKPOINTS,
   progressLine,
+  renderProgressLines,
   report,
   STATUS_SLOT_CHECKPOINTS,
   setStanding,
-  stepGlyph,
+  type ThemeLike,
 } from "./surfaces.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
@@ -244,7 +250,8 @@ function renderStatus(
   branch: readonly BranchEntry[],
 ): void {
   if (isInert(state)) {
-    // Coarse fallback: an active prose plan (no `## Steps`) still surfaces SOMETHING.
+    // Coarse fallback: an active prose plan (no `## Steps`) still surfaces SOMETHING — the same
+    // themed factory path as the steps widget (one dim line, stateless render, belowEditor).
     const coarse = coarseDescriptor(ctx, branch);
     setStanding(
       ctx,
@@ -252,15 +259,31 @@ function renderStatus(
       coarse
         ? {
             status: `${MARK_CHECKPOINTS} ${coarse.stage}`,
-            widget: [`Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`],
+            widget: (_tui: unknown, theme: ThemeLike) => ({
+              render: (width: number) => [
+                truncateToWidth(
+                  theme.fg("dim", `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`),
+                  width,
+                ),
+              ],
+              invalidate: () => {},
+            }),
+            placement: "belowEditor",
           }
         : undefined,
     );
     return;
   }
+  // Themed component factory (D3/D10): lines are computed inside render() per call — never cached
+  // — over the freshly-rebuilt state snapshot; windowed (D1) + width-truncated (D9) in surfaces.ts.
+  const snapshot = state;
   setStanding(ctx, STATUS_SLOT_CHECKPOINTS, {
     status: `${MARK_CHECKPOINTS} ${progressLine(state)}`,
-    widget: state.steps.map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`),
+    widget: (_tui: unknown, theme: ThemeLike) => ({
+      render: (width: number) => renderProgressLines(snapshot, theme, width),
+      invalidate: () => {},
+    }),
+    placement: "belowEditor",
   });
 }
 
@@ -349,12 +372,12 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         return;
       }
       const state = rebuildCheckpoint(branchOf(ctx));
-      // Still multi-line — the charter-recorded D8 violator; node 2.2 converges it.
+      // One line (charter D8): `done/total · ▸n <current step text>`; the tail drops when no
+      // step is current (all complete).
+      const current = state.steps.find((s) => s.step === state.current);
       const message = isInert(state)
         ? "no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
-        : `(${progressLine(state)}):\n${state.steps
-            .map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`)
-            .join("\n")}`;
+        : `${progressLine(state)}${current ? ` ${current.text}` : ""}`;
       report(ctx, "checkpoints", "info", message);
     },
   });
