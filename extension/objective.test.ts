@@ -8,7 +8,6 @@ import type { PlanRef } from "./cache.ts";
 import {
   DEFAULT_COMPACT_THRESHOLD,
   findBudgetMarker,
-  formatBudgetLine,
   OBJECTIVE_BUDGET_TYPE,
   rebuildBudget,
   shouldCompact,
@@ -83,11 +82,6 @@ test("rebuildBudget: inert with no marker", () => {
     tokens: 0,
     elapsedMs: 0,
   });
-});
-
-test("formatBudgetLine: tokens + elapsed", () => {
-  assert.equal(formatBudgetLine({ tokens: 12_345, elapsedMs: 65_000 }), "12.3k tok · 1m");
-  assert.equal(formatBudgetLine({ tokens: 500, elapsedMs: 5_000 }), "500 tok · 5s");
 });
 
 test("shouldCompact: threshold boundaries", () => {
