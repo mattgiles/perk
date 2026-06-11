@@ -3,8 +3,10 @@
 // `perk` (PERK_BIN) stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
-import { addressGuidance } from "./address.ts";
+import { addressGuidance, decodeResolveParams } from "./address.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("addressGuidance injects the configured review-classifier model when set", () => {
@@ -150,4 +152,64 @@ test("/address and /address --preview register and are headless-safe", async () 
   } finally {
     h.dispose();
   }
+});
+
+// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+
+test("tool: a row missing thread_id → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("resolve_review_threads", {
+      threads: [{ thread_id: "PRRT_1" }, { comment: "no id" }],
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: mistyped counts → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: RESOLVE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("resolve_review_threads", {
+      threads: [{ thread_id: "PRRT_1" }],
+      counts: "x",
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("decodeResolveParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodeResolveParams({ threads: [{ thread_id: "t1", comment: "c" }] }), {
+    threads: [{ thread_id: "t1", comment: "c" }],
+    pr: undefined,
+    counts: undefined,
+  });
+  // threads absent/non-array decodes to [] (the existing empty-batch bad_input arm fires).
+  assert.deepEqual(decodeResolveParams({})?.threads, []);
+  assert.deepEqual(decodeResolveParams({ threads: "x" })?.threads, []);
+  assert.equal(decodeResolveParams(undefined), null);
+  assert.equal(decodeResolveParams({ threads: [{ comment: "no id" }] }), null);
+  assert.equal(decodeResolveParams({ threads: [{ thread_id: 5 }] }), null);
+  assert.equal(decodeResolveParams({ threads: [{ thread_id: "t1", comment: 5 }] }), null);
+  assert.equal(decodeResolveParams({ threads: [], pr: "42" }), null);
+  assert.equal(decodeResolveParams({ threads: [], counts: "x" }), null);
+  assert.equal(decodeResolveParams({ threads: [], counts: { actionable: "2" } }), null);
+  assert.deepEqual(decodeResolveParams({ threads: [], counts: { actionable: 2 } })?.counts, {
+    actionable: 2,
+  });
 });

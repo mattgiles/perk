@@ -181,3 +181,23 @@ test("tool: learn with a summary but a failing worker fails soft (no terminate, 
     h.dispose();
   }
 });
+
+// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+
+test("tool: learn with a mistyped summary → bad_input AND the marker is NOT cleared", async () => {
+  const cwd = scaffoldRepo();
+  setMarker(cwd, PENDING_LEARN);
+  const h = await loadPerkSession({ cwd });
+  try {
+    const result = await h.invokeTool("learn", { summary: 5 });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.ok(
+      existsSync(markerPath(cwd, PENDING_LEARN)),
+      "pending-learn NOT cleared on uncertainty",
+    );
+  } finally {
+    h.dispose();
+  }
+});

@@ -22,6 +22,7 @@ import { booleanField, type ColdJson, runColdDoor } from "./coldDoor.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
+import { numberParam, paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
@@ -57,6 +58,46 @@ interface ObjectiveNodePayload {
 /** Lenient decode — `comment_updated` is advisory display detail; never returns null. */
 function decodeObjectiveNode(payload: ColdJson): ObjectiveNodePayload {
   return { comment_updated: booleanField(payload, "comment_updated") ?? false };
+}
+
+/**
+ * Decode unknown tool-call params into `ObjectiveNodeParams` (the tool-boundary seam — Node 3.2):
+ * `objective` required number, `node` required non-empty string; `status` narrowed against
+ * `NODE_STATUSES` (present-but-unknown → null — fail before any exec instead of riding to the
+ * Click enum); `pr`/`description`/`audit` optional strings. Null on any miss (strict-fail).
+ */
+export function decodeObjectiveNodeParams(params: unknown): ObjectiveNodeParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const objective = numberParam(p, "objective");
+  const node = stringParam(p, "node");
+  if (typeof objective !== "number" || typeof node !== "string" || !node) return null;
+  const rawStatus = stringParam(p, "status");
+  if (rawStatus === null) return null;
+  let status: NodeStatus | undefined;
+  if (rawStatus !== undefined) {
+    const known = NODE_STATUSES.find((s) => s === rawStatus);
+    if (known === undefined) return null;
+    status = known;
+  }
+  const pr = stringParam(p, "pr");
+  const description = stringParam(p, "description");
+  const audit = stringParam(p, "audit");
+  if (pr === null || description === null || audit === null) return null;
+  return { objective, node, status, pr, description, audit };
+}
+
+/**
+ * Decode unknown tool-call params into `ReconcileObjectiveParams` (the tool-boundary seam):
+ * `objective` required number, `prose` required string. Null on any miss (strict-fail).
+ */
+export function decodeReconcileParams(params: unknown): ReconcileObjectiveParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const objective = numberParam(p, "objective");
+  const prose = stringParam(p, "prose");
+  if (typeof objective !== "number" || typeof prose !== "string") return null;
+  return { objective, prose };
 }
 
 /** A non-trivial audit iff it is a string whose value after `.trim()` is ≥ MIN_AUDIT_LENGTH. */
@@ -338,7 +379,15 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return objectiveNode(pi, ctx, params as ObjectiveNodeParams);
+      const decoded = decodeObjectiveNodeParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "objective-plan",
+          "objective_node",
+        )("objective_node needs { objective: <number>, node: <id> }", "bad_input");
+      }
+      return objectiveNode(pi, ctx, decoded);
     },
   });
 
@@ -366,7 +415,15 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return reconcileObjective(pi, ctx, params as ReconcileObjectiveParams);
+      const decoded = decodeReconcileParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "objective-reconcile",
+          "reconcile_objective",
+        )("reconcile_objective needs { objective: <number>, prose: <string> }", "bad_input");
+      }
+      return reconcileObjective(pi, ctx, decoded);
     },
   });
 

@@ -27,6 +27,7 @@ import { generatePlanTitle } from "./planTitle.ts";
 import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
+import { numberArrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import {
   appendWorkflowState,
   type BranchEntry,
@@ -268,6 +269,41 @@ export async function savePlan(
   );
 }
 
+/** The decoded `plan_save` tool params (snake_case, as the schema declares them). */
+interface PlanSaveParams {
+  plan: string;
+  title?: string;
+  objective_id?: string;
+  node_id?: string;
+  consumed_learn?: number[];
+}
+
+/**
+ * Decode unknown `plan_save` tool-call params (the tool-boundary seam — Node 3.2). `plan` absent
+ * decodes to `""` (so `savePlan`'s "no plan markdown to save" `invalid_input` arm keeps owning
+ * that message) but present-but-mistyped → null (strict-fail); the optional fields likewise.
+ */
+export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const plan = stringParam(p, "plan");
+  if (plan === null) return null;
+  const title = stringParam(p, "title");
+  const objectiveId = stringParam(p, "objective_id");
+  const nodeId = stringParam(p, "node_id");
+  const consumedLearn = numberArrayParam(p, "consumed_learn");
+  if (title === null || objectiveId === null || nodeId === null || consumedLearn === null) {
+    return null;
+  }
+  return {
+    plan: plan ?? "",
+    title,
+    objective_id: objectiveId,
+    node_id: nodeId,
+    consumed_learn: consumedLearn,
+  };
+}
+
 const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
   "Pass the full plan markdown to plan_save in the `plan` parameter; never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
@@ -322,19 +358,22 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { plan, title, objective_id, node_id, consumed_learn } = params as {
-        plan: string;
-        title?: string;
-        objective_id?: string;
-        node_id?: string;
-        consumed_learn?: number[];
-      };
+      const decoded = decodePlanSaveParams(params);
+      if (decoded === null) {
+        // The `label` arg matters: this handler-level closure renders "plan_save failed: …" while
+        // savePlan's internal failFor(ctx, "plan-save") stays as-is.
+        return failFor(
+          ctx,
+          "plan-save",
+          "plan_save",
+        )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
+      }
       return savePlan(pi, ctx, {
-        plan,
-        title,
-        objectiveId: objective_id,
-        nodeId: node_id,
-        consumedLearn: consumed_learn,
+        plan: decoded.plan,
+        title: decoded.title,
+        objectiveId: decoded.objective_id,
+        nodeId: decoded.node_id,
+        consumedLearn: decoded.consumed_learn,
       });
     },
   });

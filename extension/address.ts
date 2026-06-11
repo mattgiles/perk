@@ -22,6 +22,14 @@ import {
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
+import {
+  arrayParam,
+  numberParam,
+  objectParam,
+  paramsOf,
+  stringParam,
+  type ToolParams,
+} from "./toolParams.ts";
 import { appendWorkflowState } from "./workflowState.ts";
 
 interface ThreadInput {
@@ -40,6 +48,51 @@ interface ResolveParams {
   threads: ThreadInput[];
   pr?: number;
   counts?: ResolveCounts;
+}
+
+/** The four known `counts` keys (recorded into workflow-state — strict-decoded). */
+const COUNT_KEYS = ["actionable", "informational", "praise", "question"] as const;
+
+/** Decode the optional `counts` object; null = present-but-mistyped (a key or the object). */
+function decodeCounts(p: ToolParams): ResolveCounts | undefined | null {
+  const raw = objectParam(p, "counts");
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  const counts: ResolveCounts = {};
+  for (const key of COUNT_KEYS) {
+    const value = numberParam(raw, key);
+    if (value === null) return null;
+    if (value !== undefined) counts[key] = value;
+  }
+  return counts;
+}
+
+/**
+ * Decode unknown tool-call params into `ResolveParams` (the tool-boundary seam — Node 3.2).
+ * `threads` absent or non-array decodes to `[]` (so the existing empty-batch `bad_input` arm
+ * fires); any malformed ROW → null — whole-batch refusal, since resolving a guessed subset of
+ * threads is a durable GitHub mutation. `pr`/`counts` mistyped → null (recorded state).
+ */
+export function decodeResolveParams(params: unknown): ResolveParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const rawThreads = arrayParam(p, "threads");
+  const threads: ThreadInput[] = [];
+  if (Array.isArray(rawThreads)) {
+    for (const item of rawThreads) {
+      const row = paramsOf(item);
+      if (row === null) return null;
+      const threadId = stringParam(row, "thread_id");
+      const comment = stringParam(row, "comment");
+      if (typeof threadId !== "string" || comment === null) return null;
+      threads.push({ thread_id: threadId, comment });
+    }
+  }
+  const pr = numberParam(p, "pr");
+  if (pr === null) return null;
+  const counts = decodeCounts(p);
+  if (counts === null) return null;
+  return { threads, pr, counts };
 }
 
 /** One per-thread outcome row from the cold door's batch result. */
@@ -248,7 +301,15 @@ export function registerAddress(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return resolveReviewThreads(pi, ctx, params as ResolveParams);
+      const decoded = decodeResolveParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "address",
+          "resolve_review_threads",
+        )("resolve_review_threads needs { threads: [{thread_id, comment?}] }", "bad_input");
+      }
+      return resolveReviewThreads(pi, ctx, decoded);
     },
   });
 
