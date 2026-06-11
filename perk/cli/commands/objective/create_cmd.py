@@ -6,12 +6,12 @@ from pathlib import Path
 
 import click
 
-from perk import github, objective, plan, run_id
+from perk import issues, objective, plan, run_id
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -82,15 +82,14 @@ def create_objective(
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
         resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()
-        issue = github.create_objective_issue(
+        issue = issues.resolve_issue_backend(repo_root).create_objective_issue(
             title=resolved_title,
             body=body_text,
-            repo_root=repo_root,
             run_id=resolved_run_id,
             roadmap_nodes=roadmap_nodes,
             dry_run=dry_run,
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -110,11 +109,12 @@ def create_objective(
     payload = {
         "success": True,
         "error_type": None,
-        "objective": {"number": issue.number, "url": issue.url, "existed": issue.existed},
+        # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+        "objective": {"number": int(issue.id), "url": issue.url, "existed": issue.existed},
         "dry_run": dry_run,
     }
     if as_json:
         machine_output(json.dumps(payload))
     else:
         verb = "Found existing" if issue.existed else "Created"
-        user_output(click.style("✓ ", fg="green") + f"{verb} objective #{issue.number} {issue.url}")
+        user_output(click.style("✓ ", fg="green") + f"{verb} objective #{issue.id} {issue.url}")

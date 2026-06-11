@@ -21,11 +21,11 @@ import json
 
 import click
 
-from perk import github, launch, objective
+from perk import issues, launch, objective
 from perk.cli.alias import alias
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
@@ -159,7 +159,8 @@ def objective_plan(
         if not dry_run:
             require_github(ctx)
 
-        state = github.get_objective(number=number, repo_root=repo_root)
+        backend = issues.resolve_issue_backend(repo_root)
+        state = backend.get_objective(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
@@ -217,13 +218,12 @@ def objective_plan(
                 )
             )
         if not dry_run:
-            github.update_objective_node(
-                number=number,
+            backend.update_objective_node(
+                issue_id=str(number),
                 node_id=node.id,
                 status=marked_status,
-                repo_root=repo_root,
             )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

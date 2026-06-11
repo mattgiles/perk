@@ -5,12 +5,12 @@ from pathlib import Path
 
 import click
 
-from perk import github
+from perk import issues
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -41,10 +41,10 @@ def reconcile_objective(
         if not dry_run:
             require_github(ctx)
         prose = body_path.read_text(encoding="utf-8")
-        result = github.update_objective_body(
-            number=number, prose=prose, repo_root=repo_root, dry_run=dry_run
+        result = issues.resolve_issue_backend(repo_root).update_objective_body(
+            issue_id=str(number), prose=prose, dry_run=dry_run
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         message = str(exc)
         error_type = (
             "reconcile_target_missing"
@@ -65,8 +65,9 @@ def reconcile_objective(
     payload = {
         "success": True,
         "error_type": None,
-        "objective": result.number,
-        "comment_id": result.comment_id,
+        # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+        "objective": int(result.issue_id),
+        "comment_id": None if result.comment_id is None else int(result.comment_id),
         "updated": result.updated,
         "dry_run": result.dry_run,
     }
