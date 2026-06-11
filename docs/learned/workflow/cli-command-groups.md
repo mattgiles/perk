@@ -133,6 +133,11 @@ only the `pi.exec` argv arrays in the extension change.
 - `docs/guiding-principles/python-cli-guidelines.md` has been reconciled against the grouped
   surface (Objective #225, node 5.1) — its §8.1 now documents the group-dir template and
   cross-links this doc as the detailed playbook. Keep the two in sync when the structure evolves.
+- **`EXIT_FOR_TYPE` naming is mixed reality**, despite the "cross-verb helpers drop the leading
+  underscore" rule above: `objective/`, `workflow/run/`, and `doctor/workflow/` group `shared.py`
+  files use the public name, but `pr/`, `learn/`, and the flat single-file commands use the
+  underscore-private name. Harmless (each group owns its copy), but a new group must not copy from
+  `pr/shared.py` assuming the underscore is the convention; a future polish pass could align them.
 - Cosmetic asymmetry: `learn capture`'s human dry-run line was respelled to the grouped form, but
   `learn docs`' human gather/dry-run label still prints the old `learn-docs {label}` spelling
   (harmless stderr human text; a future polish pass could align it).

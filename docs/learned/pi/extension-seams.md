@@ -1,6 +1,6 @@
 ---
 title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
-read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, migrating a workflow-state read-back site, or deciding which call sites a single-message seam can absorb.
+read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, migrating a workflow-state read-back site, routing a handler's notifies through report() (name shadowing, failFor-only failure surfacing, banner-fragile notify asserts), or deciding which call sites a single-message seam can absorb.
 ---
 
 # Extension consolidation seams
@@ -76,6 +76,18 @@ doubling (scope `checkpoints` + a message starting `checkpoints deferred`). That
 **only because** the suite substring-matches meaningful tokens, never full-string equality — verify
 that assumption per-suite before accepting cosmetic drift.
 
+## report()-rollout gotchas (from the full notify migration)
+
+- **Local `report` bindings shadow the seam**: a handler that builds a local named `report` (e.g.
+  a selfcheck report object) shadows the imported seam — import as `report as reportTo` in such
+  modules. Expect recurrences as report() routing spreads to new handlers.
+- **`failFor` is now the ONLY failure-surfacing path for door impls**: the handlers' duplicate raw
+  toast is gone, so a door failure that bypasses `failFor` is *silent in the UI*. Keep failFor the
+  single failure path in door implementations.
+- **The startup banner makes count-based notify assertions fragile**: every headful harness
+  session now receives the startup notify, so filter notify asserts by severity (e.g. "exactly one
+  *error* notify"), never by count. See the harness recipes in `pi/tui-surfaces.md`.
+
 ## Not every site fits a single-message seam (the P1/P2/P3 triage)
 
 - **P1 (migratable):** same message in both branches, severity-driven, no follow-up turn.
@@ -98,3 +110,5 @@ planSave change deliberately inherited the seam's fail-safe.
 - `extension/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
 - `docs/learned/pi/extension-api.md` — the SDK context the structural interface slices
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve
+- `docs/learned/pi/tui-surfaces.md` — the surfaces module that owns the rich-UI call sites, and
+  the harness notify/status recipes

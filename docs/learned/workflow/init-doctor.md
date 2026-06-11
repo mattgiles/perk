@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, or extending perk init's managed gitignore block.
+read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -107,18 +107,42 @@ it; only an index that *exists but didn't reach* the prompt is a gap. The "reach
 trimmed-substring match (robust to join-newline/whitespace differences) and stays sound only while Pi
 loads `.pi/APPEND_SYSTEM.md` **verbatim** — see `docs/learned/pi/context-system.md`.
 
-## `doctor`'s human output renders only `_GROUP_ORDER` groups
+## `doctor`'s human output renders only the `GROUP_ORDER` groups
 
-`perk doctor`'s **condensed human output** renders only the groups in the literal tuple
-`_GROUP_ORDER` in `perk/cli/commands/doctor_cmd.py` (`environment, github, package, repository,
-registry, state`). Its render loop iterates that tuple, so any check whose group is **not** listed —
-currently `bindings`, `skills`, and `providers` — is **invisible in the human text** and surfaces
-only in `--json` and the exit code.
+`perk doctor`'s **condensed human output** renders only the groups in the literal group-order
+tuple in the doctor command module. Its render loop iterates that tuple, so any check whose group
+is **not** listed is **invisible in the human text** and surfaces only in `--json` and the exit
+code.
+
+**The trap struck again** (the skills-delivery check): the new `skills` group wasn't in the render
+order — and neither were the pre-existing `bindings` and `providers` groups, meaning those checks
+had been silently invisible in human output the whole time. Durable rule: **any new `Check.group`
+value MUST be added to the render group order in the same change**, and a render-visibility test
+is cheap insurance.
 
 This is distinct from `perk/doctor.py`'s `_MANAGED_GROUP` (which only *assigns* a managed
-convergence's group name, falling back to `"repository"`); assigning a group there does **not** make
-it render unless that group is also in `doctor_cmd._GROUP_ORDER`. Any new doctor groups will remain
-completely invisible in the condensed human text unless explicitly added here.
+convergence's group name, falling back to `"repository"`); assigning a group there does **not**
+make it render unless that group is also in the render module's `GROUP_ORDER`
+(`perk/cli/commands/doctor/render.py`). Any new doctor groups will remain completely invisible in
+the condensed human text unless explicitly added there.
+
+## Fail-level checks, fix_errors, and the machine-surface co-owners
+
+Lessons from making skills delivery a fail-level concern (see also `init-external-cli.md`):
+
+- **A new fail-level verify-gated check shifts the baseline of every `verify=True` test repo** —
+  freshly-converged test repos now fail the new check unless the healthy end-state exists. Budget
+  for a conftest fixture that plants that end-state (e.g. the converged skills workspace) rather
+  than patching individual tests.
+- **Failed repairs are first-class report data**: `DoctorReport.fix_errors` is rendered in human
+  output and present in `--json`, never folded into `fixed`. The `--fix` re-verify must trigger on
+  fixes *or* fix-errors — otherwise a failing sync with zero successful fixes reports stale
+  pre-fix checks.
+- **The machine-surface contract sections are always co-owners**: when adding error types or
+  report fields, the exit-code taxonomy (`shared/contracts.md` §8.5) and the `--json` shape
+  (§8.6) need same-turn amendment — plan them in, not just the feature's own section.
+- **Seam-signature ripple**: before changing a patched seam's signature, grep tests for the seam
+  name — the skills-sync seam had 8 stub sites whose monkeypatch lambdas all needed widening.
 
 ## Managed template reconvergence
 
@@ -146,11 +170,11 @@ The `register_with_aliases` helper in `perk/cli/alias.py` is strictly designed f
 registration. Attempting to pass extra positionals (e.g., trying to register multiple commands in a
 single call) will fail loudly at import time.
 
-The latent trap: "mirror bindings" instructions inherit bindings' own unrendered status. A node that
-actually wants `bindings` / `skills` / `providers` to appear in the human output must extend
-`_GROUP_ORDER` — and that changes long-standing behavior for `bindings` / `skills` too, so treat it
-as a deliberate cross-cutting change, not a drive-by. **Verify render visibility empirically with
-`perk doctor`, not just `--json`.**
+The latent trap: "mirror an existing group" instructions inherit that group's own render status —
+the `bindings` and `providers` groups were unrendered for a long time before the skills-delivery
+fix added them. Extending `GROUP_ORDER` changes long-standing behavior for previously-invisible
+groups, so treat it as a deliberate cross-cutting change, not a drive-by. **Verify render
+visibility empirically with `perk doctor`, not just `--json`.**
 
 ## Doctor migration idempotency rule
 
@@ -163,7 +187,7 @@ the `again.fixed == []` idempotency tests.
 - `perk/init.py` — `GITIGNORE_BODY`, `converge()`, `ManagedConvergence`, `managed_convergences()`,
   `_skill_link_state`, `_sync_skills`
 - `perk/doctor.py` — `_MIGRATIONS`, `_managed_checks`, `_MANAGED_GROUP`, `_apply_fixes`
-- `perk/cli/commands/doctor_cmd.py` — `_GROUP_ORDER` (the human-render group allow-list)
+- `perk/cli/commands/doctor/render.py` — `GROUP_ORDER` (the human-render group allow-list)
 - `perk/capabilities.py` — `Capability`, `applicable()`
 - `perk/git.py` — `is_tracked`, `rm_cached`
 - `tests/test_doctor.py` — `test_every_required_capability_has_a_doctor_check`
