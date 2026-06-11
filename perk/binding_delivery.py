@@ -16,11 +16,15 @@ launch.
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.bindings import Binding, is_skill_installed, load_bindings, resolve_bindings
+from perk.bindings import (
+    SKILL_FILENAME,
+    SKILLS_DIR,
+    Binding,
+    is_skill_installed,
+    load_bindings,
+    resolve_bindings,
+)
 from perk.registry import Issue
-
-SKILLS_SUBDIR = Path(".agents/skills")
-SKILL_FILENAME = "SKILL.md"
 
 _HEADER = "The following skill binding(s) apply here:"
 
@@ -70,7 +74,7 @@ def render_cold_bindings(
                 continue
             warnings.append(
                 f"skill binding: transclude target for `{binding.skill}` not found under "
-                f"{SKILLS_SUBDIR}/{binding.skill}/{SKILL_FILENAME} — falling back to a pointer."
+                f"{SKILLS_DIR}/{binding.skill}/{SKILL_FILENAME} — falling back to a pointer."
             )
         elif not is_skill_installed(repo_root, binding.skill):
             # The nudge mirror of the transclude warning (Node 3.1, D6): a binding to a skill that
@@ -78,7 +82,7 @@ def render_cold_bindings(
             # is still emitted so the model gets the nudge.
             warnings.append(
                 f"skill binding: skill `{binding.skill}` for `{binding.trigger}` is not installed "
-                f"under {SKILLS_SUBDIR}/{binding.skill}/{SKILL_FILENAME} — the pointer may dangle."
+                f"under {SKILLS_DIR}/{binding.skill}/{SKILL_FILENAME} — the pointer may dangle."
             )
         parts.append(f"Follow the `{binding.skill}` skill.")
 
@@ -88,7 +92,7 @@ def render_cold_bindings(
 
 def _read_skill_body(repo_root: Path, skill: str) -> str | None:
     """Read ``.agents/skills/<skill>/SKILL.md`` (frontmatter stripped); ``None`` if absent."""
-    path = repo_root / SKILLS_SUBDIR / skill / SKILL_FILENAME
+    path = repo_root / SKILLS_DIR / skill / SKILL_FILENAME
     if not path.is_file():
         return None
     return _strip_frontmatter(path.read_text(encoding="utf-8"))

@@ -48,9 +48,9 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
 # `pi.skills`, so Pi discovers them only through these symlinks). perk's own self-repo also keeps
 # the skill bodies committed at `skills/<name>/`; doctor accepts that as a pre-sync fallback under
 # `self_repo` (a best-effort safety net before `skills update --sync` has run).
-_SKILLS_DIR = Path(".agents/skills")
+SKILLS_DIR = Path(".agents/skills")
 _SELF_REPO_SKILLS_DIR = Path("skills")
-_SKILL_FILENAME = "SKILL.md"
+SKILL_FILENAME = "SKILL.md"
 
 
 @dataclass(frozen=True)
@@ -270,6 +270,6 @@ def is_skill_installed(root: Path, skill: str, *, self_repo: bool = False) -> bo
     ``.agents/skills/``). The self-repo fallback is doctor-only; injection always uses the default
     ``self_repo=False``.
     """
-    if (root / _SKILLS_DIR / skill / _SKILL_FILENAME).is_file():
+    if (root / SKILLS_DIR / skill / SKILL_FILENAME).is_file():
         return True
-    return self_repo and (root / _SELF_REPO_SKILLS_DIR / skill / _SKILL_FILENAME).is_file()
+    return self_repo and (root / _SELF_REPO_SKILLS_DIR / skill / SKILL_FILENAME).is_file()
