@@ -110,13 +110,9 @@ def _seed_prompt(
 
 @alias("oplan")
 @click.command("objective-plan", context_settings={"ignore_unknown_options": True})
-@click.argument("number", required=False, default=None, type=int)
-@click.option(
-    "--node", "node_id", default=None, help="Plan a specific node id (else next actionable)."
-)
-@click.option(
-    "--worktree", default=None, help="Worktree to position (objective-plan runs at repo root)."
-)
+@click.argument("number", required=False, type=int)
+@click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
+@click.option("--worktree", help="Worktree to position (objective-plan runs at repo root).")
 @click.option(
     "--dry-run", "dry_run", is_flag=True, help="Resolve + print; mark nothing, launch nothing."
 )

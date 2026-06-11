@@ -15,7 +15,7 @@ from perk.output import user_output
 @alias("new")
 @click.command("create")
 @click.argument("name")
-@click.option("--branch", default=None, help="Branch to create (default: the worktree name).")
+@click.option("--branch", help="Branch to create (default: the worktree name).")
 @click.pass_context
 def create_worktree(ctx: click.Context, name: str, *, branch: str | None) -> None:
     """Create a worktree NAME under the configured worktree root."""

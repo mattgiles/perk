@@ -35,7 +35,6 @@ def _read_handoff_arg(value: str) -> dict[str, Any]:
 @click.option(
     "--handoff",
     "handoff_arg",
-    default=None,
     help="Handoff JSON object (or @file) to write for the extension to claim.",
 )
 def new_run(handoff_arg: str | None) -> None:

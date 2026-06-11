@@ -64,9 +64,7 @@ def _seed_prompt() -> str:
 
 @alias("oauthor")
 @click.command("objective-author", context_settings={"ignore_unknown_options": True})
-@click.option(
-    "--worktree", default=None, help="Worktree to position (objective-author runs at repo root)."
-)
+@click.option("--worktree", help="Worktree to position (objective-author runs at repo root).")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Resolve + print; launch nothing.")
 @click.option(
     "--remote",
