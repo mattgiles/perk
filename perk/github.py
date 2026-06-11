@@ -7,6 +7,13 @@ their stage handlers.
 
 The TS extension authors the *same* operation names + payload shapes in Phase 1, so
 ``doctor`` can verify both planes and either can later swap ``gh``-shell → API-backed.
+
+Issue tier demotion (Objective #252, Node 1.2): the issue-tracking tier functions here
+(``create_label`` … ``update_objective_body`` — plan/learn/objective issues, marked comments,
+labels) are now the **implementation substrate** of the GitHub issue backend. Production code
+must reach the issue tier through the resolver in the issues module — never by calling these
+module functions directly (enforced by the source-scan regression test in
+``tests/test_issues.py``). PR/CI/auth tier functions remain the direct surface for all backends.
 """
 
 import json

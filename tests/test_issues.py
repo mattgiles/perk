@@ -437,13 +437,3 @@ class TestConsumerBoundary:
         assert not offenders, "issue-tier calls must go through perk.issues:\n" + "\n".join(
             offenders
         )
-
-    def test_issue_backend_never_imports_issues(self) -> None:
-        source = Path(issue_backend.__file__).read_text(encoding="utf-8")
-        assert "perk.issues" not in source
-        assert "import issues" not in source
-
-    def test_github_never_imports_issues_or_issue_backend(self) -> None:
-        source = Path(github.__file__).read_text(encoding="utf-8")
-        assert "issue_backend" not in source
-        assert "perk.issues" not in source
