@@ -16,6 +16,7 @@ import {
   runColdDoor,
   stringField,
 } from "./coldDoor.ts";
+import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
@@ -189,11 +190,9 @@ export function registerLearn(pi: ExtensionAPI): void {
       if (trimmed.length > 0) {
         const summary = trimmed === "skip" ? "" : args;
         const result = await learnDone(pi, ctx, summary);
-        if (ctx.hasUI) {
-          ctx.ui.notify(
-            result.content[0]?.text ?? "learn done",
-            result.details.ok ? "info" : "error",
-          );
+        // Failure already reported loudly via failFor (the single error surface) — success only.
+        if (result.details.ok) {
+          report(ctx, "learn", "info", result.content[0]?.text ?? "learn done");
         }
         return;
       }
@@ -206,7 +205,7 @@ export function registerLearn(pi: ExtensionAPI): void {
         console.error(`perk: /learn invoked (headless) — ${result.content[0]?.text ?? "cleared"}`);
         return;
       }
-      ctx.ui.notify("perk: /learn — investigate the landed change and capture learnings", "info");
+      report(ctx, "learn", "info", "investigate the landed change and capture learnings");
       pi.sendUserMessage(learnGuidance(activePlanRef(ctx)) + bindingSuffix(ctx.cwd, "stage:learn"));
     },
   });

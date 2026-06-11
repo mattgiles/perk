@@ -321,16 +321,12 @@ export function registerAddress(pi: ExtensionAPI): void {
       const preview = /(^|\s)--preview(\s|$)/.test(args ?? "");
       const model = loadPerkConfig(ctx.cwd).subagents["review-classifier"];
       const guidance = addressGuidance(preview, model);
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          preview
-            ? "perk: /address --preview (classify only)"
-            : "perk: /address (classify → fix → resolve)",
-          "info",
-        );
-      } else {
-        console.error("perk: /address invoked (headless)");
-      }
+      report(
+        ctx,
+        "address",
+        "info",
+        preview ? "--preview (classify only)" : "classify → fix → resolve",
+      );
       // Inject the address-workflow guidance as a user message so the model starts the loop.
       // `pi.sendUserMessage` always triggers a turn (the warm entry to the review loop). The
       // perk-address pointer rides the skill-binding suffix (Node 2.3, D5).

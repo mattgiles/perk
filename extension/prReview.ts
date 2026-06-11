@@ -19,6 +19,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { loadPerkConfig } from "./config.ts";
+import { report } from "./report.ts";
 
 /**
  * The seed guidance the warm `/pr-review` injects to spawn the reviewer (the perk-pr-review skill
@@ -52,11 +53,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
     handler: async (_args, ctx: ExtensionContext) => {
       const model = loadPerkConfig(ctx.cwd).subagents["pr-reviewer"];
       const guidance = prReviewGuidance(model);
-      if (ctx.hasUI) {
-        ctx.ui.notify("perk: /pr-review (fresh-context review → posts to the PR)", "info");
-      } else {
-        console.error("perk: /pr-review invoked (headless)");
-      }
+      report(ctx, "pr-review", "info", "fresh-context review → posts to the PR");
       // Inject the spawn guidance as a user message so the model starts the review (warm entry).
       // The perk-pr-review pointer rides the skill-binding suffix (command:pr-review, D5).
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:pr-review"));
