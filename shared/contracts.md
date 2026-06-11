@@ -642,10 +642,20 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   see the `[subagents]` paragraph below).
 
 **PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
-stage — `shared/registry.yaml` is unchanged) that conducts automated code review of the active PR
-and leaves the review **as comments on the PR**. It spawns the perk-owned **`perk.pr-reviewer`**
-agent via the borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the
-implementation session's history never biases the review.
+stage — `shared/registry.yaml` is unchanged) that conducts automated code review of the active PR.
+The outcome is **verdict-driven**: the review lands **as comments on the PR only on an
+`actionable` verdict**; a `clean` verdict posts a single 👍 reaction to the PR description and
+nothing else — comments and `/address` are reserved for actionable feedback, and a clean verdict
+unambiguously routes to `/land`. It spawns the perk-owned **`perk.pr-reviewer`** agent via the
+borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the implementation
+session's history never biases the review.
+
+- **Verdict-driven batch.** The review batch requires a `verdict` of exactly `"clean"` or
+  `"actionable"` (a clean verdict with non-empty `comments` is a `bad_batch`). The optional
+  `fyi: string[]` field carries borderline notes that are validated and echoed **in-session only**
+  — it is structurally never part of any GitHub payload. The clean path's 👍 reaction
+  (`add_pr_reaction`, the issues-reactions endpoint — idempotent on rerun) is a **hard error** on
+  failure (mutations raise; no fallback ladder — nothing review-shaped is lost).
 
 - **Deliberate departure from the read-only-child convention.** Unlike `/address` (read-only child
   classifies; the **parent** acts), the reviewer child **posts its own review**. Rationale: the PR

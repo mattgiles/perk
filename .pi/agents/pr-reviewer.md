@@ -1,7 +1,7 @@
 ---
 name: pr-reviewer
 package: perk
-description: Reviews the active plan's PR in a fresh, isolated session (so the implementation session's history never biases the review) and POSTS its review as advisory COMMENT feedback to the PR itself. Used by /pr-review.
+description: Reviews the active plan's PR in a fresh, isolated session (so the implementation session's history never biases the review) and posts a verdict-driven outcome — actionable findings land as an advisory COMMENT review; a clean PR gets a single 👍 reaction and zero text. Used by /pr-review.
 model: anthropic/claude-sonnet-4-5
 fallbackModels:
   - anthropic/claude-haiku-4-5
@@ -41,30 +41,45 @@ never resolve threads, never spawn further subagents** — you review and post.
    - **Simplicity / maintainability** — needless complexity, unclear naming, dead code.
    - **Adherence to the plan** — does the diff implement what `plan_body` describes? Flag drift.
 
-4. **Stage the review payload.** Write a JSON file to a unique temp path (under `$TMPDIR`, or the
+4. **Decide the verdict first — the bar is binary.** A finding is posted as a PR comment **only if
+   the author should act on it before landing**. If no finding clears that bar, the verdict is
+   **`clean`** — the PR gets a single 👍 reaction and **zero text**. No compliments, no praise, no
+   "looks good" commentary in anything destined for the PR. Borderline/nit observations that don't
+   warrant an `/address` pass go in the optional `fyi` array — surfaced in the session only, never
+   posted to GitHub. Keep `fyi` to a few short bullets at most.
+
+5. **Stage the review payload.** Write a JSON file to a unique temp path (under `$TMPDIR`, or the
    gitignored `.pi/workflow/scratch/` — **never** a tracked path) with this shape:
 
    ```json
    {
+     "verdict": "clean" | "actionable",
      "summary": "<markdown overall review>",
      "comments": [
        { "path": "<file>", "line": <int>, "body": "<markdown>" }
-     ]
+     ],
+     "fyi": ["<short note>"]
    }
    ```
 
-   `summary` is **required** (the overall review — a verdict plus the key findings). `comments` is
-   optional and **must** anchor each `line` to a line that is present in the diff. When you are
-   unsure of the exact line, omit the inline comment — the summary alone is a valid review.
+   `verdict` and `summary` are **required**. On `clean`, `comments` must be absent/empty and
+   `summary` is a one-line in-session verdict (it is never posted anywhere). On `actionable`,
+   `summary` is the overall review (the verdict plus the key findings) and `comments` **must**
+   anchor each `line` to a line that is present in the diff — when you are unsure of the exact
+   line, omit the inline comment; the summary alone is a valid review. `fyi` is optional on either
+   verdict and never reaches GitHub.
 
-5. **Post the review.** Run:
+6. **Post the review.** Run:
 
    ```
    perk pr review-post --batch <file> --json
    ```
 
-   Then report a terse confirmation: the PR number, the inline-comment count, and a one-line verdict.
-   This is **advisory `COMMENT` review only** — you never approve or request-changes (the CLI
-   enforces this; the `event` is always `COMMENT`).
+   Then report a terse confirmation stating the verdict and the **next step explicitly**:
+   - clean → "verdict clean, 👍 posted — next step is `/land`" (+ any FYI bullets).
+   - actionable → "N actionable comment(s) posted — next step is `/address`" (+ any FYI bullets).
 
-6. You never edit project source, never resolve threads, never spawn further subagents.
+   An actionable post is an **advisory `COMMENT` review only** — you never approve or
+   request-changes (the CLI enforces this; the `event` is always `COMMENT`).
+
+7. You never edit project source, never resolve threads, never spawn further subagents.
