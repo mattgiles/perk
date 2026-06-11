@@ -1,22 +1,63 @@
 ---
-title: Extension consolidation seams — minimal structural interfaces, the report() seam, the P1/P2/P3 triage
-read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf, or deciding which call sites a single-message seam can absorb.
+title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
+read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, migrating a workflow-state read-back site, or deciding which call sites a single-message seam can absorb.
 ---
 
 # Extension consolidation seams
 
-When the same context-dependent idiom (notify-if-UI-else-log, branch lookup, …) is repeated across
-the extension, perk collapses it into one small tested seam. This doc captures the *shape* of those
-seams — the recipe, the traps, and the triage for sites that don't fit — distilled from the
-headless-safe `report()` seam (`extension/report.ts`) and its predecessor `branchOf`/`BranchSource`.
+When the same context-dependent idiom (notify-if-UI-else-log, branch lookup, strict workflow-state
+append, …) is repeated across the extension, perk collapses it into one small tested seam. This
+doc captures the *shape* of those seams — the recipe, the traps, and the triage for sites that
+don't fit — distilled from the headless-safe `report()` seam (`extension/report.ts`), its
+predecessor `branchOf`/`BranchSource`, and the `appendWorkflowState`/`EntrySink` strict-append seam
+(`extension/workflowState.ts`).
 
 ## The minimal-structural-interface recipe
 
 Export a **tiny structural interface** that the real `ExtensionContext` satisfies *and* a test fake
 implements trivially — `ReportTarget` (`hasUI` + `ui.notify`) in the report seam, mirroring
-`BranchSource`/`branchOf`. This keeps the seam unit-testable offline (headful/headless × options ×
+`BranchSource`/`branchOf`; `EntrySink` in the workflow-state seam is the third realized instance of
+exactly this recipe. This keeps the seam unit-testable offline (headful/headless × options ×
 severity) without importing the SDK context. Return the built string from the seam for reuse as
 tool-result text.
+
+## The "pure module + effectful seam" reconciliation
+
+A module headered "pure, fs-light, unit-testable" can absorb an effectful helper **without losing
+the property** if effects enter only through structural slices (`EntrySink`, `BranchSource`,
+`ReportTarget`) — **testability-with-fakes is the real invariant, not purity**. Amend the module
+header to say so rather than splitting the module.
+
+## The strict-append seam (`appendWorkflowState`)
+
+The helper shape that worked for the verified workflow-state append:
+
+- **Never throws:** the whole append + rebuild + compare runs in one try; the catch reports
+  (`<field> append threw — …`) and returns false.
+- **Boolean return** so the caller can gate establish-before-consume follow-ups (e.g. only mark a
+  handoff consumed after the append verified).
+- **Idempotence pre-checks stay caller-side** ("append iff rebuilt differs") — pushing
+  skip-if-equal into the helper was considered and rejected to keep the seam single-purpose.
+
+Two non-obvious facts around it:
+
+- **Verified-linkage tiering:** strict read-back applies only to the four contracted linkage
+  fields. Mode writes, activation appends, the fork append (LWW), and budget appends deliberately
+  stay un-verified — do **not** "helpfully" migrate them onto the seam; the contract distinguishes
+  the tiers.
+- **Object-valued read-back is reference-identity:** `rebuildWorkflowState` copies `entry.data` by
+  reference, so a default compare on an object field passes iff both sides share the same object
+  reference — build the payload object once and pass it to both the append and the expectation. A
+  deep compare is needed only when the expected value comes from a *different* source (e.g.
+  decoded from the cold door, where `planRefsEqual` applies).
+
+## Aspirational-comment fiction is a migration signal
+
+When extracting an idiom, **grep for comments *claiming* the idiom** — they mark sites that
+intended to adopt it but never did (a "strict read-back via rebuild" comment described nonexistent
+behavior until the seam landed; the extraction was the right moment to make it true). Minor
+corollary: when a plan prescribes a local variable name, check the target scope for collisions
+first.
 
 ## "One idiom" is often 1 base + 1 superset — prefer an opt-in flag
 
@@ -54,5 +95,6 @@ planSave change deliberately inherited the seam's fail-safe.
 ## Cross-references
 
 - `extension/report.ts` — `report()`, `ReportTarget`
+- `extension/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
 - `docs/learned/pi/extension-api.md` — the SDK context the structural interface slices
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve

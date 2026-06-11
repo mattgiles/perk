@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, or testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness.
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, or hitting the `headfulUIContext` select/input gap.
 ---
 
 # Pi extension API (0.78.x)
@@ -97,6 +97,23 @@ Two adjacent facts:
   `Map<reviewId, resolver>` avoids depending on the event-bus unsubscribe return and naturally
   ignores mismatched ids.
 
+## Asserting `pi.sendUserMessage` injection offline: spy on the session instance
+
+The keyless harness session makes a `pi.sendUserMessage` call fail **asynchronously** ("No API key
+found") via the runner's error channel — the injected message never lands on the session branch, so
+branch inspection can't prove the injection happened. The SDK's extension API delegates as
+`this.sendUserMessage(...)` looked up **at call time** on the AgentSession instance, so an
+instance-property override — assigning a capturing async function to `session.sendUserMessage` —
+cleanly captures the injected guidance. This is the harness-level pattern for pinning a command's
+guidance injection (prior tests only asserted notifies + side effects).
+
+## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`
+
+The test harness's headful UI fake has **no `select`/`input`**, so a registered-tool-level
+UI-interaction test isn't possible offline. The workaround is the exported pure decode + pure core
+pattern — the handler stays a thin wiring layer and the decode + core are tested directly with a
+fake UI (see `pi/tool-param-decode.md`).
+
 ## Sources
 
 - `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`) — verified at
@@ -110,3 +127,5 @@ Two adjacent facts:
 - `docs/learned/pi/context-injection.md` — conditional strip on the every-call `context` event
 - `docs/learned/workflow/skill-bindings.md` — branch persistence powering the cold↔warm dedup
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree
+- `docs/learned/pi/tool-param-decode.md` — the pure-decode export that works around the
+  `headfulUIContext` gap
