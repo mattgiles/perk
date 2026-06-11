@@ -816,7 +816,7 @@ close_and_label_consolidated{ issue }               -> bool
   plain `"<plan title>\n\nCloses #<issue>"` (`get_plan(...).title`, fallback `Closes #<issue>` on an
   empty title). Plain text only — the second of the **two PR targets** (the GitHub HTML body, T8a,
   is the other); HTML never leaks into `git log`.
-- **`/learn` (D10).** The `learn-capture` worker (`perk learn-capture --json --body <file>`) reads
+- **`/learn` (D10).** The `learn capture` worker (`perk learn capture --json --body <file>`) reads
   the agent-captured learnings markdown from a run-scoped scratch file (the stdin-less worker
   pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), and
   clears `pending-learn`. The warm `/learn` (`extension/learn.ts`) takes an optional `summary`:
@@ -833,7 +833,7 @@ close_and_label_consolidated{ issue }               -> bool
   by calling the `learn` tool); **`/learn skip`** preserves the pure marker-clear and **`/learn
   <text>`** still captures verbatim; **headless** bare `/learn` stays the safe marker-clear
   (can't drive a turn). The **`perk-learn` skill** is the judgment layer both surfaces point at.
-  No new gateway op — the existing `learn` tool / `learn-capture` worker remain the durable-write
+  No new gateway op — the existing `learn` tool / `learn capture` worker remain the durable-write
   path. **Tier 3 update (hop-2):** the **`docs/learned/*.md` documentation-plan loop is now BUILT**
   (see the *Learned-docs consumer (hop-2)* subsection below). The remaining Tier-3 pieces
   (session-material bundling on land, multi-agent session/diff/docs analysis) stay **deferred** —
@@ -1223,7 +1223,7 @@ region; everything outside it (the Mechanical roadmap table, any Immutable notes
   comment` / `no reconcilable region`) on a missing target. The table block + Immutable prose are
   never touched (structural Immutable-safety).
 - `perk objective reconcile NUMBER --body @FILE [--dry-run] [--json]` — the cold worker (stdin-less
-  file-arg pattern, mirroring `learn-capture`); maps the two missing-target `GitHubError`s to a
+  file-arg pattern, mirroring `learn capture`); maps the two missing-target `GitHubError`s to a
   stable `reconcile_target_missing`, other infra to `github_error`. Node-description reconciliation
   reuses the existing `objective node --description` (no new flag).
 - `extension/objectivePlan.ts` gains: a `description?` param on the `objective_node` tool
@@ -1246,17 +1246,23 @@ factory** (mirrors `objective-plan`, NOT a direct doc-writer), triggered on-dema
 adds **no `registry.yaml` stage** (it borrows the existing `plan` stage descriptor to launch) and
 uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
 
-- **The factory cold door + warm command.** `perk learn-docs` (alias `ldocs`,
-  `learn_docs_cmd.py`): `list_learn_issues` → materialize the inbox
+- **The factory cold door + warm command.** `perk learn docs` (`commands/learn/docs_cmd.py`, no
+  alias): `list_learn_issues` → materialize the inbox
   `.pi/workflow/scratch/learn-docs-inbox.md` (a `## Learning #<n>` section per issue, each body in
   `<untrusted_learning>`) → `launch_stage(plan_stage, prompt_override=<seed>)` (a read-only
   plan-mode session). `--gather` materializes the inbox + emits `{ inbox_path, learn_numbers }`
   with no launch (the warm path + tests consume this); `--dry-run` gathers + prints; `--remote` is
   rejected (`remote_blocked`, the `plan` stage is `cold_remote:false`); no open learn issues →
   exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/learnDocs.ts`) delegates to
-  `perk learn-docs --gather --json` (gate-safe — extension `pi.exec` is not subject to the
+  `perk learn docs --gather --json` (gate-safe — extension `pi.exec` is not subject to the
   read-only bash gate), then `pi.sendUserMessage`s the factory guidance pointing at the
   `perk-learn-docs` skill. **Headless-safe** (the inbox is still materialized; no turn is driven).
+- **`learn` is a hybrid group (Node 2.2).** `perk learn` is a hand-written default-dispatch group
+  (`commands/learn/`): a bare/non-verb invocation falls through to a hidden launcher built from
+  the generic registry factory (byte-identical to the generated `learn` stage launcher), while
+  `capture` and `docs` are the cold workers (no aliases). Warm ids (`/learn`, `/learn-docs`,
+  `command:learn-docs`, the inbox artifact) are unchanged — they key off warm command ids, not
+  cold CLI spellings.
 - **The read-only gate forces inbox-over-gh.** The read-only tool gate's bash allowlist excludes
   `gh`/`perk` (`extension/toolGating.ts`), so the seeded factory session reads the materialized
   inbox via the `read` tool — it cannot query GitHub. This is why the cold door (not the model)

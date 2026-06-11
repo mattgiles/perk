@@ -1,6 +1,6 @@
 // P2.T8b — the deepened warm `/learn` door (D10). Graduates the Phase-1 thin marker-clear into a
 // real knowledge-capture pass: when a `summary` is given, write it to a run-scoped scratch file and
-// DELEGATE to `perk learn-capture --json --body <path>` (D1 — GitHub writes canonical in Python),
+// DELEGATE to `perk learn capture --json --body <path>` (D1 — GitHub writes canonical in Python),
 // which creates a `perk:learn` issue + clears `pending-learn`; then mirror the marker-clear
 // in-session (idempotent). With no `summary`, stay the thin TS-only marker-clear (graceful — no
 // empty issue). Never throws (soft `details.ok`).
@@ -29,7 +29,7 @@ export interface LearnOk {
 
 export type LearnResult = Result<LearnOk>;
 
-/** The `perk learn-capture --json` shape (the contract the warm door consumes). */
+/** The `perk learn capture --json` shape (the contract the warm door consumes). */
 interface LearnCaptureJson {
   success: boolean;
   error_type: string | null;
@@ -93,7 +93,7 @@ export async function learnDone(
   const perkBin = process.env.PERK_BIN ?? "perk";
   let res: ExecResult;
   try {
-    res = await pi.exec(perkBin, ["learn-capture", "--json", "--body", bodyPath], {
+    res = await pi.exec(perkBin, ["learn", "capture", "--json", "--body", bodyPath], {
       cwd: ctx.cwd,
       signal: ctx.signal,
     });
@@ -105,7 +105,7 @@ export async function learnDone(
     const tail = res.stderr.trim();
     return fail(
       tail
-        ? `perk learn-capture failed (exit ${res.code}): ${tail}`
+        ? `perk learn capture failed (exit ${res.code}): ${tail}`
         : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
       "exec_failed",
     );
@@ -115,11 +115,11 @@ export async function learnDone(
   try {
     parsed = JSON.parse(res.stdout) as LearnCaptureJson;
   } catch {
-    return fail("perk learn-capture returned unparseable JSON", "bad_output");
+    return fail("perk learn capture returned unparseable JSON", "bad_output");
   }
   if (!parsed.success || !parsed.learn_issue) {
     return fail(
-      parsed.message ?? "perk learn-capture reported failure",
+      parsed.message ?? "perk learn capture reported failure",
       parsed.error_type ?? "github_error",
     );
   }

@@ -1,7 +1,7 @@
 // hop-2 — the learned-docs plan factory's warm transition surface: the `/learn-docs` command.
 //
-// The warm twin of the `perk learn-docs` cold door. It DELEGATES the gather to the Python plane
-// (`perk learn-docs --gather --json` via `pi.exec` — gate-safe, not subject to the read-only bash
+// The warm twin of the `perk learn docs` cold door. It DELEGATES the gather to the Python plane
+// (`perk learn docs --gather --json` via `pi.exec` — gate-safe, not subject to the read-only bash
 // allowlist), parses `{ inbox_path, learn_numbers }`, then injects the factory guidance via
 // `pi.sendUserMessage` so the model reads the inbox, authors a docs plan, and calls `plan_save`
 // with `consumed_learn`. No model tool — the model uses the existing `plan_save` tool.
@@ -13,7 +13,7 @@ import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { report } from "./report.ts";
 
-/** The `perk learn-docs --gather --json` success shape (the contract the warm door consumes). */
+/** The `perk learn docs --gather --json` success shape (the contract the warm door consumes). */
 interface LearnDocsGatherJson {
   success: boolean;
   error_type: string | null;
@@ -55,7 +55,7 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
       const perkBin = process.env.PERK_BIN ?? "perk";
       let res: ExecResult;
       try {
-        res = await pi.exec(perkBin, ["learn-docs", "--gather", "--json"], {
+        res = await pi.exec(perkBin, ["learn", "docs", "--gather", "--json"], {
           cwd: ctx.cwd,
           signal: ctx.signal,
         });

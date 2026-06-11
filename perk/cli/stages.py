@@ -16,13 +16,20 @@ from perk.registry import RegistryError, Stage, load_registry
 DEDICATED_STAGES: frozenset[str] = frozenset(
     {
         "implement",  # perk/cli/commands/implement_cmd.py
+        "learn",  # perk/cli/commands/learn/__init__.py (hybrid group; hidden launcher, Node 2.2)
         "objective-author",  # perk/cli/commands/objective_author_cmd.py (P3.T2)
         "objective-plan",  # perk/cli/commands/objective_plan_cmd.py (P2.T10)
     }
 )
 
 
-def _make_stage_command(stage: Stage) -> click.Command:
+def make_stage_launcher(stage: Stage) -> click.Command:
+    """Build the generic launcher command for ``stage``.
+
+    Used by the generator below for every non-dedicated stage, and reused by the ``learn``
+    group for its hidden bare-invocation launcher (``commands/learn/__init__.py``).
+    """
+
     @click.command(
         name=stage.id,
         help=stage.summary,
@@ -70,4 +77,4 @@ def register_stage_commands(cli: click.Group) -> None:
     for stage in registry.stages:
         if stage.id in DEDICATED_STAGES:
             continue  # a dedicated command is registered explicitly (e.g. `implement`)
-        cli.add_command(_make_stage_command(stage))
+        cli.add_command(make_stage_launcher(stage))

@@ -58,7 +58,7 @@ def _run(monkeypatch, extra_args, *, write_ref=True, body="## Learnings\n\nWe de
         cache.set_marker(Path(d), cache.PENDING_LEARN)
         body_file = Path(d) / "learnings.md"
         body_file.write_text(body, encoding="utf-8")
-        result = runner.invoke(cli, ["learn-capture", "--body", str(body_file), *extra_args])
+        result = runner.invoke(cli, ["learn", "capture", "--body", str(body_file), *extra_args])
         marker = cache.has_marker(Path(d), cache.PENDING_LEARN)
         return result, marker
 
@@ -102,6 +102,6 @@ def test_capture_not_a_repo_exits_2():
     with runner.isolated_filesystem() as d:
         body_file = Path(d) / "l.md"
         body_file.write_text("x", encoding="utf-8")
-        result = runner.invoke(cli, ["learn-capture", "--body", str(body_file), "--json"])
+        result = runner.invoke(cli, ["learn", "capture", "--body", str(body_file), "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"

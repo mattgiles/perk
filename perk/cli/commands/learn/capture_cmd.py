@@ -1,4 +1,4 @@
-"""`perk learn-capture --json --body <file>` — the deep `/learn` knowledge-capture pass (P2.T8b).
+"""`perk learn capture --json --body <file>` — the deep `/learn` knowledge-capture pass (P2.T8b).
 
 Graduates `/learn` from a thin marker-clear into a real capture: read the agent-captured learnings
 markdown from a run-scoped scratch file (the stdin-less worker pattern), create a `perk:learn`
@@ -15,13 +15,11 @@ from pathlib import Path
 import click
 
 from perk import cache, github
-from perk.cli.alias import alias
+from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.output import machine_output, user_output
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
@@ -33,8 +31,7 @@ class LearnCaptureResult:
     dry_run: bool
 
 
-@alias("lc")
-@click.command("learn-capture")
+@click.command("capture")
 @click.option(
     "--body",
     "body_path",
@@ -47,7 +44,7 @@ class LearnCaptureResult:
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def learn_capture(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json: bool) -> None:
+def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json: bool) -> None:
     """Create the perk:learn issue from captured learnings and clear pending-learn (land → learn).
 
     \b
@@ -59,16 +56,21 @@ def learn_capture(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json
             require_github(ctx)
         result = _learn_capture_impl(repo_root=repo_root, body_path=body_path, dry_run=dry_run)
     except GitHubError as exc:
-        _fail(
-            ctx, as_json=as_json, error_type="github_error", message=f"learn-capture failed\n{exc}"
+        fail(
+            ctx,
+            as_json=as_json,
+            error_type="github_error",
+            message=f"learn capture failed\n{exc}",
+            extra={"dry_run": False},
         )
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
             message=exc.format_message(),
+            extra={"dry_run": False},
         )
         return
 
@@ -155,7 +157,7 @@ def _result_to_dict(result: LearnCaptureResult) -> dict[str, object]:
 
 def _render_human(result: LearnCaptureResult) -> None:
     if result.dry_run:
-        user_output(click.style("learn-capture --dry-run (no issue, no marker clear)", dim=True))
+        user_output(click.style("learn capture --dry-run (no issue, no marker clear)", dim=True))
         user_output(f"  plan=#{result.plan_issue}")
         return
     verb = "Found existing" if result.learn_issue.existed else "Created"
@@ -165,15 +167,3 @@ def _render_human(result: LearnCaptureResult) -> None:
         + click.style(f"#{result.learn_issue.number}", fg="cyan")
         + "; pending-learn cleared"
     )
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(
-            json.dumps(
-                {"success": False, "error_type": error_type, "message": message, "dry_run": False}
-            )
-        )
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))

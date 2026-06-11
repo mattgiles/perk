@@ -59,6 +59,36 @@ def test_objective_author_is_dedicated_and_local_only(git_repo):
     assert "local-only" in remote.output
 
 
+def test_learn_is_dedicated_hybrid_group(git_repo):
+    # Node 2.2: `learn` is a hand-written hybrid group — bare invocation default-dispatches to the
+    # hidden stage launcher (byte-identical to the generated launcher); `capture`/`docs` are verbs.
+    from perk.cli.stages import DEDICATED_STAGES
+
+    assert "learn" in DEDICATED_STAGES
+
+    # Bare launcher preserved: a non-verb invocation falls through to the hidden launcher, with
+    # launcher options (--worktree/--dry-run) surviving group-level parsing intact.
+    (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # learn reuses an existing worktree
+    dry = CliRunner().invoke(cli, ["learn", "--worktree", "wt1", "--dry-run"], obj=_ctx(git_repo))
+    assert dry.exit_code == 0, dry.output
+    assert "would launch stage 'learn'" in dry.output
+
+    # `--help` renders the GROUP help (listing the verbs), not the launcher's.
+    helped = CliRunner().invoke(cli, ["learn", "--help"])
+    assert helped.exit_code == 0
+    assert "capture" in helped.output and "docs" in helped.output
+
+    # The verbs resolve.
+    assert CliRunner().invoke(cli, ["learn", "capture", "--help"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["learn", "docs", "--help"]).exit_code == 0
+
+    # The old flat spellings (and their aliases) are gone.
+    for old in (["learn-capture", "--json"], ["learn-docs", "--json"], ["lc"], ["ldocs"]):
+        gone = CliRunner().invoke(cli, old)
+        assert gone.exit_code == 2
+        assert "No such command" in gone.output
+
+
 def test_remote_door_blocked():
     # plan is cold_remote:false (P2.T8c) -> local-only.
     result = CliRunner().invoke(cli, ["plan", "--remote"], obj=_ctx(Path("/repo")))

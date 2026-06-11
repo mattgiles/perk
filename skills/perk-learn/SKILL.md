@@ -36,7 +36,7 @@ Keep it tight and durable. A learning is worth capturing only if a future agent 
 ## The write
 
 Call the **`learn` tool** with the synthesized `summary` (markdown). The tool stages the body and
-delegates to the `learn-capture` cold door, which creates the idempotent `perk:learn` issue, posts a
+delegates to the `learn capture` cold door, which creates the idempotent `perk:learn` issue, posts a
 back-link comment on the plan issue, and clears `pending-learn`. Write the learnings as the `summary`
 — it is captured verbatim.
 
