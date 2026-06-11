@@ -74,6 +74,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 | [cli-vs-pi.md](./guiding-principles/cli-vs-pi.md) | The CLI/extension separation: **boundary = the session; authority follows the actor.** The CLI owns the exterior, the extension owns the interior; they coordinate only through durable state, process launch, and a shared static schema. Defines **stage parity** (warm/cold-local/cold-remote doors from one stage registry). |
 | [design/headless-worker.md](./design/headless-worker.md) | The Phase-1 autonomy spike (Objective #137 node 1.1): the gap list for the in-process SDK headless drive pathway, and the headless-worker contract — inputs, terminal-signal, outcome shape — that node 1.2 builds against. |
 | [design/migration-adoption-audit.md](./design/migration-adoption-audit.md) | The migration/adoption audit (Objective #137 node 4.2): erk's four migration surfaces audited against perk's issue-canonical Pi-native model — adopt-nothing outcome with per-surface drop rationale and record-only follow-on. |
+| [design/tui-charter.md](./design/tui-charter.md) | The **binding visual design charter** for perk's pi-TUI presence (Objective #251 node 1.1): the UI-emission inventory, surface taxonomy + placement rules, height/width budgets, glyph + severity vocabulary, and the adopted/declined richer pi surfaces (footer ownership, themed widgets, working indicator). Nodes 2.1–3.1 implement it. |
 
 ## Explainers (interactive HTML)
 
