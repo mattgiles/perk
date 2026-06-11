@@ -349,13 +349,13 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         return;
       }
       const state = rebuildCheckpoint(branchOf(ctx));
+      // Still multi-line — the charter-recorded D8 violator; node 2.2 converges it.
       const message = isInert(state)
-        ? "perk: no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
-        : `perk checkpoints (${progressLine(state)}):\n${state.steps
+        ? "no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
+        : `(${progressLine(state)}):\n${state.steps
             .map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`)
             .join("\n")}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
+      report(ctx, "checkpoints", "info", message);
     },
   });
 }

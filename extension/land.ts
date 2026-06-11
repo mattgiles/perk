@@ -15,6 +15,7 @@ import {
   stringField,
 } from "./coldDoor.ts";
 import { reconcileGuidance } from "./objectivePlan.ts";
+import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
@@ -209,8 +210,9 @@ export function registerLand(pi: ExtensionAPI): void {
     description: "Merge the active plan's PR and set pending-learn (submit → land).",
     handler: async (_args, ctx) => {
       const result = await landPr(pi, ctx);
-      if (ctx.hasUI) {
-        ctx.ui.notify(result.content[0]?.text ?? "land done", result.details.ok ? "info" : "error");
+      // Failure already reported loudly via failFor (the single error surface) — success only.
+      if (result.details.ok) {
+        report(ctx, "land", "info", result.content[0]?.text ?? "land done");
       }
       driveReconcileAfterLand(pi, ctx, result.details);
     },

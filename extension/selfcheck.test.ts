@@ -94,7 +94,7 @@ test("buildSelfcheckReport: all wired → ok + info", () => {
   });
   assert.equal(report.ok, true);
   assert.equal(report.level, "info");
-  assert.match(report.summary, /perk 1\.2\.3 selfcheck: ok/);
+  assert.match(report.summary, /^1\.2\.3: ok/);
   assert.match(report.summary, /ambient=reached/);
   assert.match(report.summary, /agents=reached/);
 });
@@ -186,7 +186,7 @@ test("selfcheck (live): converged ambient index + managed AGENTS reach the promp
   try {
     await h.invokeCommand("perk-selfcheck");
     const msg = h.notifies.at(-1) ?? "";
-    assert.match(msg, /selfcheck: ok/, `expected ok wiring, got: ${msg}`);
+    assert.match(msg, /^perk: selfcheck — .*: ok/, `expected ok wiring, got: ${msg}`);
     assert.match(msg, /ambient=reached/);
     assert.match(msg, /agents=reached/);
   } finally {

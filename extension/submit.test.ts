@@ -108,6 +108,20 @@ test("tool: success:true with a malformed pr fails as bad_output (unexpected pay
   }
 });
 
+test("/submit command: failure surfaces exactly ONE error notify (failFor's — no duplicate)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeCommand("submit");
+    const errors = h.notifyEvents.filter((e) => e.severity === "error");
+    assert.equal(errors.length, 1, `expected one error notify, got: ${JSON.stringify(errors)}`);
+    assert.match(errors[0]?.message ?? "", /^perk: submit — /);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/submit command: notifies success", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: SUBMIT_JSON });
