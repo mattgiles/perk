@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 
 from perk import github, issue_backend, issues, objective
-from perk.issues import GitHubIssueBackend, resolve_issue_backend
+from perk.issue_backend import IssueBackendError
+from perk.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
 
 
 def _make_backend(repo_root: Path) -> issue_backend.IssueBackend:
@@ -30,11 +31,47 @@ class TestConformance:
         assert isinstance(backend, GitHubIssueBackend)
 
 
+def _write_config(repo_root: Path, name: str, text: str) -> None:
+    pi = repo_root / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / name).write_text(text, encoding="utf-8")
+
+
 class TestResolver:
     def test_returns_github_backend_bound_to_root(self, tmp_path: Path) -> None:
         backend = resolve_issue_backend(tmp_path)
         assert isinstance(backend, GitHubIssueBackend)
         assert backend._repo_root == tmp_path
+
+    def test_explicit_github_selection_returns_github_backend(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "github"\n')
+        assert isinstance(resolve_issue_backend(tmp_path), GitHubIssueBackend)
+
+    def test_linear_selection_raises_not_yet_supported(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
+        with pytest.raises(IssueBackendError, match="not yet supported"):
+            resolve_issue_backend(tmp_path)
+
+    def test_unknown_selection_raises(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "jira"\n')
+        with pytest.raises(IssueBackendError, match="unknown issue backend"):
+            resolve_issue_backend(tmp_path)
+
+    def test_local_overlay_selection_is_ignored(self, tmp_path: Path) -> None:
+        # Committed-only read: a perk.local.toml [issues] selection never fragments the store.
+        _write_config(tmp_path, "perk.local.toml", '[issues]\nbackend = "linear"\n')
+        assert isinstance(resolve_issue_backend(tmp_path), GitHubIssueBackend)
+
+    def test_malformed_committed_toml_raises_backend_error(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", "[issues\nbackend =")
+        with pytest.raises(IssueBackendError, match="not valid TOML"):
+            resolve_issue_backend(tmp_path)
+
+    def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
+        assert resolve_issue_backend_id(tmp_path) == issues.GITHUB_BACKEND_ID
+
+    def test_github_backend_id(self) -> None:
+        assert GitHubIssueBackend.backend_id == "github"
 
 
 class _Recorder:

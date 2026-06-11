@@ -97,12 +97,13 @@ def implement(
     require_github(ctx)
     number = parse_plan_id(plan)
     try:
-        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(number))
+        backend = issues.resolve_issue_backend(repo_root)
+        state = backend.get_plan(issue_id=str(number))
     except IssueBackendError as exc:
         raise UserFacingCliError(f"implement failed\n{exc}", error_type="github_error") from exc
     if state is None:
         raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
-    ref = resume.reconstruct_plan_ref(state)
+    ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
     worktree_name = launch.resolve_plan_worktree_name(ref)
 
     if dry_run:

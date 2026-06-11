@@ -5,7 +5,7 @@ from typing import cast
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, issue_backend, issues
 from perk.cli.cli import cli
 
 PLAN = "# My Feature\n\nDo the thing.\n"
@@ -105,6 +105,34 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         "objective_id": None,
         "consumed_learn": [],
     }
+
+
+def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
+    # The plan-ref provider is the resolved backend's `backend_id` (contracts.md §8.21), not a
+    # hardcoded literal: a stub backend claiming "linear" must surface verbatim in the ref.
+    _authed(monkeypatch)
+
+    class _StubBackend:
+        backend_id = "linear"
+
+        def ensure_label(self, name, *, color, description, dry_run=False):
+            return issue_backend.Label(name=name, created=False)
+
+        def create_plan_issue(self, *, title, body, run_id, dry_run=False):
+            return issue_backend.IssueRef(id="9", url="https://lin/i/9", existed=False)
+
+        def add_issue_comment(self, *, issue_id, body, dry_run=False):
+            return issue_backend.CommentResult(posted=True)
+
+    monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _StubBackend())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md"])
+        assert result.exit_code == 0
+        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+    assert ref["provider"] == "linear"
 
 
 def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):

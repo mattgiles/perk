@@ -257,3 +257,31 @@ function parseProvidersSelection(table: Record<string, string> | undefined): {
   if (typeof table?.todo === "string") selection.todo = table.todo;
   return selection;
 }
+
+/** The `[issues] backend` vocabulary (contracts.md §8.21). */
+export type IssueBackendId = "github" | "linear";
+
+export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
+
+/**
+ * The fail-safe TS mirror of the issue-backend selection (Objective #252, Node 1.3).
+ *
+ * Reads ONLY committed `.pi/perk.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
+ * the Python committed-only read (the backend decides where canonical durable state is written;
+ * a per-user `perk.local.toml` override would fragment the canonical store). Python
+ * (`perk/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
+ * "linear"/unknown; this mirror is fail-safe (absence/unknown/any error → `"github"`) because
+ * the TS plane only renders prompts — it never writes canonical issues. Ships DORMANT (no
+ * consumer until Node 3.1's backend-aware prompt rendering), mirroring the providers.ts
+ * Node-2.1 dormant-loader precedent.
+ */
+export function resolveIssueBackendId(cwd: string): IssueBackendId {
+  try {
+    const committed = readTomlFile(join(cwd, ".pi", CONFIG_FILENAME));
+    const backend = committed.tables.issues?.backend;
+    if (backend === "github" || backend === "linear") return backend;
+    return GITHUB_ISSUE_BACKEND_ID;
+  } catch {
+    return GITHUB_ISSUE_BACKEND_ID;
+  }
+}

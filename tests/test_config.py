@@ -1,6 +1,9 @@
+import tomllib
 from pathlib import Path
 
-from perk.config import load_committed_compaction, load_config
+import pytest
+
+from perk.config import load_committed_compaction, load_committed_issues_backend, load_config
 from perk.init import PERK_TOML_TEMPLATE
 
 
@@ -177,3 +180,44 @@ def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
     _write(tmp_path, "perk.toml", "[compaction]\nenabled = true\n")
     _write(tmp_path, "perk.local.toml", "[compaction]\nenabled = false\nreserve_tokens = 999\n")
     assert load_committed_compaction(tmp_path) == {"enabled": True}
+
+
+# --- [issues] committed-only read (objective #252 node 1.3) ----------------------------------
+
+
+def test_issues_backend_absent_file_is_none(tmp_path):
+    assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_seeded_template_is_inert(tmp_path):
+    # The seeded `.pi/perk.toml` carries only a *commented* [issues] example.
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_absent_table_is_none(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nroot = ".worktrees"\n')
+    assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_reads_value(tmp_path):
+    _write(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
+    assert load_committed_issues_backend(tmp_path) == "linear"
+
+
+@pytest.mark.parametrize("value", ["true", "7", '""', '"   "'])
+def test_issues_backend_illtyped_or_blank_is_none(tmp_path, value):
+    _write(tmp_path, "perk.toml", f"[issues]\nbackend = {value}\n")
+    assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_is_committed_only_ignores_local_overlay(tmp_path):
+    # The committed-only guarantee: perk.local.toml's [issues] is NEVER read.
+    _write(tmp_path, "perk.local.toml", '[issues]\nbackend = "linear"\n')
+    assert load_committed_issues_backend(tmp_path) is None
+
+
+def test_issues_backend_malformed_toml_raises(tmp_path):
+    _write(tmp_path, "perk.toml", "[issues\nbackend =")
+    with pytest.raises(tomllib.TOMLDecodeError):
+        load_committed_issues_backend(tmp_path)

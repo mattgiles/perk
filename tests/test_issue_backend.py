@@ -27,6 +27,8 @@ class _FakeIssue:
 class _FakeBackend:
     """A minimal in-memory ``IssueBackend`` (the seed of the Node 4.1 Fake layer)."""
 
+    backend_id = "fake"
+
     def __init__(self) -> None:
         self._issues: dict[str, _FakeIssue] = {}
         self._labels: set[str] = set()

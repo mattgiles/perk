@@ -305,7 +305,7 @@ def _plan_save_impl(
             backend.add_issue_comment(issue_id=issue.id, body=body_comment, dry_run=dry_run)
 
     plan_ref = plan.PlanRef(
-        provider="github",
+        provider=backend.backend_id,
         pr_id=issue.id,
         url=issue.url,
         labels=(plan.PLAN_LABEL,),

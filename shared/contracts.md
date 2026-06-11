@@ -1005,7 +1005,7 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
 erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
 
 ```
-{ provider: string,            # e.g. "github"
+{ provider: string,            # the resolved issue backend ("github" today — §8.21)
   pr_id: string,               # STRING (allows non-numeric ids like Jira "PROJ-123")
   url: string,                 # during planning: the plan issue url/id; branch/pr staged null
   labels: string[],            # ["perk:plan"]
@@ -1457,7 +1457,8 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 `package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
-non-fatal config checks — §8.9/§8.10) · `state` (the `.pi/workflow/` cache layout + handoff-blob
+non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues] backend` selection
+check — §8.21) · `state` (the `.pi/workflow/` cache layout + handoff-blob
 integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
@@ -1728,10 +1729,12 @@ progress discipline onto the foreign overlay — see the Node 3.2 status note). 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
 provider id, today it is the **issue backend** (`"github"`) — `perk/launch.py` branches on
-`provider == "github"`, and `plan_save_cmd.py`/`resume.py`/all TS fixtures stamp `"github"`. That
-"id == provider field" equivalence is aspirational; Node 2.2 does **not** restamp it (restamping
-would break `launch.py`'s backend branching). `cache.plan-ref` is untouched by the plan-seam
-deferral.
+`provider == "github"`. The stamp sites (`plan_save_cmd.py` / `resume.py`'s
+`reconstruct_plan_ref` callers) no longer hardcode the `"github"` literal: the field is stamped
+from the **resolved issue backend's `backend_id`** (§8.21) — still the issue backend, still ≠
+the seam id. That "id == provider field" equivalence is aspirational; Node 2.2 does **not**
+restamp it (restamping would break `launch.py`'s backend branching). `cache.plan-ref` is
+untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
@@ -2671,3 +2674,64 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
 Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, `dispatch_failed`
 (propagated from `launch_stage`) → 1. Benign decision kinds (`plan_required`/`blocked`/`awaiting_*`/
 `ready_for_review`/`merged_pending_reconcile`/`pr_closed`/`completed`) are **not** errors (exit 0).
+
+---
+
+## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Node 1.3)
+
+The issue-tracking tier (plan/learn/objective issues — `perk/issue_backend.py`'s `IssueBackend`
+contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/issues.py`, Node 1.2) is
+**backend-selectable** via one committed config table:
+
+```toml
+[issues]
+backend = "github"   # or "linear" (reserved — ships in objective #252 Phase 2)
+```
+
+**Committed-only read, both planes.** The selection is read from committed `.pi/perk.toml`
+**only** — never the `perk.local.toml` overlay (Python: `load_committed_issues_backend`; TS:
+`resolveIssueBackendId` reads only the committed file). Rationale: the backend decides where
+canonical durable state (plan/learn/objective issues) is *written*; a per-user override would
+fragment the canonical store. Node 2.4 later converges committed artifacts from this same
+selection.
+
+**Python is the authoritative validator** (`perk/issues.py::resolve_issue_backend_id`):
+
+- absent / `"github"` → `"github"` (the default backend);
+- `"linear"` → **raises** `IssueBackendError` ("not yet supported — … objective #252 Phase 2");
+- any other value → **raises** `IssueBackendError` ("unknown issue backend … (known: github,
+  linear)");
+- malformed committed TOML → `tomllib.TOMLDecodeError` re-raised as `IssueBackendError` (chained,
+  pointing at `perk doctor`).
+
+Raising (not falling back) is deliberate: a silent fallback would write canonical issues to the
+wrong tracker. `resolve_issue_backend(repo_root)` resolves the id and constructs the matching
+backend; every issue-tier consumer already routes `IssueBackendError` through its existing error
+boundary.
+
+**The TS mirror is fail-safe and dormant** (`extension/config.ts::resolveIssueBackendId`):
+returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
+parse error — safe because the TS plane only *renders prompts*, never writes canonical issues. No
+TS consumer exists at this node; Node 3.1 (backend-aware prompt rendering) consumes it (mirrors
+the providers.ts Node-2.1 dormant-loader precedent). `PerkConfig` carries no `issues` field — an
+overlay-read shape would contradict the committed-only rule.
+
+**The `backend_id` discipline + the stamping rule.** The `IssueBackend` Protocol carries
+`backend_id: str` — the backend's id in the `[issues] backend` vocabulary, stamped **verbatim**
+into `cache.plan-ref.provider` at every stamp site (`plan_save_cmd.py`'s `PlanRef`;
+`resume.reconstruct_plan_ref(state, provider=…)`'s callers). This makes "the backend that wrote
+the issue is the backend that gets stamped" structurally true (see also the §8.10 paragraph:
+the field is the issue backend, not the seam id).
+
+**The `issues-backend` doctor check** (group `issues`; no `--fix` arm — the selection is
+user-owned config):
+
+| committed selection | status | note |
+| --- | --- | --- |
+| absent / `"github"` | `ok` | `issues backend: github` |
+| `"linear"` | `fail` | selected but not yet supported; remediate to `backend = "github"` until Phase 2 |
+| anything else | `fail` | `unknown issue backend '<x>'`; fix `.pi/perk.toml [issues]` |
+| malformed TOML | `warn` | selection not evaluated — defers to the config check (mirrors `providers`) |
+
+`fail` (not `warn`) for a bad selection is deliberate: unlike `[providers]` (graceful fallback →
+warn), a non-github selection hard-breaks **every** issue-touching command at this node.

@@ -6,8 +6,8 @@ backend-selectable (GitHub Issues today; Linear later) — PRs, CI, and auth sta
 ``perk/github.py`` for **all** backends (PRs are GitHub-universal even under a Linear issue
 backend). This module is that tier's contract: the ``IssueBackend`` `Protocol`, the
 backend-neutral result dataclasses, and the one backend-neutral error type. It is deliberately
-dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracts the GitHub backend behind it
-and Node 1.3 adds the ``[issues]`` config table + resolver.
+dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracted the GitHub backend behind
+it and Node 1.3 added the ``[issues]`` config table + config-driven resolver (``perk/issues.py``).
 
 Contract disciplines (every concrete backend MUST honor these):
 
@@ -174,6 +174,11 @@ class IssueBackend(Protocol):
     ``... | None`` for not-found and raise on an infra failure. ``dry_run`` mutations validate +
     compose only — no backend writes.
     """
+
+    # The backend's id in the `[issues] backend` vocabulary (e.g. "github"). Contract discipline:
+    # stamped **verbatim** into `cache.plan-ref.provider`, so "the backend that wrote the issue is
+    # the backend that gets stamped" is structurally true at every stamp site.
+    backend_id: str
 
     # --- labels ---
 

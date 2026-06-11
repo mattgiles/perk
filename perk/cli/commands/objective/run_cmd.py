@@ -182,7 +182,9 @@ def _dispatch_stage_remote(
         stage.doors.get("cold_remote") is True,
         f"stage '{stage_id}' is not remote-drivable (cold_remote:false)",
     )
-    plan_ref = resume.reconstruct_plan_ref(node_plan_state)
+    plan_ref = resume.reconstruct_plan_ref(
+        node_plan_state, provider=issues.resolve_issue_backend_id(repo_root)
+    )
     if dry_run:
         return None
     cache.write_plan_ref(repo_root, plan_ref)

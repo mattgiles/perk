@@ -164,14 +164,15 @@ def run_worker(
     """
     stage = _drivable_stage(stage_id)
     try:
-        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(plan))
+        backend = issues.resolve_issue_backend(repo_root)
+        state = backend.get_plan(issue_id=str(plan))
     except IssueBackendError as exc:
         raise UserFacingCliError(
             f"run-worker failed to resolve plan #{plan}\n{exc}", error_type="github_error"
         ) from exc
     if state is None:
         raise UserFacingCliError(f"Plan issue #{plan} not found", error_type="plan_not_found")
-    plan_ref = resume.reconstruct_plan_ref(state)
+    plan_ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
 
     user_output(
         f"run-worker: positioning {stage.id} for plan #{plan} "

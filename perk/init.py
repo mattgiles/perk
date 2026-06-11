@@ -176,6 +176,16 @@ root = ".worktrees"
 # enabled = true            # turn pi's auto-compaction on/off
 # reserve_tokens = 16384    # tokens reserved for the response (pi default)
 # keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
+
+# Issue backend (optional) — where canonical plan/learn/objective issues live.
+# "github" (the default when unset) is the only supported backend today;
+# "linear" is reserved — selecting it errors until the Linear backend ships
+# (objective #252 Phase 2). Committed-only: this key is read from THIS file,
+# never from the perk.local.toml overlay (a per-user override would fragment
+# the canonical issue store).
+#
+# [issues]
+# backend = "github"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
