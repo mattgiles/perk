@@ -15,11 +15,10 @@
 // intentional non-audited paths; the structural refusal protects the model's path only. The
 // "are we done?" judgment text lives in the perk-objective-plan skill.
 
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import type { ExecResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
-import { ensureRunScratch, readPlanRef } from "./cache.ts";
+import { readPlanRef } from "./cache.ts";
+import { booleanField, type ColdJson, runColdDoor } from "./coldDoor.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
@@ -50,14 +49,14 @@ export interface ObjectiveNodeOk {
 
 export type ObjectiveNodeResult = Result<ObjectiveNodeOk>;
 
-/** The `perk objective node --json` success shape (the contract the warm door consumes). */
-interface ObjectiveNodeJson {
-  success: boolean;
-  error_type: string | null;
-  message?: string | null;
-  objective?: number;
-  node?: string;
-  comment_updated?: boolean;
+/** The fields `objectiveNode` consumes off the success envelope. */
+interface ObjectiveNodePayload {
+  comment_updated: boolean;
+}
+
+/** Lenient decode — `comment_updated` is advisory display detail; never returns null. */
+function decodeObjectiveNode(payload: ColdJson): ObjectiveNodePayload {
+  return { comment_updated: booleanField(payload, "comment_updated") ?? false };
 }
 
 /** A non-trivial audit iff it is a string whose value after `.trim()` is ≥ MIN_AUDIT_LENGTH. */
@@ -115,36 +114,11 @@ export async function objectiveNode(
     );
   }
 
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(perkBin, args, { cwd: ctx.cwd, signal: ctx.signal });
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk objective node failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: ObjectiveNodeJson;
-  try {
-    parsed = JSON.parse(res.stdout) as ObjectiveNodeJson;
-  } catch {
-    return fail("perk objective node returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success) {
-    return fail(
-      parsed.message ?? "perk objective node reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  const r = await runColdDoor<ObjectiveNodePayload>(pi, ctx, args, {
+    label: "perk objective node",
+    decode: decodeObjectiveNode,
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
 
   const detail = params.status
     ? `node ${params.node} → ${params.status}`
@@ -154,7 +128,7 @@ export async function objectiveNode(
   return ok(`Updated objective #${params.objective}: ${detail}.`, {
     objective: params.objective,
     node: params.node,
-    comment_updated: parsed.comment_updated ?? false,
+    comment_updated: r.data.comment_updated,
   });
 }
 
@@ -171,25 +145,14 @@ export interface ReconcileObjectiveOk {
 
 export type ReconcileObjectiveResult = Result<ReconcileObjectiveOk>;
 
-/** The `perk objective reconcile --json` success shape (the contract the warm door consumes). */
-interface ObjectiveReconcileJson {
-  success: boolean;
-  error_type: string | null;
-  message?: string | null;
-  objective?: number;
-  updated?: boolean;
+/** The fields `reconcileObjective` consumes off the success envelope. */
+interface ReconcilePayload {
+  updated: boolean;
 }
 
-/** Read the active run id from the rebuilt workflow-state (for the scratch dir); else a stamp. */
-function reconcileRunId(ctx: ExtensionContext): string {
-  try {
-    const branch = branchOf(ctx);
-    const runId = rebuildWorkflowState(branch).run_id;
-    if (typeof runId === "string" && runId.length > 0) return runId;
-  } catch {
-    // fall through to a stamp
-  }
-  return `objective-reconcile-${Date.now()}`;
+/** Lenient decode — `updated` is advisory display detail; never returns null. */
+function decodeReconcile(payload: ColdJson): ReconcilePayload {
+  return { updated: booleanField(payload, "updated") ?? false };
 }
 
 /**
@@ -209,54 +172,27 @@ export async function reconcileObjective(
     return fail("reconcile_objective needs { objective: <number>, prose: <string> }", "bad_input");
   }
 
-  // pi.exec has no stdin channel → write the prose to a run-scoped scratch file, pass its path.
-  let bodyPath: string;
-  try {
-    const dir = ensureRunScratch(ctx.cwd, reconcileRunId(ctx));
-    bodyPath = join(dir, `objective-reconcile-${Date.now()}.md`);
-    writeFileSync(bodyPath, params.prose, "utf8");
-  } catch (err) {
-    return fail(`could not stage the reconcile prose: ${String(err)}`, "scratch_failed");
-  }
-
-  const perkBin = process.env.PERK_BIN ?? "perk";
-  let res: ExecResult;
-  try {
-    res = await pi.exec(
-      perkBin,
-      ["objective", "reconcile", String(params.objective), "--json", "--body", bodyPath],
-      { cwd: ctx.cwd, signal: ctx.signal },
-    );
-  } catch (err) {
-    return fail(`could not run '${perkBin}': ${String(err)}`, "exec_failed");
-  }
-
-  if (res.killed || res.code !== 0) {
-    const tail = res.stderr.trim();
-    return fail(
-      tail
-        ? `perk objective reconcile failed (exit ${res.code}): ${tail}`
-        : `could not run '${perkBin}' (exit ${res.code}) — is the perk CLI on PATH or PERK_BIN set?`,
-      "exec_failed",
-    );
-  }
-
-  let parsed: ObjectiveReconcileJson;
-  try {
-    parsed = JSON.parse(res.stdout) as ObjectiveReconcileJson;
-  } catch {
-    return fail("perk objective reconcile returned unparseable JSON", "bad_output");
-  }
-  if (!parsed.success) {
-    return fail(
-      parsed.message ?? "perk objective reconcile reported failure",
-      parsed.error_type ?? "github_error",
-    );
-  }
+  // The substrate's stdin channel stages the prose in run scratch (pi.exec has no stdin) and
+  // appends `--body <path>` to the argv.
+  const r = await runColdDoor<ReconcilePayload>(
+    pi,
+    ctx,
+    ["objective", "reconcile", String(params.objective), "--json"],
+    {
+      label: "perk objective reconcile",
+      decode: decodeReconcile,
+      stdin: {
+        flag: "--body",
+        content: params.prose,
+        filename: `objective-reconcile-${Date.now()}.md`,
+      },
+    },
+  );
+  if (!r.ok) return fail(r.message, r.errorType);
 
   return ok(`Reconciled objective #${params.objective} prose region.`, {
     objective: params.objective,
-    updated: parsed.updated ?? false,
+    updated: r.data.updated,
   });
 }
 
