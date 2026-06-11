@@ -30,9 +30,17 @@ def make_stage_launcher(stage: Stage) -> click.Command:
     group for its hidden bare-invocation launcher (``commands/learn/__init__.py``).
     """
 
+    # Click takes the first paragraph as short help, so listing rows render the bare registry
+    # summary; the second paragraph disambiguates the launcher from same-named worker verbs.
+    launcher_help = (
+        f"{stage.summary}\n\n"
+        f"Opens a primed pi session for the '{stage.id}' stage (use --dry-run to print the "
+        "launch plan without exec'ing pi)."
+    )
+
     @click.command(
         name=stage.id,
-        help=stage.summary,
+        help=launcher_help,
         context_settings={"ignore_unknown_options": True},
     )
     @click.option("--worktree", default=None, help="Worktree to position (create/reuse stages).")
