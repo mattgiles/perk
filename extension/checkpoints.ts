@@ -27,7 +27,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readHandoff, readPlanBody } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
-import { report } from "./report.ts";
+import {
+  MARK_CHECKPOINTS,
+  progressLine,
+  report,
+  STATUS_SLOT_CHECKPOINTS,
+  setStanding,
+  stepGlyph,
+} from "./surfaces.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -213,19 +220,6 @@ export function rebuildCheckpoint(branch: readonly BranchEntry[]): CheckpointSta
 
 // --- the controller -----------------------------------------------------------------------------
 
-function progressLine(state: CheckpointState): string {
-  const done = state.steps.filter((s) => s.completed).length;
-  const base = `${done}/${state.steps.length}`;
-  return state.current != null ? `${base} · ▶${state.current}` : base;
-}
-
-/** The glyph for a step: ☑ completed, ▶ the current step, ☐ otherwise. */
-function stepGlyph(state: CheckpointState, s: CheckpointStep): string {
-  if (s.completed) return "☑";
-  if (s.step === state.current) return "▶";
-  return "☐";
-}
-
 /** A coarse descriptor of the active plan when there is no `## Steps` checklist (the prose path). */
 interface CoarseDescriptor {
   stage: string;
@@ -249,26 +243,25 @@ function renderStatus(
   state: CheckpointState,
   branch: readonly BranchEntry[],
 ): void {
-  if (!ctx.hasUI) return;
   if (isInert(state)) {
     // Coarse fallback: an active prose plan (no `## Steps`) still surfaces SOMETHING.
     const coarse = coarseDescriptor(ctx, branch);
-    if (coarse) {
-      ctx.ui.setStatus("perk-checkpoints", `📋 ${coarse.stage}`);
-      ctx.ui.setWidget("perk-checkpoints", [
-        `Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`,
-      ]);
-    } else {
-      ctx.ui.setStatus("perk-checkpoints", undefined);
-      ctx.ui.setWidget("perk-checkpoints", undefined);
-    }
+    setStanding(
+      ctx,
+      STATUS_SLOT_CHECKPOINTS,
+      coarse
+        ? {
+            status: `${MARK_CHECKPOINTS} ${coarse.stage}`,
+            widget: [`Plan #${coarse.planId}: prose plan — no \`## Steps\` checklist`],
+          }
+        : undefined,
+    );
     return;
   }
-  ctx.ui.setStatus("perk-checkpoints", `📋 ${progressLine(state)}`);
-  ctx.ui.setWidget(
-    "perk-checkpoints",
-    state.steps.map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`),
-  );
+  setStanding(ctx, STATUS_SLOT_CHECKPOINTS, {
+    status: `${MARK_CHECKPOINTS} ${progressLine(state)}`,
+    widget: state.steps.map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`),
+  });
 }
 
 /**
@@ -356,13 +349,13 @@ export function registerCheckpoints(pi: ExtensionAPI): void {
         return;
       }
       const state = rebuildCheckpoint(branchOf(ctx));
+      // Still multi-line — the charter-recorded D8 violator; node 2.2 converges it.
       const message = isInert(state)
-        ? "perk: no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
-        : `perk checkpoints (${progressLine(state)}):\n${state.steps
+        ? "no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
+        : `(${progressLine(state)}):\n${state.steps
             .map((s) => `${stepGlyph(state, s)} ${s.step}. ${s.text}`)
             .join("\n")}`;
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
+      report(ctx, "checkpoints", "info", message);
     },
   });
 }

@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { report as reportTo } from "./report.ts";
 
 /** Project-scoped ambient routing index, relative to the repo root. */
 export const AMBIENT_INDEX_REL_PATH = join(".pi", "APPEND_SYSTEM.md");
@@ -120,7 +121,7 @@ export function buildSelfcheckReport(input: {
   const agents = managedAgentsProbe(options?.contextFiles);
   const ok = sharedOk && ambient.wired && agents.reachedPrompt;
   const summary =
-    `perk ${version} selfcheck: ${ok ? "ok" : "WIRING GAP"}; ` +
+    `${version}: ${ok ? "ok" : "WIRING GAP"}; ` +
     `shared=${sharedOk ? "ok" : "miss"}; ` +
     `ambient=${ambient.onDisk ? (ambient.reachedPrompt ? "reached" : "MISSING") : "none"} ` +
     `(append=${ambient.promptChars}c); ` +
@@ -147,12 +148,8 @@ export function registerSelfcheck(
         onDiskIndex: readAmbientIndex(ctx.cwd),
         options,
       });
-      if (ctx.hasUI) {
-        ctx.ui.notify(report.summary, report.level);
-      } else {
-        // Headless: still surface the derived booleans/counts (never the raw prompt content).
-        console.error(`perk: ${report.summary}`);
-      }
+      // Headless-safe: report() surfaces the derived booleans/counts (never raw prompt content).
+      reportTo(ctx, "selfcheck", report.level, report.summary);
     },
   });
 }

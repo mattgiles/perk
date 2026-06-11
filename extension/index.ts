@@ -243,9 +243,8 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
-    if (ctx.hasUI) {
-      ctx.ui.notify(`perk ${version} loaded`, "info");
-    }
+    // Headless now gains one stderr line (accepted — node 3.1 retires this toast to the footer).
+    report(ctx, "startup", "info", `v${version} loaded`);
 
     if (process.env.PERK_SELFCHECK) {
       try {

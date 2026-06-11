@@ -13,6 +13,7 @@ import {
   runColdDoor,
   stringField,
 } from "./coldDoor.ts";
+import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -76,11 +77,9 @@ export function registerReady(pi: ExtensionAPI): void {
     description: "Mark the active plan's draft PR ready for review (submit → ready).",
     handler: async (_args, ctx) => {
       const result = await markReady(pi, ctx);
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          result.content[0]?.text ?? "ready done",
-          result.details.ok ? "info" : "error",
-        );
+      // Failure already reported loudly via failFor (the single error surface) — success only.
+      if (result.details.ok) {
+        report(ctx, "ready", "info", result.content[0]?.text ?? "ready done");
       }
     },
   });

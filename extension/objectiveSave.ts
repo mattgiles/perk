@@ -17,6 +17,7 @@ import {
   stringField,
 } from "./coldDoor.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
+import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { arrayParam, paramsOf, stringParam } from "./toolParams.ts";
@@ -243,9 +244,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
       // on headless), /objective-save has no pre-gather artifact, so the only useful action is the
       // gate-exit + drive (mirrors /address and /objective-plan).
       if (gating.isActive()) gating.exit(ctx);
-      const message = "perk: /objective-save — handing the structured save to the session";
-      if (ctx.hasUI) ctx.ui.notify(message, "info");
-      else console.error(message);
+      report(ctx, "objective-save", "info", "handing the structured save to the session");
       // The perk-objective-author pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
       // /objective-save outside a stage:objective-author session gets none from Mechanism A.
       pi.sendUserMessage(

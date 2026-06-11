@@ -20,7 +20,13 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadPerkConfig } from "./config.ts";
-import { report } from "./report.ts";
+import {
+  formatBudgetLine,
+  MARK_OBJECTIVE,
+  report,
+  STATUS_SLOT_OBJECTIVE,
+  setStanding,
+} from "./surfaces.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
@@ -95,25 +101,6 @@ export function rebuildBudget(branch: readonly ScanEntry[], now: number): Budget
   };
 }
 
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) return `${tokens}`;
-  return `${(tokens / 1000).toFixed(1)}k`;
-}
-
-function formatElapsed(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  if (totalSec < 60) return `${totalSec}s`;
-  const min = Math.floor(totalSec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h${min % 60}m`;
-}
-
-/** A compact one-line budget summary (e.g. `12.3k tok · 5m`). */
-export function formatBudgetLine(args: { tokens: number; elapsedMs: number }): string {
-  return `${formatTokens(args.tokens)} tok · ${formatElapsed(args.elapsedMs)}`;
-}
-
 /** True when context usage has crossed the compaction threshold (pure; tolerant of unknowns). */
 export function shouldCompact(
   usage: { percent: number | null; tokens: number | null } | undefined,
@@ -144,16 +131,14 @@ function renderStatus(ctx: ExtensionContext): void {
   try {
     const active = activeObjective(ctx);
     if (active === null) {
-      ctx.ui.setStatus("perk-objective", undefined);
-      ctx.ui.setWidget("perk-objective", undefined);
+      setStanding(ctx, STATUS_SLOT_OBJECTIVE, undefined);
       return;
     }
     const budget = rebuildBudget(scanBranchOf(ctx), Date.now());
-    ctx.ui.setStatus("perk-objective", `🎯 ${active} · ${formatBudgetLine(budget)}`);
-    ctx.ui.setWidget("perk-objective", [
-      `objective: ${active}`,
-      `budget: ${formatBudgetLine(budget)}`,
-    ]);
+    setStanding(ctx, STATUS_SLOT_OBJECTIVE, {
+      status: `${MARK_OBJECTIVE} ${active} · ${formatBudgetLine(budget)}`,
+      widget: [`objective: ${active}`, `budget: ${formatBudgetLine(budget)}`],
+    });
   } catch (error) {
     console.error(`perk: objective status render failed — ${error}`);
   }

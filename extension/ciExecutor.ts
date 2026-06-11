@@ -31,6 +31,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { ensureRunScratch, workflowDir } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "./readOnlySession.ts";
+import { report } from "./report.ts";
 import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -433,10 +434,14 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const check = args.trim() === "" ? undefined : args.trim();
       const result = await runCiImpl(pi, ctx, { check }, latch);
-      if (ctx.hasUI) {
-        const firstLine = result.content[0]?.text.split("\n")[0] ?? "perk CI done";
-        ctx.ui.notify(firstLine, result.details.passed ? "info" : "warning");
-      }
+      // A `/ci` "failure" is a normal warning result (not failFor) — always surface it.
+      const firstLine = result.content[0]?.text.split("\n")[0] ?? "perk CI done";
+      report(
+        ctx,
+        "ci",
+        result.details.passed ? "info" : "warning",
+        firstLine.replace(/^perk CI: /, ""),
+      );
     },
   });
 }

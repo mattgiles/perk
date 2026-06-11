@@ -442,11 +442,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
         );
         return;
       }
-      if (ctx.hasUI) {
-        ctx.ui.notify(`perk: /objective-reconcile #${objective}`, "info");
-      } else {
-        console.error("perk: /objective-reconcile invoked (headless)");
-      }
+      report(ctx, "objective-reconcile", "info", `#${objective}`);
       pi.sendUserMessage(
         reconcileGuidance(objective) + bindingSuffix(ctx.cwd, "command:objective-reconcile"),
       );
@@ -469,11 +465,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
         );
         return;
       }
-      if (ctx.hasUI) {
-        ctx.ui.notify(`perk: /objective-plan #${objective}${node ? ` node ${node}` : ""}`, "info");
-      } else {
-        console.error("perk: /objective-plan invoked (headless)");
-      }
+      report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
       // The perk-objective-plan pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
       // /objective-plan outside a stage:objective-plan session gets none from Mechanism A.

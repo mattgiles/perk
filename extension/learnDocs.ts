@@ -91,10 +91,7 @@ export function registerLearnDocs(pi: ExtensionAPI): void {
         return;
       }
 
-      ctx.ui.notify(
-        `perk: /learn-docs — gathered ${r.data.learn_numbers.length} learn issue(s)`,
-        "info",
-      );
+      report(ctx, "learn-docs", "info", `gathered ${r.data.learn_numbers.length} learn issue(s)`);
       pi.sendUserMessage(
         learnDocsGuidance(r.data.inbox_path, r.data.learn_numbers) +
           bindingSuffix(ctx.cwd, "command:learn-docs"),
