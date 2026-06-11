@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
-import { objectiveSaveGuidance } from "./objectiveSave.ts";
+import { decodeObjectiveSaveParams, objectiveSaveGuidance } from "./objectiveSave.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 const CREATE_JSON = JSON.stringify({
@@ -167,4 +167,39 @@ test("objectiveSaveGuidance: with a title argument, names that title", () => {
 test("objectiveSaveGuidance: does not hardcode the perk-objective-author skill pointer", () => {
   // The skill pointer rides the binding suffix (Node 2.3), never the guidance body.
   assert.doesNotMatch(objectiveSaveGuidance(), /perk-objective-author/);
+});
+
+// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+
+test("tool: objective_save with a mistyped roadmap → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_save", {
+      prose: "# Objective",
+      roadmap: "not-an-array",
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodeObjectiveSaveParams({ prose: "p", roadmap: [{ id: "1.1" }] }), {
+    prose: "p",
+    title: undefined,
+    roadmap: [{ id: "1.1" }],
+  });
+  // prose absent decodes to "" (saveObjective's invalid_input arm keeps owning that message).
+  assert.equal(decodeObjectiveSaveParams({})?.prose, "");
+  assert.equal(decodeObjectiveSaveParams(undefined), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: 5 }), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", title: 5 }), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", roadmap: "x" }), null);
 });

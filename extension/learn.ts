@@ -17,6 +17,7 @@ import {
   stringField,
 } from "./coldDoor.ts";
 import { failFor, ok, type Result } from "./result.ts";
+import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The ok-arm fields. */
@@ -166,7 +167,13 @@ export function registerLearn(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const summary = (params as { summary?: string } | undefined)?.summary;
+      // Tool-boundary decode (Node 3.2): absent → undefined (the marker-clear path); mistyped →
+      // strict-fail — never silently clear the pending-learn marker on uncertainty.
+      const p = paramsOf(params);
+      const summary = p === null ? undefined : stringParam(p, "summary");
+      if (summary === null) {
+        return failFor(ctx, "learn")("learn `summary` must be a string", "bad_input");
+      }
       return learnDone(pi, ctx, summary);
     },
   });

@@ -291,3 +291,28 @@ test("harness: headless run_ci with checks + no flag refuses (fail closed)", asy
     h.dispose();
   }
 });
+
+test("harness: run_ci with a mistyped check → bad_input, no check executed", async () => {
+  // Node 3.2: tool-boundary decode. A configured check exists but is never run.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[ci]\nok = "true"\n', "utf8");
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    h.setFlag("allow-project-ci", true);
+    const result = await h.invokeTool("run_ci", { check: 5 });
+    const details = result.details as {
+      ok: boolean;
+      passed: boolean;
+      checks: unknown[];
+      error_type?: string;
+    };
+    assert.equal(details.ok, false);
+    assert.equal(details.passed, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.deepEqual(details.checks, [], "no check executed");
+    assert.match(result.content[0]?.text ?? "", /run_ci failed: `check` must be a string/);
+  } finally {
+    h.dispose();
+  }
+});

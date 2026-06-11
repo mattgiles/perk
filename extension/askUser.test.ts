@@ -3,7 +3,12 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type AskUserUI, OTHER_CHOICE, runAskUserQuestion } from "./askUser.ts";
+import {
+  type AskUserUI,
+  decodeAskUserParams,
+  OTHER_CHOICE,
+  runAskUserQuestion,
+} from "./askUser.ts";
 
 interface Call {
   method: "select" | "input";
@@ -135,4 +140,39 @@ test("signal propagation: select and input receive the passed signal in opts", a
   });
   assert.equal(at(calls, 0).opts?.signal, controller.signal);
   assert.equal(at(calls, 1).opts?.signal, controller.signal);
+});
+
+// --- Node 3.2: tool-boundary decode (native graceful vocabulary) ---------------------------
+
+test("decodeAskUserParams: mistyped options advisory-drop to the free-text path", async () => {
+  const decoded = decodeAskUserParams({ question: "Which?", options: "x" });
+  assert.deepEqual(decoded, { question: "Which?", options: undefined });
+  // Composed with the pure core: input called (free-text), select not.
+  const { ui, calls } = fakeUI({ input: "blue" });
+  const result = await runAskUserQuestion({ hasUI: true, ui, ...decoded });
+  assert.equal(textOf(result), "blue");
+  assert.equal(calls.length, 1);
+  assert.equal(at(calls, 0).method, "input");
+});
+
+test("decodeAskUserParams: absent or mistyped question decodes to the no-question arm", async () => {
+  assert.equal(decodeAskUserParams({}).question, "");
+  assert.equal(decodeAskUserParams(undefined).question, "");
+  assert.equal(decodeAskUserParams({ question: 5 }).question, "");
+  const { ui, calls } = fakeUI({ input: "ignored" });
+  const result = await runAskUserQuestion({
+    hasUI: true,
+    ui,
+    ...decodeAskUserParams({ question: 5 }),
+  });
+  assert.equal(textOf(result), "ask_user_question: no question provided.");
+  assert.deepEqual(result.details, { ok: true, answered: false });
+  assert.equal(calls.length, 0);
+});
+
+test("decodeAskUserParams: valid options pass through (select path preserved)", () => {
+  assert.deepEqual(decodeAskUserParams({ question: "Pick", options: ["A", "B"] }), {
+    question: "Pick",
+    options: ["A", "B"],
+  });
 });

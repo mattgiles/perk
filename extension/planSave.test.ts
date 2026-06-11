@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { extractPlanMarkdown, isPlanModeActive } from "./planSave.ts";
+import { decodePlanSaveParams, extractPlanMarkdown, isPlanModeActive } from "./planSave.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import type { BranchEntry } from "./workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
@@ -579,4 +579,42 @@ test("extractPlanMarkdown: the whole latest assistant text; null when absent", (
     null,
   );
   assert.equal(extractPlanMarkdown([]), null);
+});
+
+// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+
+test("tool: plan_save with a mistyped consumed_learn → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: "# Plan", consumed_learn: "x" });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.match(result.content[0]?.text ?? "", /^plan_save failed: /);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodePlanSaveParams({ plan: "# P", consumed_learn: [1, 2] }), {
+    plan: "# P",
+    title: undefined,
+    objective_id: undefined,
+    node_id: undefined,
+    consumed_learn: [1, 2],
+  });
+  // plan absent decodes to "" (savePlan's invalid_input arm keeps owning that message).
+  assert.equal(decodePlanSaveParams({})?.plan, "");
+  assert.equal(decodePlanSaveParams(undefined), null);
+  assert.equal(decodePlanSaveParams({ plan: 5 }), null);
+  assert.equal(decodePlanSaveParams({ plan: "p", title: 5 }), null);
+  assert.equal(decodePlanSaveParams({ plan: "p", objective_id: 7 }), null);
+  assert.equal(decodePlanSaveParams({ plan: "p", node_id: 1.2 }), null);
+  assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: "x" }), null);
+  assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: [1, "2"] }), null);
 });

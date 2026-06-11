@@ -12,6 +12,7 @@
 // a thin `registerAskUser` wrapper — mirrors ciExecutor.ts's pure-core + injected-fakes testability.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { paramsOf, stringArrayParam, stringParam } from "./toolParams.ts";
 
 /** The always-appended escape entry on the select path so preset options never trap the user. */
 export const OTHER_CHOICE = "✏️ Other (type a custom answer)…";
@@ -79,6 +80,23 @@ export async function runAskUserQuestion(args: {
   return typed === undefined ? answer(DISMISSED_TEXT, false) : answer(typed, true);
 }
 
+/**
+ * Decode unknown `ask_user_question` tool-call params (the tool-boundary seam — Node 3.2), in
+ * this tool's native graceful vocabulary: `question` absent OR mistyped → "" (routed into
+ * `runAskUserQuestion`'s NO_QUESTION_TEXT arm — answered: false, never throws/blocks); `options`
+ * mistyped → advisory-dropped to undefined (the free-text path) — a UI affordance, not a durable
+ * write (the decided exception to strict-fail).
+ */
+export function decodeAskUserParams(params: unknown): { question: string; options?: string[] } {
+  const p = paramsOf(params);
+  if (p === null) return { question: "" };
+  return {
+    question: stringParam(p, "question") ?? "",
+    // Advisory drop: a mistyped `options` falls back to the free-text path.
+    options: stringArrayParam(p, "options") ?? undefined,
+  };
+}
+
 const TOOL_GUIDELINES = [
   "Prefer this during planning to resolve genuine ambiguity rather than guessing.",
   "Ask ONE focused question at a time, and wait for the answer before the next.",
@@ -114,11 +132,11 @@ export function registerAskUser(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { question, options } = params as { question?: string; options?: string[] };
+      const { question, options } = decodeAskUserParams(params);
       return runAskUserQuestion({
         hasUI: ctx.hasUI,
         ui: ctx.ui,
-        question: question ?? "",
+        question,
         options,
         signal,
       });

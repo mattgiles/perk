@@ -12,6 +12,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { writePlanRef } from "./cache.ts";
 import {
   buildObjectiveNodeArgs,
+  decodeObjectiveNodeParams,
+  decodeReconcileParams,
   factoryGuidance,
   isNonTrivialAudit,
   MIN_AUDIT_LENGTH,
@@ -443,4 +445,92 @@ test("reconcileGuidance: names the objective and carries the reconcile cues (no 
   assert.match(g, /reconcile_objective/);
   // The skill pointer rides the bindingSuffix, never the guidance body.
   assert.doesNotMatch(g, /Follow the/);
+});
+
+// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+
+test("tool: objective_node with a mistyped objective → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_node", { objective: "7", node: "1.2", pr: "#9" });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: objective_node with an unknown status → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_node", {
+      objective: 7,
+      node: "1.2",
+      status: "bogus",
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: reconcile_objective with a mistyped prose → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: RECONCILE_OK, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("reconcile_objective", { objective: 5, prose: 5 });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("decodeObjectiveNodeParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodeObjectiveNodeParams({ objective: 7, node: "1.2", pr: "#9" }), {
+    objective: 7,
+    node: "1.2",
+    status: undefined,
+    pr: "#9",
+    description: undefined,
+    audit: undefined,
+  });
+  assert.equal(decodeObjectiveNodeParams(undefined), null);
+  assert.equal(decodeObjectiveNodeParams("x"), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: "7", node: "1.2" }), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "" }), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", status: "bogus" }), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", status: 5 }), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", pr: 9 }), null);
+  assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", audit: 1 }), null);
+  assert.equal(
+    decodeObjectiveNodeParams({ objective: 7, node: "1.2", status: "done", audit: "a" })?.status,
+    "done",
+  );
+});
+
+test("decodeReconcileParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodeReconcileParams({ objective: 5, prose: "p" }), {
+    objective: 5,
+    prose: "p",
+  });
+  assert.equal(decodeReconcileParams(undefined), null);
+  assert.equal(decodeReconcileParams({ objective: "5", prose: "p" }), null);
+  assert.equal(decodeReconcileParams({ objective: 5, prose: 5 }), null);
+  assert.equal(decodeReconcileParams({ objective: 5 }), null);
 });

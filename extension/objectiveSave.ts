@@ -19,6 +19,7 @@ import {
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
+import { arrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -42,6 +43,29 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
   const url = stringField(objective, "url");
   if (number === undefined || url === undefined) return null;
   return { objective: { number, url, existed: booleanField(objective, "existed") } };
+}
+
+/** The decoded `objective_save` tool params. */
+interface ObjectiveSaveParams {
+  prose: string;
+  title?: string;
+  roadmap?: unknown[];
+}
+
+/**
+ * Decode unknown `objective_save` tool-call params (the tool-boundary seam — Node 3.2). `prose`
+ * absent decodes to `""` (so `saveObjective`'s "no objective prose to save" `invalid_input` arm
+ * keeps owning that message) but present-but-mistyped → null (strict-fail). `roadmap` stays
+ * `unknown[]` — the Python cold door owns node-shape validation.
+ */
+export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const prose = stringParam(p, "prose");
+  const title = stringParam(p, "title");
+  const roadmap = arrayParam(p, "roadmap");
+  if (prose === null || title === null || roadmap === null) return null;
+  return { prose: prose ?? "", title, roadmap };
 }
 
 /**
@@ -192,12 +216,18 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { prose, title, roadmap } = params as {
-        prose: string;
-        title?: string;
-        roadmap?: unknown[];
-      };
-      return saveObjective(pi, ctx, { prose, title, roadmap });
+      const decoded = decodeObjectiveSaveParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "objective-save",
+          "objective_save",
+        )(
+          "objective_save needs { prose: string, roadmap?: array } per the tool schema",
+          "bad_input",
+        );
+      }
+      return saveObjective(pi, ctx, decoded);
     },
   });
 

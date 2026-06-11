@@ -37,6 +37,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "./planMode.ts";
 import { PLANNOTATOR_PLAN_PROVIDER_ID } from "./providers.ts";
+import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
@@ -321,7 +322,22 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { plan } = params as { plan: string };
+      // Tool-boundary decode (Node 3.2), in this tool's native fail-open vocabulary: a missing or
+      // mistyped `plan` skip-shapes (additive `reason: "bad_input"`) without calling the bridge —
+      // authoring never wedges.
+      const p = paramsOf(params);
+      const plan = p === null ? null : stringParam(p, "plan");
+      if (plan === undefined || plan === null) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "plan_review needs { plan: string } — pass the complete plan markdown.",
+            },
+          ],
+          details: { status: "skipped", reason: "bad_input" },
+        };
+      }
       // 1. Not plannotator-selected → soft skip (the tool is allowlisted on every path).
       if (!isPlannotatorPlanSelected(ctx.cwd)) return skipResult();
       // 2. Headless → soft skip (fail-open; never wedges CI/supervisor runs on a browser UI).
