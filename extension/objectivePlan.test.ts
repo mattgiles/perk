@@ -208,6 +208,28 @@ test("tool: a failing worker fails loud-but-soft (no throw)", async () => {
   }
 });
 
+test("tool: objective_node — a success:false envelope at non-zero exit surfaces the structured error", async () => {
+  // The envelope-aware regression (Node 2.4): the Python plane prints a structured failure
+  // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const envelope = JSON.stringify({
+    success: false,
+    error_type: "node_not_found",
+    message: "no node 9.9 in the roadmap",
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_node", { objective: 7, node: "9.9", pr: "#9" });
+    const details = result.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "node_not_found");
+    assert.equal(details.error, "no node 9.9 in the roadmap");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("/objective-plan registers and is headless-safe", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
@@ -325,6 +347,26 @@ test("tool: reconcile_objective failing worker fails loud-but-soft (no throw)", 
   try {
     const result = await h.invokeTool("reconcile_objective", { objective: 5, prose: "x" });
     assert.equal((result.details as { ok: boolean }).ok, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: reconcile_objective — a success:false envelope at non-zero exit surfaces the structured error", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const envelope = JSON.stringify({
+    success: false,
+    error_type: "github_error",
+    message: "could not update the objective body",
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("reconcile_objective", { objective: 5, prose: "x" });
+    const details = result.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "github_error");
+    assert.equal(details.error, "could not update the objective body");
   } finally {
     h.dispose();
   }
