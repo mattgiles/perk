@@ -148,8 +148,127 @@ def _github_checks(root: Path) -> list[Check]:
     return checks
 
 
+def _runner_enabled_check(root: Path) -> tuple[Check, bool]:
+    """D4.2 — always report the enabled state; ``disabled=True`` is the D4.3 early-stop."""
+    enabled = github.get_repo_variable(name=RUNNER_ENABLED_VAR, repo_root=root)
+    if enabled is None:
+        return (
+            Check(
+                "runner-enabled",
+                "runner",
+                "info",
+                f"remote runner enabled ({RUNNER_ENABLED_VAR} unset → default-on)",
+            ),
+            False,
+        )
+    if enabled == "false":
+        return (
+            Check(
+                "runner-enabled",
+                "runner",
+                "info",
+                f"remote runner disabled ({RUNNER_ENABLED_VAR}=false)",
+            ),
+            True,
+        )
+    return (
+        Check(
+            "runner-enabled",
+            "runner",
+            "info",
+            f"remote runner enabled ({RUNNER_ENABLED_VAR}={enabled})",
+        ),
+        False,
+    )
+
+
+def _runner_pat_check(root: Path, absent_detail: str) -> Check:
+    """D5.1 — the checkout/push PAT."""
+    pat = github.secret_exists(name=RUNNER_PAT_SECRET, repo_root=root)
+    if pat is True:
+        return Check("runner-pat-secret", "runner", "ok", f"{RUNNER_PAT_SECRET} configured")
+    if pat is False:
+        return Check(
+            "runner-pat-secret",
+            "runner",
+            "warn",
+            f"{RUNNER_PAT_SECRET} not configured",
+            absent_detail,
+            f"gh secret set {RUNNER_PAT_SECRET}",
+        )
+    return Check(
+        "runner-pat-secret",
+        "runner",
+        "info",
+        f"could not verify {RUNNER_PAT_SECRET} (insufficient permission?)",
+    )
+
+
 # Model credentials the runner accepts (the workflow's "either" validate logic — §8.14).
 _MODEL_SECRETS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+
+
+def _runner_model_check(root: Path, absent_detail: str) -> Check:
+    """D5.2 — the model credential (either ANTHROPIC_API_KEY or OPENAI_API_KEY)."""
+    model_results = {
+        name: github.secret_exists(name=name, repo_root=root) for name in _MODEL_SECRETS
+    }
+    present = [name for name, ok in model_results.items() if ok is True]
+    if present:
+        return Check(
+            "runner-model-secret",
+            "runner",
+            "ok",
+            f"model credential configured ({', '.join(present)})",
+        )
+    if all(ok is False for ok in model_results.values()):
+        return Check(
+            "runner-model-secret",
+            "runner",
+            "warn",
+            "no model credential configured",
+            absent_detail,
+            "gh secret set ANTHROPIC_API_KEY   # or OPENAI_API_KEY",
+        )
+    return Check(
+        "runner-model-secret",
+        "runner",
+        "info",
+        "could not verify model credential",
+    )
+
+
+def _runner_permissions_check(root: Path) -> Check:
+    """D5.3 — workflow permissions (advisory ``info`` in all non-error cases — perk pushes with
+    a PAT, not github.token, so this is not blocking for the runner).
+    """
+    perms_detail = "advisory — perk's runner pushes with a PAT, not github.token"
+    perms = github.get_workflow_permissions(repo_root=root)
+    if perms is None:
+        return Check(
+            "runner-workflow-permissions",
+            "runner",
+            "info",
+            "could not verify workflow permissions",
+            perms_detail,
+        )
+    if perms.can_approve_pull_request_reviews:
+        return Check(
+            "runner-workflow-permissions",
+            "runner",
+            "info",
+            "Actions may create PRs",
+            perms_detail,
+        )
+    return Check(
+        "runner-workflow-permissions",
+        "runner",
+        "info",
+        "Actions cannot create PRs",
+        perms_detail,
+        "gh api --method PUT repos/{owner}/{repo}/actions/permissions/workflow "
+        "-F can_approve_pull_request_reviews=true",
+    )
 
 
 def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
@@ -181,137 +300,15 @@ def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
             )
         ]
 
-    checks: list[Check] = []
-
-    # D4.2 — always report the enabled state.
-    enabled = github.get_repo_variable(name=RUNNER_ENABLED_VAR, repo_root=root)
-    if enabled is None:
-        checks.append(
-            Check(
-                "runner-enabled",
-                "runner",
-                "info",
-                f"remote runner enabled ({RUNNER_ENABLED_VAR} unset → default-on)",
-            )
-        )
-    elif enabled == "false":
-        checks.append(
-            Check(
-                "runner-enabled",
-                "runner",
-                "info",
-                f"remote runner disabled ({RUNNER_ENABLED_VAR}=false)",
-            )
-        )
-        # D4.3 — deliberately disabled ⇒ stop; don't nag about credentials.
+    # Composition: enabled → (if deliberately disabled, stop — don't nag about credentials,
+    # D4.3) → pat → model → permissions.
+    enabled_check, disabled = _runner_enabled_check(root)
+    checks: list[Check] = [enabled_check]
+    if disabled:
         return checks
-    else:
-        checks.append(
-            Check(
-                "runner-enabled",
-                "runner",
-                "info",
-                f"remote runner enabled ({RUNNER_ENABLED_VAR}={enabled})",
-            )
-        )
-
-    # D5.1 — the checkout/push PAT.
-    pat = github.secret_exists(name=RUNNER_PAT_SECRET, repo_root=root)
-    if pat is True:
-        checks.append(Check("runner-pat-secret", "runner", "ok", f"{RUNNER_PAT_SECRET} configured"))
-    elif pat is False:
-        checks.append(
-            Check(
-                "runner-pat-secret",
-                "runner",
-                "warn",
-                f"{RUNNER_PAT_SECRET} not configured",
-                absent_detail,
-                f"gh secret set {RUNNER_PAT_SECRET}",
-            )
-        )
-    else:
-        checks.append(
-            Check(
-                "runner-pat-secret",
-                "runner",
-                "info",
-                f"could not verify {RUNNER_PAT_SECRET} (insufficient permission?)",
-            )
-        )
-
-    # D5.2 — the model credential (either ANTHROPIC_API_KEY or OPENAI_API_KEY).
-    model_results = {
-        name: github.secret_exists(name=name, repo_root=root) for name in _MODEL_SECRETS
-    }
-    present = [name for name, ok in model_results.items() if ok is True]
-    if present:
-        checks.append(
-            Check(
-                "runner-model-secret",
-                "runner",
-                "ok",
-                f"model credential configured ({', '.join(present)})",
-            )
-        )
-    elif all(ok is False for ok in model_results.values()):
-        checks.append(
-            Check(
-                "runner-model-secret",
-                "runner",
-                "warn",
-                "no model credential configured",
-                absent_detail,
-                "gh secret set ANTHROPIC_API_KEY   # or OPENAI_API_KEY",
-            )
-        )
-    else:
-        checks.append(
-            Check(
-                "runner-model-secret",
-                "runner",
-                "info",
-                "could not verify model credential",
-            )
-        )
-
-    # D5.3 — workflow permissions (advisory `info` in all non-error cases — perk pushes with a
-    # PAT, not github.token, so this is not blocking for the runner).
-    perms_detail = "advisory — perk's runner pushes with a PAT, not github.token"
-    perms = github.get_workflow_permissions(repo_root=root)
-    if perms is None:
-        checks.append(
-            Check(
-                "runner-workflow-permissions",
-                "runner",
-                "info",
-                "could not verify workflow permissions",
-                perms_detail,
-            )
-        )
-    elif perms.can_approve_pull_request_reviews:
-        checks.append(
-            Check(
-                "runner-workflow-permissions",
-                "runner",
-                "info",
-                "Actions may create PRs",
-                perms_detail,
-            )
-        )
-    else:
-        checks.append(
-            Check(
-                "runner-workflow-permissions",
-                "runner",
-                "info",
-                "Actions cannot create PRs",
-                perms_detail,
-                "gh api --method PUT repos/{owner}/{repo}/actions/permissions/workflow "
-                "-F can_approve_pull_request_reviews=true",
-            )
-        )
-
+    checks.append(_runner_pat_check(root, absent_detail))
+    checks.append(_runner_model_check(root, absent_detail))
+    checks.append(_runner_permissions_check(root))
     return checks
 
 
@@ -758,16 +755,18 @@ def _strip_ungrouped_ignore_line(text: str, line: str) -> str:
     return "".join(out)
 
 
-def _untrack_materialized_plan_cache(root: Path) -> list[str]:
+def _untrack_materialized_plan_cache(root: Path) -> tuple[list[str], list[str]]:
     """Repair the legacy tracked `cache.plan` body + its stray ungrouped `.gitignore` line.
 
     `.pi/workflow/plan.md` is a transient materialized cache (contracts.md §8.1) — it must be
     gitignored (now in the managed block) and never tracked. Early repos committed it and
     hand-added an ungrouped `/.pi/workflow/plan.md` ignore line *outside* the managed block.
     This forward-only repair removes the stray line and `git rm --cached`s the file; it is a
-    no-op (returns `[]`) once converged, so `--fix` stays idempotent.
+    no-op (returns `([], [])`) once converged, so `--fix` stays idempotent. Returns
+    ``(changes, errors)`` — a failed untrack is reported, never swallowed.
     """
     changes: list[str] = []
+    errors: list[str] = []
     rel = ".pi/workflow/plan.md"
     gitignore = root / ".gitignore"
     if gitignore.is_file():
@@ -780,15 +779,18 @@ def _untrack_materialized_plan_cache(root: Path) -> list[str]:
         try:
             git.rm_cached(root, rel)
             changes.append(".pi/workflow/plan.md: untracked (transient cache.plan body)")
-        except git.GitError:
-            pass
-    return changes
+        except git.GitError as exc:
+            errors.append(f"{rel}: untrack failed (git rm --cached): {exc}")
+    return changes, errors
 
 
 # The legacy/one-off migration seam (erk's `init --upgrade` repairs, perk's home for them).
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
-# cache file). Each must be idempotent: a no-op (`[]`) once the repo is converged.
-_MIGRATIONS: tuple[Callable[[Path], list[str]], ...] = (_untrack_materialized_plan_cache,)
+# cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
+# returns `(changes, errors)` so failures land loudly on `fix_errors`.
+_MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
+    _untrack_materialized_plan_cache,
+)
 
 
 def _fix_config(root: Path) -> list[str]:
@@ -798,8 +800,9 @@ def _fix_config(root: Path) -> list[str]:
     return changes
 
 
-def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> list[str]:
+def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list[str], list[str]]:
     fixed: list[str] = []
+    errors: list[str] = []
     mc_by_name = {mc.name: mc for mc in init.managed_convergences(root, self_repo)}
     for check in [c for c in checks if c.status == "fail"]:
         if check.name in mc_by_name:
@@ -807,8 +810,10 @@ def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> list[str]:
         elif check.name == "config":
             fixed.extend(_fix_config(root))
     for migration in _MIGRATIONS:
-        fixed.extend(migration(root))
-    return fixed
+        changes, migration_errors = migration(root)
+        fixed.extend(changes)
+        errors.extend(migration_errors)
+    return fixed, errors
 
 
 # --- entry point + pure serialization -------------------------------------------------------
@@ -827,7 +832,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     fixed: list[str] = []
     fix_errors: list[str] = []
     if fix:
-        fixed = _apply_fixes(root, self_repo, checks)
+        fixed, fix_errors = _apply_fixes(root, self_repo, checks)
         # Materialize skills under the covers (the repair gesture) via the `skills` CLI —
         # load-bearing (#289): a failure is carried loudly on `fix_errors` (rendered by the
         # command + serialized in --json), and the post-fix re-verify below then also shows the
