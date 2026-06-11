@@ -16,7 +16,7 @@ locally — the Node 2.2 workflow positions the worker in CI).
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -371,6 +371,56 @@ def launch_stage(
     )
     wt = resolved.path
     rid = run_id_override or run_id.mint()
+    prompt = _resolve_prompt(
+        stage=stage,
+        resolved=resolved,
+        repo_root=repo_root,
+        config=config,
+        prompt_override=prompt_override,
+        binding_trigger=binding_trigger,
+    )
+    # Worktree stages run in a fresh `plan-<id>` checkout whose path pi has never seen, so pi's
+    # project-trust prompt (keyed per canonical cwd) re-fires on every launch. perk always launches
+    # its OWN managed checkout, so trust is implicit — pass pi's `--approve` to trust the project
+    # for THIS run (no `~/.pi/agent/trust.json` write, so ephemeral worktrees leave no residue).
+    # Inserted BEFORE pi_args so a user-passed `--no-approve` overrides it (pi parses last-wins).
+    # `worktree: none` stages run in the repo root the user trusts manually, so they are left alone.
+    trust_args = ["--approve"] if stage.worktree != "none" else []
+    argv = ["pi", *trust_args, *pi_args, *([prompt] if prompt is not None else [])]
+
+    if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
+        _emit_dry_run_preview(stage=stage, resolved=resolved, rid=rid, argv=argv)
+        return
+
+    cache.ensure_layout(wt)
+    cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
+    if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
+        cache.write_plan_ref(wt, resolved.plan_ref)
+    # P2.T2c: materialize the plan body into the worktree so in-session checkpoints can seed from
+    # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
+    # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
+    if stage.worktree != "none":
+        materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
+    env = {**os.environ, "PERK_RUN_ID": rid}
+    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
+    os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
+    os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
+
+
+def _resolve_prompt(
+    *,
+    stage: Stage,
+    resolved: ResolvedWorktree,
+    repo_root: Path,
+    config: Config,
+    prompt_override: str | None,
+    binding_trigger: str | None,
+) -> str | None:
+    """Assemble the initial prompt for a cold-local launch (prompt + skill bindings).
+
+    Extracted verbatim from :func:`launch_stage`'s body — see its docstring for the
+    ``prompt_override``/``binding_trigger`` semantics.
+    """
     # Prime the session (Bug 1): when --worktree is given the derived ref is absent, so fall back
     # to the repo-root active ref for the prompt. A `prompt_override` (P2.T10) wins outright.
     prompt = prompt_override
@@ -389,44 +439,28 @@ def launch_stage(
         user_output(f"⚠ {warning}")
     if delivery.text and prompt is not None:
         prompt = f"{prompt}\n\n{delivery.text}"
-    # Worktree stages run in a fresh `plan-<id>` checkout whose path pi has never seen, so pi's
-    # project-trust prompt (keyed per canonical cwd) re-fires on every launch. perk always launches
-    # its OWN managed checkout, so trust is implicit — pass pi's `--approve` to trust the project
-    # for THIS run (no `~/.pi/agent/trust.json` write, so ephemeral worktrees leave no residue).
-    # Inserted BEFORE pi_args so a user-passed `--no-approve` overrides it (pi parses last-wins).
-    # `worktree: none` stages run in the repo root the user trusts manually, so they are left alone.
-    trust_args = ["--approve"] if stage.worktree != "none" else []
-    argv = ["pi", *trust_args, *pi_args, *([prompt] if prompt is not None else [])]
+    return prompt
 
-    if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
-        user_output(f"would launch stage '{stage.id}' in {wt}")
-        user_output(f"  run_id={rid}  PERK_RUN_ID={rid}  argv={' '.join(argv)}")
-        payload: dict[str, object] = {
-            "success": True,
-            "stage": stage.id,
-            "worktree": str(wt),
-            "run_id": rid,
-            "argv": argv,
-            "base": resolved.base,
-        }
-        if resolved.plan_ref is not None:
-            payload["plan_ref"] = resolved.plan_ref
-        machine_output(json.dumps(payload))
-        return
 
-    cache.ensure_layout(wt)
-    cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
-    if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
-        cache.write_plan_ref(wt, resolved.plan_ref)
-    # P2.T2c: materialize the plan body into the worktree so in-session checkpoints can seed from
-    # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
-    # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
-    if stage.worktree != "none":
-        _materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
-    env = {**os.environ, "PERK_RUN_ID": rid}
-    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
-    os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
-    os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
+def _emit_dry_run_preview(
+    *, stage: Stage, resolved: ResolvedWorktree, rid: str, argv: list[str]
+) -> None:
+    """The side-effect-free ``--dry-run`` preview of a cold-local launch (user lines + the
+    machine-readable JSON payload). The remote dispatch preview in :func:`_drive_remote_target`
+    is a different payload and stays inline there."""
+    user_output(f"would launch stage '{stage.id}' in {resolved.path}")
+    user_output(f"  run_id={rid}  PERK_RUN_ID={rid}  argv={' '.join(argv)}")
+    payload: dict[str, object] = {
+        "success": True,
+        "stage": stage.id,
+        "worktree": str(resolved.path),
+        "run_id": rid,
+        "argv": argv,
+        "base": resolved.base,
+    }
+    if resolved.plan_ref is not None:
+        payload["plan_ref"] = resolved.plan_ref
+    machine_output(json.dumps(payload))
 
 
 def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_run: bool) -> None:
@@ -516,17 +550,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
             stage=stage.id, plan_ref=plan_ref, run_id=rid, base=base, repo_root=repo_root
         )
     except (runner.RunnerError, GitHubError) as exc:
-        failed = runner.DispatchRecord(
-            run_id=rid,
-            stage=stage.id,
-            plan_ref=plan_ref,
-            runner=runner_ref,
-            kind=selected.kind,
-            status="failed",
-            dispatched_at=record.dispatched_at,
-            run_handle=None,
-            error=str(exc),
-        )
+        failed = replace(record, status="failed", error=str(exc))
         cache.write_dispatch(repo_root, rid, failed.to_data())
         raise UserFacingCliError(
             f"failed to dispatch stage '{stage.id}' to {runner_label}: {exc}",
@@ -535,17 +559,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
 
     # Finalize: record the verified handle. The critical verified linkage is the step-above one;
     # a finalize-write mismatch is loud-but-non-fatal.
-    final = runner.DispatchRecord(
-        run_id=rid,
-        stage=stage.id,
-        plan_ref=plan_ref,
-        runner=runner_ref,
-        kind=selected.kind,
-        status="dispatched",
-        dispatched_at=record.dispatched_at,
-        run_handle=handle.to_data(),
-        error=None,
-    )
+    final = replace(record, status="dispatched", run_handle=handle.to_data())
     cache.write_dispatch(repo_root, rid, final.to_data())
     confirm = cache.read_dispatch(repo_root, rid)
     if confirm is None or confirm.get("status") != "dispatched":
@@ -567,10 +581,11 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     )
 
 
-def _materialize_plan_body(
-    repo_root: Path, worktree: Path, plan_ref: dict[str, Any] | None
-) -> None:
+def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, Any] | None) -> None:
     """Fetch the plan body from its canonical source and cache it into the worktree (P2.T2c).
+
+    Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for
+    plan-body materialization, §1.10).
 
     Best-effort: a non-github provider, a non-numeric id, or any GitHub failure is reported but
     never blocks the launch (checkpoints simply stay inert). Honest, not silent.
