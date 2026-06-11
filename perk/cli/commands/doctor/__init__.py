@@ -25,7 +25,7 @@ from perk.output import machine_output
 @click.option("-v", "--verbose", is_flag=True, help="Show every check, not just failures.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def doctor_group(ctx: click.Context, fix: bool, verbose: bool, as_json: bool) -> None:
+def doctor_group(ctx: click.Context, *, fix: bool, verbose: bool, as_json: bool) -> None:
     """Diagnose (and with --fix, repair) this perk-managed repo.
 
     `doctor` reports a grouped health view; `--fix` re-converges drifted managed pieces (and

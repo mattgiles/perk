@@ -45,6 +45,8 @@ class PlanSaveResult:
 @click.command("plan-save")
 @click.option(
     "--plan-file",
+    # Deliberately no exists=True: existence/emptiness are tier-2 (UserFacingCliError) so the
+    # --json error envelope (error_type: invalid_input) survives a missing file.
     type=click.Path(path_type=Path),
     help="Path to the plan markdown to save.",
 )

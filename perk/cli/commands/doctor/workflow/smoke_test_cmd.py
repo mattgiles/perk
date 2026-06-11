@@ -16,7 +16,7 @@ from perk.output import machine_output, user_output
 @click.option("-v", "--verbose", is_flag=True, help="Show every prereq check, not just failures.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def smoke_test_workflow(ctx: click.Context, wait: bool, verbose: bool, as_json: bool) -> None:
+def smoke_test_workflow(ctx: click.Context, *, wait: bool, verbose: bool, as_json: bool) -> None:
     """Dispatch a throwaway CI run (smoke short-circuit) to prove the runner is live."""
     try:
         root = require_repo(ctx)

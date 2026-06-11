@@ -14,7 +14,7 @@ from perk.registry import Severity, validate
 @alias("ch")
 @click.command("check")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable result on stdout.")
-def check_registry(as_json: bool) -> None:
+def check_registry(*, as_json: bool) -> None:
     """Validate the bundled registry (shape, graph, state-key vocabulary).
 
     Exits 0 when valid, 1 when any error issue is found.

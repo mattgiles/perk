@@ -15,7 +15,7 @@ from perk.output import machine_output
 @click.option("-v", "--verbose", is_flag=True, help="Show every check, not just failures.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def check_workflow(ctx: click.Context, verbose: bool, as_json: bool) -> None:
+def check_workflow(ctx: click.Context, *, verbose: bool, as_json: bool) -> None:
     """Static remote-runner prereq checks (GitHub readiness + runner prereqs + managed workflow)."""
     try:
         root = require_repo(ctx)
