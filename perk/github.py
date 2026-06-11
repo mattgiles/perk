@@ -101,10 +101,7 @@ def check_repo_access(repo_root: Path) -> RepoAccess:
         return RepoAccess(
             ok=False, repo=None, can_push=False, error=proc.stderr.strip() or "no GitHub repo"
         )
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh repo view` output: {exc}") from exc
+    data = _parse_json(proc, source="`gh repo view`")
     if not isinstance(data, dict):
         raise GitHubError(f"unexpected `gh repo view` payload: {data!r}")
     permission = data.get("viewerPermission")
@@ -188,6 +185,90 @@ def _failed(proc: subprocess.CompletedProcess[str], what: str) -> GitHubError:
     return GitHubError(f"{what}: {(proc.stderr + proc.stdout).strip() or 'no output'}")
 
 
+def _is_not_found(proc: subprocess.CompletedProcess[str]) -> bool:
+    """Did a failed ``gh`` call report a missing resource (a 404 / "not found" lookup miss)?"""
+    haystack = (proc.stderr + proc.stdout).lower()
+    return "not found" in haystack or "404" in haystack
+
+
+def _parse_json(
+    proc: subprocess.CompletedProcess[str], *, source: str, default: str | None = None
+) -> Any:
+    """Parse a ``gh`` call's stdout as JSON (``default`` substitutes an empty stdout when given).
+
+    Unparseable output raises ``GitHubError``; post-parse type narrowing stays with the caller
+    (the fallback behavior differs per site: raise vs ``None`` vs ``()``).
+    """
+    text = proc.stdout if default is None else (proc.stdout or default)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise GitHubError(f"unparseable {source} output: {exc}") from exc
+
+
+def _run_json(
+    args: list[str],
+    *,
+    what: str,
+    source: str,
+    cwd: Path | None = None,
+    timeout: int = _READ_TIMEOUT,
+    default: str | None = None,
+    none_on_not_found: bool = False,
+) -> Any | None:
+    """``_run`` + the shared returncode/not-found/parse pipeline.
+
+    A non-zero exit raises ``_failed(proc, what)`` — except when ``none_on_not_found`` is set and
+    the failure is a 404/"not found" lookup miss, which returns ``None`` (the lookup convention:
+    lookups return ``... | None``, mutations raise).
+    """
+    proc = _run(args, cwd=cwd, timeout=timeout)
+    if proc.returncode != 0:
+        if none_on_not_found and _is_not_found(proc):
+            return None
+        raise _failed(proc, what)
+    return _parse_json(proc, source=source, default=default)
+
+
+def _rest_args(
+    path: str,
+    *,
+    method: str,
+    fields: dict[str, str] | None = None,
+    body_path: str | None = None,
+    jq: str | None = None,
+) -> list[str]:
+    """Build a REST ``gh api`` argv in the gateway's standing shape: ``-X`` after the path,
+    ``-f`` fields in order, the body file via ``-F body=@…``, ``--jq`` last."""
+    args = ["api", path, "-X", method]
+    for key, value in (fields or {}).items():
+        args += ["-f", f"{key}={value}"]
+    if body_path is not None:
+        args += ["-F", f"body=@{body_path}"]
+    if jq is not None:
+        args += ["--jq", jq]
+    return args
+
+
+def _list_label_issues(label: str, *, repo_root: Path, what: str) -> list[Any]:
+    """The shared label-scoped open-issue LIST read (the **list** endpoint, not the
+    eventually-consistent search index). Returns the raw issue list (``[]`` when the payload is
+    not a list); callers keep their own per-entry filtering/mapping. Raises ``GitHubError`` on an
+    infra/query failure (never masks it)."""
+    issues = _run_json(
+        _rest_args(
+            "repos/{owner}/{repo}/issues",
+            method="GET",
+            fields={"labels": label, "state": "open"},
+        ),
+        what=what,
+        source="`gh api issues`",
+        cwd=repo_root,
+        default="[]",
+    )
+    return issues if isinstance(issues, list) else []
+
+
 def create_label(
     name: str,
     *,
@@ -200,18 +281,11 @@ def create_label(
     if dry_run:
         return Label(name=name, created=False)
     proc = _run(
-        [
-            "api",
+        _rest_args(
             "repos/{owner}/{repo}/labels",
-            "-X",
-            "POST",
-            "-f",
-            f"name={name}",
-            "-f",
-            f"color={color}",
-            "-f",
-            f"description={description}",
-        ],
+            method="POST",
+            fields={"name": name, "color": color, "description": description},
+        ),
         cwd=repo_root,
         timeout=_WRITE_TIMEOUT,
     )
@@ -238,27 +312,7 @@ def find_plan_issue(
     (``plan-header``); ``find_learn_issue`` passes ``perk:learn``/``learn-header`` so the learn
     lookup is **label-scoped** and cannot match the plan issue (which shares the same ``run_id``).
     """
-    proc = _run(
-        [
-            "api",
-            "repos/{owner}/{repo}/issues",
-            "-X",
-            "GET",
-            "-f",
-            f"labels={label}",
-            "-f",
-            "state=open",
-        ],
-        cwd=repo_root,
-    )
-    if proc.returncode != 0:
-        raise _failed(proc, "failed to list plan issues")
-    try:
-        issues = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api issues` output: {exc}") from exc
-    if not isinstance(issues, list):
-        return None
+    issues = _list_label_issues(label, repo_root=repo_root, what="failed to list plan issues")
     for issue in issues:
         if not isinstance(issue, dict):
             continue
@@ -287,27 +341,9 @@ def list_learn_issues(*, repo_root: Path) -> tuple[LearnIssueSummary, ...]:
     search index), scoped to ``perk:learn``. Raises ``GitHubError`` on an infra/query failure
     (never masks it as an empty list); skips non-dict entries.
     """
-    proc = _run(
-        [
-            "api",
-            "repos/{owner}/{repo}/issues",
-            "-X",
-            "GET",
-            "-f",
-            f"labels={plan.LEARN_LABEL}",
-            "-f",
-            "state=open",
-        ],
-        cwd=repo_root,
+    issues = _list_label_issues(
+        plan.LEARN_LABEL, repo_root=repo_root, what="failed to list learn issues"
     )
-    if proc.returncode != 0:
-        raise _failed(proc, "failed to list learn issues")
-    try:
-        issues = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api issues` output: {exc}") from exc
-    if not isinstance(issues, list):
-        return ()
     summaries: list[LearnIssueSummary] = []
     for issue in issues:
         if not isinstance(issue, dict) or "number" not in issue:
@@ -344,28 +380,20 @@ def close_and_label_consolidated(*, issue: int, repo_root: Path, dry_run: bool =
         repo_root=repo_root,
     )
     label_proc = _run(
-        [
-            "api",
+        _rest_args(
             f"repos/{{owner}}/{{repo}}/issues/{issue}/labels",
-            "-X",
-            "POST",
-            "-f",
-            f"labels[]={plan.CONSOLIDATED_LABEL}",
-        ],
+            method="POST",
+            fields={"labels[]": plan.CONSOLIDATED_LABEL},
+        ),
         cwd=repo_root,
         timeout=_WRITE_TIMEOUT,
     )
     if label_proc.returncode != 0:
         raise _failed(label_proc, f"failed to label issue #{issue} consolidated")
     state_proc = _run(
-        [
-            "api",
-            f"repos/{{owner}}/{{repo}}/issues/{issue}",
-            "-X",
-            "PATCH",
-            "-f",
-            "state=closed",
-        ],
+        _rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{issue}", method="PATCH", fields={"state": "closed"}
+        ),
         cwd=repo_root,
         timeout=_WRITE_TIMEOUT,
     )
@@ -385,14 +413,9 @@ def close_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
     if dry_run:
         return False
     state_proc = _run(
-        [
-            "api",
-            f"repos/{{owner}}/{{repo}}/issues/{number}",
-            "-X",
-            "PATCH",
-            "-f",
-            "state=closed",
-        ],
+        _rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", fields={"state": "closed"}
+        ),
         cwd=repo_root,
         timeout=_WRITE_TIMEOUT,
     )
@@ -472,26 +495,22 @@ def create_plan_issue(
         if existing is not None:
             return existing
     with _body_file(body) as body_path:
-        args = [
-            "api",
+        args = _rest_args(
             "repos/{owner}/{repo}/issues",
-            "-X",
-            "POST",
-            "-f",
-            f"title={title}",
-            "-F",
-            f"body=@{body_path}",
-        ]
+            method="POST",
+            fields={"title": title},
+            body_path=body_path,
+        )
         for label in labels:
             args += ["-f", f"labels[]={label}"]
         args += ["--jq", "{number: .number, url: .html_url}"]
-        proc = _run(args, cwd=repo_root, timeout=_WRITE_TIMEOUT)
-    if proc.returncode != 0:
-        raise _failed(proc, "failed to create plan issue")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api issues` create output: {exc}") from exc
+        data = _run_json(
+            args,
+            what="failed to create plan issue",
+            source="`gh api issues` create",
+            cwd=repo_root,
+            timeout=_WRITE_TIMEOUT,
+        )
     if not isinstance(data, dict):
         raise GitHubError(f"unexpected create-issue payload: {data!r}")
     return PlanIssue(number=int(data["number"]), url=str(data["url"]), existed=False)
@@ -505,14 +524,11 @@ def add_issue_comment(
         return CommentResult(posted=False)
     with _body_file(body) as body_path:
         proc = _run(
-            [
-                "api",
+            _rest_args(
                 f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
-                "-X",
-                "POST",
-                "-F",
-                f"body=@{body_path}",
-            ],
+                method="POST",
+                body_path=body_path,
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -600,26 +616,18 @@ def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | No
 def _post_comment_with_id(*, issue: int, body: str, repo_root: Path) -> int:
     """Post a comment and return its numeric id (REST, body via file). Raises on failure."""
     with _body_file(body) as body_path:
-        proc = _run(
-            [
-                "api",
+        data = _run_json(
+            _rest_args(
                 f"repos/{{owner}}/{{repo}}/issues/{issue}/comments",
-                "-X",
-                "POST",
-                "-F",
-                f"body=@{body_path}",
-                "--jq",
-                "{id: .id}",
-            ],
+                method="POST",
+                body_path=body_path,
+                jq="{id: .id}",
+            ),
+            what=f"failed to post objective body comment on #{issue}",
+            source="comment-create",
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
-    if proc.returncode != 0:
-        raise _failed(proc, f"failed to post objective body comment on #{issue}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable comment-create output: {exc}") from exc
     if not isinstance(data, dict) or "id" not in data:
         raise GitHubError(f"unexpected comment-create payload: {data!r}")
     return int(data["id"])
@@ -703,16 +711,15 @@ def create_objective_issue(
 def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:
     """Read an objective issue's state (header + roadmap nodes). ``None`` when absent; raises on
     an infra failure."""
-    proc = _run(["issue", "view", str(number), "--json", "number,title,body,url"], cwd=repo_root)
-    if proc.returncode != 0:
-        haystack = (proc.stderr + proc.stdout).lower()
-        if "not found" in haystack or "404" in haystack:
-            return None
-        raise _failed(proc, f"failed to read objective issue #{number}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    data = _run_json(
+        ["issue", "view", str(number), "--json", "number,title,body,url"],
+        what=f"failed to read objective issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
     body = str(data.get("body", ""))
     header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
     nodes, errors = objective.parse_roadmap_nodes(body)
@@ -746,14 +753,9 @@ def update_objective_header(
         return ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
     with _body_file(new_body) as body_path:
         proc = _run(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/issues/{number}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
+            _rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -768,7 +770,7 @@ def _get_comment_body(comment_id: int, repo_root: Path) -> str | None:
         cwd=repo_root,
     )
     if proc.returncode != 0:
-        if "404" in (proc.stderr + proc.stdout):
+        if _is_not_found(proc):
             return None
         raise _failed(proc, f"failed to read comment #{comment_id}")
     return proc.stdout
@@ -777,14 +779,11 @@ def _get_comment_body(comment_id: int, repo_root: Path) -> str | None:
 def _patch_comment_body(comment_id: int, body: str, repo_root: Path) -> None:
     with _body_file(body) as body_path:
         proc = _run(
-            [
-                "api",
+            _rest_args(
                 f"repos/{{owner}}/{{repo}}/issues/comments/{comment_id}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
+                method="PATCH",
+                body_path=body_path,
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -825,14 +824,9 @@ def update_objective_node(
     )
     with _body_file(new_body) as body_path:
         proc = _run(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/issues/{number}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
+            _rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -979,25 +973,17 @@ def find_pr_for_branch(*, branch: str, repo_root: Path) -> PullRequest | None:
 
     Prefers an open PR (the submit-reuse case); raises on an infra failure, never masks it.
     """
-    proc = _run(
-        [
-            "api",
+    items = _run_json(
+        _rest_args(
             "repos/{owner}/{repo}/pulls",
-            "-X",
-            "GET",
-            "-f",
-            f"head={_owner(repo_root)}:{branch}",
-            "-f",
-            "state=all",
-        ],
+            method="GET",
+            fields={"head": f"{_owner(repo_root)}:{branch}", "state": "all"},
+        ),
+        what=f"failed to list PRs for {branch!r}",
+        source="`gh api pulls`",
         cwd=repo_root,
+        default="[]",
     )
-    if proc.returncode != 0:
-        raise _failed(proc, f"failed to list PRs for {branch!r}")
-    try:
-        items = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api pulls` output: {exc}") from exc
     if not isinstance(items, list) or not items:
         return None
     chosen = next((p for p in items if p.get("state") == "open"), items[0])
@@ -1021,34 +1007,25 @@ def create_pr(
     if existing is not None:
         return existing
     with _body_file(body) as body_path:
-        proc = _run(
-            [
-                "api",
-                "repos/{owner}/{repo}/pulls",
-                "-X",
-                "POST",
-                "-f",
-                f"title={title}",
-                "-f",
-                f"head={head}",
-                "-f",
-                f"base={base}",
-                "-F",
-                f"body=@{body_path}",
-                "-F",
-                f"draft={'true' if draft else 'false'}",
-                "--jq",
-                "{number: .number, html_url: .html_url, draft: .draft, state: .state}",
-            ],
+        args = _rest_args(
+            "repos/{owner}/{repo}/pulls",
+            method="POST",
+            fields={"title": title, "head": head, "base": base},
+            body_path=body_path,
+        )
+        args += [
+            "-F",
+            f"draft={'true' if draft else 'false'}",
+            "--jq",
+            "{number: .number, html_url: .html_url, draft: .draft, state: .state}",
+        ]
+        data = _run_json(
+            args,
+            what="failed to create PR",
+            source="`gh api pulls` create",
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
-    if proc.returncode != 0:
-        raise _failed(proc, "failed to create PR")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api pulls` create output: {exc}") from exc
     if not isinstance(data, dict):
         raise GitHubError(f"unexpected create-PR payload: {data!r}")
     return _pull_request(data, existed=False)
@@ -1071,14 +1048,9 @@ def update_plan_header(
         return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
     with _body_file(new_body) as body_path:
         proc = _run(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/issues/{issue}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
+            _rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{issue}", method="PATCH", body_path=body_path
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -1101,13 +1073,13 @@ def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
     (mirrors :func:`get_plan_body`). The REST list returns an **integer** ``id`` usable for the
     comment-PATCH endpoint (the GraphQL node id from ``gh issue view`` is not). ``None`` when no
     comment matches (legacy issue / comment missing)."""
-    proc = _run(["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"], cwd=repo_root)
-    if proc.returncode != 0:
-        raise _failed(proc, f"failed to list comments on issue #{issue}")
-    try:
-        raw = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable issue comments output: {exc}") from exc
+    raw = _run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"],
+        what=f"failed to list comments on issue #{issue}",
+        source="issue comments",
+        cwd=repo_root,
+        default="[]",
+    )
     for c in raw if isinstance(raw, list) else []:
         if not isinstance(c, dict) or "id" not in c:
             continue
@@ -1124,13 +1096,13 @@ def find_comment_id_by_marker(*, issue: int, marker: str, repo_root: Path) -> in
     :func:`upsert_marked_comment` to evolve a single marker-keyed comment (e.g. the per-run
     ``run-report`` note). ``None`` when no comment matches; raises ``GitHubError`` on infra failure.
     """
-    proc = _run(["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"], cwd=repo_root)
-    if proc.returncode != 0:
-        raise _failed(proc, f"failed to list comments on issue #{issue}")
-    try:
-        raw = json.loads(proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable issue comments output: {exc}") from exc
+    raw = _run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"],
+        what=f"failed to list comments on issue #{issue}",
+        source="issue comments",
+        cwd=repo_root,
+        default="[]",
+    )
     for c in raw if isinstance(raw, list) else []:
         if not isinstance(c, dict) or "id" not in c:
             continue
@@ -1186,14 +1158,9 @@ def update_plan_issue(
         body_updated = False
 
     proc = _run(
-        [
-            "api",
-            f"repos/{{owner}}/{{repo}}/issues/{number}",
-            "-X",
-            "PATCH",
-            "-f",
-            f"title={title}",
-        ],
+        _rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", fields={"title": title}
+        ),
         cwd=repo_root,
         timeout=_WRITE_TIMEOUT,
     )
@@ -1204,15 +1171,15 @@ def update_plan_issue(
 
 def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
     """Fetch a PR by number (REST). ``None`` if it does not exist; raises on infra failure."""
-    proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}"], cwd=repo_root)
-    if proc.returncode != 0:
-        if "404" in (proc.stderr + proc.stdout):
-            return None
-        raise _failed(proc, f"failed to read PR #{number}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api pulls/{number}` output: {exc}") from exc
+    data = _run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}"],
+        what=f"failed to read PR #{number}",
+        source=f"`gh api pulls/{number}`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
     return _pull_request(data, existed=True)
 
 
@@ -1221,7 +1188,7 @@ def get_pr_body(*, number: int, repo_root: Path) -> str | None:
     failure. Used by ``perk pr check`` to re-validate the live checkout footer (P2.T8a)."""
     proc = _run(["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".body"], cwd=repo_root)
     if proc.returncode != 0:
-        if "404" in (proc.stderr + proc.stdout):
+        if _is_not_found(proc):
             return None
         raise _failed(proc, f"failed to read PR #{number} body")
     return proc.stdout
@@ -1238,14 +1205,9 @@ def update_pr_body(
         return PrBodyUpdate(number=number, dry_run=True)
     with _body_file(body) as body_path:
         proc = _run(
-            [
-                "api",
-                f"repos/{{owner}}/{{repo}}/pulls/{number}",
-                "-X",
-                "PATCH",
-                "-F",
-                f"body=@{body_path}",
-            ],
+            _rest_args(
+                f"repos/{{owner}}/{{repo}}/pulls/{number}", method="PATCH", body_path=body_path
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -1291,19 +1253,15 @@ def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
 
     ``None`` when the issue does not exist; raises ``GitHubError`` on an infra failure.
     """
-    proc = _run(
-        ["issue", "view", str(number), "--json", "number,title,body,state,url"], cwd=repo_root
+    data = _run_json(
+        ["issue", "view", str(number), "--json", "number,title,body,state,url"],
+        what=f"failed to read plan issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
     )
-    if proc.returncode != 0:
-        if "not found" in (proc.stderr + proc.stdout).lower() or "404" in (
-            proc.stderr + proc.stdout
-        ):
-            return None
-        raise _failed(proc, f"failed to read plan issue #{number}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    if data is None:
+        return None
     header = plan.find_metadata_block(str(data.get("body", "")), plan.PLAN_HEADER_KEY) or {}
     pr_field = header.get("pr")
     pr = (
@@ -1327,16 +1285,15 @@ def get_plan_body(*, number: int, repo_root: Path) -> str | None:
     raises ``GitHubError`` on an infra failure. Used to materialize the plan body for in-session
     checkpoints (P2.T2c).
     """
-    proc = _run(["issue", "view", str(number), "--json", "body,comments"], cwd=repo_root)
-    if proc.returncode != 0:
-        haystack = (proc.stderr + proc.stdout).lower()
-        if "not found" in haystack or "404" in haystack:
-            return None
-        raise _failed(proc, f"failed to read plan issue #{number}")
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh issue view` output: {exc}") from exc
+    data = _run_json(
+        ["issue", "view", str(number), "--json", "body,comments"],
+        what=f"failed to read plan issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
     candidates = [str(data.get("body", ""))]
     comments = data.get("comments")
     if isinstance(comments, list):
@@ -1659,15 +1616,13 @@ def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
         int_vars={"number": pr_number},
         what=f"failed to fetch reviews for PR #{pr_number}",
     )
-    comments_proc = _run(
-        ["api", f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments"], cwd=repo_root
+    raw_comments = _run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments"],
+        what=f"failed to fetch discussion comments for PR #{pr_number}",
+        source="issue comments",
+        cwd=repo_root,
+        default="[]",
     )
-    if comments_proc.returncode != 0:
-        raise _failed(comments_proc, f"failed to fetch discussion comments for PR #{pr_number}")
-    try:
-        raw_comments = json.loads(comments_proc.stdout or "[]")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable issue comments output: {exc}") from exc
     discussion = tuple(
         DiscussionComment(
             comment_id=int(c["id"]),
@@ -1802,21 +1757,18 @@ def get_pr_review_context(*, pr_number: int, branch: str, repo_root: Path) -> Pr
     ``GitHubError`` on an infra failure. ``branch`` is the head ref (already resolved by the
     caller). ``plan_body`` is best-effort: the materialized `cache.plan` body if present, else the
     plan issue body, else ``None`` (the review still runs from the diff)."""
-    meta = _run(
+    data = _run_json(
         [
             "api",
             f"repos/{{owner}}/{{repo}}/pulls/{pr_number}",
             "--jq",
             "{title: .title, body: .body, base: .base.ref, head: .head.ref}",
         ],
+        what=f"failed to read PR #{pr_number}",
+        source=f"`gh api pulls/{pr_number}`",
         cwd=repo_root,
+        default="{}",
     )
-    if meta.returncode != 0:
-        raise _failed(meta, f"failed to read PR #{pr_number}")
-    try:
-        data = json.loads(meta.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api pulls/{pr_number}` output: {exc}") from exc
     if not isinstance(data, dict):
         raise GitHubError(f"unexpected PR payload: {data!r}")
 
@@ -1917,14 +1869,11 @@ def post_pr_review(
     body = _render_review_comment(summary, comments)
     with _body_file(body) as body_path:
         fallback = _run(
-            [
-                "api",
+            _rest_args(
                 f"repos/{{owner}}/{{repo}}/issues/{pr_number}/comments",
-                "-X",
-                "POST",
-                "-F",
-                f"body=@{body_path}",
-            ],
+                method="POST",
+                body_path=body_path,
+            ),
             cwd=repo_root,
             timeout=_WRITE_TIMEOUT,
         )
@@ -1990,10 +1939,7 @@ def trigger_workflow(
             cwd=repo_root,
         )
         if runs.returncode == 0:
-            try:
-                workflow_runs = json.loads(runs.stdout or "[]")
-            except json.JSONDecodeError as exc:
-                raise GitHubError(f"unparseable `gh api workflow runs` output: {exc}") from exc
+            workflow_runs = _parse_json(runs, source="`gh api workflow runs`", default="[]")
             titles = []
             for run in workflow_runs if isinstance(workflow_runs, list) else []:
                 if not isinstance(run, dict):
@@ -2031,10 +1977,7 @@ def get_workflow_run(*, run_id: str, repo_root: Path) -> WorkflowRun | None:
     )
     if proc.returncode != 0:
         return None
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh run view` output: {exc}") from exc
+    data = _parse_json(proc, source="`gh run view`", default="{}")
     if not isinstance(data, dict) or "databaseId" not in data:
         return None
     conclusion = data.get("conclusion")
@@ -2093,7 +2036,7 @@ def secret_exists(*, name: str, repo_root: Path) -> bool | None:
     proc = _run(["api", f"repos/{{owner}}/{{repo}}/actions/secrets/{name}"], cwd=repo_root)
     if proc.returncode == 0:
         return True
-    if "404" in (proc.stderr + proc.stdout):
+    if _is_not_found(proc):
         return False
     return None
 
@@ -2104,10 +2047,7 @@ def get_workflow_permissions(*, repo_root: Path) -> WorkflowPermissions | None:
     proc = _run(["api", "repos/{owner}/{repo}/actions/permissions/workflow"], cwd=repo_root)
     if proc.returncode != 0:
         return None
-    try:
-        data = json.loads(proc.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        raise GitHubError(f"unparseable `gh api workflow permissions` output: {exc}") from exc
+    data = _parse_json(proc, source="`gh api workflow permissions`", default="{}")
     if not isinstance(data, dict):
         raise GitHubError(f"unexpected `gh api workflow permissions` payload: {data!r}")
     return WorkflowPermissions(
