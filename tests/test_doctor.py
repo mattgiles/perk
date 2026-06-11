@@ -183,6 +183,22 @@ def test_legacy_tracked_plan_md_is_repaired(git_repo):
     assert again.healthy and again.fixed == []  # repair is idempotent
 
 
+def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
+    # The migration's `git rm --cached` failure is reported on `fix_errors`, never swallowed.
+    _scaffold(git_repo)
+    monkeypatch.setattr(git, "is_tracked", lambda root, rel: True)
+
+    def boom(root, rel):
+        raise git.GitError("rm --cached exploded")
+
+    monkeypatch.setattr(git, "rm_cached", boom)
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert report.fix_errors == [
+        ".pi/workflow/plan.md: untrack failed (git rm --cached): rm --cached exploded"
+    ]
+    assert report_to_dict(report)["fix_errors"] == report.fix_errors
+
+
 def test_skills_manifest_drift_detected_and_fixed(git_repo):
     # The committed manifest fragment is a managed convergence: tampering is drift, and `--fix`
     # re-converges it idempotently (grouped under "skills").
