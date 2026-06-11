@@ -24,12 +24,12 @@ from pathlib import Path
 
 import click
 
-from perk import github, launch
+from perk import issues, launch
 from perk.cli.alias import alias
 from perk.cli.commands.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
@@ -140,7 +140,8 @@ def replan(
         # any side effect (mirrors learn-docs/objective-plan; plan is cold_remote:false).
         launch.resolve_target(stage, remote)
 
-        state = github.get_plan(number=number, repo_root=repo_root)
+        backend = issues.resolve_issue_backend(repo_root)
+        state = backend.get_plan(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
         if state.state != "OPEN":
@@ -155,7 +156,7 @@ def replan(
                 f"Plan #{number} has no run_id header — cannot replan it in place.",
                 error_type="no_run_id",
             )
-        body = github.get_plan_body(number=number, repo_root=repo_root)
+        body = backend.get_plan_body(issue_id=str(number))
         if not body or not body.strip():
             raise UserFacingCliError(
                 f"Plan #{number} has no plan-body content to replan.",
@@ -168,7 +169,7 @@ def replan(
         scratch_path.write_text(
             _render_existing_plan(number, state.title, state.url, body), encoding="utf-8"
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

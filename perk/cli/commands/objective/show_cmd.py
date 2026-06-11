@@ -4,12 +4,12 @@ import json
 
 import click
 
-from perk import github, objective
+from perk import issues, objective
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, node_to_dict
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -22,12 +22,12 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
     """Show an objective's header, roadmap, summary, and next actionable node."""
     try:
         repo_root = require_repo(ctx)
-        state = github.get_objective(number=number, repo_root=repo_root)
+        state = issues.resolve_issue_backend(repo_root).get_objective(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
             )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
@@ -48,7 +48,8 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
         "success": True,
         "error_type": None,
         "objective": {
-            "number": state.number,
+            # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+            "number": int(state.id),
             "url": state.url,
             "title": state.title,
             "header": state.header,
@@ -63,7 +64,7 @@ def show_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
     if as_json:
         machine_output(json.dumps(payload))
     else:
-        user_output(f"Objective #{state.number}: {state.title}")
+        user_output(f"Objective #{state.id}: {state.title}")
         user_output(f"  summary: {objective.summary(nodes)}")
         if next_node is not None:
             user_output(f"  next: {next_node.id}")

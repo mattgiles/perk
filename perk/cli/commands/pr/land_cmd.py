@@ -15,11 +15,12 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github, launch, objective
+from perk import cache, github, issues, launch, objective
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
@@ -84,7 +85,7 @@ def land_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         if not dry_run:
             require_github(ctx)
         result = _pr_land_impl(repo_root=repo_root, dry_run=dry_run)
-    except GitHubError as exc:
+    except (GitHubError, IssueBackendError) as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -180,8 +181,9 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         number = int(str(raw).lstrip("#"))
     except ValueError:
         return ObjectiveLandUpdate(None, (), "bad_objective_id")
+    backend = issues.resolve_issue_backend(repo_root)
     try:
-        state = github.get_objective(number=number, repo_root=repo_root)
+        state = backend.get_objective(issue_id=str(number))
         if state is None:
             return ObjectiveLandUpdate(number, (), "objective_not_found")
         targets = objective.nodes_for_pr(list(state.nodes), str(plan_ref["pr_id"]))
@@ -191,11 +193,10 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         for node in targets:
             if node.status in objective.TERMINAL:
                 continue
-            github.update_objective_node(
-                number=number,
+            backend.update_objective_node(
+                issue_id=str(number),
                 node_id=node.id,
                 status=objective.NodeStatus.DONE,
-                repo_root=repo_root,
             )
             marked.append(node.id)
         # Completeness is computed LOCALLY over the post-mark node list (no re-fetch — this path
@@ -214,7 +215,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
             # Isolated fail-open: a close failure must NOT fall into the outer handler (which
             # would discard the already-marked node ids). No closing comment — symmetric with the
             # supervisor's completion close (§8.20).
-            github.close_issue(number=number, repo_root=repo_root)
+            backend.close_issue(issue_id=str(number))
         except Exception as exc:
             print(
                 f"perk pr land: objective close skipped (non-fatal): {exc}",
@@ -250,11 +251,12 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
     # transient infra error) does NOT strand the rest — the #89-residual that made the accumulated
     # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
     # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
+    backend = issues.resolve_issue_backend(repo_root)
     closed: list[int] = []
     failed: list[int] = []
     for number in numbers:
         try:
-            github.close_and_label_consolidated(issue=number, repo_root=repo_root)
+            backend.close_and_label_consolidated(issue_id=str(number))
             closed.append(number)
         except Exception as exc:  # fail-open: consuming learn issues never blocks landing
             print(
@@ -275,8 +277,8 @@ def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
     """
     closes = f"Closes #{issue}"
     try:
-        state = github.get_plan(number=issue, repo_root=repo_root)
-    except GitHubError:
+        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(issue))
+    except (GitHubError, IssueBackendError):
         return closes
     title = state.title.strip() if state is not None else ""
     return f"{title}\n\n{closes}" if title else closes

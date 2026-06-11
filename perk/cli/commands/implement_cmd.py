@@ -9,7 +9,7 @@ Replaces the generic registry launcher for `implement` with a dedicated command 
 - **inherits the priming prompt** `launch.launch_stage` now injects (Bug 1) so the launched `pi`
   starts working on the plan instead of opening idle.
 
-Reuses `perk resume`'s plan resolution (`github.get_plan` + `resume.reconstruct_plan_ref`).
+Reuses `perk resume`'s plan resolution (`IssueBackend.get_plan` + `resume.reconstruct_plan_ref`).
 Supervisor surface (cli-vs-pi §3.2): `--dry-run` prints the launch plan; failures exit 1 (Click
 renders `UserFacingCliError`), not-a-repo via `require_repo`.
 """
@@ -19,12 +19,12 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github, launch, resume
+from perk import cache, issues, launch, resume
 from perk.cli.alias import alias
 from perk.cli.commands.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
@@ -97,8 +97,8 @@ def implement(
     require_github(ctx)
     number = parse_plan_id(plan)
     try:
-        state = github.get_plan(number=number, repo_root=repo_root)
-    except GitHubError as exc:
+        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(number))
+    except IssueBackendError as exc:
         raise UserFacingCliError(f"implement failed\n{exc}", error_type="github_error") from exc
     if state is None:
         raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")

@@ -16,13 +16,14 @@ from typing import Any
 
 import click
 
-from perk import cache, github, launch, objective, resume, run_report, runner
+from perk import cache, github, issue_backend, issues, launch, objective, resume, run_report, runner
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
 from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
@@ -164,7 +165,7 @@ def _dispatch_stage_remote(
     repo_root: Path,
     config: Config,
     stage_id: str,
-    node_plan_state: github.PlanState,
+    node_plan_state: issue_backend.PlanState,
     remote: str,
     dry_run: bool,
 ) -> str | None:
@@ -216,9 +217,8 @@ def _resolve_in_flight_stage(
     # ValueError — it falls through to the plan_required fallback below like a missing pr.
     raw_pr = str(node.pr).lstrip("#").strip() if node.pr else ""
     pr_number = int(raw_pr) if raw_pr.isdigit() else None
-    plan_state = (
-        github.get_plan(number=pr_number, repo_root=repo_root) if pr_number is not None else None
-    )
+    backend = issues.resolve_issue_backend(repo_root)
+    plan_state = backend.get_plan(issue_id=str(pr_number)) if pr_number is not None else None
     if plan_state is None:  # defensive: an in-flight node should carry a resolvable plan
         payload.update(action="plan_required", node=node.id, remediation=remediation)
         return payload
@@ -265,12 +265,14 @@ def _run_impl(
     ctx: click.Context, *, number: int, remote: str, wait: bool, dry_run: bool
 ) -> dict[str, Any]:
     """The deterministic single-pass control flow (D2). Returns the structured payload to render;
-    raises ``UserFacingCliError``/``GitHubError`` for the command's ``fail`` boundary."""
+    raises ``UserFacingCliError``/``IssueBackendError``/``GitHubError`` for the command's ``fail``
+    boundary."""
     repo_root = require_repo(ctx)
     config = require_config(ctx)
     if not dry_run:
         require_github(ctx)
-    state = github.get_objective(number=number, repo_root=repo_root)
+    backend = issues.resolve_issue_backend(repo_root)
+    state = backend.get_objective(issue_id=str(number))
     if state is None:
         raise UserFacingCliError(f"Objective #{number} not found", error_type="objective_not_found")
     graph = objective.build_graph(list(state.nodes))
@@ -305,7 +307,7 @@ def _run_impl(
             # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the
             # graph rather than classifying on the pre-poll snapshot.
             payload["budget"] = _cumulative_budget(repo_root, number)
-            state = github.get_objective(number=number, repo_root=repo_root)
+            state = backend.get_objective(issue_id=str(number))
             if state is None:
                 raise UserFacingCliError(
                     f"Objective #{number} not found", error_type="objective_not_found"
@@ -314,7 +316,7 @@ def _run_impl(
 
     selection = graph.classify_for_planning()
     if selection.kind == "complete":
-        closed = github.close_issue(number=number, repo_root=repo_root, dry_run=dry_run)
+        closed = backend.close_issue(issue_id=str(number), dry_run=dry_run)
         payload.update(
             action="completed",
             closed=closed,
@@ -407,7 +409,7 @@ def run_objective(
     """Advance an objective's backlog one autonomously-safe step, then pause at the human gate."""
     try:
         payload = _run_impl(ctx, number=number, remote=remote, wait=wait, dry_run=dry_run)
-    except GitHubError as exc:
+    except (GitHubError, IssueBackendError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

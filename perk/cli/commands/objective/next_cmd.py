@@ -4,12 +4,12 @@ import json
 
 import click
 
-from perk import github, objective
+from perk import issues, objective
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, node_to_dict
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -22,12 +22,12 @@ def next_objective(ctx: click.Context, *, number: int, as_json: bool) -> None:
     """Print the next plannable node (pending, or a resumable ``planning`` claim)."""
     try:
         repo_root = require_repo(ctx)
-        state = github.get_objective(number=number, repo_root=repo_root)
+        state = issues.resolve_issue_backend(repo_root).get_objective(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
             )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

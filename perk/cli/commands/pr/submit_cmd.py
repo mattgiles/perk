@@ -14,11 +14,12 @@ from pathlib import Path
 
 import click
 
-from perk import cache, git, github, launch, plan
+from perk import cache, git, github, issue_backend, issues, launch, plan
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -27,7 +28,7 @@ class PrSubmitResult:
     pr: github.PullRequest
     branch: str
     issue: int
-    header_update: github.PlanHeaderUpdate
+    header_update: issue_backend.PlanHeaderUpdate
     plan_embedded: bool
     pr_checked: bool
     dry_run: bool
@@ -48,7 +49,7 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         if not dry_run:
             require_github(ctx)
         result = _pr_submit_impl(repo_root=repo_root, dry_run=dry_run)
-    except GitHubError as exc:
+    except (GitHubError, IssueBackendError) as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -119,13 +120,16 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             ),
             branch=branch,
             issue=issue,
-            header_update=github.PlanHeaderUpdate(fields_updated=_HEADER_FIELDS, dry_run=True),
+            header_update=issue_backend.PlanHeaderUpdate(
+                fields_updated=_HEADER_FIELDS, dry_run=True
+            ),
             plan_embedded=False,
             pr_checked=False,
             dry_run=True,
         )
 
-    state = github.get_plan(number=issue, repo_root=repo_root)
+    backend = issues.resolve_issue_backend(repo_root)
+    state = backend.get_plan(issue_id=str(issue))
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
     if git.is_dirty(repo_root):
@@ -159,9 +163,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
         raise UserFacingCliError(
             "PR body check failed:\n  " + "\n  ".join(errors), error_type="pr_check_failed"
         )
-    header_update = github.update_plan_header(
-        issue=issue,
-        repo_root=repo_root,
+    header_update = backend.update_plan_header(
+        issue_id=str(issue),
         fields={
             "branch": branch,
             "pr": str(pr.number),
@@ -183,8 +186,9 @@ def _safe_plan_body(*, issue: int, repo_root: Path) -> str | None:
     """Fetch the verbatim plan markdown for the `<details>` embed (D3). Best-effort: any GitHub
     failure degrades to `None` (no embed) rather than sinking the submit."""
     try:
-        return github.get_plan_body(number=issue, repo_root=repo_root)
-    except GitHubError:
+        backend = issues.resolve_issue_backend(repo_root)
+        return backend.get_plan_body(issue_id=str(issue))
+    except IssueBackendError:
         return None
 
 

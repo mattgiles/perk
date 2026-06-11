@@ -1,9 +1,10 @@
 """`perk resume <plan>` — the cross-stage resume verb (P1.T5c).
 
 The one genuinely-new CLI command this phase: resolve any plan to its current actionable stage and
-launch it. Reads the plan from GitHub (`github.get_plan`), reconstructs the `cache.plan-ref`,
-derives the stage (`perk.resume`), then reuses T4a's `launch_stage` (idempotent worktree +
-materialize + exec pi). Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, stable exit codes.
+launch it. Reads the plan from the issue backend (`IssueBackend.get_plan`), reconstructs the
+`cache.plan-ref`, derives the stage (`perk.resume`), then reuses T4a's `launch_stage` (idempotent
+worktree + materialize + exec pi). Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, stable
+exit codes.
 
 Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found / op
 failure · 2 not-a-repo.
@@ -13,11 +14,11 @@ import json
 
 import click
 
-from perk import cache, github, launch, resume
+from perk import cache, issues, launch, resume
 from perk.cli.alias import alias
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 from perk.registry import load_registry
 
@@ -60,14 +61,15 @@ def resume_cmd(
         require_github(ctx)  # resume always reads GitHub (the dry run resolves via a read)
         config = require_config(ctx)
         number = parse_plan_id(plan)
-        state = github.get_plan(number=number, repo_root=repo_root)
+        backend = issues.resolve_issue_backend(repo_root)
+        state = backend.get_plan(issue_id=str(number))
         if state is None:
             raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
         ref = resume.reconstruct_plan_ref(state)
         stage_id = resume.resolve_resume_stage(
             state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
         return
     except UserFacingCliError as exc:

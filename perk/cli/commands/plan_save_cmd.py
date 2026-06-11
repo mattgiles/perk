@@ -15,11 +15,11 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github, objective, plan
+from perk import cache, issue_backend, issues, objective, plan
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 # error_type -> process exit code (default 1).
@@ -28,7 +28,7 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 @dataclass(frozen=True)
 class PlanSaveResult:
-    issue: github.PlanIssue
+    issue: issue_backend.IssueRef
     plan_ref: plan.PlanRef
     issue_body: str
     body_comment: str
@@ -119,7 +119,7 @@ def plan_save(
             consumed_learn=consumed_learn_numbers,
             dry_run=dry_run,
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         _fail(
             ctx,
             as_json=as_json,
@@ -259,17 +259,16 @@ def _plan_save_impl(
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
 
-    github.create_label(
+    backend = issues.resolve_issue_backend(repo_root)
+    backend.ensure_label(
         plan.PLAN_LABEL,
         color=plan.PLAN_LABEL_COLOR,
         description=plan.PLAN_LABEL_DESCRIPTION,
-        repo_root=repo_root,
         dry_run=dry_run,
     )
-    issue = github.create_plan_issue(
+    issue = backend.create_plan_issue(
         title=resolved_title,
         body=issue_body,
-        repo_root=repo_root,
         run_id=run_id,
         dry_run=dry_run,
     )
@@ -280,38 +279,34 @@ def _plan_save_impl(
     updated = False
     if not dry_run:
         if issue.existed:
-            github.update_plan_issue(
-                number=issue.number,
+            backend.update_plan_issue(
+                issue_id=issue.id,
                 title=resolved_title,
                 body_comment=body_comment,
-                repo_root=repo_root,
             )
             # `update_plan_issue` rewrites only the plan-body comment + the issue title; it never
             # touches the `plan-header` block. So the planning-time header fields (`objective_id`,
             # `consumed_learn`) that are only written on a fresh create would be silently dropped on
             # any re-save — leaving the canonical header (which `reconstruct_plan_ref` / on-land
             # consume read from) stale. Merge them back via the `update_plan_header` gateway, which
-            # is additive (omitted fields are left intact, never clobbering an existing link or the
-            # submit-populated branch/pr/lifecycle_stage). A failure surfaces (raises GitHubError →
-            # `github_error`) — this is the canonical save, where a silent drop is the bug.
+            # is additive (omitted fields are left intact, never clobbering an existing link or
+            # the submit-populated branch/pr/lifecycle_stage). A failure surfaces (raises
+            # IssueBackendError → `github_error`) — this is the canonical save, where a silent
+            # drop is the bug.
             header_fields: dict[str, object] = {}
             if objective_id is not None:
                 header_fields["objective_id"] = objective_id
             if consumed_learn:
                 header_fields["consumed_learn"] = list(consumed_learn)
             if header_fields:
-                github.update_plan_header(
-                    issue=issue.number, fields=header_fields, repo_root=repo_root
-                )
+                backend.update_plan_header(issue_id=issue.id, fields=header_fields)
             updated = True
         else:
-            github.add_issue_comment(
-                issue=issue.number, body=body_comment, repo_root=repo_root, dry_run=dry_run
-            )
+            backend.add_issue_comment(issue_id=issue.id, body=body_comment, dry_run=dry_run)
 
     plan_ref = plan.PlanRef(
         provider="github",
-        pr_id=str(issue.number),
+        pr_id=issue.id,
         url=issue.url,
         labels=(plan.PLAN_LABEL,),
         objective_id=objective_id,
@@ -328,12 +323,11 @@ def _plan_save_impl(
     objective_node_result: dict[str, object] | None = None
     if not dry_run and objective_id and node_id:
         try:
-            github.update_objective_node(
-                number=int(str(objective_id).lstrip("#")),
+            backend.update_objective_node(
+                issue_id=str(objective_id).lstrip("#"),
                 node_id=node_id,
                 status=objective.NodeStatus.IN_PROGRESS,
-                pr=f"#{issue.number}",
-                repo_root=repo_root,
+                pr=f"#{issue.id}",
             )
             objective_node_result = {
                 "linked": True,
@@ -371,7 +365,8 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "issue": {
-            "number": result.issue.number,
+            # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+            "number": int(result.issue.id),
             "url": result.issue.url,
             "existed": result.issue.existed,  # warm /plan-save surfaces this in details (T3)
         },
@@ -395,7 +390,7 @@ def _render_human(result: PlanSaveResult) -> None:
     user_output(
         click.style("✓ ", fg="green")
         + f"{verb} plan "
-        + click.style(f"#{result.issue.number}", fg="cyan")
+        + click.style(f"#{result.issue.id}", fg="cyan")
         + f" → {result.issue.url}"
     )
     node_link = result.objective_node

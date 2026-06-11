@@ -324,3 +324,17 @@ class TestImportDirection:
         # reverse — Node 1.2 must not invert the dependency from inside github.py.
         source = Path(github.__file__).read_text(encoding="utf-8")
         assert "issue_backend" not in source
+
+    def test_github_module_never_imports_issues(self) -> None:
+        # Node 1.2's adapter module (perk/issues.py) is the only module importing both sides;
+        # github.py must never reach back into it.
+        source = Path(github.__file__).read_text(encoding="utf-8")
+        assert "perk.issues" not in source
+        assert "import issues" not in source
+
+    def test_issue_backend_module_never_imports_issues(self) -> None:
+        # The contract stays implementation-free: the protocol module never references the
+        # concrete backend/resolver module.
+        source = Path(issue_backend.__file__).read_text(encoding="utf-8")
+        assert "perk.issues" not in source
+        assert "import issues" not in source

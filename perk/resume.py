@@ -1,6 +1,7 @@
 """Cross-stage resume resolution (P1.T5c) — pure, deterministic, no Click/subprocess/network.
 
-`perk resume <plan>` reads a plan's observable GitHub state (:func:`perk.github.get_plan`) and uses
+`perk resume <plan>` reads a plan's observable issue-backend state (``IssueBackend.get_plan``)
+and uses
 this module to (1) reconstruct the provider-agnostic `cache.plan-ref` and (2) derive the **current
 actionable stage**. The launcher then materializes the ref + launches that stage (reusing T4a's
 `launch_stage`). Keeping the decision pure is what makes the resolution matrix unit-testable.
@@ -8,10 +9,12 @@ actionable stage**. The launcher then materializes the ref + launches that stage
 
 from typing import Any
 
-from perk import github, plan
+from perk import issue_backend, plan
 
 
-def resolve_resume_stage(plan_state: github.PlanState, *, has_pending_learn: bool) -> str | None:
+def resolve_resume_stage(
+    plan_state: issue_backend.PlanState, *, has_pending_learn: bool
+) -> str | None:
     """The stage to resume a plan at, or ``None`` when nothing is actionable (merged + learned).
 
     The minimal state machine (turn-5 §8 / D5):
@@ -32,11 +35,11 @@ def resolve_resume_stage(plan_state: github.PlanState, *, has_pending_learn: boo
     return None
 
 
-def reconstruct_plan_ref(plan_state: github.PlanState) -> dict[str, Any]:
+def reconstruct_plan_ref(plan_state: issue_backend.PlanState) -> dict[str, Any]:
     """Rebuild the `cache.plan-ref` payload from a plan's GitHub state (provider-agnostic)."""
     return {
         "provider": "github",
-        "pr_id": str(plan_state.number),
+        "pr_id": plan_state.id,
         "url": plan_state.url,
         "labels": [plan.PLAN_LABEL],
         "objective_id": plan_state.header.get("objective_id"),

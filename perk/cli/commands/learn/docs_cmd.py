@@ -23,11 +23,12 @@ from pathlib import Path
 
 import click
 
-from perk import github, launch
+from perk import issues as issues_mod
+from perk import launch
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError, LearnIssueSummary
+from perk.issue_backend import IssueBackendError, LearnIssueSummary
 from perk.output import machine_output, user_output
 from perk.registry import Stage, load_registry
 
@@ -52,7 +53,7 @@ def _render_inbox(issues: tuple[LearnIssueSummary, ...]) -> str:
         "",
     ]
     for issue in issues:
-        lines.append(f"## Learning #{issue.number} — {issue.title}")
+        lines.append(f"## Learning #{issue.id} — {issue.title}")
         lines.append(f"({issue.url})")
         lines.append("")
         lines.append("<untrusted_learning>")
@@ -91,7 +92,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
 
     Raises ``UserFacingCliError`` (``no_learn_issues``) when there is nothing to consolidate.
     """
-    issues = github.list_learn_issues(repo_root=repo_root)
+    issues = issues_mod.resolve_issue_backend(repo_root).list_learn_issues()
     if not issues:
         raise UserFacingCliError(
             "No open perk:learn issues to consolidate.\n"
@@ -154,7 +155,7 @@ def docs_learn(
         launch.resolve_target(stage, remote)
 
         inbox_path, issues = _gather(repo_root)
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
@@ -166,7 +167,8 @@ def docs_learn(
         )
         return
 
-    numbers = tuple(issue.number for issue in issues)
+    # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+    numbers = tuple(int(issue.id) for issue in issues)
     seed = _seed_prompt(inbox_path, numbers)
 
     if gather_only or dry_run:

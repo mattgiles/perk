@@ -6,10 +6,10 @@ from pathlib import Path
 
 import click
 
-from perk import cache, git, github
+from perk import cache, git, issues
 from perk.cli.context import require_config, require_repo
 from perk.git import GitError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import user_output
 
 
@@ -94,8 +94,8 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
         assert number is not None
         # Determine PR state (network); skip on any uncertainty — never delete on doubt.
         try:
-            state = github.get_plan(number=number, repo_root=repo_root)
-        except GitHubError as exc:
+            state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(number))
+        except IssueBackendError as exc:
             _skip(name, f"could not determine PR state ({exc})")
             skipped += 1
             continue

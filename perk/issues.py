@@ -1,0 +1,325 @@
+"""The issue-tracking tier seam (Objective #252, Node 1.2): the GitHub backend + the resolver.
+
+Node 1.1 (``perk/issue_backend.py``) shipped the issue-tier **contract** — the ``IssueBackend``
+``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``. This module makes
+it live: ``GitHubIssueBackend`` is a thin delegation adapter over ``perk.github``'s issue-tier
+module functions (which remain the GitHub backend's private implementation substrate), and
+``resolve_issue_backend`` is the resolver every issue-tier consumer goes through.
+
+This is deliberately the only module that imports both ``perk.github`` and ``perk.issue_backend``
+(preserving Node 1.1's one-way import guard: ``github.py`` never references the contract).
+
+Adapter disciplines:
+
+- **Late-bound delegation.** Every method resolves its delegate via attribute access on the
+  ``github`` module object at call time (``github.get_plan(...)``), so existing
+  ``monkeypatch.setattr(github, ...)`` test fixtures keep intercepting unchanged — even when the
+  patch lands after backend construction.
+- **Constructor-bound repo context.** ``repo_root`` is bound once at construction and threaded
+  into every delegate call; methods take no repo parameter (the contract discipline).
+- **String ids at the boundary.** GitHub's int issue/comment numbers are stringified on the way
+  out; incoming ``issue_id`` strings are ``int()``-converted at the edge — a non-numeric id
+  raises ``IssueBackendError`` (the GitHub backend legitimately requires numeric ids).
+- **Error mapping at the boundary.** Every delegate call wraps ``GitHubError`` into
+  ``IssueBackendError(str(exc)) from exc`` — message text preserved verbatim (consumers map on
+  substrings, and tests assert messages).
+"""
+
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+
+from perk import github, issue_backend, objective
+from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
+
+
+@contextmanager
+def _translate() -> Iterator[None]:
+    """Map the GitHub backend's native error into the backend-neutral one (message verbatim)."""
+    try:
+        yield
+    except GitHubError as exc:
+        raise IssueBackendError(str(exc)) from exc
+
+
+def _number(issue_id: str) -> int:
+    """Convert a boundary string id to GitHub's numeric issue number (honest failure on junk)."""
+    try:
+        return int(issue_id)
+    except ValueError as exc:
+        raise IssueBackendError(f"GitHub issue ids are numeric; got {issue_id!r}") from exc
+
+
+def _issue_ref(found: github.PlanIssue | github.ObjectiveIssue) -> issue_backend.IssueRef:
+    return issue_backend.IssueRef(id=str(found.number), url=found.url, existed=found.existed)
+
+
+class GitHubIssueBackend:
+    """``IssueBackend`` over GitHub Issues — a thin adapter over ``perk.github``'s issue-tier
+    functions (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
+    ``IssueBackendError``)."""
+
+    def __init__(self, repo_root: Path) -> None:
+        self._repo_root = repo_root
+
+    # --- labels ---
+
+    def ensure_label(
+        self, name: str, *, color: str, description: str, dry_run: bool = False
+    ) -> issue_backend.Label:
+        with _translate():
+            label = github.create_label(
+                name,
+                color=color,
+                description=description,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+        return issue_backend.Label(name=label.name, created=label.created)
+
+    # --- plan issues ---
+
+    def find_plan_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        with _translate():
+            found = github.find_plan_issue(run_id=run_id, repo_root=self._repo_root)
+        return None if found is None else _issue_ref(found)
+
+    def create_plan_issue(
+        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+    ) -> issue_backend.IssueRef:
+        with _translate():
+            created = github.create_plan_issue(
+                title=title, body=body, repo_root=self._repo_root, run_id=run_id, dry_run=dry_run
+            )
+        return _issue_ref(created)
+
+    def update_plan_issue(
+        self, *, issue_id: str, title: str, body_comment: str, dry_run: bool = False
+    ) -> issue_backend.PlanUpdate:
+        number = _number(issue_id)
+        with _translate():
+            updated = github.update_plan_issue(
+                number=number,
+                title=title,
+                body_comment=body_comment,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+        return issue_backend.PlanUpdate(
+            issue_id=str(updated.number),
+            body_updated=updated.body_updated,
+            title_updated=updated.title_updated,
+            dry_run=updated.dry_run,
+        )
+
+    def update_plan_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> issue_backend.PlanHeaderUpdate:
+        number = _number(issue_id)
+        with _translate():
+            updated = github.update_plan_header(
+                issue=number, fields=fields, repo_root=self._repo_root, dry_run=dry_run
+            )
+        return issue_backend.PlanHeaderUpdate(
+            fields_updated=updated.fields_updated, dry_run=updated.dry_run
+        )
+
+    def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
+        number = _number(issue_id)
+        with _translate():
+            state = github.get_plan(number=number, repo_root=self._repo_root)
+        if state is None:
+            return None
+        return issue_backend.PlanState(
+            id=str(state.number),
+            url=state.url,
+            title=state.title,
+            header=state.header,
+            pr=state.pr,
+            state=state.state,
+        )
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        number = _number(issue_id)
+        with _translate():
+            return github.get_plan_body(number=number, repo_root=self._repo_root)
+
+    # --- learn issues ---
+
+    def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        with _translate():
+            found = github.find_learn_issue(run_id=run_id, repo_root=self._repo_root)
+        return None if found is None else _issue_ref(found)
+
+    def create_learn_issue(
+        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+    ) -> issue_backend.IssueRef:
+        plan_number = _number(plan_id)
+        with _translate():
+            created = github.create_learn_issue(
+                title=title,
+                body=body,
+                repo_root=self._repo_root,
+                run_id=run_id,
+                plan_number=plan_number,
+                dry_run=dry_run,
+            )
+        return _issue_ref(created)
+
+    def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
+        with _translate():
+            summaries = github.list_learn_issues(repo_root=self._repo_root)
+        return tuple(
+            issue_backend.LearnIssueSummary(id=str(s.number), title=s.title, url=s.url, body=s.body)
+            for s in summaries
+        )
+
+    def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        number = _number(issue_id)
+        with _translate():
+            return github.close_and_label_consolidated(
+                issue=number, repo_root=self._repo_root, dry_run=dry_run
+            )
+
+    # --- generic issue ops ---
+
+    def close_issue(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        number = _number(issue_id)
+        with _translate():
+            return github.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
+
+    def add_issue_comment(
+        self, *, issue_id: str, body: str, dry_run: bool = False
+    ) -> issue_backend.CommentResult:
+        number = _number(issue_id)
+        with _translate():
+            result = github.add_issue_comment(
+                issue=number, body=body, repo_root=self._repo_root, dry_run=dry_run
+            )
+        return issue_backend.CommentResult(posted=result.posted)
+
+    def find_comment_id_by_marker(self, *, issue_id: str, marker: str) -> str | None:
+        number = _number(issue_id)
+        with _translate():
+            comment_id = github.find_comment_id_by_marker(
+                issue=number, marker=marker, repo_root=self._repo_root
+            )
+        return None if comment_id is None else str(comment_id)
+
+    def upsert_marked_comment(
+        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+    ) -> issue_backend.CommentResult:
+        number = _number(issue_id)
+        with _translate():
+            result = github.upsert_marked_comment(
+                issue=number, marker=marker, body=body, repo_root=self._repo_root, dry_run=dry_run
+            )
+        return issue_backend.CommentResult(posted=result.posted)
+
+    # --- objective issues ---
+
+    def find_objective_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        with _translate():
+            found = github.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
+        return None if found is None else _issue_ref(found)
+
+    def create_objective_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str,
+        status: str = "active",
+        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        with _translate():
+            created = github.create_objective_issue(
+                title=title,
+                body=body,
+                repo_root=self._repo_root,
+                run_id=run_id,
+                status=status,
+                roadmap_nodes=roadmap_nodes,
+                dry_run=dry_run,
+            )
+        return _issue_ref(created)
+
+    def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
+        number = _number(issue_id)
+        with _translate():
+            state = github.get_objective(number=number, repo_root=self._repo_root)
+        if state is None:
+            return None
+        return issue_backend.ObjectiveState(
+            id=str(state.number),
+            url=state.url,
+            title=state.title,
+            header=state.header,
+            nodes=state.nodes,
+        )
+
+    def update_objective_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> issue_backend.ObjectiveHeaderUpdate:
+        number = _number(issue_id)
+        with _translate():
+            updated = github.update_objective_header(
+                number=number, fields=fields, repo_root=self._repo_root, dry_run=dry_run
+            )
+        return issue_backend.ObjectiveHeaderUpdate(
+            fields_updated=updated.fields_updated, dry_run=updated.dry_run
+        )
+
+    def update_objective_node(
+        self,
+        *,
+        issue_id: str,
+        node_id: str,
+        status: objective.NodeStatus | None = None,
+        pr: str | None = None,
+        description: str | None = None,
+        dry_run: bool = False,
+    ) -> issue_backend.ObjectiveNodeUpdate:
+        number = _number(issue_id)
+        with _translate():
+            updated = github.update_objective_node(
+                number=number,
+                node_id=node_id,
+                status=status,
+                pr=pr,
+                description=description,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+        return issue_backend.ObjectiveNodeUpdate(
+            issue_id=str(updated.number),
+            node_id=updated.node_id,
+            comment_updated=updated.comment_updated,
+            dry_run=updated.dry_run,
+        )
+
+    def update_objective_body(
+        self, *, issue_id: str, prose: str, dry_run: bool = False
+    ) -> issue_backend.ObjectiveBodyUpdate:
+        number = _number(issue_id)
+        with _translate():
+            updated = github.update_objective_body(
+                number=number, prose=prose, repo_root=self._repo_root, dry_run=dry_run
+            )
+        return issue_backend.ObjectiveBodyUpdate(
+            issue_id=str(updated.number),
+            comment_id=None if updated.comment_id is None else str(updated.comment_id),
+            updated=updated.updated,
+            dry_run=updated.dry_run,
+        )
+
+
+def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
+    """Resolve the repo's issue backend — always GitHub today.
+
+    Node 1.3 reads the ``[issues]`` config table here (config-driven backend selection); until
+    then this returns ``GitHubIssueBackend(repo_root)`` unconditionally.
+    """
+    return GitHubIssueBackend(repo_root)

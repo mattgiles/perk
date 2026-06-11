@@ -4,11 +4,11 @@ import json
 
 import click
 
-from perk import github, objective
+from perk import issues, objective
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
@@ -41,16 +41,15 @@ def node_objective(
         repo_root = require_repo(ctx)
         if not dry_run:
             require_github(ctx)
-        result = github.update_objective_node(
-            number=number,
+        result = issues.resolve_issue_backend(repo_root).update_objective_node(
+            issue_id=str(number),
             node_id=node_id,
             status=objective.NodeStatus(status) if status else None,
             pr=pr,
             description=description,
-            repo_root=repo_root,
             dry_run=dry_run,
         )
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         # A not-found node is a user error, not infra — map it to invalid_input.
         error_type = "node_not_found" if "not found" in str(exc) else "github_error"
         fail(ctx, as_json=as_json, error_type=error_type, message=str(exc))

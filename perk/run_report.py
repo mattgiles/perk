@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from perk import cache, github
+from perk import cache, issues
 from perk.output import user_output
 
 # One marker-keyed comment per `run_id` (started -> terminal upsert; reruns are distinct run_ids).
@@ -184,11 +184,11 @@ def report_started(
     try:
         run_url = run_url_from_env(environ)
         body = format_started(run_id=run_id, stage=stage, plan=plan, run_url=run_url)
-        github.upsert_marked_comment(
-            issue=plan,
+        backend = issues.resolve_issue_backend(repo_root)
+        backend.upsert_marked_comment(
+            issue_id=str(plan),
             marker=RUN_REPORT_MARKER.format(run_id=run_id),
             body=body,
-            repo_root=repo_root,
         )
         user_output(f"run-report: posted started note on plan #{plan} (run_id={run_id})")
     except Exception as exc:  # observability is best-effort; never sink the run.
@@ -216,11 +216,11 @@ def report_terminal(
             outcome=outcome,
             exit_code=exit_code,
         )
-        github.upsert_marked_comment(
-            issue=plan,
+        backend = issues.resolve_issue_backend(repo_root)
+        backend.upsert_marked_comment(
+            issue_id=str(plan),
             marker=RUN_REPORT_MARKER.format(run_id=run_id),
             body=body,
-            repo_root=repo_root,
         )
         summary_path = (environ.get("GITHUB_STEP_SUMMARY") or "").strip()
         if summary_path:

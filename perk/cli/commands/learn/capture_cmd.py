@@ -14,17 +14,17 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github
+from perk import cache, issue_backend, issues
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
 from perk.output import machine_output, user_output
 
 
 @dataclass(frozen=True)
 class LearnCaptureResult:
-    learn_issue: github.PlanIssue
+    learn_issue: issue_backend.IssueRef
     plan_issue: int
     commented: bool
     pending_cleared: bool
@@ -53,7 +53,7 @@ def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json
         if not dry_run:
             require_github(ctx)
         result = _learn_capture_impl(repo_root=repo_root, body_path=body_path, dry_run=dry_run)
-    except GitHubError as exc:
+    except IssueBackendError as exc:
         fail(
             ctx,
             as_json=as_json,
@@ -94,25 +94,25 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
 
     if dry_run:
         return LearnCaptureResult(
-            learn_issue=github.PlanIssue(number=0, url="(dry-run)", existed=False),
+            learn_issue=issue_backend.IssueRef(id="0", url="(dry-run)", existed=False),
             plan_issue=issue,
             commented=False,
             pending_cleared=False,
             dry_run=True,
         )
 
-    state = github.get_plan(number=issue, repo_root=repo_root)
+    backend = issues.resolve_issue_backend(repo_root)
+    state = backend.get_plan(issue_id=str(issue))
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
     run_id = state.header.get("run_id")
-    learn_issue = github.create_learn_issue(
+    learn_issue = backend.create_learn_issue(
         title=f"Learnings: {state.title}",
         body=body_text,
-        repo_root=repo_root,
         run_id=str(run_id) if isinstance(run_id, str) else None,
-        plan_number=issue,
+        plan_id=str(issue),
     )
-    commented = _backlink(issue=issue, learn=learn_issue, repo_root=repo_root)
+    commented = _backlink(backend, issue=issue, learn=learn_issue)
     cache.clear_marker(repo_root, cache.PENDING_LEARN)
     return LearnCaptureResult(
         learn_issue=learn_issue,
@@ -123,15 +123,16 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
     )
 
 
-def _backlink(*, issue: int, learn: github.PlanIssue, repo_root: Path) -> bool:
+def _backlink(
+    backend: issue_backend.IssueBackend, *, issue: int, learn: issue_backend.IssueRef
+) -> bool:
     """Post a back-link comment on the plan issue (best-effort — a failure never sinks capture)."""
     try:
-        github.add_issue_comment(
-            issue=issue,
-            body=f"Learnings captured in #{learn.number}.",
-            repo_root=repo_root,
+        backend.add_issue_comment(
+            issue_id=str(issue),
+            body=f"Learnings captured in #{learn.id}.",
         )
-    except GitHubError:
+    except IssueBackendError:
         return False
     return True
 
@@ -142,7 +143,8 @@ def _result_to_dict(result: LearnCaptureResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "learn_issue": {
-            "number": result.learn_issue.number,
+            # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
+            "number": int(result.learn_issue.id),
             "url": result.learn_issue.url,
             "existed": result.learn_issue.existed,
         },
@@ -162,6 +164,6 @@ def _render_human(result: LearnCaptureResult) -> None:
     user_output(
         click.style("✓ ", fg="green")
         + f"{verb} learn issue "
-        + click.style(f"#{result.learn_issue.number}", fg="cyan")
+        + click.style(f"#{result.learn_issue.id}", fg="cyan")
         + "; pending-learn cleared"
     )
