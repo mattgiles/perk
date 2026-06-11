@@ -8,7 +8,10 @@ description: Orchestrating the perk /objective-reconcile pass — after a PR lin
 `/objective-reconcile` is perk's **post-merge reconciliation** surface: when a PR linked to an
 objective node merges, the roadmap should reflect what was *actually* built, not what was originally
 planned. The deterministic half already ran on land — the cold land path auto-marked the backlinked
-node `done` (mechanical, fail-open, non-audited). **This pass is the judgment layer**: reconciling
+node `done` (mechanical, fail-open, non-audited), and when that mark completed the roadmap (every
+node terminal) it also **closed the objective issue**. So this pass may legitimately be operating on
+a just-closed objective — the closed state is not anomalous, and you must **not reopen** the issue
+(closed issues' bodies and comments remain editable). **This pass is the judgment layer**: reconciling
 stale *prose* and *node descriptions* against the real diff. Judgment and durable writes stay with
 **you** (the parent) — never delegate them.
 

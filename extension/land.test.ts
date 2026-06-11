@@ -113,7 +113,7 @@ const OBJECTIVE_DETAILS: LandDetails = {
   ok: true,
   pr: { number: 9, state: "MERGED" },
   pending_learn: true,
-  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
+  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null, closed: false },
 };
 
 test("driveReconcileAfterLand: no objective → not driven", () => {
@@ -149,6 +149,66 @@ test("driveReconcileAfterLand: streaming (land tool) → followUp", () => {
   driveReconcileAfterLand(pi, ctx, OBJECTIVE_DETAILS);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.options?.deliverAs, "followUp");
+});
+
+test("driveReconcileAfterLand: still fires when the land closed the objective", () => {
+  // The reconcile pass auto-drives after a closing land — the final prose reconciliation against
+  // the last merged diff is still wanted (a closed issue's body/comments remain editable).
+  const { pi, calls } = spyPi();
+  const ctx = { cwd: ".", isIdle: () => true } as unknown as ExtensionContext;
+  driveReconcileAfterLand(pi, ctx, {
+    ok: true,
+    pr: { number: 9, state: "MERGED" },
+    pending_learn: true,
+    objective: { number: 5, nodes_marked: ["1.3"], skipped_reason: null, closed: true },
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]?.content ?? "", /objective #5/i);
+});
+
+function stubLandCtx(cwd: string, stdout: string): [ExtensionAPI, ExtensionContext] {
+  const piStub = {
+    exec: async () => ({ code: 0, killed: false, stdout, stderr: "" }),
+  } as unknown as ExtensionAPI;
+  const ctx = { cwd, hasUI: false, isIdle: () => true } as unknown as ExtensionContext;
+  return [piStub, ctx];
+}
+
+test("landPr: a closing land reports the objective close", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const payload = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    pr: { number: 42, state: "MERGED" },
+    pending_learn: true,
+    objective: { number: 5, nodes_marked: ["1.3"], skipped_reason: null, closed: true },
+  });
+  const result = await landPr(...stubLandCtx(cwd, payload));
+  assert.ok(result.details.ok);
+  assert.equal(result.details.objective?.closed, true);
+  assert.match(result.content[0]?.text ?? "", /Objective #5 complete — closed\./);
+});
+
+test("landPr: `closed` decodes leniently — absent/malformed → false, sub-object kept", async () => {
+  // Advisory display detail: a missing or non-boolean `closed` must default to false rather than
+  // dropping the whole objective sub-object (the existing advisory-tier posture).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  for (const closed of [undefined, "yes"]) {
+    const payload = JSON.stringify({
+      success: true,
+      error_type: null,
+      message: null,
+      pr: { number: 42, state: "MERGED" },
+      pending_learn: true,
+      objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null, closed },
+    });
+    const result = await landPr(...stubLandCtx(cwd, payload));
+    assert.ok(result.details.ok);
+    assert.equal(result.details.objective?.closed, false, `closed=${closed} → false`);
+    assert.deepEqual(result.details.objective?.nodes_marked, ["1.2"], "sub-object kept");
+    assert.doesNotMatch(result.content[0]?.text ?? "", /complete — closed/);
+  }
 });
 
 test("tool: land with a skipped objective adds no nudge", async () => {

@@ -25,6 +25,7 @@ export interface ObjectiveLandUpdate {
   number: number | null;
   nodes_marked: string[];
   skipped_reason: string | null;
+  closed: boolean;
 }
 
 export interface LearnConsumeUpdate {
@@ -66,7 +67,14 @@ function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
   }
   const skippedReason = nullableStringField(obj, "skipped_reason");
   if (skippedReason === undefined && obj.skipped_reason !== undefined) return undefined;
-  return { number, nodes_marked: nodesMarked, skipped_reason: skippedReason ?? null };
+  // `closed` is an advisory display detail: decode leniently (missing/malformed → false) rather
+  // than dropping the whole sub-object.
+  return {
+    number,
+    nodes_marked: nodesMarked,
+    skipped_reason: skippedReason ?? null,
+    closed: obj.closed === true,
+  };
 }
 
 /** Validate the optional `learn` sub-object; malformed → undefined (advisory, never fatal). */
@@ -124,6 +132,9 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
       `Objective #${obj.number} node(s) ${obj.nodes_marked.join(", ")} marked done — ` +
         `reconciling the roadmap against the merged diff.`,
     );
+  }
+  if (obj?.closed && obj.number !== null) {
+    lines.push(`Objective #${obj.number} complete — closed.`);
   }
   const learn = r.data.learn;
   if (learn?.closed.length) {
