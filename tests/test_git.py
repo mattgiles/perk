@@ -28,6 +28,22 @@ def test_worktree_lifecycle(git_repo):
     assert "wt1" not in {w.path.name for w in git.worktree_list(git_repo)}
 
 
+def test_tracked_paths(git_repo):
+    import pytest
+
+    skill = git_repo / ".claude" / "skills" / "x" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("# x\n", encoding="utf-8")
+    pathspecs = [".claude/skills", ".agents/skills"]
+    assert git.tracked_paths(git_repo, pathspecs) == []  # untracked -> clean
+    subprocess.run(
+        ["git", "add", ".claude"], cwd=git_repo, check=True, capture_output=True, text=True
+    )
+    assert git.tracked_paths(git_repo, pathspecs) == [".claude/skills/x/SKILL.md"]
+    with pytest.raises(git.GitError):  # a failed probe propagates (no silent pass)
+        git.tracked_paths(git_repo.parent, pathspecs)
+
+
 def test_delete_branch(git_repo):
     import pytest
 

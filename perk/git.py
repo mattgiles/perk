@@ -70,6 +70,17 @@ def is_tracked(repo: Path, path: Path | str) -> bool:
     return bool(out.strip())
 
 
+def tracked_paths(repo: Path, pathspecs: list[str]) -> list[str]:
+    """The tracked paths under ``pathspecs`` (relative to ``repo``); ``[]`` when clean.
+
+    One ``git ls-files -- <pathspecs…>`` probe (sibling of ``is_tracked``, which takes a single
+    path and swallows failures). Propagates ``GitError`` — callers decide how a failed probe
+    degrades (no silent pass).
+    """
+    out = _run(["ls-files", "--", *pathspecs], cwd=repo)
+    return [line for line in out.splitlines() if line]
+
+
 def rm_cached(repo: Path, path: Path | str) -> None:
     """Stop tracking ``path`` without deleting the working-tree file (``git rm --cached``)."""
     _run(["rm", "--cached", "--quiet", "--", str(path)], cwd=repo)
