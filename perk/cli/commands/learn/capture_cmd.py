@@ -39,9 +39,7 @@ class LearnCaptureResult:
     required=True,
     help="Path to the captured-learnings markdown (a run-scoped scratch file).",
 )
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Compose without creating an issue or clearing."
-)
+@click.option("--dry-run", is_flag=True, help="Compose without creating an issue or clearing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json: bool) -> None:

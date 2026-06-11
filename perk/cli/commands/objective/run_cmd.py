@@ -390,16 +390,12 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
 @click.argument("number", type=int)
 @click.option(
     "--remote",
-    "remote",
     default="",
     help="Runner ref for remote dispatches (default: the default runner).",
 )
-@click.option(
-    "--wait", "wait", is_flag=True, help="Poll an in-flight run to completion, then re-evaluate."
-)
+@click.option("--wait", is_flag=True, help="Poll an in-flight run to completion, then re-evaluate.")
 @click.option(
     "--dry-run",
-    "dry_run",
     is_flag=True,
     help="Resolve + report the decision only — mint/write/trigger/close nothing.",
 )

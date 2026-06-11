@@ -31,7 +31,7 @@ from perk.output import machine_output, user_output
     help="Structured roadmap as a JSON array of nodes (preferred over embedding YAML in --body).",
 )
 @click.option("--run-id", "run_id_arg", help="Correlation run id (defaults to $PERK_RUN_ID).")
-@click.option("--dry-run", "dry_run", is_flag=True, help="Compose without creating an issue.")
+@click.option("--dry-run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def create_objective(

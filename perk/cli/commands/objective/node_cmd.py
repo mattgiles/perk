@@ -22,7 +22,7 @@ from perk.output import machine_output, user_output
 )
 @click.option("--pr", help='Set/clear the PR ("#N" sets, "" clears).')
 @click.option("--description", help="Update the node description.")
-@click.option("--dry-run", "dry_run", is_flag=True, help="Validate without writing.")
+@click.option("--dry-run", is_flag=True, help="Validate without writing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def node_objective(

@@ -24,7 +24,7 @@ from perk.output import machine_output, user_output
     required=True,
     help="Path to the reconciled Reconcilable-prose markdown (stdin-less worker pattern).",
 )
-@click.option("--dry-run", "dry_run", is_flag=True, help="Compose without writing.")
+@click.option("--dry-run", is_flag=True, help="Compose without writing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def reconcile_objective(

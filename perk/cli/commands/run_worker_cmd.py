@@ -22,7 +22,7 @@ _DRIVABLE_STAGE_IDS = sorted(
 
 
 @click.command("run-worker")
-@click.option("--run-id", "run_id", required=True, help="The perk run_id (ULID) for this drive.")
+@click.option("--run-id", required=True, help="The perk run_id (ULID) for this drive.")
 @click.option(
     "--stage",
     "stage_id",

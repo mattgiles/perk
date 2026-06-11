@@ -63,9 +63,7 @@ class PlanSaveResult:
     "--consumed-learn",
     help="Comma-separated perk:learn issue numbers this docs plan consumes (hop-2; e.g. '45,50').",
 )
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Compose and print without touching GitHub."
-)
+@click.option("--dry-run", is_flag=True, help="Compose and print without touching GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def plan_save(

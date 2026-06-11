@@ -112,9 +112,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
     help="Materialize the inbox + emit {inbox_path, learn_numbers}; launch nothing (warm path).",
 )
 @click.option("--worktree", help="Worktree to position (learn-docs runs at repo root).")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Gather + print the inbox/seed; launch nothing."
-)
+@click.option("--dry-run", is_flag=True, help="Gather + print the inbox/seed; launch nothing.")
 @click.option(
     "--remote",
     type=str,

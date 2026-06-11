@@ -113,9 +113,7 @@ def _seed_prompt(
 @click.argument("number", required=False, type=int)
 @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
 @click.option("--worktree", help="Worktree to position (objective-plan runs at repo root).")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Resolve + print; mark nothing, launch nothing."
-)
+@click.option("--dry-run", is_flag=True, help="Resolve + print; mark nothing, launch nothing.")
 @click.option(
     "--remote",
     type=str,

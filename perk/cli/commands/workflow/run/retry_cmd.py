@@ -11,7 +11,7 @@ from perk.output import machine_output, user_output
 
 @click.command("retry")
 @click.argument("run_id")
-@click.option("--failed", "failed", is_flag=True, help="Re-run only the failed jobs.")
+@click.option("--failed", is_flag=True, help="Re-run only the failed jobs.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def retry_run(ctx: click.Context, *, run_id: str, failed: bool, as_json: bool) -> None:

@@ -37,9 +37,7 @@ def _implement_stage() -> Stage:
 @click.command("implement", context_settings={"ignore_unknown_options": True})
 @click.argument("plan", required=False)
 @click.option("--worktree", help="Worktree to position (overrides the plan name).")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Print the launch plan without exec'ing pi."
-)
+@click.option("--dry-run", is_flag=True, help="Print the launch plan without exec'ing pi.")
 @click.option(
     "--remote",
     type=str,

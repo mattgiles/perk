@@ -100,9 +100,7 @@ def _seed_prompt(scratch_path: Path, number: int, url: str) -> str:
 @click.command("replan", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
 @click.option("--worktree", help="Worktree to position (replan runs at repo root).")
-@click.option(
-    "--dry-run", "dry_run", is_flag=True, help="Materialize + print the seed; launch nothing."
-)
+@click.option("--dry-run", is_flag=True, help="Materialize + print the seed; launch nothing.")
 @click.option(
     "--remote",
     type=str,
