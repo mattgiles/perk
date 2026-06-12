@@ -1,5 +1,6 @@
 import json
 import subprocess
+from typing import cast
 
 from click.testing import CliRunner
 
@@ -307,7 +308,7 @@ def test_linear_readiness_runs_when_selected(git_repo, stub_env, monkeypatch):
     # Created labels are reported through LinearReport, never the filesystem-delta changes.
     assert not any("linear" in c.lower() for c in report.changes if "pi-mono-linear" not in c)
     data = report_to_dict(report)
-    linear_dict = data["linear"]
+    linear_dict = cast("dict[str, object]", data["linear"])
     assert isinstance(linear_dict, dict) and linear_dict["ok"] is True
 
 

@@ -884,11 +884,12 @@ def check_readiness(
         data = client.request("{ viewer { id name email } }")
     except IssueBackendError as exc:
         return LinearReadiness(auth_ok=False, user=None, team_ok=False, error=str(exc))
-    viewer = data.get("viewer") if isinstance(data, dict) else None
+    viewer = data.get("viewer")
     user: str | None = None
     if isinstance(viewer, dict):
-        name = viewer.get("name")
-        email = viewer.get("email")
+        viewer_dict = cast("dict[str, object]", viewer)
+        name = viewer_dict.get("name")
+        email = viewer_dict.get("email")
         user = name if isinstance(name, str) and name.strip() else None
         if user is None and isinstance(email, str) and email.strip():
             user = email
