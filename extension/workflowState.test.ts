@@ -95,6 +95,16 @@ test("rebuild: undefined does not clobber, explicit null wins", () => {
   assert.equal(state.active_plan_ref, null);
 });
 
+test("rebuild: session_artifacts participates in per-field LWW like any field (Node 1.3)", () => {
+  const v1 = { run_id: "A", name: "draft.md", path: "p", digest: "sha256:1", at: "t1" };
+  const v2 = { run_id: "A", name: "draft.md", path: "p", digest: "sha256:2", at: "t2" };
+  const state = rebuildWorkflowState([
+    ws({ session_artifacts: { "draft.md": v1 } }),
+    ws({ session_artifacts: { "draft.md": v2 } }),
+  ]);
+  assert.deepEqual(state.session_artifacts, { "draft.md": v2 });
+});
+
 test("rebuild: /tree re-scan reflects a newly added entry", () => {
   const branch: BranchEntry[] = [ws({ run_id: "A", mode: "read-only" })];
   assert.equal(rebuildWorkflowState(branch).mode, "read-only");

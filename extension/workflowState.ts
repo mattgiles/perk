@@ -12,6 +12,21 @@ import { type ReportTarget, report } from "./report.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
+/**
+ * A session-artifact provenance pointer (Node 1.3, contracts §8.3): the session tier's proof
+ * that a `scratch/runs/<run_id>/data/` file is current for THIS run. Reads validate the
+ * on-disk file against the rebuilt pointer (run_id match + digest match) and refuse otherwise.
+ */
+export interface SessionArtifactPointer {
+  run_id: string;
+  name: string;
+  /** Repo-relative, informational only — validation always re-derives via the seam. */
+  path: string;
+  /** `sha256:<hex>` of the file bytes as read back from disk. */
+  digest: string;
+  at: string; // ISO timestamp
+}
+
 export interface WorkflowState {
   run_id?: string;
   pi_session_id?: string;
@@ -22,6 +37,8 @@ export interface WorkflowState {
   active_plan_ref?: PlanRef | null;
   active_objective?: string | null;
   last_review_batch?: unknown;
+  /** Session-artifact provenance pointers, keyed by artifact name (Node 1.3, §8.3). */
+  session_artifacts?: Record<string, SessionArtifactPointer> | null;
 }
 
 /** The structural slice of a session entry that the rebuild cares about. */

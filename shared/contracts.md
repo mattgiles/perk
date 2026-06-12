@@ -71,6 +71,19 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). No new state key:
   `cache.scratch` already names the substrate; a dedicated `cache.session-data` key is deferred
   to the first stage that declares it in `requires`/`reads`/`writes` (Node 2.1).
+
+  **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
+  `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
+  trusted. The digest convention is `sha256:<hex>` of the bytes **read back** from disk after
+  the write. Validation derives the path from `run_id` + `name` through the accessor seam; the
+  recorded `path` is informational only and never dereferenced (workflow-state entries are
+  reconstructable from untrusted session history). Lifecycle: **rewind** ⇒ the rebuilt branch
+  carries an older pointer while disk holds newer bytes ⇒ digest mismatch ⇒ refusal; **fork /
+  concurrent sessions** ⇒ the pointer's `run_id` ≠ the active one ⇒ refusal (no inheritance —
+  a fork child's data dir starts empty); **reload / compaction** ⇒ same `run_id` ⇒ pointer and
+  dir persist through the LWW rebuild. Consumers fail open to their fallback when validation
+  refuses (the reader returns `null`; mismatched-run_id refusals are silent by design, broken
+  promises — missing file, digest mismatch — warn on stderr).
 - **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` for runs whose
   terminal stage completed, or older than N days — surfaced later as a `doctor` check + a
   prune command (erk accumulated session dirs precisely because GC was undefined).
@@ -184,6 +197,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `active_plan_ref` | object \| null | the provider-agnostic plan ref (§8.4); null during early `plan` |
 | `active_objective` | string \| null | the active objective id; **live since P2.T9** (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
+| `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (Node 1.3, §8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
