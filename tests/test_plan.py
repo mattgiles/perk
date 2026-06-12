@@ -199,3 +199,28 @@ def test_render_plan_body_inline_code_round_trips():
     assert "<details>" not in comment and "<!--" not in comment
     wrapped = f"preamble\n\n{comment}\n\ntrailing\n"
     assert plan.extract_plan_body(wrapped) == markdown.strip()
+
+
+def test_has_metadata_block_both_encodings():
+    html = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "x"})
+    inline = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "x"}, style="inline-code")
+    assert plan.has_metadata_block(html, plan.PLAN_HEADER_KEY)
+    assert plan.has_metadata_block(inline, plan.PLAN_HEADER_KEY)
+
+
+def test_has_metadata_block_absent_is_false():
+    assert not plan.has_metadata_block("no blocks here", plan.PLAN_HEADER_KEY)
+    # a different key's block never matches
+    other = plan.render_metadata_block("learn-header", {"run_id": "x"})
+    assert not plan.has_metadata_block(other, plan.PLAN_HEADER_KEY)
+
+
+def test_has_metadata_block_is_presence_only_even_when_malformed():
+    # find_metadata_block returns None for both absent AND malformed; has_metadata_block
+    # discriminates: a present-but-malformed block is still "present".
+    broken_html = "<!-- perk:metadata-block:plan-header -->\n```yaml\nrun_id: x"
+    broken_inline = "`perk:metadata-block:plan-header`\n```yaml\nrun_id: x"
+    assert plan.find_metadata_block(broken_html, plan.PLAN_HEADER_KEY) is None
+    assert plan.find_metadata_block(broken_inline, plan.PLAN_HEADER_KEY) is None
+    assert plan.has_metadata_block(broken_html, plan.PLAN_HEADER_KEY)
+    assert plan.has_metadata_block(broken_inline, plan.PLAN_HEADER_KEY)

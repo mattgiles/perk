@@ -327,3 +327,71 @@ def test_replace_reconcilable_section_splices_and_preserves():
 
 def test_replace_reconcilable_section_none_when_markers_absent():
     assert o.replace_reconcilable_section("no markers here", "x") is None
+
+
+# --- Node 2.3 (objective #252): dual-encoding marker awareness --------------------------------
+
+
+def test_replace_reconcilable_section_preserves_inline_code_form():
+    from perk.linear_backend import to_linear_markdown
+
+    comment = to_linear_markdown(o.render_body_comment(_nodes(), prose="Old prose."))
+    comment = comment + "\n## Immutable history\nnever touch this\n"
+    assert "<!--" not in comment  # the transcode dropped every HTML marker
+    out = o.replace_reconcilable_section(comment, "New prose.")
+    assert out is not None
+    assert "New prose." in out and "Old prose." not in out
+    assert "never touch this" in out
+    # form preservation: the inline-code sentinels stay; no HTML form is reintroduced
+    assert "`perk:objective-reconcilable`" in out and "`/perk:objective-reconcilable`" in out
+    assert "<!--" not in out
+
+
+def test_rerender_body_table_preserves_inline_code_form():
+    from perk.linear_backend import to_linear_markdown
+
+    nodes = _nodes()
+    comment = to_linear_markdown(o.render_body_comment(nodes, prose="Some prose."))
+    updated = o.update_node(nodes, "1.2", status=N.DONE)
+    assert updated is not None
+    out = o.rerender_body_table(comment, updated)
+    assert out is not None
+    assert "Some prose." in out
+    line = next(ln for ln in out.splitlines() if ln.startswith("| 1.2 "))
+    assert "done" in line
+    assert "`perk:roadmap-table`" in out and "`/perk:roadmap-table`" in out
+    assert "<!--" not in out
+
+
+def test_html_form_behavior_unchanged_by_dual_encoding():
+    # The HTML scan runs first: a comment carrying BOTH forms (pathological) splices the HTML one.
+    comment = o.render_body_comment(_nodes(), prose="HTML prose.")
+    out = o.replace_reconcilable_section(comment, "Spliced.")
+    assert out is not None
+    assert o.OBJECTIVE_RECONCILABLE_MARKER_START in out
+    assert o.OBJECTIVE_RECONCILABLE_MARKER_END in out
+
+
+def test_parse_roadmap_nodes_inline_code_block():
+    nodes = _nodes()
+    body = render_metadata_block(
+        o.OBJECTIVE_ROADMAP_KEY, o.render_roadmap_block(nodes), style="inline-code"
+    )
+    parsed, errors = o.parse_roadmap_nodes(body)
+    assert errors == []
+    assert [n.id for n in parsed] == ["1.1", "1.2", "2.1"]
+
+
+def test_parse_roadmap_nodes_malformed_inline_block_is_an_error():
+    # present-but-malformed in the inline-code encoding -> error (not "valid roadmap-free")
+    broken = "`perk:metadata-block:objective-roadmap`\n\n```yaml\nnodes: [\n```"
+    parsed, errors = o.parse_roadmap_nodes(broken)
+    assert parsed == [] and errors and "malformed" in errors[0]
+
+
+def test_objective_header_string_comment_id_round_trips():
+    header = o.ObjectiveHeader(
+        run_id="01RID", created="t", objective_comment_id="comment-uuid-1", status="active"
+    )
+    data = header.to_data()
+    assert data["objective_comment_id"] == "comment-uuid-1"
