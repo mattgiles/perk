@@ -13,6 +13,11 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   backwards-compat migrations into `init`.
 - **Headless-fail-safe.** In extensions, guard every rich-UI call with `ctx.hasUI`
   and block dangerous operations when `!ctx.hasUI`.
+- **GitHub access goes through the `gh` CLI.** Never fetch `github.com` /
+  `api.github.com` over raw HTTPS (curl/fetch) — private repos reject
+  unauthenticated requests; `gh` is already authenticated. Read-only `gh`
+  query subcommands (view/list/diff/status/checks/search) work even in perk
+  read-only sessions.
 - **State tiers:** GitHub (canonical) / `.pi/workflow/` (cache) / session entries
   (transient). Cross-plane contracts live in `shared/`.
 
