@@ -247,6 +247,86 @@ test("/objective-plan registers and is headless-safe", async () => {
   }
 });
 
+// --- Objective #352 Node 1.2: /objective-plan enters the read-only gate -------------------
+
+/**
+ * Spy on the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`) — the
+ * keyless offline session can't run the injected factory turn, so capture the injection instead.
+ */
+function spyInjections(h: Awaited<ReturnType<typeof loadPerkSession>>): void {
+  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
+    async () => {};
+}
+
+test("/objective-plan enters the read-only gate: mode flips, write blocked, announce reported", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  spyInjections(h);
+  try {
+    // Starts read-write: write allowed.
+    assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, undefined);
+
+    await h.invokeCommand("objective-plan", "7");
+
+    assert.equal(h.workflowState().mode, "read-only", "mode flips to read-only");
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      true,
+      "write is structurally blocked",
+    );
+    assert.ok(
+      h.notifies.some((m) => /read-only ON/.test(m)),
+      "the read-only announce line was reported",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan skip-if-active: an already read-only session gets no duplicate enter/announce", async () => {
+  // The cold-door shape: the handoff's `mode: read-only` claim syncs the gate on at session_start.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  spyInjections(h);
+  try {
+    await h.invokeCommand("objective-plan", "7");
+
+    assert.equal(h.workflowState().mode, "read-only", "mode stays read-only");
+    assert.equal(
+      h.notifies.filter((m) => /read-only ON/.test(m)).length,
+      0,
+      "no duplicate announce when the gate is already active",
+    );
+    assert.ok(
+      h.notifies.some((m) => /#7/.test(m)),
+      "the objective info line still reports",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan with no objective leaves the gate off (warning only)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    await h.invokeCommand("objective-plan");
+
+    assert.ok(
+      h.notifyEvents.some((e) => e.severity === "warning" && /no objective given/.test(e.message)),
+      "the no-objective warning fires",
+    );
+    assert.notEqual(h.workflowState().mode, "read-only", "the gate stays off");
+    assert.equal(
+      (await h.emitToolCall("write", { path: "x", content: "y" }))?.block,
+      undefined,
+      "writes stay unblocked",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- pure helpers (offline unit) --------------------------------------------------------
 
 test("buildObjectiveNodeArgs: shapes", () => {

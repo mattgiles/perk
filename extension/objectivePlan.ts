@@ -1,8 +1,10 @@
 // P2.T10 — the objective plan-factory's warm transition surface. Two pieces:
 //
 //   1. `/objective-plan [<number>] [--node ID]` — the warm entry: resolve the objective (arg, else
-//      `active_objective` from the rebuilt `perk:workflow-state`) and `pi.sendUserMessage(...)` to
-//      start the factory loop in-session (mirrors `/address`). Headless-safe.
+//      `active_objective` from the rebuilt `perk:workflow-state`), enter the read-only gate when it
+//      is off (parity with the cold door's `mode: read-only` handoff claim; skip-if-active; exit
+//      stays owned by `plan_save` / `/plan` off), and `pi.sendUserMessage(...)` to start the
+//      factory loop in-session (mirrors `/address`). Headless-safe.
 //
 //   2. `objective_node` tool — the BOUNDED model-facing transition surface. It DELEGATES the
 //      mutation to the Python cold door (`perk objective node`, canonical mutations in Python) and
@@ -22,6 +24,7 @@ import { booleanField, type ColdJson, runColdDoor } from "./coldDoor.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
+import type { ToolGating } from "./toolGating.ts";
 import { idParam, paramsOf, stringParam } from "./toolParams.ts";
 import {
   appendWorkflowState,
@@ -428,7 +431,7 @@ const TOOL_GUIDELINES = [
  * Register the warm objective plan-factory door: the `objective_node` bounded transition tool + the
  * `/objective-plan` command. Headless-safe; the tool never throws.
  */
-export function registerObjectivePlan(pi: ExtensionAPI): void {
+export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): void {
   pi.registerTool({
     name: "objective_node",
     label: "Update objective node",
@@ -558,6 +561,21 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
         return;
       }
       report(ctx, "objective-plan", "info", `#${objective}${node ? ` node ${node}` : ""}`);
+      // Enter the read-only gate (parity with the cold door's `mode: read-only` handoff claim) —
+      // skip-if-active so an already-gated session (cold objective-plan, `/plan` on) gets no
+      // duplicate `mode` append or announce. Entering BEFORE sendUserMessage means the seeded
+      // factory turn runs gated and picks up the [READ-ONLY MODE] + [PLAN AUTHORING] injections
+      // on its before_agent_start. Exit stays owned by plan_save (approval auto-save included)
+      // and `/plan` off.
+      if (!gating.isActive()) {
+        gating.enter(ctx);
+        report(
+          ctx,
+          "objective-plan",
+          "info",
+          "read-only ON — structurally enforced exploration; plan_save exits (approval auto-saves), or /plan toggles off.",
+        );
+      }
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
       // The perk-objective-plan pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
       // /objective-plan outside a stage:objective-plan session gets none from Mechanism A.

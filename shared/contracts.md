@@ -408,7 +408,13 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
 of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
 - **`/objective-plan [<number>] [--node ID]`** — the warm entry: resolve the objective (arg, else
   `active_objective` from the rebuilt `perk:workflow-state`) and `pi.sendUserMessage(...)` the
-  factory guidance to start the loop (mirrors `/address`). Headless-safe.
+  factory guidance to start the loop (mirrors `/address`). Headless-safe. On invocation it ALSO
+  **enters the read-only gate** when it is off (skip-if-active: no duplicate `mode` append or
+  announce when already read-only): appends `mode: "read-only"` to `perk:workflow-state` via
+  `gating.enter` and reports a dedicated announce line — parity with the cold door's registry
+  `mode: read-only` handoff claim. Gate **exit** remains owned by `plan_save` (D1a, approval
+  auto-save included) / `/plan` off; the no-objective warning path never enters the gate.
+  (Objective #352 Node 1.2.)
 - **`objective_node` tool** — the BOUNDED model-facing transition. It **delegates** the mutation to
   the Python cold door (`perk objective node`, canonical mutations in Python) and **never throws**
   (soft `details.ok`, mirrors `resolve_review_threads`). Params `{ objective, node, status?, pr?,
