@@ -43,6 +43,8 @@ const IMPLEMENT_SUBSTRINGS = [
   "Progress markers: when the plan has a `## Steps` list,",
   "`[WIP:n]`",
   "`[DONE:n]`",
+  "perk may inject a generated checklist as a context message",
+  "otherwise don't invent step numbers",
 ];
 // The Node 3.1 linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 // tests/test_worker_prompt_parity.py (the literal fragments of the shared linear arm).

@@ -74,8 +74,11 @@ step n) markers:
     3. ...
 
 Genuinely multi-step work **should** include a `## Steps` list — you (the planner) control whether
-the implementer gets fine-grained checkpoints. Omit it for prose-only plans — checkpoints stay inert
-(no crash, no nagging; the implement status bar instead shows a coarse stage label).
+the implementer gets fine-grained checkpoints. Prose plans (no `## Steps`) now get a **best-effort
+generated checklist** at implement time (perk asks the session model for one and seeds checkpoints
+from it; when generation is unavailable, checkpoints stay inert and the implement status bar shows
+a coarse stage label). An authored `## Steps` list remains **preferred**: it is deterministic,
+reviewable, and its numbering is visible in the plan issue.
 
 Keep it concise and human- *and* agent-digestible. Resolve every open choice **before** saving — a
 saved plan must leave **no decisions to the implementer** (no "should I…?" residue).

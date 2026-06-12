@@ -33,7 +33,10 @@ shows on a completed step).
 **Step numbers come from the plan's `## Steps` list** — the numbered list under that heading is the
 only source of valid step numbers. Emit markers that match those numbers.
 
-**Prose plans have no checkpoints.** If the plan has no `## Steps` list, checkpoints are inert: the
-markers are harmless no-ops, so **don't invent step numbers**. The status bar instead shows a coarse
-stage label for the active plan. Whether you get fine-grained checkpoints is the planner's choice
-(they decide whether to include a `## Steps` list).
+**Prose plans may get a generated checklist.** If the plan has no `## Steps` list, perk may
+generate a checklist on the fly and inject it as a context message ("perk generated the following
+implementation checklist…"). When that injection appears, **use exactly the step numbers it
+lists** — they drive the same checkpoint tracking as an authored `## Steps` list. If no injection
+appears (generation is best-effort and may be unavailable), checkpoints are inert: the markers are
+harmless no-ops, so **don't invent step numbers** — the status bar instead shows a coarse stage
+label for the active plan.

@@ -572,6 +572,32 @@ likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single la
 pi-status's `session_start` footer install replaced perk's footer — borrowed packages must not own
 the footer.
 
+**Generated checkpoint steps for prose plans (#342).** When the implement-session `session_start`
+seeding finds a **materialized plan body with no usable `## Steps`** (`extractSteps` → `[]` covers
+both a missing and a malformed section), checkpoints **generate** the step list on the fly via the
+structured-output substrate (`extension/planSteps.ts`, the `planTitle.ts` idiom: a single
+`set_plan_steps` tool call, TypeBox-validated, 2–12 steps sanitized to ≤200 chars each). Trigger
+conditions (ALL required): the perk-checkpoints reference is the selected todo provider; no
+existing `perk:checkpoint` entry (seed-once); an active workflow (`active_plan_ref != null`); a
+non-null plan body whose `extractSteps` is empty; and the **launched stage is `implement`** (the
+handoff's `stage` — address/learn/plan sessions never generate). **Artifact reuse first**: the
+generated list persists as the session artifact `plan-steps.json`
+(`{ plan_id, plan_body_digest, steps }`) written through the §8.1 session-data accessor with a
+§8.3 provenance pointer, and is trusted only when the pointer validates AND its stored
+`plan_body_digest` (the §8.1 `sha256:` convention over the current `plan.md` bytes) matches — a
+replan/rematerialized body invalidates the cache and regenerates. On success the seed is
+byte-identical to the explicit-`## Steps` path (same `perk:checkpoint` entry shape — no schema
+change; rebuild/advance/render untouched); generated-ness is **recomputed, never stored**
+(non-inert AND the current plan body parses to no explicit steps). A once-only
+**`perk:steps-context`** hidden context message (injected at `before_agent_start`, dedup-guarded by
+the branch already carrying the type; **no strip handler** — the checklist never goes stale within
+the session) teaches the model the exact step numbers for `[WIP:n]`/`[DONE:n]`. `/checkpoints`
+appends ` (generated)` when generated-ness recomputes true. **Fail-safe ladder**: the `PERK_NO_LLM`
+offline gate, no model/auth, a model error, schema-invalid args, an unusable sanitized list, or a
+missing session-data substrate each fall back to the coarse prose behavior (byte-identical widget
+text) — never a failed session start. The plan issue is never mutated (generated steps are
+cache-tier, session-local state).
+
 **Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
 `setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces.ts` +
 `extension/report.ts`); every other extension module reaches the UI only through the seams

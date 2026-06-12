@@ -6,8 +6,9 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, planBodyPath } from "./cache.ts";
+import { type PlanRef, planBodyPath, sessionDataDir } from "./cache.ts";
 import {
   CHECKPOINT_TYPE,
   type CheckpointStep,
@@ -20,9 +21,12 @@ import {
   markCompletedSteps,
   rebuildCheckpoint,
   resolvedTodoProviderId,
+  STEPS_ARTIFACT_NAME,
+  STEPS_CONTEXT_TYPE,
 } from "./checkpoints.ts";
+import { digestSessionData } from "./sessionData.ts";
 import { loadPerkSession, plantRawSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { WorkflowState } from "./workflowState.ts";
+import type { SessionArtifactPointer, WorkflowState } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",
@@ -364,6 +368,258 @@ test("/checkpoints headless: uses console (no rich-UI throw)", async () => {
     await h.invokeCommand("checkpoints");
     assert.ok(true, "headless /checkpoints did not throw");
   } finally {
+    h.dispose();
+  }
+});
+
+// --- generated steps for prose plans (#342) ----------------------------------------------
+
+const PROSE_PLAN = "# T\n\n## Summary\nProse only.\n";
+
+/** Faux `set_plan_steps` happy response (markers echoed to exercise the sanitizer). */
+const fauxStepsResponse = () =>
+  fauxAssistantMessage(
+    [fauxToolCall("set_plan_steps", { steps: ["1. Add the module", "Wire it in", "Test it"] })],
+    { stopReason: "toolUse" },
+  );
+
+/** Write a pointer-valid generated-steps artifact for run `01RID`; returns the pointer. */
+function plantStepsArtifact(
+  cwd: string,
+  artifact: { plan_id: string; plan_body_digest: string; steps: string[] },
+): SessionArtifactPointer {
+  const dir = sessionDataDir(cwd, "01RID");
+  mkdirSync(dir, { recursive: true });
+  const content = `${JSON.stringify(artifact, null, 2)}\n`;
+  writeFileSync(join(dir, STEPS_ARTIFACT_NAME), content, "utf8");
+  return {
+    run_id: "01RID",
+    name: STEPS_ARTIFACT_NAME,
+    path: join(".pi", "workflow", "scratch", "runs", "01RID", "data", STEPS_ARTIFACT_NAME),
+    digest: digestSessionData(content),
+    at: new Date().toISOString(),
+  };
+}
+
+test("prose plan under PERK_NO_LLM: coarse fallback unchanged, zero model calls", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  // Harness default env keeps PERK_NO_LLM=1 — the offline gate stays on.
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 0, "the gate prevents any model call");
+    const branch = h.session.sessionManager.getBranch() as never as { customType?: string }[];
+    assert.equal(
+      branch.some((e) => e.customType === CHECKPOINT_TYPE),
+      false,
+      "no checkpoint entry seeded",
+    );
+    const widget = h.widgets.filter((w) => w.slot === "perk-checkpoints").at(-1);
+    assert.ok(
+      widget?.value?.[0]?.includes("prose plan — no `## Steps` checklist"),
+      `coarse widget byte-identical to today: ${JSON.stringify(widget?.value)}`,
+    );
+  } finally {
+    reg.unregister();
+    h.dispose();
+  }
+});
+
+test("prose implement plan: faux model generates the seed + once-only injection", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_NO_LLM: undefined, PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 1, "exactly one generation call");
+    const state = rebuildCheckpoint(h.session.sessionManager.getBranch() as never);
+    assert.deepEqual(
+      state.steps.map((s) => [s.step, s.text, s.completed]),
+      [
+        [1, "Add the module", false],
+        [2, "Wire it in", false],
+        [3, "Test it", false],
+      ],
+      "seeded from the sanitized generated steps",
+    );
+    // The artifact + provenance pointer landed (the #339 reuse cache).
+    const pointer = h.workflowState().session_artifacts?.[STEPS_ARTIFACT_NAME];
+    assert.equal(pointer?.run_id, "01RID", "provenance pointer recorded");
+    // The injection teaches the exact numbering...
+    const injected = await h.emitBeforeAgentStart();
+    const msg = injected.find((m) => m.customType === STEPS_CONTEXT_TYPE);
+    assert.ok(msg, "steps-context injected for a generated checklist");
+    assert.ok(String(msg?.content).includes("1. Add the module"), "numbered list in the content");
+    assert.ok(String(msg?.content).includes("EXACTLY these numbers"), "numbering instruction");
+    // /checkpoints flags the LLM-derived checklist.
+    await h.invokeCommand("checkpoints");
+    assert.ok(
+      h.notifies.some((m) => m.includes("(generated)")),
+      `/checkpoints appends (generated): ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    reg.unregister();
+    h.dispose();
+  }
+});
+
+test("once-only: a branch already carrying perk:steps-context is not re-injected", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  const file = plantRawSession(cwd, [
+    { custom: { type: "perk:workflow-state", data: ACTIVE } },
+    {
+      custom: {
+        type: CHECKPOINT_TYPE,
+        data: { steps: [{ step: 1, text: "one", completed: false }] },
+      },
+    },
+    { custom: { type: STEPS_CONTEXT_TYPE, data: {} } },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    env: { PERK_RUN_ID: undefined },
+  });
+  try {
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === STEPS_CONTEXT_TYPE),
+      false,
+      "branch already carries the steps context → no re-injection",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("artifact reuse: a digest-valid plan-steps artifact seeds without a model call", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  const pointer = plantStepsArtifact(cwd, {
+    plan_id: "42",
+    plan_body_digest: digestSessionData(PROSE_PLAN),
+    steps: ["From the artifact", "Second cached step"],
+  });
+  const file = plantSession(cwd, [
+    { ...ACTIVE, session_artifacts: { [STEPS_ARTIFACT_NAME]: pointer } },
+  ]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_NO_LLM: undefined, PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 0, "artifact reuse skips the model");
+    const state = rebuildCheckpoint(h.session.sessionManager.getBranch() as never);
+    assert.deepEqual(
+      state.steps.map((s) => s.text),
+      ["From the artifact", "Second cached step"],
+    );
+  } finally {
+    reg.unregister();
+    h.dispose();
+  }
+});
+
+test("digest-mismatched artifact is ignored → regeneration", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  // The artifact was generated against a DIFFERENT (stale) plan body — must be ignored.
+  const pointer = plantStepsArtifact(cwd, {
+    plan_id: "42",
+    plan_body_digest: digestSessionData("# stale plan body\n"),
+    steps: ["Stale cached step", "Another stale step"],
+  });
+  const file = plantSession(cwd, [
+    { ...ACTIVE, session_artifacts: { [STEPS_ARTIFACT_NAME]: pointer } },
+  ]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_NO_LLM: undefined, PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 1, "stale artifact → regeneration");
+    const state = rebuildCheckpoint(h.session.sessionManager.getBranch() as never);
+    assert.deepEqual(
+      state.steps.map((s) => s.text),
+      ["Add the module", "Wire it in", "Test it"],
+      "seeded from the fresh generation, not the stale artifact",
+    );
+  } finally {
+    reg.unregister();
+    h.dispose();
+  }
+});
+
+test("non-implement stage never generates (coarse fallback)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  writeFileSync(planBodyPath(cwd), PROSE_PLAN, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_NO_LLM: undefined, PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 0, "plan stage → no generation call");
+    assert.ok(isInert(rebuildCheckpoint(h.session.sessionManager.getBranch() as never)));
+  } finally {
+    reg.unregister();
+    h.dispose();
+  }
+});
+
+test("explicit `## Steps` plans: no generation, no injection, no (generated) suffix", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  writeFileSync(planBodyPath(cwd), PLAN_WITH_STEPS, "utf8");
+  const file = plantSession(cwd, [ACTIVE]);
+  const reg = registerFauxProvider();
+  reg.setResponses([fauxStepsResponse()]);
+  const h = await loadPerkSession({
+    cwd,
+    sessionManager: SessionManager.open(file),
+    model: reg.getModel(),
+    env: { PERK_NO_LLM: undefined, PERK_RUN_ID: undefined },
+  });
+  try {
+    assert.equal(reg.state.callCount, 0, "explicit steps → never a model call");
+    const injected = await h.emitBeforeAgentStart();
+    assert.equal(
+      injected.some((m) => m.customType === STEPS_CONTEXT_TYPE),
+      false,
+      "explicit steps → no steps-context injection",
+    );
+    await h.invokeCommand("checkpoints");
+    const msg = h.notifies.find((m) => m.includes("checkpoints"));
+    assert.ok(msg && !msg.includes("(generated)"), `no (generated) suffix: ${JSON.stringify(msg)}`);
+  } finally {
+    reg.unregister();
     h.dispose();
   }
 });
