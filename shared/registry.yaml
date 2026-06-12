@@ -64,7 +64,7 @@ stages:
     command: objective-author  # P3.T2: dedicated seeded cold door (perk objective-author)
     requires: []                       # nothing exists yet — this stage CREATES the objective
     reads: []
-    writes: [session.workflow-state]   # the read-only `mode` append (the gate toggle)
+    writes: [session.workflow-state, cache.session-data]   # the read-only `mode` append (the gate toggle); #352 Node 2.1: objective_draft writes the objective-draft artifact + its session_artifacts pointer
     predecessors: []                   # the new single initial (authoring precedes everything)
     successors: [objective-save]
 

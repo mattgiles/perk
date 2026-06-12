@@ -93,7 +93,8 @@ def test_objective_author_is_the_single_initial():
     assert auth.mode == "read-only" and auth.worktree == "none"
     assert auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
     assert auth.requires == [] and auth.reads == []
-    assert auth.writes == ["session.workflow-state"]
+    # #352 Node 2.1: objective_draft adds cache.session-data to the authoring stage's writes.
+    assert auth.writes == ["session.workflow-state", "cache.session-data"]
     assert save.mode == "read-write" and save.worktree == "none"
     assert save.writes == ["github.objective", "session.workflow-state"]
 
@@ -155,6 +156,8 @@ def test_stage_io_contract():
     assert "cache.session-data" in registry.state_keys
     assert "cache.session-data" in by_id["plan"].writes
     assert "cache.session-data" in by_id["objective-plan"].writes
+    # #352 Node 2.1: objective_draft writes the objective-draft artifact during objective-author.
+    assert "cache.session-data" in by_id["objective-author"].writes
 
 
 def test_good_fixture_is_valid(tmp_path):

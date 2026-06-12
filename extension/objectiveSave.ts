@@ -40,12 +40,39 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
   return { objective: { id, url, existed: booleanField(objective, "existed") } };
 }
 
-/** The decoded `objective_save` tool params. */
-interface ObjectiveSaveParams {
+/** The decoded `objective_save` tool params (shared with `objective_draft` — #352 Node 2.1). */
+export interface ObjectiveSaveParams {
   prose: string;
   title?: string;
   roadmap?: unknown[];
 }
+
+/**
+ * The roadmap-node items JSON schema, shared between `objective_save` and `objective_draft`
+ * (#352 Node 2.1) so the two tools' roadmap contracts cannot drift.
+ */
+export const ROADMAP_PARAM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "description"],
+  properties: {
+    id: { type: "string", description: 'A stable node id, e.g. "1.1".' },
+    description: { type: "string", description: "What this node delivers." },
+    status: {
+      type: "string",
+      enum: ["pending", "planning", "in_progress", "done", "blocked", "skipped"],
+      description: "Optional initial status (defaults to pending).",
+    },
+    slug: { type: "string", description: "Optional short slug." },
+    pr: { type: "string", description: 'Optional plan/PR backlink, e.g. "#42".' },
+    depends_on: {
+      type: "array",
+      items: { type: "string" },
+      description: "Optional explicit dependency node ids.",
+    },
+    comment: { type: "string", description: "Optional note." },
+  },
+} as const;
 
 /**
  * Decode unknown `objective_save` tool-call params (the tool-boundary seam — Node 3.2). `prose`
@@ -186,28 +213,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
           type: "array",
           description:
             "The structured roadmap: a JSON array of nodes. Never hand-write roadmap YAML.",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["id", "description"],
-            properties: {
-              id: { type: "string", description: 'A stable node id, e.g. "1.1".' },
-              description: { type: "string", description: "What this node delivers." },
-              status: {
-                type: "string",
-                enum: ["pending", "planning", "in_progress", "done", "blocked", "skipped"],
-                description: "Optional initial status (defaults to pending).",
-              },
-              slug: { type: "string", description: "Optional short slug." },
-              pr: { type: "string", description: 'Optional plan/PR backlink, e.g. "#42".' },
-              depends_on: {
-                type: "array",
-                items: { type: "string" },
-                description: "Optional explicit dependency node ids.",
-              },
-              comment: { type: "string", description: "Optional note." },
-            },
-          },
+          items: ROADMAP_PARAM_SCHEMA,
         },
       },
     },

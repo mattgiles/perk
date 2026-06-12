@@ -8,7 +8,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
-import { decodeObjectiveSaveParams, objectiveSaveGuidance } from "./objectiveSave.ts";
+import {
+  decodeObjectiveSaveParams,
+  objectiveSaveGuidance,
+  ROADMAP_PARAM_SCHEMA,
+} from "./objectiveSave.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 const CREATE_JSON = JSON.stringify({
@@ -202,4 +206,19 @@ test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
   assert.equal(decodeObjectiveSaveParams({ prose: 5 }), null);
   assert.equal(decodeObjectiveSaveParams({ prose: "p", title: 5 }), null);
   assert.equal(decodeObjectiveSaveParams({ prose: "p", roadmap: "x" }), null);
+});
+
+test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape (#352 Node 2.1)", () => {
+  assert.equal(ROADMAP_PARAM_SCHEMA.type, "object");
+  assert.equal(ROADMAP_PARAM_SCHEMA.additionalProperties, false);
+  assert.deepEqual([...ROADMAP_PARAM_SCHEMA.required], ["id", "description"]);
+  assert.deepEqual(Object.keys(ROADMAP_PARAM_SCHEMA.properties), [
+    "id",
+    "description",
+    "status",
+    "slug",
+    "pr",
+    "depends_on",
+    "comment",
+  ]);
 });

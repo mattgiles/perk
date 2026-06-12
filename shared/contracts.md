@@ -71,8 +71,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   segments outside the seam is forbidden and guard-tested in both planes
   (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). The dedicated
   `cache.session-data` state key is now real (Node 2.1): it names the run-scoped session data
-  dir artifacts and is declared in `writes` by the two read-only authoring stages, `plan` and
-  `objective-plan` (`cache.scratch` still names the broader substrate).
+  dir artifacts and is declared in `writes` by the read-only authoring stages — `plan`,
+  `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
 
   **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
   twin) is the first session-data producer: it writes the working plan during read-only plan
@@ -101,6 +101,27 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   Non-param sources are announced in the success message (`plan source: …`; param-path messages
   stay byte-stable) and the machine-readable `plan_source` (`"plan-draft" | "param" |
   "transcript" | null`) always lands in the tool's `details`.
+
+  **The objective-draft file tool (Objective #352 Node 2.1).** The tool `objective_draft`
+  (interior-only; no Python twin) is the objective-flavored twin of `plan_draft`: it writes the
+  working objective during read-only objective authoring. It is allowlisted in `READ_ONLY_TOOLS`
+  via the same structural carve-out argument (no path/name parameter; the artifact name is the
+  fixed constant `objective-draft.json` — `OBJECTIVE_DRAFT_ARTIFACT`,
+  `extension/objectiveDraft.ts` — and the path derives exclusively through the accessor seam;
+  the gate's `edit`/`write`/bash blocking is unchanged). The artifact is a **single JSON file**
+  carrying `{schema_version: 1, title?, prose, roadmap}` — the structured roadmap rides
+  **verbatim** (node-shape validation stays with the Python plane at save time, the
+  `parse_structured_roadmap` path; an empty roadmap is allowed — only creation rejects
+  roadmap-free objectives). **The JSON is storage/transport only** — the human review surface
+  (node 2.2, Plannotator or the first-party editor) displays rendered markdown (the prose + a
+  markdown roadmap table) derived from the artifact, never raw JSON. Semantics: full rewrite per
+  call, non-terminating, NOT a save — `objective_save`/`/objective-save` remain the canonical
+  GitHub persist surface. Failure taxonomy (soft results, never throws): mistyped params →
+  `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
+  file-or-pointer write failure → `write_failed`. Consumers read the draft only via
+  `readSessionArtifact` (digest-validated, fail-open). The review-surface consumer (node 2.2)
+  and the approval→`objective_save` orchestration (node 2.3) are forthcoming — the tool is
+  dark-launched with no prompting-surface changes in this node.
 
   **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
