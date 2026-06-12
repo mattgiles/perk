@@ -416,3 +416,25 @@ def test_seed_prompt_omits_model_when_unset():
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
     assert "passing `model:" not in _seed_prompt("7", node, "Ship it")
+
+
+def test_seed_prompt_instructs_the_file_first_loop():
+    """Node 3.1: the cold seed prompt mirrors the warm file-first loop (draft → review →
+    approval-driven save), with the cold link carrier (handoff recovery, no planning mark)."""
+    from perk.cli.commands.objective_plan_cmd import _seed_prompt
+
+    node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
+    primed = _seed_prompt("7", node, "Ship it")
+    # Draft + review steps are present; approval recovers the link from this run's handoff.
+    assert "`plan_draft`" in primed
+    assert "`plan_review`" in primed
+    assert "from this run's handoff" in primed
+    # No `objective_node` planning instruction — the cold door already marked the node.
+    assert "objective_node" not in primed
+    assert 'status: "planning"' not in primed
+    # The old primary-save mandate is gone (the failsafe keeps a distinct phrasing).
+    assert "Persist with `plan_save`" not in primed
+    assert 'passing BOTH `objective_id: "' not in primed
+    # The failsafe + never-implement mandate survive.
+    assert "Manual failsafe: `/plan-save`" in primed
+    assert "ALWAYS save, NEVER implement directly from this session" in primed

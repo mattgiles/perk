@@ -24,7 +24,7 @@ import { type SessionDataCtx, writeSessionArtifact } from "./sessionData.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import type { ToolGating } from "./toolGating.ts";
 import type { BranchEntry, EntrySink } from "./workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
+import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 const PLAN_JSON = JSON.stringify({
   success: true,
@@ -1206,6 +1206,38 @@ test("approvalSave: the artifact wins over a differing reviewedPlan (paramMismat
       const argv = argvs[0] ?? [];
       const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
       assert.equal(readFileSync(planFile, "utf8"), "# The draft", "the artifact bytes staged");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approvalSave: a planted claim is recovered into the argv and cleared on success", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [
+        {
+          type: "custom",
+          customType: WORKFLOW_STATE_TYPE,
+          data: { run_id: "RID", objective_node_claim: CLAIM },
+        },
+      ];
+      const argvs: string[][] = [];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_NODE_OK_JSON, argvs });
+      const ctx = reportableCtx(cwd, branch);
+      assert.ok(
+        writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+        "the draft artifact landed",
+      );
+      const gating = fakeGating(true);
+      const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating);
+      assert.equal(outcome.status, "saved");
+      const argv = argvs[0] ?? [];
+      assert.equal(argv[argv.indexOf("--objective-id") + 1], "115", "objective recovered");
+      assert.equal(argv[argv.indexOf("--node-id") + 1], "1.2", "node recovered");
+      const rebuilt = rebuildWorkflowState(branch as BranchEntry[]);
+      assert.equal(rebuilt.objective_node_claim, null, "the claim was cleared");
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
