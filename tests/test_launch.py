@@ -472,6 +472,92 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     assert "could not fetch plan #42 body" in capsys.readouterr().err
 
 
+def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):
+    """Node 5.1: the cold-local implement launch calls the (internally gated) Linear agent
+    run-started emitter exactly once, with the worktree + plan-ref + minted run_id."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+    calls: list[tuple[Path, dict]] = []
+    monkeypatch.setattr(
+        "perk.launch.linear_agent.emit_run_started",
+        lambda wt, **kw: calls.append((wt, kw)),
+    )
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert execs == ["pi"]
+    assert len(calls) == 1
+    wt, kw = calls[0]
+    assert wt == config.worktree_root / "plan-42"
+    assert kw["plan_ref"] == _PLAN_REF
+    assert kw["run_id"]  # the minted PERK_RUN_ID
+
+
+def test_non_implement_stage_skips_linear_agent_emission(git_repo, monkeypatch):
+    """Only implement launches emit run-started (address/learn/plan do not)."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    (config.worktree_root / "plan-42").mkdir(parents=True)  # address reuses an existing worktree
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "perk.launch.linear_agent.emit_run_started", lambda *a, **kw: calls.append(a)
+    )
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("address"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert calls == []
+
+
+def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypatch, capsys):
+    """Fail-soft end-to-end: an open gate + a broken emitter substrate still reaches exec."""
+    linear_ref = {**_PLAN_REF, "provider": "linear", "pr_id": "ENG-9"}
+    cache.write_plan_ref(git_repo, linear_ref)
+    monkeypatch.setenv("LINEAR_AGENT_TOKEN", "lin_oauth_x")
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+
+    def boom(_environ):
+        raise RuntimeError("agent substrate down")
+
+    monkeypatch.setattr("perk.linear_agent.agent_client_from_env", boom)
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert execs == ["pi"], "emission failure never blocks the launch"
+    assert "run-started emission skipped (non-fatal)" in capsys.readouterr().err
+
+
 def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
     """#78: launch_stage merges handoff_extra into the handoff blob (objective-plan ferries the
     objective_id/node_id link this way so a later plan-save recovers it)."""

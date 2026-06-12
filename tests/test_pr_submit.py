@@ -4,8 +4,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, git, github
+from perk import cache, git, github, linear_agent
 from perk.cli.cli import cli
+from perk.cli.commands.pr import submit_cmd
 
 _REF = {
     "provider": "github",
@@ -146,6 +147,55 @@ def test_real_submit_plan_not_found_exits_1(monkeypatch):
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "plan_not_found"
+
+
+def test_real_submit_calls_linear_agent_pr_opened(monkeypatch):
+    """Node 5.1: the submit hook fires after the header update with the PR fields (the emitter
+    itself gates on the stamped provider + LINEAR_AGENT_TOKEN)."""
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        submit_cmd.linear_agent, "emit_pr_opened", lambda _root, **kw: emitted.append(kw)
+    )
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    assert len(emitted) == 1
+    kw = emitted[0]
+    assert kw["pr_number"] == 42
+    assert kw["pr_url"] == "u/pr/42"
+    assert kw["branch"] == "plan-7"
+
+
+def test_dry_run_submit_never_calls_linear_agent(monkeypatch):
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        submit_cmd.linear_agent, "emit_pr_opened", lambda _root, **kw: emitted.append(kw)
+    )
+    result = _run(monkeypatch, ["pr", "submit", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    assert emitted == []
+
+
+def test_linear_agent_failure_leaves_submit_payload_byte_identical(monkeypatch):
+    """Fail-soft: a broken emitter substrate (gate forced open) never changes the --json payload
+    or exit code."""
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch)
+    baseline = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert baseline.exit_code == 0
+
+    monkeypatch.setattr(linear_agent, "emission_enabled", lambda *_a, **_k: True)
+    monkeypatch.setattr(cache, "read_agent_session", lambda _r: {"session_id": "sess-1"})
+
+    def boom(_environ):
+        raise RuntimeError("agent substrate down")
+
+    monkeypatch.setattr(linear_agent, "agent_client_from_env", boom)
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    assert result.stdout == baseline.stdout  # the --json payload is byte-identical
+    assert "pr-opened emission skipped (non-fatal)" in result.stderr
 
 
 def test_real_submit_force_pushes(monkeypatch):

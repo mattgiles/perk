@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from perk import cache, git, github, issues, run_id, runner
+from perk import cache, git, github, issues, linear_agent, run_id, runner
 from perk.binding_delivery import render_cold_bindings
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
@@ -428,6 +428,16 @@ def launch_stage(
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
     if stage.worktree != "none":
         materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
+    # Node 5.1 (stretch): mirror the implement-run start into Linear's Agents UI. Gated inside
+    # the emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
+    # it can never block the exec below. Not reached on --dry-run or --remote (early returns).
+    if stage.id == "implement":
+        linear_agent.emit_run_started(
+            wt,
+            plan_ref=resolved.plan_ref or cache.read_plan_ref(repo_root),
+            run_id=rid,
+            environ=os.environ,
+        )
     env = {**os.environ, "PERK_RUN_ID": rid}
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there

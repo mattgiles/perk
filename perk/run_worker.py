@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, issues, launch, resume, run_report
+from perk import cache, issues, launch, linear_agent, resume, run_report
 from perk.cli.ensure import UserFacingCliError
 from perk.init import GIT_PACKAGE
 from perk.issue_backend import IssueBackendError
@@ -182,6 +182,17 @@ def run_worker(
     entry = resolve_worker_entry(repo_root, environ)
     user_output(f"run-worker: worker entry={entry.path} ({entry.source})")
     run_report.report_started(repo_root, run_id=run_id, stage=stage.id, plan=plan, environ=environ)
+    # Node 5.1 (stretch): mirror the remote run into Linear's Agents UI. Gated inside the
+    # emitters (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
+    # emission can never change the forwarded worker exit code.
+    run_url = run_report.run_url_from_env(environ)
+    linear_agent.emit_run_started(
+        repo_root,
+        plan_ref=plan_ref,
+        run_id=run_id,
+        environ=environ,
+        external_urls=[("GitHub Actions run", run_url)] if run_url else [],
+    )
     code = _spawn_worker(
         entry.path, stage_id=stage.id, worktree=repo_root, run_id=run_id, environ=environ
     )
@@ -189,4 +200,9 @@ def run_worker(
     run_report.report_terminal(
         repo_root, run_id=run_id, stage=stage.id, plan=plan, exit_code=code, environ=environ
     )
+    # A failed remote drive would otherwise leave the agent session dangling-active; a successful
+    # remote implement already emitted its PR activity via the in-run `perk pr submit` delegation
+    # (no success-arm terminal activity).
+    if code != 0:
+        linear_agent.emit_run_failed(repo_root, exit_code=code, run_url=run_url, environ=environ)
     return code
