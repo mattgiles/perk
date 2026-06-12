@@ -9,7 +9,8 @@
 // worktree stays untouched) holds, and the gate's `tool_call` edit/write/bash blocking logic is
 // UNCHANGED. Full rewrite per call, non-terminating; NOT a save — `plan_save`/`/plan-save` still
 // persist to GitHub. Consumers read the draft only via `readSessionArtifact` (digest-validated,
-// fail-open); nothing consumes it yet — the file-first save preference is Node 2.2.
+// fail-open); the artifact is consumed by `resolvePlanSource` (planSave.ts, Node 2.2) — both save
+// surfaces prefer it over an explicit param and over the transcript scrape.
 //
 // Imports stay node builtins + sibling seams (sessionData.ts, toolParams.ts, result.ts) so the
 // module loads under `node --test`; no manual `scratch`/`runs` path segments (cacheGuard.test.ts).

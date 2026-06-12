@@ -5,6 +5,12 @@
 // stdin channel), then appends `active_plan_ref` so the live session is linked immediately
 // (strict read-back, idempotent, headless-safe). Failures are loud-but-non-fatal — never throw.
 //
+// FILE-FIRST PLAN SOURCE (Node 2.2). Both surfaces resolve their plan through
+// `resolvePlanSource`: the validated `plan-draft.md` artifact (`readSessionArtifact`,
+// digest-validated, fail-open) wins; the explicit `plan` param (tool only, now optional) is the
+// fallback for sessions that never wrote a draft; `extractPlanMarkdown` (the transcript scrape)
+// is the universal last resort. A differing ignored param is surfaced, never silent.
+//
 // SEAM-SHARED SUBSTRATE (Node 2.2). `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
 // are the produced-contract landing for the PLAN seam (`adapter-architecture.md` Invariant 1) — the
 // Node 2.3 adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
@@ -23,9 +29,11 @@ import {
   runColdDoor,
   stringField,
 } from "./coldDoor.ts";
+import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
+import { readSessionArtifact, type SessionDataCtx } from "./sessionData.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { numberArrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import {
@@ -44,6 +52,7 @@ export interface PlanSaveOk {
   existed: boolean | null;
   updated: boolean;
   objective_node: ObjectiveNodeLink | null;
+  plan_source: PlanSource | null;
 }
 
 /** The atomic objective node→plan commit surfaced by `perk plan-save` (P2.T10). */
@@ -151,11 +160,12 @@ function textOf(content: unknown): string {
 }
 
 /**
- * Best-effort, deterministic: the whole text of the latest assistant message, or null. This is the
- * `/plan-save` **command**'s fallback plan source and is inherently fragile (it cannot tell a clean
- * plan from conversation). The robust path is the `plan_save` *tool*, where the model hands the
- * finalized plan over via the `plan` parameter. (There is no tag/marker convention to extract — the
- * borrowed plan-mode package emits no structured plan, only free-form prose.)
+ * Best-effort, deterministic: the whole text of the latest assistant message, or null. As of
+ * Node 2.2 this is the universal fail-open transcript FALLBACK behind the validated plan-draft
+ * artifact (see `resolvePlanSource`) — no longer the `/plan-save` command's primary plan source.
+ * Inherently fragile (it cannot tell a clean plan from conversation): keep the working draft
+ * current with `plan_draft` so the validated artifact wins. (There is no tag/marker convention to
+ * extract — the borrowed plan-mode package emits no structured plan, only free-form prose.)
  */
 export function extractPlanMarkdown(entries: readonly unknown[]): string | null {
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -165,6 +175,41 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
     if (!text) continue;
     return text;
   }
+  return null;
+}
+
+/** Where the saved plan bytes came from (the Node 2.2 file-first resolution order). */
+export type PlanSource = "plan-draft" | "param" | "transcript";
+
+/**
+ * The shared plan-source resolver (Node 2.2) both save surfaces use — and Node 2.3's
+ * approval→save orchestration later. Resolution order: (1) the validated `plan-draft.md`
+ * artifact (`readSessionArtifact`: digest-validated, fail-open — null on no run_id / no pointer
+ * / fork run_id mismatch / missing file / digest mismatch); (2) a non-blank explicit param;
+ * (3) the transcript scrape (`extractPlanMarkdown`); else null.
+ *
+ * `paramMismatch` is true iff the artifact won AND a non-blank explicit param was passed whose
+ * trimmed bytes differ from the artifact's — surfaced by `savePlan`, never silently dropped and
+ * never a hard-fail.
+ */
+export function resolvePlanSource(
+  ctx: SessionDataCtx,
+  explicit?: string,
+): { plan: string; source: PlanSource; paramMismatch: boolean } | null {
+  const artifact = readSessionArtifact(ctx, PLAN_DRAFT_ARTIFACT);
+  if (artifact !== null && artifact.content.trim().length > 0) {
+    const param = explicit?.trim() ?? "";
+    return {
+      plan: artifact.content,
+      source: "plan-draft",
+      paramMismatch: param.length > 0 && param !== artifact.content.trim(),
+    };
+  }
+  if (explicit !== undefined && explicit.trim().length > 0) {
+    return { plan: explicit, source: "param", paramMismatch: false };
+  }
+  const scraped = extractPlanMarkdown(branchOf(ctx));
+  if (scraped !== null) return { plan: scraped, source: "transcript", paramMismatch: false };
   return null;
 }
 
@@ -182,6 +227,10 @@ export async function savePlan(
     objectiveId?: string;
     nodeId?: string;
     consumedLearn?: number[];
+    /** The resolved plan source (Node 2.2) — surfaced in the message + details when non-param. */
+    source?: PlanSource;
+    /** A differing explicit param was ignored in favor of the artifact (visibly flagged). */
+    paramMismatch?: boolean;
   },
 ): Promise<SaveResult> {
   const fail = failFor(ctx, "plan-save");
@@ -255,8 +304,20 @@ export async function savePlan(
       nodeLink.error ? ` (${nodeLink.error})` : ""
     }`;
   }
+  // Node 2.2: surface NON-param sources in the message (param-path success messages stay
+  // byte-stable); a differing ignored param is visibly flagged, never silent.
+  let sourceSuffix = "";
+  if (opts.source === "plan-draft" || opts.source === "transcript") {
+    sourceSuffix =
+      opts.source === "plan-draft"
+        ? " · plan source: plan-draft artifact"
+        : " · plan source: transcript";
+    if (opts.paramMismatch) {
+      sourceSuffix += " (⚠ differing plan param ignored — the validated artifact was saved)";
+    }
+  }
   return ok(
-    `${verb} plan #${ref.pr_id} → ${ref.url}${linkSuffix}`,
+    `${verb} plan #${ref.pr_id} → ${ref.url}${sourceSuffix}${linkSuffix}`,
     {
       issue: { number: r.data.issue.number, url: r.data.issue.url },
       plan_ref: ref,
@@ -264,6 +325,7 @@ export async function savePlan(
       existed: r.data.issue.existed ?? null,
       updated: r.data.updated ?? false,
       objective_node: nodeLink,
+      plan_source: opts.source ?? null,
     },
     { terminate: true },
   );
@@ -271,7 +333,7 @@ export async function savePlan(
 
 /** The decoded `plan_save` tool params (snake_case, as the schema declares them). */
 interface PlanSaveParams {
-  plan: string;
+  plan?: string;
   title?: string;
   objective_id?: string;
   node_id?: string;
@@ -279,9 +341,9 @@ interface PlanSaveParams {
 }
 
 /**
- * Decode unknown `plan_save` tool-call params (the tool-boundary seam — Node 3.2). `plan` absent
- * decodes to `""` (so `savePlan`'s "no plan markdown to save" `invalid_input` arm keeps owning
- * that message) but present-but-mistyped → null (strict-fail); the optional fields likewise.
+ * Decode unknown `plan_save` tool-call params (the tool-boundary seam — Node 3.2). `plan` is
+ * optional (Node 2.2: the validated plan-draft artifact is preferred) — absent decodes to
+ * `undefined`, but present-but-mistyped → null (strict-fail); the optional fields likewise.
  */
 export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
   const p = paramsOf(params);
@@ -296,7 +358,7 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
     return null;
   }
   return {
-    plan: plan ?? "",
+    plan: plan ?? undefined,
     title,
     objective_id: objectiveId,
     node_id: nodeId,
@@ -306,7 +368,7 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
 
 const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
-  "Pass the full plan markdown to plan_save in the `plan` parameter; never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
+  "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
   "Pass consumed_learn (the gathered perk:learn issue numbers) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
   "When saving an objective-factory plan, pass BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
 ];
@@ -325,11 +387,13 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["plan"],
       properties: {
         plan: {
           type: "string",
-          description: "The full plan markdown to save (no line-number references).",
+          description:
+            "Optional — the validated plan-draft.md artifact is preferred when present; this " +
+            "param is the fallback for sessions that never wrote a draft (no line-number " +
+            "references).",
         },
         title: {
           type: "string",
@@ -368,8 +432,21 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
           "plan_save",
         )("plan_save needs { plan: string, … } per the tool schema", "bad_input");
       }
+      const src = resolvePlanSource(ctx, decoded.plan);
+      if (src === null) {
+        return failFor(
+          ctx,
+          "plan-save",
+          "plan_save",
+        )(
+          "no plan to save — write the working draft with plan_draft, or pass the plan parameter",
+          "invalid_input",
+        );
+      }
       return savePlan(pi, ctx, {
-        plan: decoded.plan,
+        plan: src.plan,
+        source: src.source,
+        paramMismatch: src.paramMismatch,
         title: decoded.title,
         objectiveId: decoded.objective_id,
         nodeId: decoded.node_id,
@@ -381,13 +458,15 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
   pi.registerCommand("plan-save", {
     description: "Save the latest proposed plan to GitHub (the read-only → read-write boundary).",
     handler: async (args, ctx) => {
-      const plan = extractPlanMarkdown(ctx.sessionManager.getBranch());
-      if (plan === null) {
+      // Node 2.2: artifact-first; the transcript scrape is the demoted universal fallback. No
+      // explicit param on the command path ⇒ paramMismatch is always false.
+      const src = resolvePlanSource(ctx);
+      if (src === null) {
         report(
           ctx,
           "plan-save",
           "warning",
-          "no plan to save; propose a plan first, or call the plan_save tool with the markdown.",
+          "no plan to save; write a draft with plan_draft, propose a plan, or call the plan_save tool.",
           { alsoLog: true },
         );
         return;
@@ -397,7 +476,7 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       // the read-only → read-write boundary in one gesture. (The tool path never does this — it is
       // structurally unreachable while read-only.)
       const wasReadOnly = gating.isActive();
-      const result = await savePlan(pi, ctx, { plan, title });
+      const result = await savePlan(pi, ctx, { plan: src.plan, title, source: src.source });
       if (result.details.ok && wasReadOnly) {
         gating.exit(ctx);
       }
