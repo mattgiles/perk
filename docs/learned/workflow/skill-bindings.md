@@ -80,6 +80,15 @@ Two delivery-surface boundaries that held:
   delivery `warnings` are **returned, never raised**, and surfaced loud-but-non-fatal: a missing
   transclude target degrades to the nudge pointer with a warning, never blocking a launch.
 
+## Skills `references:` frontmatter + subdirectory routing needs no wiring
+
+A skill can route per-variant content via `references:` frontmatter plus a subdirectory (the
+dignified-python `versions/` pattern — perk's own instance is `perk-implement`'s
+`backends/{github,linear}.md`). This works for perk's skills with **zero init/doctor changes**:
+delivery is whole-directory sync, and the launch prompt naming the variant (e.g. the backend in
+`implementing perk plan <backend> #<id>`) is the routing signal the model uses to pick
+`backends/<backend>.md`. See `linear-backend.md` for the backend-aware prompt side.
+
 ## doctor validation + the injection-time presence mirror (Node 3.1)
 
 `doctor` validates skill bindings, and a missing/unknown binding target yields a **loud-but-non-fatal

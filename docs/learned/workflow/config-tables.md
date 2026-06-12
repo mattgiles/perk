@@ -55,6 +55,12 @@ project settings).
 **Rule of thumb:** the local overlay is safe for session-transient config, unsafe for config that
 lands in committed files.
 
+Committed-only knobs now have **three precedents** (`[compaction]`, `[issues]`, the
+settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser + a
+`load_committed_*(repo_root)` that reads `.pi/perk.toml` via `_read_toml` only, lets
+`TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
+the **"local overlay is ignored"** case — it's the whole point of the shape.
+
 ## Two consumption models
 
 - **Interior gate (`[trust]`).** Consumed at runtime by a TS gate — `decideCiScope` in
@@ -110,7 +116,8 @@ interior-only.
 
 - `extension/config.ts` — `parseTomlSubset` (string-values-only TS parser)
 - `extension/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate)
-- `perk/config.py` — `parse_compaction_table`, `load_committed_compaction` (committed-only read)
+- `perk/config.py` — `parse_compaction_table`, `load_committed_compaction`,
+  `load_committed_issues_backend` (the committed-only reads)
 - `perk/init.py` — `_converge_settings` / `_converge_compaction` composition
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape

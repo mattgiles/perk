@@ -1,6 +1,6 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/issue_backend.py, perk/issues.py, an issue-tier consumer, adding a backend (Linear), or fighting the boundary/import-direction tests.
+read_when: You are touching perk/issue_backend.py, perk/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids, the doctor issues check, or fighting the boundary/import-direction tests.
 ---
 
 # The IssueBackend seam
@@ -68,6 +68,52 @@ neutral-state helper).
   `except (GitHubError, IssueBackendError)` tuples — keep the tuples until the tiers fully
   separate.
 
+## `backend_id` + the stamp discipline
+
+- **Adding a member to a `Protocol` breaks every fake, not just the real adapter.** `backend_id:
+  str` on `IssueBackend` failed ty on the test suite's `_FakeBackend`, not only the planned
+  `GitHubIssueBackend` conformance helper. The ty-checked `backend: IssueBackend = <impl>`
+  annotated-binding pattern in tests is what catches this — keep one per fake/impl.
+- **The stamp discipline**: `cache.plan-ref.provider` := the resolved backend's `backend_id`,
+  stamped verbatim. `reconstruct_plan_ref` stays pure (provider passed in, no config read in
+  `resume.py`). Stamp sites that hold no backend instance use
+  `issues.resolve_issue_backend_id(repo_root)` — that id resolver exists precisely so stamping
+  needn't construct a backend. Future stamp sites follow the pass-the-id-in pattern rather than
+  reading config deep in pure modules.
+
+## Required-kwarg-first as a caller census
+
+When a plan says "add a required keyword," treat its named call sites as a **floor** — grep all
+callers. The `[issues]` plan named only one `reconstruct_plan_ref` caller as needing
+`provider=backend.backend_id`; the function had **four** production callers (`resume_cmd.py`,
+`implement_cmd.py`, `run_worker.py`, `objective/run_cmd.py::_dispatch_stage_remote`). Making the
+kwarg required is what surfaced them loudly — the type checker/test suite forces completeness.
+
+## Doctor arm-mapping over a collapsed error type
+
+The resolver deliberately collapses `tomllib.TOMLDecodeError` into `IssueBackendError` (consumers
+need one error type), which erases the malformed-TOML vs bad-selection distinction doctor needs
+(warn-defer vs fail). The landed shape: `_issues_check` calls `load_committed_issues_backend`
+first to catch `TOMLDecodeError` (→ warn, defer to the config check), then calls the resolver and
+maps its `IssueBackendError` arms. **Known substring coupling**: the linear-vs-unknown split
+matches `"not yet supported"` in the resolver's error text — rewording it silently degrades the
+tailored remediation (still `fail`, so not dangerous). If a third arm ever appears, give
+`IssueBackendError` a structured kind instead.
+
+## Opaque backend-owned header ids
+
+`objective_comment_id` is `int | str | None` (GitHub numeric, Linear string UUID). Read sites
+accept `str | int` and `str()` it before use; consumers must never interpret it. The remaining CLI
+envelope `int(...)` coercions stay tagged `# GitHub-numeric id assumption` (the grep tag below).
+
+## Selection-managed package entries are two-directional
+
+`_converge_linear_package` is the second instance of the `_converge_provider_packages` shape: an
+identity-matched settings entry is *removed* when the selection is absent — hand-adding the
+package without selecting it is explicitly unsupported. Composing it inside `_converge_settings`
+keeps it under the `settings-wiring` SSOT (doctor dry-runs/fixes it with zero new
+checks/capabilities).
+
 ## Gotchas / residuals
 
 - **Module-name shadowing**: `perk/issues.py` collides with natural local names (e.g. an `issues`
@@ -75,8 +121,10 @@ neutral-state helper).
 - **`PlanState` default friction**: the protocol's `PlanState` has no `state` default while the
   gateway shape does — backends must always populate it; expect fixture friction at extraction
   time.
-- **`resolve_issue_backend` returns GitHub unconditionally** until Node 1.3 (the `[issues]` config
-  read, doctor check, and contracts amendment are deferred there by design).
+- **`resolve_issue_backend`'s non-github `raise` arms are placeholders, not dead code** — each is
+  replaced when that backend's constructing arm lands; don't "clean them up".
+- `error_type="github_error"` for `IssueBackendError` at CLI boundaries is still GitHub-named (the
+  rename was explicitly deferred).
 - **The protocol's docstring contracts** (normalized `"OPEN"/"CLOSED"` states, string ids, the
   error-mapping discipline) are only enforced for backends covered by an annotated binding —
   drift is possible for anything outside that net.
@@ -93,4 +141,6 @@ neutral-state helper).
 - `tests/test_issue_backend.py`, `tests/test_issues.py` — conformance, late-binding, boundary, and
   import-direction tests
 - `docs/learned/workflow/github-gateway.md` — the gateway the substrate lives in
+- `docs/learned/workflow/linear-backend.md` — the Linear backend's client, dual-encoding markers,
+  readiness wiring, and prompt rendering
 - `docs/learned/toolchain/ty.md` — ty suppression syntax + enum strictness hit during this work

@@ -66,6 +66,10 @@ publishing via `setStatus` even though the footer renders the segments directly)
   `session_start` could leak the previous factory's subscriptions). Accepted trade: the install
   closures capture the *first* session's `ctx`; if pi ever invalidated old context objects, the
   footer's model/context would silently freeze. Revisit if pi documents dispose-on-replace.
+- **The footer is a single last-wins slot** — extensions receive `session_start` in settings load
+  order, so a later-loaded package calling `ctx.ui.setFooter` silently replaces perk's footer (no
+  error, no log). Borrowed packages must never call it; see `workflow/borrowed-packages.md` for
+  the vetting grep and the retirement recipe.
 - **`setWorkingIndicator` is never called** (charter D5 rescinded): its frames are pre-baked
   verbatim strings with no theme hook — structurally incompatible with the
   never-pre-bake-theme-colors law. Re-check that API constraint before any "brand the spinner"
@@ -123,3 +127,4 @@ token formatter (which rendered `200.0k`), rippling into other consumers of the 
 - `shared/contracts.md` P2.T2c — the RPC dual-publish contract
 - `docs/design/tui-charter.md` — the charter the surfaces converge to
 - `docs/learned/pi/extension-seams.md` — `report()` and the consolidation-seam recipe
+- `docs/learned/workflow/borrowed-packages.md` — the setFooter-clobber vetting/retirement recipe

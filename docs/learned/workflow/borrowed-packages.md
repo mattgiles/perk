@@ -1,6 +1,6 @@
 ---
 title: Borrowed Pi packages — the lockstep-surfaces recipe and the evaluation bar
-read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), allowlisting a borrowed package's tools in read-only mode, or deciding between a provider seam and a plain borrow.
+read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), vetting a borrow candidate (singleton UI slots like setFooter), retiring a borrowed package, allowlisting a borrowed package's tools in read-only mode, or deciding between a provider seam and a plain borrow.
 ---
 
 # Borrowed Pi packages
@@ -24,6 +24,30 @@ Adding (or removing) a borrowed package touches a fixed set of surfaces **in one
    the package alters (e.g. the tool-gating restricted set).
 5. Tests — a membership assert in `tests/test_init_idempotent.py`, plus any behavior anchor (e.g.
    `READ_ONLY_TOOLS` membership in `extension/toolGating.test.ts`).
+
+## Vetting: grep for singleton UI slots (the setFooter clobber)
+
+Pi's footer is a **single last-wins slot**, and extensions receive `session_start` in settings
+load order — so a later-loaded borrowed package calling `ctx.ui.setFooter` silently clobbers
+perk's footer (no error, no log). This is now a contracts.md rule: borrowed packages must never
+call `ctx.ui.setFooter`. Before borrowing, grep the candidate's **installed** source for
+`setFooter` and other singleton UI slots — and note gitignored `.pi/npm/` defeats ripgrep
+evidence: use `--no-ignore` (or `grep -r`) under `.pi/npm/node_modules/`, or the grep comes back
+falsely empty.
+
+## The retirement recipe (thrice-affirmed)
+
+Removing a borrowed package (pi-plan, rpiv-todo, pi-status precedents) touches, in one commit:
+remove from `BORROWED_PACKAGES` with an inline rationale comment, edit the committed
+`.pi/settings.json`, fix the capability summary string, amend both contracts.md sites
+(borrowed-set enumeration + the owning-feature paragraph), and invert the init-idempotency
+membership assert. **No `doctor --fix` stale-entry removal** — consumer repos keep the entry as an
+unmanaged user extra (precedent thrice-affirmed; a stale-entry doctor check is a plausible future,
+deliberately not built).
+
+Fixture subtlety: "borrowed package preserved across provider select/deselect" fixtures must use a
+*still-borrowed* package; if a test needs strict "user extra survives" semantics, anchor on
+`npm:@me/custom`, not a borrowed entry (init would re-add a borrowed one regardless).
 
 ## Foreign tool names are inert when absent
 
@@ -63,3 +87,4 @@ source), actively maintained, license, and the package's pi-version floor vs per
 - `perk/capabilities.py` — the `borrowed-packages` capability summary
 - `docs/learned/workflow/provider-seam.md` — the seam this recipe is *not*; also `package_filter`
 - `docs/learned/pi/context-system.md` — the read-only mode whose allowlist this touches
+- `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects

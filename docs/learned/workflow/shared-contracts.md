@@ -1,6 +1,6 @@
 ---
 title: Adding a parsed shared/ contract — the registry/bindings recipe
-read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, or tracing how a shared contract ripples into both planes + the test suite.
+read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
 ---
 
 # Parsed `shared/` contracts
@@ -66,6 +66,22 @@ You must immediately reconcile the objective's Reconcilable prose region and nod
 (using `reconcile_objective` and `objective_node` tools) to ensure the active roadmap accurately reflects
 the implemented reality.
 
+## The cross-plane SSOT prompt-fragment pattern
+
+When a prompt fragment must agree **byte-for-byte across planes**, give each plane one exported
+helper (`perk/launch.py::_plan_read_instruction` ↔ `extension/lifecycleGates.ts::planReadInstruction`)
+plus a shared literal-fragment substring list (`LINEAR_READ_SUBSTRINGS`) asserted from BOTH suites
+(`tests/test_worker_prompt_parity.py` ↔ `extension/worker.test.ts`). Choose substrings as
+fragments of the *instruction*, not the scaffold — scaffold fragments match every arm and pin
+nothing.
+
+## Registry vocabulary keys land with their first declaring stage
+
+The §8.1 deferral discipline is proven: `cache.session-data` was deferred at one node and landed
+the moment a stage declared it in `writes` — the Python self-check validates membership
+automatically and the TS parser carries lists opaquely, so the whole change is YAML + one pytest
+assertion. **Never add registry vocabulary speculatively.**
+
 ## Adding a registry stage ripples into both planes + hardcoded tests
 
 A new stage in `shared/registry.yaml` ripples to:
@@ -97,3 +113,4 @@ validator strict.
 - `tests/test_packaging.py` — the wheel + npm-pack bundle assertions (the publish-surface guard)
 - `docs/learned/workflow/skill-bindings.md` — the bindings subsystem this contract underpins
 - `docs/learned/workflow/init-doctor.md` — managed-convergence SSOT (the doctor-check side of drift)
+- `docs/learned/workflow/linear-backend.md` — the backend-aware prompt arms the parity lists pin

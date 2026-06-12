@@ -28,7 +28,9 @@ Recovery:
 Recurrence variant: **`run_ci` green ≠ committable.** The pre-commit format hook can reformat
 *after* CI passed — e.g. collapsing a habit-wrapped signature back to one line because the
 project's line length actually permits it. Treat the first commit attempt as part of verification,
-not an afterthought: commit → hook rewrites → re-add → re-commit → re-run CI.
+not an afterthought: commit → hook rewrites → re-add → re-commit → re-run CI. (This trap keeps
+recurring — multiple independent confirmations — so build the re-commit loop into your habit, not
+your surprise.)
 
 ## `RUF100` fires on a `# noqa` for a non-enabled rule
 
@@ -45,6 +47,13 @@ And tie the multi-line-collapse case to the format-on-commit trap above: the pre
 hook reformats (e.g. collapses a multi-line call) on commit, and `just lint` / `ruff check` won't
 catch what `ruff format` *changes* — expect a first-commit "files modified", then `git add -A` +
 re-commit.
+
+## `RUF043`: regex metacharacters in `pytest.raises(match=...)`
+
+`pytest.raises(match=...)` patterns are regexes; a pattern containing metacharacters (`.`, `(`,
+etc.) draws **RUF043** unless it's a raw/escaped regex (`match=r"\.\.\."` or `re.escape(...)`).
+Recurred twice in quick succession — expect it whenever an error message under test contains a
+dot.
 
 ## Template string E501 (line length) rule
 

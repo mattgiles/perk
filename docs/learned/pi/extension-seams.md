@@ -21,6 +21,13 @@ exactly this recipe. This keeps the seam unit-testable offline (headful/headless
 severity) without importing the SDK context. Return the built string from the seam for reuse as
 tool-result text.
 
+Corollary for plan handoffs: **when a plan names SDK types for an exported core, narrow the landed
+signature to the minimal structural slices the sibling seams already export** (`EntrySink`,
+`BranchSource`, `ReportTarget`, `SessionDataCtx`). Callers pass `pi`/`ctx` unchanged — plan
+fidelity is preserved — and the core's offline tests reuse the existing fakes with no harness
+(the `writePlanDraft` precedent: spec'd against `ExtensionAPI`/`ExtensionContext`, landed against
+the slices).
+
 ## The "pure module + effectful seam" reconciliation
 
 A module headered "pure, fs-light, unit-testable" can absorb an effectful helper **without losing
@@ -50,6 +57,12 @@ Two non-obvious facts around it:
   reference — build the payload object once and pass it to both the append and the expectation. A
   deep compare is needed only when the expected value comes from a *different* source (e.g.
   decoded from the cold door, where `planRefsEqual` applies).
+- **Object-valued fields need a custom `equals`** (second confirmed instance after
+  `planRefsEqual`): the `session_artifacts` map append passes an identity-subset comparator —
+  per-name `{run_id, digest}` plus key-count — not a deep-equal of the whole object (timestamps
+  and informational fields may drift). Note the exact-key-count strictness: an interleaved append
+  between rebuild and read-back spuriously fails the strict append — loud and fail-open, known
+  and acceptable.
 
 ## Aspirational-comment fiction is a migration signal
 
@@ -112,3 +125,5 @@ planSave change deliberately inherited the seam's fail-safe.
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve
 - `docs/learned/pi/tui-surfaces.md` — the surfaces module that owns the rich-UI call sites, and
   the harness notify/status recipes
+- `docs/learned/workflow/session-data.md` — the provenance map field behind the identity-subset
+  comparator

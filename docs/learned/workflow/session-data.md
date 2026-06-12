@@ -1,0 +1,137 @@
+---
+title: Session data, run identity, provenance & GC
+read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers, the `plan_draft` read-only carve-out, or `perk state prune` / the `cache-gc` doctor check.
+---
+
+# Session data, run identity, provenance & GC
+
+Objective #339 built one lifecycle: a session gets a run identity (minted or claimed), keys its
+scratch data dirs by it, records provenance pointers for artifacts it writes, and a GC eventually
+prunes the dirs. The pieces only make sense against each other — this doc carries the whole
+narrative: identity → data dirs → provenance → the read-only writer → GC.
+
+## Warm run_id minting
+
+- **The mint lives in `index.ts`'s `session_start` `none` arm, NOT in `decideClaim`** — keeping the
+  pure decision function byte-identical bought claim/keep/fork stability *by construction* (the
+  existing lifecycle tests were the regression proof, literally).
+- `extension/runId.ts` is a **hand-rolled spec-conformant ULID** (~40 lines, no npm dep): 10 time
+  chars by repeated div/mod of `Date.now()` (48-bit, plain `Math.floor` arithmetic — no BigInt),
+  16 randomness chars by a standard 5-bit bit-walk over `randomBytes(10)`.
+- **Cross-plane validity is proven by grammar, not subprocess**: the TS test pins the exact
+  Crockford regex (`/^[0-9A-HJKMNP-TV-Z]{26}$/`) as the proof Python's `ULID.from_str` parses
+  minted ids — no node→pytest bridge. Cheap and sufficient when the foreign parser is
+  spec-anchored.
+- The sentinel `source: "mint"` is observability, deliberately NOT pinned in contracts §8.7;
+  `shared/registry.yaml`'s per-stage `run_id` policy governs stage *transitions* — don't "fix" it
+  to mention warm minting (§8.2's three-way doctrine is canonical).
+- The mint append is **loud-but-non-fatal on read-back failure**: the session continues
+  unidentified and re-mints on the next `session_start`; downstream accessors must tolerate
+  `run_id === undefined`.
+
+## The accessor seam + the two-resolver doctrine
+
+There are intentionally **TWO** current-run resolvers in the extension with opposite degradation:
+
+- `coldDoor.activeRunId` stamps a `cold-door-<ts>` fallback — right for stdin-staging
+  debuggability.
+- `sessionData.activeSessionRunId` degrades to `null` — a stamp would orphan data dirs and break
+  run_id-keyed provenance.
+
+**Do not unify them.** The divergence is documented in both headers and in contracts §8.1.
+
+Also: `list_dispatch_records` composes through `list_run_ids` (dirs-only enumeration) — any future
+stray-file-in-`runs/` semantics live in one place.
+
+## Provenance pointers
+
+- **The repo digest convention**: `sha256:<hex>` lowercase, computed by
+  `extension/sessionData.ts:digestSessionData` over bytes **read back from disk after the write**
+  — not the in-memory string (catches encoding/disk surprises). Reuse the exported helper; never
+  mint a second convention.
+- **Per-field LWW means map-valued workflow-state fields must append the whole merged map**:
+  rebuild, spread the prior map, append `{...prior, [name]: pointer}`. Appending only the new
+  entry clobbers siblings. Any future per-name map field in `WorkflowState` inherits this rule.
+- **A recorded `path` is informational only** — workflow-state entries are reconstructable from
+  untrusted session history, so validation always re-derives the path from `run_id` + `name`
+  through the owning seam and never dereferences `pointer.path`. Generalizes: never trust a
+  path/locator stored in a session entry.
+- **Refusal tiering is two-grade by design**: run_id mismatch → *silent* `null` (it IS the
+  fork-no-inheritance / concurrent-isolation mechanism, not an anomaly); pointer-present-but-broken
+  (missing file, digest mismatch) → stderr warn + `null` (a broken promise). Don't "fix" the
+  silent arm into a warning — forks would spam.
+- **Writer success = fully recorded**: a returned path means file written + read back + pointer
+  strict-appended. Pointer-append failure returns `null` and deliberately leaves an orphan file
+  (gitignored scratch; GC prunes). Consumers must treat `null` as "not consumable", even if the
+  file visibly exists.
+
+## The read-only carve-out recipe (proven end-to-end by `plan_draft`)
+
+For any future writer that must work in read-only mode:
+
+1. A **fixed artifact-name constant** — no path/name tool parameter.
+2. The path derived **exclusively through the session-data accessor seam**
+   (`writeSessionArtifact` = file + provenance pointer in one gesture).
+3. Allowlist only the tool *name* in `extension/toolGating.ts::READ_ONLY_TOOLS` — the gate's
+   edit/write/bash blocking stays untouched.
+
+Harness proof pattern: plant a session with `mode: "read-only"`, then `invokeTool` succeeds while
+`workflowState().mode` confirms the gate is up. `READ_ONLY_CONTEXT` is exported and interpolates
+`READ_ONLY_TOOLS.join(", ")` — allowlist changes track automatically; tests pin one representative
+name.
+
+## GC: the destructive-op triad
+
+`perk/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
+any future reclaim/cleanup feature:
+
+- **Pure-read policy module** (`perk/gc.py::plan_prune`, injectable `now`).
+- **Report-only doctor check** (`cache-gc`: warn + remediation, no `--fix` arm — doctor fixes stay
+  documented-non-destructive; pure FS + bundled registry, so deterministic in unit tests).
+- **A single destructive command** (`perk state prune`, alias `gc`) — the ONLY deletion site.
+
+Key policies:
+
+- **Registry-derived terminal set**: `terminal_stage_ids()` computes successor-less stages from the
+  bundled registry (currently `{learn}`), degrading to `frozenset()` with a stderr warn on
+  `RegistryError` — never hardcode stage names into GC-like policies; a graph change must flow
+  through automatically.
+- **Conservative eligibility ladder**: current-run protection (`PERK_RUN_ID` base-ULID match covers
+  fork children) → terminal-stage rule (requires a *consumed* handoff; unreadable handoff ⇒ never
+  terminal-pruned, age rule only) → age rule (ULID self-date, `st_mtime` fallback for non-ULID
+  names). **Never delete on a guess** — mirrors `worktree wipe`'s skip-on-uncertainty posture.
+- **Pruned runs leave dangling provenance pointers by design**: the accessor seams degrade absent
+  files to `None`/`null` by contract, so no pointer cleanup exists — check contracts §8.1 before
+  "fixing" this.
+- `DEFAULT_MAX_AGE_DAYS` is a module constant pinned in §8.1; a `[gc]` config table was
+  deliberately deferred as premature.
+- `_fail` is duplicated in two CLI groups deliberately (avoiding a cross-group import); a third
+  occurrence should trigger folding it into a shared CLI helper.
+
+## Test recipes
+
+- A **live shared branch array** backing both the `EntrySink` fake and the ctx's `getBranch()`
+  makes the append→rebuild→verify loop testable with zero mocking; **rewind** is simulated by
+  `branch.slice(0, n)` into a fresh ctx, **fork** by appending a `run_id: "RID.1"` entry atop the
+  parent's entries.
+- `captureStderr` (swap `console.error`, restore in `finally`) cleanly asserts the warn-tier vs
+  silent-tier distinction.
+- `ULID.from_datetime(...)` (python-ulid) mints backdated run_ids for age-rule tests; `os.utime`
+  covers the mtime-fallback branch.
+- **CliRunner + macOS symlinks**: `git rev-parse --show-toplevel` resolves `/var/folders/…` to
+  `/private/var/folders/…`, so JSON payloads carrying repo-rooted paths won't equal paths built
+  from `runner.isolated_filesystem()`'s raw dir — `.resolve()` the tmp dir before constructing
+  expected payload paths (same family as the worktree `.resolve()`-both-sides rule).
+
+## Sources
+
+- Issues #350, #358, #363, #372, #367 (PRs #348, #355, #362, #371, #366)
+
+## Cross-references
+
+- `docs/learned/pi/extension-seams.md` — the strict-append seam + object-valued `equals`
+- `docs/learned/pi/extension-api.md` — the `PERK_RUN_ID` harness leak
+- `docs/learned/workflow/worktree-lifecycle.md` — the `.resolve()`-both-sides rule's origin
+- `docs/learned/workflow/plan-save-surfaces.md` — the save surface that consumes the plan-draft
+  artifact
+- `docs/learned/workflow/source-scan-guards.md` — the path guards confining the data-dir literals
