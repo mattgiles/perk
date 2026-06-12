@@ -12,17 +12,25 @@ is the durable knowledge.
 ## The fidelity gap: assume the model picks the lower-fidelity surface
 
 - The **`plan_save` tool** (TS, warm) passes `objective_id` / `node_id` explicitly.
-- The **`/plan-save` command** (TS) forwards only `{plan, title}` to `perk plan-save` — it **cannot
-  carry the link**.
+- The **approval path** (`approvalSave`, and its `/plan-save` manual-failsafe command, which takes
+  only an optional title) carries **no model params at all** — no plan, no link.
 
-In a read-only plan-mode session (e.g. `objective-plan`), the `plan_save` *tool* is gated out by the
-read-only tool gate (`toolGating.ts` `READ_ONLY_TOOLS`), so the model falls back to the *command*,
-which drops the link. Result: `objective_id: null` in the plan-ref, the node stranded in `planning`,
-the downstream `/land` reconcile short-circuiting `no_objective_link`.
+**The historical incident (pre-carrier behavior):** in a read-only plan-mode session (e.g.
+`objective-plan`), the `plan_save` *tool* is gated out by the read-only tool gate (`toolGating.ts`
+`READ_ONLY_TOOLS`), and the model fell back to the then-`{plan, title}`-only `/plan-save` command,
+which dropped the link. Result: `objective_id: null` in the plan-ref, the node stranded in
+`planning`, the downstream `/land` reconcile short-circuiting `no_objective_link`.
 
-**Lesson:** when two surfaces can perform the "same" action, assume the model will pick the
-lower-fidelity one. Don't rely on the model passing tool params correctly — make the canonical
+**Lesson (durable):** when two surfaces can perform the "same" action, assume the model will pick
+the lower-fidelity one. Don't rely on the model passing tool params correctly — make the canonical
 linkage flow through a **plane that owns the lifecycle**.
+
+**The current shape:** the `/plan-save` command takes only a title and invokes `approvalSave`
+(file-first resolution + warm claim recovery inside `savePlan`), so the "lower-fidelity surface"
+today is the approval path itself — and the two recovery carriers below (the cold `handoff_extra`
+blob, the warm `objective_node_claim` entry) close it. The dropped-link outcome is a *historical
+incident*, not the live failure mode. See contracts §8.23 for the consolidated file-first
+contract.
 
 ## The fix pattern: `handoff_extra` as a general cold-door carrier
 
@@ -135,6 +143,7 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 
 ## Cross-references
 
+- `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
 - `extension/planSave.ts` — `resolvePlanSource`, `savePlan`, the `approvalSave` seam
 - `extension/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
