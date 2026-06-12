@@ -48,7 +48,7 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
 - **Amend the contract, don't drift.** If an implementation changes cross-plane *behavior*, amend
   `shared/contracts.md` in the **same turn**.
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
-  `setWidget`/`setFooter` are called only inside `extension/surfaces.ts` + `extension/report.ts`;
+  `setWidget`/`setFooter` are called only inside `extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`;
   everything else uses their seams (`report()`, `createPerkStatus`, `setStandingWidget`,
   `installPerkFooter`). `setWorkingIndicator` is never called (charter D5 rescinded).
   `extension/surfacesGuard.test.ts` fails CI on violations — extend the surfaces module rather
