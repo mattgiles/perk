@@ -571,7 +571,7 @@ def test_find_plan_body_comment_id_returns_matching_id(monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
     )
-    assert github._find_plan_body_comment_id(123, ROOT) == 101
+    assert github.prs._find_plan_body_comment_id(123, ROOT) == 101
 
 
 def test_find_plan_body_comment_id_none_when_no_match(monkeypatch):
@@ -579,7 +579,7 @@ def test_find_plan_body_comment_id_none_when_no_match(monkeypatch):
     monkeypatch.setattr(
         subprocess, "run", _GhDispatch([(_has("issues/123/comments"), _Proc(0, listing))])
     )
-    assert github._find_plan_body_comment_id(123, ROOT) is None
+    assert github.prs._find_plan_body_comment_id(123, ROOT) is None
 
 
 def test_update_plan_issue_patches_comment_and_title(monkeypatch):

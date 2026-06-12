@@ -440,7 +440,7 @@ def test_plan_save_dry_run_offline(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("dry run must not shell gh")
 
-    monkeypatch.setattr(github, "_run", boom)
+    monkeypatch.setattr(github._exec, "_run", boom)
     result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--dry-run"])
     assert result.exit_code == 0
     assert "plan-header" in result.output and "plan-body" in result.output
