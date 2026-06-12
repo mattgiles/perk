@@ -154,6 +154,34 @@ def load_committed_issues_backend(repo_root: Path) -> str | None:
     return parse_issues_backend(raw.get("issues"))
 
 
+def parse_issues_team(raw: Any) -> str | None:
+    """Read the raw `[issues]` table's ``team`` value when it is a non-blank ``str``.
+
+    LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
+    absent/ill-typed/blank ``team`` yields ``None``. The value is the Linear **team key**
+    (e.g. ``"ENG"``) — what ``LinearIssueBackend`` resolves to a team UUID via its ``_team_id()``
+    query. Returns the stripped string otherwise.
+    """
+    table = raw if isinstance(raw, dict) else {}
+    value = table.get("team")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def load_committed_issues_team(repo_root: Path) -> str | None:
+    """Read the `[issues] team` key from **committed** `.pi/perk.toml` only (no local overlay).
+
+    Mirrors ``load_committed_issues_backend`` exactly: deliberately bypasses ``load_config`` (and
+    thus ``perk.local.toml``) — the backend decides where canonical durable state is written, so a
+    per-user team override would fragment the canonical store. A missing file yields ``None``; a
+    malformed-TOML ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check
+    owns malformed TOML).
+    """
+    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    return parse_issues_team(raw.get("issues"))
+
+
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
     """Read the flat `[providers]` table into a `{plan, todo}` selection (string values only).
 

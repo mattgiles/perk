@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from perk.config import load_committed_compaction, load_committed_issues_backend, load_config
+from perk.config import (
+    load_committed_compaction,
+    load_committed_issues_backend,
+    load_committed_issues_team,
+    load_config,
+)
 from perk.init import PERK_TOML_TEMPLATE
 
 
@@ -221,3 +226,44 @@ def test_issues_backend_malformed_toml_raises(tmp_path):
     _write(tmp_path, "perk.toml", "[issues\nbackend =")
     with pytest.raises(tomllib.TOMLDecodeError):
         load_committed_issues_backend(tmp_path)
+
+
+def test_issues_team_absent_file_is_none(tmp_path):
+    assert load_committed_issues_team(tmp_path) is None
+
+
+def test_issues_team_seeded_template_is_inert(tmp_path):
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_committed_issues_team(tmp_path) is None
+
+
+def test_issues_team_absent_table_is_none(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nroot = ".worktrees"\n')
+    assert load_committed_issues_team(tmp_path) is None
+
+
+def test_issues_team_reads_value(tmp_path):
+    _write(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
+    assert load_committed_issues_team(tmp_path) == "ENG"
+
+
+def test_issues_team_strips_surrounding_whitespace(tmp_path):
+    _write(tmp_path, "perk.toml", '[issues]\nteam = "  ENG  "\n')
+    assert load_committed_issues_team(tmp_path) == "ENG"
+
+
+@pytest.mark.parametrize("value", ["true", "7", '""', '"   "'])
+def test_issues_team_illtyped_or_blank_is_none(tmp_path, value):
+    _write(tmp_path, "perk.toml", f"[issues]\nteam = {value}\n")
+    assert load_committed_issues_team(tmp_path) is None
+
+
+def test_issues_team_is_committed_only_ignores_local_overlay(tmp_path):
+    _write(tmp_path, "perk.local.toml", '[issues]\nteam = "ENG"\n')
+    assert load_committed_issues_team(tmp_path) is None
+
+
+def test_issues_team_malformed_toml_raises(tmp_path):
+    _write(tmp_path, "perk.toml", "[issues\nteam =")
+    with pytest.raises(tomllib.TOMLDecodeError):
+        load_committed_issues_team(tmp_path)
