@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, or a test run exits -1/143 with no FAILED line.
+read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, a test run exits -1/143 with no FAILED line, you suspect main/the branch point was already red (the stash-diagnostic), or you hit a delete/edit rebase conflict on lines your branch moved to a new file.
 ---
 
 # Worktree `node_modules` resolution
@@ -32,6 +32,29 @@ version.
 
 **Rule:** any plan that bumps a pinned Pi/SDK version must run `npm install` in the worktree (or the
 root checkout, depending on which `node_modules` is resolving), or the bump is inert.
+
+## Diagnosing pre-existing breakage (prove provenance FIRST)
+
+A stale SDK is only one cause of "red in files I never touched" — main itself can be genuinely
+broken at your branch point (e.g. the #386/#387 merge race left a stale `issue: { number }`
+fixture failing tsc on origin/main HEAD; both #391 and #392 found genuine red-on-main this way).
+Before assuming you caused it, **prove provenance**:
+
+```
+git stash && npx tsc --noEmit -p . && git stash pop
+```
+
+(or run the suite on the clean branch point). If the failure reproduces without your diff, it's
+pre-existing — fix-the-fixture in-scope when it's a one-line contract-shape correction, and never
+misattribute it to your change.
+
+### The delete/edit rebase-conflict recipe
+
+When main edits lines your branch *moved* to a new file, the rebase surfaces a delete/edit
+conflict. Resolution: **keep the deletion, then verify the moved copy already carries main's fix**
+(grep the new file for the fixed shape). When a payload shape changes, grep ALL test fixtures
+repo-wide, not just the owning module's suite (see `workflow/cold-door-client.md`'s merge-race
+fixture sweep).
 
 ## Commit hygiene after installing in a worktree
 
@@ -75,3 +98,5 @@ runtime's nested one — see `docs/learned/pi/headless-session-drive.md` for the
 - `docs/learned/pi/extension-api.md` — the 0.78.x API surface a stale SDK fails to provide
 - `docs/learned/toolchain/biome.md` — the other half of the TS CI gate
 - `docs/learned/workflow/provider-seam.md` — the `shared/providers.yaml` seam these smokes exercise
+- `docs/learned/workflow/cold-door-client.md` — the merge-race fixture sweep after a cross-plane
+  shape change

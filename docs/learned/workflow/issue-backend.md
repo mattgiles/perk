@@ -1,6 +1,6 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/issue_backend.py, perk/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids, the doctor issues check, or fighting the boundary/import-direction tests.
+read_when: You are touching perk/issue_backend.py, perk/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, the doctor issues check, or fighting the boundary/import-direction tests.
 ---
 
 # The IssueBackend seam
@@ -67,6 +67,36 @@ neutral-state helper).
 - **Mixed-tier `try` blocks** (one `try` spanning issue-tier + PR/CI-tier calls) use
   `except (GitHubError, IssueBackendError)` tuples — keep the tuples until the tiers fully
   separate.
+
+## Opaque string ids: the backend is the authority on junk
+
+Plan/objective ids are opaque backend-owned strings. Parse-time validation rejects **only**
+empty/path-unsafe shapes (`/`, `.`, `..`); formerly-rejected inputs (`not-a-number`, `#abc`) are
+now *valid* opaque ids that the **backend** rejects (GitHub's number-conversion edge raises
+`github_error`). When loosening a validator, expect **every "rejects garbage" negative test to
+need an explicit decision**: re-point at genuinely-invalid input (`bad/id`, booleans) or re-purpose
+to assert the new contract (e.g. the supervisor's malformed-`pr`-backlink case no longer silently
+degrades to `plan_required`).
+
+### Sweep ALL id consumers, not just decoders
+
+The relaxation's blast radius reached beyond the planned decoder list: the warm objective tools
+(`extension/objectivePlan.ts`'s number-typed params, the `/objective-reconcile` `\d+` arg parser),
+`workflow run list`'s `isdigit()` PR-overlay gate, and `launch.py`'s checkpoint gate — which ALSO
+had a `provider != "github"` early-return that skipped Linear; both gates had to go. **Grep for
+`isdigit` / `\d+` / number-typed params when widening an id type.** The string-or-number tool-param
+shape lives in `extension/toolParams.ts` (`idParam`/`idArrayParam` — see
+`pi/tool-param-decode.md`).
+
+## Per-backend land closure
+
+GitHub keeps `Closes #N` in the squash body byte-identically; non-github backends get a
+`Plan: <id> — <url>` line plus an explicit fail-open `close_issue` (surfaced as the
+`plan_issue_closed` envelope field). **Branch on `backend_id`, never on id shape.** Known gap:
+`extension/land.ts` ignores `plan_issue_closed`, so the warm `/land` message doesn't mention the
+explicit close under Linear. Also: the GitHub envelope renames (`issue.number`→`issue.id` etc.)
+are **deliberately breaking** for external `perk … --json` consumers; contracts §8.21 is the
+canonical record.
 
 ## `backend_id` + the stamp discipline
 

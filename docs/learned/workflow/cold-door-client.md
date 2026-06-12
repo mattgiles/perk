@@ -1,6 +1,6 @@
 ---
 title: The runColdDoor envelope-aware client — decode policy, narrowing helpers, door migrations
-read_when: You are adding a warm door that shells to a `--json` cold door (the substrate is mandatory), writing a decode for a cold-door JSON envelope, choosing strict vs advisory vs fully-lenient validation for a payload field, consuming a fail-arm payload, or chasing a door/fixture assertion change after strictening a decode.
+read_when: You are adding a warm door that shells to a `--json` cold door (the substrate is mandatory), writing a decode for a cold-door JSON envelope, choosing strict vs advisory vs fully-lenient vs derived for a payload field, consuming a fail-arm payload, chasing a door/fixture assertion change after strictening a decode, hardening a door against cold/warm version skew, or auditing fixtures after a cross-plane shape change merges.
 ---
 
 # The cold-door client (`runColdDoor`)
@@ -35,13 +35,15 @@ choice.**
 The crisp criterion: **anything the warm door appends into workflow-state must be fully strict** —
 a half-formed `plan_ref` poisons `planRefsEqual` and every downstream consumer, so any miss is
 `bad_output`. **Render-only sub-objects are advisory** — validated, dropped on malformation — the
-mutation already succeeded, so the success report must survive. Three arms, chosen per payload
+mutation already succeeded, so the success report must survive. Four arms, chosen per payload
 field:
 
 - **Strict on the core payload:** malformed → decode returns `null` → the client reports
   `bad_output` with "`<label>` reported success but returned an unexpected payload — the perk CLI
   and the perk extension may be version-skewed (update/rebase so both planes match)". Use this arm for anything the
   success message/marker logic **dereferences** or persists. Reference: `decodePlanRef`.
+  (`decodePlanSave` is the reference example for the criterion: strict **iff** appended to
+  workflow-state — it is strict only on `plan_ref`.)
 - **Advisory sub-objects are validated-but-dropped:** malformed → the field becomes `undefined` and
   the success report survives. Use this arm for report-only extras whose underlying mutation already
   succeeded (e.g. land's `objective`/`learn` sub-reports). Reference: `decodeObjectiveNode`.
@@ -50,11 +52,43 @@ field:
   that door and needs **no decode-edge tests** (they can't fail). References: the objectivePlan
   decode and `extension/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
   capture mutation precedes the decode, so a success envelope must survive an undecodable
-  sub-object; the post-#387 cold/warm skew lesson).
+  sub-object — `learn_issue?` is optional, never null, and `bad_output` is unreachable for that
+  door; the post-#387 cold/warm skew lesson).
+- **Derive-don't-decode (the strongest tier):** when a payload field is render-only AND
+  redundant with a strict field (constructed from the same source in the cold door), **derive it
+  from the strict field** instead of decoding it independently — the field's shape becomes
+  *unrepresentable as a failure mode*, stronger than lenient decoding (which still parses the field
+  and merely tolerates absence). Realized twice: `decodePlanSave` (strict only on `plan_ref`;
+  the rendered `issue.id`/`url` derived from the ref — byte-identical by construction in the cold
+  door, which builds the ref from the issue; `existed` advisory via `booleanField`) and the learn
+  door.
+
+**The `bad_output` reachability acceptance test.** The doctrine's intended end-state for a door's
+decode: `bad_output` is reachable **only** for a payload whose persistence would corrupt
+workflow-state. When auditing other doors' decodes, use that as the acceptance criterion.
+
+**Plan-internal inconsistency rule:** when a plan's test expectation contradicts its own
+implementation spec (the `existed === false` vs `null` resolution — a legacy fixture that *is* a
+decodable object with a valid boolean), implement the **specified mechanism** and split the
+assertions to cover both arms.
 
 A dropped advisory field must also **short-circuit any follow-up drive** — land's reconcile drive
 skips when `objective` is `undefined` (pinned by test). Don't let a downstream drive dereference an
 advisory field the decode dropped.
+
+## Version skew between the planes
+
+**Cross-plane skew is structural for the dev flow.** Warm doors exec bare `perk` from PATH (a
+uv-tool editable install → an arbitrary dev worktree) while the session loaded the extension at
+start; no operational guard exists (a doctor skew check / launch-time `PERK_BIN` pinning were
+explicitly deferred). The landed mitigation tier is **per-door decode hardening** — strict decodes
+still hard-fail under skew, they just say so honestly.
+
+**The skew-naming reword:** `runColdDoor`'s decode-null message names version skew ("the perk CLI
+and the perk extension may be version-skewed"), and the `unexpected payload` substring was
+deliberately preserved so the door-test `/unexpected payload/` regexes needed zero edits. **The
+substring-preserving reword is the general lever for hardening shared error text** without
+assertion churn.
 
 ## The fail-arm payload narrowing pattern
 
@@ -132,6 +166,14 @@ Future doors only test their own decode edges.
   e2e scenarios (e.g. `extension/workerE2e.test.ts`) — and bringing fixtures up to full contract
   shape. **Fix the fixture, never loosen the decode** (the real cold door always emits the full
   shape).
+- **The merge-race fixture sweep.** Semantically-green-per-PR ≠ green-after-merge when two
+  in-flight PRs share a contract shape (one adds consumers of a shape, the other renames its
+  fields): git merges cleanly (no textual conflict), each branch's CI is green, merged main is red
+  (the #386/#387 `issue: { number }`→`id` race, which then recurred as a delete/edit rebase
+  conflict in #396). **After ANY cross-plane shape change lands, grep ALL test fixtures repo-wide
+  for the legacy field name** — never trust the changing PR's own sweep; in-flight branches
+  re-introduce the old shape. No CI guard for this class exists (merge queue / post-merge main CI
+  both absent).
 - **`assert.deepEqual` pins on a discriminated-union arm are shape-exhaustive:** adding an optional
   field to the arm (e.g. `payload` on the fail arm) is an assertion change wherever the arm is
   pinned exactly.
@@ -148,6 +190,7 @@ Future doors only test their own decode edges.
   `activeRunId`
 - `extension/coldDoor.test.ts` — the client mechanics pins + the compile-time `ExecHost` drift check
 - `extension/land.ts` — the advisory-drop + three-way-narrow exemplar
+- `extension/planSave.ts` — `decodePlanSave`, the derive-don't-decode exemplar
 - `extension/address.ts` — the fail-arm payload re-narrowing exemplar
 - `docs/learned/workflow/warm-door-commands.md` — a warm door must render every cold-door outcome;
   this client is the mechanism

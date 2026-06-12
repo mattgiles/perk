@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/linear.py` / `perk/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, or planning the Node 4.1 live smoke.
+read_when: You are touching `perk/linear.py` / `perk/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, or planning the live smoke gate.
 ---
 
 # The Linear issue backend
@@ -113,6 +113,60 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
 See `init-doctor.md` for the general rule that network repairs live in the verify-gated repair
 gesture, never a `ManagedConvergence`.
 
+## Agent-session emission (one-way, internally gated)
+
+`perk/linear_agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
+AgentActivity updates during implement runs. Four hook sites (`launch_stage`, `run_worker`,
+`_pr_submit_impl`, `_pr_land_impl`) each make a **bare unconditional call** — the gate (stamped
+`provider == "linear"` + `LINEAR_AGENT_TOKEN` present) and the try/except live INSIDE each emitter.
+This keeps hook sites one-line with no per-site gating to drift, and makes "dormant by default /
+byte-identical without the token" provable **per-emitter** (zero-requests tests) rather than
+per-site.
+
+### Linear agent API facts (offline-verified, NOT live)
+
+- AgentSession/AgentActivity need an OAuth `actor=app` token (a personal `LINEAR_API_KEY` is
+  rejected); the header form is `Authorization: Bearer` — hence the additive `bearer=True` mode on
+  `LinearClient` (the personal-key header is byte-unchanged).
+- The sanctioned proactive create is `agentSessionCreateOnIssue` (accepts the human identifier,
+  e.g. `ENG-123`, as `issueId`).
+- Session status is **derived automatically from activities** — no manual state management;
+  sessions go stale ~30 min after the last activity.
+
+### Testing a fail-open side-channel
+
+The wrong test shape: monkeypatch the emitter with a raising spy — the try/except is *inside* the
+emitter, so the raise propagates, fails the test, and proves nothing. The honest shape: **force the
+gate open** (monkeypatch `linear_agent.emission_enabled` → True, plus a canned
+`cache.read_agent_session` for follow-up emitters) and **break the substrate**
+(`agent_client_from_env` raising), then assert exit-code/`--json`-payload byte-neutrality
+end-to-end through the real fail-soft wrapper. Reusable whenever a fail-open side-channel is wired
+into a host command.
+
+Plus the MockTransport injection recipe for module-internal client construction: monkeypatch the
+module's `LinearClient` symbol with a keyword-only factory that closes over a transport — records
+every request the emitters compose without touching emitter code or the real client class.
+
+## E2E lifecycle validation patterns (from the string-id work)
+
+- **Named GraphQL operations make substring-keyed fakes routable**: the UUID lookup is a named
+  operation — `query UuidForIssue($id: String!) { issue(id: $id) { id } }` — so both the scripted
+  fake and the stateful fake route it distinctly from generic `issue(id` reads. With
+  substring-keyed response dicts, **insertion order disambiguates** — the most specific needle
+  first.
+- **Read-seeding kills the extra mutation query**: every issue read seeds the identifier→UUID
+  cache, so the common read-then-mutate path costs zero extra requests; only cold mutations pay one
+  lookup.
+- **The stateful `FakeLinearWorkspace` discipline**: identifier-or-UUID tolerated on *reads* (the
+  documented `issue(id:)` tolerance), **UUIDs ONLY on mutations** — passing an identifier to a
+  mutation raises `Entity not found`, structurally pinning the `_uuid_for` discipline with no
+  explicit assertion. Page size 2 exercises the cursor loop on tiny data for free.
+- **Late-bound `linear.client_from_env` monkeypatching** runs the whole real stack (resolver →
+  `LinearIssueBackend` → real CLI commands) offline; only the GitHub PR tier needs the classic
+  gateway fakes. **One shared workspace threading the entire lifecycle in a single test** catches
+  cross-command contract drift (e.g. the plan-body comment must be patched, not duplicated, on
+  re-save) that per-command tests can't.
+
 ## Backend-aware prompts (Node 3.1)
 
 - **Per-plane plan-read SSOT helpers**: `perk/launch.py::_plan_read_instruction` ↔
@@ -151,6 +205,11 @@ gesture, never a `ManagedConvergence`.
 
 ## Node 4.1 deferral register (carried, flagged)
 
+- **The live smoke gate (`docs/linear-smoke-gate.md`) is still UNRUN** — a runbook with an empty
+  observations table. ProseMirror round-trip fidelity, the real "Entity not found"
+  `extensions.code`, RATELIMITED behavior, mutation identifier-acceptance, and the exact
+  agent-session GraphQL field signatures are all unverified live; the runbook's observations table
+  is the landing pad for whatever live runs discover.
 - Live round-trip / ProseMirror fidelity is **mitigated-not-proven** (documented-supported
   constructs only); the live smoke gate proves it.
 - `"not found"` *message-substring* tolerance in `_issue_or_none`/`_comment_body_or_none` (no
@@ -160,11 +219,15 @@ gesture, never a `ManagedConvergence`.
   offline fakes only check substrings.
 - RATELIMITED retry/backoff (deferred until live call patterns exist).
 - `LINEAR_API_KEY` as a GHA secret for headless/remote runs.
-- `--json` envelope numeric-id re-shaping (see the grep tag in `issue-backend.md`).
+- Agent-session deferrals: `perk address` emission, the `agentSessionUpdate.plan` checklist
+  (technology preview), elicitation, retry/backoff, a webhook receiver (emission is one-way).
+- **Residual**: a remote-created agent session is invisible to a later *local* land
+  (`agent-session.json` lives in the runner's checkout, so the local land skips its emission with a
+  stderr note) — accepted; a durable issue-tier session pointer would fix it.
 
 ## Sources
 
-- Issues #347, #356, #361, #370, #376 (PRs #344, #354, #359, #368, #375)
+- Issues #347, #356, #361, #370, #376, #389, #400 (PRs #344, #354, #359, #368, #375, #387, #399)
 
 ## Cross-references
 

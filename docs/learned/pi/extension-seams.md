@@ -1,6 +1,6 @@
 ---
 title: Extension consolidation seams — minimal structural interfaces, the report()/EntrySink seams, the P1/P2/P3 triage
-read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, migrating a workflow-state read-back site, routing a handler's notifies through report() (name shadowing, failFor-only failure surfacing, banner-fragile notify asserts), or deciding which call sites a single-message seam can absorb.
+read_when: You are collapsing a repeated context-dependent idiom in the extension into one tested function, building a seam like report()/branchOf/appendWorkflowState, extracting a tool's execute core for testability (minimal structural dependency slices), breaking a would-be module cycle with a type-only import, migrating a workflow-state read-back site, routing a handler's notifies through report() (name shadowing, failFor-only failure surfacing, banner-fragile notify asserts), or deciding which call sites a single-message seam can absorb.
 ---
 
 # Extension consolidation seams
@@ -27,6 +27,20 @@ signature to the minimal structural slices the sibling seams already export** (`
 fidelity is preserved — and the core's offline tests reuse the existing fakes with no harness
 (the `writePlanDraft` precedent: spec'd against `ExtensionAPI`/`ExtensionContext`, landed against
 the slices).
+
+The recipe extends to **extracting a tool's execute core for testability**: type the injected
+dependency as the minimal structural slice (e.g. the one-method `{ review(plan, signal) }` in
+`executePlanReview`), not the concrete collaborator — the fake then collapses an entire layer
+(bus + envelope + timers) per test instead of re-implementing the collaborator. See
+`workflow/plan-review-flow.md` for the realized testing recipe.
+
+## The type-only-import cycle break
+
+When a vocabulary type moves to a new owning module that the old module still references, import
+it back **type-only**: the new owner imports the old module's values normally; the old module's
+`import type { … }` of the moved type is erased at runtime, so no cycle exists. Realized when
+`plan_review` moved out of the plannotator adapter — `planReview.ts` imports the bridge (a value)
+from `planAdapterPlannotator.ts`, and the adapter imports `ReviewOutcome` type-only back.
 
 ## The "pure module + effectful seam" reconciliation
 
@@ -122,6 +136,7 @@ planSave change deliberately inherited the seam's fail-safe.
 - `extension/report.ts` — `report()`, `ReportTarget`
 - `extension/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
 - `docs/learned/pi/extension-api.md` — the SDK context the structural interface slices
+- `docs/learned/workflow/plan-review-flow.md` — the extracted-core + scripted-fake testing recipe
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve
 - `docs/learned/pi/tui-surfaces.md` — the surfaces module that owns the rich-UI call sites, and
   the harness notify/status recipes
