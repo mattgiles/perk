@@ -34,6 +34,7 @@ state_keys:
     - scratch         # per-run inter-process workflow files
     - handoff         # pre-session CLI->extension cold-door state
     - markers         # existence-based friction semaphores (e.g. pending-learn)
+    - session-data    # the run-scoped session data dir artifacts (scratch/runs/<run_id>/data/; #339 Node 2.1)
   # Tier 3 · session entries — transient in-session state.
   session:
     - workflow-state  # the single `perk:workflow-state` record (contracts.md §8.3)
@@ -89,7 +90,7 @@ stages:
     command: objective-plan   # P2.T10: dedicated cold door (perk objective-plan) + /objective-plan
     requires: [github.objective]                        # an objective issue must exist
     reads: [github.objective]                           # roadmap nodes + next-node selection
-    writes: [github.objective, session.workflow-state]  # mark node planning; set active_objective
+    writes: [github.objective, session.workflow-state, cache.session-data]  # mark node planning; set active_objective; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer
     predecessors: [objective-save]                      # P3.T2: objective-save now precedes planning
     successors: [plan]
 
@@ -102,7 +103,7 @@ stages:
     command: plan             # slash = /plan (perk-owned P2.T2a; toggles the read-only tool gate)
     requires: []
     reads: []
-    writes: [session.workflow-state]  # P2.T2a: /plan enter/exit appends `mode` (read-only/read-write)
+    writes: [session.workflow-state, cache.session-data]  # P2.T2a: /plan enter/exit appends `mode`; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer
     predecessors: [objective-plan]    # P2.T10: objective-plan is the new single initial
     successors: [save]
 
