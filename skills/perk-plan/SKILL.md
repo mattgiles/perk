@@ -1,6 +1,6 @@
 ---
 name: perk-plan
-description: Authoring a perk implementation plan and presenting it for review before the human saves it with the /plan-save command. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
+description: Authoring a perk implementation plan — draft with plan_draft, request a human review with plan_review (approval auto-saves), with present + /plan-save as the manual failsafe. Use when drafting, revising, or reviewing a plan in a perk repo, before it is saved to GitHub.
 ---
 
 # Authoring a perk plan
@@ -10,29 +10,31 @@ mode, read-only), then save it **verbatim** to GitHub. The save step is purely m
 the judgment lives here**. Write the plan so an executor (a future session, or another engineer)
 with **zero prior context** can implement it without guessing.
 
-## Saving: present the complete plan; the human runs `/plan-save`
+## Saving: draft → review → approval auto-saves
 
-In interactive plan authoring your deliverable is the **complete plan as your final message** —
-you never attempt to save it yourself (`/plan` is a user command you cannot run, and the
-`plan_save` tool is hidden while plan mode is on). The flow is:
+In interactive plan authoring the default flow is **review-first** (`/plan` is a user command you
+cannot run, and the `plan_save` tool is hidden while plan mode is on):
 
 1. Explore read-only and converge on the plan (`/plan` on).
-2. When the plan is decision-complete, write the **complete final plan as your last message** and
-   present it to the user for review. The message must be the clean plan and nothing else — no
-   preamble, no conversation — because the save scrapes it verbatim.
-3. The **human** runs **`/plan-save`** when satisfied: it scrapes your latest message as the plan,
-   saves it to GitHub, and on success automatically exits plan mode (the read-only → read-write
-   boundary in one gesture).
+2. Keep the working draft current with **`plan_draft`** — the validated draft artifact is what
+   gets reviewed AND saved.
+3. When the plan is decision-complete, call the **`plan_review`** tool — the human reviews the
+   plan in the configured review surface (perk's in-TUI editor review by default; the human may
+   edit the plan there, and those edits are written back to the draft before the verdict).
+4. On a **deny**, revise per the returned feedback, rewrite the draft with `plan_draft`, and call
+   `plan_review` again. On an **approve**, the plan is **auto-saved** to GitHub and the session
+   leaves read-only — no final-message re-dump, no telling the user to run `/plan-save`; relay
+   the save outcome instead.
 
-When the `plannotator-plan` provider is selected, the review step replaces the present-and-wait
-flow: keep the working draft current with **`plan_draft`** (the validated draft artifact is what
-gets reviewed AND saved) and call the **`plan_review`** tool when the plan is decision-complete —
-the Plannotator browser UI opens for the human. On a deny, revise per the returned annotations,
-rewrite the draft with `plan_draft`, and call `plan_review` again. On approve, **the plan is
-auto-saved** to GitHub and the session leaves read-only — no final-message re-dump, no human
-`/plan-save`; relay the save outcome instead. (When that provider is not selected, or `plan_review`
-reports it was skipped/unavailable, the default present-plan + human-`/plan-save` flow above
-applies — the manual failsafe.)
+When the `plannotator-plan` provider is selected, the same `plan_review` call opens the
+Plannotator browser UI instead of the in-TUI editor review — the flow is otherwise identical.
+
+If `plan_review` reports it was **skipped or unavailable** (headless session, the human dismissed
+the review, no surface), fall back to the manual flow: write the **complete final plan as your
+last message** — the clean plan and nothing else, no preamble — and the **human** runs
+**`/plan-save`** when satisfied (it prefers the validated draft artifact, falling back to scraping
+your latest message; on success it exits plan mode — the read-only → read-write boundary in one
+gesture).
 
 The `plan_save` **tool** remains the canonical save surface for **orchestrated factory flows**
 (objective-plan, learn-docs, replan), where the factory prompt explicitly instructs an autonomous

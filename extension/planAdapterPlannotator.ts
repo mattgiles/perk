@@ -1,36 +1,27 @@
-// The SECOND 3rd-party plan adapter — and the first with the AUGMENT posture. A perk-owned bridge
+// The SECOND 3rd-party plan adapter — and the first with the AUGMENT posture. A perk-owned shim
 // that enables `@plannotator/pi-extension` as a REAL, selectable plan provider: unlike the tombell
 // adapter (REPLACE posture — perk's plan surface fully vacates), plannotator AUGMENTS perk's plan
 // flow. perk's `/plan` mode, authoring injection, and read-only gate STAY (planMode skips only the
-// `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions); this shim
-// contributes plannotator's browser plan-review UI via a model-callable `plan_review` tool that
-// bridges to plannotator's published `plannotator:request` event API (in-process `pi.events` bus).
+// `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions).
 //
-// INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires — and the
-// `plan_review` tool does real work — only when the resolved `[providers] plan` selection is
-// `plannotator-plan` (read fresh per-event, same shape as planMode/planAdapterTombell). On any
-// other selection the tool soft-skips and the context handler only strips its own stale marker —
-// zero behavior change on the default path.
+// INJECTION + BRIDGE ONLY (Node 2.5 split): as of Node 2.5 the `plan_review` TOOL lives in
+// `extension/planReview.ts` — perk's backend-neutral review door — and this module is back to
+// the injection-only adapter shape: it owns (1) the plannotator review-step authoring context
+// (injected while the gate is active AND plannotator is selected) and (2) the pure event-bus
+// bridge (`createPlannotatorBridge`) that planReview.ts dispatches to when plannotator is the
+// selected plan provider. The bridge speaks plannotator's published `plannotator:request` event
+// API (in-process `pi.events` bus).
 //
-// REVIEW SEMANTICS (Node 2.4 — file-first, approval auto-saves): plannotator reviews the plan
-// while the session is still read-only (the tool is in READ_ONLY_TOOLS — review happens before
-// the gate ever comes off). The reviewed plan resolves FILE-FIRST via `resolvePlanSource`: the
-// validated `plan-draft.md` artifact wins; the `plan` param is the fallback for sessions that
-// never wrote a draft; the transcript scrape is NEVER reviewed (an approval would auto-save
-// scraped conversation bytes — no draft + no param soft-skips with a `plan_draft` redirect). An
-// APPROVED outcome wires into the shared `approvalSave` seam (`planSave.ts`, Node 2.3): auto-save
-// → D1a gate exit on success → terminating result (node link recovered from the
-// `objective_node_claim` carrier inside `savePlan`). A DENY returns feedback and directs a
-// `plan_draft` rewrite + re-review. Strict on deny, FAIL-OPEN on absence: plannotator missing /
-// unresponsive / headless soft-skips with a loud warning so plan authoring never wedges
-// (CI/supervisor safe) — those arms keep the present-the-plan + human-`/plan-save` discipline
-// (the manual failsafe).
+// INERT BY DEFAULT. The shim is ALWAYS registered in index.ts but the injection fires only when
+// the resolved `[providers] plan` selection is `plannotator-plan` (read fresh per-event, same
+// shape as planMode/planAdapterTombell). On any other selection the context handler only strips
+// its own stale marker — zero behavior change on the default path.
 //
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
-// restamps `cache.plan-ref.provider` (stays `"github"`). The adapter composes the gate AND the
-// save EXCLUSIVELY through the `approvalSave` seam (Invariant 1: composes, never owns — the gate
-// exit lives in the seam; the adapter never writes GitHub itself; the injection's gate-active
-// check reads the persisted `perk:workflow-state.mode`, the gate's own state twin).
+// restamps `cache.plan-ref.provider` (stays `"github"`). The adapter is INJECTION-ONLY again
+// (Invariant 1: composes, never owns) — the review tool, the `approvalSave` composition, and the
+// gate exit all live behind planReview.ts's seams; the injection's gate-active check reads the
+// persisted `perk:workflow-state.mode`, the gate's own state twin.
 //
 // EVENT ENVELOPE (pinned against `@plannotator/pi-extension@0.20.0`, `plannotator-events.ts`):
 //   request  — pi.events.emit("plannotator:request", { requestId, action: "plan-review",
@@ -40,13 +31,12 @@
 //   decision — pi.events.on("plannotator:review-result", { reviewId, approved, feedback?, ... })
 
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "./planMode.ts";
-import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./planSave.ts";
+// Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
+import type { ReviewOutcome } from "./planReview.ts";
 import { PLANNOTATOR_PLAN_PROVIDER_ID } from "./providers.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { paramsOf, stringParam } from "./toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
@@ -110,12 +100,6 @@ interface ReviewDecision {
   approved: boolean;
   feedback?: string;
 }
-
-/** The bridge outcome the tool maps into a result (also `details.status`). */
-export type ReviewOutcome =
-  | { status: "unavailable"; warning: string }
-  | { status: "aborted" }
-  | { status: "completed"; approved: boolean; feedback?: string; reviewId: string };
 
 /**
  * Create the plannotator bridge over an event bus: ONE persistent `plannotator:review-result`
@@ -198,209 +182,16 @@ export function createPlannotatorBridge(bus: PlannotatorBus): {
   return { review };
 }
 
-// ------------------------------------------------------------------------ tool result mapping
-
-interface ToolResult {
-  content: { type: "text"; text: string }[];
-  details: Record<string, unknown>;
-  terminate?: boolean;
-}
-
-const SKIP_TEXT =
-  "no external review surface configured — present the complete plan to the user in your next message.";
-
-function skipResult(): ToolResult {
-  return { content: [{ type: "text", text: SKIP_TEXT }], details: { status: "skipped" } };
-}
-
-/**
- * Map a non-approved bridge outcome into the model-facing tool result (exported for the offline
- * tests). The `completed` case renders the DENIED text — the execute path routes approved
- * outcomes to `approvedSaveResult` first, so callers only reach `completed` here with
- * `approved: false` (kept total for safety).
- */
-export function reviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
-  switch (outcome.status) {
-    case "unavailable":
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `WARNING: ${outcome.warning} — no review performed. ` +
-              "Present the complete plan to the user in your next message instead.",
-          },
-        ],
-        details: { status: "unavailable" },
-      };
-    case "aborted":
-      return {
-        content: [{ type: "text", text: "plan review aborted (turn interrupted)." }],
-        details: { status: "aborted" },
-      };
-    case "completed": {
-      const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
-      const text =
-        "plan DENIED — revise per this feedback, rewrite the working draft with plan_draft, " +
-        `then call plan_review again.${feedback}`;
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          status: "completed",
-          approved: outcome.approved,
-          feedback: outcome.feedback ?? null,
-          reviewId: outcome.reviewId,
-        },
-      };
-    }
-  }
-}
-
-/**
- * Map an APPROVED bridge outcome + the `approvalSave` outcome into the model-facing tool result
- * (exported for the offline tests). A successful save TERMINATES the turn (propagating the
- * seam's `terminate: true` intent); a failed save is non-terminating, leaves the gate read-only,
- * and directs the human `/plan-save` failsafe. Reviewer feedback is surfaced loudly as
- * implementation guidance — the approved bytes were saved verbatim, never post-edited. The
- * `no-plan` arm is defensively unreachable (the reviewed plan is always non-blank) but maps to
- * the save-failed shape rather than throwing.
- */
-export function approvedSaveResult(
-  outcome: Extract<ReviewOutcome, { status: "completed" }>,
-  save: ApprovalSaveOutcome,
-  opts: { paramMismatch: boolean },
-): ToolResult {
-  const feedback = outcome.feedback
-    ? "\n\nReviewer feedback (implementation guidance — the approved plan was saved verbatim):\n" +
-      outcome.feedback
-    : "";
-  const base = {
-    status: "completed",
-    approved: true,
-    reviewId: outcome.reviewId,
-    feedback: outcome.feedback ?? null,
-  };
-  if (save.status === "saved") {
-    const saveText = save.result.content[0]?.text ?? "";
-    const mismatch = opts.paramMismatch
-      ? "\n\n⚠ differing plan param ignored — the validated draft was reviewed and saved."
-      : "";
-    return {
-      content: [
-        { type: "text", text: `plan APPROVED by reviewer.${feedback}\n\n${saveText}${mismatch}` },
-      ],
-      details: { ...base, saved: true, gateExited: save.gateExited, save: save.result.details },
-      terminate: true,
-    };
-  }
-  const error =
-    save.status === "no-plan"
-      ? "no plan source resolved"
-      : save.result.details.ok
-        ? "unknown save failure"
-        : save.result.details.error;
-  return {
-    content: [
-      {
-        type: "text",
-        text:
-          `plan APPROVED by reviewer, but the auto-save FAILED (${error}) — the session stays ` +
-          `read-only. Ask the user to run /plan-save (the manual failsafe) to retry.${feedback}`,
-      },
-    ],
-    details: {
-      ...base,
-      saved: false,
-      save: save.status === "no-plan" ? null : save.result.details,
-    },
-  };
-}
-
-// ------------------------------------------------------------------------- the execute core
-
-/**
- * The `plan_review` execute core, extracted pure-over-its-seams (the bridge, the gating, the
- * ctx) so the resolution + approved-save paths are unit-testable offline (the same
- * pure-over-a-fake-bus split the bridge tests use, extended over the whole tool).
- */
-export async function executePlanReview(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  gating: ToolGating,
-  bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
-  params: unknown,
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  // Tool-boundary decode (Node 3.2), in this tool's native fail-open vocabulary: a MISTYPED
-  // `plan` (or non-object params) skip-shapes (`reason: "bad_input"`) without calling the
-  // bridge; an ABSENT `plan` proceeds — the validated draft artifact is the preferred source.
-  const p = paramsOf(params);
-  const plan = p === null ? null : stringParam(p, "plan");
-  if (plan === null) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "plan_review takes { plan?: string } — omit it (the plan-draft artifact is preferred) or pass a string.",
-        },
-      ],
-      details: { status: "skipped", reason: "bad_input" },
-    };
-  }
-  // 1. Not plannotator-selected → soft skip (the tool is allowlisted on every path).
-  if (!isPlannotatorPlanSelected(ctx.cwd)) return skipResult();
-  // 2. Headless → soft skip (fail-open; never wedges CI/supervisor runs on a browser UI).
-  if (!ctx.hasUI) return skipResult();
-  // 3. Objective-author session → soft skip (mirrors the injection's stage exception): an
-  //    approval here would auto-save a PLAN issue + exit the gate mid objective-authoring.
-  if (rebuildWorkflowState(branchOf(ctx)).stage === OBJECTIVE_AUTHOR_STAGE) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: "objective authoring saves with objective_save — plan_review does not apply here.",
-        },
-      ],
-      details: { status: "skipped", reason: "objective-author" },
-    };
-  }
-  // 4. File-first resolution (Node 2.4): artifact → param, NEVER transcript — an approval
-  //    auto-saves the reviewed bytes, and scraped conversation bytes must never be those.
-  const src = resolvePlanSource(ctx, plan);
-  if (src === null || src.source === "transcript") {
-    return {
-      content: [
-        {
-          type: "text",
-          text:
-            "no plan to review — write the working draft with plan_draft (or pass the plan " +
-            "param), then call plan_review again.",
-        },
-      ],
-      details: { status: "skipped", reason: "no_plan" },
-    };
-  }
-  // 5. Bridge to plannotator; an APPROVED decision wires into the approvalSave seam (auto-save
-  //    → D1a gate exit → terminating result); everything else maps via reviewOutcomeResult.
-  const outcome = await bridge.review(src.plan, signal ?? ctx.signal);
-  if (outcome.status === "completed" && outcome.approved) {
-    const save = await approvalSave(pi, ctx, gating, { reviewedPlan: src.plan });
-    return approvedSaveResult(outcome, save, { paramMismatch: src.paramMismatch });
-  }
-  return reviewOutcomeResult(outcome);
-}
-
 // ----------------------------------------------------------------------------- registration
 
 /**
- * Register the plannotator plan adapter: the augment-posture injection + the `plan_review` bridge
- * tool, inert unless `[providers] plan = "plannotator-plan"`. It NEVER calls setActiveTools and
- * never owns the gate — the APPROVED arm composes the gate + the save exclusively through the
- * `approvalSave` seam (Invariant 1: composes, never owns).
+ * Register the plannotator plan adapter: the augment-posture authoring-context injection, inert
+ * unless `[providers] plan = "plannotator-plan"`. INJECTION-ONLY (Invariant 1: composes, never
+ * owns) — the `plan_review` tool lives in planReview.ts (the backend-neutral review door), which
+ * dispatches to this module's bridge when plannotator is selected; the adapter itself never
+ * arbitrates tools and needs no gating.
  */
-export function registerPlanAdapterPlannotator(pi: ExtensionAPI, gating: ToolGating): void {
-  const bridge = createPlannotatorBridge(pi.events);
-
+export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
   // Inject the bridge context while the read-only gate is active AND plannotator is selected —
   // EXCEPT in an objective-author session (also read-only, but objectiveAuthor.ts owns its
   // authoring context there; mirrors planMode's stage exception). The gate-active check reads the
@@ -440,43 +231,5 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI, gating: ToolGat
         return true;
       }),
     };
-  });
-
-  // The model-callable review bridge. In READ_ONLY_TOOLS so it is callable INSIDE plan mode (the
-  // whole point — review happens before the gate ever comes off). Fail-open everywhere: not
-  // selected / headless / plannotator unresponsive all soft-skip so authoring never wedges.
-  pi.registerTool({
-    name: "plan_review",
-    label: "Plan review",
-    description:
-      "Present the plan to the configured external review surface (Plannotator browser UI) and " +
-      "wait for the human decision. Reviews the validated plan-draft artifact (keep it current " +
-      "with plan_draft); on approval the plan is auto-saved to GitHub and the turn terminates. " +
-      "On deny, revise per the returned feedback, rewrite the draft with plan_draft, and call " +
-      "again. No-op skip when no review surface is configured or the session is headless.",
-    promptSnippet: "Request a human review of the working plan draft (Plannotator)",
-    promptGuidelines: [
-      "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_review reviews AND auto-saves; the plan param is only a fallback when no draft exists.",
-      "Call plan_review only when the plan is decision-complete.",
-      "On a DENIED review, revise per the feedback, rewrite the draft with plan_draft, then call plan_review again.",
-      "On an APPROVED review, the plan is auto-saved and the turn ends — never re-dump the plan as a final message and never tell the user to run /plan-save; relay the save outcome instead.",
-      "If plan_review reports it was skipped or unavailable, fall back to presenting the complete plan; the human runs /plan-save (the manual failsafe).",
-    ],
-    executionMode: "sequential",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        plan: {
-          type: "string",
-          description:
-            "Optional — the validated plan-draft.md artifact is preferred when present; this " +
-            "param is the fallback for sessions that never wrote a draft.",
-        },
-      },
-    },
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return executePlanReview(pi, ctx, gating, bridge, params, signal);
-    },
   });
 }

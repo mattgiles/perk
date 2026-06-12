@@ -67,10 +67,18 @@ implement it without guessing. Anchor every change durably — function/class na
 descriptions, structural locations — never line numbers. Resolve every open choice before saving;
 a saved plan must leave no decisions to the implementer.
 
-When the plan is decision-complete: write the COMPLETE final plan as your last message and present
-it to the user for review. Do NOT attempt to save it yourself — the user runs /plan-save when
-satisfied (it scrapes your latest message, so that final message must be the clean, complete plan
-and nothing else).`;
+When the plan is decision-complete, request a human review:
+- Keep the working draft current with plan_draft — the validated plan-draft artifact is what gets
+  reviewed AND auto-saved.
+- Call the plan_review tool — the human reviews the plan in the configured review surface (perk's
+  in-TUI editor review by default).
+- If the review is DENIED: revise per the feedback, rewrite the draft with plan_draft, then call
+  plan_review again.
+- If the review is APPROVED: the plan is auto-saved and the session leaves read-only. Relay the
+  save outcome — do NOT re-dump the plan as a final message and do NOT tell the user to run
+  /plan-save.
+- If plan_review reports it was skipped or unavailable (headless, dismissed, no surface): present
+  the complete plan as your final message; the human runs /plan-save (the manual failsafe).`;
 
 /** Build the full plan-authoring injection, appending the project config addendum when present. */
 export function planContextContent(cwd: string): string {
@@ -122,7 +130,7 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
 
   function announce(ctx: ExtensionContext, on: boolean): void {
     const message = on
-      ? "plan mode ON — read-only exploration; author the plan and present it for review; save with /plan-save when satisfied."
+      ? "plan mode ON — read-only exploration; author the plan, then review with plan_review (approval auto-saves; /plan-save is the manual failsafe)."
       : "plan mode OFF — full tool access restored.";
     report(ctx, "plan-mode", "info", message);
   }

@@ -16,6 +16,11 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   assert.match(base, /\[PLAN AUTHORING\]/);
   assert.match(base, /Discoveries/);
   assert.match(base, /never line numbers/);
+  // Node 2.5: the review-first ending — plan_review when decision-complete; /plan-save is the
+  // manual failsafe when the review reports skipped/unavailable.
+  assert.match(base, /plan_review/);
+  assert.match(base, /plan_draft/);
+  assert.match(base, /\/plan-save \(the manual failsafe\)/);
 
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(
