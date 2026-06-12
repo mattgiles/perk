@@ -2863,8 +2863,19 @@ unpinned plain-string entry is appended (bundled `linear` skill accepted wholesa
 (perk treats the package as managed by the selection; hand-adding it without selecting linear is
 unsupported). A malformed committed TOML defers to the config check (selection treated as absent).
 
-**Explicit Node 3.1 deferral.** Prompt rendering is still GitHub-shaped: linear-selected sessions
-render `gh issue view` prompts. Nothing crashes — `perk/launch.py` falls back to `open <url>` for
-non-github providers and the best-effort checkpoint guard returns early — but backend-aware
-prompt rendering (and read-only-mode allowlisting of the pi-mono-linear `linear_*` tools) lands
-in Node 3.1.
+**Backend-aware prompt rendering (Node 3.1).** Every plan-read prompt site branches on
+`cache.plan-ref.provider` via the per-plane helpers `perk/launch.py::_plan_read_instruction` and
+`extension/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
+paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker.test.ts`). The
+`linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools (the
+plan body is the first comment — true under every backend's `create_plan_issue`) with an
+`open <url>` fallback; unknown providers keep the plain `open <url>` arm. Learn prompts
+(`_learn_prompt`, `extension/learn.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
+--state merged` merged-PR derivation under every backend — PRs are GitHub-universal.
+`extension/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
+unconditionally (foreign names are inert when the package is absent); the mutating/sensitive
+tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`, the two
+`linear_upload_file*`, `linear_configure_auth`) are deliberately excluded. The perk-implement and
+perk-learn skills carry per-backend `backends/` reference directories (`github`, `linear`),
+delivered by the whole-directory skills sync. Historical Status notes elsewhere quoting
+`gh issue view` (e.g. P1.T4c) are records — left untouched.

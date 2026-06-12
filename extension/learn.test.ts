@@ -119,6 +119,21 @@ test("learnGuidance derives the head branch from the plan-ref (skill pointer is 
   assert.match(noRef, /`learn` tool/);
 });
 
+test("learnGuidance: a linear plan-ref reads via the linear tools but keeps the gh PR derivation", () => {
+  // Node 3.1: PRs are GitHub-universal under every issue backend.
+  const linear = learnGuidance({ ...PLAN_REF, provider: "linear" });
+  assert.match(linear, /linear_get_issue/);
+  assert.match(linear, /linear_list_comments/);
+  assert.match(linear, /gh pr list --head plan-42/);
+  assert.doesNotMatch(linear, /gh issue view/);
+  // The github arm is unchanged.
+  assert.match(learnGuidance(PLAN_REF), /gh issue view 42 --comments/);
+  // An unknown provider falls back to the plan url; PR derivation still rides gh.
+  const other = learnGuidance({ ...PLAN_REF, provider: "gitlab" });
+  assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
+  assert.match(other, /gh pr list --head plan-42/);
+});
+
 test("tool: learn with a summary delegates capture, surfaces the issue, and clears", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN);

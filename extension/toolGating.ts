@@ -37,13 +37,38 @@ export const READ_ONLY_TOOLS = [
   "code_search",
   "fetch_content",
   "get_search_content",
+  // pi-mono-linear's read-only tools (Node 3.1 — the [issues] backend = "linear" selection):
+  // none mutate Linear or the repo. Foreign names are inert when the package is absent (the
+  // pi-web-access precedent above). The mutating/sensitive tools are deliberately excluded:
+  // linear_create_issue, linear_update_issue, linear_create_comment, linear_upload_file,
+  // linear_upload_file_to_issue_comment, linear_configure_auth (writes ~/.pi/agent/auth.json).
+  "linear_whoami",
+  "linear_workspace_metadata",
+  "linear_list_teams",
+  "linear_get_team",
+  "linear_list_users",
+  "linear_get_user",
+  "linear_list_issues",
+  "linear_get_issue",
+  "linear_search_issues",
+  "linear_list_my_issues",
+  "linear_list_projects",
+  "linear_get_project",
+  "linear_list_issue_statuses",
+  "linear_get_issue_status",
+  "linear_list_labels",
+  "linear_list_cycles",
+  "linear_list_documents",
+  "linear_get_document",
+  "linear_list_comments",
 ];
 
 /** The read-only marker / custom-message type injected into context while active. */
 const MODE_CONTEXT_TYPE = "perk:mode-context";
 const READ_ONLY_MARKER = "[READ-ONLY MODE]";
 
-const READ_ONLY_CONTEXT = `${READ_ONLY_MARKER}
+/** Exported for tests: the injected read-only mode context (interpolates the allowlist). */
+export const READ_ONLY_CONTEXT = `${READ_ONLY_MARKER}
 You are in perk read-only mode — a structurally enforced exploration mode.
 
 - You can only use: ${READ_ONLY_TOOLS.join(", ")}.

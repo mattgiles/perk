@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "./cache.ts";
-import { gateDecision, implementHandoffPrompt } from "./lifecycleGates.ts";
+import { gateDecision, implementHandoffPrompt, planReadInstruction } from "./lifecycleGates.ts";
 import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import type { WorkflowState } from "./workflowState.ts";
 
@@ -138,6 +138,22 @@ test("implementHandoffPrompt: carries the plan forward (read it; never summarize
   // A non-github provider falls back to opening the url.
   const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
   assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
+  // A linear ref renders the pi-mono-linear read recipe (Node 3.1).
+  const linear = implementHandoffPrompt({ ...REF, provider: "linear" });
+  assert.match(linear, /linear_get_issue/);
+  assert.match(linear, /linear_list_comments/);
+});
+
+test("planReadInstruction: three arms (github / linear / fallback)", () => {
+  assert.equal(planReadInstruction("github", "42", "https://x/42"), "gh issue view 42 --comments");
+  const linear = planReadInstruction("linear", "uuid-1", "https://linear.app/x/ENG-1");
+  assert.ok(linear.includes("use the `linear_get_issue` tool (id `uuid-1`)"));
+  assert.ok(linear.includes("then `linear_list_comments`"));
+  assert.ok(linear.includes("the plan body is the first comment"));
+  assert.ok(
+    linear.includes("if the linear tools are unavailable, open https://linear.app/x/ENG-1"),
+  );
+  assert.equal(planReadInstruction("gitlab", "9", "https://gl/x"), "open https://gl/x");
 });
 
 test("/implement: inside a clean impl worktree -> seeded ctx.newSession handoff (output capped)", async () => {

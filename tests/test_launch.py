@@ -320,6 +320,33 @@ def test_initial_prompt_primes_learn():
     assert _initial_prompt(_stage("learn"), None) is None
 
 
+_LINEAR_PLAN_REF = {
+    "provider": "linear",
+    "pr_id": "a1b2c3d4-0000-0000-0000-000000000000",
+    "url": "https://linear.app/acme/issue/ENG-123",
+}
+
+
+def test_implement_prompt_linear_uses_linear_tools_with_url_fallback():
+    """Node 3.1: a linear plan-ref renders the pi-mono-linear read recipe (not `gh issue view`),
+    with `open <url>` as the in-prompt fallback."""
+    prompt = _initial_prompt(_stage("implement"), _LINEAR_PLAN_REF)
+    assert prompt is not None
+    assert "linear_get_issue" in prompt
+    assert "linear_list_comments" in prompt
+    assert "open https://linear.app/acme/issue/ENG-123" in prompt
+    assert "gh issue view" not in prompt
+
+
+def test_learn_prompt_linear_keeps_gh_pr_derivation():
+    """Node 3.1: the linear learn prompt reads the plan via the linear tools, but the merged-PR
+    derivation stays `gh` — PRs are GitHub-universal under every issue backend."""
+    prompt = _initial_prompt(_stage("learn"), _LINEAR_PLAN_REF)
+    assert prompt is not None
+    assert "linear_get_issue" in prompt and "linear_list_comments" in prompt
+    assert f"gh pr list --head plan-{_LINEAR_PLAN_REF['pr_id']} --state merged" in prompt
+
+
 def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch):
     """Real-git integration (D4/D5): implement creates plan-<pr_id> + branch, materializes
     handoff + plan-ref into it, and reuses the worktree on a second run."""

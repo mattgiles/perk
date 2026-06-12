@@ -44,6 +44,14 @@ const IMPLEMENT_SUBSTRINGS = [
   "`[WIP:n]`",
   "`[DONE:n]`",
 ];
+// The Node 3.1 linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
+// tests/test_worker_prompt_parity.py (the literal fragments of the shared linear arm).
+const LINEAR_READ_SUBSTRINGS = [
+  "use the `linear_get_issue` tool",
+  "then `linear_list_comments`",
+  "the plan body is the first comment",
+  "if the linear tools are unavailable, open ",
+];
 const ADDRESS_SUBSTRINGS = [
   "You are addressing review feedback on the PR for plan",
   "Spawn the `perk.review-classifier` agent (the `subagent` tool)",
@@ -467,6 +475,21 @@ test("initialPromptFor: implement output carries the cross-plane invariant subst
   assert.ok(prompt);
   for (const s of IMPLEMENT_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
   assert.ok(prompt?.includes("gh issue view 148 --comments"));
+});
+
+test("initialPromptFor: linear implement output carries the linear read substrings", () => {
+  const linearRef: PlanRef = {
+    provider: "linear",
+    pr_id: "a1b2c3d4-0000-0000-0000-000000000000",
+    url: "https://linear.app/acme/issue/ENG-123",
+    labels: [],
+    objective_id: null,
+  };
+  const prompt = initialPromptFor("implement", linearRef);
+  assert.ok(prompt);
+  for (const s of LINEAR_READ_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
+  assert.ok(prompt?.includes("open https://linear.app/acme/issue/ENG-123"));
+  for (const s of IMPLEMENT_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
 });
 
 test("initialPromptFor: address output carries the cross-plane invariant substrings", () => {

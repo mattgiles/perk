@@ -60,9 +60,27 @@ async function guardTransition(
  * never summarize it — the plan is the only artifact that crosses the boundary (erk
  * context-preservation-prompting / impl-context). Pure → unit-testable offline.
  */
+/**
+ * The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the saved
+ * plan". Byte-identical to `perk/launch.py::_plan_read_instruction` (the Python twin); drift in
+ * either plane fails the paired parity suites. `github` reads via `gh`; `linear` points at the
+ * pi-mono-linear tools with an `open <url>` fallback; any other provider falls back to opening
+ * the url.
+ */
+export function planReadInstruction(provider: string, prId: string, url: string): string {
+  if (provider === "github") return `gh issue view ${prId} --comments`;
+  if (provider === "linear") {
+    return (
+      `use the \`linear_get_issue\` tool (id \`${prId}\`), then \`linear_list_comments\` — ` +
+      "the plan body is the first comment; " +
+      `if the linear tools are unavailable, open ${url}`
+    );
+  }
+  return `open ${url}`;
+}
+
 export function implementHandoffPrompt(ref: PlanRef): string {
-  const readCmd =
-    ref.provider === "github" ? `gh issue view ${ref.pr_id} --comments` : `open ${ref.url}`;
+  const readCmd = planReadInstruction(ref.provider, String(ref.pr_id), ref.url);
   return (
     `You are implementing perk plan ${ref.provider} #${ref.pr_id} (${ref.url}) on this branch.\n\n` +
     `First, read the full plan:\n    ${readCmd}\n\n` +
