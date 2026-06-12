@@ -287,7 +287,12 @@ same LWW field; a warm append makes the next reload's reconciliation a no-op. Th
 `save` stage a direct writer of `session.workflow-state`. The warm door also **surfaces the
 objective node→plan link outcome** returned by `perk plan-save` (`objective_node`): a successful
 advance shows `→ in_progress`, a failed one shows a visible `⚠ … NOT advanced — re-run /plan-save`
-warning (§8.4 "The node↔plan link") — it is not silently swallowed.
+warning (§8.4 "The node↔plan link") — it is not silently swallowed. The warm door's decode of the
+`perk plan-save --json` payload is strict **only** on `plan_ref` (the field appended to
+workflow-state); the rendered issue id/url are derived from it (byte-identical by construction in
+the cold door, which builds the ref from the issue), and `existed`/`objective_node` are advisory —
+so a successful cold save can never be reported as a warm failure by render-only payload fields
+(e.g. under CLI↔extension version skew, the #387/#390 incident).
 
 **Approval→save orchestration seam (Node 2.3 of #339).** The exported `approvalSave` seam
 (`extension/planSave.ts`) is the shared APPROVED-review → save orchestration: artifact-first plan

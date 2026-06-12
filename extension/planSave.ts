@@ -74,7 +74,13 @@ export interface ObjectiveNodeLink {
 export type SaveResult = Result<PlanSaveOk>;
 export type PlanSaveDetails = SaveResult["details"];
 
-/** The decoded `perk plan-save --json` payload slice the warm door consumes. */
+/**
+ * The decoded `perk plan-save --json` payload slice the warm door consumes. Decode policy
+ * (`docs/learned/workflow/cold-door-client.md`: strict iff appended to workflow-state): only
+ * `plan_ref` is strict. The rendered `issue.id`/`url` are DERIVED from the strict ref — the cold
+ * door constructs the ref from the issue (`pr_id == issue.id`, `url == issue.url`), so they are
+ * byte-identical by construction; `existed` and `objective_node` are advisory.
+ */
 interface PlanSavePayload {
   issue: { id: string; url: string; existed: boolean | undefined };
   plan_ref: PlanRef;
@@ -123,20 +129,23 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
 }
 
 /**
- * Narrow the `perk plan-save --json` success payload. Strict on `issue` and (fully) on `plan_ref`
- * (malformed → bad_output); the advisory `objective_node` sub-object is validated but dropped when
- * malformed — the plan genuinely saved, so the success report must survive it.
+ * Narrow the `perk plan-save --json` success payload. Strict ONLY on `plan_ref` (malformed →
+ * bad_output — it is appended to workflow-state, where a half-formed ref would poison
+ * `planRefsEqual`). The rendered issue id/url are derived from the strict ref instead of decoded
+ * independently — the cold door builds the ref FROM the issue, so they are byte-identical by
+ * construction; this makes any `issue` sub-object shape change (e.g. the #387 `number`→`id`
+ * rename under CLI↔extension version skew, the #390 incident) skew-harmless. `existed` and
+ * `objective_node` are advisory — the plan genuinely saved, so the success report must survive
+ * them. With `plan_ref` the only strict field, `bad_output` is reachable only for a payload whose
+ * persistence would corrupt workflow-state.
  */
 function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
-  const issue = objectField(payload, "issue");
-  if (issue === undefined) return null;
-  const id = stringField(issue, "id");
-  const url = stringField(issue, "url");
-  if (id === undefined || url === undefined) return null;
   const ref = decodePlanRef(payload);
   if (ref === null) return null;
+  const issue = objectField(payload, "issue");
+  const existed = issue === undefined ? undefined : booleanField(issue, "existed");
   return {
-    issue: { id, url, existed: booleanField(issue, "existed") },
+    issue: { id: ref.pr_id, url: ref.url, existed },
     plan_ref: ref,
     cached: booleanField(payload, "cached"),
     updated: booleanField(payload, "updated"),

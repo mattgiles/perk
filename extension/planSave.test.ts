@@ -395,6 +395,79 @@ test("tool: success:true with a malformed plan_ref fails as bad_output, no linka
   }
 });
 
+test("tool: a legacy pre-#387 issue shape (number, no id) still saves — derived from plan_ref", async () => {
+  // The #390 incident regression (the #391 sibling): a version-skewed CLI emitting a different
+  // `issue` sub-object shape must NOT fail a save that already succeeded — the rendered issue
+  // id/url are derived from the strict plan_ref (byte-identical by construction in the cold door).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const legacy = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { number: 390, url: "https://gh/o/r/issues/390", existed: false }, // pre-#387 shape
+    plan_ref: {
+      provider: "github",
+      pr_id: "390",
+      url: "https://gh/o/r/issues/390",
+      labels: ["perk:plan"],
+      objective_id: null,
+    },
+  });
+  const bin = fakePerk(cwd, { stdout: legacy });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as {
+      ok: boolean;
+      issue?: { id?: string; url?: string };
+      existed?: boolean | null;
+    };
+    assert.equal(details.ok, true, "the save succeeded despite the skewed issue shape");
+    assert.deepEqual(details.issue, { id: "390", url: "https://gh/o/r/issues/390" });
+    assert.equal(details.existed, false, "existed is advisory — still decoded from the issue");
+    assert.equal(result.terminate, true);
+    assert.match(result.content[0]?.text ?? "", /Saved plan #390/);
+    assert.equal(
+      (h.workflowState().active_plan_ref as { pr_id?: string } | null)?.pr_id,
+      "390",
+      "the linkage was appended",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: an absent issue sub-object still saves — derived from plan_ref", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const noIssue = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    plan_ref: {
+      provider: "github",
+      pr_id: "77",
+      url: "https://gh/o/r/issues/77",
+      labels: ["perk:plan"],
+      objective_id: null,
+    },
+  });
+  const bin = fakePerk(cwd, { stdout: noIssue });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const details = result.details as {
+      ok: boolean;
+      issue?: { id?: string; url?: string };
+      existed?: boolean | null;
+    };
+    assert.equal(details.ok, true);
+    assert.deepEqual(details.issue, { id: "77", url: "https://gh/o/r/issues/77" });
+    assert.equal(details.existed, null);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a malformed objective_node is dropped (advisory), save still succeeds", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const advisory = JSON.stringify({
