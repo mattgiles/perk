@@ -1,6 +1,6 @@
 ---
 title: The provider seam — owned-surface deferral vs always-registered substrate
-read_when: You are working on the plan/todo provider seam — the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating, the injection-only adapter shim, an augment-posture provider (the plannotator bridge), or `package_filter`.
+read_when: You are working on the plan/todo provider seam — the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating, the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
 ---
 
 # The provider seam
@@ -123,6 +123,37 @@ and (b) the foreign package's own self-enforcement for ad-hoc `pi --plan`. The p
 **reuses the existing `/plan-save` `extractPlanMarkdown` scrape** — no new save machinery; the shim
 only *directs the flow* into the substrate that already exists. **Anti-pattern:** do **not** compose
 `enter` / `exit` inside an adapter — double-`setActiveTools` creates a snapshot-ordering hazard.
+
+## The tombell review-first re-aim — generalizable adapter patterns
+
+Re-aiming the tombell adapter's injected prompt from harmless prose to action-directing prose
+(review-first: `plan_review` approval saves an issue + exits the gate) surfaced four patterns any
+foreign-adapter work should reuse:
+
+- **Foreign-package persisted state as a gating signal (the state-twin read).** An adapter can
+  condition behavior on a foreign extension's persisted session state by scanning the branch for
+  its custom entries — `isTombellPlanModeEnabled` (`extension/planAdapterTombell.ts`) reads
+  `@tombell/pi-plan`'s `plan-mode-state` entries: latest-wins (a later `enabled: false` defeats an
+  earlier `true`, mirroring tombell's own `session_start` rebuild), defensive false on
+  missing/malformed. This extends the gate's state-twin doctrine (read the persisted
+  `perk:workflow-state.mode`, never the gate object) to foreign packages. Risk: the entry shape is
+  pinned by convention only — if tombell renames it, the adapter degrades to silently-not-injecting
+  (fail-open, invisible; the harness `planMode` fixture would mask the drift).
+- **OR-shaped injection condition when an adapter serves two entry paths.** The injection fires
+  when (perk gate read-only) OR (tombell's own plan mode enabled), objective-author excepted — the
+  OR-arm serves ad-hoc interactive `pi` + tombell `/plan` with the perk gate off. When re-aiming an
+  adapter from harmless prose to action-directing prose, an unconditional-on-selection injection
+  becomes unsafe and must gain the gate condition.
+- **Injected prompts need a tools-may-be-hidden branch under foreign tool restrictions.**
+  tombell's `enable()` calls `setActiveTools` with a read-only set that excludes
+  `plan_draft`/`plan_review`, and an injection-only adapter can't fix that (Invariant 1: it never
+  touches gating/`setActiveTools`). So the prompt itself must carry an explicit "tools not in your
+  tool set → present the complete plan; the human runs /plan-save" arm — or the model wedges
+  trying to call invisible tools. Generalizable to any injected discipline that directs tool calls
+  under a foreign surface that restricts tools.
+- **Offline test recipe for the ad-hoc arm.** `plantSession(..., { planMode: true })` plants
+  exactly tombell's `plan-mode-state` entry shape; combined with `SessionManager.open` +
+  `loadPerkSession` it exercises "perk gate off, foreign mode on" fully offline.
 
 ## `package_filter` — verify the foreign manifest, don't trust an illustrative filter
 

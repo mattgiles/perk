@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop, the deterministic perk objective run supervisor loop, or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, or debugging a node stuck in planning.
 ---
 
 # Objective lifecycle
@@ -113,6 +113,38 @@ injection can no longer key off the read-only gate alone. A `stage` field on `pe
 persisted at **cold claim** from the handoff blob; `planMode` defers when `stage ===
 "objective-author"` and `objectiveAuthor.ts` injects instead (exactly one authoring context present).
 This stage-field disambiguation pattern is detailed in `pi/context-injection.md`.
+
+### The review-first authoring loop's artifact mechanics
+
+The objective authoring loop is review-first and file-first: `objective_draft` writes a session
+artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves through the
+`objectiveApprovalSave` seam. The artifact mechanics worth preserving:
+
+- **Store-as-JSON, render-at-the-door.** `objective_draft` writes a JSON artifact
+  (`{schema_version: 1, title?, prose, roadmap}`); the digest is computed over the **serialized
+  JSON**, not the prose; and the roadmap rides verbatim as `unknown[]` — node-shape validation
+  stays with the Python plane at save time. JSON is storage/transport only; the human review
+  surface renders markdown from it.
+- **Renderers live with the artifact owner, not the consumer.** `extension/objectiveDraft.ts`
+  exports both the reader (`readObjectiveDraft` — fail-open validation, warn+null on bad
+  JSON/shape/schema_version/blank prose) and the markdown renderer (`renderObjectiveDraft`).
+  That keeps `planReview → objectiveDraft` cycle-free: the draft module never imports review
+  modules. `schema_version` is the consumer branch point — consumers must validate/branch on it
+  rather than assuming the shape.
+- **Draft module = leaf.** When a save module needs to value-import the draft reader, move the
+  shared param vocabulary INTO the draft module rather than extracting a third module — mirrors
+  planDraft←planSave; the import direction is draft→save only, never the reverse. (An exported
+  `as const` schema is accepted by tsc directly in `registerTool` parameters — no widening cast.)
+- **The asymmetric objective failsafe.** `/objective-save` is artifact-first but keeps the
+  drive-the-session injection as the **no-draft fallback** — objectives have no transcript scrape
+  by design (a structured roadmap is unscrapeable), so unlike `/plan-save` (which warns and stops
+  on no-plan) the objective command must still hand the save to the model. Its severity ladder is
+  also simpler: no `warning` tier, because objective saves have no node-link sub-step.
+- **Known wart: an approved empty-roadmap draft save-fails.** The draft reader accepts
+  `roadmap: []`, so the review surface happily reviews a roadmap-less objective; the save then
+  hits `perk objective create`'s `empty_roadmap` rejection. It degrades correctly
+  (non-terminating save-failed result, gate stays read-only, the `/objective-save` failsafe is
+  directed) — a pre-review/pre-save nudge would surface it earlier.
 
 ### Residual: objective_save is not an upsert
 

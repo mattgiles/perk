@@ -84,6 +84,22 @@ assert `h.registeredCommands().includes("<cmd>")`), and (b) **pure `*Guidance` u
 rendered text names the tool + required args, renders/omits optional args like `title`, and contains
 no hardcoded skill-pointer string). The canonical tool tests remain the behavioral coverage.
 
+## The warm gate-enter recipe (enter is distributed, exit is centralized)
+
+A warm door that seeds a read-only turn enters the gate with the **skip-if-active** recipe, proven
+twice (the `--plan` cold start in `planMode.ts`; `/objective-plan`): if the gate is not already
+active, enter it and announce, placed **after** input resolution (warning paths leave the gate
+untouched) and **before** `sendUserMessage` — so the seeded turn's `before_agent_start` picks up
+the read-only / plan-authoring injections with zero new injection wiring.
+
+Skip-if-active is what lets warm and cold doors coexist: the cold door's registry
+`mode: read-only` handoff already synced the gate at `session_start`, so the warm handler must
+never double-append `mode` or re-announce.
+
+The asymmetry to preserve: **enter is distributed, exit is centralized.** Gate-exit ownership
+stays concentrated in `plan_save` (incl. the approval auto-save) and `/plan` off; a warm door
+entering the gate must add **zero** exit logic, or it forks the mode lifecycle.
+
 ## A terminating surface can drive the *next* pass
 
 The section above covers "warm commands DRIVE the session." This adds the case where the driving

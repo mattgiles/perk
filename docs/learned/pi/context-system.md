@@ -1,6 +1,6 @@
 ---
 title: Pi context system — no transclusion, ambient index split, bash allowlist
-read_when: You are designing how to surface information to a plan session, building a plan factory, or debugging why a bash command is blocked in a read-only session.
+read_when: You are designing how to surface information to a plan session, building a plan factory, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (incl. the subcommand-shaped gh entries).
 ---
 
 # Pi context system
@@ -47,6 +47,15 @@ Consequence for plan factories: the inbox pattern (cold door fetches via `gh` an
 into a file before the session launches) remains **preferred** — deterministic and token-cheap —
 but since #416 it is no longer structurally forced: ad-hoc read-only `gh` queries pass the gate.
 See `docs/learned/workflow/plan-factories.md` for the inbox-over-gh pattern.
+
+### The gh allowlist is subcommand-shaped, never verb-inferred
+
+`gh api` stays blocked even for GET-shaped calls — inferring GET-vs-mutation by regex is fragile,
+so the allowlist names query *subcommands* instead (`view|list|diff|status|checks`, `gh search`,
+`gh auth status`), which cover real read needs. Destructive-wins still blocks `gh issue view >
+file` redirects for free. Extending the allowlist is a **deliberate per-subcommand act**: judge
+each candidate by what it does, not by its verb shape — e.g. `gh release download` is NOT
+read-only (it writes files).
 
 ### Allowlist policy when adding an entry
 

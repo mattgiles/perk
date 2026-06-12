@@ -1,6 +1,6 @@
 ---
 title: Structured output over pi-ai — tool-calling, not JSON mode
-read_when: You need a model to return structured/typed data in an extension, are choosing how to gate a model call offline in tests, or are writing offline tests for code that calls a provider.
+read_when: You need a model to return structured/typed data in an extension, are choosing how to gate a model call offline in tests (PERK_NO_LLM is the only gate — auth resolution succeeds keyless), or are writing offline tests for code that calls a provider (top-level vs nested faux registration by caller).
 ---
 
 # Structured output over pi-ai
@@ -35,6 +35,19 @@ pi-ai's Google-compat guidance.
 spread last so it stays overridable) and **never by the production `perk` CLI**. So production
 sessions generate output while tests stay offline — even on a dev machine that has provider keys
 configured. This mirrors the existing `PERK_SELFCHECK` pattern.
+
+**`ModelRegistry.getApiKeyAndHeaders` is NOT an offline gate.** It returns `ok: true` with an
+undefined key when none exists (absent `authHeader` config), so auth resolution *succeeds* for
+keyless real models — no AuthStorage seeding is needed for faux models, and `PERK_NO_LLM` is the
+ONLY thing keeping keyless tests offline. Never rely on auth-resolution failure as a test guard.
+
+## Faux-provider routing depends on WHO makes the model call
+
+The harness's nested registration (`fauxModelRegistration()`, a nested pi-coding-agent copy of
+pi-ai) serves **session-runtime** streaming only. **Extension-initiated** structured-output calls
+resolve pi-ai at the **top level** under `node --test`, so register via the top-level
+`registerFauxProvider()` and pass the model in via `loadPerkSession({ model })` — a nested
+registration would miss; the runtime never streams the model in these tests.
 
 ## Offline model-call tests use the faux provider
 

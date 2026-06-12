@@ -5,18 +5,31 @@ read_when: You are building or debugging a perk plan factory (learn-docs, object
 
 # Plan factory pattern
 
-## The central constraint: inbox-over-gh
+## Inbox-over-gh: a discipline, not a structural constraint
 
 A seeded read-only plan-mode session historically **could not run `gh`/`perk` in bash** —
 `extension/toolGating.ts` `SAFE_PATTERNS` allowed only
 `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
-So any cold-door factory must **do every GitHub read up front** and materialize the result into a
-file the session reads via the `read` tool (e.g. `.pi/workflow/scratch/learn-docs-inbox.md`).
-Untrusted fetched bodies are wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
-This is *why* the cold door gathers, not the model — at the time, the model couldn't call `gh` in
-a plan session. (Since #416, read-only `gh` *query* subcommands pass the gate, so the constraint
-is no longer structural — but the inbox pattern remains the canonical factory data flow:
-deterministic, token-cheap, and prompt-injection-bounded via the untrusted markers.)
+So every cold-door factory did its GitHub reads up front and materialized the result into a
+file the session reads via the `read` tool (e.g. `.pi/workflow/scratch/learn-docs-inbox.md`),
+with untrusted fetched bodies wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
+
+Since #416 the read-only gate allowlists read-shaped `gh` *query* subcommands, so the constraint
+is **no longer structural** — docs that asserted "the gate excludes gh" as the *mechanism* behind
+cold-door gathering were reframed keep-and-annotate style. The inbox pattern stays **canonical**
+(deterministic, token-cheap, prompt-injection-bounded via the untrusted markers) but is no longer
+forced: ad-hoc read-only `gh` queries pass the gate. **Future edits must not resurrect the
+"cannot run gh" claim.**
+
+## Mirrored guidance ≠ identical text — the link carrier is plane-specific
+
+When factory guidance exists on both planes (the warm `/objective-plan` guidance and the cold
+seed prompt), mirror the *loop* but derive each plane's carrier step from its own mechanics, never
+copy text across. The proven instance: the warm factory instructs an **unconditional**
+`objective_node` planning mark — a `planning → planning` re-mark is valid/idempotent in
+`perk/objective.py` and re-records the `objective_node_claim`, which is what makes
+resume-into-an-existing-claim safe — while the cold seed prompt instructs **no** mark, because the
+cold door already marked the node pre-launch and the link rides `handoff_extra`.
 
 ## Non-stage factories borrow the `plan` stage descriptor + `prompt_override`
 
@@ -41,4 +54,4 @@ for the canonical fail-open pattern.
 ## Cross-references
 
 - `docs/learned/workflow/plan-ref-lifecycle.md` — fail-open on-land bookkeeping pattern
-- `docs/learned/pi/context-system.md` — the bash allowlist and why inbox-over-gh is necessary
+- `docs/learned/pi/context-system.md` — the bash allowlist (incl. the read-only `gh` query subcommands)
