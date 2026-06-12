@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
 
-from perk.plan import find_metadata_block
+from perk.plan import find_metadata_block, has_metadata_block
 
 OBJECTIVE_LABEL = "perk:objective"
 OBJECTIVE_LABEL_COLOR = "5319e7"  # indigo (distinct from plan green / learn purple)
@@ -58,7 +58,43 @@ ROADMAP_TABLE_MARKER_END = "<!-- /perk:roadmap-table -->"
 OBJECTIVE_RECONCILABLE_MARKER_START = "<!-- perk:objective-reconcilable -->"
 OBJECTIVE_RECONCILABLE_MARKER_END = "<!-- /perk:objective-reconcilable -->"
 
-_METADATA_OPEN = "<!-- perk:metadata-block:{key} -->"
+# The Linear-safe inline-code rewrite of a perk HTML-comment marker (objective #252 Node 2.3).
+# Derived locally by the same rule as the Linear backend's `to_linear_markdown` transcoder
+# (`<!-- perk:x -->` → `` `perk:x` ``) — NOT imported from it: the import direction is
+# `linear_backend → objective`, never back.
+_INLINE_MARKER_RE = re.compile(r"^<!--\s*(/?perk:.+?)\s*-->$")
+
+
+def _inline_marker(html_marker: str) -> str:
+    match = _INLINE_MARKER_RE.match(html_marker)
+    if match is None:  # pragma: no cover - module-constant inputs only
+        raise ValueError(f"not a perk HTML-comment marker: {html_marker!r}")
+    return f"`{match.group(1)}`"
+
+
+def _find_marker_pair(
+    text: str, start_marker: str, end_marker: str
+) -> tuple[int, int, str, str] | None:
+    """Locate a marker-bounded region in either encoding (form-preservation, Node 2.3).
+
+    ``start_marker``/``end_marker`` are the canonical HTML forms; the HTML scan runs first (the
+    unchanged GitHub path), then the Linear-safe inline-code forms derived by the same rewrite
+    rule as ``to_linear_markdown``. Returns ``(start, end, found_start, found_end)`` — the index
+    of the open marker, the index of the close marker, and the **concrete marker strings found**
+    (so callers re-emit whichever form was present) — or ``None`` when absent/unclosed.
+    """
+    for open_form, close_form in (
+        (start_marker, end_marker),
+        (_inline_marker(start_marker), _inline_marker(end_marker)),
+    ):
+        start = text.find(open_form)
+        if start == -1:
+            continue
+        end = text.find(close_form, start)
+        if end == -1:
+            return None
+        return start, end, open_form, close_form
+    return None
 
 
 class NodeStatus(StrEnum):
@@ -113,7 +149,8 @@ class ObjectiveHeader:
 
     run_id: str
     created: str  # ISO-8601 UTC (see plan.now_iso)
-    objective_comment_id: int | None = None
+    # Backend-owned opaque value: GitHub stores its numeric comment id, Linear its string UUID.
+    objective_comment_id: int | str | None = None
     status: str = "active"
 
     def to_data(self) -> dict[str, object]:
@@ -129,7 +166,9 @@ class ObjectiveHeader:
 
 
 def _has_block(text: str, key: str) -> bool:
-    return _METADATA_OPEN.format(key=key) in text
+    # Dual-encoding presence check (HTML or inline-code) — a Linear-stored roadmap block must
+    # discriminate absent (valid roadmap-free) from present-but-malformed, same as GitHub's.
+    return has_metadata_block(text, key)
 
 
 def validate_roadmap(data: dict[str, Any]) -> tuple[list[ObjectiveNode], list[str]]:
@@ -649,40 +688,42 @@ def replace_reconcilable_section(comment_body: str, new_prose: str) -> str | Non
     created before P2.T11).
 
     Pure + offline. Structurally Immutable-safe: only the marker-bounded region is rewritten.
+    Dual-encoding + form-preserving (Node 2.3): the HTML markers are tried first (the GitHub
+    path, byte-identical behavior), then the Linear-safe inline-code forms — whichever was found
+    is re-emitted.
     """
-    start = comment_body.find(OBJECTIVE_RECONCILABLE_MARKER_START)
-    if start == -1:
+    found = _find_marker_pair(
+        comment_body, OBJECTIVE_RECONCILABLE_MARKER_START, OBJECTIVE_RECONCILABLE_MARKER_END
+    )
+    if found is None:
         return None
-    end = comment_body.find(OBJECTIVE_RECONCILABLE_MARKER_END, start)
-    if end == -1:
-        return None
+    start, end, open_marker, close_marker = found
     prose_body = new_prose.strip()
     inner = f"\n{prose_body}\n" if prose_body else "\n"
     return (
         comment_body[:start]
-        + OBJECTIVE_RECONCILABLE_MARKER_START
+        + open_marker
         + inner
-        + OBJECTIVE_RECONCILABLE_MARKER_END
-        + comment_body[end + len(OBJECTIVE_RECONCILABLE_MARKER_END) :]
+        + close_marker
+        + comment_body[end + len(close_marker) :]
     )
 
 
 def rerender_body_table(comment_body: str, nodes: list[ObjectiveNode]) -> str | None:
     """Re-render the marker-bounded table inside an existing ``objective-body`` comment from the
-    authoritative ``nodes``. Returns the updated comment, or ``None`` if no markers are found."""
-    start = comment_body.find(ROADMAP_TABLE_MARKER_START)
-    if start == -1:
+    authoritative ``nodes``. Returns the updated comment, or ``None`` if no markers are found.
+    Dual-encoding + form-preserving (Node 2.3): re-emits whichever marker form was found."""
+    found = _find_marker_pair(comment_body, ROADMAP_TABLE_MARKER_START, ROADMAP_TABLE_MARKER_END)
+    if found is None:
         return None
-    end = comment_body.find(ROADMAP_TABLE_MARKER_END, start)
-    if end == -1:
-        return None
+    start, end, open_marker, close_marker = found
     table = render_roadmap_table(nodes, body=comment_body)
     return (
         comment_body[:start]
-        + ROADMAP_TABLE_MARKER_START
+        + open_marker
         + "\n"
         + table
         + "\n"
-        + ROADMAP_TABLE_MARKER_END
-        + comment_body[end + len(ROADMAP_TABLE_MARKER_END) :]
+        + close_marker
+        + comment_body[end + len(close_marker) :]
     )

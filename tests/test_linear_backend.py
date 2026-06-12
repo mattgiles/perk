@@ -12,7 +12,7 @@ from typing import cast
 
 import pytest
 
-from perk import github, issue_backend, linear_backend, plan, run_report
+from perk import github, issue_backend, linear_backend, objective, plan, run_report
 from perk.github import GitHubError
 from perk.issue_backend import IssueBackendError
 from perk.linear import LinearGraphQLError
@@ -792,21 +792,408 @@ class TestCloseOps:
         assert updates[1][1]["input"] == {"stateId": "state-done"}
 
 
-class TestObjectiveStubs:
-    def test_every_objective_method_raises_the_node_23_stub(self) -> None:
-        backend, _ = _make_backend()
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.find_objective_issue(run_id="01R")
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.create_objective_issue(title="t", body="b", run_id="01R")
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.get_objective(issue_id="iss-1")
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.update_objective_header(issue_id="iss-1", fields={})
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.update_objective_node(issue_id="iss-1", node_id="1.1")
-        with pytest.raises(IssueBackendError, match=r"Node 2\.3"):
-            backend.update_objective_body(issue_id="iss-1", prose="p")
+def _objective_nodes() -> list[objective.ObjectiveNode]:
+    return [
+        objective.ObjectiveNode(id="1.1", description="Alpha", status=objective.NodeStatus.DONE),
+        objective.ObjectiveNode(id="1.2", description="Beta", status=objective.NodeStatus.PENDING),
+    ]
+
+
+def _inline_objective_description(
+    run_id: str,
+    *,
+    comment_id: str | int | None = None,
+    nodes: list[objective.ObjectiveNode] | None = None,
+) -> str:
+    header = objective.ObjectiveHeader(
+        run_id=run_id, created="t", objective_comment_id=comment_id, status="active"
+    )
+    header_block = plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+    )
+    roadmap_block = plan.render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY,
+        objective.render_roadmap_block(nodes if nodes is not None else _objective_nodes()),
+        style="inline-code",
+    )
+    return f"{header_block}\n\n{roadmap_block}\n"
+
+
+def _objective_issue_response(description: str) -> dict[str, object]:
+    return {"issue": {"id": "obj-1", "url": "u-obj", "title": "Obj", "description": description}}
+
+
+_COMMENT_CREATED: dict[str, object] = {
+    "commentCreate": {"success": True, "comment": {"id": "cmt-uuid-1"}}
+}
+
+
+class TestFindObjectiveIssue:
+    def test_matches_inline_encoded_objective_header(self) -> None:
+        description = _inline_objective_description("01OBJ")
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [
+                    {"issues": _page([{"id": "obj-1", "url": "u", "description": description}])}
+                ],
+            }
+        )
+        found = backend.find_objective_issue(run_id="01OBJ")
+        assert found == issue_backend.IssueRef(id="obj-1", url="u", existed=True)
+        [(_, variables)] = _queries(fake, "issues(first")
+        assert variables["label"] == "perk:objective"
+
+    def test_no_match_is_none_after_exhausting_pages(self) -> None:
+        page1 = {"issues": _page([], has_next=True, cursor="C1")}
+        page2 = {"issues": _page([])}
+        backend, fake = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [page1, page2]}
+        )
+        assert backend.find_objective_issue(run_id="01NOPE") is None
+        assert len(_queries(fake, "issues(first")) == 2
+
+    def test_infra_errors_propagate(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [LinearGraphQLError("Linear GraphQL error: boom", codes=())],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="boom"):
+            backend.find_objective_issue(run_id="01NOPE")
+
+
+class TestCreateObjectiveIssue:
+    def test_dry_run_shape(self) -> None:
+        backend, fake = _make_backend()
+        ref = backend.create_objective_issue(
+            title="t", body="b", run_id="01DRY", roadmap_nodes=_objective_nodes(), dry_run=True
+        )
+        assert ref == issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        assert fake.requests == []
+
+    def test_idempotent_find_then_return(self) -> None:
+        description = _inline_objective_description("01DUP")
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [
+                    {"issues": _page([{"id": "obj-1", "url": "u", "description": description}])}
+                ],
+            }
+        )
+        ref = backend.create_objective_issue(
+            title="t", body="b", run_id="01DUP", roadmap_nodes=_objective_nodes()
+        )
+        assert ref == issue_backend.IssueRef(id="obj-1", url="u", existed=True)
+        assert not _queries(fake, "issueCreate(")
+
+    def test_empty_roadmap_raises(self) -> None:
+        backend, _ = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
+        )
+        with pytest.raises(IssueBackendError, match="objective roadmap is empty"):
+            backend.create_objective_issue(title="t", body="prose only", run_id="01EMPTY")
+
+    def test_invalid_embedded_roadmap_raises(self) -> None:
+        bad = plan.render_metadata_block(
+            objective.OBJECTIVE_ROADMAP_KEY, {"schema_version": "99", "nodes": []}
+        )
+        backend, _ = _make_backend(
+            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
+        )
+        with pytest.raises(IssueBackendError, match="invalid objective roadmap"):
+            backend.create_objective_issue(title="t", body=bad, run_id="01BAD")
+
+    def test_full_two_step_create_with_comment_id_backfill(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [_no_issues()],
+                "issueLabels(filter": [_LABEL_FOUND],
+                "issueCreate(": [
+                    {"issueCreate": {"success": True, "issue": {"id": "obj-1", "url": "u-obj"}}}
+                ],
+                "commentCreate(": [_COMMENT_CREATED],
+                # the backfill's _get_issue read: returns the freshly created description
+                "issue(id": [_objective_issue_response(_inline_objective_description("01NEW"))],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        ref = backend.create_objective_issue(
+            title="t",
+            body="The objective prose.",
+            run_id="01NEW",
+            roadmap_nodes=_objective_nodes(),
+        )
+        assert ref == issue_backend.IssueRef(id="obj-1", url="u-obj", existed=False)
+
+        # 1) the issue description is composed directly inline-code-encoded
+        [(_, create_vars)] = _queries(fake, "issueCreate(")
+        description = _input_payload(create_vars)["description"]
+        assert isinstance(description, str)
+        assert "`perk:metadata-block:objective-header`" in description
+        assert "`perk:metadata-block:objective-roadmap`" in description
+        assert "<!--" not in description and "<details>" not in description
+        header = plan.find_metadata_block(description, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None and header["run_id"] == "01NEW"
+        assert header["objective_comment_id"] is None
+
+        # 2) the body comment is posted transcoded (table + reconcilable sentinels)
+        [(_, comment_vars)] = _queries(fake, "commentCreate(")
+        comment_input = _input_payload(comment_vars)
+        assert comment_input["issueId"] == "obj-1"
+        comment_body = comment_input["body"]
+        assert isinstance(comment_body, str)
+        assert "`perk:roadmap-table`" in comment_body
+        assert "`perk:objective-reconcilable`" in comment_body
+        assert "The objective prose." in comment_body
+        assert "<!--" not in comment_body
+
+        # 3) the captured comment UUID is backfilled into the header (form-preserving)
+        [(_, update_vars)] = _queries(fake, "issueUpdate(")
+        new_description = _input_payload(update_vars)["description"]
+        assert isinstance(new_description, str)
+        assert "<!--" not in new_description
+        backfilled = plan.find_metadata_block(new_description, objective.OBJECTIVE_HEADER_KEY)
+        assert backfilled is not None
+        assert backfilled["objective_comment_id"] == "cmt-uuid-1"
+
+
+class TestGetObjective:
+    def test_happy_path(self) -> None:
+        description = _inline_objective_description("01OBJ", comment_id="cmt-1")
+        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
+        state = backend.get_objective(issue_id="obj-1")
+        assert state is not None
+        assert state.id == "obj-1" and state.url == "u-obj" and state.title == "Obj"
+        assert state.header["run_id"] == "01OBJ"
+        assert state.header["objective_comment_id"] == "cmt-1"
+        assert [n.id for n in state.nodes] == ["1.1", "1.2"]
+
+    def test_missing_issue_is_none(self) -> None:
+        backend, _ = _make_backend({"issue(id": [_not_found_error()]})
+        assert backend.get_objective(issue_id="obj-gone") is None
+
+    def test_invalid_roadmap_raises(self) -> None:
+        broken = "`perk:metadata-block:objective-roadmap`\n\n```yaml\nnodes: [\n```"
+        backend, _ = _make_backend({"issue(id": [_objective_issue_response(broken)]})
+        with pytest.raises(IssueBackendError, match="invalid objective roadmap on 'obj-1'"):
+            backend.get_objective(issue_id="obj-1")
+
+
+class TestUpdateObjectiveHeader:
+    def test_unknown_fields_rejected_lbyl(self) -> None:
+        backend, fake = _make_backend()
+        with pytest.raises(IssueBackendError, match="unknown objective-header field"):
+            backend.update_objective_header(issue_id="obj-1", fields={"nope": 1})
+        assert fake.requests == []
+
+    def test_dry_run_composes_only(self) -> None:
+        description = _inline_objective_description("01HDR")
+        backend, fake = _make_backend({"issue(id": [_objective_issue_response(description)]})
+        update = backend.update_objective_header(
+            issue_id="obj-1", fields={"status": "complete"}, dry_run=True
+        )
+        assert update == issue_backend.ObjectiveHeaderUpdate(
+            fields_updated=("status",), dry_run=True
+        )
+        assert not _queries(fake, "issueUpdate(")
+
+    def test_write_path_preserves_inline_code_form(self) -> None:
+        description = _inline_objective_description("01HDR")
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        update = backend.update_objective_header(issue_id="obj-1", fields={"status": "complete"})
+        assert update == issue_backend.ObjectiveHeaderUpdate(
+            fields_updated=("status",), dry_run=False
+        )
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        new_description = _input_payload(variables)["description"]
+        assert isinstance(new_description, str)
+        assert "<!--" not in new_description and "<details>" not in new_description
+        header = plan.find_metadata_block(new_description, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None
+        assert header["status"] == "complete" and header["run_id"] == "01HDR"
+
+
+class TestUpdateObjectiveNode:
+    def test_node_not_found_raises(self) -> None:
+        description = _inline_objective_description("01N")
+        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(IssueBackendError, match=r"objective node '9\.9' not found on 'obj-1'"):
+            backend.update_objective_node(
+                issue_id="obj-1", node_id="9.9", status=objective.NodeStatus.DONE
+            )
+
+    def test_dry_run_shape(self) -> None:
+        description = _inline_objective_description("01N")
+        backend, fake = _make_backend({"issue(id": [_objective_issue_response(description)]})
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE, dry_run=True
+        )
+        assert update == issue_backend.ObjectiveNodeUpdate(
+            issue_id="obj-1", node_id="1.2", comment_updated=False, dry_run=True
+        )
+        assert not _queries(fake, "issueUpdate(")
+
+    def test_authoritative_write_plus_comment_rerender(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-uuid-1")
+        comment_body = to_linear_markdown(
+            objective.render_body_comment(_objective_nodes(), prose="Prose.")
+        )
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [{"comment": {"body": comment_body}}],
+                "commentUpdate(": [{"commentUpdate": {"success": True}}],
+            }
+        )
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        )
+        assert update == issue_backend.ObjectiveNodeUpdate(
+            issue_id="obj-1", node_id="1.2", comment_updated=True, dry_run=False
+        )
+        # the authoritative roadmap write (form-preserving inline-code)
+        [(_, body_vars)] = _queries(fake, "issueUpdate(")
+        new_description = _input_payload(body_vars)["description"]
+        assert isinstance(new_description, str) and "<!--" not in new_description
+        nodes, errors = objective.parse_roadmap_nodes(new_description)
+        assert errors == []
+        assert next(n for n in nodes if n.id == "1.2").status is objective.NodeStatus.DONE
+        # the best-effort comment re-render (form-preserving inline-code)
+        [(_, patch_vars)] = _queries(fake, "commentUpdate(")
+        assert patch_vars["id"] == "cmt-uuid-1"
+        patched = _input_payload(patch_vars)["body"]
+        assert isinstance(patched, str)
+        assert "`perk:roadmap-table`" in patched and "<!--" not in patched
+        line = next(ln for ln in patched.splitlines() if ln.startswith("| 1.2 "))
+        assert "done" in line
+        assert "Prose." in patched
+
+    def test_missing_comment_id_degrades_to_comment_not_updated(self) -> None:
+        description = _inline_objective_description("01N", comment_id=None)
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        )
+        assert update.comment_updated is False
+        assert len(_queries(fake, "issueUpdate(")) == 1  # roadmap still written
+
+    def test_comment_not_found_degrades(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-gone")
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [_not_found_error()],
+            }
+        )
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        )
+        assert update.comment_updated is False
+        assert not _queries(fake, "commentUpdate(")
+
+    def test_markerless_comment_degrades(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-1")
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [{"comment": {"body": "no table markers here"}}],
+            }
+        )
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        )
+        assert update.comment_updated is False
+        assert not _queries(fake, "commentUpdate(")
+
+
+class TestUpdateObjectiveBody:
+    def test_missing_comment_id_raises(self) -> None:
+        description = _inline_objective_description("01B", comment_id=None)
+        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(IssueBackendError, match="objective 'obj-1' has no body comment"):
+            backend.update_objective_body(issue_id="obj-1", prose="p")
+
+    def test_comment_not_found_raises(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-gone")
+        backend, _ = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [_not_found_error()],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="has no body comment"):
+            backend.update_objective_body(issue_id="obj-1", prose="p")
+
+    def test_no_reconcilable_region_raises(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-1")
+        backend, _ = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [{"comment": {"body": "no markers"}}],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="no reconcilable region"):
+            backend.update_objective_body(issue_id="obj-1", prose="p")
+
+    def test_dry_run_composes_only(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-1")
+        comment_body = to_linear_markdown(
+            objective.render_body_comment(_objective_nodes(), prose="Old.")
+        )
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [{"comment": {"body": comment_body}}],
+            }
+        )
+        update = backend.update_objective_body(issue_id="obj-1", prose="New.", dry_run=True)
+        assert update == issue_backend.ObjectiveBodyUpdate(
+            issue_id="obj-1", comment_id="cmt-1", updated=False, dry_run=True
+        )
+        assert not _queries(fake, "commentUpdate(")
+
+    def test_splice_preserves_immutable_tail(self) -> None:
+        description = _inline_objective_description("01B", comment_id="cmt-1")
+        comment_body = (
+            to_linear_markdown(objective.render_body_comment(_objective_nodes(), prose="Old."))
+            + "\n## Immutable history\nnever touch this\n"
+        )
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "comment(id": [{"comment": {"body": comment_body}}],
+                "commentUpdate(": [{"commentUpdate": {"success": True}}],
+            }
+        )
+        update = backend.update_objective_body(issue_id="obj-1", prose="New prose.")
+        assert update == issue_backend.ObjectiveBodyUpdate(
+            issue_id="obj-1", comment_id="cmt-1", updated=True, dry_run=False
+        )
+        [(_, patch_vars)] = _queries(fake, "commentUpdate(")
+        assert patch_vars["id"] == "cmt-1"
+        patched = _input_payload(patch_vars)["body"]
+        assert isinstance(patched, str)
+        assert "New prose." in patched and "Old." not in patched
+        assert "never touch this" in patched  # the Immutable tail is preserved
+        assert "`perk:roadmap-table`" in patched  # the Mechanical block above is preserved
+        assert "<!--" not in patched
 
 
 class TestImportDirection:

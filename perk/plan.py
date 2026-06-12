@@ -181,6 +181,16 @@ def replace_metadata_block(text: str, key: str, data: dict[str, object]) -> str:
     return f"{text.rstrip()}\n\n{rendered}\n" if text.strip() else f"{rendered}\n"
 
 
+def has_metadata_block(text: str, key: str) -> bool:
+    """Presence-only check for a perk metadata block's **open** delimiter, in either encoding
+    (HTML or the Linear-safe inline-code sentinel).
+
+    The absent-vs-malformed discriminator: :func:`find_metadata_block` returns ``None`` for both
+    cases; this answers only "is a block (possibly malformed) present at all?".
+    """
+    return _OPEN.format(key=key) in text or _INLINE_OPEN.format(key=key) in text
+
+
 def find_metadata_block(text: str, key: str) -> dict[str, object] | None:
     """Parse a single structured perk metadata block by key. None if absent or malformed.
 
