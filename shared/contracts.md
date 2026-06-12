@@ -119,9 +119,16 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   GitHub persist surface. Failure taxonomy (soft results, never throws): mistyped params →
   `bad_input`; empty/whitespace prose → `invalid_input`; no session `run_id` → `no_run_id`;
   file-or-pointer write failure → `write_failed`. Consumers read the draft only via
-  `readSessionArtifact` (digest-validated, fail-open). The review-surface consumer (node 2.2)
-  and the approval→`objective_save` orchestration (node 2.3) are forthcoming — the tool is
-  dark-launched with no prompting-surface changes in this node.
+  `readSessionArtifact` (digest-validated, fail-open). **The review surface (node 2.2, landed):**
+  `plan_review` in an objective-author session reviews the **rendered markdown** —
+  `readObjectiveDraft` (fail-open validation over the artifact: stderr warning + `null` on
+  malformed JSON / non-object payload / wrong `schema_version` / blank prose) +
+  `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
+  when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
+  never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
+  `objective_draft` redirect. Approval is **non-saving** pending node 2.3 — the
+  approval→`objective_save` orchestration stays forthcoming; every arm directs the human
+  `/objective-save` gesture.
 
   **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
@@ -2113,14 +2120,24 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `edited: true`; the objective node link is recovered from the `objective_node_claim` carrier
 > inside `savePlan`; a failed save is non-terminating, leaves the gate read-only, and directs
 > the human `/plan-save` failsafe). A human **DENY** is strict: feedback returned with a
-> directive to rewrite the working draft via `plan_draft` + re-review. The **objective-author
-> soft-skip** (`reason: "objective-author"`) mirrors the injections' stage exception.
+> directive to rewrite the working draft via `plan_draft` + re-review. **The objective-author
+> arm (#352 Node 2.2):** in an objective-author session the door routes to
+> `executeObjectiveReview` — the review subject is the **rendered objective draft** (§8.1's
+> `readObjectiveDraft` + `renderObjectiveDraft`; the `plan` param is decoded first — a mistyped
+> param still `bad_input` — but never a source), dispatched to the same backends; the
+> first-party editor runs **view-only** (edits are never written back — deny+feedback is the
+> change channel) with objective verdict labels. **APPROVED is non-saving** until Node 2.3:
+> `approvalSave` is never called — a non-terminating result (`details.subject: "objective"`,
+> `saved: false`) relays the approval and directs the human `/objective-save`.
 > **Fail-open semantics:** headless (`!ctx.hasUI`) / dismissed / handshake-timeout /
 > `unavailable` / `error` all **soft-skip** with a result instructing the model to present the
 > plan to the user directly — plan authoring never wedges. `plan_review` is in
 > `READ_ONLY_TOOLS` so review happens **inside** plan mode, before the gate ever comes off.
 > (3) The plannotator adapter shim is **injection-only again** (Node 2.5): it owns the hidden
-> `perk:plan-adapter-plannotator` context (gate-active AND selected AND not objective-author)
+> `perk:plan-adapter-plannotator` context (gate-active AND selected; **two content flavors, one
+> customType** — the plan bridge context, or `OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT` in an
+> objective-author session, whose marker `[OBJECTIVE ADAPTER: PLANNOTATOR]` the strip handler
+> also covers)
 > plus the bridge core, and otherwise keeps the standard adapter hygiene: never
 > `setActiveTools`, never a `tool_call` handler, never restamps `cache.plan-ref.provider` (stays
 > `"github"`); the door composes the gate and the save **only** through the `approvalSave` seam

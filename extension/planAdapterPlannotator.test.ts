@@ -1,6 +1,7 @@
 // The plannotator plan adapter (augment posture, injection + bridge only as of Node 2.5):
-// injection only when (gate active AND plannotator-plan selected AND not objective-author),
-// stale-marker strip on deselect, and the pure event-bus bridge core — the bounded handshake
+// injection only when (gate active AND plannotator-plan selected) — two content flavors, one
+// customType (the plan bridge context; the objective flavor in an objective-author session,
+// #352 Node 2.2) — stale-marker strip on deselect (both flavors), and the pure event-bus bridge core — the bounded handshake
 // (timeout / unavailable), the human decision (approved / denied + feedback), and the turn-abort
 // path. Fully offline: the fake plannotator is a test listener on an event bus that calls
 // `respond(...)` and emits `plannotator:review-result`. The `plan_review` TOOL (dispatch, soft
@@ -14,6 +15,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   createPlannotatorBridge,
   isPlannotatorPlanSelected,
+  OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT,
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   type PlannotatorBus,
 } from "./planAdapterPlannotator.ts";
@@ -104,7 +106,7 @@ test("plannotator selected but gate off: no bridge context injected", async () =
   }
 });
 
-test("objective-author session: the bridge context defers (objectiveAuthor owns that session)", async () => {
+test("objective-author session: the OBJECTIVE-flavored bridge context is injected", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
   });
@@ -115,12 +117,18 @@ test("objective-author session: the bridge context defers (objectiveAuthor owns 
     env: { PERK_RUN_ID: "01RID" },
   });
   try {
+    const injected = await h.emitBeforeAgentStart();
+    const bridge = injected.filter((m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE);
+    assert.equal(bridge.length, 1, "exactly one bridge context injected");
+    const content = String(bridge[0]?.content);
+    assert.equal(content, OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
+    assert.ok(content.includes("[OBJECTIVE ADAPTER: PLANNOTATOR]"), "the objective marker");
+    assert.ok(content.includes("objective_draft"), "directs the objective_draft rewrite loop");
+    assert.ok(content.includes("/objective-save"), "approval directs the human /objective-save");
     assert.equal(
-      (await h.emitBeforeAgentStart()).some(
-        (m) => m.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-      ),
+      content.includes("[PLAN ADAPTER: PLANNOTATOR]"),
       false,
-      "no bridge context in an objective-author session (mirrors planMode's stage exception)",
+      "the plan marker is not injected in an objective-author session",
     );
   } finally {
     h.dispose();
@@ -151,6 +159,7 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
         content: "[PLAN ADAPTER: PLANNOTATOR]\nstale",
       },
       { role: "user", content: "[PLAN ADAPTER: PLANNOTATOR] leaked into a user turn" },
+      { role: "user", content: "[OBJECTIVE ADAPTER: PLANNOTATOR] leaked into a user turn" },
       { role: "user", content: "a normal message" },
     ];
     const surviving = await h.emitContext(stale);
@@ -162,7 +171,12 @@ test("default selection: shim injects nothing and strips a stale bridge marker",
     assert.equal(
       surviving.some((m) => String(m.content).includes("[PLAN ADAPTER: PLANNOTATOR]")),
       false,
-      "stale bridge marker stripped from user turns on the default path",
+      "stale plan bridge marker stripped from user turns on the default path",
+    );
+    assert.equal(
+      surviving.some((m) => String(m.content).includes("[OBJECTIVE ADAPTER: PLANNOTATOR]")),
+      false,
+      "stale objective bridge marker stripped from user turns on the default path",
     );
     assert.equal(surviving.length, 1, "the normal message survives");
   } finally {

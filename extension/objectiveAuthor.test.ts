@@ -34,6 +34,26 @@ test("objectiveAuthoringContextContent: carries the authoring contract; appends 
   assert.match(withAddendum, /House rule: cite a file path per change\./);
 });
 
+test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline (#352 Node 2.2)", () => {
+  // The draft + review loop replaced the structurally-broken `/plan` off → objective_save ending
+  // (the model cannot run /plan; objective_save is hidden while the gate is on).
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /call the plan_review tool/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /rendered objective \(the prose \+ a roadmap table\)/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /nothing auto-saves yet/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /`\/objective-save` \(the manual failsafe\)/);
+  assert.doesNotMatch(
+    OBJECTIVE_AUTHORING_CONTEXT,
+    /exit read-only mode/,
+    "the pre-file-first save instructions are gone",
+  );
+  assert.doesNotMatch(
+    OBJECTIVE_AUTHORING_CONTEXT,
+    /call the objective_save tool/,
+    "the model is never directed to call objective_save itself",
+  );
+});
+
 test("objective-author session injects objective-authoring context; planMode defers", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },

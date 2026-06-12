@@ -13,10 +13,11 @@
 // Format doctrine: JSON is the storage/transport format, NEVER the human review surface. The
 // artifact carries `{schema_version, title?, prose, roadmap}` — the structured roadmap rides
 // verbatim (node-shape validation stays with the Python plane at save time, the
-// `parse_structured_roadmap` path). The review surface (node 2.2, forthcoming) renders markdown
-// (the prose + a roadmap table) from the artifact; the approval→`objective_save` orchestration
-// (node 2.3, forthcoming) feeds the recovered roadmap back as structured JSON. Consumers read the
-// draft only via `readSessionArtifact` (digest-validated, fail-open).
+// `parse_structured_roadmap` path). The review surface (node 2.2, landed) reads the draft via
+// `readObjectiveDraft` (over `readSessionArtifact` — digest-validated, fail-open) and renders
+// markdown via `renderObjectiveDraft` (the prose + a roadmap table) — never raw JSON; the
+// approval→`objective_save` orchestration (node 2.3, forthcoming) feeds the recovered roadmap
+// back as structured JSON.
 //
 // Imports stay node builtins + sibling seams (sessionData.ts, objectiveSave.ts, result.ts) so the
 // module loads under `node --test`; no manual `scratch`/`runs` path segments (cacheGuard.test.ts).
@@ -29,6 +30,7 @@ import { failFor, ok, type Result } from "./result.ts";
 import {
   activeSessionRunId,
   digestSessionData,
+  readSessionArtifact,
   type SessionDataCtx,
   writeSessionArtifact,
 } from "./sessionData.ts";
@@ -102,6 +104,104 @@ export function writeObjectiveDraft(
     run_id: runId,
     roadmap_nodes: roadmap.length,
   });
+}
+
+// ------------------------------------------------------------------- the reader + the renderer
+
+/** The validated working-objective draft shape consumers receive from `readObjectiveDraft`. */
+export interface ObjectiveDraft {
+  title?: string;
+  prose: string;
+  roadmap: unknown[];
+}
+
+/**
+ * Read + validate the working-objective draft artifact. Fail-open `null` everywhere (mirroring
+ * `readSessionArtifact`'s loud tier): no pointer/file/digest → `null` (the seam already spoke);
+ * malformed JSON, a non-object payload, an unsupported `schema_version`, or blank prose → a
+ * stderr warning + `null`. `roadmap` defaults to `[]` when absent/non-array; `title` is kept
+ * only when a non-blank string. Never throws.
+ */
+export function readObjectiveDraft(ctx: SessionDataCtx): ObjectiveDraft | null {
+  const artifact = readSessionArtifact(ctx, OBJECTIVE_DRAFT_ARTIFACT);
+  if (artifact === null) return null;
+
+  const refuse = (why: string): null => {
+    console.error(`perk: warning: ${OBJECTIVE_DRAFT_ARTIFACT} ${why} — refusing the draft`);
+    return null;
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(artifact.content);
+  } catch {
+    return refuse("is not valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return refuse("is not a JSON object");
+  }
+  const payload = parsed as Record<string, unknown>;
+  if (payload.schema_version !== 1) {
+    return refuse(`has an unsupported schema_version (${JSON.stringify(payload.schema_version)})`);
+  }
+  const prose = payload.prose;
+  if (typeof prose !== "string" || !prose.trim()) {
+    return refuse("has no prose");
+  }
+  const roadmap = Array.isArray(payload.roadmap) ? payload.roadmap : [];
+  const title =
+    typeof payload.title === "string" && payload.title.trim() ? payload.title : undefined;
+  return { ...(title !== undefined ? { title } : {}), prose, roadmap };
+}
+
+/** Sanitize a table cell: `|` escaped, newlines collapsed to a single space. */
+function tableCell(value: string): string {
+  return value.replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
+}
+
+/** Read a string field off an unknown-shaped roadmap node (`""` when absent/mistyped). */
+function nodeString(node: unknown, key: string): string {
+  if (typeof node !== "object" || node === null) return "";
+  const value = (node as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** Render a node's `depends_on` as a `", "`-join of its string members; `-` when empty/absent. */
+function nodeDependsOn(node: unknown): string {
+  if (typeof node !== "object" || node === null) return "-";
+  const value = (node as Record<string, unknown>).depends_on;
+  if (!Array.isArray(value)) return "-";
+  const deps = value.filter((d): d is string => typeof d === "string");
+  return deps.length > 0 ? deps.join(", ") : "-";
+}
+
+/**
+ * Render the draft as the markdown review surface (JSON is storage/transport only — contracts
+ * §8.1): the optional `# title` heading, the prose verbatim, and (when the roadmap is non-empty)
+ * a `## Roadmap` section with ONE markdown table. The `Phase` column appears only when some node
+ * carries a non-blank string `phase`. Pure; never throws.
+ */
+export function renderObjectiveDraft(draft: ObjectiveDraft): string {
+  let out = "";
+  if (draft.title) out += `# ${draft.title}\n\n`;
+  out += draft.prose;
+
+  if (draft.roadmap.length === 0) return out;
+
+  const withPhase = draft.roadmap.some((node) => nodeString(node, "phase").trim().length > 0);
+  const header = withPhase
+    ? "| Node | Phase | Description | Depends On | Status |\n| --- | --- | --- | --- | --- |"
+    : "| Node | Description | Depends On | Status |\n| --- | --- | --- | --- |";
+  const rows = draft.roadmap.map((node) => {
+    const cells = [
+      tableCell(nodeString(node, "id")),
+      ...(withPhase ? [tableCell(nodeString(node, "phase"))] : []),
+      tableCell(nodeString(node, "description")),
+      tableCell(nodeDependsOn(node)),
+      tableCell(nodeString(node, "status") || "pending"),
+    ];
+    return `| ${cells.join(" | ")} |`;
+  });
+  return `${out.trimEnd()}\n\n## Roadmap\n\n${header}\n${rows.join("\n")}\n`;
 }
 
 const TOOL_GUIDELINES = [

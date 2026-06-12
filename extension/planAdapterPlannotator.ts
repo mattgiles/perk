@@ -7,8 +7,10 @@
 // INJECTION + BRIDGE ONLY (Node 2.5 split): as of Node 2.5 the `plan_review` TOOL lives in
 // `extension/planReview.ts` — perk's backend-neutral review door — and this module is back to
 // the injection-only adapter shape: it owns (1) the plannotator review-step authoring context
-// (injected while the gate is active AND plannotator is selected) and (2) the pure event-bus
-// bridge (`createPlannotatorBridge`) that planReview.ts dispatches to when plannotator is the
+// (injected while the gate is active AND plannotator is selected — TWO content flavors, one
+// customType: the plan bridge context, or the objective flavor when the stage is
+// `objective-author`, #352 Node 2.2) and (2) the pure event-bus bridge
+// (`createPlannotatorBridge`) that planReview.ts dispatches to when plannotator is the
 // selected plan provider. The bridge speaks plannotator's published `plannotator:request` event
 // API (in-process `pi.events` bus).
 //
@@ -42,6 +44,7 @@ import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";
 const PLAN_ADAPTER_PLANNOTATOR_MARKER = "[PLAN ADAPTER: PLANNOTATOR]";
+const OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER = "[OBJECTIVE ADAPTER: PLANNOTATOR]";
 
 /**
  * The handshake timeout for plannotator's immediate `respond` callback (mirrors plannotator's own
@@ -74,6 +77,30 @@ read-only exactly as the plan-authoring contract describes; then add one review 
   the save outcome (and any reviewer feedback) instead.
 - If plan_review reports it was skipped or no review surface is available: fall back to presenting
   the complete plan to the user; the human runs /plan-save (the manual failsafe).`;
+
+/**
+ * The objective flavor of the bridge prompt (#352 Node 2.2), injected in an `objective-author`
+ * session instead of the plan flavor. Approval does NOT save anything yet — the
+ * approval→`objective_save` orchestration is Node 2.3; `/objective-save` is the human save
+ * gesture on every arm.
+ */
+export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = `${OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER}
+A Plannotator browser review surface is configured for objective authoring in this repo. Author
+the objective read-only exactly as the objective-authoring contract describes; then add one
+review step:
+
+- Keep the working objective current with objective_draft — pass the FULL prose and the FULL
+  structured roadmap each call (it rewrites the whole draft); never hand-write roadmap YAML.
+- When the objective + roadmap are decision-complete, call the plan_review tool. The Plannotator
+  browser UI shows the RENDERED objective (the prose + a roadmap table) derived from the draft
+  artifact — never raw JSON.
+- If the review is DENIED: revise per the returned annotations/feedback, rewrite the working
+  draft with objective_draft, then call plan_review again.
+- If the review is APPROVED: nothing is saved yet — relay the approval (and any reviewer
+  feedback) and ask the user to run /objective-save (the structured save).
+- If plan_review reports it was skipped or no review surface is available: present the complete
+  objective + structured roadmap to the user; the human runs /objective-save (the manual
+  failsafe).`;
 
 /** Whether the foreign `plannotator-plan` provider is the selected plan provider for `cwd`. */
 export function isPlannotatorPlanSelected(cwd: string): boolean {
@@ -192,26 +219,33 @@ export function createPlannotatorBridge(bus: PlannotatorBus): {
  * arbitrates tools and needs no gating.
  */
 export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
-  // Inject the bridge context while the read-only gate is active AND plannotator is selected —
-  // EXCEPT in an objective-author session (also read-only, but objectiveAuthor.ts owns its
-  // authoring context there; mirrors planMode's stage exception). The gate-active check reads the
-  // persisted `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
+  // Inject the bridge context while the read-only gate is active AND plannotator is selected.
+  // Two content flavors, one customType: an objective-author session (also read-only) gets the
+  // objective flavor (the review surface renders the objective draft — #352 Node 2.2); any other
+  // gated stage gets the plan flavor. The gate-active check reads the persisted
+  // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   pi.on("before_agent_start", async (_event, ctx) => {
     if (!isPlannotatorPlanSelected(ctx.cwd)) return;
     const state = rebuildWorkflowState(branchOf(ctx));
     if (state.mode !== "read-only") return;
-    if (state.stage === OBJECTIVE_AUTHOR_STAGE) return;
+    const content =
+      state.stage === OBJECTIVE_AUTHOR_STAGE
+        ? OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT
+        : PLAN_ADAPTER_PLANNOTATOR_CONTEXT;
     return {
       message: {
         customType: PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
-        content: PLAN_ADAPTER_PLANNOTATOR_CONTEXT,
+        content,
         display: false,
       },
     };
   });
 
-  // Strip the stale bridge marker from context when plannotator-plan is no longer selected (same
-  // hygiene as the tombell shim), so it never lingers across a deselect.
+  // Strip the stale bridge markers (BOTH flavors) from context when plannotator-plan is no
+  // longer selected (same hygiene as the tombell shim), so they never linger across a deselect.
+  const hasMarker = (text: string): boolean =>
+    text.includes(PLAN_ADAPTER_PLANNOTATOR_MARKER) ||
+    text.includes(OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER);
   pi.on("context", async (event, ctx) => {
     if (isPlannotatorPlanSelected(ctx.cwd)) return;
     return {
@@ -220,12 +254,12 @@ export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
         if (msg.customType === PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE) return false;
         if (msg.role !== "user") return true;
         const content = msg.content;
-        if (typeof content === "string") return !content.includes(PLAN_ADAPTER_PLANNOTATOR_MARKER);
+        if (typeof content === "string") return !hasMarker(content);
         if (Array.isArray(content)) {
           return !content.some(
             (c) =>
               (c as { type?: string; text?: string }).type === "text" &&
-              ((c as { text?: string }).text ?? "").includes(PLAN_ADAPTER_PLANNOTATOR_MARKER),
+              hasMarker((c as { text?: string }).text ?? ""),
           );
         }
         return true;
