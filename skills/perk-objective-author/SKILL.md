@@ -1,14 +1,14 @@
 ---
 name: perk-objective-author
-description: Authoring a new perk objective + roadmap in a read-only session, then saving it with the objective_save tool. Use when drafting a new objective in a perk repo, before it is created on GitHub.
+description: Authoring a new perk objective + roadmap in a read-only session — draft with objective_draft, request a human review with plan_review (approval auto-saves), with /objective-save and the objective_save tool as the manual failsafes. Use when drafting a new objective in a perk repo, before it is created on GitHub.
 ---
 
 # Authoring a perk objective (the `objective-author` stage)
 
 An **objective** is a long-running goal that *generates* bounded plans rather than being implemented
 directly. This stage is the objective mirror of `plan`: you author the objective (in read-only
-mode), then save it to GitHub, where `/objective-plan` later turns its roadmap nodes into plans.
-The save step is mechanical — **all the judgment lives here**. You (the parent) own the goal
+mode), request a human review, and an approval saves it to GitHub, where `/objective-plan` later
+turns its roadmap nodes into plans. The save step is mechanical — **all the judgment lives here**. You (the parent) own the goal
 framing, the user conversation, and the durable write; never delegate them.
 
 ## The loop
@@ -28,25 +28,33 @@ framing, the user conversation, and the durable write; never delegate them.
    - optional **`depends_on`** ids for explicit ordering (omit to infer sequential order within a
      phase), an optional **`status`** (defaults to `pending`), and an optional **`slug`**.
 5. **Iterate** with the user until the objective + roadmap are decision-complete — no open
-   "should this be one node or two?" residue.
+   "should this be one node or two?" residue. Keep the **working draft current with
+   `objective_draft`**, passing the FULL prose + FULL structured roadmap each call (it rewrites
+   the whole draft; never hand-write roadmap YAML). Stress-test the objective with the user
+   **before** requesting review: ask one focused question at a time (via `ask_user_question` when
+   available), recommending an answer for each.
 
-## Saving: exit read-only, then call the `objective_save` tool
+## Saving: draft → review → approval auto-saves
 
-The **robust** path is the `objective_save` **tool** — you hand it the finalized `prose` and the
-**structured `roadmap`** (a JSON array of nodes), so the exact objective is stored. Because
-read-only mode hides custom tools, the flow is:
+In interactive objective authoring the default flow is **review-first**:
 
-1. Explore and converge on the objective + roadmap (read-only).
-2. **Exit read-only mode** (`/plan` off) so the `objective_save` tool becomes available.
-3. Call **`objective_save`** with `prose` and `roadmap` (and an optional `title`).
-
-The tool creates the `perk:objective` issue, **activates** it (`active_objective`), and **starts
-budget tracking** — so you can go straight to `/objective-plan` afterwards.
-
-The `/objective-save` **command** is a convenience trigger — it exits read-only and drives you (the
-agent) to call the `objective_save` tool with your converged `prose` + structured `roadmap`, so the
-structured save still flows through the tool. Both the direct tool call and `/objective-save` reach
-the same place; neither hand-writes roadmap YAML.
+1. Explore read-only and converge on the objective + roadmap; keep the draft current with
+   **`objective_draft`** — the validated draft artifact is what gets reviewed AND saved.
+2. When the objective is decision-complete, call the **`plan_review`** tool — the configured
+   review surface (the Plannotator browser UI when selected; perk's in-TUI editor otherwise)
+   displays the **rendered objective** (prose + roadmap table) derived from the draft artifact.
+   The first-party editor is **view-only** for objectives: deny + feedback is the change channel —
+   edits are never written back to the draft.
+3. On a **deny**, revise per the returned feedback, rewrite the draft with `objective_draft`, and
+   call `plan_review` again. On an **approve**, the objective is **auto-saved** (the
+   `perk:objective` issue is created + activated, budget tracking starts) and the session leaves
+   read-only — relay the save outcome; no final-message re-dump, no directing the human to
+   `/objective-save`.
+4. If `plan_review` reports it was **skipped or unavailable** (headless session, the human
+   dismissed the review, no surface), present the complete objective + structured roadmap; the
+   **human** runs **`/objective-save`** (artifact-first: it re-reads the draft through the same
+   save seam; only a draftless session falls back to the legacy drive-the-session `objective_save`
+   flow). The direct `objective_save` tool call remains the post-gate-exit manual failsafe.
 
 ## 🔴 Never hand-write roadmap YAML
 
@@ -65,5 +73,6 @@ rather than encoding a guess into the roadmap.
 
 - **Judgment** — the goal, its boundaries, how it decomposes into nodes — is yours.
 - **User interaction** — clarifying scope and trade-offs — is yours.
-- **The durable write** — creating the objective via `objective_save` — is yours; it is the
+- **The durable write** — creating the objective via the approval-driven save (`plan_review` →
+  the save seam), with `objective_save`/`/objective-save` as the failsafe — is yours; it is the
   read-only → read-write boundary, the same way `plan_save` is for plans.

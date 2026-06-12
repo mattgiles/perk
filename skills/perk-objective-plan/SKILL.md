@@ -1,6 +1,6 @@
 ---
 name: perk-objective-plan
-description: Orchestrating the perk /objective-plan factory — select the next objective node, optionally explore it in an isolated child, author a bounded plan, save it linked to the objective, and link the node back to the plan. Use when planning an objective node in a perk repo.
+description: Orchestrating the perk /objective-plan factory — select the next objective node, optionally explore it in an isolated child, author a bounded plan, review it with plan_review, and on approval the plan is saved linked to the objective (the node backlinked and advanced automatically). Use when planning an objective node in a perk repo.
 ---
 
 # Planning an objective node (the `/objective-plan` factory)
@@ -19,7 +19,9 @@ exploration call, and the completion audit. Judgment, user interaction, and dura
    `planning`; warm (`/objective-plan N`) hands you the objective. If you need to choose, use
    `perk objective next N` (the next **plannable** node — a pending node, or a resumable `planning`
    claim) or pick an explicit `--node`. Mark it `planning` with the `objective_node` tool
-   (`{ objective: N, node: <id>, status: "planning" }`) if it is not already. **The node lifecycle
+   (`{ objective: N, node: <id>, status: "planning" }`) — **unconditionally, even if it is already
+   `planning`**: the successful transition records the in-session `objective_node_claim` the
+   approval-driven save uses to link the node. **The node lifecycle
    is a resumable lease:** `planning` is a *claim* with no saved plan yet — re-running
    `/objective-plan` resumes it (an abandoned claim self-heals); `in_progress` means a plan has been
    saved (committed) and is awaiting implementation.
@@ -36,14 +38,22 @@ exploration call, and the completion audit. Judgment, user interaction, and dura
    child is optional.
 
 4. **Author a bounded plan.** Scope the plan to **this one node** — reference `Part of Objective #N,
-   Node <id>`. Resolve every decision (the standard `perk-plan` contract: decision-complete, durable
-   anchors, no line numbers). Do **not** widen scope to the whole objective.
+   Node <id>`. Keep the **working draft current with `plan_draft`** — the validated artifact is
+   what gets reviewed AND saved. Stress-test the plan with the user **before** requesting review:
+   one focused question at a time, recommending an answer for each. Resolve every decision (the
+   standard `perk-plan` contract: decision-complete, durable anchors, no line numbers). Do **not**
+   widen scope to the whole objective.
 
-5. **Save, committing the node.** Persist with the `plan_save` tool, passing **both**
-   `objective_id: "N"` **and** `node_id: "<id>"`. This atomically backlinks the node to the plan
-   **and** advances it `planning → in_progress` — no separate `objective_node` backlink call. **Always
-   save — never implement directly** from this session. (The `objective_node` `pr`-only shape still
-   exists for manual repair, but it is no longer part of the factory loop.)
+5. **Review, committing the node on approval.** When the plan is decision-complete, call the
+   **`plan_review`** tool. An **APPROVED** review **auto-saves** the draft and recovers
+   `objective_id`/`node_id` automatically from the planning claim — atomically backlinking the
+   node to the plan **and** advancing it `planning → in_progress` (no separate `objective_node`
+   backlink call). A **DENIED** review → revise per the feedback, rewrite the draft with
+   `plan_draft`, and call `plan_review` again. **Manual failsafe:** `/plan-save`, or the
+   `plan_save` tool passing **both** `objective_id: "N"` and `node_id: "<id>"` (e.g. when
+   `plan_review` reports skipped/unavailable). **Always save — never implement directly** from
+   this session. (The `objective_node` `pr`-only shape still exists for manual repair, but it is
+   no longer part of the factory loop.)
 
 ## The completion audit (the `done` transition)
 
@@ -65,5 +75,6 @@ paths — the refusal is honest about enforcing only your path.
 
 - **Judgment** — node scope, what the plan must decide, whether the node is actually done — is yours.
 - **The plan** — authoring and saving it — is yours; the explorer child never plans or writes.
-- **Durable writes** — the node status/backlink mutations (via `objective_node`) and the plan save —
-  are yours, never the child's. The spawned explorer is read-only and exploration-only.
+- **Durable writes** — the node status/backlink mutations (via `objective_node`) and the plan save
+  (approval-driven via `plan_review`, or the `/plan-save`/`plan_save` failsafe surfaces) — are
+  yours, never the child's. The spawned explorer is read-only and exploration-only.
