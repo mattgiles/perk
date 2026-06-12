@@ -301,8 +301,11 @@ resolution (`resolvePlanSource`) → `savePlan` → gate exit on success (the D1
 `gating.isActive()` before the save, `gating.exit` only on a successful save; a failed save leaves
 the gate on). The `/plan-save` command is now the **manual failsafe** invocation of the same seam;
 the `plan_review` door wires **two review backends** into it — plannotator's browser review
-(Node 2.4) and the **first-party in-TUI editor review (Node 2.5)** — their APPROVED outcomes run
-this seam (tombell's re-aim remains Node 2.6). No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
+(Node 2.4) and the **first-party in-TUI editor review (Node 2.5)** — and those two backends cover
+**every** selection (plannotator → the browser bridge; any other selection, tombell included, →
+the first-party in-TUI review); all three authoring contexts (`PLAN_AUTHORING_CONTEXT`,
+`PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, `PLAN_ADAPTER_TOMBELL_CONTEXT`) now speak review-first, and
+APPROVED outcomes run this seam. No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
 (fail-open; callers render their own fallback). **Warm node-link recovery:** when a save reaches
 `savePlan` with **both** `objectiveId` and `nodeId` absent (an approval-triggered save carries no
 model params), the link is recovered **both-or-neither** from the rebuilt `objective_node_claim`;
@@ -1981,6 +1984,14 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `[providers] plan` selection, and all downstream stages bind only to the provider-agnostic
 > plan-ref (unchanged).
 >
+> **Status (Node 2.6):** the tombell bridge context is **re-aimed to review-first**
+> (`plan_draft` → `plan_review` → the first-party in-TUI review → `approvalSave` auto-save), with
+> the present + `/plan-save` flow as its explicit fail-open arm (see §8.10's interactive save
+> discipline). The injection is now **conditioned** — it fires only when perk's gate is read-only
+> (per the persisted `perk:workflow-state.mode`) **or** tombell's own persisted `plan-mode-state`
+> entry has `enabled: true` (latest wins), and never in an objective-author session — replacing
+> Node 2.3's unconditional-on-selection injection.
+>
 > **Status (Node 3.2):** the **first 3rd-party todo adapter** lands `juicesharp-todo` as a real,
 > selectable todo provider (no longer illustrative); the todo seam is **behavior-complete**. (1) The
 > shipped entry carries no `package_filter` (single-concern checklist overlay — mirrors the tombell
@@ -2063,9 +2074,12 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > message and never attempt to save**; the **human** runs `/plan-save` (its
 > `extractPlanMarkdown` scrape is reliable by construction — the final message is the clean
 > plan; as of Node 2.2 `/plan-save` prefers the validated plan-draft artifact when one exists,
-> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` still
-> speaks the present + `/plan-save` flow as its primary discipline (its `plan_review` re-aim is
-> Node 2.6). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**, and the
+> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` (Node 2.6)
+> now joins `PLAN_AUTHORING_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` in the review-first
+> list; the present + `/plan-save` (artifact-preferred, scrape-fallback) flow remains its
+> explicit **fail-open** arm — including when `@tombell/pi-plan`'s own interactive `/plan`
+> `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
+> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**, and the
 > orchestrated **factory flows** (objective-plan, learn-docs, replan) still instruct an
 > autonomous `plan_save` tool call — unchanged.
 
