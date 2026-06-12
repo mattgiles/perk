@@ -12,12 +12,20 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { sessionDataDir } from "./cache.ts";
 import {
   OBJECTIVE_DRAFT_ARTIFACT,
+  type ObjectiveDraft,
   type ObjectiveDraftResult,
+  readObjectiveDraft,
+  renderObjectiveDraft,
   writeObjectiveDraft,
 } from "./objectiveDraft.ts";
 import { decodeObjectiveSaveParams } from "./objectiveSave.ts";
 import type { ReportTarget } from "./report.ts";
-import { digestSessionData, readSessionArtifact, type SessionDataCtx } from "./sessionData.ts";
+import {
+  digestSessionData,
+  readSessionArtifact,
+  type SessionDataCtx,
+  writeSessionArtifact,
+} from "./sessionData.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 import {
   type EntrySink,
@@ -221,6 +229,136 @@ test("core: pointer-append failure (dropping sink) ⇒ write_failed", () => {
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+// --- readObjectiveDraft (the node-2.2 review-surface reader) -------------------------------------
+
+/** Plant a raw artifact write (file + valid pointer) so malformed payloads are readable. */
+function plantArtifact(cwd: string, branch: unknown[], content: string): void {
+  const ctx = reportableCtx(cwd, branch);
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, content));
+}
+
+test("readObjectiveDraft: happy path round-trips a writeObjectiveDraft write", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    assert.equal(
+      writeObjectiveDraft(fakeSink(branch), ctx, {
+        prose: PROSE,
+        title: "Objective title",
+        roadmap: ROADMAP,
+      }).details.ok,
+      true,
+    );
+    assert.deepEqual(readObjectiveDraft(ctx), {
+      title: "Objective title",
+      prose: PROSE,
+      roadmap: ROADMAP,
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("readObjectiveDraft: no pointer/run_id → null (silent fail-open)", () => {
+  const cwd = tempCwd();
+  try {
+    assert.equal(readObjectiveDraft(reportableCtx(cwd, [])), null, "no run_id");
+    assert.equal(readObjectiveDraft(reportableCtx(cwd, [runIdEntry("RID")])), null, "no pointer");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("readObjectiveDraft: malformed payloads warn + null", () => {
+  for (const [label, content] of [
+    ["malformed JSON", "{ not json"],
+    ["non-object payload", '["an", "array"]\n'],
+    ["wrong schema_version", JSON.stringify({ schema_version: 2, prose: PROSE, roadmap: [] })],
+    ["blank prose", JSON.stringify({ schema_version: 1, prose: "  \n", roadmap: [] })],
+    ["missing prose", JSON.stringify({ schema_version: 1, roadmap: [] })],
+  ] as const) {
+    const cwd = tempCwd();
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      plantArtifact(cwd, branch, content);
+      const draft = quietly(() => readObjectiveDraft(reportableCtx(cwd, branch)));
+      assert.equal(draft, null, label);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test("readObjectiveDraft: absent/non-array roadmap → []; blank title dropped", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    plantArtifact(
+      cwd,
+      branch,
+      JSON.stringify({ schema_version: 1, title: "   ", prose: PROSE, roadmap: "nope" }),
+    );
+    assert.deepEqual(readObjectiveDraft(reportableCtx(cwd, branch)), {
+      prose: PROSE,
+      roadmap: [],
+    });
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// --- renderObjectiveDraft (the markdown review surface) ------------------------------------------
+
+test("renderObjectiveDraft: title heading + prose + roadmap table with defaults", () => {
+  const draft: ObjectiveDraft = {
+    title: "Objective title",
+    prose: "The why.\n",
+    roadmap: [
+      { id: "1.1", description: "first", status: "done" },
+      { id: "2.1", description: "second", depends_on: ["1.1", "1.2"] },
+    ],
+  };
+  const md = renderObjectiveDraft(draft);
+  assert.ok(md.startsWith("# Objective title\n\nThe why.\n"));
+  assert.match(md, /## Roadmap/);
+  assert.match(md, /\| Node \| Description \| Depends On \| Status \|/);
+  assert.match(md, /\| 1\.1 \| first \| - \| done \|/);
+  assert.match(md, /\| 2\.1 \| second \| 1\.1, 1\.2 \| pending \|/, "status defaults to pending");
+  assert.doesNotMatch(md, /\| Phase \|/, "no Phase column without a phase");
+});
+
+test("renderObjectiveDraft: no title → no heading; empty roadmap → no Roadmap section", () => {
+  const md = renderObjectiveDraft({ prose: "Just prose.\n", roadmap: [] });
+  assert.equal(md, "Just prose.\n");
+  assert.doesNotMatch(md, /## Roadmap/);
+});
+
+test("renderObjectiveDraft: Phase column appears iff any node carries a phase", () => {
+  const md = renderObjectiveDraft({
+    prose: "P",
+    roadmap: [
+      { id: "1.1", description: "first", phase: "Phase 1" },
+      { id: "2.1", description: "second" },
+    ],
+  });
+  assert.match(md, /\| Node \| Phase \| Description \| Depends On \| Status \|/);
+  assert.match(md, /\| 1\.1 \| Phase 1 \| first \| - \| pending \|/);
+  assert.match(
+    md,
+    /\| 2\.1 \| {2}\| second \| - \| pending \|/,
+    "phase-less node gets an empty cell",
+  );
+});
+
+test("renderObjectiveDraft: cells are sanitized (pipes escaped, newlines collapsed)", () => {
+  const md = renderObjectiveDraft({
+    prose: "P",
+    roadmap: [{ id: "1.1", description: "a | b\nc", status: 7 }],
+  });
+  assert.match(md, /\| 1\.1 \| a \\\| b c \| - \| pending \|/, "mistyped status falls to pending");
 });
 
 // --- harness: the tool is live UNDER the read-only gate (the carve-out) -------------------------
