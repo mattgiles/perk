@@ -8,10 +8,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { sessionDataDir } from "./cache.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
+  approvalSave,
   decodePlanSaveParams,
   extractPlanMarkdown,
   isPlanModeActive,
@@ -20,6 +22,7 @@ import {
 import type { ReportTarget } from "./report.ts";
 import { type SessionDataCtx, writeSessionArtifact } from "./sessionData.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import type { ToolGating } from "./toolGating.ts";
 import type { BranchEntry, EntrySink } from "./workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
@@ -859,4 +862,293 @@ test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
   assert.equal(decodePlanSaveParams({ plan: "p", node_id: 1.2 }), null);
   assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: "x" }), null);
   assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: [1, "2"] }), null);
+});
+
+// --- Node 2.3 (#339): warm node-link recovery (the objective_node_claim carrier) -----------
+
+const CLAIM = { objective: "115", node: "1.2" };
+
+test("tool: both link params absent + a claim present → recovered into the argv", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_NODE_OK_JSON, argvFile });
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", objective_node_claim: CLAIM },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "115", "objective recovered");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "1.2", "node recovered");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: explicit link params win outright over a claim", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", objective_node_claim: CLAIM },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, objective_id: "9", node_id: "2.2" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "9");
+    assert.equal(argv[argv.indexOf("--node-id") + 1], "2.2");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a half-specified explicit link is never mixed with the claim", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", objective_node_claim: CLAIM },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD, objective_id: "9" });
+    const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+    assert.equal(argv[argv.indexOf("--objective-id") + 1], "9", "the explicit half is kept");
+    assert.ok(!argv.includes("--node-id"), "the claim's node is NOT mixed in");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a successful node-linked save clears the matching claim", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: PLAN_NODE_OK_JSON });
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", objective_node_claim: CLAIM },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(h.workflowState().objective_node_claim, null, "the claim was cleared");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a failed save keeps the claim", async () => {
+  const cwd = scaffoldRepo();
+  const bin = fakePerk(cwd, { stdout: "not json", code: 1 });
+  const file = plantSession(cwd, [
+    { run_id: "01RID", mode: "read-write", objective_node_claim: CLAIM },
+  ]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.deepEqual(h.workflowState().objective_node_claim, CLAIM, "the claim survives");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- Node 2.3 (#339): the approvalSave orchestration seam (pure fakes, offline) -------------
+
+const FAIL_ENVELOPE = JSON.stringify({
+  success: false,
+  error_type: "github_error",
+  message: "gh exploded",
+});
+
+/** A ToolGating fake recording exits; `active` is the isActive snapshot. */
+function fakeGating(active: boolean): ToolGating & { exits: number } {
+  const g = {
+    exits: 0,
+    syncFromState() {},
+    enter() {},
+    exit() {
+      g.exits += 1;
+    },
+    isActive: () => active,
+  };
+  return g;
+}
+
+/** An ExtensionAPI fake: appendEntry lands on the branch; exec returns the canned payload. */
+function fakeApprovalPi(
+  branch: unknown[],
+  opts: { stdout: string; code?: number; argvs?: string[][] },
+): ExtensionAPI {
+  return {
+    appendEntry(customType: string, data?: unknown) {
+      branch.push({ type: "custom", customType, data });
+    },
+    async exec(_cmd: string, args: string[]) {
+      opts.argvs?.push(args);
+      return { stdout: opts.stdout, stderr: "", code: opts.code ?? 0, killed: false };
+    },
+  } as unknown as ExtensionAPI;
+}
+
+/** Run `fn` with PERK_NO_LLM pinned on (deterministic: no title generation path). */
+async function withNoLlm(fn: () => Promise<void>): Promise<void> {
+  const prev = process.env.PERK_NO_LLM;
+  process.env.PERK_NO_LLM = "1";
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PERK_NO_LLM;
+    else process.env.PERK_NO_LLM = prev;
+  }
+}
+
+test("approvalSave: no artifact/param/transcript → no-plan, no exec, gate untouched", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      const argvs: string[][] = [];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+      const gating = fakeGating(true);
+      const outcome = await approvalSave(pi, ctx, gating);
+      assert.deepEqual(outcome, { status: "no-plan" });
+      assert.equal(argvs.length, 0, "no cold-door exec");
+      assert.equal(gating.exits, 0, "the gate was untouched");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approvalSave: reviewedPlan fallback saves while read-only → gate exited", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      const argvs: string[][] = [];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+      const gating = fakeGating(true);
+      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+      assert.equal(outcome.status, "saved");
+      assert.equal(outcome.status === "saved" && outcome.gateExited, true, "gateExited reported");
+      assert.equal(gating.exits, 1, "the gate was exited once");
+      const argv = argvs[0] ?? [];
+      const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+      assert.equal(readFileSync(planFile, "utf8"), "# Reviewed plan", "the reviewed plan staged");
+      const result = outcome.status === "saved" ? outcome.result : null;
+      assert.equal(result?.terminate, true, "the SaveResult keeps terminate for tool callers");
+      // The param-path success message stays byte-stable (no source suffix); details carry it.
+      const details = result?.details as { plan_source?: string } | undefined;
+      assert.equal(details?.plan_source, "param");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approvalSave: a successful save while already read-write never exits the gate", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON });
+      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+      const gating = fakeGating(false);
+      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+      assert.equal(outcome.status, "saved");
+      assert.equal(outcome.status === "saved" && outcome.gateExited, false);
+      assert.equal(gating.exits, 0, "no gating.exit call");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approvalSave: a failed save leaves the gate on", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      const pi = fakeApprovalPi(branch, { stdout: FAIL_ENVELOPE, code: 1 });
+      const ctx = reportableCtx(cwd, branch) as unknown as ExtensionContext;
+      const gating = fakeGating(true);
+      const outcome = await approvalSave(pi, ctx, gating, { reviewedPlan: "# Reviewed plan" });
+      assert.equal(outcome.status, "save-failed");
+      assert.equal(outcome.status === "save-failed" && outcome.gateExited, false);
+      assert.equal(gating.exits, 0, "the gate stays on");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("approvalSave: the artifact wins over a differing reviewedPlan (paramMismatch)", async () => {
+  await withNoLlm(async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "approval-save-test-"));
+    try {
+      const branch: unknown[] = [runIdEntry("RID")];
+      const argvs: string[][] = [];
+      const pi = fakeApprovalPi(branch, { stdout: PLAN_JSON, argvs });
+      const ctx = reportableCtx(cwd, branch);
+      assert.ok(
+        writeSessionArtifact(fakeSink(branch), ctx, PLAN_DRAFT_ARTIFACT, "# The draft\n"),
+        "the draft artifact landed",
+      );
+      const gating = fakeGating(false);
+      const outcome = await approvalSave(pi, ctx as unknown as ExtensionContext, gating, {
+        reviewedPlan: "# A different reviewed plan",
+      });
+      assert.equal(outcome.status, "saved");
+      const text = outcome.status === "saved" ? (outcome.result.content[0]?.text ?? "") : "";
+      assert.match(text, /plan source: plan-draft artifact/);
+      assert.match(text, /⚠ differing plan param ignored/);
+      const argv = argvs[0] ?? [];
+      const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+      assert.equal(readFileSync(planFile, "utf8"), "# The draft", "the artifact bytes staged");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("command: /plan-save with no plan leaves a read-only gate untouched", async () => {
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only" }]);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: "/nonexistent" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeCommand("plan-save");
+    assert.equal(h.workflowState().mode, "read-only", "the gate stays on (nothing saved)");
+    assert.ok(
+      h.notifies.some((n) => /no plan to save/i.test(n)),
+      "the byte-stable no-plan warning",
+    );
+  } finally {
+    h.dispose();
+  }
 });

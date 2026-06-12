@@ -239,6 +239,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `active_objective` | string \| null | the active objective id; **live since P2.T9** (`/objective <id>` sets it, `/objective clear` nulls it) |
 | `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (Node 1.3, §8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
+| `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`, Node 2.3 of #339); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
@@ -287,6 +288,21 @@ same LWW field; a warm append makes the next reload's reconciliation a no-op. Th
 objective node→plan link outcome** returned by `perk plan-save` (`objective_node`): a successful
 advance shows `→ in_progress`, a failed one shows a visible `⚠ … NOT advanced — re-run /plan-save`
 warning (§8.4 "The node↔plan link") — it is not silently swallowed.
+
+**Approval→save orchestration seam (Node 2.3 of #339).** The exported `approvalSave` seam
+(`extension/planSave.ts`) is the shared APPROVED-review → save orchestration: artifact-first plan
+resolution (`resolvePlanSource`) → `savePlan` → gate exit on success (the D1a pattern — snapshot
+`gating.isActive()` before the save, `gating.exit` only on a successful save; a failed save leaves
+the gate on). The `/plan-save` command is now the **manual failsafe** invocation of the same seam;
+from Node 2.4 on, the review backends (plannotator / first-party / tombell) wire their APPROVED
+outcome into it. No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
+(fail-open; callers render their own fallback). **Warm node-link recovery:** when a save reaches
+`savePlan` with **both** `objectiveId` and `nodeId` absent (an approval-triggered save carries no
+model params), the link is recovered **both-or-neither** from the rebuilt `objective_node_claim`;
+any explicit value (even one) wins outright — never mixed; a malformed/missing claim never blocks
+the save. The cold handoff recovery (`perk plan-save` `_link_from_handoff`, #78) is unchanged
+underneath — if both carriers exist the recovered values match, and Python's explicit-flags-win
+ordering is preserved. A successful node-linked save clears the matching claim (best-effort).
 
 **Plan-issue title (#129).** The warm door now **actually forwards** an explicit `title` to
 `perk plan-save --title` (it was previously accepted by `savePlan` but silently dropped). When no

@@ -17,6 +17,8 @@ import {
   factoryGuidance,
   isNonTrivialAudit,
   MIN_AUDIT_LENGTH,
+  nodeClaimsEqual,
+  readNodeClaim,
   reconcileGuidance,
   resolveReconcileObjective,
 } from "./objectivePlan.ts";
@@ -533,4 +535,143 @@ test("decodeReconcileParams: tri-state strict-fail shapes", () => {
   assert.equal(decodeReconcileParams({ objective: "5", prose: "p" }), null);
   assert.equal(decodeReconcileParams({ objective: 5, prose: 5 }), null);
   assert.equal(decodeReconcileParams({ objective: 5 }), null);
+});
+
+// --- Node 2.3 (#339): the warm node-link carrier (objective_node_claim) --------------------
+
+const NODE_FAIL_JSON = JSON.stringify({
+  success: false,
+  error_type: "github_error",
+  message: "boom",
+});
+
+test("tool: a successful planning transition writes objective_node_claim", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_node", {
+      objective: 7,
+      node: "1.2",
+      status: "planning",
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(h.workflowState().objective_node_claim, { objective: "7", node: "1.2" });
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a non-planning transition for the claimed node clears the claim", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", status: "planning" });
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", status: "blocked" });
+    assert.equal(h.workflowState().objective_node_claim, null, "the claim was cleared");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a non-planning transition for a DIFFERENT node preserves the claim", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", status: "planning" });
+    await h.invokeTool("objective_node", { objective: 7, node: "9.9", status: "blocked" });
+    assert.deepEqual(
+      h.workflowState().objective_node_claim,
+      { objective: "7", node: "1.2" },
+      "an unrelated claim is never clobbered",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a failed cold door writes no claim", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: NODE_FAIL_JSON, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("objective_node", {
+      objective: 7,
+      node: "1.2",
+      status: "planning",
+    });
+    assert.equal((result.details as { ok: boolean }).ok, false);
+    assert.equal(h.workflowState().objective_node_claim ?? null, null, "no claim was written");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a pr-only backlink leaves the claim untouched", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", status: "planning" });
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", pr: "#9" });
+    assert.deepEqual(
+      h.workflowState().objective_node_claim,
+      { objective: "7", node: "1.2" },
+      "pr-only calls never touch the claim",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: pr-only with no prior claim writes none", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: OK_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_node", { objective: 7, node: "1.2", pr: "#9" });
+    assert.equal(h.workflowState().objective_node_claim ?? null, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- nodeClaimsEqual / readNodeClaim (pure units) -------------------------------------------
+
+test("nodeClaimsEqual: structural objective+node identity; absent equals only absent", () => {
+  const a = { objective: "7", node: "1.2" };
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.2" }), true);
+  assert.equal(nodeClaimsEqual(a, { objective: "7", node: "1.3" }), false);
+  assert.equal(nodeClaimsEqual(a, { objective: "8", node: "1.2" }), false);
+  assert.equal(nodeClaimsEqual(a, null), false);
+  assert.equal(nodeClaimsEqual(null, null), true);
+  assert.equal(nodeClaimsEqual(undefined, null), true);
+});
+
+test("readNodeClaim: rebuilt claim, fail-open on malformed/missing", () => {
+  const src = (data: unknown): { sessionManager: { getBranch(): unknown[] } } => ({
+    sessionManager: {
+      getBranch: () => [{ type: "custom", customType: "perk:workflow-state", data }],
+    },
+  });
+  assert.deepEqual(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "1.2" } })), {
+    objective: "7",
+    node: "1.2",
+  });
+  assert.equal(readNodeClaim(src({})), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: null })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: 7, node: "1.2" } })), null);
+  assert.equal(readNodeClaim(src({ objective_node_claim: { objective: "7", node: "" } })), null);
+  assert.equal(
+    readNodeClaim({
+      sessionManager: {
+        getBranch: () => {
+          throw new Error("boom");
+        },
+      },
+    }),
+    null,
+  );
 });

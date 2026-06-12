@@ -23,7 +23,13 @@ import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import { numberParam, paramsOf, stringParam } from "./toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
+import {
+  appendWorkflowState,
+  type BranchSource,
+  branchOf,
+  rebuildWorkflowState,
+  type WorkflowState,
+} from "./workflowState.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
 const NODE_STATUSES = ["pending", "planning", "in_progress", "done", "blocked", "skipped"] as const;
@@ -49,6 +55,74 @@ export interface ObjectiveNodeOk {
 }
 
 export type ObjectiveNodeResult = Result<ObjectiveNodeOk>;
+
+type ObjectiveNodeClaim = NonNullable<WorkflowState["objective_node_claim"]>;
+
+/** Structural claim equality (objective + node match); absent compares equal only to absent. */
+export function nodeClaimsEqual(
+  a: WorkflowState["objective_node_claim"] | undefined,
+  b: WorkflowState["objective_node_claim"] | undefined,
+): boolean {
+  const an = a ?? null;
+  const bn = b ?? null;
+  if (an === null || bn === null) return an === bn;
+  return an.objective === bn.objective && an.node === bn.node;
+}
+
+/** The rebuilt `objective_node_claim`, read fail-open (malformed/throwing branch → null). */
+export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
+  try {
+    const claim = rebuildWorkflowState(branchOf(ctx)).objective_node_claim ?? null;
+    if (
+      claim !== null &&
+      typeof claim.objective === "string" &&
+      claim.objective !== "" &&
+      typeof claim.node === "string" &&
+      claim.node !== ""
+    ) {
+      return claim;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record/clear the warm node-link carrier (Node 2.3 of #339) after a SUCCESSFUL `objective_node`
+ * status transition. `planning` writes the claim (the exact moment the warm factory learns the
+ * node id); any other explicit status clears it iff the rebuilt claim matches this objective +
+ * node (an unrelated claim is never clobbered). Best-effort: a failed append is loud via
+ * appendWorkflowState's report() but never fails the tool result.
+ */
+function recordNodeClaim(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  params: ObjectiveNodeParams,
+): void {
+  if (params.status === undefined) return; // pr-only / description-only: untouched.
+  const claim: ObjectiveNodeClaim = { objective: String(params.objective), node: params.node };
+  if (params.status === "planning") {
+    appendWorkflowState(pi, ctx, {
+      data: { objective_node_claim: claim },
+      field: "objective_node_claim",
+      expected: claim,
+      scope: "objective-plan",
+      failure: `objective_node_claim read-back failed for #${params.objective} node ${params.node}`,
+      equals: nodeClaimsEqual,
+    });
+    return;
+  }
+  if (!nodeClaimsEqual(readNodeClaim(ctx), claim)) return;
+  appendWorkflowState(pi, ctx, {
+    data: { objective_node_claim: null },
+    field: "objective_node_claim",
+    expected: null,
+    scope: "objective-plan",
+    failure: `objective_node_claim clear read-back failed for #${params.objective} node ${params.node}`,
+    equals: nodeClaimsEqual,
+  });
+}
 
 /** The fields `objectiveNode` consumes off the success envelope. */
 interface ObjectiveNodePayload {
@@ -160,6 +234,9 @@ export async function objectiveNode(
     decode: decodeObjectiveNode,
   });
   if (!r.ok) return fail(r.message, r.errorType);
+
+  // Node 2.3 (#339): maintain the warm node-link carrier off the successful transition.
+  recordNodeClaim(pi, ctx, params);
 
   const detail = params.status
     ? `node ${params.node} → ${params.status}`
