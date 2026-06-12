@@ -1,19 +1,19 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/issue_backend.py, perk/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, the doctor issues check, or fighting the boundary/import-direction tests.
+read_when: You are touching perk/backends/issue_backend.py, perk/backends/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, the doctor issues check, or fighting the boundary/import-direction tests.
 ---
 
 # The IssueBackend seam
 
-Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `perk/issue_backend.py` (the
+Objective #252 nodes 1.1/1.2 carved the backend-neutral issue tier: `perk/backends/issue_backend.py` (the
 protocol module — error type, frozen dataclasses, the 21-method `IssueBackend` Protocol) and
-`perk/issues.py` (the `GitHubIssueBackend` adapter + `resolve_issue_backend`). All 21 issue-tier
+`perk/backends/issues.py` (the `GitHubIssueBackend` adapter + `resolve_issue_backend`). All 21 issue-tier
 consumers route through the resolver. This doc preserves the patterns, enforcement, and residuals.
 
 ## Protocol-module shape
 
-`perk/runner.py` is the in-repo template for a contract module: module docstring + error type +
-frozen dataclasses + a plain `Protocol`, all in one module. `perk/issue_backend.py` followed it;
+`perk/run/runner.py` is the in-repo template for a contract module: module docstring + error type +
+frozen dataclasses + a plain `Protocol`, all in one module. `perk/backends/issue_backend.py` followed it;
 future contract modules should too.
 
 - **Static conformance via one annotated binding per implementation**: a function returning the
@@ -48,10 +48,10 @@ neutral-state helper).
 ## Boundary + import-direction enforcement
 
 - **Source-scan boundary test** (`tests/test_issues.py`): no module under `perk/` except
-  `perk/issues.py` and `perk/github.py` may call the 21 issue-tier gateway functions. New
-  production code reaches the issue tier via the resolver in `perk/issues.py`.
+  `perk/backends/issues.py` and the `perk/github/` package may call the 21 issue-tier gateway functions. New
+  production code reaches the issue tier via the resolver in `perk/backends/issues.py`.
 - **The import-direction guards are *substring* assertions over file text**, so they bite
-  docstrings and comments too: `perk/github.py` prose cannot even *mention* the resolver's name or
+  docstrings and comments too: `perk/github/` prose cannot even *mention* the resolver's name or
   the protocol module's name. Phrase around it ("the resolver in the issues module") or loosen the
   guard to import-statement scanning.
 
@@ -81,11 +81,11 @@ degrades to `plan_required`).
 ### Sweep ALL id consumers, not just decoders
 
 The relaxation's blast radius reached beyond the planned decoder list: the warm objective tools
-(`extension/objectivePlan.ts`'s number-typed params, the `/objective-reconcile` `\d+` arg parser),
+(`extension/factories/objectivePlan.ts`'s number-typed params, the `/objective-reconcile` `\d+` arg parser),
 `workflow run list`'s `isdigit()` PR-overlay gate, and `launch.py`'s checkpoint gate — which ALSO
 had a `provider != "github"` early-return that skipped Linear; both gates had to go. **Grep for
 `isdigit` / `\d+` / number-typed params when widening an id type.** The string-or-number tool-param
-shape lives in `extension/toolParams.ts` (`idParam`/`idArrayParam` — see
+shape lives in `extension/substrate/toolParams.ts` (`idParam`/`idArrayParam` — see
 `pi/tool-param-decode.md`).
 
 ## Per-backend land closure
@@ -93,7 +93,7 @@ shape lives in `extension/toolParams.ts` (`idParam`/`idArrayParam` — see
 GitHub keeps `Closes #N` in the squash body byte-identically; non-github backends get a
 `Plan: <id> — <url>` line plus an explicit fail-open `close_issue` (surfaced as the
 `plan_issue_closed` envelope field). **Branch on `backend_id`, never on id shape.** Known gap:
-`extension/land.ts` ignores `plan_issue_closed`, so the warm `/land` message doesn't mention the
+`extension/doors/land.ts` ignores `plan_issue_closed`, so the warm `/land` message doesn't mention the
 explicit close under Linear. Also: the GitHub envelope renames (`issue.number`→`issue.id` etc.)
 are **deliberately breaking** for external `perk … --json` consumers; contracts §8.21 is the
 canonical record.
@@ -146,7 +146,7 @@ checks/capabilities).
 
 ## Gotchas / residuals
 
-- **Module-name shadowing**: `perk/issues.py` collides with natural local names (e.g. an `issues`
+- **Module-name shadowing**: `perk/backends/issues.py` collides with natural local names (e.g. an `issues`
   list) — import as `from perk import issues as issues_mod` where needed.
 - **`PlanState` default friction**: the protocol's `PlanState` has no `state` default while the
   gateway shape does — backends must always populate it; expect fixture friction at extraction
@@ -165,9 +165,9 @@ checks/capabilities).
 
 ## Cross-references
 
-- `perk/issue_backend.py` — the protocol module
-- `perk/issues.py` — `GitHubIssueBackend`, `resolve_issue_backend`
-- `perk/github.py` — the private substrate the adapter delegates into
+- `perk/backends/issue_backend.py` — the protocol module
+- `perk/backends/issues.py` — `GitHubIssueBackend`, `resolve_issue_backend`
+- `perk/github/` — the private substrate the adapter delegates into
 - `tests/test_issue_backend.py`, `tests/test_issues.py` — conformance, late-binding, boundary, and
   import-direction tests
 - `docs/learned/workflow/github-gateway.md` — the gateway the substrate lives in

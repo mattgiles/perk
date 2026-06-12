@@ -7,7 +7,7 @@ read_when: You hit a Biome lint or tsc error in the extension (useIterableCallba
 
 perk's TypeScript plane is gated by Biome (lint + format) and `tsc`, run via `just ci` (the `lint`
 check). A few idiomatic JS patterns are rejected and cost a CI iteration if you don't pre-empt them.
-The triggering examples below came from the `parseTomlSubset` rewrite (`extension/config.ts`) but the
+The triggering examples below came from the `parseTomlSubset` rewrite (`extension/substrate/config.ts`) but the
 rules are general.
 
 ## Biome lint rules that reject idiomatic JS
@@ -81,7 +81,7 @@ Always run `npx biome check --write extension` to apply import sorting alongside
 
 ## Cross-references
 
-- `extension/config.ts` — `parseTomlSubset` (where these three rules all bit at once)
+- `extension/substrate/config.ts` — `parseTomlSubset` (where these three rules all bit at once)
 - `docs/learned/toolchain/ruff.md` — the Python-side check-vs-format split
 - `docs/learned/toolchain/worktree-node-modules.md` — why tsc/tests can use a stale SDK in a worktree
 - `docs/learned/toolchain/ts-module-moves.md` — the two-commit mv+sweep recipe whose audits hit the import reorder

@@ -13,10 +13,10 @@ future foreign-adapter node must respect.
 
 ## The substrate is the third cross-plane parsed-YAML contract
 
-`shared/providers.yaml` + `perk/providers.py` (`resolve_providers`, `ProvidersError`) +
-`extension/providers.ts` (`resolveProviders`, `PERK_PLAN_PROVIDER_ID`) reuse the `bindings.yaml`
+`shared/providers.yaml` + `perk/substrate/providers.py` (`resolve_providers`, `ProvidersError`) +
+`extension/substrate/providers.ts` (`resolveProviders`, `PERK_PLAN_PROVIDER_ID`) reuse the `bindings.yaml`
 recipe **verbatim** with zero packaging changes: shape-only loaders on each plane, `Issue`/`Severity`
-reused from `perk.registry`, and **no standalone CLI** — validation surfaces only through `doctor`.
+reused from `perk.substrate.registry`, and **no standalone CLI** — validation surfaces only through `doctor`.
 See `docs/learned/workflow/shared-contracts.md` for the six-seam recipe; it is not re-explained here.
 
 The bundled file ships both `perk-plan` and `perk-checkpoints` reference defaults and reads
@@ -44,7 +44,7 @@ break that bridge. The generalization for the todo seam: a future deferral must 
 `docs/design/provider-contract.md` frames `cache.plan-ref.provider` as "== the plan provider id".
 That is **aspirational / false today**. The reality:
 
-- The field is the issue-backend string `"github"`. `perk/launch.py` branches on
+- The field is the issue-backend string `"github"`. `perk/run/launch.py` branches on
   `provider == "github"`; all the Python and TS save surfaces stamp `"github"`; `shared/contracts.md`
   documents the shape as `provider: string  # e.g. "github"`.
 - The deferral work deliberately did **not** restamp it with the seam id — that would break
@@ -57,9 +57,9 @@ are different namespaces today.
 
 TS `resolveProviders` is a pure mirror of Python `resolve_providers`: same fallback semantics
 (absent key → default silently; unknown id / seam mismatch → default + exactly one issue), verified
-against `tests/test_providers.py` and `extension/providers.test.ts`. The one intentional divergence:
+against `tests/test_providers.py` and `extension/substrate/providers.test.ts`. The one intentional divergence:
 TS returns `issues: string[]` because the TS plane has no `Issue`/`Severity` (those live in
-`perk/registry.py`). **Python stays the authoritative validator.**
+`perk/substrate/registry.py`). **Python stays the authoritative validator.**
 
 ## Runtime deferral vs. registration-time vacating — the two-node split
 
@@ -68,7 +68,7 @@ whether a foreign package is actually loaded yet. There are two tiers, delivered
 kinds of node.
 
 - A **reference-provider deferral node** (plan seam Node 2.2 / todo seam Node 3.1, the latter on
-  `extension/checkpoints.ts`) defers at **runtime only** — per-event handler guards step the owned
+  `extension/checkpoints/checkpoints.ts`) defers at **runtime only** — per-event handler guards step the owned
   surface aside under a foreign selection. This suffices and is behavior-preserving **because no
   foreign package is loaded yet**: nothing else is competing for `/plan`, `Ctrl+Alt+P`, or the
   `--plan` entry, so a silent early-return inside each handler is enough.
@@ -106,14 +106,14 @@ A reference provider defers by adding two exported helpers — `resolved<Seam>Pr
 `isPerk<X>ReferenceSelected(cwd)` — read **fresh per-event** (no static state). Event handlers
 (`session_start` / `session_tree` / `turn_end`) early-return **silently**; the user-facing command
 (`/plan`, `/checkpoints`) **announces** the deferral headless-safe (`ctx.ui.notify` else
-`console.error`). The two instances are `extension/planMode.ts` (plan seam) and
-`extension/checkpoints.ts` (todo seam) — the same shape on both, which is why a future seam can copy
+`console.error`). The two instances are `extension/factories/planMode.ts` (plan seam) and
+`extension/checkpoints/checkpoints.ts` (todo seam) — the same shape on both, which is why a future seam can copy
 it. (This is the concrete reuse of the per-event fail-safe consumption described below, not a
 separate mechanism.)
 
 ## The adapter shim is injection-only (Invariant 1)
 
-`extension/planAdapterTombell.ts` is **always registered** but inert unless `[providers] plan =
+`extension/adapters/planAdapterTombell.ts` is **always registered** but inert unless `[providers] plan =
 "tombell-plan"`. Its sole effect is to inject a hidden `perk:plan-adapter-tombell` context (mirroring
 `planMode` / `objectiveAuthor` hygiene: inject on `before_agent_start`, strip the stale marker on
 `context`). It **never** registers a `tool_call` handler, never calls `setActiveTools`, never touches
@@ -132,7 +132,7 @@ foreign-adapter work should reuse:
 
 - **Foreign-package persisted state as a gating signal (the state-twin read).** An adapter can
   condition behavior on a foreign extension's persisted session state by scanning the branch for
-  its custom entries — `isTombellPlanModeEnabled` (`extension/planAdapterTombell.ts`) reads
+  its custom entries — `isTombellPlanModeEnabled` (`extension/adapters/planAdapterTombell.ts`) reads
   `@tombell/pi-plan`'s `plan-mode-state` entries: latest-wins (a later `enabled: false` defeats an
   earlier `true`, mirroring tombell's own `session_start` rebuild), defensive false on
   missing/malformed. This extends the gate's state-twin doctrine (read the persisted
@@ -196,7 +196,7 @@ file, or a selection naming a non-existent / wrong-seam provider. See
 
 ## A sibling seam's forward-note must be re-derived, not mirrored
 
-The Node 3.1 status note (`shared/contracts.md`) + `extension/checkpoints.ts` both forward-assumed
+The Node 3.1 status note (`shared/contracts.md`) + `extension/checkpoints/checkpoints.ts` both forward-assumed
 the todo adapter would add registration-time vacating "mirroring `registerPlanMode`." That was
 **wrong for the todo seam.** The plan seam needed registration-time vacating *only* because perk and
 `@tombell/pi-plan` both register the identically-named `/plan` command — Pi suffixes duplicate names
@@ -241,7 +241,7 @@ Because the substrate was built seam-generic, **"enable the first real foreign p
 reduced to a shim + comment reframe**: the injection-only shim + its `index.ts` wiring + flipping
 ILLUSTRATIVE→REAL comments across `providers.yaml` / `contracts.md` + provider/init tests asserting
 the already-generic behavior. The todo adapter (Node 3.2, `@juicesharp/rpiv-todo`) needed **no**
-changes to `perk/init.py` / `perk/providers.py` / `perk/config.py` / the TS resolver / the
+changes to `perk/convergence/init.py` / `perk/substrate/providers.py` / `perk/substrate/config.py` / the TS resolver / the
 `providers.yaml` entry's structural fields. The todo shim copied `planAdapterTombell.ts`'s shape
 verbatim (always-registered + inert; a `before_agent_start` injector + a `context` stale-marker
 strip — the strip's customType filter + user-role string/array marker removal is verbatim) plus one
@@ -279,7 +279,7 @@ it.
 
 Both seams now have **real foreign adapters**: the plan seam (`@tombell/pi-plan`, Node 2.3) vacates
 perk's plan surface at registration time and bridges the foreign prose into the plan-ref substrate;
-the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/todoAdapterJuicesharp.ts`) carries
+the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/adapters/todoAdapterJuicesharp.ts`) carries
 perk's progress discipline onto the foreign overlay via an injected context (no `perk:checkpoint`
 population, no registration-time vacating — there is no `/checkpoints` command-name collision). The
 default path (both reference providers, `package: null`) remains the hard zero-change guarantee in
@@ -287,14 +287,14 @@ every mode.
 
 ## Cross-references
 
-- `extension/planMode.ts` — the owned plan-authoring surface that defers
-- `extension/checkpoints.ts` — the todo-seam owned surface (runtime deferral, Node 3.1; the mirror)
-- `extension/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
-- `extension/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (Node 3.2; carries discipline by prompting)
-- `extension/planSave.ts` — the seam-shared substrate that never defers
-- `extension/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
-- `perk/providers.py` — `resolve_providers`, `ProvidersError`
-- `perk/launch.py` — the `provider == "github"` backend branch
+- `extension/factories/planMode.ts` — the owned plan-authoring surface that defers
+- `extension/checkpoints/checkpoints.ts` — the todo-seam owned surface (runtime deferral, Node 3.1; the mirror)
+- `extension/adapters/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
+- `extension/adapters/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (Node 3.2; carries discipline by prompting)
+- `extension/factories/planSave.ts` — the seam-shared substrate that never defers
+- `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
+- `perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
+- `perk/run/launch.py` — the `provider == "github"` backend branch
 - `shared/providers.yaml` — the bundled reference defaults
 - `shared/contracts.md` — the `cache.plan-ref` shape (`provider: string  # e.g. "github"`)
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane parsed-YAML recipe

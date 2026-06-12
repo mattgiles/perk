@@ -13,7 +13,7 @@ reveals.
 
 ## The read-only tool-gating trap (why command/tool pairs are asymmetric)
 
-In a read-only session, `extension/toolGating.ts` calls `pi.setActiveTools(READ_ONLY_TOOLS)`
+In a read-only session, `extension/substrate/toolGating.ts` calls `pi.setActiveTools(READ_ONLY_TOOLS)`
 (`read`/`grep`/`find`/`ls`/`bash`) which **hides every custom tool**. But `pi.registerCommand`
 commands stay **visible regardless of mode**. So a canonical tool gated behind read-only is
 invisible while its sibling `/command` is the *only* save affordance the agent can see.
@@ -197,14 +197,14 @@ chain.
 
 ## Cross-references
 
-- `extension/planSave.ts` — `savePlan`, the three-way `nodeLink` render, the "one text field, two
+- `extension/factories/planSave.ts` — `savePlan`, the three-way `nodeLink` render, the "one text field, two
   doors" shape
-- `extension/objectiveSave.ts` — the on-ramp / drive-the-session conversion (dead `extractObjectiveMarkdown`)
-- `extension/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides custom tools but not commands
-- `extension/planMode.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
+- `extension/factories/objectiveSave.ts` — the on-ramp / drive-the-session conversion (dead `extractObjectiveMarkdown`)
+- `extension/substrate/toolGating.ts` — `READ_ONLY_TOOLS`, the gate that hides custom tools but not commands
+- `extension/factories/planMode.ts` — `/plan off` / `Ctrl+Alt+P` (the gate is a user gesture, not a turn action)
 - `docs/learned/workflow/plan-save-surfaces.md` — the two-surface fidelity gap + `handoff_extra` carrier
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring/save loop the driving commands feed
 - `docs/learned/workflow/skill-bindings.md` — `bindingSuffix` (the skill pointer the guidance rides)
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
-- `extension/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
+- `extension/doors/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case

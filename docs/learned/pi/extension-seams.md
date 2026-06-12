@@ -8,9 +8,9 @@ read_when: You are collapsing a repeated context-dependent idiom in the extensio
 When the same context-dependent idiom (notify-if-UI-else-log, branch lookup, strict workflow-state
 append, …) is repeated across the extension, perk collapses it into one small tested seam. This
 doc captures the *shape* of those seams — the recipe, the traps, and the triage for sites that
-don't fit — distilled from the headless-safe `report()` seam (`extension/report.ts`), its
+don't fit — distilled from the headless-safe `report()` seam (`extension/surfaces/report.ts`), its
 predecessor `branchOf`/`BranchSource`, and the `appendWorkflowState`/`EntrySink` strict-append seam
-(`extension/workflowState.ts`).
+(`extension/substrate/workflowState.ts`).
 
 ## The minimal-structural-interface recipe
 
@@ -133,8 +133,8 @@ planSave change deliberately inherited the seam's fail-safe.
 
 ## Cross-references
 
-- `extension/report.ts` — `report()`, `ReportTarget`
-- `extension/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
+- `extension/surfaces/report.ts` — `report()`, `ReportTarget`
+- `extension/substrate/workflowState.ts` — `appendWorkflowState`, `EntrySink`, `rebuildWorkflowState`
 - `docs/learned/pi/extension-api.md` — the SDK context the structural interface slices
 - `docs/learned/workflow/plan-review-flow.md` — the extracted-core + scripted-fake testing recipe
 - `docs/learned/workflow/warm-door-commands.md` — the warm doors whose error paths these seams serve

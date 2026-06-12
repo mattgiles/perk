@@ -1,11 +1,11 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
-read_when: You are touching `perk/github.py`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call, or designing a mutation-posting policy (failure ladders, verdict-driven artifacts).
+read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call, or designing a mutation-posting policy (failure ladders, verdict-driven artifacts).
 ---
 
 # The github.py gateway
 
-`perk/github.py` is the single gateway for `gh` subprocess calls. A dignified-sweep consolidation
+`perk/github/` is the single gateway for `gh` subprocess calls. A dignified-sweep consolidation
 carried 19 hand-rolled parse sites onto a small helper family; this doc preserves the boundary
 rules that made the migration safe and the one residual risk it accepted.
 
@@ -76,7 +76,7 @@ plumb-through — the `= False` defaults are audited and stay.
 
 ## Cross-references
 
-- `perk/github.py` — the gateway and the helper family
+- `perk/github/` — the gateway and the helper family
 - `docs/learned/pi/extension-seams.md` — the TS sibling of idiom consolidation (minimal structural
   seams)
 - `docs/learned/toolchain/ruff.md` — the preview-rule enablement collateral from the same sweep

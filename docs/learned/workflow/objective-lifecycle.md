@@ -125,7 +125,7 @@ artifact, `plan_review` renders + reviews it, and an APPROVED verdict auto-saves
   JSON**, not the prose; and the roadmap rides verbatim as `unknown[]` — node-shape validation
   stays with the Python plane at save time. JSON is storage/transport only; the human review
   surface renders markdown from it.
-- **Renderers live with the artifact owner, not the consumer.** `extension/objectiveDraft.ts`
+- **Renderers live with the artifact owner, not the consumer.** `extension/factories/objectiveDraft.ts`
   exports both the reader (`readObjectiveDraft` — fail-open validation, warn+null on bad
   JSON/shape/schema_version/blank prose) and the markdown renderer (`renderObjectiveDraft`).
   That keeps `planReview → objectiveDraft` cycle-free: the draft module never imports review
@@ -220,7 +220,7 @@ existing `plan_required` fallback on a malformed/non-numeric id.
 - `perk/cli/commands/objective_cmd.py` — the `perk objective run` supervisor (`needs_address`, classification)
 - `docs/learned/workflow/cold-door-launch.md` — the composition + testing mechanics the supervisor relies on
 - `shared/contracts.md` §8.20 — the capstone supervisor loop contract
-- `extension/objectiveAuthor.ts` + `perk` objective-author/save stages — the authoring loop
+- `extension/factories/objectiveAuthor.ts` + `perk` objective-author/save stages — the authoring loop
 - `docs/learned/workflow/plan-save-surfaces.md` — the node→plan link carrier + re-save discipline
 - `docs/learned/pi/context-injection.md` — the `stage`-field disambiguation of shared-mode stages
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the fail-open on-land bookkeeping shape

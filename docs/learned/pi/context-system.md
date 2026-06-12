@@ -26,7 +26,7 @@ architecture.
 
 ## Bash allowlist in read-only plan sessions
 
-`extension/toolGating.ts` `SAFE_PATTERNS` restricts bash in read-only (`mode: read-only`) sessions
+`extension/substrate/toolGating.ts` `SAFE_PATTERNS` restricts bash in read-only (`mode: read-only`) sessions
 to:
 
 ```
@@ -78,7 +78,7 @@ query to read the rest.
 
 ## Cross-references
 
-- `extension/toolGating.ts` — `SAFE_PATTERNS` implementation
+- `extension/substrate/toolGating.ts` — `SAFE_PATTERNS` implementation
 - `docs/learned/workflow/plan-factories.md` — inbox-over-gh pattern using this constraint
 - `.pi/APPEND_SYSTEM.md` — the live ambient routing index
 - `docs/learned/index.md` — the full on-demand catalog

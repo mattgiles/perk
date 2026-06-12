@@ -5,7 +5,7 @@ read_when: You are decoding registered-tool params, adding a tool handler, choos
 
 # Tool-boundary typed param decode
 
-`extension/toolParams.ts` is the typed decode seam at the registered-tool boundary: every tool
+`extension/substrate/toolParams.ts` is the typed decode seam at the registered-tool boundary: every tool
 handler narrows its `params` through it instead of `params as {…}` casts. This doc captures the
 policy decisions behind the seam and the testing patterns that make decode behavior provable
 offline.
@@ -38,7 +38,7 @@ proceeds — mistyped-vs-absent for free with one comparison.
 
 ## Backend-agnostic id params: `idParam` / `idArrayParam`
 
-`extension/toolParams.ts` exports a string-or-number pair for opaque backend-owned ids: strings
+`extension/substrate/toolParams.ts` exports a string-or-number pair for opaque backend-owned ids: strings
 pass through, numbers coerce via `String()`, anything else is the strict-fail `null`. This is the
 standard shape for id params once ids are backend-owned opaque strings (see
 `workflow/issue-backend.md`'s opaque-id relaxation) — don't type new id params as `number`.
@@ -93,8 +93,8 @@ programmatic callers, not live-session drift.
 
 ## Cross-references
 
-- `extension/toolParams.ts` — the tri-state seam, `paramsOf`
-- `extension/toolParams.test.ts` — the decode + ordering-proof pins
+- `extension/substrate/toolParams.ts` — the tri-state seam, `paramsOf`
+- `extension/substrate/toolParams.test.ts` — the decode + ordering-proof pins
 - `docs/learned/workflow/cold-door-client.md` — the contrasting advisory decode policy (never reuse
   its helpers here)
 - `docs/learned/pi/extension-api.md` — the `headfulUIContext` gap that forces the pure-decode export

@@ -1,6 +1,6 @@
 ---
 title: perk TUI surfaces — surfaces module, composed status slot, factory widgets, the perk-owned footer
-read_when: You are touching extension/surfaces.ts or any perk-rendered TUI surface (footer, widgets, status slot), adding a rich-UI call, or testing widget/footer rendering through the harness.
+read_when: You are touching extension/surfaces/surfaces.ts or any perk-rendered TUI surface (footer, widgets, status slot), adding a rich-UI call, or testing widget/footer rendering through the harness.
 ---
 
 # perk TUI surfaces
@@ -12,7 +12,7 @@ pi API facts, and test recipes those turns established.
 
 ## The surfaces module = `surfaces.ts` + `report.ts`
 
-"The surfaces module" is **two files**: `extension/surfaces.ts` plus `extension/report.ts`
+"The surfaces module" is **two files**: `extension/surfaces/surfaces.ts` plus `extension/surfaces/report.ts`
 (`report` is re-exported from surfaces). The node-4.1 rich-UI regression guard treats exactly
 these two as the sanctioned rich-UI call sites — `setFooter` calls were deliberately confined to
 `surfaces.ts`; don't add `ctx.ui.setFooter` (or any other direct rich-UI call) elsewhere.
@@ -23,7 +23,7 @@ Two structural invariants to preserve:
   (e.g. a `ProgressState`/`ProgressStep` shape) rather than importing controller state types —
   that avoids an import cycle with the surface controllers. Keep it that way when adding renderers.
 - **The glyph + height-budget constants are charter-law data**, pinned only by
-  `extension/surfaces.test.ts` until consumers bind them — they are not dead code.
+  `extension/surfaces/surfaces.test.ts` until consumers bind them — they are not dead code.
 
 ## The composed single `perk` status slot
 
@@ -120,7 +120,7 @@ token formatter (which rendered `200.0k`), rippling into other consumers of the 
 
 ## Cross-references
 
-- `extension/surfaces.ts`, `extension/report.ts` — the surfaces module (the only sanctioned
+- `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned
   rich-UI call sites)
 - `extension/index.ts` — shared segment-store handle creation, once-only footer install
 - `extension/testing/harness.ts` — factory-widget/placement capture, `invokeCommand`

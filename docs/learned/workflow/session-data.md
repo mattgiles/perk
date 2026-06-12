@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers (incl. the two-digests-two-roles split — integrity vs cache invalidation), adding a session-data producer or consumer (the full recipe — incl. the read-only carve-out 2-instance template and its JSON-artifact variant), deciding whether to store a derived flag, or `perk state prune` / the `cache-gc` doctor check.
+read_when: You are working on run_id minting/claiming, `extension/substrate/sessionData.ts` / the `perk/state/cache.py` data-dir accessors, session-artifact provenance pointers (incl. the two-digests-two-roles split — integrity vs cache invalidation), adding a session-data producer or consumer (the full recipe — incl. the read-only carve-out 2-instance template and its JSON-artifact variant), deciding whether to store a derived flag, or `perk state prune` / the `cache-gc` doctor check.
 ---
 
 # Session data, run identity, provenance & GC
@@ -15,7 +15,7 @@ narrative: identity → data dirs → provenance → the read-only writer → GC
 - **The mint lives in `index.ts`'s `session_start` `none` arm, NOT in `decideClaim`** — keeping the
   pure decision function byte-identical bought claim/keep/fork stability *by construction* (the
   existing lifecycle tests were the regression proof, literally).
-- `extension/runId.ts` is a **hand-rolled spec-conformant ULID** (~40 lines, no npm dep): 10 time
+- `extension/substrate/runId.ts` is a **hand-rolled spec-conformant ULID** (~40 lines, no npm dep): 10 time
   chars by repeated div/mod of `Date.now()` (48-bit, plain `Math.floor` arithmetic — no BigInt),
   16 randomness chars by a standard 5-bit bit-walk over `randomBytes(10)`.
 - **Cross-plane validity is proven by grammar, not subprocess**: the TS test pins the exact
@@ -46,7 +46,7 @@ stray-file-in-`runs/` semantics live in one place.
 ## Provenance pointers
 
 - **The repo digest convention**: `sha256:<hex>` lowercase, computed by
-  `extension/sessionData.ts:digestSessionData` over bytes **read back from disk after the write**
+  `extension/substrate/sessionData.ts:digestSessionData` over bytes **read back from disk after the write**
   — not the in-memory string (catches encoding/disk surprises). Reuse the exported helper; never
   mint a second convention.
 - **Per-field LWW means map-valued workflow-state fields must append the whole merged map**:
@@ -81,7 +81,7 @@ The full producer→consumer recipe, composed from the rules proven above and in
 (`plan_draft` → `resolvePlanSource` is the end-to-end precedent):
 
 1. **Producer**: a fixed artifact-name constant (the `PLAN_DRAFT_ARTIFACT` precedent,
-   `extension/planDraft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
+   `extension/factories/planDraft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
    one gesture); pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
    pointers" above); a `null` return ⇒ not consumable, even if the file visibly exists.
 2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe
@@ -93,7 +93,7 @@ The full producer→consumer recipe, composed from the rules proven above and in
    `run_id` + `name` through the seam).
 4. **Refusal tiers**: run_id mismatch → *silent* `null` (fork isolation, not an anomaly);
    broken-promise (missing file / digest mismatch) → stderr warn + `null`.
-5. **GC**: artifacts are prunable (`perk/gc.py`); pruned runs leave dangling pointers **by
+5. **GC**: artifacts are prunable (`perk/state/gc.py`); pruned runs leave dangling pointers **by
    design** — consumers must tolerate `null` forever.
 6. **Guards + registry**: manual `scratch`/`runs` path construction trips
    `extension/cacheGuard.test.ts` / `tests/test_cache_guard.py` — go through the seam; if a stage
@@ -104,12 +104,12 @@ The full producer→consumer recipe, composed from the rules proven above and in
 
 For any future writer that must work in read-only mode (step 2 above). `objective_draft` confirmed
 the `plan_draft` checklist generalizes — a third stage-scoped draft tool should copy
-`extension/objectiveDraft.ts` mechanically:
+`extension/factories/objectiveDraft.ts` mechanically:
 
 1. A **fixed artifact-name constant** — no path/name tool parameter.
 2. The path derived **exclusively through the session-data accessor seam**
    (`writeSessionArtifact` = file + provenance pointer in one gesture).
-3. Allowlist only the tool *name* in `extension/toolGating.ts::READ_ONLY_TOOLS`, with a carve-out
+3. Allowlist only the tool *name* in `extension/substrate/toolGating.ts::READ_ONLY_TOOLS`, with a carve-out
    comment — the gate's edit/write/bash blocking stays untouched.
 4. Register in the factory **before the gate snapshots tools**.
 5. The `invalid_input`/`no_run_id`/`write_failed` failure taxonomy via `failFor`.
@@ -128,10 +128,10 @@ name.
 
 ## GC: the destructive-op triad
 
-`perk/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
+`perk/state/gc.py` + `perk state prune` + the `cache-gc` doctor check established the shape to reuse for
 any future reclaim/cleanup feature:
 
-- **Pure-read policy module** (`perk/gc.py::plan_prune`, injectable `now`).
+- **Pure-read policy module** (`perk/state/gc.py::plan_prune`, injectable `now`).
 - **Report-only doctor check** (`cache-gc`: warn + remediation, no `--fix` arm — doctor fixes stay
   documented-non-destructive; pure FS + bundled registry, so deterministic in unit tests).
 - **A single destructive command** (`perk state prune`, alias `gc`) — the ONLY deletion site.

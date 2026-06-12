@@ -1,12 +1,12 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/runner.py` / `perk/run_worker.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, or the worker-entry resolver.
+read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, or the worker-entry resolver.
 ---
 
 # The remote-runner dispatch + CI execution seam
 
 perk can dispatch a stage drive to a remote runner (today: GitHub Actions) instead of running it on
-the local worktree. The seam spans Python (`perk/runner.py` dispatch + `perk/run_worker.py` CI
+the local worktree. The seam spans Python (`perk/run/runner.py` dispatch + `perk/run/run_worker.py` CI
 entrypoint), a managed CI artifact (`.github/workflows/perk-run.yml` + the `perk-remote-setup`
 composite action), and the TS worker the runner ultimately drives (`extension/workerMain.ts` →
 `driveStage`). This doc captures the non-obvious shape and the load-bearing rules.
@@ -34,7 +34,7 @@ The standing follow-up — a live remote smoke — is folded into Node 3.3 (`doc
 
 ## The `Runner` contract (Node 2.1)
 
-`perk/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
+`perk/run/runner.py` defines a runner-agnostic `Runner` **Protocol** + value types
 (`RunHandle`/`RunObservation`/`DispatchRecord`) + the concrete `GitHubActionsRunner` + `select_runner`.
 `observe`/`cancel` are implemented at the **library level (not stubbed)** so the supervisor nodes
 (3.1/3.2) consume settled shapes — only the supervisor *command surfaces* are deferred to those
@@ -137,7 +137,7 @@ Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the 
   (`.pi/npm/node_modules/@perk/pi/...`, `consumer-npm`). The `consumer-git` path is **derived from
   `GIT_PACKAGE`** (split on `/` after stripping `git:`) — never hardcoded segments, so a package-URL
   change can't silently desync the resolver. Importing `GIT_PACKAGE` into `run_worker` is cycle-free
-  (`perk.init` does not import `perk.run_worker`).
+  (`perk.convergence.init` does not import `perk.run.run_worker`).
 
 ## Honest fiction vs. loud deferral
 
@@ -167,8 +167,8 @@ plan's surface — `--fix` converges the whole repo, not just your target artifa
 
 ## Cross-references
 
-- `perk/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
-- `perk/run_worker.py` — the CI worker entrypoint + the four-candidate worker-entry ladder
+- `perk/run/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
+- `perk/run/run_worker.py` — the CI worker entrypoint + the four-candidate worker-entry ladder
 - `extension/workerMain.ts` — the worker entry the runner drives into
 - `shared/contracts.md` §8.13 (Runner contract + dispatch record) / §8.14 (Actions runner artifact +
   CI worker entrypoint)

@@ -8,7 +8,7 @@ read_when: You are building or debugging a perk plan factory (learn-docs, object
 ## Inbox-over-gh: a discipline, not a structural constraint
 
 A seeded read-only plan-mode session historically **could not run `gh`/`perk` in bash** —
-`extension/toolGating.ts` `SAFE_PATTERNS` allowed only
+`extension/substrate/toolGating.ts` `SAFE_PATTERNS` allowed only
 `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
 So every cold-door factory did its GitHub reads up front and materialized the result into a
 file the session reads via the `read` tool (e.g. `.pi/workflow/scratch/learn-docs-inbox.md`),

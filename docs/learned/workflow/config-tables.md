@@ -30,7 +30,7 @@ If the table *is* a map, the new knob needs its own section.
 
 Each plane's parser silently discards values it can't use, but the failure mode is different:
 
-- **TS — string values only.** `parseTomlSubset` (`extension/config.ts`) keeps only string values, so
+- **TS — string values only.** `parseTomlSubset` (`extension/substrate/config.ts`) keeps only string values, so
   a boolean `trust = true` is **silently dropped**. The value must be the quoted string
   `ci = "true"` (the same reason `objectiveCompactThreshold` is `"0.8"`), and the gate guards with
   `.trim().toLowerCase() === "true"`.
@@ -47,7 +47,7 @@ Each plane's parser silently discards values it can't use, but the failure mode 
 Most tables (`[providers]`, `[subagents]`, `[[bindings]]`) read through `load_config`, which overlays
 `perk.local.toml` for per-user, session-transient overrides. Config that converges into a
 **committed** artifact must not. `[compaction]` lands in `settings.json` (committed), so
-`load_committed_compaction` (`perk/config.py`) reads committed `.pi/perk.toml` **only**, bypassing the
+`load_committed_compaction` (`perk/substrate/config.py`) reads committed `.pi/perk.toml` **only**, bypassing the
 overlay — otherwise a per-user local override would produce a stray committed git diff. Per-user
 overrides for such knobs belong in pi's native global `~/.pi/agent/settings.json` (pi merges it under
 project settings).
@@ -64,7 +64,7 @@ the **"local overlay is ignored"** case — it's the whole point of the shape.
 ## Two consumption models
 
 - **Interior gate (`[trust]`).** Consumed at runtime by a TS gate — `decideCiScope` in
-  `extension/ciExecutor.ts`. The session must honor it live.
+  `extension/doors/ciExecutor.ts`. The session must honor it live.
 - **init convergence (`[compaction]`).** Converged by `init` into `settings.json`, which pi reads
   natively at boot. No extension change is even possible here: the interactive pi CLI builds its
   `SettingsManager` *before* extensions load, so the extension can never set
@@ -75,7 +75,7 @@ the **"local overlay is ignored"** case — it's the whole point of the shape.
 
 ## Convergence composition (the settings-targeting path)
 
-Add a settings-targeting converger by composing it *inside* `_converge_settings` (`perk/init.py`):
+Add a settings-targeting converger by composing it *inside* `_converge_settings` (`perk/convergence/init.py`):
 `_converge_compaction` mutates the shared `settings` dict before the `json.dumps` no-op short-circuit,
 so it rides the existing `settings-wiring` `ManagedConvergence` for free — **no new doctor check**.
 This mirrors `_converge_provider_packages`. Fold returned change fragments into the init/doctor `parts`
@@ -114,11 +114,11 @@ interior-only.
 
 ## Cross-references
 
-- `extension/config.ts` — `parseTomlSubset` (string-values-only TS parser)
-- `extension/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate)
-- `perk/config.py` — `parse_compaction_table`, `load_committed_compaction`,
+- `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser)
+- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate)
+- `perk/substrate/config.py` — `parse_compaction_table`, `load_committed_compaction`,
   `load_committed_issues_backend` (the committed-only reads)
-- `perk/init.py` — `_converge_settings` / `_converge_compaction` composition
+- `perk/convergence/init.py` — `_converge_settings` / `_converge_compaction` composition
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape
 - `shared/contracts.md` — the `[trust]` + `[compaction]` cross-plane prose

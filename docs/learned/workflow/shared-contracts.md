@@ -18,7 +18,7 @@ third, mirror exactly these six seams (no codegen, no manifest edits):
 1. **Data file** `shared/<name>.yaml` with `schema_version: 1` + a documenting header comment.
 2. **Python reader** `perk/<name>.py` — `load_*` raises a dedicated `*Error` **only for structural
    failures** (missing file / not a mapping / unsupported `schema_version`); `validate()` returns
-   `list[Issue]` and **never raises for content**. Reuse `Issue`/`Severity` from `perk/registry.py`
+   `list[Issue]` and **never raises for content**. Reuse `Issue`/`Severity` from `perk/substrate/registry.py`
    (one findings vocabulary — don't redefine). Parse leniently (coerce missing/ill-typed fields to
    `""`) so the *validator*, not the parser, reports every shape problem in one place.
 3. **TS reader** `extension/<name>.ts` — a thin structural parse with the `yaml` package; throws on
@@ -76,9 +76,9 @@ the implemented reality.
 ## The cross-plane SSOT prompt-fragment pattern
 
 When a prompt fragment must agree **byte-for-byte across planes**, give each plane one exported
-helper (`perk/launch.py::_plan_read_instruction` ↔ `extension/lifecycleGates.ts::planReadInstruction`)
+helper (`perk/run/launch.py::_plan_read_instruction` ↔ `extension/doors/lifecycleGates.ts::planReadInstruction`)
 plus a shared literal-fragment substring list (`LINEAR_READ_SUBSTRINGS`) asserted from BOTH suites
-(`tests/test_worker_prompt_parity.py` ↔ `extension/worker.test.ts`). Choose substrings as
+(`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`). Choose substrings as
 fragments of the *instruction*, not the scaffold — scaffold fragments match every arm and pin
 nothing.
 
@@ -108,7 +108,7 @@ alarm, not a defect — so guidance polish must update the pins in **both** suit
 
 A new stage in `shared/registry.yaml` ripples to:
 
-1. The validator's **single-initial / symmetric-edge** invariants (`perk/registry.py`) — the new
+1. The validator's **single-initial / symmetric-edge** invariants (`perk/substrate/registry.py`) — the new
    initial must be the *only* stage with no predecessors, and every edge must be listed on both ends.
 2. `perk/cli/stages.py` `DEDICATED_STAGES` (if it needs a seeded/positional launcher rather than the
    generic one) + `perk/cli/cli.py` registration.
@@ -117,7 +117,7 @@ A new stage in `shared/registry.yaml` ripples to:
    `test_cli_stages.py::test_all_stages_are_generated`).
 
 **Grep the stage-id list before assuming a graph change is local.** A new skill also requires
-updating BOTH `PERK_SKILLS` in `perk/init.py` AND the committed manifest fragment
+updating BOTH `PERK_SKILLS` in `perk/convergence/init.py` AND the committed manifest fragment
 `.agents/manifest.d/perk.yaml` (`perk doctor`'s `skills-manifest` check flags drift).
 
 ## Default at the new edge, don't loosen a shared validator
@@ -130,8 +130,8 @@ validator strict.
 
 ## Cross-references
 
-- `perk/registry.py` — `Issue`/`Severity`, the validator invariants (the canonical first contract)
-- `shared/bindings.yaml` + `perk/bindings.py` + `extension/bindings.ts` — the second instance
+- `perk/substrate/registry.py` — `Issue`/`Severity`, the validator invariants (the canonical first contract)
+- `shared/bindings.yaml` + `perk/substrate/bindings.py` + `extension/substrate/bindings.ts` — the second instance
 - `tests/test_packaging.py` — the wheel + npm-pack bundle assertions (the publish-surface guard)
 - `docs/learned/workflow/skill-bindings.md` — the bindings subsystem this contract underpins
 - `docs/learned/workflow/init-doctor.md` — managed-convergence SSOT (the doctor-check side of drift)

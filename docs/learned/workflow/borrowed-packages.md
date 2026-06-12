@@ -6,7 +6,7 @@ read_when: You are adding/removing a borrowed Pi package (`BORROWED_PACKAGES`), 
 # Borrowed Pi packages
 
 perk ships a small set of **borrowed** Pi packages (entries in `BORROWED_PACKAGES` in
-`perk/init.py`, converged into every consumer repo's `.pi/settings.json`). This doc is the recipe
+`perk/convergence/init.py`, converged into every consumer repo's `.pi/settings.json`). This doc is the recipe
 for changing that set without leaving surfaces stale, plus the evaluation bar that decides whether
 a capability is a borrow at all.
 
@@ -14,16 +14,16 @@ a capability is a borrow at all.
 
 Adding (or removing) a borrowed package touches a fixed set of surfaces **in one turn**:
 
-1. `BORROWED_PACKAGES` in `perk/init.py` — a plain unpinned `npm:` string entry **plus one
+1. `BORROWED_PACKAGES` in `perk/convergence/init.py` — a plain unpinned `npm:` string entry **plus one
    rationale line** in the comment block above (every entry has one; keep the pattern).
 2. The committed `.pi/settings.json` in this repo — same entry; never let the committed settings lag
    `BORROWED_PACKAGES`.
-3. The `borrowed-packages` capability summary in `perk/capabilities.py` — **this string drifts
+3. The `borrowed-packages` capability summary in `perk/convergence/capabilities.py` — **this string drifts
    silently**; check it whenever the borrowed set changes.
 4. `shared/contracts.md` — the borrowed-set enumeration (settings-wiring section) plus any behavior
    the package alters (e.g. the tool-gating restricted set).
 5. Tests — a membership assert in `tests/test_init_idempotent.py`, plus any behavior anchor (e.g.
-   `READ_ONLY_TOOLS` membership in `extension/toolGating.test.ts`).
+   `READ_ONLY_TOOLS` membership in `extension/substrate/toolGating.test.ts`).
 
 ## Vetting: grep for singleton UI slots (the setFooter clobber)
 
@@ -75,7 +75,7 @@ source), actively maintained, license, and the package's pi-version floor vs per
 
 ## Residuals
 
-- SDK in-process children (`SDK_READ_ONLY_TOOLS` in `extension/readOnlySession.ts`) deliberately
+- SDK in-process children (`SDK_READ_ONLY_TOOLS` in `extension/worker/readOnlySession.ts`) deliberately
   stay strict — widening them so SDK children can use borrowed tools is an **explicit decision, not
   drift** (spawned pi-subagents children already inherit the tools via `.pi/settings.json`).
 - String-entry packages can't filter skills — a bundled skill is accepted wholesale. If one becomes
@@ -83,8 +83,8 @@ source), actively maintained, license, and the package's pi-version floor vs per
 
 ## Cross-references
 
-- `perk/init.py` — `BORROWED_PACKAGES`
-- `perk/capabilities.py` — the `borrowed-packages` capability summary
+- `perk/convergence/init.py` — `BORROWED_PACKAGES`
+- `perk/convergence/capabilities.py` — the `borrowed-packages` capability summary
 - `docs/learned/workflow/provider-seam.md` — the seam this recipe is *not*; also `package_filter`
 - `docs/learned/pi/context-system.md` — the read-only mode whose allowlist this touches
 - `docs/learned/pi/tui-surfaces.md` — the perk-owned footer the setFooter rule protects

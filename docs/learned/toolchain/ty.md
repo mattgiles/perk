@@ -57,7 +57,7 @@ GraphQL `variables["input"]`) beats per-site asserts the same way. See
 
 ## Cross-references
 
-- `perk/providers.py`, `perk/init.py` — settings.json `packages` handling
+- `perk/substrate/providers.py`, `perk/convergence/init.py` — settings.json `packages` handling
 - `tests/test_issue_backend.py` — the `# ty: ignore[invalid-assignment]` precedent
 - `docs/learned/toolchain/ruff.md` — the SIM108 / formatter interaction
 - `docs/learned/workflow/linear-backend.md` — the GraphQL payloads the helper family narrows

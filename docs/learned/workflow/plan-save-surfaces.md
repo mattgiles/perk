@@ -52,7 +52,7 @@ choice.
 
 The handoff carrier covers **cold** sessions; warm sessions got the matching half: the
 `objective_node_claim` carrier in `perk:workflow-state`, written on a successful `planning`
-transition by the `objective_node` tool (`extension/objectivePlan.ts` — the claim helpers live
+transition by the `objective_node` tool (`extension/factories/objectivePlan.ts` — the claim helpers live
 there, typed over the structural `BranchSource` slice so `planSave.ts` imports them with no module
 cycle), cleared on a non-planning transition for the same node or after a successful node-linked
 save keyed off the cold door's *reported* node. Both planes implement **identical semantics**:
@@ -75,7 +75,7 @@ a worktree, the locations would diverge and recovery would silently miss. **Tie 
 
 ## The plan-source resolution chain
 
-`resolvePlanSource` in `extension/planSave.ts` resolves the plan to save as: validated plan-draft
+`resolvePlanSource` in `extension/factories/planSave.ts` resolves the plan to save as: validated plan-draft
 artifact → `plan` param → transcript scrape → null. The artifact tier needs `run_id`; the param
 tier doesn't. Success messages annotate **only the NEW sources** (` · plan source: plan-draft
 artifact`/`transcript`) — the param path stays byte-identical by design, so existing tests and
@@ -144,12 +144,12 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 ## Cross-references
 
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
-- `extension/planSave.ts` — `resolvePlanSource`, `savePlan`, the `approvalSave` seam
-- `extension/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
+- `extension/factories/planSave.ts` — `resolvePlanSource`, `savePlan`, the `approvalSave` seam
+- `extension/factories/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
 - `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
 - `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip
 - `perk/cli/commands/plan_save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
-- `perk/launch.py` — `launch_stage` `handoff_extra` param
+- `perk/run/launch.py` — `launch_stage` `handoff_extra` param
 - `tests/test_plan_save.py` — recover/override/unlinked + the empty-dict skip assertion
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref/header schema and fail-open on-land shape
 - `docs/learned/workflow/objective-lifecycle.md` — node linkage + the objective re-save gap
