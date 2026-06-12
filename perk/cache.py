@@ -3,7 +3,8 @@
 Free functions over an explicit repo ``root`` (erk's scratch/markers style). **Both
 planes read and write the same files**; the TS twin is ``extension/cache.ts``. These are
 state-tiering *primitives* — no workflow semantics (no ``pending-learn`` meaning, no GC
-policy; those land in Phase 1 / `doctor`). LBYL throughout; absence is a normal,
+policy; the GC *policy* lives in ``perk/gc.py``, surfaced as ``perk state prune`` + the
+``cache-gc`` doctor check). LBYL throughout; absence is a normal,
 branchable condition (reads return ``None``, not an exception).
 """
 
@@ -132,6 +133,18 @@ def read_session_data(root: Path, run_id: str, name: str) -> str | None:
 def handoff_path(root: Path, run_id: str) -> Path:
     """The handoff file path for a run."""
     return workflow_dir(root) / "handoff" / f"{run_id}.json"
+
+
+def list_handoff_run_ids(root: Path) -> list[str]:
+    """Stems of all handoff blobs under ``handoff/`` (sorted; ``[]`` when absent).
+
+    Mirrors :func:`list_run_ids` so ``perk/gc.py`` collects orphan handoffs (no run dir) too.
+    Exterior-only — there is no TS twin (GC is CLI-owned).
+    """
+    handoff_root = workflow_dir(root) / "handoff"
+    if not handoff_root.is_dir():
+        return []
+    return sorted(p.stem for p in handoff_root.glob("*.json") if p.is_file())
 
 
 def write_handoff(root: Path, run_id: str, data: dict[str, Any]) -> Path:
