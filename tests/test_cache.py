@@ -2,16 +2,22 @@ from perk.cache import (
     clear_marker,
     ensure_layout,
     has_marker,
+    list_run_ids,
     mark_handoff_consumed,
     plan_ref_path,
     read_handoff,
     read_plan_ref,
     read_scratch,
+    read_session_data,
+    run_scratch_dir,
+    scratch_dir,
+    session_data_dir,
     set_marker,
     workflow_dir,
     write_handoff,
     write_plan_ref,
     write_scratch,
+    write_session_data,
 )
 
 
@@ -28,6 +34,49 @@ def test_scratch_round_trip(tmp_path):
     write_scratch(tmp_path, "RID", "diff.txt", "hello")
     assert read_scratch(tmp_path, "RID", "diff.txt") == "hello"
     assert read_scratch(tmp_path, "RID", "missing.txt") is None
+
+
+def test_scratch_and_session_data_path_shapes(tmp_path):
+    assert scratch_dir(tmp_path) == workflow_dir(tmp_path) / "scratch"
+    assert run_scratch_dir(tmp_path, "RID") == scratch_dir(tmp_path) / "runs" / "RID"
+    assert session_data_dir(tmp_path, "RID") == run_scratch_dir(tmp_path, "RID") / "data"
+
+
+def test_session_data_round_trip(tmp_path):
+    path = write_session_data(tmp_path, "RID", "draft.md", "hello")
+    assert path == session_data_dir(tmp_path, "RID") / "draft.md"
+    assert path is not None and path.is_file()
+    assert read_session_data(tmp_path, "RID", "draft.md") == "hello"
+
+
+def test_session_data_absent_read_returns_none(tmp_path):
+    assert read_session_data(tmp_path, "RID", "missing.md") is None
+
+
+def test_session_data_write_failure_degrades(tmp_path, capsys):
+    # Make the run dir a *file* so mkdir of data/ fails with OSError.
+    run_dir = run_scratch_dir(tmp_path, "RID")
+    run_dir.parent.mkdir(parents=True)
+    run_dir.write_text("not a dir", encoding="utf-8")
+    assert write_session_data(tmp_path, "RID", "draft.md", "x") is None
+    assert "warning: could not write session data" in capsys.readouterr().err
+
+
+def test_session_data_read_failure_degrades(tmp_path, capsys):
+    write_session_data(tmp_path, "RID", "blob.bin", "placeholder")
+    (session_data_dir(tmp_path, "RID") / "blob.bin").write_bytes(b"\xff\xfe\xff")
+    assert read_session_data(tmp_path, "RID", "blob.bin") is None
+    assert "warning: could not read session data" in capsys.readouterr().err
+
+
+def test_list_run_ids(tmp_path):
+    assert list_run_ids(tmp_path) == []
+    runs = scratch_dir(tmp_path) / "runs"
+    runs.mkdir(parents=True)
+    (runs / "B").mkdir()
+    (runs / "A").mkdir()
+    (runs / "stray.txt").write_text("", encoding="utf-8")
+    assert list_run_ids(tmp_path) == ["A", "B"]
 
 
 def test_handoff_round_trip_and_consume(tmp_path):

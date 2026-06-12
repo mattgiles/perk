@@ -28,7 +28,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch, workflowDir } from "./cache.ts";
+import { ensureRunScratch, scratchDir } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "./readOnlySession.ts";
 import { report } from "./report.ts";
@@ -108,7 +108,7 @@ export function ciScratchPath(cwd: string, runId: string | undefined, check: str
   if (runId) {
     return join(ensureRunScratch(cwd, runId), `ci-${check}.md`);
   }
-  const dir = join(workflowDir(cwd), "scratch", "ci");
+  const dir = join(scratchDir(cwd), "ci");
   mkdirSync(dir, { recursive: true });
   return join(dir, `${check}.md`);
 }

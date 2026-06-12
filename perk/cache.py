@@ -36,11 +36,32 @@ def ensure_layout(root: Path) -> Path:
 
 
 # --- scratch: per-run inter-process files (scratch/runs/<run_id>/<name>) ---------------
+#
+# This module is the EXTERIOR accessor seam for scratch/session-data paths (contracts.md §8.1,
+# Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
+# outside this module (guard-tested by tests/test_cache_guard.py; the interior twins are
+# extension/cache.ts + extension/sessionData.ts).
+
+
+def scratch_dir(root: Path) -> Path:
+    """The ``.pi/workflow/scratch/`` directory under ``root``."""
+    return workflow_dir(root) / "scratch"
 
 
 def run_scratch_dir(root: Path, run_id: str) -> Path:
     """The scratch directory for a run."""
-    return workflow_dir(root) / "scratch" / "runs" / run_id
+    return scratch_dir(root) / "runs" / run_id
+
+
+def list_run_ids(root: Path) -> list[str]:
+    """Names of all run scratch dirs under ``scratch/runs/`` (sorted; ``[]`` when absent).
+
+    Twin of the TS ``listRunIds`` (extension/cache.ts). Stray non-directory entries are ignored.
+    """
+    runs_root = scratch_dir(root) / "runs"
+    if not runs_root.is_dir():
+        return []
+    return sorted(p.name for p in runs_root.iterdir() if p.is_dir())
 
 
 def write_scratch(root: Path, run_id: str, name: str, content: str) -> Path:
@@ -58,6 +79,51 @@ def read_scratch(root: Path, run_id: str, name: str) -> str | None:
     if not path.is_file():
         return None
     return path.read_text(encoding="utf-8")
+
+
+# --- session data: run-scoped session artifacts (scratch/runs/<run_id>/data/<name>) ------
+#
+# The session data dir (Objective #339 Node 1.2) — a dedicated `data/` subdir so run-scoped
+# session artifacts never overlap perk machine records (dispatch.json, events.ndjson, ci-*.md)
+# living directly in the run dir. Created lazily on first write; helpers degrade gracefully
+# (absence and I/O failure -> ``None`` + a stderr warning, never an exception).
+
+
+def session_data_dir(root: Path, run_id: str) -> Path:
+    """The session data dir for a run (pure path; created lazily by ``write_session_data``)."""
+    return run_scratch_dir(root, run_id) / "data"
+
+
+def write_session_data(root: Path, run_id: str, name: str, content: str) -> Path | None:
+    """Write a session-data file (creating the dir); return its path, or ``None`` on failure.
+
+    Never raises: an ``OSError`` is reported loudly to stderr and yields ``None`` (a broken
+    disk must not wedge a session).
+    """
+    directory = session_data_dir(root, run_id)
+    path = directory / name
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        user_output(f"warning: could not write session data {path}: {exc}")
+        return None
+    return path
+
+
+def read_session_data(root: Path, run_id: str, name: str) -> str | None:
+    """Read a session-data file; ``None`` when absent (normal, branchable) or unreadable.
+
+    Absence is silent; an OS/decode error warns to stderr and yields ``None`` (never raises).
+    """
+    path = session_data_dir(root, run_id) / name
+    if not path.is_file():
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        user_output(f"warning: could not read session data {path}: {exc}")
+        return None
 
 
 # --- handoff: pre-session CLI->extension cold-door blob (handoff/<run_id>.json) ---------
@@ -141,12 +207,9 @@ def list_dispatch_records(root: Path) -> list[dict[str, Any]]:
     ``dispatched_at`` descending (empty/missing timestamps sort last). An absent ``scratch/runs/``
     dir is the normal pre-dispatch state and yields ``[]``.
     """
-    runs_root = workflow_dir(root) / "scratch" / "runs"
-    if not runs_root.is_dir():
-        return []
     records: list[dict[str, Any]] = []
-    for run_dir in sorted(runs_root.iterdir()):
-        path = run_dir / "dispatch.json"
+    for run_id in list_run_ids(root):
+        path = run_scratch_dir(root, run_id) / "dispatch.json"
         if not path.is_file():
             continue
         try:

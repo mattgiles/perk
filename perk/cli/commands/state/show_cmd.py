@@ -20,8 +20,7 @@ def show_state(*, rid: str | None) -> None:
     wd = cache.workflow_dir(root)
     if rid is None:
         runs = sorted(
-            {p.stem for p in (wd / "handoff").glob("*.json")}
-            | {p.name for p in (wd / "scratch" / "runs").glob("*") if p.is_dir()}
+            {p.stem for p in (wd / "handoff").glob("*.json")} | set(cache.list_run_ids(root))
         )
         user_output(f"{len(runs)} run(s):")
         for run in runs:

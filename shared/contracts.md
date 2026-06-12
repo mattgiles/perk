@@ -44,6 +44,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ├── plan.md                 # cache.plan: the materialized plan body (transient per-worktree mirror)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
+│   └── data/               # the session data dir (Node 1.2): run-scoped session artifacts
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
 └── markers/                # existence-based friction semaphores (e.g. pending-learn)
 ```
@@ -56,6 +57,20 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   CLI's cold launch (`perk <stage>`, T4) writes it; the extension claims it on `session_start`
   and sets `consumed: true` (§8.2). `stage` is the target stage id — the launched session's
   interior *handler* acts on it (Phase 1); T4's extension reads only `mode`/`run_id`.
+- **Session-data accessor seam (Objective #339 Node 1.2).** The session data dir is
+  `scratch/runs/<run_id>/data/` — a dedicated subdir so run-scoped session artifacts never
+  overlap perk machine records (`dispatch.json`, `events.ndjson`, `ci-*.md`) living directly in
+  the run dir — created lazily on first write (`session_start` stays artifact-free). All
+  scratch/session-data paths flow through one accessor per plane: `perk/cache.py` (exterior;
+  consumers hold an explicit `run_id`) and `extension/cache.ts` + `extension/sessionData.ts`
+  (interior; the ctx seam resolves the current `run_id` from `perk:workflow-state` and degrades
+  to `null` when the session has no identity — never a stamp `run_id`, contrast
+  `coldDoor.activeRunId`). Helpers degrade gracefully: absence and I/O failure → `None`/`null`
+  plus a stderr warning, never an exception. Manual construction of the `scratch`/`runs` path
+  segments outside the seam is forbidden and guard-tested in both planes
+  (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). No new state key:
+  `cache.scratch` already names the substrate; a dedicated `cache.session-data` key is deferred
+  to the first stage that declares it in `requires`/`reads`/`writes` (Node 2.1).
 - **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` for runs whose
   terminal stage completed, or older than N days — surfaced later as a `doctor` check + a
   prune command (erk accumulated session dirs precisely because GC was undefined).
