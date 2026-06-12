@@ -632,7 +632,9 @@ transition; restore it on on→off, falling back to the **full** configured tool
 `pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
 (2) blocks `edit`/`write`
 and non-allowlisted `bash` commands at `tool_call` with `{ block: true, reason }` (a perk-owned
-copy of plan-mode's destructive/safe regex tables); (3) injects a hidden `[READ-ONLY MODE]`
+copy of plan-mode's destructive/safe regex tables; the bash allowlist additionally includes
+read-only `gh` query subcommands — `gh issue|pr|repo|run|release|label view|list|diff|status|checks`,
+`gh search …`, `gh auth status` — while `gh api` and all mutating `gh` subcommands stay blocked); (3) injects a hidden `[READ-ONLY MODE]`
 context at `before_agent_start` and **strips** that marker from `context` when off. The allowlist
 is **restored on both `session_start` and `session_tree`** (re-sync from the rebuilt `mode`).
 **Fail-closed:** the in-memory gate flag drives `tool_call`; a failed state-rebuild never opens the
@@ -976,7 +978,9 @@ get_plan{ number }                                  -> PlanState{ number, url, t
   existing plan's run). Because the warm `plan_save` is an upsert keyed on `run_id` (above), the
   re-save **updates the same plan issue in place** rather than creating a new one — preserving the
   `plan-header` and thus the plan→objective link (`objective_id`) and the node→plan backlink. The
-  cold door performs every GitHub read up front (the read-only bash allowlist excludes `gh`) and
+  cold door performs every GitHub read up front (read-only `gh` query subcommands are
+  allowlisted, but the cold door still materializes every GitHub read up front — deterministic
+  and token-cheap) and
   materializes the prior plan body into a `<untrusted_plan>` scratch file the session reads. It
   **refuses** a non-OPEN plan (`plan_not_open` — a closed plan would silently create a new issue),
   a missing plan (`plan_not_found`), a header without `run_id` (`no_run_id`), or an empty body
@@ -1506,10 +1510,11 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   `capture` and `docs` are the cold workers (no aliases). Warm ids (`/learn`, `/learn-docs`,
   `command:learn-docs`, the inbox artifact) are unchanged — they key off warm command ids, not
   cold CLI spellings.
-- **The read-only gate forces inbox-over-gh.** The read-only tool gate's bash allowlist excludes
-  `gh`/`perk` (`extension/toolGating.ts`), so the seeded factory session reads the materialized
-  inbox via the `read` tool — it cannot query GitHub. This is why the cold door (not the model)
-  performs every GitHub read up front.
+- **The factory discipline is inbox-over-gh.** The seeded factory session reads the materialized
+  inbox via the `read` tool as its canonical input. Read-only `gh` query subcommands are now
+  allowlisted in the read-only bash gate (`extension/toolGating.ts`), so ad-hoc GitHub reads are
+  *possible* — but the cold door remains the canonical gatherer (deterministic, token-cheap), and
+  factory sessions should not re-fetch the inbox's contents via `gh`.
 - **The `consumed_learn` thread.** `perk plan-save --consumed-learn "45,50"` (and the warm
   `plan_save` tool's `consumed_learn` array param) populate `plan.PlanHeader.consumed_learn` +
   `plan.PlanRef.consumed_learn` (parsed to a sorted unique `tuple[str, ...]` of opaque string ids

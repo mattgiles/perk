@@ -43,6 +43,9 @@ test("READ_ONLY_TOOLS: contains the read-only linear_* tools, never the mutating
   }
   // The injected read-only context interpolates the allowlist, so it names the linear tools too.
   assert.ok(READ_ONLY_CONTEXT.includes("linear_get_issue"));
+  // The context steers GitHub reads to the allowlisted read-only `gh` subcommands.
+  assert.ok(READ_ONLY_CONTEXT.includes("read-only `gh` subcommands"));
+  assert.ok(READ_ONLY_CONTEXT.includes("never raw curl/fetch against github.com"));
 });
 
 test("isReadOnlyBashCommand: allows read-only commands", () => {
@@ -65,6 +68,13 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "perk obj show 42",
     "perk objective s", // s/n aliases
     "perk obj n",
+    "gh issue view 12 --json body", // read-only gh queries
+    "gh pr view 7 --json title --jq .title",
+    "gh pr diff 7",
+    "gh pr checks 7",
+    "gh run list --limit 5",
+    "gh search prs perk",
+    "gh auth status",
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), true, `expected allowed: ${cmd}`);
   }
@@ -90,6 +100,13 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "perk objective reconcile",
     "perk init", // would allow scaffolding writes
     "perk obj node 2.3", // the `n` alias must not match `node`
+    "gh api repos/{owner}/{repo}/issues -f title=x", // gh api blocked (can POST/PATCH)
+    "gh api user", // even GET-shaped gh api stays blocked
+    "gh pr create --fill", // mutating gh subcommands stay blocked
+    "gh issue edit 12",
+    "gh pr merge 7",
+    "gh repo clone o/r",
+    "gh issue view 12 > out.txt", // destructive-wins blocks the redirect
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }

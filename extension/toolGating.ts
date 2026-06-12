@@ -75,6 +75,7 @@ You are in perk read-only mode — a structurally enforced exploration mode.
 - You CANNOT use edit or write (file modifications are blocked).
 - plan_draft is the sole sanctioned write: it writes only the working-plan artifact in the session data dir.
 - bash is restricted to an allowlist of read-only commands.
+- For GitHub data use read-only \`gh\` subcommands (view/list/diff/status/checks/search) — never raw curl/fetch against github.com (private repos reject unauthenticated requests).
 
 These restrictions are enforced by perk, not advisory. Do not attempt to make changes.`;
 
@@ -171,6 +172,13 @@ const SAFE_PATTERNS = [
   // perk's own read-only objective queries (show/next + their s/n aliases). The trailing \b keeps
   // the `n` alias from matching the mutating `node` subcommand; create/node/reconcile stay blocked.
   /^\s*perk\s+(objective|obj)\s+(show|s|next|n)\b/i,
+  // Read-only `gh` queries — the guidance in the managed AGENTS block ("GitHub access goes
+  // through gh") must be followable in read-only sessions. Query-shaped subcommands only;
+  // `gh api` stays blocked (it can POST/PATCH), as do all mutating subcommands (create/edit/
+  // merge/close/comment/clone/...). Destructive-wins still blocks `> file` redirects.
+  /^\s*gh\s+(issue|pr|repo|run|release|label)\s+(view|list|diff|status|checks)\b/i,
+  /^\s*gh\s+search\s+(issues|prs|code|commits|repos)\b/i,
+  /^\s*gh\s+auth\s+status\b/i,
 ];
 
 /**

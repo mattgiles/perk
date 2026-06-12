@@ -37,7 +37,10 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "/.pi/npm/" in gitignore
     assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
     assert "/.pi/workflow/plan.md" in gitignore  # cache.plan materialized body (transient, #43)
-    assert "perk conventions" in (tmp_path / "AGENTS.md").read_text()
+    agents_md = (tmp_path / "AGENTS.md").read_text()
+    assert "perk conventions" in agents_md
+    # The managed block carries the ambient gh guidance (#416).
+    assert "GitHub access goes through the `gh` CLI" in agents_md
 
     # Idempotency: a second run changes nothing on disk.
     before = _snapshot(tmp_path)

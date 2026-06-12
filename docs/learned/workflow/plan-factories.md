@@ -7,12 +7,16 @@ read_when: You are building or debugging a perk plan factory (learn-docs, object
 
 ## The central constraint: inbox-over-gh
 
-A seeded read-only plan-mode session **cannot run `gh`/`perk` in bash**. `extension/toolGating.ts`
-`SAFE_PATTERNS` allows only `cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
+A seeded read-only plan-mode session historically **could not run `gh`/`perk` in bash** —
+`extension/toolGating.ts` `SAFE_PATTERNS` allowed only
+`cat`/`head`/`tail`/`grep`/`find`/`ls`/`git status|log|diff`/`jq`/`curl`.
 So any cold-door factory must **do every GitHub read up front** and materialize the result into a
 file the session reads via the `read` tool (e.g. `.pi/workflow/scratch/learn-docs-inbox.md`).
 Untrusted fetched bodies are wrapped in a marker (`<untrusted_learning>…</untrusted_learning>`).
-This is *why* the cold door gathers, not the model — the model can't call `gh` in a plan session.
+This is *why* the cold door gathers, not the model — at the time, the model couldn't call `gh` in
+a plan session. (Since #416, read-only `gh` *query* subcommands pass the gate, so the constraint
+is no longer structural — but the inbox pattern remains the canonical factory data flow:
+deterministic, token-cheap, and prompt-injection-bounded via the untrusted markers.)
 
 ## Non-stage factories borrow the `plan` stage descriptor + `prompt_override`
 

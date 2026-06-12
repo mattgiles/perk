@@ -34,15 +34,19 @@ cat / head / tail / grep / find / ls
 git status | git log | git diff
 jq
 curl
+gh <issue|pr|repo|run|release|label> <view|list|diff|status|checks> | gh search … | gh auth status
 ```
 
-Excluded: `gh`, `perk` (mutating subcommands), `npm`, `uv`, any write command. This is
-**intentional** — plan sessions must not mutate state or make network calls that require auth
-(beyond public curl).
+Excluded: `gh` mutating subcommands (create/edit/merge/close/comment/clone/…) **and `gh api`**
+(it can POST/PATCH — GET-vs-mutation by regex is fragile), `perk` (mutating subcommands), `npm`,
+`uv`, any write command. This is **intentional** — plan sessions must not mutate state.
+Read-only `gh` *query* subcommands were allowlisted in #416 so the ambient AGENTS guidance
+("GitHub access goes through `gh`") is followable in read-only sessions.
 
-Consequence for plan factories: any data that requires `gh` (issue bodies, PR metadata) must be
-fetched by the **cold door** and materialized into a file before the session launches. See
-`docs/learned/workflow/plan-factories.md` for the inbox-over-gh pattern.
+Consequence for plan factories: the inbox pattern (cold door fetches via `gh` and materializes
+into a file before the session launches) remains **preferred** — deterministic and token-cheap —
+but since #416 it is no longer structurally forced: ad-hoc read-only `gh` queries pass the gate.
+See `docs/learned/workflow/plan-factories.md` for the inbox-over-gh pattern.
 
 ### Allowlist policy when adding an entry
 
