@@ -9,12 +9,13 @@ Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failu
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from perk import cache, git, github, issue_backend, issues, launch, plan
+from perk import cache, git, github, issue_backend, issues, launch, linear_agent, plan
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -170,6 +171,12 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             "pr": str(pr.number),
             "lifecycle_stage": plan.LifecycleStage.IMPL.value,
         },
+    )
+    # Node 5.1 (stretch): mirror the opened PR into the Linear agent session. Gated inside the
+    # emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it
+    # never changes the submit result or exit code. Never reached on --dry-run (early return).
+    linear_agent.emit_pr_opened(
+        repo_root, pr_number=pr.number, pr_url=pr.url, branch=branch, environ=os.environ
     )
     return PrSubmitResult(
         pr=pr,

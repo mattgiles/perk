@@ -46,6 +46,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 ├── scratch/runs/<run_id>/  # per-run inter-process workflow files (diffs, generated bodies)
 │   └── data/               # the session data dir (Node 1.2): run-scoped session artifacts
 ├── handoff/<run_id>.json   # pre-session CLI->extension cold-door state (claimed on session_start)
+├── agent-session.json      # cache.agent-session: the Linear AgentSession pointer (§8.22)
 └── markers/                # existence-based friction semaphores (e.g. pending-learn)
 ```
 
@@ -2968,3 +2969,46 @@ everywhere — PRs are GitHub-universal. Concretely:
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
   `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
   `docs/linear-smoke-gate.md`.
+
+## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
+
+An **opt-in, fail-soft, one-way** mirror of an implement run into Linear's Agents UI
+(`perk/linear_agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
+there is no TS twin).
+
+- **The gate** (checked inside every emitter): the worktree's stamped
+  `cache.plan-ref.provider == "linear"` (the stamped provider, never config — the Node 3.1 rule)
+  **and** a non-empty **`LINEAR_AGENT_TOKEN`** env var. Without the token, behavior is
+  byte-identical to today (dormant by default; "additive only").
+- **`LINEAR_AGENT_TOKEN` env contract**: an OAuth `actor=app` access token from a user-created
+  Linear agent application — a personal `LINEAR_API_KEY` is rejected by Linear's agent API. Sent
+  in the OAuth `Authorization: Bearer <token>` header form (`LinearClient(bearer=True)`;
+  personal-key requests keep the plain header byte-identically). Environment only — never
+  config/committed files. No new config keys, no doctor check — the live smoke doc
+  (`docs/linear-smoke-gate.md`) is the verification surface.
+- **The file**: `.pi/workflow/agent-session.json` (cache tier, §8.1) —
+  `{"session_id": str, "issue": str, "url": str | null}`, written at session create
+  (`cache.write_agent_session`/`read_agent_session`). Absent at a follow-up hook → fail-soft
+  skip with a stderr note (known consequence: a remote-run-created session is invisible to a
+  later local land — that land's emission skips).
+- **The four hook sites**:
+  1. **implement start (local)** — `launch.launch_stage`, cold-local block, `stage.id ==
+     "implement"` → `agentSessionCreateOnIssue` on the plan issue + one `thought` activity;
+  2. **implement start (remote)** — `run_worker.run_worker` beside `report_started`, with the
+     GitHub Actions run URL as an `externalUrls` entry; a **nonzero** worker exit additionally
+     emits an `error` activity beside `report_terminal` (otherwise a failed remote drive leaves
+     the session dangling-active); a zero exit emits nothing terminal (the in-run `perk pr
+     submit` delegation already emitted the PR activity);
+  3. **submit** — `pr submit`'s `_pr_submit_impl` (never on `--dry-run`) → an `action` activity
+     (PR opened) + `agentSessionUpdate.addedExternalUrls` with the PR link;
+  4. **land** — `pr land`'s `_pr_land_impl` (never on `--dry-run`) → a `response` activity
+     ("PR #n squash-merged." + the objective-node summary line when any).
+- **The fail-soft guarantee**: every emitter is fully wrapped (the
+  `_reconcile_objective_on_land` fail-open discipline) — it never raises and never changes the
+  host command's result/exit code/`--json` payload; failures print one loud-but-non-fatal stderr
+  note (`perk linear-agent: <what> skipped (non-fatal): <exc>`).
+- **Known limits + deferrals** (flagged in the module docstring): GraphQL field signatures are
+  substring-pinned offline and verified live only at the smoke gate; Linear marks sessions
+  `stale` ~30 min after the last activity (accepted, not mitigated); `perk address` emission,
+  the `agentSessionUpdate.plan` checklist, elicitation activities, retry/backoff, and any
+  webhook receiver (perk never *responds* to Linear prompts) are all deferred.

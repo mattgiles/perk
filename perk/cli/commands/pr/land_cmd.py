@@ -9,13 +9,14 @@ Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failur
 """
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from perk import cache, github, issue_backend, issues, launch, objective
+from perk import cache, github, issue_backend, issues, launch, linear_agent, objective
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -164,6 +165,15 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
     plan_issue_closed = _close_plan_issue_on_land(backend, issue=issue)
     obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
     learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
+    # Node 5.1 (stretch): mirror the land into the Linear agent session. Gated inside the emitter
+    # (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it never
+    # changes the land result or exit code. Never reached on --dry-run (early return).
+    linear_agent.emit_landed(
+        repo_root,
+        pr_number=pr.number,
+        summary=_landed_summary(obj_update),
+        environ=os.environ,
+    )
     return PrLandResult(
         pr=pr,
         branch=branch,
@@ -174,6 +184,19 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         learn=learn_update,
         plan_issue_closed=plan_issue_closed,
     )
+
+
+def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
+    """The one-line land summary for the agent-session ``response`` activity (Node 5.1):
+    the objective nodes the merge marked done, when any; empty otherwise (the emitter
+    supplies the "PR #n squash-merged." base line itself)."""
+    if not obj_update.nodes_marked:
+        return ""
+    nodes = ", ".join(obj_update.nodes_marked)
+    line = f"Objective #{obj_update.objective}: marked node(s) {nodes} done."
+    if obj_update.closed:
+        line += " Objective complete — closed."
+    return line
 
 
 def _close_plan_issue_on_land(backend: issue_backend.IssueBackend, *, issue: str) -> bool:

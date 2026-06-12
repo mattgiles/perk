@@ -77,12 +77,16 @@ class LinearClient:
         *,
         timeout: float = _TIMEOUT,
         transport: httpx.BaseTransport | None = None,
+        bearer: bool = False,
     ) -> None:
         if not api_key.strip():
             raise IssueBackendError(f"Linear API key is empty; {_API_KEY_HINT}")
         self._api_key = api_key
         self._timeout = timeout
         self._transport = transport
+        # OAuth tokens (e.g. an actor=app agent token) use the `Bearer <token>` form;
+        # personal API keys keep the plain `Authorization: <API_KEY>` header byte-identically.
+        self._bearer = bearer
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         """POST one GraphQL request; return the ``data`` dict or raise ``IssueBackendError``.
@@ -98,7 +102,9 @@ class LinearClient:
                     LINEAR_GRAPHQL_URL,
                     json={"query": query, "variables": variables or {}},
                     headers={
-                        "Authorization": self._api_key,
+                        "Authorization": (
+                            f"Bearer {self._api_key}" if self._bearer else self._api_key
+                        ),
                         "Content-Type": "application/json",
                     },
                 )

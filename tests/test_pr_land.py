@@ -4,13 +4,15 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, github, objective
+from perk import cache, github, linear_agent, objective
 from perk.cli.cli import cli
+from perk.cli.commands.pr import land_cmd
 from perk.cli.commands.pr.land_cmd import (
     LearnConsumeUpdate,
     ObjectiveLandUpdate,
     PrLandResult,
     _consume_learn_on_land,
+    _landed_summary,
     _reconcile_objective_on_land,
     _render_human,
     _result_to_dict,
@@ -170,6 +172,65 @@ def _objective_state(nodes: list[objective.ObjectiveNode]) -> github.ObjectiveSt
 
 def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
     return objective.ObjectiveNode(id=node_id, description=node_id, status=status, pr=pr)
+
+
+def test_real_land_calls_linear_agent_landed(monkeypatch):
+    """Node 5.1: the land hook fires after the merge + learn consume, with the PR number and the
+    objective-node summary (the emitter itself gates on the stamped provider + token)."""
+    _authed(monkeypatch)
+    _stub_land(monkeypatch, draft=True)
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
+    )
+    result = _run(["pr", "land", "--json"])
+    assert result.exit_code == 0
+    assert len(emitted) == 1
+    assert emitted[0]["pr_number"] == 42
+    assert emitted[0]["summary"] == ""  # no objective link on _REF
+
+
+def test_dry_run_land_never_calls_linear_agent(monkeypatch):
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        land_cmd.linear_agent, "emit_landed", lambda _root, **kw: emitted.append(kw)
+    )
+    result = _run(["pr", "land", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    assert emitted == []
+
+
+def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
+    """Fail-soft: a broken emitter substrate (gate forced open) never changes the --json payload
+    or exit code."""
+    _authed(monkeypatch)
+    _stub_land(monkeypatch, draft=True)
+    baseline = _run(["pr", "land", "--json"])
+    assert baseline.exit_code == 0
+
+    monkeypatch.setattr(linear_agent, "emission_enabled", lambda *_a, **_k: True)
+    monkeypatch.setattr(cache, "read_agent_session", lambda _r: {"session_id": "sess-1"})
+
+    def boom(_environ):
+        raise RuntimeError("agent substrate down")
+
+    monkeypatch.setattr(linear_agent, "agent_client_from_env", boom)
+    result = _run(["pr", "land", "--json"])
+    assert result.exit_code == 0
+    assert result.stdout == baseline.stdout  # the --json payload is byte-identical
+    assert "landed emission skipped (non-fatal)" in result.stderr
+
+
+def test_landed_summary_lines():
+    assert _landed_summary(ObjectiveLandUpdate(None, (), "no_objective_link")) == ""
+    assert (
+        _landed_summary(ObjectiveLandUpdate("9", ("2.1",), None))
+        == "Objective #9: marked node(s) 2.1 done."
+    )
+    assert (
+        _landed_summary(ObjectiveLandUpdate("9", ("2.1", "2.2"), None, closed=True))
+        == "Objective #9: marked node(s) 2.1, 2.2 done. Objective complete — closed."
+    )
 
 
 def test_reconcile_on_land_no_objective_link():
