@@ -88,8 +88,9 @@ new tools propagate the seam's terminate intent.
 - The editor-dialog UX (long-plan scrolling, the Ctrl+G `$EDITOR` round-trip) is
   automation-untested — pinned only by the pi type contract; see `pi/extension-api.md` for the
   `ctx.ui.editor` facts.
-- `PLAN_ADAPTER_TOMBELL_CONTEXT` still speaks present + `/plan-save` as primary (deliberately left;
-  documented in contracts §8.10) until Node 2.6 re-aims it.
+- ~~`PLAN_ADAPTER_TOMBELL_CONTEXT` re-aim~~ — Node 2.6 landed (PR #404): the tombell context now
+  speaks review-first, with present + `/plan-save` as its explicit fail-open arm (see contracts
+  §8.10 / §8.23).
 
 ## Sources
 
@@ -97,6 +98,7 @@ new tools propagate the seam's terminate intent.
 
 ## Cross-references
 
+- `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
 - `extension/planReview.ts` — the door, `executePlanReview`, the first-party review
 - `extension/planSave.ts` — `approvalSave`, `resolvePlanSource`, `savePlan`
 - `docs/learned/workflow/plan-save-surfaces.md` — the save-side source resolution + recovery carrier

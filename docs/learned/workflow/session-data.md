@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers, the `plan_draft` read-only carve-out, or `perk state prune` / the `cache-gc` doctor check.
+read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers, adding a session-data producer or consumer (the full recipe — incl. the `plan_draft` read-only carve-out), or `perk state prune` / the `cache-gc` doctor check.
 ---
 
 # Session data, run identity, provenance & GC
@@ -65,9 +65,34 @@ stray-file-in-`runs/` semantics live in one place.
   (gitignored scratch; GC prunes). Consumers must treat `null` as "not consumable", even if the
   file visibly exists.
 
-## The read-only carve-out recipe (proven end-to-end by `plan_draft`)
+## Adding a session-data consumer (the full recipe)
 
-For any future writer that must work in read-only mode:
+The full producer→consumer recipe, composed from the rules proven above and in contracts §8.1
+(`plan_draft` → `resolvePlanSource` is the end-to-end precedent):
+
+1. **Producer**: a fixed artifact-name constant (the `PLAN_DRAFT_ARTIFACT` precedent,
+   `extension/planDraft.ts`); write only via `writeSessionArtifact` (file + provenance pointer in
+   one gesture); pointer appends carry the **whole merged map** (per-field LWW — see "Provenance
+   pointers" above); a `null` return ⇒ not consumable, even if the file visibly exists.
+2. **Read-only writer** (only if the producer must run under the gate) — the carve-out recipe
+   below.
+3. **Consumer**: read only via `readSessionArtifact` (digest-validated, fail-open); design the
+   fallback chain up front and pick the tier law deliberately — save-style (… → a universal
+   fallback, e.g. the transcript scrape) vs review-style (validated sources only, never the
+   scrape — see `plan-review-flow.md`); never dereference `pointer.path` (re-derive from
+   `run_id` + `name` through the seam).
+4. **Refusal tiers**: run_id mismatch → *silent* `null` (fork isolation, not an anomaly);
+   broken-promise (missing file / digest mismatch) → stderr warn + `null`.
+5. **GC**: artifacts are prunable (`perk/gc.py`); pruned runs leave dangling pointers **by
+   design** — consumers must tolerate `null` forever.
+6. **Guards + registry**: manual `scratch`/`runs` path construction trips
+   `extension/cacheGuard.test.ts` / `tests/test_cache_guard.py` — go through the seam; if a stage
+   owns the artifact, declare `cache.session-data` in its registry `writes` (vocabulary keys land
+   with their first declaring stage — see `shared-contracts.md`).
+
+### The read-only carve-out recipe (proven end-to-end by `plan_draft`)
+
+For any future writer that must work in read-only mode (step 2 above):
 
 1. A **fixed artifact-name constant** — no path/name tool parameter.
 2. The path derived **exclusively through the session-data accessor seam**

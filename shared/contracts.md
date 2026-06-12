@@ -178,15 +178,20 @@ environment before `exec pi`; an initial message or `@file` would pollute LLM co
 stage may stash extra keys in its handoff blob (the TS `Handoff` interface already carries
 `[key: string]: unknown`). `objective-plan` writes the `objective_id`/`node_id` it just marked
 `planning` so a later `perk plan-save` recovers the objective→node link **regardless of which save
-surface the model used** — the `/plan-save` *command* forwards only `{plan, title}` (it cannot
-carry the link), whereas the `plan_save` *tool* passes it explicitly. `plan-save` reads the
+surface the model used** — the `plan_save` *tool* passes the link explicitly, but an
+approval-triggered `approvalSave` (and its `/plan-save` manual-failsafe invocation, which takes
+only an optional title) carries no link params at all; the warm `objective_node_claim` carrier
+(§8.3) covers those in-session, and this cold handoff carrier covers the relaunch/cold path
+(→ §8.23). `plan-save` reads the
 handoff and defaults `objective_id`/`node_id` from it only when neither flag was passed (explicit
 flags always win; a non-objective handoff has no `objective_id`, so plain planning is unaffected).
 
 The same carrier ferries `consumed_learn` (#102). `learn-docs` launches a **read-only** plan-mode
-session, where the `plan_save` *tool* is gated out (`toolGating.ts`), so the model saves via the
-`/plan-save` *command* — which forwards only `{plan, title}`, dropping the gathered `perk:learn`
-numbers. The `learn-docs` cold door stashes them as `handoff_extra={"consumed_learn": […]}`, and
+session, where the `plan_save` *tool* is gated out (`toolGating.ts`); the save lands review-first
+through `approvalSave` (or the `/plan-save` failsafe), and only the `plan_save` tool's explicit
+`consumed_learn` param can carry the numbers warm — the handoff carrier makes the consume
+mechanism independent of which surface fired. The `learn-docs` cold door stashes them as
+`handoff_extra={"consumed_learn": […]}`, and
 `plan-save` recovers them (`_consumed_learn_from_handoff`) when `--consumed-learn` is absent
 (explicit flag wins; a non-factory handoff has no key, so plain planning is unaffected). This makes
 the consume mechanism independent of which save surface the model used.
@@ -3072,3 +3077,45 @@ there is no TS twin).
   `stale` ~30 min after the last activity (accepted, not mitigated); `perk address` emission,
   the `agentSessionUpdate.plan` checklist, elicitation activities, retry/backoff, and any
   webhook receiver (perk never *responds* to Linear prompts) are all deferred.
+
+## §8.23 · The file-first plan contract (the three plan backends; Objective #339)
+
+A consolidation-by-reference of the file-first plan pipeline Phase 1–2 of Objective #339 built.
+The normative detail lives in §8.1 ("File-first plan save" + the `plan_draft` carve-out), §8.3
+(the `approvalSave` seam + the warm claim carrier), and §8.10 (the plannotator/Node 2.5/2.6 Status
+blocks + the interactive save discipline); this section is the one-stop current shape.
+
+- **The artifact.** The working plan lives in the session data dir as `plan-draft.md`
+  (`PLAN_DRAFT_ARTIFACT`, `extension/planDraft.ts`), written **only** by the `plan_draft` tool
+  through the session-data accessor seam (`writeSessionArtifact`: file + provenance pointer in one
+  gesture), and consumable **only** via its validated provenance pointer
+  (`readSessionArtifact` — digest-validated, fail-open) (→ §8.1).
+- **The two resolution chains + the asymmetry law.** **Save** surfaces resolve
+  artifact → `plan` param → transcript scrape (the universal fail-open last resort)
+  (`resolvePlanSource`, → §8.1 "File-first plan save"). **Review** surfaces resolve
+  artifact → param **only** — the transcript tier is excluded because an approval auto-saves the
+  reviewed bytes, and scraped conversation bytes must never be what gets approved (→ §8.10's
+  plannotator Status block).
+- **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
+  `extension/planReview.ts`) dispatches: plannotator-selected → the event-bus bridge; **any**
+  other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs
+  `approvalSave` (`extension/planSave.ts`): save → D1a gate exit on success (→ §8.3). The
+  `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
+  optional title argument.
+- **The three backends.** All three speak review-first
+  (`plan_draft` → `plan_review` → auto-save on approval):
+
+  | provider id | authoring context | review surface | fail-open arm |
+  |---|---|---|---|
+  | `perk-plan` | `PLAN_AUTHORING_CONTEXT` | first-party in-TUI review | present + `/plan-save` |
+  | `plannotator-plan` | `PLAN_ADAPTER_PLANNOTATOR_CONTEXT` | browser bridge | present + `/plan-save` |
+  | `tombell-plan` | `PLAN_ADAPTER_TOMBELL_CONTEXT` (conditioned injection, Node 2.6) | first-party in-TUI review | present + `/plan-save` (incl. tombell's own interactive `/plan` `setActiveTools` restriction arm) |
+
+- **Link/`consumed_learn` recovery carriers.** Approval-triggered saves carry **no model params**;
+  the **cold** `handoff_extra` carrier (→ §8.2) and the **warm** `objective_node_claim` carrier
+  (→ §8.3) recover `objective_id`/`node_id` with identical semantics — fill both-or-neither,
+  explicit values win outright (even one — never mixed), fail-open (a malformed carrier never
+  blocks a save). `consumed_learn` rides the cold handoff (`_consumed_learn_from_handoff`).
+
+§8.10's per-node Status blocks remain the historical record of how each piece landed; this section
+is the consolidated **current** contract.
