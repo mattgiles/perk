@@ -42,14 +42,19 @@ Produce two things:
   (optionally) a phase grouping and explicit dependencies. NEVER hand-write the roadmap as YAML —
   hand the structured roadmap to the tool, which serializes it.
 
-When the objective + roadmap are decision-complete: exit read-only mode (\`/plan\` off), then call
-the objective_save tool with the prose and the structured roadmap. It creates the perk:objective
-issue, activates it, and starts budget tracking.
+Keep the working draft current with objective_draft — pass the FULL prose and the FULL structured
+roadmap each call (it rewrites the whole draft); never hand-write roadmap YAML.
 
-Either path saves: call the objective_save tool directly after exiting read-only, OR run
-\`/objective-save\`, which exits read-only and asks you to call the objective_save tool with your
-converged prose + structured roadmap. Either way the structured save flows through the tool — never
-hand-write roadmap YAML.`;
+When the objective + roadmap are decision-complete, call the plan_review tool — the configured
+review surface displays the rendered objective (the prose + a roadmap table) derived from the
+draft artifact.
+
+- If the review is DENIED: revise per the feedback, rewrite the working draft with
+  objective_draft, then call plan_review again.
+- If the review is APPROVED: nothing auto-saves yet — relay the approval (and any feedback) and
+  ask the user to run \`/objective-save\` to persist it.
+- If plan_review reports it was skipped or unavailable: present the complete objective +
+  structured roadmap to the user; the human runs \`/objective-save\` (the manual failsafe).`;
 
 /** Build the full objective-authoring injection, appending the project config addendum when present. */
 export function objectiveAuthoringContextContent(cwd: string): string {
