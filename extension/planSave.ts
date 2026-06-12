@@ -377,13 +377,14 @@ export type ApprovalSaveOutcome =
 
 /**
  * The shared approval→save orchestration seam (Node 2.3 of #339): an APPROVED review outcome
- * (plannotator / first-party / tombell — Nodes 2.4–2.6) and the manual `/plan-save` failsafe both
- * run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
+ * (plannotator's `plan_review` — the first wired backend, Node 2.4; first-party / tombell follow
+ * in Nodes 2.5/2.6) and the manual `/plan-save` failsafe both run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
  * the explicit fallback, the transcript scrape last) → `savePlan` (warm node-link recovery happens
  * inside) → gate exit on a successful save while read-only (the D1a pattern: snapshot
  * `gating.isActive()` before the save; a failed save leaves the gate ON). No resolvable plan
  * source → `no-plan` (nothing saved, the gate untouched); callers render their own fallback.
- * The returned `SaveResult` keeps `terminate: true` for future tool-path callers.
+ * The returned `SaveResult` keeps `terminate: true` for tool-path callers (plannotator's
+ * approved arm propagates it).
  */
 export async function approvalSave(
   pi: ExtensionAPI,

@@ -24,11 +24,15 @@ you never attempt to save it yourself (`/plan` is a user command you cannot run,
    saves it to GitHub, and on success automatically exits plan mode (the read-only → read-write
    boundary in one gesture).
 
-When the `plannotator-plan` provider is selected, add a review step before presenting: call the
-**`plan_review`** tool with the complete plan markdown — the Plannotator browser UI opens for the
-human; on a deny, revise per the returned annotations and call `plan_review` again; on approve,
-present the final plan as above. (When that provider is not selected, `plan_review` is a no-op
-skip — just present the plan.)
+When the `plannotator-plan` provider is selected, the review step replaces the present-and-wait
+flow: keep the working draft current with **`plan_draft`** (the validated draft artifact is what
+gets reviewed AND saved) and call the **`plan_review`** tool when the plan is decision-complete —
+the Plannotator browser UI opens for the human. On a deny, revise per the returned annotations,
+rewrite the draft with `plan_draft`, and call `plan_review` again. On approve, **the plan is
+auto-saved** to GitHub and the session leaves read-only — no final-message re-dump, no human
+`/plan-save`; relay the save outcome instead. (When that provider is not selected, or `plan_review`
+reports it was skipped/unavailable, the default present-plan + human-`/plan-save` flow above
+applies — the manual failsafe.)
 
 The `plan_save` **tool** remains the canonical save surface for **orchestrated factory flows**
 (objective-plan, learn-docs, replan), where the factory prompt explicitly instructs an autonomous
