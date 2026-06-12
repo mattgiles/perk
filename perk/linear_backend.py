@@ -8,9 +8,10 @@ the GitHub backend. The objective tier (Node 2.3) mirrors ``perk.github``'s beha
 (the two-step create with comment-id backfill, header LBYL, authoritative roadmap writes +
 best-effort comment re-renders, the Reconcilable splice).
 
-Deliberately dormant: no consumer exists yet. The resolver in the issues module still raises on
-``backend = "linear"`` until Node 2.4 wires it (config ``[issues] team`` parsing, init/doctor
-validation, and the contracts §8.21 amendment all land there).
+Live: the resolver in the issues module constructs this backend on ``backend = "linear"`` (config
+``[issues] team`` parsing, init/doctor readiness, and the contracts §8.21 amendment landed in Node
+2.4). :func:`check_readiness` is the shared init/doctor readiness probe (auth + team + the four
+perk labels), report-shaped (never raises), mirroring ``github.check_auth``'s degrade discipline.
 
 **Linear-safe encoding.** Caller-composed bodies arrive in the GitHub encoding — HTML-comment
 metadata-block delimiters + ``<details>`` wrappers (rendered by ``perk.plan``). Linear stores
@@ -24,7 +25,6 @@ live at Node 4.1's smoke gate (flagged deferral — mitigated here, not proven).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **``[issues] team`` config + init/doctor validation + contracts §8.21** — Node 2.4.
 - **Envelope id re-shaping** (the tagged ``# GitHub-numeric id assumption`` edges in
   ``perk/cli/commands/``) — Node 3.1.
 - **Live round-trip fidelity** + tightening the ``"not found"`` substring tolerance to
@@ -33,6 +33,7 @@ Explicit deferrals (flagged, not silently omitted):
 """
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -832,3 +833,100 @@ class LinearIssueBackend:
         return issue_backend.ObjectiveBodyUpdate(
             issue_id=issue_id, comment_id=comment_key, updated=True, dry_run=False
         )
+
+
+# ===========================================================================
+# Shared readiness probe (Node 2.4) — used by both `perk init` and `perk doctor`.
+# Report-shaped (never raises): every failure mode lands in a `LinearReadiness` field,
+# mirroring `github.check_auth`'s degrade discipline. Offline-testable through the
+# `GraphQLClient` protocol fake.
+# ===========================================================================
+
+# The four perk labels (name, color, description), the readiness probe ensures/looks up.
+_PERK_LABELS: tuple[tuple[str, str, str], ...] = (
+    (plan.PLAN_LABEL, plan.PLAN_LABEL_COLOR, plan.PLAN_LABEL_DESCRIPTION),
+    (plan.LEARN_LABEL, plan.LEARN_LABEL_COLOR, plan.LEARN_LABEL_DESCRIPTION),
+    (plan.CONSOLIDATED_LABEL, plan.CONSOLIDATED_LABEL_COLOR, plan.CONSOLIDATED_LABEL_DESCRIPTION),
+    (
+        objective.OBJECTIVE_LABEL,
+        objective.OBJECTIVE_LABEL_COLOR,
+        objective.OBJECTIVE_LABEL_DESCRIPTION,
+    ),
+)
+
+
+@dataclass(frozen=True)
+class LinearReadiness:
+    """The init/doctor Linear readiness snapshot (report-shaped; never raises)."""
+
+    auth_ok: bool
+    user: str | None
+    team_ok: bool
+    missing_labels: tuple[str, ...] = ()
+    created_labels: tuple[str, ...] = ()
+    error: str | None = None
+
+
+def check_readiness(
+    client: GraphQLClient, *, team_key: str, ensure_labels: bool
+) -> LinearReadiness:
+    """Probe Linear readiness: viewer auth, team resolution, and the four perk labels.
+
+    Report-shaped — every failure mode lands in a ``LinearReadiness`` field (never raises),
+    mirroring ``github.check_auth``. Phases short-circuit: an auth failure skips team + labels; a
+    team failure skips labels. With ``ensure_labels=False`` (doctor report path) labels are
+    looked up only and missing names land in ``missing_labels``; with ``ensure_labels=True``
+    (init + doctor ``--fix``) each label is ensured and names actually created land in
+    ``created_labels`` (lookup-first idempotency → a converged workspace reports none).
+    """
+    # --- auth: one viewer query ---
+    try:
+        data = client.request("{ viewer { id name email } }")
+    except IssueBackendError as exc:
+        return LinearReadiness(auth_ok=False, user=None, team_ok=False, error=str(exc))
+    viewer = data.get("viewer")
+    user: str | None = None
+    if isinstance(viewer, dict):
+        viewer_dict = cast("dict[str, object]", viewer)
+        name = viewer_dict.get("name")
+        email = viewer_dict.get("email")
+        user = name if isinstance(name, str) and name.strip() else None
+        if user is None and isinstance(email, str) and email.strip():
+            user = email
+
+    # --- team: resolve the team UUID (reuses the backend's `_team_id`) ---
+    backend = LinearIssueBackend(client, team_key=team_key, repo_root=Path())
+    try:
+        backend._team_id()
+    except IssueBackendError as exc:
+        return LinearReadiness(auth_ok=True, user=user, team_ok=False, error=str(exc))
+
+    # --- labels: the four perk labels ---
+    missing: list[str] = []
+    created: list[str] = []
+    try:
+        for name, color, description in _PERK_LABELS:
+            if ensure_labels:
+                _, was_created = backend._ensure_label_id(
+                    name, color=color, description=description
+                )
+                if was_created:
+                    created.append(name)
+            elif backend._lookup_label_id(name) is None:
+                missing.append(name)
+    except IssueBackendError as exc:
+        return LinearReadiness(
+            auth_ok=True,
+            user=user,
+            team_ok=True,
+            missing_labels=tuple(missing),
+            created_labels=tuple(created),
+            error=str(exc),
+        )
+    return LinearReadiness(
+        auth_ok=True,
+        user=user,
+        team_ok=True,
+        missing_labels=tuple(missing),
+        created_labels=tuple(created),
+    )

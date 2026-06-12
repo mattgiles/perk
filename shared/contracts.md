@@ -1463,6 +1463,9 @@ already happened before the sync); `skills_conflict` short-circuits before any c
   env:     [ { name, ok, detail, remediation } ],          # required-tooling checks
   github:  { auth: { ok, user, scopes[], error },          # null when env-not-ready / verify skipped
              repo: { ok, repo, can_push, error } },
+  linear:  { ok, team, error,                              # null unless verify ran AND the committed
+             readiness: { auth_ok, user, team_ok,          #   [issues] backend is "linear" (§8.21);
+                          missing_labels[], created_labels[], error } | null },  # non-fatal like github
   capabilities: string[],                                  # the managed inventory (perk/capabilities.py)
   changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
   handoff: string|null }                                   # path to the post-init markdown on-ramp
@@ -1513,13 +1516,15 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 ```
 
 **Groups.** `environment` (tools; missing = `fail`) · `github` (auth/access; non-fatal `warn`) ·
-`runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
+`linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
+`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the four perk
+labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
-non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues] backend` selection
-check — §8.21) · `state` (the `.pi/workflow/` cache layout + handoff-blob
-integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
+non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
+linear requires a committed `team` — §8.21) · `state` (the `.pi/workflow/` cache layout +
+handoff-blob integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
 
@@ -2738,28 +2743,31 @@ Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, 
 
 ---
 
-## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Node 1.3)
+## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Nodes 1.3 + 2.4)
 
 The issue-tracking tier (plan/learn/objective issues — `perk/issue_backend.py`'s `IssueBackend`
-contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/issues.py`, Node 1.2) is
-**backend-selectable** via one committed config table:
+contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/issues.py`, Node 1.2;
+the `LinearIssueBackend` over the `perk/linear.py` GraphQL client, Nodes 2.1–2.3, wired live in
+Node 2.4) is **backend-selectable** via one committed config table:
 
 ```toml
 [issues]
-backend = "github"   # or "linear" (reserved — ships in objective #252 Phase 2)
+backend = "linear"   # "github" is the default when unset
+team = "ENG"         # the Linear team key — required when backend = "linear"
 ```
 
-**Committed-only read, both planes.** The selection is read from committed `.pi/perk.toml`
-**only** — never the `perk.local.toml` overlay (Python: `load_committed_issues_backend`; TS:
-`resolveIssueBackendId` reads only the committed file). Rationale: the backend decides where
-canonical durable state (plan/learn/objective issues) is *written*; a per-user override would
-fragment the canonical store. Node 2.4 later converges committed artifacts from this same
-selection.
+**Committed-only read, both planes.** The selection (`backend` AND `team`) is read from committed
+`.pi/perk.toml` **only** — never the `perk.local.toml` overlay (Python:
+`load_committed_issues_backend` / `load_committed_issues_team`; TS: `resolveIssueBackendId` reads
+only the committed file). Rationale: the backend decides where canonical durable state
+(plan/learn/objective issues) is *written*; a per-user override would fragment the canonical
+store. **`LINEAR_API_KEY` lives in the environment only** — never in config/committed files
+(`linear.client_from_env`; matches pi-mono-linear's own auth order, which reads the same var).
 
 **Python is the authoritative validator** (`perk/issues.py::resolve_issue_backend_id`):
 
 - absent / `"github"` → `"github"` (the default backend);
-- `"linear"` → **raises** `IssueBackendError` ("not yet supported — … objective #252 Phase 2");
+- `"linear"` → `"linear"` (a live selection);
 - any other value → **raises** `IssueBackendError` ("unknown issue backend … (known: github,
   linear)");
 - malformed committed TOML → `tomllib.TOMLDecodeError` re-raised as `IssueBackendError` (chained,
@@ -2768,7 +2776,10 @@ selection.
 Raising (not falling back) is deliberate: a silent fallback would write canonical issues to the
 wrong tracker. `resolve_issue_backend(repo_root)` resolves the id and constructs the matching
 backend; every issue-tier consumer already routes `IssueBackendError` through its existing error
-boundary.
+boundary. The **linear construction arm** raises a typed `IssueBackendError` when either
+requirement is missing: no committed `[issues] team` → remediation pointing at `.pi/perk.toml`;
+no/blank `LINEAR_API_KEY` → the hinted message from `client_from_env`. Construction is lazy (no
+network): the team key is bound and resolved to its UUID on first use.
 
 **The TS mirror is fail-safe and dormant** (`extension/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
@@ -2790,9 +2801,54 @@ user-owned config):
 | committed selection | status | note |
 | --- | --- | --- |
 | absent / `"github"` | `ok` | `issues backend: github` |
-| `"linear"` | `fail` | selected but not yet supported; remediate to `backend = "github"` until Phase 2 |
+| `"linear"` + committed `team` | `ok` | `issues backend: linear (team <key>)` |
+| `"linear"` without `team` | `fail` | offline-decidable; remediate: set `[issues] team` in `.pi/perk.toml` |
 | anything else | `fail` | `unknown issue backend '<x>'`; fix `.pi/perk.toml [issues]` |
 | malformed TOML | `warn` | selection not evaluated — defers to the config check (mirrors `providers`) |
 
 `fail` (not `warn`) for a bad selection is deliberate: unlike `[providers]` (graceful fallback →
-warn), a non-github selection hard-breaks **every** issue-touching command at this node.
+warn), a bad `[issues]` selection hard-breaks **every** issue-touching command. Network readiness
+is *not* this offline check's job — that is the `linear` group's (below).
+
+**The verify-gated `linear` doctor group** (`perk/doctor.py::_linear_checks`; present only when
+`verify` AND the committed backend is `"linear"`). All warn-level on failure — network readiness
+is non-fatal, mirroring the `github` group's D3 discipline. Built from one
+`linear_backend.check_readiness(client, team_key, ensure_labels=False)` call (the shared
+init/doctor probe — report-shaped, never raises; phases short-circuit auth → team → labels):
+
+- `linear-auth` — ok: `authenticated as <user>`; failure (or missing `LINEAR_API_KEY`): warn,
+  remediation "export LINEAR_API_KEY (create a personal API key at linear.app Settings →
+  Security & access)".
+- `linear-team` — ok: `team <key> found`; failure: warn with the error detail.
+- `linear-labels` — all four perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
+  `perk:objective`): ok; otherwise warn listing the missing names, remediation "run `perk init`
+  or `perk doctor --fix`".
+
+**The `--fix` label repair gesture** (`_fix_linear_labels`, verify-gated like the skills sync —
+network I/O, so never a `ManagedConvergence`): when `fix` AND `verify` AND linear is selected AND
+key + team are available, `check_readiness(..., ensure_labels=True)` ensures the four labels;
+created names land on `fixed` (`Linear: created label perk:plan`), failures on `fix_errors`.
+Lookup-first idempotency: a converged workspace reports nothing (the doctor idempotency rule).
+
+**The init readiness step** (`perk/init.py::_linear_readiness`, verify-gated, non-fatal — the
+GitHub D3 mirror: file convergence already succeeded). Only when `verify` AND the committed
+backend is `"linear"`: missing key/team degrade to an errored `LinearReport`; otherwise the probe
+runs with `ensure_labels=True` (init converges the four perk labels upfront; the lazy write-time
+`ensure_label` calls remain the safety net). Created labels are reported through the
+`LinearReport` (the `--json` `linear` key, §8.5; the human `✓ Linear: <user>, team <key>` line) —
+**never** appended to `InitReport.changes`, which stays a pure filesystem-delta list.
+
+**The `npm:pi-mono-linear` settings convergence** (`perk/init.py::_converge_linear_package`,
+composed inside `_converge_settings` — it rides the `settings-wiring` managed convergence, so
+doctor dry-runs and `--fix`es it for free; no new doctor check, no new capability).
+Two-directional, mirroring `_converge_provider_packages`: `backend = "linear"` selected → the
+unpinned plain-string entry is appended (bundled `linear` skill accepted wholesale — no
+`package_filter`); not selected → any entry matching the `pi-mono-linear` identity is **removed**
+(perk treats the package as managed by the selection; hand-adding it without selecting linear is
+unsupported). A malformed committed TOML defers to the config check (selection treated as absent).
+
+**Explicit Node 3.1 deferral.** Prompt rendering is still GitHub-shaped: linear-selected sessions
+render `gh issue view` prompts. Nothing crashes — `perk/launch.py` falls back to `open <url>` for
+non-github providers and the best-effort checkpoint guard returns early — but backend-aware
+prompt rendering (and read-only-mode allowlisting of the pi-mono-linear `linear_*` tools) lands
+in Node 3.1.

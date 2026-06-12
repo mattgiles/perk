@@ -32,6 +32,8 @@ from perk import (
     github,
     init,
     issues,
+    linear,
+    linear_backend,
     providers,
     registry,
 )
@@ -40,6 +42,7 @@ from perk.config import (
     CONFIG_FILENAME,
     LOCAL_CONFIG_FILENAME,
     load_committed_issues_backend,
+    load_committed_issues_team,
     load_config,
 )
 from perk.github import GitHubError
@@ -621,14 +624,17 @@ def _providers_check(root: Path) -> Check:
 
 
 def _issues_check(root: Path) -> Check:
-    """Validate the committed `[issues] backend` selection (contracts.md §8.21).
+    """Validate the committed `[issues]` selection (contracts.md §8.21).
 
     Maps ``issues.resolve_issue_backend_id``'s outcomes (never duplicates the vocabulary):
-    absent/``"github"`` → ``ok``; ``"linear"``/unknown → ``fail`` — unlike `[providers]` (which
-    falls back gracefully and only warns), a bad selection hard-breaks **every** issue-touching
-    command, so doctor must say so loudly. A malformed committed TOML → ``warn`` deferring to the
-    config check (mirrors ``_providers_check``). No ``--fix`` arm: the selection is user-owned
-    config; nothing is convergeable.
+    absent/``"github"`` → ``ok``; ``"linear"`` **with** a committed team → ``ok``; ``"linear"``
+    **without** a team → ``fail`` (offline-decidable, hard-breaks every issue-touching command);
+    unknown → ``fail`` — unlike `[providers]` (which falls back gracefully and only warns), a bad
+    selection hard-breaks **every** issue-touching command, so doctor must say so loudly. A
+    malformed committed TOML → ``warn`` deferring to the config check (mirrors
+    ``_providers_check``). No ``--fix`` arm: the selection is user-owned config; nothing is
+    convergeable. Network readiness (auth/team-existence/labels) is the verify-gated ``linear``
+    group's job, not this offline check's.
     """
     try:
         load_committed_issues_backend(root)
@@ -642,25 +648,120 @@ def _issues_check(root: Path) -> Check:
     try:
         backend_id = issues.resolve_issue_backend_id(root)
     except IssueBackendError as exc:
-        if "not yet supported" in str(exc):
-            return Check(
-                "issues-backend",
-                "issues",
-                "fail",
-                "issue backend 'linear' is selected but not yet supported",
-                str(exc),
-                'Set [issues] backend = "github" in .pi/perk.toml until objective #252 '
-                "Phase 2 ships the Linear backend.",
-            )
         return Check(
             "issues-backend",
             "issues",
             "fail",
             str(exc),
             "",
-            'Fix .pi/perk.toml [issues] — backend must be "github" (or "linear" once supported).',
+            'Fix .pi/perk.toml [issues] — backend must be "github" or "linear".',
         )
+    if backend_id == issues.LINEAR_BACKEND_ID:
+        team = load_committed_issues_team(root)
+        if team is None:
+            return Check(
+                "issues-backend",
+                "issues",
+                "fail",
+                '[issues] team is required when backend = "linear"',
+                "",
+                'Set [issues] team (the Linear team key, e.g. "ENG") in .pi/perk.toml.',
+            )
+        return Check("issues-backend", "issues", "ok", f"issues backend: linear (team {team})")
     return Check("issues-backend", "issues", "ok", f"issues backend: {backend_id}")
+
+
+def _linear_selected(root: Path) -> bool:
+    """The verify-gate read for the `linear` group (malformed TOML defers to the config check)."""
+    try:
+        return load_committed_issues_backend(root) == issues.LINEAR_BACKEND_ID
+    except tomllib.TOMLDecodeError:
+        return False
+
+
+_LINEAR_KEY_REMEDIATION = (
+    "export LINEAR_API_KEY (create a personal API key at linear.app Settings → Security & access)"
+)
+
+
+def _linear_checks(root: Path) -> list[Check]:
+    """Linear readiness — verify-gated; always non-fatal (`warn`, the github-group D3 mirror).
+
+    Built from one ``check_readiness(..., ensure_labels=False)`` call (lookup-only — the repair
+    is `perk init` / `perk doctor --fix`). Phases short-circuit like the probe: no auth → no
+    team/labels checks (no silent pass — the failure carries its reason).
+    """
+    team = load_committed_issues_team(root)
+    try:
+        client = linear.client_from_env()
+    except IssueBackendError as exc:
+        return [
+            Check(
+                "linear-auth",
+                "linear",
+                "warn",
+                "Linear auth not verified",
+                str(exc),
+                _LINEAR_KEY_REMEDIATION,
+            )
+        ]
+    if team is None:
+        # The offline `issues-backend` check already fails on this; the network probe needs a
+        # team to run, so report the gap here too (no silent pass) and stop.
+        return [
+            Check(
+                "linear-team",
+                "linear",
+                "warn",
+                "[issues] team not set — readiness not checked",
+                "",
+                "Set [issues] team in .pi/perk.toml.",
+            )
+        ]
+    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=False)
+    if not readiness.auth_ok:
+        return [
+            Check(
+                "linear-auth",
+                "linear",
+                "warn",
+                "Linear not authenticated",
+                readiness.error or "",
+                _LINEAR_KEY_REMEDIATION,
+            )
+        ]
+    checks = [Check("linear-auth", "linear", "ok", f"authenticated as {readiness.user or '?'}")]
+    if not readiness.team_ok:
+        checks.append(
+            Check(
+                "linear-team",
+                "linear",
+                "warn",
+                f"team {team} not verified",
+                readiness.error or "",
+                'Set [issues] team to your Linear team key (e.g. "ENG") in .pi/perk.toml.',
+            )
+        )
+        return checks
+    checks.append(Check("linear-team", "linear", "ok", f"team {team} found"))
+    if readiness.error:
+        checks.append(
+            Check("linear-labels", "linear", "warn", "labels not verified", readiness.error)
+        )
+    elif readiness.missing_labels:
+        checks.append(
+            Check(
+                "linear-labels",
+                "linear",
+                "warn",
+                f"missing label(s): {', '.join(readiness.missing_labels)}",
+                "",
+                "Run `perk init` or `perk doctor --fix`.",
+            )
+        )
+    else:
+        checks.append(Check("linear-labels", "linear", "ok", "perk labels present"))
+    return checks
 
 
 def _subagent_engine_check(root: Path) -> Check:
@@ -803,6 +904,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
             checks.append(
                 Check("runner-prereqs", "runner", "info", f"runner prereqs not checked: {exc}")
             )
+        # Verify-gated like env/github (network readiness); only when linear is selected.
+        if _linear_selected(root):
+            checks.extend(_linear_checks(root))
         # Verify-gated like env/github: it shells git + validates external-CLI outcomes.
         checks.append(_skills_delivery_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
@@ -885,6 +989,29 @@ def _fix_config(root: Path) -> list[str]:
     return changes
 
 
+def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
+    """The verify-gated `--fix` label repair: ensure the four perk labels in Linear.
+
+    Only acts when linear is selected AND key + team are available (otherwise the warn-level
+    `linear` group already carries the remediation — nothing repairable here). Idempotent
+    (lookup-first → no created labels once converged), satisfying the doctor idempotency rule.
+    Returns ``(fixed, errors)``.
+    """
+    if not _linear_selected(root):
+        return [], []
+    team = load_committed_issues_team(root)
+    if team is None:
+        return [], []
+    try:
+        client = linear.client_from_env()
+    except IssueBackendError:
+        return [], []
+    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)
+    fixed = [f"Linear: created label {name}" for name in readiness.created_labels]
+    errors = [f"Linear: label ensure failed: {readiness.error}"] if readiness.error else []
+    return fixed, errors
+
+
 def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list[str], list[str]]:
     fixed: list[str] = []
     errors: list[str] = []
@@ -929,6 +1056,12 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             sync_error = init.sync_skills(root, fixed, self_repo=self_repo)
             if sync_error is not None:
                 fix_errors.append(sync_error)
+            # The Linear label repair gesture (verify-gated like sync_skills — network I/O;
+            # `_apply_fixes`' check-keyed loop only acts on `fail` checks, and the linear group
+            # is warn-level). Lookup-first idempotency: a converged workspace reports nothing.
+            linear_fixed, linear_errors = _fix_linear_labels(root)
+            fixed.extend(linear_fixed)
+            fix_errors.extend(linear_errors)
         if fixed or fix_errors:
             checks = _build_checks(root, self_repo, verify=verify)
     return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo, fix_errors=fix_errors)

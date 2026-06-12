@@ -50,6 +50,21 @@ def _render_human(report: InitReport) -> None:
                 "  Run: gh auth login  (perk did not mutate GitHub)"
             )
 
+    if report.linear is not None:
+        readiness = report.linear.readiness
+        if report.linear.ok and readiness is not None:
+            line = f" Linear: {readiness.user or 'authenticated'}, team {report.linear.team}"
+            if readiness.created_labels:
+                line += f", created labels: {', '.join(readiness.created_labels)}"
+            user_output(click.style("✓", fg="green") + line)
+        else:
+            error = report.linear.error or (readiness.error if readiness is not None else None)
+            user_output(
+                click.style("⚠️", fg="yellow") + f" Linear not verified: {error}\n"
+                "  Export LINEAR_API_KEY and set [issues] team in .pi/perk.toml"
+                "  (perk did not mutate Linear)"
+            )
+
     if report.handoff is not None:
         user_output("")
         user_output(click.style("📋 Next: ", fg="cyan") + f"read and execute {report.handoff}")

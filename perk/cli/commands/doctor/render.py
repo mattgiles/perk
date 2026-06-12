@@ -8,6 +8,7 @@ from perk.output import user_output
 GROUP_ORDER = (
     "environment",
     "github",
+    "linear",
     "runner",
     "package",
     "repository",

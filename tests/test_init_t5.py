@@ -1,5 +1,6 @@
 import json
 import subprocess
+from typing import cast
 
 from click.testing import CliRunner
 
@@ -258,3 +259,72 @@ def test_cli_idempotent_second_run(tmp_path, stub_env):
         result = runner.invoke(cli, ["init", "--json"])
         assert result.exit_code == 0
         assert json.loads(result.stdout)["changes"] == []
+
+
+# --- Linear readiness (verify-gated, non-fatal) -------------------------------
+
+
+def _select_linear(root, *, team=True) -> None:
+    pi = root / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    body = '[issues]\nbackend = "linear"\n'
+    if team:
+        body += 'team = "ENG"\n'
+    (pi / "perk.toml").write_text(body, encoding="utf-8")
+
+
+def test_report_to_dict_linear_null_when_not_evaluated(tmp_path):
+    data = report_to_dict(run_init(tmp_path, verify=False))
+    assert data["linear"] is None
+
+
+def test_linear_readiness_skipped_without_verify(tmp_path):
+    _select_linear(tmp_path)
+    report = run_init(tmp_path, verify=False)
+    assert report.ok and report.linear is None
+
+
+def test_linear_readiness_skipped_on_github_selection(git_repo, stub_env):
+    report = run_init(git_repo, verify=True)
+    assert report.ok and report.linear is None
+
+
+def test_linear_readiness_runs_when_selected(git_repo, stub_env, monkeypatch):
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    ready = init_mod.linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+    calls = []
+
+    def fake_readiness(client, *, team_key, ensure_labels):
+        calls.append((team_key, ensure_labels))
+        return ready
+
+    monkeypatch.setattr(init_mod.linear_backend, "check_readiness", fake_readiness)
+    report = run_init(git_repo, verify=True)
+    assert report.ok and report.linear is not None
+    assert report.linear.ok and report.linear.readiness == ready
+    assert report.linear.team == "ENG"
+    assert calls == [("ENG", True)]  # init ensures the labels upfront
+    # Created labels are reported through LinearReport, never the filesystem-delta changes.
+    assert not any("linear" in c.lower() for c in report.changes if "pi-mono-linear" not in c)
+    data = report_to_dict(report)
+    linear_dict = cast("dict[str, object]", data["linear"])
+    assert isinstance(linear_dict, dict) and linear_dict["ok"] is True
+
+
+def test_linear_readiness_degrades_on_missing_api_key(git_repo, stub_env, monkeypatch):
+    _select_linear(git_repo)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    report = run_init(git_repo, verify=True)
+    assert report.ok  # non-fatal (D3): convergence already succeeded
+    assert report.linear is not None and not report.linear.ok
+    assert "LINEAR_API_KEY" in (report.linear.error or "")
+
+
+def test_linear_readiness_degrades_on_missing_team(git_repo, stub_env, monkeypatch):
+    _select_linear(git_repo, team=False)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert report.linear is not None and not report.linear.ok
+    assert "[issues] team" in (report.linear.error or "")

@@ -12,7 +12,8 @@ import subprocess
 
 import pytest
 
-from perk import capabilities, git, github, init
+from perk import capabilities, git, github, init, linear_backend
+from perk import doctor as doctor_mod
 from perk.cli.commands.doctor import render
 from perk.doctor import (
     Check,
@@ -128,15 +129,28 @@ def test_issues_check_ok_on_default_repo(git_repo):
     assert check.message == "issues backend: github"
 
 
-def test_issues_check_fails_on_linear_selection(git_repo):
-    # "linear" is reserved until Phase 2 — every issue-touching command is hard-broken → fail.
+def test_issues_check_ok_on_linear_with_team(git_repo):
+    # linear + a committed team is a live, valid selection → ok (with the team in the message).
+    _scaffold(git_repo)
+    (git_repo / ".pi" / "perk.toml").write_text(
+        '[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "issues-backend")
+    assert check.status == "ok"
+    assert check.message == "issues backend: linear (team ENG)"
+
+
+def test_issues_check_fails_on_linear_without_team(git_repo):
+    # Offline-decidable misconfiguration: linear without a team hard-breaks every
+    # issue-touching command → fail.
     _scaffold(git_repo)
     (git_repo / ".pi" / "perk.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
     report = run_doctor(git_repo, verify=False)
     check = next(c for c in report.checks if c.name == "issues-backend")
     assert check.status == "fail"
-    assert "not yet supported" in check.message
-    assert 'backend = "github"' in check.remediation
+    assert "[issues] team is required" in check.message
+    assert "[issues] team" in check.remediation
     assert report.exit_code == 1
 
 
@@ -164,6 +178,175 @@ def test_issues_group_renders():
     from perk.cli.commands.doctor.render import GROUP_ORDER
 
     assert "issues" in GROUP_ORDER
+
+
+def test_linear_group_renders():
+    # The _GROUP_ORDER trap again: the verify-gated linear group must be render-visible.
+    from perk.cli.commands.doctor.render import GROUP_ORDER
+
+    assert "linear" in GROUP_ORDER
+
+
+# --- the verify-gated `linear` group ---------------------------------------------------------
+
+
+def _select_linear(repo, *, team=True):
+    body = '[issues]\nbackend = "linear"\n'
+    if team:
+        body += 'team = "ENG"\n'
+    (repo / ".pi" / "perk.toml").write_text(body, encoding="utf-8")
+
+
+def _linear_group(report):
+    return [c for c in report.checks if c.group == "linear"]
+
+
+def test_linear_checks_absent_without_verify(git_repo):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert _linear_group(report) == []
+
+
+def test_linear_checks_absent_on_github_selection(git_repo, stub_env):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=True)
+    assert _linear_group(report) == []
+
+
+def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = {c.name: c for c in _linear_group(report)}
+    assert group["linear-auth"].status == "ok" and "Mat" in group["linear-auth"].message
+    assert group["linear-team"].status == "ok" and "ENG" in group["linear-team"].message
+    assert group["linear-labels"].status == "ok"
+
+
+def test_linear_checks_warn_on_missing_api_key(git_repo, stub_env, monkeypatch):
+    # Network readiness is non-fatal (the github-group D3 mirror): warn, never fail.
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    report = run_doctor(git_repo, verify=True)
+    group = _linear_group(report)
+    assert [c.name for c in group] == ["linear-auth"]
+    assert group[0].status == "warn"
+    assert "LINEAR_API_KEY" in group[0].remediation
+
+
+def test_linear_checks_warn_on_auth_failure(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=False, user=None, team_ok=False, error="bad key"
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = _linear_group(report)
+    assert [c.name for c in group] == ["linear-auth"]
+    assert group[0].status == "warn" and group[0].detail == "bad key"
+
+
+def test_linear_checks_warn_on_team_not_found(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=False, error="Linear team 'ENG' not found"
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = {c.name: c for c in _linear_group(report)}
+    assert group["linear-auth"].status == "ok"
+    assert group["linear-team"].status == "warn"
+    assert "linear-labels" not in group  # team failure skips labels
+
+
+def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True, missing_labels=("perk:plan",)
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    labels = next(c for c in _linear_group(report) if c.name == "linear-labels")
+    assert labels.status == "warn"
+    assert "perk:plan" in labels.message
+    assert "doctor --fix" in labels.remediation
+
+
+def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
+    # The --fix repair gesture: created labels land on `fixed`; idempotent once converged.
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    calls = []
+
+    def fake_readiness(client, *, team_key, ensure_labels):
+        calls.append(ensure_labels)
+        if ensure_labels:
+            return linear_backend.LinearReadiness(
+                auth_ok=True, user="Mat", team_ok=True, created_labels=("perk:plan", "perk:learn")
+            )
+        return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+
+    monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert "Linear: created label perk:plan" in report.fixed
+    assert "Linear: created label perk:learn" in report.fixed
+    assert True in calls  # the repair ran with ensure_labels=True
+
+
+def test_fix_linear_label_failure_lands_on_fix_errors(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+
+    def fake_readiness(client, *, team_key, ensure_labels):
+        if ensure_labels:
+            return linear_backend.LinearReadiness(
+                auth_ok=True, user="Mat", team_ok=True, error="rate limited"
+            )
+        return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+
+    monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert any("rate limited" in e for e in report.fix_errors)
+
+
+def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    called = []
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: called.append(True),
+    )
+    run_doctor(git_repo, fix=True, verify=True)
+    assert called == []
 
 
 def test_subagent_engine_signal_and_defs_dir(git_repo):

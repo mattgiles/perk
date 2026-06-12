@@ -1210,3 +1210,124 @@ class TestValueShapes:
         ref = issue_backend.IssueRef(id="uuid-1", url="u", existed=True)
         with pytest.raises(dataclasses.FrozenInstanceError):
             ref.id = "x"  # ty: ignore[invalid-assignment]
+
+
+# ---------------------------------------------------------------------------- readiness probe
+
+_VIEWER_OK: dict[str, object] = {"viewer": {"id": "u1", "name": "Mat", "email": "m@x.io"}}
+_VIEWER_EMAIL_ONLY: dict[str, object] = {"viewer": {"id": "u1", "name": "", "email": "m@x.io"}}
+_LABEL_CREATED: dict[str, object] = {
+    "issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-new"}}
+}
+
+
+class TestCheckReadiness:
+    def test_auth_failure_short_circuits(self) -> None:
+        fake = _FakeLinear({"viewer": [IssueBackendError("Linear API request failed: boom")]})
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness.auth_ok is False
+        assert readiness.team_ok is False
+        assert readiness.user is None
+        assert readiness.error is not None and "boom" in readiness.error
+        # Auth failure short-circuits: no team/label queries issued.
+        assert len(fake.requests) == 1
+
+    def test_team_not_found(self) -> None:
+        fake = _FakeLinear({"viewer": [_VIEWER_OK], "teams(filter": [{"teams": {"nodes": []}}]})
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness.auth_ok is True
+        assert readiness.user == "Mat"
+        assert readiness.team_ok is False
+        assert readiness.error is not None and "ENG" in readiness.error
+        # Team failure skips labels.
+        assert not _queries(fake, "issueLabels")
+
+    def test_user_falls_back_to_email(self) -> None:
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_EMAIL_ONLY],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [_LABEL_FOUND],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness.user == "m@x.io"
+
+    def test_all_labels_present_lookup_only(self) -> None:
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_OK],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [_LABEL_FOUND],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness == linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True, missing_labels=(), created_labels=()
+        )
+        # Lookup-only: no create mutation issued under ensure_labels=False.
+        assert not _queries(fake, "issueLabelCreate")
+        assert len(_queries(fake, "issueLabels(filter")) == 4
+
+    def test_missing_labels_reported(self) -> None:
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_OK],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [_LABEL_ABSENT],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness.missing_labels == (
+            plan.PLAN_LABEL,
+            plan.LEARN_LABEL,
+            plan.CONSOLIDATED_LABEL,
+            objective.OBJECTIVE_LABEL,
+        )
+        assert readiness.created_labels == ()
+        assert readiness.error is None
+
+    def test_ensure_labels_creates_and_reports(self) -> None:
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_OK],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [_LABEL_ABSENT],
+                "issueLabelCreate": [_LABEL_CREATED],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=True)
+        assert readiness.created_labels == (
+            plan.PLAN_LABEL,
+            plan.LEARN_LABEL,
+            plan.CONSOLIDATED_LABEL,
+            objective.OBJECTIVE_LABEL,
+        )
+        assert readiness.missing_labels == ()
+        assert len(_queries(fake, "issueLabelCreate")) == 4
+
+    def test_ensure_labels_preexisting_reports_none(self) -> None:
+        # The genuine-delta rule: lookup-first idempotency → a converged workspace creates none.
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_OK],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [_LABEL_FOUND],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=True)
+        assert readiness.created_labels == ()
+        assert not _queries(fake, "issueLabelCreate")
+
+    def test_label_phase_failure_lands_in_error(self) -> None:
+        fake = _FakeLinear(
+            {
+                "viewer": [_VIEWER_OK],
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueLabels(filter": [IssueBackendError("rate limited")],
+            }
+        )
+        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness.auth_ok is True
+        assert readiness.team_ok is True
+        assert readiness.error is not None and "rate limited" in readiness.error

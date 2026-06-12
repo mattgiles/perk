@@ -15,16 +15,14 @@ Status-based handling is the fallback for non-2xx responses whose bodies carry n
 errors. Partial success (``errors`` alongside partial ``data``) fails loud — perk's narrow
 queries never want partial results.
 
-Deliberately dormant: the consumer now exists (``perk/linear_backend.py``'s
-``LinearIssueBackend``, Node 2.2), but the resolver in ``perk/issues.py`` still raises on
-``backend = "linear"`` until Nodes 2.3/2.4 wire it.
+Live: the consumer exists (``perk/linear_backend.py``'s ``LinearIssueBackend``) and the resolver
+in ``perk/issues.py`` constructs it on ``backend = "linear"`` (Node 2.4 wired config, init/doctor
+readiness, and contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Retry/backoff on RATELIMITED** — fail loud now (a typed ``LinearGraphQLError``); revisit
-  once Node 2.2/2.3 call patterns exist.
-- **``LINEAR_API_KEY`` validation in init/doctor + contracts.md documentation** — Node 2.4.
-  This node is single-plane (Python) and dormant, so contracts.md is untouched.
+- **Retry/backoff on RATELIMITED** — fail loud now (a typed ``LinearGraphQLError``); revisit at
+  the Node 4.1 live smoke gate.
 """
 
 import os

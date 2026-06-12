@@ -187,6 +187,62 @@ def test_init_provider_wiring_is_idempotent(tmp_path):
     assert before == _snapshot(tmp_path)  # a re-run with the selection in place changes nothing
 
 
+def test_init_default_repo_wires_no_linear_package(tmp_path):
+    # No [issues] selection (or backend = "github") → no pi-mono-linear entry.
+    assert run_init(tmp_path, verify=False).ok
+    packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
+    assert "npm:pi-mono-linear" not in _identities(packages)
+
+
+def test_init_selecting_linear_wires_then_deselecting_removes(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    # User + borrowed packages present from a prior run; both must survive.
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        '[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    # The plain-string entry (the borrowed-set convention; no package_filter), exactly once.
+    assert packages.count("npm:pi-mono-linear") == 1
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
+
+    # Deselect (back to github) → the entry is removed; others survive.
+    pi_dir.joinpath("perk.toml").write_text('[issues]\nbackend = "github"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:pi-mono-linear" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
+
+
+def test_init_linear_wiring_is_idempotent(tmp_path):
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("perk.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+    before = _snapshot(tmp_path)
+    assert run_init(tmp_path, verify=False).ok
+    assert before == _snapshot(tmp_path)
+
+
+def test_init_removes_hand_added_linear_package_without_selection(tmp_path):
+    # Hand-adding pi-mono-linear without selecting linear is unsupported — init removes it.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:pi-mono-linear"]}, indent=2) + "\n"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:pi-mono-linear" not in _identities(packages)
+
+
 def test_init_writes_compaction_when_present(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

@@ -17,6 +17,7 @@ import pytest
 from perk import github, issue_backend, issues, objective
 from perk.issue_backend import IssueBackendError
 from perk.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
+from perk.linear_backend import LinearIssueBackend
 
 
 def _make_backend(repo_root: Path) -> issue_backend.IssueBackend:
@@ -47,10 +48,36 @@ class TestResolver:
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "github"\n')
         assert isinstance(resolve_issue_backend(tmp_path), GitHubIssueBackend)
 
-    def test_linear_selection_raises_not_yet_supported(self, tmp_path: Path) -> None:
+    def test_resolve_id_accepts_linear(self, tmp_path: Path) -> None:
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
-        with pytest.raises(IssueBackendError, match="not yet supported"):
+        assert resolve_issue_backend_id(tmp_path) == issues.LINEAR_BACKEND_ID
+
+    def test_linear_selection_missing_api_key_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
+        with pytest.raises(IssueBackendError, match="LINEAR_API_KEY"):
             resolve_issue_backend(tmp_path)
+
+    def test_linear_selection_missing_team_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
+        with pytest.raises(IssueBackendError, match=r"\[issues\] team is required"):
+            resolve_issue_backend(tmp_path)
+
+    def test_linear_selection_returns_linear_backend(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
+        backend = resolve_issue_backend(tmp_path)
+        assert isinstance(backend, LinearIssueBackend)
+        assert backend.backend_id == "linear"
+        # Construction is lazy — the team key is bound, no network call issued.
+        assert backend._team_key == "ENG"
 
     def test_unknown_selection_raises(self, tmp_path: Path) -> None:
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "jira"\n')
