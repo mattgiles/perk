@@ -15,6 +15,10 @@ test("READ_ONLY_TOOLS: contains plan_draft (the #339 Node 2.1 session-data carve
   assert.ok(READ_ONLY_TOOLS.includes("plan_draft"));
 });
 
+test("READ_ONLY_TOOLS: contains objective_draft (the #352 Node 2.1 twin of the carve-out)", () => {
+  assert.ok(READ_ONLY_TOOLS.includes("objective_draft"));
+});
+
 test("READ_ONLY_TOOLS: contains the four pi-web-access research tools (web research during planning)", () => {
   for (const tool of ["web_search", "code_search", "fetch_content", "get_search_content"]) {
     assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);

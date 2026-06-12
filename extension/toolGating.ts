@@ -29,6 +29,10 @@ export const READ_ONLY_TOOLS = [
   // artifact in the run-scoped session data dir (gitignored scratch), so the read-only invariant
   // (worktree untouched) holds; the `tool_call` edit/write/bash blocking below is unchanged.
   "plan_draft",
+  // The #352 Node 2.1 twin of the #339 carve-out: objective_draft writes only the one
+  // working-objective artifact in the session data dir (fixed artifact name, seam-derived
+  // path); the gate's edit/write/bash blocking is unchanged.
+  "objective_draft",
   // pi-web-access's research tools (borrowed package): none mutate the repo — fetch_content's
   // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to
   // the already-allowlisted curl. Allowlisting foreign tool names is safe when the package is

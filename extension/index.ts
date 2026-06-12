@@ -25,6 +25,7 @@ import { registerLearnDocs } from "./learnDocs.ts";
 import { registerLifecycleGates } from "./lifecycleGates.ts";
 import { registerObjective } from "./objective.ts";
 import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
+import { registerObjectiveDraft } from "./objectiveDraft.ts";
 import { registerObjectivePlan } from "./objectivePlan.ts";
 import { registerObjectiveSave } from "./objectiveSave.ts";
 import { registerPlanAdapterPlannotator } from "./planAdapterPlannotator.ts";
@@ -339,6 +340,9 @@ export default function (pi: ExtensionAPI) {
   // exists before the gate snapshots tools; its name is in READ_ONLY_TOOLS (the structural
   // session-data carve-out), so it survives plan mode.
   registerPlanDraft(pi);
+
+  // #352 Node 2.1 — the `objective_draft` working-objective file tool (the plan_draft twin).
+  registerObjectiveDraft(pi);
 
   // #187 — the universal `ask_user_question` tool: lets a model interactively ask the human a
   // clarifying question (free-text or multiple-choice). Registered in the factory so it exists
