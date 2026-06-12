@@ -40,7 +40,9 @@ test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline (#352 Node 
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /call the plan_review tool/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /rendered objective \(the prose \+ a roadmap table\)/);
-  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /nothing auto-saves yet/);
+  // #352 Node 2.3: approval auto-saves — the failsafe arms keep the /objective-save mention.
+  assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /nothing auto-saves yet/);
+  assert.match(OBJECTIVE_AUTHORING_CONTEXT, /relay the save outcome instead/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /`\/objective-save` \(the manual failsafe\)/);
   assert.doesNotMatch(
     OBJECTIVE_AUTHORING_CONTEXT,

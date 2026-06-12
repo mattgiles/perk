@@ -79,10 +79,10 @@ read-only exactly as the plan-authoring contract describes; then add one review 
   the complete plan to the user; the human runs /plan-save (the manual failsafe).`;
 
 /**
- * The objective flavor of the bridge prompt (#352 Node 2.2), injected in an `objective-author`
- * session instead of the plan flavor. Approval does NOT save anything yet — the
- * approval→`objective_save` orchestration is Node 2.3; `/objective-save` is the human save
- * gesture on every arm.
+ * The objective flavor of the bridge prompt (#352 Nodes 2.2 + 2.3), injected in an
+ * `objective-author` session instead of the plan flavor. An APPROVED review auto-saves the
+ * objective via the `objectiveApprovalSave` seam; `/objective-save` is the manual failsafe on
+ * the skipped/unavailable arms.
  */
 export const OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT = `${OBJECTIVE_ADAPTER_PLANNOTATOR_MARKER}
 A Plannotator browser review surface is configured for objective authoring in this repo. Author
@@ -96,8 +96,9 @@ review step:
   artifact — never raw JSON.
 - If the review is DENIED: revise per the returned annotations/feedback, rewrite the working
   draft with objective_draft, then call plan_review again.
-- If the review is APPROVED: nothing is saved yet — relay the approval (and any reviewer
-  feedback) and ask the user to run /objective-save (the structured save).
+- If the review is APPROVED: the objective is auto-saved to GitHub and the session leaves
+  read-only — do NOT re-dump the objective as a final message and do NOT tell the user to run
+  /objective-save; relay the save outcome (and any reviewer feedback) instead.
 - If plan_review reports it was skipped or no review surface is available: present the complete
   objective + structured roadmap to the user; the human runs /objective-save (the manual
   failsafe).`;

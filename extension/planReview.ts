@@ -27,15 +27,16 @@
 // discarded (the aborted arm wins). Enter submits in the editor dialog (Shift+Enter = newline),
 // so the dialog titles carry the key hints — pi renders no other affordance.
 //
-// THE OBJECTIVE ARM (#352 Node 2.2): an objective-author session (read-only, stage
+// THE OBJECTIVE ARM (#352 Nodes 2.2 + 2.3): an objective-author session (read-only, stage
 // `objective-author`) routes through `executeObjectiveReview` instead of the plan path — the
 // reviewed bytes are the RENDERED objective draft (`readObjectiveDraft` + `renderObjectiveDraft`,
 // objectiveDraft.ts — never raw JSON, never the `plan` param, never the transcript; no draft
 // soft-skips with `reason: "no_objective_draft"`). Dispatch mirrors the plan path (plannotator
 // bridge or the first-party editor, VIEW-ONLY — edits are never written back; deny+feedback is
-// the change channel). Approval saves NOTHING in this node — `objectiveReviewOutcomeResult`'s
-// approved arm is non-terminating and directs the human `/objective-save` gesture (the
-// approval→`objective_save` orchestration is Node 2.3).
+// the change channel). An APPROVED outcome wires into the `objectiveApprovalSave` seam
+// (objectiveSave.ts, Node 2.3): re-read the STRUCTURED artifact → `saveObjective` → D1a gate
+// exit → a TERMINATING result; a failed save is non-terminating, leaves the gate read-only, and
+// directs the human `/objective-save` failsafe.
 //
 // INVARIANTS HELD: never calls `setActiveTools`, never registers a `tool_call` handler, never
 // restamps `cache.plan-ref.provider`. The door composes the gate AND the save EXCLUSIVELY
@@ -45,6 +46,7 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
+import { type ObjectiveApprovalSaveOutcome, objectiveApprovalSave } from "./objectiveSave.ts";
 import { createPlannotatorBridge, isPlannotatorPlanSelected } from "./planAdapterPlannotator.ts";
 import { writePlanDraft } from "./planDraft.ts";
 import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./planSave.ts";
@@ -311,9 +313,9 @@ export async function runFirstPartyReview(args: {
 
 // ------------------------------------------------------------------- the objective review arm
 
-/** The objective-flavored verdict options (the save is the human `/objective-save` — Node 2.3). */
+/** The objective-flavored verdict options (approval auto-saves — #352 Node 2.3). */
 const OBJECTIVE_VERDICTS = {
-  approve: "Approve — objective is ready (save via /objective-save)",
+  approve: "Approve — auto-save to GitHub",
   deny: "Deny — send feedback for revision",
   skip: "Skip — decide later (manual /objective-save)",
 };
@@ -323,12 +325,12 @@ const OBJECTIVE_REVIEW_EDITOR_TITLE =
   "Ctrl+G: $EDITOR";
 
 /**
- * Map an objective review outcome into the model-facing tool result (exported for the offline
- * tests) — the objective-flavored sibling of `reviewOutcomeResult`. Every arm carries
- * `details.subject: "objective"`; the texts redirect to `objective_draft` / `/objective-save`.
- * The APPROVED arm is NON-TERMINATING and saves nothing (`saved: false`) — the
- * approval→`objective_save` orchestration is Node 2.3; the human `/objective-save` gesture is
- * the save on every arm.
+ * Map a non-approved objective review outcome into the model-facing tool result (exported for
+ * the offline tests) — the objective-flavored sibling of `reviewOutcomeResult`. Every arm
+ * carries `details.subject: "objective"`; the texts redirect to `objective_draft` /
+ * `/objective-save`. The `completed` case renders the DENIED text — the execute path routes
+ * approved outcomes to `approvedObjectiveSaveResult` first, so callers only reach `completed`
+ * here with `approved: false` (kept total for safety).
  */
 export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult {
   switch (outcome.status) {
@@ -363,27 +365,6 @@ export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult
       };
     case "completed": {
       const feedback = outcome.feedback ? `\n\nReviewer feedback:\n${outcome.feedback}` : "";
-      if (outcome.approved) {
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                "objective APPROVED by reviewer — nothing is saved yet. Relay the approval " +
-                "(and any feedback below) and ask the user to run /objective-save to persist " +
-                `it.${feedback}`,
-            },
-          ],
-          details: {
-            status: "completed",
-            approved: true,
-            feedback: outcome.feedback ?? null,
-            reviewId: outcome.reviewId,
-            subject: "objective",
-            saved: false,
-          },
-        };
-      }
       return {
         content: [
           {
@@ -395,7 +376,7 @@ export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult
         ],
         details: {
           status: "completed",
-          approved: false,
+          approved: outcome.approved,
           feedback: outcome.feedback ?? null,
           reviewId: outcome.reviewId,
           subject: "objective",
@@ -406,14 +387,75 @@ export function objectiveReviewOutcomeResult(outcome: ReviewOutcome): ToolResult
 }
 
 /**
- * The objective review arm (#352 Node 2.2), mirroring `executePlanReview`'s shape but with the
- * rendered objective draft as the SOLE review source (never the `plan` param, never the
- * transcript). First-party reviews run VIEW-ONLY (edits are never written back); approval saves
- * nothing — `approvalSave` is never called here (Node 2.3 swaps the approved arm for the
- * approval→`objective_save` orchestration).
+ * Map an APPROVED objective review outcome + the `objectiveApprovalSave` outcome into the
+ * model-facing tool result (exported for the offline tests) — the objective sibling of
+ * `approvedSaveResult` (no `paramMismatch`/`edited` opts: the objective path reviews only the
+ * rendered draft, view-only). A successful save TERMINATES the turn; a failed save is
+ * non-terminating, leaves the gate read-only, and directs the human `/objective-save` failsafe.
+ * The `no-draft` arm is defensively unreachable (the review just read the draft) but maps to
+ * the save-failed shape rather than throwing.
+ */
+export function approvedObjectiveSaveResult(
+  outcome: Extract<ReviewOutcome, { status: "completed" }>,
+  save: ObjectiveApprovalSaveOutcome,
+): ToolResult {
+  const feedback = outcome.feedback
+    ? "\n\nReviewer feedback (implementation guidance — the approved objective was saved " +
+      `verbatim):\n${outcome.feedback}`
+    : "";
+  const base = {
+    status: "completed",
+    approved: true,
+    reviewId: outcome.reviewId,
+    feedback: outcome.feedback ?? null,
+    subject: "objective",
+  };
+  if (save.status === "saved") {
+    const saveText = save.result.content[0]?.text ?? "";
+    return {
+      content: [
+        { type: "text", text: `objective APPROVED by reviewer.${feedback}\n\n${saveText}` },
+      ],
+      details: { ...base, saved: true, gateExited: save.gateExited, save: save.result.details },
+      terminate: true,
+    };
+  }
+  const error =
+    save.status === "no-draft"
+      ? "no objective draft resolved"
+      : save.result.details.ok
+        ? "unknown save failure"
+        : save.result.details.error;
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `objective APPROVED by reviewer, but the auto-save FAILED (${error}) — the session ` +
+          "stays read-only. Ask the user to run /objective-save (the manual failsafe) to " +
+          `retry.${feedback}`,
+      },
+    ],
+    details: {
+      ...base,
+      saved: false,
+      save: save.status === "no-draft" ? null : save.result.details,
+    },
+  };
+}
+
+/**
+ * The objective review arm (#352 Nodes 2.2 + 2.3), mirroring `executePlanReview`'s shape but
+ * with the rendered objective draft as the SOLE review source (never the `plan` param, never
+ * the transcript). First-party reviews run VIEW-ONLY (edits are never written back;
+ * deny+feedback is the change channel). An APPROVED outcome wires into the
+ * `objectiveApprovalSave` seam (re-read the STRUCTURED artifact → `saveObjective` → D1a gate
+ * exit → terminating); every other outcome maps via `objectiveReviewOutcomeResult`.
  */
 export async function executeObjectiveReview(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
+  gating: ToolGating,
   bridge: { review(plan: string, signal?: AbortSignal): Promise<ReviewOutcome> },
   signal?: AbortSignal,
 ): Promise<ToolResult> {
@@ -455,8 +497,14 @@ export async function executeObjectiveReview(
     });
     outcome = fp.outcome;
   }
-  // 5. Every outcome (approved included) maps via objectiveReviewOutcomeResult — approval is
-  //    non-saving in this node; the human runs /objective-save.
+  // 5. An APPROVED decision (either backend) wires into the objectiveApprovalSave seam (the
+  //    STRUCTURED artifact is re-read at save time — never the rendered bytes; auto-save → D1a
+  //    gate exit → terminating result); everything else maps via objectiveReviewOutcomeResult.
+  //    Approved-first routing: objectiveReviewOutcomeResult's completed case renders DENIED.
+  if (outcome.status === "completed" && outcome.approved) {
+    const save = await objectiveApprovalSave(pi, ctx, gating);
+    return approvedObjectiveSaveResult(outcome, save);
+  }
   return objectiveReviewOutcomeResult(outcome);
 }
 
@@ -497,7 +545,7 @@ export async function executePlanReview(
   // 1. Objective-author session → the objective review arm (#352 Node 2.2): the rendered
   //    objective draft is the sole review source; a well-typed `plan` param is ignored here.
   if (rebuildWorkflowState(branchOf(ctx)).stage === OBJECTIVE_AUTHOR_STAGE) {
-    return executeObjectiveReview(ctx, bridge, signal ?? ctx.signal);
+    return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
   // 2. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
