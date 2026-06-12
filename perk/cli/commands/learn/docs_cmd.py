@@ -63,14 +63,14 @@ def _render_inbox(issues: tuple[LearnIssueSummary, ...]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _seed_prompt(inbox_path: Path, numbers: tuple[int, ...]) -> str:
+def _seed_prompt(inbox_path: Path, learn_ids: tuple[str, ...]) -> str:
     """The initial prompt for the read-only learned-docs factory session.
 
     Names the inbox path to ``read`` and instructs a ``plan_save`` carrying ``consumed_learn`` (the
-    gathered numbers). The ``perk-learn-docs`` skill pointer is delivered by the skill-binding
-    mechanism (Node 2.3), not hardcoded here.
+    gathered ids — opaque strings, §8.21). The ``perk-learn-docs`` skill pointer is delivered by
+    the skill-binding mechanism (Node 2.3), not hardcoded here.
     """
-    num_list = ", ".join(str(n) for n in numbers)
+    num_list = ", ".join(learn_ids)
     return (
         "You are running the perk learned-docs plan factory.\n\n"
         f"  1. Read the materialized inbox with the `read` tool: `{inbox_path}`. It holds the open "
@@ -167,9 +167,9 @@ def docs_learn(
         )
         return
 
-    # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
-    numbers = tuple(int(issue.id) for issue in issues)
-    seed = _seed_prompt(inbox_path, numbers)
+    # Opaque string ids at every machine boundary (contracts §8.21; Node 4.1).
+    learn_ids = tuple(issue.id for issue in issues)
+    seed = _seed_prompt(inbox_path, learn_ids)
 
     if gather_only or dry_run:
         # Materialize + report only: nothing launched (the warm path + tests consume --gather).
@@ -180,7 +180,7 @@ def docs_learn(
                         "success": True,
                         "error_type": None,
                         "inbox_path": str(inbox_path),
-                        "learn_numbers": list(numbers),
+                        "learn_numbers": list(learn_ids),
                         "launched": False,
                     }
                 )
@@ -188,14 +188,14 @@ def docs_learn(
         else:
             label = "--gather" if gather_only else "--dry-run"
             user_output(click.style(f"learn-docs {label} (gather only; no launch)", dim=True))
-            user_output(f"  inbox={inbox_path}  learn={', '.join(str(n) for n in numbers)}")
+            user_output(f"  inbox={inbox_path}  learn={', '.join(learn_ids)}")
             if dry_run:
                 user_output(click.style("── seed prompt ──", fg="bright_black"))
                 user_output(seed)
         return
 
     if as_json:
-        user_output(f"gathered {len(numbers)} learn issue(s); launching the docs plan factory")
+        user_output(f"gathered {len(learn_ids)} learn issue(s); launching the docs plan factory")
     # launch_stage exec's pi with the inbox-seeded prompt (becomes the session — nothing after).
     launch.launch_stage(
         repo_root=repo_root,
@@ -208,10 +208,10 @@ def docs_learn(
         prompt_override=seed,
         # learn-docs borrows `plan`, so its binding trigger is the command (not stage:plan).
         binding_trigger="command:learn-docs",
-        # Carry the gathered perk:learn numbers through the handoff so `perk plan-save` recovers
+        # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
         # `consumed_learn` regardless of which save surface the model uses (#102, mirroring #78).
         # The factory session is read-only, so the `plan_save` *tool* is gated out and the model
         # saves via the `/plan-save` *command* — which forwards only {plan, title}, dropping the
-        # numbers. Stashing them here makes the tool-vs-command save surface irrelevant.
-        handoff_extra={"consumed_learn": list(numbers)},
+        # ids. Stashing them here makes the tool-vs-command save surface irrelevant.
+        handoff_extra={"consumed_learn": list(learn_ids)},
     )

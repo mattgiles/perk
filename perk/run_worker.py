@@ -152,7 +152,7 @@ def run_worker(
     repo_root: Path,
     run_id: str,
     stage_id: str,
-    plan: int,
+    plan: str,
     base: str | None,
     environ: dict[str, str],
 ) -> int:
@@ -165,7 +165,7 @@ def run_worker(
     stage = _drivable_stage(stage_id)
     try:
         backend = issues.resolve_issue_backend(repo_root)
-        state = backend.get_plan(issue_id=str(plan))
+        state = backend.get_plan(issue_id=plan)
     except IssueBackendError as exc:
         raise UserFacingCliError(
             f"run-worker failed to resolve plan #{plan}\n{exc}", error_type="github_error"

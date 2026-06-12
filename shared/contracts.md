@@ -1115,7 +1115,8 @@ erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
   url: string,                 # during planning: the plan issue url/id; branch/pr staged null
   labels: string[],            # ["perk:plan"]
   objective_id: string|null,   # Phase 2
-  consumed_learn: number[] }   # hop-2: perk:learn issues a docs plan consolidates (closed on land)
+  consumed_learn: string[] }   # hop-2: perk:learn issue ids a docs plan consolidates (closed on
+                               # land) — opaque strings (§8.21; Node 4.1)
 ```
 
 **Plan-header block (P1.T2a — the queryable metadata in the issue *body*).** The minimal
@@ -1129,7 +1130,7 @@ block; the full plan markdown lives in the `plan-body` first comment:
   pr: string|null,             # staged — populated at submit
   created: string,             # ISO-8601 UTC
   objective_id: string|null,   # Phase 2
-  consumed_learn: number[] }   # hop-2: perk:learn issues a docs plan consolidates (closed on land)
+  consumed_learn: string[] }   # hop-2: perk:learn issue ids (opaque strings — §8.21; Node 4.1)
 ```
 
 **Label taxonomy (minimal, PRIOR_ART §2/§6):** `perk:plan` (green `1f883d`), `perk:learn` (purple
@@ -1361,7 +1362,8 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
   to stderr), then `update_objective_node(... status=DONE)` for each non-terminal matched node. Called
   in `_pr_land_impl`'s **non-dry-run** branch only, **after** `set_marker(PENDING_LEARN)`; the
   dry-run branch sets an inert `ObjectiveLandUpdate(None, (), "dry_run")` and stays fully offline.
-  `_result_to_dict` always emits `"objective": { number, nodes_marked, skipped_reason, closed }`;
+  `_result_to_dict` always emits `"objective": { id, nodes_marked, skipped_reason, closed }`
+  (`id` an opaque string objective id — §8.21; Node 4.1);
   `_render_human` adds an `objective #N: marked node(s) X done` line when non-empty (and an
   `objective #N complete — closed` line when `closed`).
 - **Close-on-complete.** After the marking loop (targets non-empty only — the early-return skips
@@ -1455,8 +1457,11 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   performs every GitHub read up front.
 - **The `consumed_learn` thread.** `perk plan-save --consumed-learn "45,50"` (and the warm
   `plan_save` tool's `consumed_learn` array param) populate `plan.PlanHeader.consumed_learn` +
-  `plan.PlanRef.consumed_learn` (parsed to a sorted unique `tuple[int, ...]`; an invalid token →
-  `invalid_input`). This persists which `perk:learn` issues the docs plan consolidates; non-factory
+  `plan.PlanRef.consumed_learn` (parsed to a sorted unique `tuple[str, ...]` of opaque string ids
+  — §8.21; only empty tokens are dropped — there is no int parse). The warm param decode
+  (`idArrayParam`) accepts strings and coerces bare numbers via `String()` (the learn-docs
+  guidance renders bare numeric ids on GitHub). This persists which `perk:learn` issues the docs
+  plan consolidates; non-factory
   plans omit it. Because the read-only factory saves via the `/plan-save` *command* (which forwards
   only `{plan, title}`), `plan-save` also recovers `consumed_learn` from the run's handoff
   (`_consumed_learn_from_handoff`, #102) when the flag is absent — see §8.2's handoff-carrier note.
@@ -2784,7 +2789,7 @@ timeout is **inconclusive, not unhealthy** (`awaiting_run` + `timed_out:true`, e
 
 ```jsonc
 { "success": true, "error_type": null,
-  "objective": <NUMBER>,
+  "objective": "<id>",           // opaque string objective id (§8.21; Node 4.1)
   "budget": { "runs": 0, "turns": 0, "tokens": 0, "elapsed_ms": 0 },
   "action": "dispatched" | "ready_for_review" | "awaiting_review" | "awaiting_run"
           | "plan_required" | "blocked" | "completed" | "merged_pending_reconcile" | "pr_closed",
@@ -2922,3 +2927,34 @@ tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`, th
 perk-learn skills carry per-backend `backends/` reference directories (`github`, `linear`),
 delivered by the whole-directory skills sync. Historical Status notes elsewhere quoting
 `gh issue view` (e.g. P1.T4c) are records — left untouched.
+
+**Opaque string issue ids at every machine boundary (Node 4.1).** Issue ids (plan / learn /
+objective) are **opaque strings** end-to-end — GitHub's are numeric strings (`"42"`), Linear's
+are the human identifier (`"ENG-123"`; the backend resolves identifier→UUID internally for
+mutations — `LinearIssueBackend._uuid_for`). **PR numbers stay `int`** under `pr.number`
+everywhere — PRs are GitHub-universal. Concretely:
+
+- Every `--json` envelope emits string issue ids, with the id fields renamed for honesty:
+  `plan-save`'s `issue.number` → **`issue.id`**; `learn capture`'s `learn_issue.number` →
+  **`learn_issue.id`** (and `plan_issue` is a string); `objective create`/`show`'s
+  `objective.number` → **`objective.id`**; `pr submit`/`pr land`'s top-level `issue` stays keyed
+  `issue` but is a string; `pr land`'s `objective` sub-object `number` → **`id`** (string|null)
+  and `learn.closed` carries string ids; `objective reconcile`'s `objective`/`comment_id` are
+  strings; `learn docs --gather`'s `learn_numbers` carries string ids. TS decoders
+  (`planSave.ts`/`learn.ts`/`land.ts`/`objectiveSave.ts`/`learnDocs.ts`) are lockstep-strict on
+  the string shapes.
+- CLI plan/objective arguments parse through the shared opaque-id validators
+  (`resume_cmd.parse_plan_id` / `objective/shared.parse_objective_id`): strip `#`/whitespace;
+  reject only empty or worktree-unsafe ids (`/`, `.`, `..`) — no int parse. The supervisor's
+  in-flight resolution treats any non-empty node `pr` backlink as the plan id.
+- Plan worktrees are `plan-<id>` for any id shape (`plan-ENG-123` exploits Linear's branch-name
+  auto-link when the GitHub integration is installed); `worktree wipe` matches `^plan-(\S+)$`.
+- **Land closure branches per backend.** GitHub keeps the squash footer `Closes #N` (autoclose
+  — byte-identical); non-github backends get a plain `Plan: <id> — <url>` footer (no commit
+  magic words — Linear's commit-linking needs a non-assumable webhook) **plus** an explicit
+  fail-open `close_issue` on the plan issue after the merge (`_close_plan_issue_on_land`,
+  surfaced as the envelope's `plan_issue_closed: bool`; idempotent beside any tracker
+  Done-on-merge automation).
+- The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
+  `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
+  `docs/linear-smoke-gate.md`.

@@ -9,17 +9,17 @@ import { learnDocsGuidance } from "./learnDocs.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("learnDocsGuidance names the inbox path", () => {
-  const text = learnDocsGuidance(".pi/workflow/scratch/learn-docs-inbox.md", [45, 50]);
+  const text = learnDocsGuidance(".pi/workflow/scratch/learn-docs-inbox.md", ["45", "50"]);
   assert.match(text, /\.pi\/workflow\/scratch\/learn-docs-inbox\.md/);
 });
 
 test("learnDocsGuidance carries the consumed learn numbers", () => {
-  const text = learnDocsGuidance("inbox.md", [45, 50]);
+  const text = learnDocsGuidance("inbox.md", ["45", "50"]);
   assert.match(text, /consumed_learn: \[45, 50\]/);
 });
 
 test("learnDocsGuidance no longer hardcodes the perk-learn-docs skill pointer (Node 2.3)", () => {
-  const text = learnDocsGuidance("inbox.md", [45]);
+  const text = learnDocsGuidance("inbox.md", ["45"]);
   assert.doesNotMatch(text, /Follow the perk-learn-docs skill/);
 });
 

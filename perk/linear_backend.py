@@ -23,13 +23,22 @@ engine parses both forms), and every incoming ``marker`` argument is transcoded 
 marker-keyed comment upserts stay idempotent end-to-end. The round-trip fidelity is verified
 live at Node 4.1's smoke gate (flagged deferral — mitigated here, not proven).
 
+**Identifier boundary ids (Node 4.1).** Boundary issue ids are the human Linear identifier
+(``ENG-123``), not the UUID: plan worktrees become ``plan-ENG-123`` (exploiting Linear's
+branch-name auto-link when the GitHub integration is installed), and every envelope/prompt
+renders readably. Reads pass identifiers natively (``issue(id:)`` accepts the identifier
+interchangeably with the UUID); **mutations** resolve identifier→UUID through the cached
+:meth:`LinearIssueBackend._uuid_for` lookup (mutation ``id`` args are not documented to accept
+identifiers). Comment ids remain UUIDs (comments have no identifier). The envelope id re-shaping
+formerly deferred here landed with Node 4.1 (always-string issue ids at every ``--json``
+boundary — contracts §8.21).
+
 Explicit deferrals (flagged, not silently omitted):
 
-- **Envelope id re-shaping** (the tagged ``# GitHub-numeric id assumption`` edges in
-  ``perk/cli/commands/``) — Node 3.1.
 - **Live round-trip fidelity** + tightening the ``"not found"`` substring tolerance to
-  ``.codes`` — Node 4.1 (the smoke gate).
-- **Rate-limit retry/backoff** — unchanged from Node 2.1 (fail loud).
+  ``.codes`` — recorded at the live smoke gate (``docs/linear-smoke-gate.md``).
+- **Rate-limit retry/backoff** — unchanged from Node 2.1 (fail loud; smoke-gate observations
+  recorded in ``docs/linear-smoke-gate.md``).
 """
 
 import re
@@ -107,8 +116,9 @@ def _hex_color(color: str) -> str:
 
 class LinearIssueBackend:
     """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
-    string UUIDs at the boundary (``IssueRef.url`` carries the human form), Linear-safe-encoded
-    bodies, and the GitHub-twin behavior shapes for every plan/learn/label/comment op."""
+    human **identifiers** (``ENG-123``) as boundary issue ids (mutations resolve them to UUIDs
+    via the cached :meth:`_uuid_for`; comment ids stay UUIDs), Linear-safe-encoded bodies, and
+    the GitHub-twin behavior shapes for every plan/learn/label/comment op."""
 
     # The `[issues] backend` vocabulary id — a module-level literal (never imported from the
     # resolver module, which will import us at wiring time).
@@ -123,6 +133,8 @@ class LinearIssueBackend:
         self._team_id_cache: str | None = None
         self._done_state_id_cache: str | None = None
         self._label_ids: dict[str, str] = {}
+        # Boundary-id → issue UUID (the mutation-path resolution; seeded by every issue read).
+        self._uuid_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------ internal helpers
 
@@ -195,21 +207,30 @@ class LinearIssueBackend:
             cursor = _require_str(page_info.get("endCursor"), "endCursor")
 
     def _issue_or_none(self, issue_id: str, selection: str) -> dict[str, object] | None:
-        """Fetch one issue by id; ``None`` when Linear reports the entity missing."""
+        """Fetch one issue by id; ``None`` when Linear reports the entity missing.
+
+        ``issue_id`` may be the human identifier (``ENG-123``) or the UUID — ``issue(id:)``
+        accepts both. A successful read seeds the ``_uuid_for`` cache.
+        """
         query = f"query($id: String!) {{ issue(id: $id) {{ {selection} }} }}"
         try:
             data = self._client.request(query, {"id": issue_id})
         except LinearGraphQLError as exc:
             # Linear reports a missing issue as "Entity not found" — a message-substring
             # dependence (no stable extensions.code observed yet); tightens to `.codes` if one
-            # is observed at the Node 4.1 smoke gate. Every other error re-raises.
+            # is observed at the live smoke gate (docs/linear-smoke-gate.md). Every other error
+            # re-raises.
             if "not found" in str(exc).lower():
                 return None
             raise
         issue = data.get("issue")
         if issue is None:
             return None
-        return _require_dict(issue, "issue")
+        payload = _require_dict(issue, "issue")
+        uuid = payload.get("id")
+        if isinstance(uuid, str) and uuid:
+            self._uuid_cache[issue_id] = uuid
+        return payload
 
     def _get_issue(self, issue_id: str, selection: str) -> dict[str, object]:
         """Fetch one issue by id; a missing issue raises (the mutation-path read)."""
@@ -217,6 +238,31 @@ class LinearIssueBackend:
         if issue is None:
             raise IssueBackendError(f"Linear issue {issue_id!r} not found")
         return issue
+
+    def _uuid_for(self, issue_id: str) -> str:
+        """Resolve a boundary id (identifier-or-UUID) to the issue UUID — the mutation path.
+
+        ``issue(id:)`` *reads* accept the human identifier interchangeably with the UUID;
+        mutation ``id``/``issueId`` args are not documented to, so every mutation routes its
+        target id through here. Cached; issue reads seed the cache, so the common
+        mutate-after-read path issues no extra query.
+        """
+        cached = self._uuid_cache.get(issue_id)
+        if cached is not None:
+            return cached
+        query = "query UuidForIssue($id: String!) { issue(id: $id) { id } }"
+        try:
+            data = self._client.request(query, {"id": issue_id})
+        except LinearGraphQLError as exc:
+            if "not found" in str(exc).lower():
+                raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
+            raise
+        issue = data.get("issue")
+        if issue is None:
+            raise IssueBackendError(f"Linear issue {issue_id!r} not found")
+        uuid = _require_str(_require_dict(issue, "issue").get("id"), "issue id")
+        self._uuid_cache[issue_id] = uuid
+        return uuid
 
     def _comments(self, issue_id: str) -> list[dict[str, object]]:
         """All comments on an issue, sorted ascending by ``createdAt`` — pins GitHub's
@@ -305,14 +351,16 @@ class LinearIssueBackend:
         """The ``find_plan_issue``-semantics core: list open label-scoped issues, match the
         header block's ``run_id``. None after exhausting pages; infra/query failures propagate
         (never masked as None)."""
-        for node in self._list_label_issues(label, "id url description"):
+        for node in self._list_label_issues(label, "id identifier url description"):
             description = node.get("description")
             if (
                 isinstance(description, str)
                 and plan.extract_run_id(description, header_key=header_key) == run_id
             ):
+                identifier = _require_str(node.get("identifier"), "issue identifier")
+                self._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
                 return issue_backend.IssueRef(
-                    id=_require_str(node.get("id"), "issue id"),
+                    id=identifier,
                     url=_require_str(node.get("url"), "issue url"),
                     existed=True,
                 )
@@ -323,7 +371,7 @@ class LinearIssueBackend:
     ) -> issue_backend.IssueRef:
         mutation = (
             "mutation($input: IssueCreateInput!) { issueCreate(input: $input) "
-            "{ success issue { id url } } }"
+            "{ success issue { id identifier url } } }"
         )
         variables: dict[str, object] = {
             "input": {
@@ -338,8 +386,10 @@ class LinearIssueBackend:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create Linear issue {title!r}")
         issue = _require_dict(payload.get("issue"), "issueCreate.issue")
+        identifier = _require_str(issue.get("identifier"), "issue identifier")
+        self._uuid_cache[identifier] = _require_str(issue.get("id"), "issue id")
         return issue_backend.IssueRef(
-            id=_require_str(issue.get("id"), "issue id"),
+            id=identifier,
             url=_require_str(issue.get("url"), "issue url"),
             existed=False,
         )
@@ -349,7 +399,7 @@ class LinearIssueBackend:
             "mutation($id: String!, $input: IssueUpdateInput!) "
             "{ issueUpdate(id: $id, input: $input) { success } }"
         )
-        data = self._client.request(mutation, {"id": issue_id, "input": fields})
+        data = self._client.request(mutation, {"id": self._uuid_for(issue_id), "input": fields})
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to {what} on Linear issue {issue_id!r}")
@@ -359,7 +409,9 @@ class LinearIssueBackend:
         mutation = (
             "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
         )
-        variables: dict[str, object] = {"input": {"issueId": issue_id, "body": body}}
+        variables: dict[str, object] = {
+            "input": {"issueId": self._uuid_for(issue_id), "body": body}
+        }
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
         if payload.get("success") is not True:
@@ -373,7 +425,9 @@ class LinearIssueBackend:
             "mutation($input: CommentCreateInput!) { commentCreate(input: $input) "
             "{ success comment { id } } }"
         )
-        variables: dict[str, object] = {"input": {"issueId": issue_id, "body": body}}
+        variables: dict[str, object] = {
+            "input": {"issueId": self._uuid_for(issue_id), "body": body}
+        }
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
         if payload.get("success") is not True:
@@ -486,7 +540,7 @@ class LinearIssueBackend:
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
-        issue = self._issue_or_none(issue_id, "id url title description state { type }")
+        issue = self._issue_or_none(issue_id, "id identifier url title description state { type }")
         if issue is None:
             return None
         description = issue.get("description")
@@ -501,7 +555,7 @@ class LinearIssueBackend:
         state = _require_dict(issue.get("state"), "issue.state")
         state_type = _require_str(state.get("type"), "issue.state.type")
         return issue_backend.PlanState(
-            id=_require_str(issue.get("id"), "issue id"),
+            id=_require_str(issue.get("identifier"), "issue identifier"),
             url=_require_str(issue.get("url"), "issue url"),
             title=_require_str(issue.get("title"), "issue title"),
             header=header,
@@ -568,11 +622,14 @@ class LinearIssueBackend:
 
     def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
         summaries: list[issue_backend.LearnIssueSummary] = []
-        for node in self._list_label_issues(plan.LEARN_LABEL, "id title url description"):
+        selection = "id identifier title url description"
+        for node in self._list_label_issues(plan.LEARN_LABEL, selection):
             description = node.get("description")
+            identifier = _require_str(node.get("identifier"), "issue identifier")
+            self._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
             summaries.append(
                 issue_backend.LearnIssueSummary(
-                    id=_require_str(node.get("id"), "issue id"),
+                    id=identifier,
                     title=_require_str(node.get("title"), "issue title"),
                     url=_require_str(node.get("url"), "issue url"),
                     body=description if isinstance(description, str) else "",
@@ -716,7 +773,7 @@ class LinearIssueBackend:
         return created
 
     def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
-        issue = self._issue_or_none(issue_id, "id url title description")
+        issue = self._issue_or_none(issue_id, "id identifier url title description")
         if issue is None:
             return None
         description = issue.get("description")
@@ -728,7 +785,7 @@ class LinearIssueBackend:
                 f"invalid objective roadmap on {issue_id!r}: " + "; ".join(errors)
             )
         return issue_backend.ObjectiveState(
-            id=_require_str(issue.get("id"), "issue id"),
+            id=_require_str(issue.get("identifier"), "issue identifier"),
             url=_require_str(issue.get("url"), "issue url"),
             title=_require_str(issue.get("title"), "issue title"),
             header=header,

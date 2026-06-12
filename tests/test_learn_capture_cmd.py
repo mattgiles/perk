@@ -69,7 +69,7 @@ def test_capture_creates_issue_and_clears_marker(monkeypatch):
     result, marker = _run(monkeypatch, ["--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
-    assert data["success"] is True and data["learn_issue"]["number"] == 99
+    assert data["success"] is True and data["learn_issue"]["id"] == "99"
     assert data["pending_cleared"] is True
     assert calls["created"] == {"run_id": "01RID", "plan_number": 7}
     assert calls["commented"] is True

@@ -25,7 +25,7 @@ from perk.output import machine_output, user_output
 @dataclass(frozen=True)
 class LearnCaptureResult:
     learn_issue: issue_backend.IssueRef
-    plan_issue: int
+    plan_issue: str  # the opaque plan-issue id (GitHub: "42"; Linear: "ENG-123")
     commented: bool
     pending_cleared: bool
     dry_run: bool
@@ -85,7 +85,7 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
             "No saved plan in this worktree\nRun /plan-save then perk implement first.",
             error_type="no_plan_ref",
         )
-    issue = int(str(plan_ref["pr_id"]))
+    issue = str(plan_ref["pr_id"])
     body_text = body_path.read_text(encoding="utf-8").strip()
     if not body_text:
         raise UserFacingCliError(
@@ -102,7 +102,7 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
         )
 
     backend = issues.resolve_issue_backend(repo_root)
-    state = backend.get_plan(issue_id=str(issue))
+    state = backend.get_plan(issue_id=issue)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
     run_id = state.header.get("run_id")
@@ -110,7 +110,7 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
         title=f"Learnings: {state.title}",
         body=body_text,
         run_id=str(run_id) if isinstance(run_id, str) else None,
-        plan_id=str(issue),
+        plan_id=issue,
     )
     commented = _backlink(backend, issue=issue, learn=learn_issue)
     cache.clear_marker(repo_root, cache.PENDING_LEARN)
@@ -124,12 +124,12 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
 
 
 def _backlink(
-    backend: issue_backend.IssueBackend, *, issue: int, learn: issue_backend.IssueRef
+    backend: issue_backend.IssueBackend, *, issue: str, learn: issue_backend.IssueRef
 ) -> bool:
     """Post a back-link comment on the plan issue (best-effort — a failure never sinks capture)."""
     try:
         backend.add_issue_comment(
-            issue_id=str(issue),
+            issue_id=issue,
             body=f"Learnings captured in #{learn.id}.",
         )
     except IssueBackendError:
@@ -143,8 +143,8 @@ def _result_to_dict(result: LearnCaptureResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "learn_issue": {
-            # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
-            "number": int(result.learn_issue.id),
+            # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+            "id": result.learn_issue.id,
             "url": result.learn_issue.url,
             "existed": result.learn_issue.existed,
         },

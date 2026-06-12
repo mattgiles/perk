@@ -30,7 +30,6 @@ import {
   booleanField,
   type ColdJson,
   nullableStringField,
-  numberField,
   objectField,
   runColdDoor,
   stringField,
@@ -42,7 +41,7 @@ import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import { readSessionArtifact, type SessionDataCtx } from "./sessionData.ts";
 import type { ToolGating } from "./toolGating.ts";
-import { numberArrayParam, paramsOf, stringParam } from "./toolParams.ts";
+import { idArrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import {
   appendWorkflowState,
   type BranchEntry,
@@ -53,7 +52,8 @@ import {
 
 /** The ok-arm fields (turn-3 D6) — the `details` surface doubles as branch-safe persisted state. */
 export interface PlanSaveOk {
-  issue: { number: number; url: string };
+  /** `issue.id` is the opaque string issue id (GitHub "42", Linear "ENG-123") — §8.21. */
+  issue: { id: string; url: string };
   plan_ref: PlanRef;
   cached: boolean;
   existed: boolean | null;
@@ -76,7 +76,7 @@ export type PlanSaveDetails = SaveResult["details"];
 
 /** The decoded `perk plan-save --json` payload slice the warm door consumes. */
 interface PlanSavePayload {
-  issue: { number: number; url: string; existed: boolean | undefined };
+  issue: { id: string; url: string; existed: boolean | undefined };
   plan_ref: PlanRef;
   cached?: boolean;
   updated?: boolean;
@@ -130,13 +130,13 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
 function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
   const issue = objectField(payload, "issue");
   if (issue === undefined) return null;
-  const number = numberField(issue, "number");
+  const id = stringField(issue, "id");
   const url = stringField(issue, "url");
-  if (number === undefined || url === undefined) return null;
+  if (id === undefined || url === undefined) return null;
   const ref = decodePlanRef(payload);
   if (ref === null) return null;
   return {
-    issue: { number, url, existed: booleanField(issue, "existed") },
+    issue: { id, url, existed: booleanField(issue, "existed") },
     plan_ref: ref,
     cached: booleanField(payload, "cached"),
     updated: booleanField(payload, "updated"),
@@ -233,7 +233,7 @@ export async function savePlan(
     title?: string;
     objectiveId?: string;
     nodeId?: string;
-    consumedLearn?: number[];
+    consumedLearn?: string[];
     /** The resolved plan source (Node 2.2) — surfaced in the message + details when non-param. */
     source?: PlanSource;
     /** A differing explicit param was ignored in favor of the artifact (visibly flagged). */
@@ -358,7 +358,7 @@ export async function savePlan(
   return ok(
     `${verb} plan #${ref.pr_id} → ${ref.url}${sourceSuffix}${linkSuffix}`,
     {
-      issue: { number: r.data.issue.number, url: r.data.issue.url },
+      issue: { id: r.data.issue.id, url: r.data.issue.url },
       plan_ref: ref,
       cached: r.data.cached ?? false,
       existed: r.data.issue.existed ?? null,
@@ -417,7 +417,7 @@ interface PlanSaveParams {
   title?: string;
   objective_id?: string;
   node_id?: string;
-  consumed_learn?: number[];
+  consumed_learn?: string[];
 }
 
 /**
@@ -433,7 +433,9 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
   const title = stringParam(p, "title");
   const objectiveId = stringParam(p, "objective_id");
   const nodeId = stringParam(p, "node_id");
-  const consumedLearn = numberArrayParam(p, "consumed_learn");
+  // Opaque string ids (§8.21); numbers are coerced — the learn-docs guidance renders bare
+  // numeric ids on GitHub, so the model may echo them un-quoted.
+  const consumedLearn = idArrayParam(p, "consumed_learn");
   if (title === null || objectiveId === null || nodeId === null || consumedLearn === null) {
     return null;
   }
@@ -449,7 +451,7 @@ export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
 const TOOL_GUIDELINES = [
   "Use plan_save only after the plan is decision-complete and the user has agreed; it creates the canonical GitHub plan and ends the turn.",
   "Keep the working draft current with plan_draft — the validated plan-draft artifact is what plan_save saves; the `plan` parameter is only a fallback when no draft exists. Never reference line numbers — use durable anchors (function names, behavioral descriptions, structural locations).",
-  "Pass consumed_learn (the gathered perk:learn issue numbers) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
+  "Pass consumed_learn (the gathered perk:learn issue ids) only from the learned-docs factory — it links the issues the docs plan consolidates so /land closes + labels them.",
   "When saving an objective-factory plan, pass BOTH objective_id and node_id — this links the node to the plan and advances it planning → in_progress (no separate backlink call).",
 ];
 
@@ -494,10 +496,10 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
         },
         consumed_learn: {
           type: "array",
-          items: { type: "number" },
+          items: { type: ["string", "number"] },
           description:
-            "Optional perk:learn issue numbers this docs plan consumes (the learned-docs factory " +
-            "passes the gathered numbers; omit for a standalone plan). /land closes + labels them.",
+            "Optional perk:learn issue ids this docs plan consumes (the learned-docs factory " +
+            "passes the gathered ids; omit for a standalone plan). /land closes + labels them.",
         },
       },
     },

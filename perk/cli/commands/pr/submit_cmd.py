@@ -27,7 +27,7 @@ from perk.output import machine_output, user_output
 class PrSubmitResult:
     pr: github.PullRequest
     branch: str
-    issue: int
+    issue: str  # the opaque plan-issue id (GitHub: "42"; Linear: "ENG-123")
     header_update: issue_backend.PlanHeaderUpdate
     plan_embedded: bool
     pr_checked: bool
@@ -111,7 +111,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             error_type="no_plan_ref",
         )
     branch = launch.resolve_plan_worktree_name(plan_ref)
-    issue = int(str(plan_ref["pr_id"]))
+    issue = str(plan_ref["pr_id"])
 
     if dry_run:
         return PrSubmitResult(
@@ -129,7 +129,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
         )
 
     backend = issues.resolve_issue_backend(repo_root)
-    state = backend.get_plan(issue_id=str(issue))
+    state = backend.get_plan(issue_id=issue)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
     if git.is_dirty(repo_root):
@@ -164,7 +164,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             "PR body check failed:\n  " + "\n  ".join(errors), error_type="pr_check_failed"
         )
     header_update = backend.update_plan_header(
-        issue_id=str(issue),
+        issue_id=issue,
         fields={
             "branch": branch,
             "pr": str(pr.number),
@@ -182,18 +182,18 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     )
 
 
-def _safe_plan_body(*, issue: int, repo_root: Path) -> str | None:
+def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
     """Fetch the verbatim plan markdown for the `<details>` embed (D3). Best-effort: any GitHub
     failure degrades to `None` (no embed) rather than sinking the submit."""
     try:
         backend = issues.resolve_issue_backend(repo_root)
-        return backend.get_plan_body(issue_id=str(issue))
+        return backend.get_plan_body(issue_id=issue)
     except IssueBackendError:
         return None
 
 
 def _compose_pr_body(
-    *, issue: int, plan_body: str | None = None, pr_number: int | None = None
+    *, issue: str, plan_body: str | None = None, pr_number: int | None = None
 ) -> str:
     """Compose the GitHub PR body (P2.T8a, D2/D3/D4): closing keyword + plan link + a best-effort
     `<details>` embed of the verbatim plan + the checkout footer.
@@ -224,6 +224,7 @@ def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
             "existed": result.pr.existed,
         },
         "branch": result.branch,
+        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
         "issue": result.issue,
         "plan_header": {"fields_updated": list(result.header_update.fields_updated)},
         "plan_embedded": result.plan_embedded,

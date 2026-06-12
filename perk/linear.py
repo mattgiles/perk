@@ -21,8 +21,9 @@ readiness, and contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Retry/backoff on RATELIMITED** — fail loud now (a typed ``LinearGraphQLError``); revisit at
-  the Node 4.1 live smoke gate.
+- **Retry/backoff on RATELIMITED** — fail loud now (a typed ``LinearGraphQLError``); live
+  encounters are recorded at the smoke gate (``docs/linear-smoke-gate.md``) and feed any
+  future backoff decision.
 """
 
 import os

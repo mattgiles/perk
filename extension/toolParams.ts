@@ -60,6 +60,37 @@ export function numberArrayParam(p: ToolParams, key: string): number[] | undefin
   return out;
 }
 
+/**
+ * Tri-state issue-id field: a string passes through; a number coerces via `String()` (models
+ * routinely echo numeric GitHub ids un-quoted); anything else → null. Issue ids are opaque
+ * strings at every boundary (contracts §8.21).
+ */
+export function idParam(p: ToolParams, key: string): string | undefined | null {
+  const value = p[key];
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return null;
+}
+
+/**
+ * Tri-state issue-id-array field: strings pass through; numbers coerce via `String()` (models
+ * are routinely shown bare numeric ids — e.g. the learn-docs guidance — and may echo them as
+ * numbers); anything else → null. Issue ids are opaque strings at every boundary (contracts
+ * §8.21).
+ */
+export function idArrayParam(p: ToolParams, key: string): string[] | undefined | null {
+  const value = p[key];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" && typeof item !== "number") return null;
+    out.push(String(item));
+  }
+  return out;
+}
+
 /** Tri-state array field: any array passes (elements stay unknown); null on a non-array. */
 export function arrayParam(p: ToolParams, key: string): unknown[] | undefined | null {
   const value = p[key];

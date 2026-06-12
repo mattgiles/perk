@@ -142,7 +142,8 @@ def test_invalid_plan_id_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["resume", "not-a-number", "--json"])
+        # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
+        result = runner.invoke(cli, ["resume", "bad/id", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "invalid_input"
 

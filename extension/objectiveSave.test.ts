@@ -14,7 +14,7 @@ import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 const CREATE_JSON = JSON.stringify({
   success: true,
   error_type: null,
-  objective: { number: 7, url: "https://gh/o/r/issues/7", existed: false },
+  objective: { id: "7", url: "https://gh/o/r/issues/7", existed: false },
   dry_run: false,
 });
 
@@ -35,9 +35,9 @@ test("tool: objective_save delegates, links active_objective + seeds budget mark
       prose: PROSE,
       roadmap: [{ id: "1.1", description: "first" }],
     });
-    const details = result.details as { ok: boolean; objective?: { number: number } };
+    const details = result.details as { ok: boolean; objective?: { id: string } };
     assert.equal(details.ok, true);
-    assert.equal(details.objective?.number, 7);
+    assert.equal(details.objective?.id, "7");
     assert.equal(result.terminate, true);
     // active_objective linked on the live session.
     assert.equal(h.workflowState().active_objective, "7");
@@ -99,7 +99,7 @@ test("tool: success:true with a malformed objective fails as bad_output (no link
   const malformed = JSON.stringify({
     success: true,
     error_type: null,
-    objective: { number: "7", url: "https://gh/o/r/issues/7" }, // number a string → reject
+    objective: { id: 7, url: "https://gh/o/r/issues/7" }, // id a number → reject (string ids, §8.21)
   });
   const bin = fakePerk(cwd, { stdout: malformed });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });

@@ -85,7 +85,7 @@ def test_dry_run_is_offline_and_well_formed(monkeypatch):
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["success"] is True and data["dry_run"] is True
-    assert data["branch"] == "plan-7" and data["issue"] == 7
+    assert data["branch"] == "plan-7" and data["issue"] == "7"
     assert data["pr"]["number"] == 0  # stub (no PR opened on a dry run)
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
 

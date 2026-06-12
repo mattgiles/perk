@@ -63,7 +63,8 @@ class PlanSaveResult:
 )
 @click.option(
     "--consumed-learn",
-    help="Comma-separated perk:learn issue numbers this docs plan consumes (hop-2; e.g. '45,50').",
+    help="Comma-separated perk:learn issue ids this docs plan consumes (hop-2; e.g. '45,50' "
+    "or 'ENG-45,ENG-50').",
 )
 @click.option("--dry-run", is_flag=True, help="Compose and print without touching GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -103,10 +104,10 @@ def plan_save(
         )
         # Recover `consumed_learn` from the handoff (#102): the learn-docs factory is read-only, so
         # the model saves via the `/plan-save` *command* (forwards only {plan, title}) rather than
-        # the gated-out `plan_save` *tool*. The learn-docs cold door stashes the gathered numbers in
+        # the gated-out `plan_save` *tool*. The learn-docs cold door stashes the gathered ids in
         # the handoff; recover them here so the save surface is irrelevant. An explicit
         # --consumed-learn always wins; a non-factory run (no handoff key) is unaffected.
-        consumed_learn_numbers = _consumed_learn_from_handoff(
+        consumed_learn_ids = _consumed_learn_from_handoff(
             repo_root, resolved_run_id, _parse_consumed_learn(consumed_learn)
         )
         result = _plan_save_impl(
@@ -116,7 +117,7 @@ def plan_save(
             title=title,
             objective_id=objective_id,
             node_id=node_id,
-            consumed_learn=consumed_learn_numbers,
+            consumed_learn=consumed_learn_ids,
             dry_run=dry_run,
         )
     except IssueBackendError as exc:
@@ -175,16 +176,16 @@ def _link_from_handoff(
 def _consumed_learn_from_handoff(
     repo_root: Path,
     run_id: str | None,
-    consumed_learn: tuple[int, ...],
-) -> tuple[int, ...]:
+    consumed_learn: tuple[str, ...],
+) -> tuple[str, ...]:
     """Default ``consumed_learn`` from the run's handoff when not passed explicitly (#102).
 
-    The ``learn-docs`` factory stashes the gathered ``perk:learn`` numbers in the handoff so they
+    The ``learn-docs`` factory stashes the gathered ``perk:learn`` ids in the handoff so they
     survive the ``/plan-save`` *command* path (which forwards only ``{plan, title}``, dropping the
     flag). An explicit ``--consumed-learn`` (parsed to a non-empty tuple) always wins; an empty
     tuple means the flag was absent, so fall back to the handoff. A missing handoff, a non-factory
     handoff (no ``consumed_learn`` key), or a malformed value leaves the input untouched.
-    Best-effort: a malformed handoff must never block a save.
+    Best-effort: a malformed handoff must never block a save. Ids are opaque strings (§8.21).
     """
     if consumed_learn or not run_id:
         return consumed_learn
@@ -195,35 +196,29 @@ def _consumed_learn_from_handoff(
     if not handoff:
         return consumed_learn
     raw = handoff.get("consumed_learn")
-    if not raw:
+    if not raw or not isinstance(raw, list):
         return consumed_learn
-    try:
-        numbers = {int(str(n).lstrip("#")) for n in raw}
-    except (TypeError, ValueError):
+    ids = {cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())}
+    if not ids:
         return consumed_learn
-    return tuple(sorted(numbers))
+    return tuple(sorted(ids))
 
 
-def _parse_consumed_learn(raw: str | None) -> tuple[int, ...]:
-    """Parse a comma-separated issue-number list into a sorted unique tuple (hop-2).
+def _parse_consumed_learn(raw: str | None) -> tuple[str, ...]:
+    """Parse a comma-separated issue-id list into a sorted unique tuple of opaque string ids
+    (hop-2; GitHub ``45`` or Linear ``ENG-45``).
 
-    ``None``/empty → ``()``. A non-integer token raises ``UserFacingCliError`` (``invalid_input``).
+    ``None``/empty → ``()``. Tokens are stripped of ``#``/whitespace; only empty tokens are
+    skipped — ids are otherwise opaque (no int parse; contracts §8.21).
     """
     if not raw or not raw.strip():
         return ()
-    numbers: set[int] = set()
+    ids: set[str] = set()
     for token in raw.split(","):
-        token = token.strip().lstrip("#")
-        if not token:
-            continue
-        try:
-            numbers.add(int(token))
-        except ValueError as exc:
-            raise UserFacingCliError(
-                f"Invalid --consumed-learn value {token!r} (expected issue numbers).",
-                error_type="invalid_input",
-            ) from exc
-    return tuple(sorted(numbers))
+        token = token.strip().lstrip("#").strip()
+        if token:
+            ids.add(token)
+    return tuple(sorted(ids))
 
 
 def _plan_save_impl(
@@ -234,7 +229,7 @@ def _plan_save_impl(
     title: str | None,
     objective_id: str | None = None,
     node_id: str | None = None,
-    consumed_learn: tuple[int, ...] = (),
+    consumed_learn: tuple[str, ...] = (),
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
@@ -365,8 +360,8 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "issue": {
-            # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
-            "number": int(result.issue.id),
+            # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+            "id": result.issue.id,
             "url": result.issue.url,
             "existed": result.issue.existed,  # warm /plan-save surfaces this in details (T3)
         },

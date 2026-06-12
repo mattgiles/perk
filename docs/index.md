@@ -13,6 +13,7 @@ locked decisions and their rationale) → the research inputs and pattern studie
 
 | Doc | What it is |
 |---|---|
+| [linear-smoke-gate.md](./linear-smoke-gate.md) | The **Linear live smoke gate runbook** (Objective #252, Node 4.1): the manual two-mode validation of the Linear issue backend against a real workspace (bare; GitHub-integration-installed), with a recorded-observations section feeding the documented follow-ups (`.codes` tightening, RATELIMITED posture, mutation identifier acceptance). The offline twin is `tests/test_linear_lifecycle.py`. |
 | [ROADMAP.md](./ROADMAP.md) | **Start here.** The phased build plan: core thesis, context strategy, implementation-craft constraints, the seven **locked foundational decisions**, Phases 0–3 with **dogfood gates**, default-package strategy, non-goals, open decisions. |
 | [foundation-open-questions.md](./guiding-principles/foundation-open-questions.md) | The thirteen questions (Q1–Q13) that had to be settled before Phase 0, each with options, rationale, and the **recorded resolution**. This is the *why* behind the ROADMAP's "Foundational decisions (locked)" section — read it when you need the reasoning behind a decision. |
 | [planning/phase-0-plan.md](./planning/phase-0-plan.md) | Phase 0 decomposed into seven landable turns (T1–T7), each with deliverables, an acceptance gate, and dependencies. The execution plan for the first phase. |

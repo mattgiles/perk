@@ -49,7 +49,7 @@ def resume_cmd(
     remote: str | None,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Resume PLAN (a plan issue number) at its current stage.
+    """Resume PLAN (a plan issue id) at its current stage.
 
     \b
     Examples:
@@ -60,11 +60,13 @@ def resume_cmd(
         repo_root = require_repo(ctx)
         require_github(ctx)  # resume always reads GitHub (the dry run resolves via a read)
         config = require_config(ctx)
-        number = parse_plan_id(plan)
+        plan_id = parse_plan_id(plan)
         backend = issues.resolve_issue_backend(repo_root)
-        state = backend.get_plan(issue_id=str(number))
+        state = backend.get_plan(issue_id=plan_id)
         if state is None:
-            raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
+            raise UserFacingCliError(
+                f"Plan issue #{plan_id} not found", error_type="plan_not_found"
+            )
         ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
         stage_id = resume.resolve_resume_stage(
             state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
@@ -82,12 +84,12 @@ def resume_cmd(
         return
 
     if stage_id is None:
-        _render_done(number, as_json=as_json)
+        _render_done(plan_id, as_json=as_json)
         return
 
     worktree_name = launch.resolve_plan_worktree_name(ref)
     if dry_run:
-        _render_dry_run(number, stage_id, worktree_name, ref, as_json=as_json)
+        _render_dry_run(plan_id, stage_id, worktree_name, ref, as_json=as_json)
         return
 
     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
@@ -104,44 +106,44 @@ def resume_cmd(
     )
 
 
-def parse_plan_id(plan: str) -> int:
-    """A GitHub plan id is a positive issue number; accept ``42`` or ``#42``.
+def parse_plan_id(plan: str, *, what: str = "plan") -> str:
+    """Validate an opaque issue id — accept ``42``, ``#42``, or a backend-native string id like
+    Linear's ``ENG-123``.
 
-    The ``int`` parse is the authoritative test (not a ``str.isdigit`` pre-check, which accepts
-    unicode-digit strings ``int`` rejects); a non-positive id is also rejected.
+    Strips ``#``/whitespace; rejects empty ids and anything unusable as a ``plan-<id>`` worktree
+    name (the ``launch.resolve_plan_worktree_name`` rule: no ``/``, never ``.``/``..``). The id
+    is otherwise opaque — the issue backend is the authority on whether it resolves.
     """
-    bad = UserFacingCliError(
-        f"Invalid plan id {plan!r} — expected an issue number (e.g. 42).",
-        error_type="invalid_input",
-    )
-    try:
-        number = int(plan.strip().lstrip("#").strip())
-    except ValueError:
-        raise bad from None
-    if number <= 0:
-        raise bad
-    return number
+    cleaned = plan.strip().lstrip("#").strip()
+    if not cleaned or "/" in cleaned or cleaned in (".", ".."):
+        raise UserFacingCliError(
+            f"Invalid {what} id {plan!r} — expected an issue id (e.g. 42 or ENG-123).",
+            error_type="invalid_input",
+        )
+    return cleaned
 
 
-def _render_done(number: int, *, as_json: bool) -> None:
-    message = f"plan #{number} is merged and learned — nothing to resume"
+def _render_done(plan_id: str, *, as_json: bool) -> None:
+    message = f"plan #{plan_id} is merged and learned — nothing to resume"
     if as_json:
         machine_output(
-            json.dumps({"success": True, "plan": number, "resumed_stage": None, "message": message})
+            json.dumps(
+                {"success": True, "plan": plan_id, "resumed_stage": None, "message": message}
+            )
         )
     else:
         user_output(message)
 
 
 def _render_dry_run(
-    number: int, stage_id: str, worktree: str, ref: dict[str, object], *, as_json: bool
+    plan_id: str, stage_id: str, worktree: str, ref: dict[str, object], *, as_json: bool
 ) -> None:
     if as_json:
         machine_output(
             json.dumps(
                 {
                     "success": True,
-                    "plan": number,
+                    "plan": plan_id,
                     "resumed_stage": stage_id,
                     "worktree": worktree,
                     "plan_ref": ref,
@@ -151,7 +153,7 @@ def _render_dry_run(
         )
     else:
         user_output(click.style("resume --dry-run (resolve only, no launch)", dim=True))
-        user_output(f"  plan=#{number}  resumed_stage={stage_id}  worktree={worktree}")
+        user_output(f"  plan=#{plan_id}  resumed_stage={stage_id}  worktree={worktree}")
 
 
 def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:

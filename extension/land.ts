@@ -23,14 +23,16 @@ import { failFor, ok, type Result } from "./result.ts";
 const BENIGN_LEARN_SKIPS = new Set(["no_consumed_learn", "dry_run"]);
 
 export interface ObjectiveLandUpdate {
-  number: number | null;
+  /** Opaque string objective id (GitHub "5", Linear "ENG-5") — §8.21. */
+  id: string | null;
   nodes_marked: string[];
   skipped_reason: string | null;
   closed: boolean;
 }
 
 export interface LearnConsumeUpdate {
-  closed: number[];
+  /** Opaque string learn-issue ids (§8.21). */
+  closed: string[];
   skipped_reason: string | null;
 }
 
@@ -38,7 +40,8 @@ export interface LearnConsumeUpdate {
 export interface LandOk {
   pr: { number: number; state: string };
   branch?: string;
-  issue?: number;
+  /** Opaque string plan-issue id (§8.21). */
+  issue?: string;
   pending_learn: boolean;
   objective?: ObjectiveLandUpdate;
   learn?: LearnConsumeUpdate;
@@ -51,7 +54,7 @@ export type LandDetails = LandResult["details"];
 interface LandPayload {
   pr: { number: number; state: string };
   branch?: string;
-  issue?: number;
+  issue?: string;
   objective?: ObjectiveLandUpdate;
   learn?: LearnConsumeUpdate;
 }
@@ -60,8 +63,8 @@ interface LandPayload {
 function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
   const obj = objectField(payload, "objective");
   if (obj === undefined) return undefined;
-  const number = obj.number;
-  if (typeof number !== "number" && number !== null) return undefined;
+  const id = obj.id;
+  if (typeof id !== "string" && id !== null) return undefined;
   const nodesMarked = obj.nodes_marked;
   if (!Array.isArray(nodesMarked) || !nodesMarked.every((n) => typeof n === "string")) {
     return undefined;
@@ -71,7 +74,7 @@ function decodeObjective(payload: ColdJson): ObjectiveLandUpdate | undefined {
   // `closed` is an advisory display detail: decode leniently (missing/malformed → false) rather
   // than dropping the whole sub-object.
   return {
-    number,
+    id,
     nodes_marked: nodesMarked,
     skipped_reason: skippedReason ?? null,
     closed: obj.closed === true,
@@ -83,7 +86,7 @@ function decodeLearn(payload: ColdJson): LearnConsumeUpdate | undefined {
   const learn = objectField(payload, "learn");
   if (learn === undefined) return undefined;
   const closed = learn.closed;
-  if (!Array.isArray(closed) || !closed.every((n) => typeof n === "number")) return undefined;
+  if (!Array.isArray(closed) || !closed.every((n) => typeof n === "string")) return undefined;
   const skippedReason = nullableStringField(learn, "skipped_reason");
   if (skippedReason === undefined && learn.skipped_reason !== undefined) return undefined;
   return { closed, skipped_reason: skippedReason ?? null };
@@ -103,7 +106,7 @@ function decodeLand(payload: ColdJson): LandPayload | null {
   return {
     pr: { number, state },
     branch: stringField(payload, "branch"),
-    issue: numberField(payload, "issue"),
+    issue: stringField(payload, "issue"),
     objective: decodeObjective(payload),
     learn: decodeLearn(payload),
   };
@@ -127,15 +130,15 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
 
   const lines = [`Landed PR #${r.data.pr.number}; run /learn to release the worktree.`];
   const obj = r.data.objective;
-  if (obj?.nodes_marked.length && obj.number !== null) {
+  if (obj?.nodes_marked.length && obj.id !== null) {
     // The reconcile pass is auto-driven after land (see driveReconcileAfterLand); just report it.
     lines.push(
-      `Objective #${obj.number} node(s) ${obj.nodes_marked.join(", ")} marked done — ` +
+      `Objective #${obj.id} node(s) ${obj.nodes_marked.join(", ")} marked done — ` +
         `reconciling the roadmap against the merged diff.`,
     );
   }
-  if (obj?.closed && obj.number !== null) {
-    lines.push(`Objective #${obj.number} complete — closed.`);
+  if (obj?.closed && obj.id !== null) {
+    lines.push(`Objective #${obj.id} complete — closed.`);
   }
   const learn = r.data.learn;
   if (learn?.closed.length) {
@@ -170,9 +173,8 @@ export function driveReconcileAfterLand(
 ): void {
   if (!details.ok) return;
   const obj = details.objective;
-  if (!obj || obj.number === null || obj.nodes_marked.length === 0) return;
-  const message =
-    reconcileGuidance(String(obj.number)) + bindingSuffix(ctx.cwd, "command:objective-reconcile");
+  if (!obj || obj.id === null || obj.nodes_marked.length === 0) return;
+  const message = reconcileGuidance(obj.id) + bindingSuffix(ctx.cwd, "command:objective-reconcile");
   if (ctx.isIdle()) {
     // The `/land` command path (idle): inject an immediate turn.
     pi.sendUserMessage(message);

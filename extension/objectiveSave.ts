@@ -8,14 +8,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
-import {
-  booleanField,
-  type ColdJson,
-  numberField,
-  objectField,
-  runColdDoor,
-  stringField,
-} from "./coldDoor.ts";
+import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "./coldDoor.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
@@ -25,7 +18,8 @@ import { appendWorkflowState, branchOf, rebuildWorkflowState } from "./workflowS
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface ObjectiveSaveOk {
-  objective: { number: number; url: string };
+  /** `id` is the opaque string objective id (GitHub "7", Linear "ENG-7") — §8.21. */
+  objective: { id: string; url: string };
   existed: boolean | null;
 }
 
@@ -33,17 +27,17 @@ export type ObjectiveSaveResult = Result<ObjectiveSaveOk>;
 
 /** The decoded `perk objective create --json` payload slice the warm door consumes. */
 interface ObjectiveCreatePayload {
-  objective: { number: number; url: string; existed: boolean | undefined };
+  objective: { id: string; url: string; existed: boolean | undefined };
 }
 
 /** Narrow the `perk objective create --json` success payload; strict on `objective`. */
 function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null {
   const objective = objectField(payload, "objective");
   if (objective === undefined) return null;
-  const number = numberField(objective, "number");
+  const id = stringField(objective, "id");
   const url = stringField(objective, "url");
-  if (number === undefined || url === undefined) return null;
-  return { objective: { number, url, existed: booleanField(objective, "existed") } };
+  if (id === undefined || url === undefined) return null;
+  return { objective: { id, url, existed: booleanField(objective, "existed") } };
 }
 
 /** The decoded `objective_save` tool params. */
@@ -106,8 +100,9 @@ export async function saveObjective(
 
   // Link the live session: set active_objective (LWW) + seed a fresh budget activation marker
   // (mirrors objective.ts's `/objective <id>` activation), so budget tracking starts immediately.
+  // The envelope id is already the opaque string id (§8.21) — no coercion needed.
   const objective = r.data.objective;
-  const objectiveId = String(objective.number);
+  const objectiveId = objective.id;
   const linked = rebuildWorkflowState(branch()).active_objective ?? null;
   if (linked !== objectiveId) {
     appendWorkflowState(pi, ctx, {
@@ -125,9 +120,9 @@ export async function saveObjective(
 
   const verb = objective.existed ? "Found existing" : "Saved";
   return ok(
-    `${verb} objective #${objective.number} → ${objective.url}`,
+    `${verb} objective #${objective.id} → ${objective.url}`,
     {
-      objective: { number: objective.number, url: objective.url },
+      objective: { id: objective.id, url: objective.url },
       existed: objective.existed ?? null,
     },
     { terminate: true },

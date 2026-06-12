@@ -7,7 +7,7 @@ import click
 
 from perk import issues
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import fail
+from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
@@ -16,7 +16,7 @@ from perk.output import machine_output, user_output
 
 @alias("rec")
 @click.command("reconcile")
-@click.argument("number", type=int)
+@click.argument("number")
 @click.option(
     "--body",
     "body_path",
@@ -28,7 +28,7 @@ from perk.output import machine_output, user_output
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def reconcile_objective(
-    ctx: click.Context, *, number: int, body_path: Path, dry_run: bool, as_json: bool
+    ctx: click.Context, *, number: str, body_path: Path, dry_run: bool, as_json: bool
 ) -> None:
     """Reconcile an objective's Reconcilable prose region against the merged diff (P2.T11b).
 
@@ -38,11 +38,12 @@ def reconcile_objective(
     """
     try:
         repo_root = require_repo(ctx)
+        number = parse_objective_id(number)
         if not dry_run:
             require_github(ctx)
         prose = body_path.read_text(encoding="utf-8")
         result = issues.resolve_issue_backend(repo_root).update_objective_body(
-            issue_id=str(number), prose=prose, dry_run=dry_run
+            issue_id=number, prose=prose, dry_run=dry_run
         )
     except IssueBackendError as exc:
         message = str(exc)
@@ -65,9 +66,9 @@ def reconcile_objective(
     payload = {
         "success": True,
         "error_type": None,
-        # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
-        "objective": int(result.issue_id),
-        "comment_id": None if result.comment_id is None else int(result.comment_id),
+        # Opaque string ids at every machine boundary (contracts §8.21; Node 4.1).
+        "objective": result.issue_id,
+        "comment_id": result.comment_id,
         "updated": result.updated,
         "dry_run": result.dry_run,
     }

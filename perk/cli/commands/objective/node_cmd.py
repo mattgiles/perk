@@ -5,7 +5,7 @@ import json
 import click
 
 from perk import issues, objective
-from perk.cli.commands.objective.shared import fail
+from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
@@ -13,7 +13,7 @@ from perk.output import machine_output, user_output
 
 
 @click.command("node")
-@click.argument("number", type=int)
+@click.argument("number")
 @click.option("--node", "node_id", required=True, help="The roadmap node id (e.g. 1.2).")
 @click.option(
     "--status",
@@ -28,7 +28,7 @@ from perk.output import machine_output, user_output
 def node_objective(
     ctx: click.Context,
     *,
-    number: int,
+    number: str,
     node_id: str,
     status: str | None,
     pr: str | None,
@@ -39,10 +39,11 @@ def node_objective(
     """Update one roadmap node (explicit-status-only; open #3)."""
     try:
         repo_root = require_repo(ctx)
+        number = parse_objective_id(number)
         if not dry_run:
             require_github(ctx)
         result = issues.resolve_issue_backend(repo_root).update_objective_node(
-            issue_id=str(number),
+            issue_id=number,
             node_id=node_id,
             status=objective.NodeStatus(status) if status else None,
             pr=pr,

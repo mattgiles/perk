@@ -23,6 +23,7 @@ import click
 
 from perk import issues, launch, objective
 from perk.cli.alias import alias
+from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
@@ -45,7 +46,7 @@ def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -
 
 
 def _node_not_plannable_error(
-    graph: objective.DependencyGraph, number: int, node_id: str
+    graph: objective.DependencyGraph, number: str, node_id: str
 ) -> UserFacingCliError:
     """A targeted error for an explicit ``--node`` that is not plannable, derived from the node's
     actual state (not found / in-flight / terminal / blocked)."""
@@ -74,7 +75,7 @@ def _node_not_plannable_error(
 
 
 def _seed_prompt(
-    number: int, node: objective.ObjectiveNode, title: str, model: str | None = None
+    number: str, node: objective.ObjectiveNode, title: str, model: str | None = None
 ) -> str:
     """The node-seeded initial prompt for the read-only plan-mode session (D5).
 
@@ -112,7 +113,7 @@ def _seed_prompt(
 
 @alias("oplan")
 @click.command("objective-plan", context_settings={"ignore_unknown_options": True})
-@click.argument("number", required=False, type=int)
+@click.argument("number", required=False)
 @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
 @click.option("--worktree", help="Worktree to position (objective-plan runs at repo root).")
 @click.option("--dry-run", is_flag=True, help="Resolve + print; mark nothing, launch nothing.")
@@ -130,7 +131,7 @@ def _seed_prompt(
 def objective_plan(
     ctx: click.Context,
     *,
-    number: int | None,
+    number: str | None,
     node_id: str | None,
     worktree: str | None,
     dry_run: bool,
@@ -141,7 +142,7 @@ def objective_plan(
     """Select the next objective node and author a bounded plan (read-only).
 
     \b
-    NUMBER is the objective issue number (required — a cold session has no active objective).
+    NUMBER is the objective issue id (required — a cold session has no active objective).
     \b
     Examples:
       perk objective-plan 7                 # plan the next actionable node of objective #7
@@ -156,11 +157,12 @@ def objective_plan(
                 "An objective number is required (e.g. `perk objective-plan 7`).",
                 error_type="objective_required",
             )
+        number = parse_objective_id(number)
         if not dry_run:
             require_github(ctx)
 
         backend = issues.resolve_issue_backend(repo_root)
-        state = backend.get_objective(issue_id=str(number))
+        state = backend.get_objective(issue_id=number)
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
@@ -219,7 +221,7 @@ def objective_plan(
             )
         if not dry_run:
             backend.update_objective_node(
-                issue_id=str(number),
+                issue_id=number,
                 node_id=node.id,
                 status=marked_status,
             )
@@ -276,5 +278,5 @@ def objective_plan(
         # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
         # regardless of which save surface the model uses (the /plan-save command forwards only
         # {plan, title}; #78). The factory already marked node.id `planning` above.
-        handoff_extra={"objective_id": str(number), "node_id": node.id},
+        handoff_extra={"objective_id": number, "node_id": node.id},
     )

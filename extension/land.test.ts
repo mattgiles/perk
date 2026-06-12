@@ -17,7 +17,7 @@ const LAND_JSON = JSON.stringify({
   message: null,
   pr: { number: 42, state: "MERGED" },
   branch: "plan-7",
-  issue: 7,
+  issue: "7",
   pending_learn: true,
   dry_run: false,
 });
@@ -64,10 +64,10 @@ const LAND_JSON_WITH_OBJECTIVE = JSON.stringify({
   message: null,
   pr: { number: 42, state: "MERGED" },
   branch: "plan-7",
-  issue: 7,
+  issue: "7",
   pending_learn: true,
   dry_run: false,
-  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null },
+  objective: { id: "5", nodes_marked: ["1.2"], skipped_reason: null },
 });
 
 // `landPr` is exercised directly here (not via the harness `invokeTool`) because the tool's
@@ -113,7 +113,7 @@ const OBJECTIVE_DETAILS: LandDetails = {
   ok: true,
   pr: { number: 9, state: "MERGED" },
   pending_learn: true,
-  objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null, closed: false },
+  objective: { id: "5", nodes_marked: ["1.2"], skipped_reason: null, closed: false },
 };
 
 test("driveReconcileAfterLand: no objective → not driven", () => {
@@ -160,7 +160,7 @@ test("driveReconcileAfterLand: still fires when the land closed the objective", 
     ok: true,
     pr: { number: 9, state: "MERGED" },
     pending_learn: true,
-    objective: { number: 5, nodes_marked: ["1.3"], skipped_reason: null, closed: true },
+    objective: { id: "5", nodes_marked: ["1.3"], skipped_reason: null, closed: true },
   });
   assert.equal(calls.length, 1);
   assert.match(calls[0]?.content ?? "", /objective #5/i);
@@ -182,7 +182,7 @@ test("landPr: a closing land reports the objective close", async () => {
     message: null,
     pr: { number: 42, state: "MERGED" },
     pending_learn: true,
-    objective: { number: 5, nodes_marked: ["1.3"], skipped_reason: null, closed: true },
+    objective: { id: "5", nodes_marked: ["1.3"], skipped_reason: null, closed: true },
   });
   const result = await landPr(...stubLandCtx(cwd, payload));
   assert.ok(result.details.ok);
@@ -201,7 +201,7 @@ test("landPr: `closed` decodes leniently — absent/malformed → false, sub-obj
       message: null,
       pr: { number: 42, state: "MERGED" },
       pending_learn: true,
-      objective: { number: 5, nodes_marked: ["1.2"], skipped_reason: null, closed },
+      objective: { id: "5", nodes_marked: ["1.2"], skipped_reason: null, closed },
     });
     const result = await landPr(...stubLandCtx(cwd, payload));
     assert.ok(result.details.ok);
@@ -219,10 +219,10 @@ test("tool: land with a skipped objective adds no nudge", async () => {
     message: null,
     pr: { number: 42, state: "MERGED" },
     branch: "plan-7",
-    issue: 7,
+    issue: "7",
     pending_learn: true,
     dry_run: false,
-    objective: { number: null, nodes_marked: [], skipped_reason: "no_objective_link" },
+    objective: { id: null, nodes_marked: [], skipped_reason: "no_objective_link" },
   });
   const bin = fakePerk(cwd, { stdout: skipped });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
@@ -245,10 +245,10 @@ test("tool: land surfaces a non-benign learn-consume skip", async () => {
     message: null,
     pr: { number: 42, state: "MERGED" },
     branch: "plan-7",
-    issue: 7,
+    issue: "7",
     pending_learn: true,
     dry_run: false,
-    learn: { closed: [45], skipped_reason: "failed: #50" },
+    learn: { closed: ["45"], skipped_reason: "failed: #50" },
   });
   const bin = fakePerk(cwd, { stdout: partial });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
@@ -271,7 +271,7 @@ test("tool: land stays quiet on a benign learn-consume skip", async () => {
     message: null,
     pr: { number: 42, state: "MERGED" },
     branch: "plan-7",
-    issue: 7,
+    issue: "7",
     pending_learn: true,
     dry_run: false,
     learn: { closed: [], skipped_reason: "no_consumed_learn" },
@@ -322,7 +322,7 @@ test("landPr: a malformed objective is dropped, land still succeeds", async () =
     message: null,
     pr: { number: 42, state: "MERGED" },
     pending_learn: true,
-    objective: { number: 5, nodes_marked: "1.2", skipped_reason: null }, // non-array
+    objective: { id: "5", nodes_marked: "1.2", skipped_reason: null }, // non-array
   });
   const piStub = {
     exec: async () => ({ code: 0, killed: false, stdout: malformedObjective, stderr: "" }),

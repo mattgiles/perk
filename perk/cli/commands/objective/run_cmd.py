@@ -18,7 +18,7 @@ import click
 
 from perk import cache, github, issue_backend, issues, launch, objective, resume, run_report, runner
 from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import fail
+from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.config import Config
@@ -47,9 +47,9 @@ def _fmt_elapsed(ms: int) -> str:
     return f"{seconds // 60}m" if seconds >= 60 else f"{seconds}s"
 
 
-def _cumulative_budget(repo_root: Path, number: int) -> dict[str, int]:
+def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
     """Sum the budget across every dispatch record for this objective (D3; report-only)."""
-    target = str(number)
+    target = number
     runs = turns = tokens = elapsed = 0
     for record in cache.list_dispatch_records(repo_root):
         oid = (record.get("plan_ref") or {}).get("objective_id")
@@ -69,7 +69,7 @@ def _cumulative_budget(repo_root: Path, number: int) -> dict[str, int]:
 
 
 def _in_flight_record(
-    repo_root: Path, number: int
+    repo_root: Path, number: str
 ) -> tuple[dict[str, Any], runner.RunHandle, runner.Runner] | None:
     """The newest in-flight dispatch for this objective (D4), or ``None``.
 
@@ -77,7 +77,7 @@ def _in_flight_record(
     ``queued``/``in_progress``. Each observe is fail-soft — a runner/GitHub error treats that
     record as not-in-flight (noted to stderr), never raises.
     """
-    target = str(number)
+    target = number
     for record in cache.list_dispatch_records(repo_root):  # newest-first
         if _canon_objective((record.get("plan_ref") or {}).get("objective_id")) != target:
             continue
@@ -208,19 +208,20 @@ def _resolve_in_flight_stage(
     *,
     repo_root: Path,
     config: Config,
-    number: int,
+    number: str,
     node: objective.ObjectiveNode,
     remote: str,
     dry_run: bool,
 ) -> dict[str, Any]:
     """Resolve the action for an in-flight node by inspecting its linked plan's PR state (D7)."""
     remediation = f"perk objective-plan {number} --node {node.id}"
-    # Defensive parse: a malformed/non-numeric `node.pr` (e.g. "#abc") must not raise a raw
-    # ValueError — it falls through to the plan_required fallback below like a missing pr.
-    raw_pr = str(node.pr).lstrip("#").strip() if node.pr else ""
-    pr_number = int(raw_pr) if raw_pr.isdigit() else None
+    # The node's `pr` backlink carries the PLAN id — an opaque string (GitHub "42", Linear
+    # "ENG-123"; contracts §8.21): any non-empty value IS the plan id (the resolved backend is
+    # the authority on whether it exists). Only the empty/missing case falls through to the
+    # plan_required fallback below.
+    plan_id = str(node.pr).lstrip("#").strip() if node.pr else ""
     backend = issues.resolve_issue_backend(repo_root)
-    plan_state = backend.get_plan(issue_id=str(pr_number)) if pr_number is not None else None
+    plan_state = backend.get_plan(issue_id=plan_id) if plan_id else None
     if plan_state is None:  # defensive: an in-flight node should carry a resolvable plan
         payload.update(action="plan_required", node=node.id, remediation=remediation)
         return payload
@@ -264,7 +265,7 @@ def _resolve_in_flight_stage(
 
 
 def _run_impl(
-    ctx: click.Context, *, number: int, remote: str, wait: bool, dry_run: bool
+    ctx: click.Context, *, number: str, remote: str, wait: bool, dry_run: bool
 ) -> dict[str, Any]:
     """The deterministic single-pass control flow (D2). Returns the structured payload to render;
     raises ``UserFacingCliError``/``IssueBackendError``/``GitHubError`` for the command's ``fail``
@@ -274,7 +275,7 @@ def _run_impl(
     if not dry_run:
         require_github(ctx)
     backend = issues.resolve_issue_backend(repo_root)
-    state = backend.get_objective(issue_id=str(number))
+    state = backend.get_objective(issue_id=number)
     if state is None:
         raise UserFacingCliError(f"Objective #{number} not found", error_type="objective_not_found")
     graph = objective.build_graph(list(state.nodes))
@@ -309,7 +310,7 @@ def _run_impl(
             # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the
             # graph rather than classifying on the pre-poll snapshot.
             payload["budget"] = _cumulative_budget(repo_root, number)
-            state = backend.get_objective(issue_id=str(number))
+            state = backend.get_objective(issue_id=number)
             if state is None:
                 raise UserFacingCliError(
                     f"Objective #{number} not found", error_type="objective_not_found"
@@ -318,7 +319,7 @@ def _run_impl(
 
     selection = graph.classify_for_planning()
     if selection.kind == "complete":
-        closed = backend.close_issue(issue_id=str(number), dry_run=dry_run)
+        closed = backend.close_issue(issue_id=number, dry_run=dry_run)
         payload.update(
             action="completed",
             closed=closed,
@@ -391,7 +392,7 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
 
 @alias("r")
 @click.command("run")
-@click.argument("number", type=int)
+@click.argument("number")
 @click.option(
     "--remote",
     default="",
@@ -406,11 +407,13 @@ def _render_run(payload: dict[str, Any], *, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def run_objective(
-    ctx: click.Context, *, number: int, remote: str, wait: bool, dry_run: bool, as_json: bool
+    ctx: click.Context, *, number: str, remote: str, wait: bool, dry_run: bool, as_json: bool
 ) -> None:
     """Advance an objective's backlog one autonomously-safe step, then pause at the human gate."""
     try:
-        payload = _run_impl(ctx, number=number, remote=remote, wait=wait, dry_run=dry_run)
+        payload = _run_impl(
+            ctx, number=parse_objective_id(number), remote=remote, wait=wait, dry_run=dry_run
+        )
     except (GitHubError, IssueBackendError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return

@@ -22,7 +22,7 @@ import { booleanField, type ColdJson, runColdDoor } from "./coldDoor.ts";
 import { loadPerkConfig } from "./config.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
-import { numberParam, paramsOf, stringParam } from "./toolParams.ts";
+import { idParam, paramsOf, stringParam } from "./toolParams.ts";
 import {
   appendWorkflowState,
   type BranchSource,
@@ -39,7 +39,8 @@ type NodeStatus = (typeof NODE_STATUSES)[number];
 export const MIN_AUDIT_LENGTH = 40;
 
 interface ObjectiveNodeParams {
-  objective: number;
+  /** Opaque string objective id (GitHub "7", Linear "ENG-7") — §8.21. */
+  objective: string;
   node: string;
   status?: NodeStatus;
   pr?: string;
@@ -49,7 +50,7 @@ interface ObjectiveNodeParams {
 
 /** The ok-arm fields. */
 export interface ObjectiveNodeOk {
-  objective: number;
+  objective: string;
   node: string;
   comment_updated: boolean;
 }
@@ -101,7 +102,7 @@ function recordNodeClaim(
   params: ObjectiveNodeParams,
 ): void {
   if (params.status === undefined) return; // pr-only / description-only: untouched.
-  const claim: ObjectiveNodeClaim = { objective: String(params.objective), node: params.node };
+  const claim: ObjectiveNodeClaim = { objective: params.objective, node: params.node };
   if (params.status === "planning") {
     appendWorkflowState(pi, ctx, {
       data: { objective_node_claim: claim },
@@ -143,9 +144,12 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodePayload {
 export function decodeObjectiveNodeParams(params: unknown): ObjectiveNodeParams | null {
   const p = paramsOf(params);
   if (p === null) return null;
-  const objective = numberParam(p, "objective");
+  // Objective ids are opaque strings (§8.21); bare numbers (the GitHub habit) coerce.
+  const objective = idParam(p, "objective");
   const node = stringParam(p, "node");
-  if (typeof objective !== "number" || typeof node !== "string" || !node) return null;
+  if (typeof objective !== "string" || !objective || typeof node !== "string" || !node) {
+    return null;
+  }
   const rawStatus = stringParam(p, "status");
   if (rawStatus === null) return null;
   let status: NodeStatus | undefined;
@@ -168,9 +172,9 @@ export function decodeObjectiveNodeParams(params: unknown): ObjectiveNodeParams 
 export function decodeReconcileParams(params: unknown): ReconcileObjectiveParams | null {
   const p = paramsOf(params);
   if (p === null) return null;
-  const objective = numberParam(p, "objective");
+  const objective = idParam(p, "objective");
   const prose = stringParam(p, "prose");
-  if (typeof objective !== "number" || typeof prose !== "string") return null;
+  if (typeof objective !== "string" || !objective || typeof prose !== "string") return null;
   return { objective, prose };
 }
 
@@ -188,7 +192,7 @@ export function buildObjectiveNodeArgs(params: ObjectiveNodeParams): string[] | 
   const { objective, node, status, pr, description } = params;
   const hasDescription = description !== undefined && description !== null;
   if (status === undefined && (pr === undefined || pr === null) && !hasDescription) return null;
-  const args = ["objective", "node", String(objective), "--node", node];
+  const args = ["objective", "node", objective, "--node", node];
   if (status !== undefined) args.push("--status", status);
   if (pr !== undefined && pr !== null) args.push("--pr", pr);
   if (hasDescription) args.push("--description", description);
@@ -208,8 +212,13 @@ export async function objectiveNode(
 ): Promise<ObjectiveNodeResult> {
   const fail = failFor(ctx, "objective-plan", "objective_node");
 
-  if (typeof params?.objective !== "number" || typeof params?.node !== "string" || !params.node) {
-    return fail("objective_node needs { objective: <number>, node: <id> }", "bad_input");
+  if (
+    typeof params?.objective !== "string" ||
+    !params.objective ||
+    typeof params?.node !== "string" ||
+    !params.node
+  ) {
+    return fail("objective_node needs { objective: <id>, node: <id> }", "bad_input");
   }
 
   // The completion-audit gate (model-path-only): `status:"done"` requires a non-trivial `audit`.
@@ -251,13 +260,14 @@ export async function objectiveNode(
 }
 
 interface ReconcileObjectiveParams {
-  objective: number;
+  /** Opaque string objective id (§8.21). */
+  objective: string;
   prose: string;
 }
 
 /** The ok-arm fields. */
 export interface ReconcileObjectiveOk {
-  objective: number;
+  objective: string;
   updated: boolean;
 }
 
@@ -286,8 +296,12 @@ export async function reconcileObjective(
 ): Promise<ReconcileObjectiveResult> {
   const fail = failFor(ctx, "objective-reconcile", "reconcile_objective");
 
-  if (typeof params?.objective !== "number" || typeof params?.prose !== "string") {
-    return fail("reconcile_objective needs { objective: <number>, prose: <string> }", "bad_input");
+  if (
+    typeof params?.objective !== "string" ||
+    !params.objective ||
+    typeof params?.prose !== "string"
+  ) {
+    return fail("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
   }
 
   // The substrate's stdin channel stages the prose in run scratch (pi.exec has no stdin) and
@@ -295,7 +309,7 @@ export async function reconcileObjective(
   const r = await runColdDoor<ReconcilePayload>(
     pi,
     ctx,
-    ["objective", "reconcile", String(params.objective), "--json"],
+    ["objective", "reconcile", params.objective, "--json"],
     {
       label: "perk objective reconcile",
       decode: decodeReconcile,
@@ -342,13 +356,14 @@ export function resolveReconcileObjective(args: string, ctx: ExtensionContext): 
   }
 }
 
-/** Parse `--node ID` out of the command args (everything else is the objective number). */
+/** Parse `--node ID` out of the command args (everything else is the objective id — an opaque
+ * string per §8.21: `7`, `#7`, or Linear's `ENG-7`). */
 function parseCommandArgs(args: string): { number: string | null; node: string | null } {
   const nodeMatch = args.match(/--node[=\s]+(\S+)/);
   const node = nodeMatch?.[1] ?? null;
   const rest = args.replace(/--node[=\s]+\S+/, "").trim();
-  const numberMatch = rest.match(/\b#?(\d+)\b/);
-  return { number: numberMatch?.[1] ?? null, node };
+  const token = rest.split(/\s+/)[0]?.replace(/^#/, "") ?? "";
+  return { number: token.length > 0 ? token : null, node };
 }
 
 /** The seed guidance the warm `/objective-plan` injects to start the factory loop (the
@@ -430,7 +445,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       additionalProperties: false,
       required: ["objective", "node"],
       properties: {
-        objective: { type: "number", description: "The objective issue number." },
+        objective: { type: ["string", "number"], description: "The objective issue id." },
         node: { type: "string", description: "The roadmap node id (e.g. 2.3)." },
         status: {
           type: "string",
@@ -462,7 +477,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
           ctx,
           "objective-plan",
           "objective_node",
-        )("objective_node needs { objective: <number>, node: <id> }", "bad_input");
+        )("objective_node needs { objective: <id>, node: <id> }", "bad_input");
       }
       return objectiveNode(pi, ctx, decoded);
     },
@@ -483,7 +498,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
       additionalProperties: false,
       required: ["objective", "prose"],
       properties: {
-        objective: { type: "number", description: "The objective issue number." },
+        objective: { type: ["string", "number"], description: "The objective issue id." },
         prose: {
           type: "string",
           description:
@@ -498,7 +513,7 @@ export function registerObjectivePlan(pi: ExtensionAPI): void {
           ctx,
           "objective-reconcile",
           "reconcile_objective",
-        )("reconcile_objective needs { objective: <number>, prose: <string> }", "bad_input");
+        )("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
       }
       return reconcileObjective(pi, ctx, decoded);
     },

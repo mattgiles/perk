@@ -76,7 +76,7 @@ def test_plan_save_json_shape(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["success"] is True
     assert payload["issue"] == {
-        "number": 123,
+        "id": "123",
         "url": "https://gh/o/r/issues/123",
         "existed": False,
     }
@@ -358,7 +358,7 @@ def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["plan_ref"]["consumed_learn"] == [45, 50]
+    assert payload["plan_ref"]["consumed_learn"] == ["45", "50"]
 
 
 def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
@@ -371,7 +371,7 @@ def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
         {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
     )
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == [7, 9]
+    assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == ["7", "9"]
 
 
 def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
@@ -499,7 +499,7 @@ def test_plan_save_resave_merges_header_fields(monkeypatch):
     assert isinstance(header, dict)
     kwargs = cast("dict[str, object]", header)
     assert kwargs["issue"] == 123
-    assert kwargs["fields"] == {"objective_id": "7", "consumed_learn": [45, 50]}
+    assert kwargs["fields"] == {"objective_id": "7", "consumed_learn": ["45", "50"]}
 
 
 def test_plan_save_resave_without_header_fields_skips_update(monkeypatch):

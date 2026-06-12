@@ -80,7 +80,7 @@ def _overlay(
     record: dict[str, Any],
     repo_root: Any,
     *,
-    plan_cache: dict[int, issue_backend.PlanState | None],
+    plan_cache: dict[str, issue_backend.PlanState | None],
 ) -> tuple[runner.RunObservation | None, github.PullRequest | None]:
     """Best-effort live overlay for one record: (run observation, correlated PR). Each read is
     fail-soft — a failure degrades to ``None`` with a one-line stderr note, never raises."""
@@ -97,19 +97,19 @@ def _overlay(
             run_obs = None
 
     pr: github.PullRequest | None = None
+    # Plan ids are opaque strings (contracts §8.21): any non-empty id resolves via the backend.
     pr_id = str((record.get("plan_ref") or {}).get("pr_id", "")).strip()
-    if pr_id.isdigit() and int(pr_id) > 0:
-        number = int(pr_id)
-        if number in plan_cache:
-            plan_state = plan_cache[number]
+    if pr_id:
+        if pr_id in plan_cache:
+            plan_state = plan_cache[pr_id]
         else:
             try:
                 backend = issues.resolve_issue_backend(repo_root)
-                plan_state = backend.get_plan(issue_id=str(number))
+                plan_state = backend.get_plan(issue_id=pr_id)
             except issue_backend.IssueBackendError as exc:
-                user_output(f"note: plan #{number} unavailable: {exc}")
+                user_output(f"note: plan #{pr_id} unavailable: {exc}")
                 plan_state = None
-            plan_cache[number] = plan_state
+            plan_cache[pr_id] = plan_state
         pr = plan_state.pr if plan_state is not None else None
     return run_obs, pr
 
@@ -189,7 +189,7 @@ def list_runs(ctx: click.Context, *, no_refresh: bool, limit: int, as_json: bool
 
     records = cache.list_dispatch_records(repo_root)[:limit]
     refreshed = not no_refresh
-    plan_cache: dict[int, issue_backend.PlanState | None] = {}
+    plan_cache: dict[str, issue_backend.PlanState | None] = {}
     rows: list[dict[str, Any]] = []
     for record in records:
         if refreshed:
