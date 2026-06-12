@@ -60,6 +60,12 @@ prefer.
 node's update; recovery is an idempotent `/plan-save` re-save or a manual `perk objective node`.
 If parallel planning becomes heavy, this is the seam to harden first.
 
+The race **has recurred in practice** (a plan saved with its objective/node ids whose `pr`
+backlink never landed): a `planning`-stuck node with `pr: null` *after its plan's PR merged* is
+now a **known signature** of this race, not an anomaly — the land-time mechanical done-mark only
+marks the *backlinked* node, so it skips the racy one. `/objective-reconcile` is the working
+safety net (sets `pr` + `done` with audit); expect reconcile passes to encounter this shape.
+
 The `perk objective run` supervisor stays sequential but **inherits pending-first** — its
 `plan_required` remediation points at a pending node, not a possibly-live claim; parallel dispatch
 (concurrent runs, budget aggregation) is deferred.
@@ -77,7 +83,8 @@ When a convergence-sweep node runs in parallel with feature nodes, a mid-impleme
 remove or rename exactly the kind of small seams plans anchor on — **re-read every plan-anchored
 module after rebasing**; the first `edit` oldText mismatch is the tell. Relatedly, re-verify
 roadmap scope counts (e.g. "~6 casts" vs an actual 9) against the tree at planning time rather
-than trusting node prose.
+than trusting node prose. The mild common case is an import-list conflict — multi-line
+one-import-per-line lists make those trivial (union both sides).
 
 ### Scoping that held: don't over-plumb
 

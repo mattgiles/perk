@@ -1,6 +1,6 @@
 ---
 title: Worktree node_modules resolution trap — stale SDK shadowing
-read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, or a `shared/` source change is not reflected when smoked via the global `perk` binary.
+read_when: CI surfaces typecheck/test failures in files your diff never touched, a fresh worktree fails `tsc`/`node --test` before `npm ci`, you bump a pinned Pi/SDK version in a worktree and the change seems to do nothing, a `shared/` source change is not reflected when smoked via the global `perk` binary, or a test run exits -1/143 with no FAILED line.
 ---
 
 # Worktree `node_modules` resolution
@@ -43,6 +43,12 @@ The allow-scripts warnings `npm ci` prints are benign.
 annotations on transitive deps (e.g. pi-tui, typebox, marked, get-east-asian-width). Run
 `git checkout package-lock.json` before committing to keep the PR diff clean — these annotations are
 not part of the change.
+
+## False failure: a `run_ci` test exit of -1/143 is a kill, not a failure
+
+A `run_ci` test run reporting exit code **-1/143 with no `FAILED` line** was SIGTERMed mid-run,
+not failed — a clean rerun passes unchanged. Check for an actual `FAILED` assertion line before
+debugging; rerun first.
 
 ## Stale globally-installed `perk` + accidental self-converge
 

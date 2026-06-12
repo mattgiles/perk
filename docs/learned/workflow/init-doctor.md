@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -144,6 +144,21 @@ Lessons from making skills delivery a fail-level concern (see also `init-externa
 - **Seam-signature ripple**: before changing a patched seam's signature, grep tests for the seam
   name — the skills-sync seam had 8 stub sites whose monkeypatch lambdas all needed widening.
 
+## Network repairs live in the verify-gated repair gesture, never a `ManagedConvergence`
+
+Managed convergences run **unconditionally in offline unit tests**, so anything that does network
+I/O (the Linear label ensure, skills sync) must instead follow the `sync_skills` pattern: a
+`fix AND verify`-gated call in `run_doctor` appending to `fixed`/`fix_errors`, idempotent via
+lookup-first. Corollary: `_apply_fixes`' check-keyed loop only acts on `fail` checks — warn-level
+findings are repairable *only* through the gesture path.
+
+Related readiness shape (full detail in `linear-backend.md`): **one report-shaped probe, two
+consumers** — a never-raising `check_readiness` with an `ensure_labels` flag splitting doctor's
+lookup-only path from init/`--fix`'s converge path. Probe results carry only what was
+*discovered*; an input value a render needs goes on the wrapping report, not the probe result. And
+a verify-gated group that can't run must say *why it stopped* (a single warn check), never
+silently pass.
+
 ## Managed template reconvergence
 
 When you edit managed full-file templates in the codebase (for example, `PERK_RUN_WORKFLOW` in
@@ -194,3 +209,4 @@ the `again.fixed == []` idempotency tests.
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `extension/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
+- `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape

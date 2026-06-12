@@ -21,6 +21,11 @@ Filter `git.worktree_list()` by **both**:
 `/var`→`/private/var` symlinks otherwise mismatch. This filter naturally excludes the main repo
 worktree (not under `worktree_root`) and any hand-created / non-numeric worktrees.
 
+The same rule has a new site beyond worktree matching: **CliRunner JSON-payload assertions on
+macOS** — `git rev-parse --show-toplevel` resolves `runner.isolated_filesystem()`'s `/var/folders`
+dir to `/private/var/folders`, so `.resolve()` the tmp dir before building expected repo-rooted
+paths (see `session-data.md`).
+
 ## Uncertainty ⇒ skip, never delete
 
 Per-worktree PR-state lookup goes through `github.get_plan(number=...)`. Any `GitHubError`,
@@ -61,3 +66,4 @@ is the sole signal under test.
 - `perk/cli/commands/worktree_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`
 - `perk/git.py` — `delete_branch`, `worktree_remove`, `worktree_list`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
+- `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule

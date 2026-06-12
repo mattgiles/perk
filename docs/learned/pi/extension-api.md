@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, or hitting the `headfulUIContext` select/input gap.
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, hitting the `headfulUIContext` select/input gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
 # Pi extension API (0.78.x)
@@ -68,6 +68,33 @@ Custom planning tools must be registered/listed in `READ_ONLY_TOOLS` in order to
 keeping them out of the latter ensures they aren't incorrectly classified as core SDK-restricted
 read-only tools.
 
+## Registration-time `process.cwd()` config reads make harness tests host-repo-sensitive
+
+`registerPlanMode` (and any seam reading committed config at factory/registration time) resolves
+from `process.cwd()`, **not** the harness `cwd` option. Dogfooding config commits to the perk repo
+itself (e.g. `[providers] plan = "plannotator-plan"` in `.pi/perk.toml`) then silently vacate
+flags/commands inside test runs — the host repo's committed config leaks into the suite.
+
+**Rule:** any harness test exercising registration-time branching must `process.chdir()` into its
+scaffold and restore in `finally`. Hit twice independently. Diagnosis shortcut: a harness test
+failing only locally/on main → check committed `.pi/perk.toml` before suspecting the code.
+
+## The harness inherits the agent's own `PERK_RUN_ID`
+
+node-test runs launched from inside a perk session inherit the session's exported `PERK_RUN_ID`.
+Harness tests that pass no `env` then take the **cold-claim path** and emit linkage-error stderr
+naming a ULID you don't recognize — and the leak *persists across tests* via the harness env
+save/restore (a later test's `applyEnv` snapshots the ambient leaked value and faithfully restores
+it on dispose). This looks exactly like a regression from run-id code and costs a debugging detour
+if you don't know it.
+
+- Diagnosis: `echo $PERK_RUN_ID`.
+- CI is unaffected (no perk session env). Run locally with `env -u PERK_RUN_ID node --test …` for
+  representative output.
+- Hardening candidate (not done): default `PERK_RUN_ID: undefined` in `loadPerkSession`'s
+  `applyEnv` baseline (alongside `PERK_SELFCHECK`/`PERK_NO_LLM`), with claim tests opting in
+  explicitly.
+
 ## Strict-mode index access in tests
 
 Under the extension's strict `tsconfig.json` compiler options, indexing into arrays or tuples is
@@ -129,3 +156,4 @@ fake UI (see `pi/tool-param-decode.md`).
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree
 - `docs/learned/pi/tool-param-decode.md` — the pure-decode export that works around the
   `headfulUIContext` gap
+- `docs/learned/workflow/session-data.md` — the run-id lifecycle behind the `PERK_RUN_ID` leak
