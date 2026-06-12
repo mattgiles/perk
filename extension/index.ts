@@ -109,9 +109,10 @@ export default function (pi: ExtensionAPI) {
   // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
   // its browser plan-review UI via the `plan_review` bridge tool while perk's plan surface + gate
   // stay (planMode skips only `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but
-  // INERT unless `[providers] plan = "plannotator-plan"`. It needs no `gating` (Invariant 1: the
-  // read-only gate stays perk's — the shim never arbitrates tools, and never saves anything).
-  registerPlanAdapterPlannotator(pi);
+  // INERT unless `[providers] plan = "plannotator-plan"`. It takes `gating` only to COMPOSE the
+  // approvalSave seam on an APPROVED review (Node 2.4: auto-save → D1a gate exit) — Invariant 1
+  // still holds: the adapter composes the gate through the seam, never owns it.
+  registerPlanAdapterPlannotator(pi, gating);
 
   // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
