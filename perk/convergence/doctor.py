@@ -22,10 +22,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import capabilities, env, github, init, issues, linear, linear_backend
+from perk import github
+from perk.backends import issues, linear, linear_backend
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence import capabilities, env, init
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
+from perk.run.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
 from perk.state import cache, gc
 from perk.substrate import bindings, git, providers, registry
 from perk.substrate.config import (
@@ -35,7 +38,6 @@ from perk.substrate.config import (
     load_committed_issues_team,
     load_config,
 )
-from perk.workflow_artifacts import RUNNER_ENABLED_VAR, RUNNER_PAT_SECRET
 
 Status = Literal["ok", "warn", "info", "fail"]
 

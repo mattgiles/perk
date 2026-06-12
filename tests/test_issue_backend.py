@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from perk import github, issue_backend, objective
+from perk import github, objective
+from perk.backends import issue_backend
 
 
 @dataclasses.dataclass
@@ -341,12 +342,12 @@ class TestImportDirection:
         # Node 1.2's adapter module (perk/issues.py) is the only module importing both sides;
         # the github package must never reach back into it.
         source = _github_package_source()
-        assert "perk.issues" not in source
+        assert "perk.backends.issues" not in source
         assert "import issues" not in source
 
     def test_issue_backend_module_never_imports_issues(self) -> None:
         # The contract stays implementation-free: the protocol module never references the
         # concrete backend/resolver module.
         source = Path(issue_backend.__file__).read_text(encoding="utf-8")
-        assert "perk.issues" not in source
+        assert "perk.backends.issues" not in source
         assert "import issues" not in source

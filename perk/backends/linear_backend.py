@@ -46,10 +46,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
-from perk import github, issue_backend, objective, plan
+from perk import github, objective, plan
+from perk.backends import issue_backend
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import LinearGraphQLError
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
-from perk.linear import LinearGraphQLError
 
 _PAGE_SIZE = 50
 

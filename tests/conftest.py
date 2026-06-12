@@ -2,9 +2,9 @@ import subprocess
 
 import pytest
 
-from perk import env as env_mod
 from perk import github as gh_mod
-from perk import init as init_mod
+from perk.convergence import env as env_mod
+from perk.convergence import init as init_mod
 
 
 @pytest.fixture

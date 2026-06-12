@@ -4,11 +4,11 @@ from typing import cast
 
 from click.testing import CliRunner
 
-from perk import env as env_mod
 from perk import github as gh_mod
-from perk import init as init_mod
 from perk.cli.cli import cli
-from perk.init import report_to_dict, run_init
+from perk.convergence import env as env_mod
+from perk.convergence import init as init_mod
+from perk.convergence.init import report_to_dict, run_init
 
 
 def _git_init(path) -> None:

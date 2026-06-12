@@ -17,8 +17,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk import github, runner
+from perk import github
 from perk.github import GitHubError
+from perk.run import runner
 from perk.state import run_id
 from perk.substrate.output import user_output
 

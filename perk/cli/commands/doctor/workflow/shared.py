@@ -5,7 +5,7 @@ import json
 import click
 
 from perk.cli.commands.doctor.render import render_group
-from perk.doctor import Check
+from perk.convergence.doctor import Check
 from perk.substrate.output import machine_output, user_output
 
 # The focused render order for the workflow subgroup (a subset of doctor's `GROUP_ORDER`).

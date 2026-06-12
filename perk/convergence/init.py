@@ -19,11 +19,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from perk import __version__, capabilities, env, github, linear, linear_backend, workflow_artifacts
+from perk import __version__, github
+from perk.backends import linear, linear_backend
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
-from perk.env import EnvCheck
+from perk.convergence import capabilities, env
+from perk.convergence.env import EnvCheck
 from perk.github import AuthStatus, GitHubError, RepoAccess
-from perk.issue_backend import IssueBackendError
+from perk.run import workflow_artifacts
 from perk.state import cache
 from perk.substrate import bindings, git
 from perk.substrate.config import (

@@ -4,7 +4,7 @@ import pytest
 
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
-from perk.init import run_init
+from perk.convergence.init import run_init
 
 
 def _snapshot(root):
@@ -352,7 +352,7 @@ def test_init_writes_skills_manifest_fragment(tmp_path):
     text = fragment.read_text(encoding="utf-8")
     assert "url: https://github.com/mattgiles/perk" in text
     assert f"ref: v{__version__}" in text
-    from perk.init import PERK_SKILLS
+    from perk.convergence.init import PERK_SKILLS
 
     for name in PERK_SKILLS:
         assert f"name: {name}" in text

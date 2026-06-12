@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
-from perk import github, runner
-from perk import workflow_smoke as ws
+from perk import github
 from perk.github import GitHubError, WorkflowRun
+from perk.run import runner
+from perk.run import workflow_smoke as ws
 
 
 def _wr(**kw) -> WorkflowRun:

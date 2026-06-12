@@ -10,7 +10,7 @@ import sys
 import click
 
 from perk.cli.ensure import UserFacingCliError
-from perk.init import InitReport, report_to_dict, run_init
+from perk.convergence.init import InitReport, report_to_dict, run_init
 from perk.substrate.output import machine_output, user_output
 
 

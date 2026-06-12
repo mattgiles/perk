@@ -12,11 +12,13 @@ from typing import cast
 
 import pytest
 
-from perk import github, issue_backend, linear_backend, objective, plan, run_report
+from perk import github, objective, plan
+from perk.backends import issue_backend, linear_backend
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import LinearGraphQLError
+from perk.backends.linear_backend import LinearIssueBackend, to_linear_markdown
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
-from perk.linear import LinearGraphQLError
-from perk.linear_backend import LinearIssueBackend, to_linear_markdown
+from perk.run import run_report
 
 _TEAM_RESPONSE: dict[str, object] = {"teams": {"nodes": [{"id": "team-1"}]}}
 _STATES_RESPONSE: dict[str, object] = {
@@ -1345,7 +1347,7 @@ class TestImportDirection:
         # The resolver module will import us at wiring time (Nodes 2.3/2.4); importing it back
         # would be a cycle. Mirrors the TestImportDirection substring style.
         source = Path(linear_backend.__file__).read_text(encoding="utf-8")
-        assert "perk.issues" not in source
+        assert "perk.backends.issues" not in source
         assert "import issues" not in source
 
 

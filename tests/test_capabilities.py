@@ -1,4 +1,4 @@
-from perk import capabilities
+from perk.convergence import capabilities
 
 
 def test_inventory_all_required_in_phase0():

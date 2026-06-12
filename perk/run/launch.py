@@ -20,10 +20,12 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from perk import github, issues, linear_agent, runner
+from perk import github
+from perk.backends import issues, linear_agent
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
+from perk.run import runner
 from perk.state import cache, run_id
 from perk.substrate import git
 from perk.substrate.binding_delivery import render_cold_bindings

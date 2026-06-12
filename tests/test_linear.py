@@ -9,8 +9,8 @@ import json
 import httpx
 import pytest
 
-from perk.issue_backend import IssueBackendError
-from perk.linear import (
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import (
     LINEAR_GRAPHQL_URL,
     RATELIMITED_CODE,
     LinearClient,

@@ -212,7 +212,7 @@ def test_aliases_resolve(args):
 
 # --- cancel / retry (control surface, Node 3.2) ---------------------------------------
 
-from perk import runner as _runner  # noqa: E402
+from perk.run import runner as _runner  # noqa: E402
 
 
 def _noop_cancel(self, handle, *, repo_root):

@@ -9,8 +9,9 @@ import subprocess
 
 from click.testing import CliRunner
 
-from perk import github, launch, objective
+from perk import github, objective
 from perk.cli.cli import cli
+from perk.run import launch
 
 N = objective.NodeStatus
 

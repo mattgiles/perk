@@ -5,8 +5,10 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import github, issue_backend, launch, resume
+from perk import github
+from perk.backends import issue_backend
 from perk.cli.cli import cli
+from perk.run import launch, resume
 from perk.state import cache
 
 

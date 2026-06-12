@@ -4,7 +4,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, linear_agent
+from perk import github
+from perk.backends import linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
 from perk.state import cache

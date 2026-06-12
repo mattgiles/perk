@@ -5,9 +5,9 @@ from typing import Any
 
 import click
 
-from perk import runner
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
+from perk.run import runner
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 

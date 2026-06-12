@@ -2,7 +2,7 @@
 
 import click
 
-from perk.doctor import Check, DoctorReport
+from perk.convergence.doctor import Check, DoctorReport
 from perk.substrate.output import user_output
 
 GROUP_ORDER = (

@@ -30,9 +30,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import github, issue_backend, linear, linear_backend, objective
+from perk import github, objective
+from perk.backends import issue_backend, linear, linear_backend
+from perk.backends.issue_backend import IssueBackendError
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
 from perk.substrate import config
 
 # The `[issues] backend` vocabulary (contracts.md §8.21). Both "github" (default) and "linear"

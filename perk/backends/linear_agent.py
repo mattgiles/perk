@@ -51,7 +51,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from perk.linear import LinearClient
+from perk.backends.linear import LinearClient
 from perk.state import cache
 
 AGENT_TOKEN_ENV = "LINEAR_AGENT_TOKEN"

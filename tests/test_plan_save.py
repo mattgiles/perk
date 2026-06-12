@@ -5,7 +5,8 @@ from typing import cast
 
 from click.testing import CliRunner
 
-from perk import github, issue_backend, issues
+from perk import github
+from perk.backends import issue_backend, issues
 from perk.cli.cli import cli
 
 PLAN = "# My Feature\n\nDo the thing.\n"

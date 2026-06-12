@@ -5,8 +5,8 @@ from pathlib import Path
 import yaml
 
 from perk import __version__
-from perk import workflow_artifacts as wa
-from perk.runner import GITHUB_ACTIONS_WORKFLOW
+from perk.run import workflow_artifacts as wa
+from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
 
 def test_workflow_path_matches_the_locked_dispatch_filename():

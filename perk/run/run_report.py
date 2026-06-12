@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from perk import issues
+from perk.backends import issues
 from perk.state import cache
 from perk.substrate.output import user_output
 

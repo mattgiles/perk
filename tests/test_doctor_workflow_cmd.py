@@ -5,9 +5,11 @@ import subprocess
 
 from click.testing import CliRunner
 
-from perk import doctor, github, init, workflow_smoke
+from perk import github
 from perk.cli.cli import cli
-from perk.doctor import Check
+from perk.convergence import doctor, init
+from perk.convergence.doctor import Check
+from perk.run import workflow_smoke
 
 
 def _git_init(path: str) -> None:

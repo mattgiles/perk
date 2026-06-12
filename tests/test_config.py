@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from perk.init import PERK_TOML_TEMPLATE
+from perk.convergence.init import PERK_TOML_TEMPLATE
 from perk.substrate.config import (
     load_committed_compaction,
     load_committed_issues_backend,

@@ -6,11 +6,13 @@ from typing import Any
 
 import click
 
-from perk import github, issue_backend, issues, runner
+from perk import github
+from perk.backends import issue_backend, issues
 from perk.cli.alias import alias
 from perk.cli.commands.workflow.run.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
+from perk.run import runner
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 

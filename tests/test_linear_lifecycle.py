@@ -27,9 +27,11 @@ from typing import cast
 import pytest
 from click.testing import CliRunner
 
-from perk import github, issues, linear, plan, run_report
+from perk import github, plan
+from perk.backends import issues, linear
+from perk.backends.linear import LinearGraphQLError
 from perk.cli.cli import cli
-from perk.linear import LinearGraphQLError
+from perk.run import run_report
 from perk.state import cache
 
 _PAGE = 2  # deliberately tiny so the suite exercises the cursor loop on real data

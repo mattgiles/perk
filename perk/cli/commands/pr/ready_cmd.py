@@ -13,11 +13,12 @@ from pathlib import Path
 
 import click
 
-from perk import github, launch
+from perk import github
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
+from perk.run import launch
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 

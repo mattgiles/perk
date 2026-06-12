@@ -9,7 +9,7 @@ entry planes (CLI launchers / extension transitions) cannot drift. Generation is
 import click
 
 from perk.cli.context import require_config, require_repo
-from perk.launch import launch_stage
+from perk.run.launch import launch_stage
 from perk.substrate.registry import RegistryError, Stage, load_registry
 
 # Stages with a dedicated, hand-written command (skipped by the generic generator below).

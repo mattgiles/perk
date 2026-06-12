@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from perk import linear_agent
+from perk.backends import linear_agent
 from perk.state import cache
 
 _TOKEN_ENV = {"LINEAR_AGENT_TOKEN": "lin_oauth_agent"}

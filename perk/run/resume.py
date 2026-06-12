@@ -9,7 +9,8 @@ actionable stage**. The launcher then materializes the ref + launches that stage
 
 from typing import Any
 
-from perk import issue_backend, plan
+from perk import plan
+from perk.backends import issue_backend
 
 
 def resolve_resume_stage(
