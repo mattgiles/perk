@@ -12,7 +12,7 @@
 // a thin `registerAskUser` wrapper — mirrors ciExecutor.ts's pure-core + injected-fakes testability.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { paramsOf, stringArrayParam, stringParam } from "./toolParams.ts";
+import { paramsOf, stringArrayParam, stringParam } from "../toolParams.ts";
 
 /** The always-appended escape entry on the select path so preset options never trap the user. */
 export const OTHER_CHOICE = "✏️ Other (type a custom answer)…";

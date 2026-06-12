@@ -47,7 +47,7 @@ typecheck:
 # run the test suite (python: pytest, typescript: node:test)
 test *args:
     uv run pytest {{args}}
-    node --test extension/*.test.ts
+    node --test "extension/**/*.test.ts"
 
 # build the python wheel + sdist
 build:

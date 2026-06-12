@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   ambientIndexProbe,
   buildSelfcheckReport,
@@ -12,7 +13,6 @@ import {
   managedAgentsProbe,
   readAmbientIndex,
 } from "./selfcheck.ts";
-import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 // ---------------------------------------------------------------------------
 // Pure: ambientIndexProbe

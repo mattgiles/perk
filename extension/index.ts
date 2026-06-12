@@ -7,8 +7,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { registerAddress } from "./address.ts";
-import { registerAskUser } from "./askUser.ts";
 import { registerBindingDelivery } from "./bindingDelivery.ts";
 import {
   ensureRunScratch,
@@ -18,11 +16,17 @@ import {
   setMarker,
 } from "./cache.ts";
 import { registerCheckpoints } from "./checkpoints.ts";
-import { registerCiExecutor } from "./ciExecutor.ts";
-import { registerLand } from "./land.ts";
-import { registerLearn } from "./learn.ts";
-import { registerLearnDocs } from "./learnDocs.ts";
-import { registerLifecycleGates } from "./lifecycleGates.ts";
+import { registerAddress } from "./doors/address.ts";
+import { registerAskUser } from "./doors/askUser.ts";
+import { registerCiExecutor } from "./doors/ciExecutor.ts";
+import { registerLand } from "./doors/land.ts";
+import { registerLearn } from "./doors/learn.ts";
+import { registerLearnDocs } from "./doors/learnDocs.ts";
+import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
+import { registerPrReview } from "./doors/prReview.ts";
+import { registerReady } from "./doors/ready.ts";
+import { registerSelfcheck } from "./doors/selfcheck.ts";
+import { registerSubmit } from "./doors/submit.ts";
 import { registerObjective } from "./objective.ts";
 import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
 import { registerObjectiveDraft } from "./objectiveDraft.ts";
@@ -34,14 +38,10 @@ import { registerPlanDraft } from "./planDraft.ts";
 import { registerPlanMode } from "./planMode.ts";
 import { registerPlanReview } from "./planReview.ts";
 import { registerPlanSave } from "./planSave.ts";
-import { registerPrReview } from "./prReview.ts";
-import { registerReady } from "./ready.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { mintRunId } from "./runId.ts";
-import { registerSelfcheck } from "./selfcheck.ts";
-import { registerSubmit } from "./submit.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces.ts";
 import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";

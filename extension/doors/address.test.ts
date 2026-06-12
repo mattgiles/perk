@@ -6,8 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("addressGuidance injects the configured review-classifier model when set", () => {
   const text = addressGuidance(false, "x/y");

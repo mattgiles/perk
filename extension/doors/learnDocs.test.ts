@@ -5,8 +5,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { learnDocsGuidance } from "./learnDocs.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("learnDocsGuidance names the inbox path", () => {
   const text = learnDocsGuidance(".pi/workflow/scratch/learn-docs-inbox.md", ["45", "50"]);
