@@ -3,7 +3,10 @@
 // via the shared cold-door client (`runColdDoor`, Node 1.4 — the body rides the run-scratch stdin
 // channel; D1 — GitHub writes canonical in Python), which creates a `perk:learn` issue + clears
 // `pending-learn`; then mirror the marker-clear in-session (idempotent). With no `summary`, stay
-// the thin TS-only marker-clear (graceful — no empty issue). Never throws (soft `details.ok`).
+// the thin TS-only marker-clear (graceful — no empty issue). Never throws (soft `details.ok`);
+// the capture decode is fully LENIENT — a `success: true` envelope always yields the captured-ok
+// terminating result even when `learn_issue` is undecodable (render-only field; see
+// `decodeLearnCapture`).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
@@ -26,20 +29,30 @@ export type LearnResult = Result<LearnOk>;
 
 /** The decoded `perk learn capture --json` payload slice the warm door consumes. */
 interface LearnCapturePayload {
-  learn_issue: { id: string; url: string; existed: boolean };
+  learn_issue?: { id: string; url: string; existed: boolean };
 }
 
 /**
- * Narrow the `perk learn capture --json` success payload. Strict on `learn_issue` (the success
- * message dereferences it) — any miss → null → bad_output. `pending_cleared` is unconsumed.
+ * Narrow the `perk learn capture --json` success payload — fully LENIENT, per the decode-policy
+ * criterion (strict iff the field is appended to workflow-state; see
+ * `docs/learned/workflow/cold-door-client.md`). `learn_issue` is render-only — it feeds only the
+ * success message text and `details` — and the `success: true` envelope is the cold door's
+ * authoritative statement that the capture mutation completed and the on-disk `pending-learn`
+ * marker was already cleared. So any miss on the sub-object (absent key, the legacy pre-#387
+ * `number` shape, mistyped fields — e.g. under CLI↔extension version skew) yields
+ * `{ learn_issue: undefined }`, never null: the warm report must survive an undecodable payload,
+ * and the `bad_output` arm is deliberately unreachable for this door. `pending_cleared` is
+ * unconsumed.
  */
-function decodeLearnCapture(payload: ColdJson): LearnCapturePayload | null {
+function decodeLearnCapture(payload: ColdJson): LearnCapturePayload {
   const issue = objectField(payload, "learn_issue");
-  if (issue === undefined) return null;
+  if (issue === undefined) return { learn_issue: undefined };
   const id = stringField(issue, "id");
   const url = stringField(issue, "url");
   const existed = booleanField(issue, "existed");
-  if (id === undefined || url === undefined || existed === undefined) return null;
+  if (id === undefined || url === undefined || existed === undefined) {
+    return { learn_issue: undefined };
+  }
   return { learn_issue: { id, url, existed } };
 }
 
@@ -80,12 +93,22 @@ export async function learnDone(
   });
   if (!r.ok) return fail(r.message, r.errorType);
 
-  // Mirror the marker-clear in-session (idempotent; the worker also cleared it on disk).
+  // Mirror the marker-clear in-session (idempotent; the worker also cleared it on disk). Runs
+  // even when `learn_issue` is undecodable — a success envelope clears the marker.
   const { wasPending } = clearPending(ctx);
-  const verb = r.data.learn_issue.existed ? "Found existing" : "Created";
+  const issue = r.data.learn_issue;
+  if (issue === undefined) {
+    return ok(
+      "Captured learnings; pending-learn cleared. (learn issue details undecodable — the perk " +
+        "CLI and the perk extension may be version-skewed.)",
+      { was_pending: wasPending, captured: true },
+      { terminate: true },
+    );
+  }
+  const verb = issue.existed ? "Found existing" : "Created";
   return ok(
-    `${verb} learn issue #${r.data.learn_issue.id}; pending-learn cleared.`,
-    { was_pending: wasPending, captured: true, learn_issue: r.data.learn_issue },
+    `${verb} learn issue #${issue.id}; pending-learn cleared.`,
+    { was_pending: wasPending, captured: true, learn_issue: issue },
     { terminate: true },
   );
 }

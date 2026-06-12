@@ -157,23 +157,58 @@ test("tool: learn with a summary delegates capture, surfaces the issue, and clea
   }
 });
 
-test("tool: learn with a malformed learn_issue payload fails as bad_output (marker kept)", async () => {
+test("tool: malformed learn_issue + success envelope → captured-ok, marker cleared (lenient decode)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   setMarker(cwd, PENDING_LEARN);
   const malformed = JSON.stringify({
     success: true,
     error_type: null,
     message: null,
-    learn_issue: { id: 99, url: "https://gh/o/r/issues/99" }, // id a number → reject (string ids, §8.21)
+    learn_issue: { id: 99, url: "https://gh/o/r/issues/99" }, // id a number → undecodable (string ids, §8.21)
   });
   const bin = fakePerk(cwd, { stdout: malformed });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
     const result = await h.invokeTool("learn", { summary: "something durable" });
-    const details = result.details as { ok: boolean; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "bad_output");
-    assert.ok(existsSync(markerPath(cwd, PENDING_LEARN)), "marker kept on a malformed payload");
+    assert.equal(result.terminate, true);
+    const details = result.details as { ok: boolean; captured?: boolean; learn_issue?: unknown };
+    assert.equal(details.ok, true);
+    assert.equal(details.captured, true);
+    assert.equal(details.learn_issue, undefined);
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /Captured learnings/);
+    assert.match(text, /version-skewed/);
+    assert.ok(
+      !existsSync(markerPath(cwd, PENDING_LEARN)),
+      "a success envelope clears the marker even when learn_issue is undecodable",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: legacy pre-#387 learn_issue shape (number, no id) → captured-ok (the skew regression)", async () => {
+  // The exact cold/warm version-skew payload pair that produced the false 'learn failed':
+  // a success envelope whose learn_issue carries the legacy `number` field instead of `id`.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const legacy = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    learn_issue: { number: 99, url: "https://gh/o/r/issues/99", existed: false },
+  });
+  const bin = fakePerk(cwd, { stdout: legacy });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("learn", { summary: "something durable" });
+    assert.equal(result.terminate, true);
+    const details = result.details as { ok: boolean; captured?: boolean; learn_issue?: unknown };
+    assert.equal(details.ok, true);
+    assert.equal(details.captured, true);
+    assert.equal(details.learn_issue, undefined);
+    assert.match(result.content[0]?.text ?? "", /version-skewed/);
+    assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "marker cleared on the skew payload");
   } finally {
     h.dispose();
   }

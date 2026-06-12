@@ -39,15 +39,18 @@ mutation already succeeded, so the success report must survive. Three arms, chos
 field:
 
 - **Strict on the core payload:** malformed → decode returns `null` → the client reports
-  `bad_output` with "`<label>` returned an unexpected payload". Use this arm for anything the
+  `bad_output` with "`<label>` reported success but returned an unexpected payload — the perk CLI
+  and the perk extension may be version-skewed (update/rebase so both planes match)". Use this arm for anything the
   success message/marker logic **dereferences** or persists. Reference: `decodePlanRef`.
 - **Advisory sub-objects are validated-but-dropped:** malformed → the field becomes `undefined` and
   the success report survives. Use this arm for report-only extras whose underlying mutation already
   succeeded (e.g. land's `objective`/`learn` sub-reports). Reference: `decodeObjectiveNode`.
 - **Fully lenient when *every* payload field is advisory display detail:** the decode defaults each
   field (`?? false`) and never returns null — the `bad_output` arm is deliberately unreachable for
-  that door and needs **no decode-edge tests** (they can't fail). Reference: the objectivePlan
-  decode.
+  that door and needs **no decode-edge tests** (they can't fail). References: the objectivePlan
+  decode and `extension/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
+  capture mutation precedes the decode, so a success envelope must survive an undecodable
+  sub-object; the post-#387 cold/warm skew lesson).
 
 A dropped advisory field must also **short-circuit any follow-up drive** — land's reconcile drive
 skips when `objective` is `undefined` (pinned by test). Don't let a downstream drive dereference an
