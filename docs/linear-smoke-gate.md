@@ -90,6 +90,53 @@ workflow automations) and additionally verify:
   `commentCreate.issueId`) accept the human identifier directly — if they reliably do, record
   it: that would let `_uuid_for` simplify to a pass-through.
 
+## Agent session emission (Objective #252, Node 5.1 — stretch)
+
+The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
+Offline fakes pin request *composition* only — this live smoke is the only surface that can prove
+Linear actually **accepts** the agent mutations (`agentSessionCreateOnIssue`,
+`agentActivityCreate`, `agentSessionUpdate`).
+
+### One-time setup
+
+1. Create a **Linear OAuth application with agent capability** (linear.app → Settings → API →
+   OAuth applications → enable "Agent" / `app:assignable`+`app:mentionable` as documented).
+2. Install it into the scratch workspace and complete the OAuth flow with **`actor=app`** — the
+   resulting access token acts *as the app*, which is what the AgentSession API requires (a
+   personal `LINEAR_API_KEY` is rejected).
+3. `export LINEAR_AGENT_TOKEN=<that access token>` (environment-only; without it the emission
+   layer is fully dormant).
+
+### Smoke script
+
+On a Linear-backed plan (the `[issues] backend = "linear"` setup above):
+
+1. `perk implement ENG-<n>` — verify in Linear's Agents UI: an **AgentSession** appears on the
+   plan issue with a `thought` activity ("Starting implement run …") and that
+   `.pi/workflow/agent-session.json` was written into the worktree. For a remote drive
+   (`perk implement --remote …`), the session's external links include the GitHub Actions run.
+2. `/submit` (or `perk pr submit --json`) — verify an `action` activity ("Opened pull request",
+   parameter = branch, result = PR URL) and the **PR link attached** to the session
+   (`addedExternalUrls`).
+3. `/land` (or `perk pr land --json`) — verify a `response` activity ("PR #n squash-merged." +
+   the objective-node summary when linked) and that the session's derived status settles.
+4. **Failed remote drive** (optional): force a remote implement to fail and verify the `error`
+   activity lands beside the terminal run-report note.
+5. Re-run any step **without** `LINEAR_AGENT_TOKEN` and verify zero agent-API traffic
+   (byte-identical behavior — the dormant guarantee).
+
+### Deferral register (agent emission)
+
+- **Exact mutation signatures unverified offline** — the GraphQL documents are substring-pinned
+  in `tests/test_linear_agent.py`; record any live schema rejection here.
+- **Staleness** — Linear marks sessions `stale` ~30 min after the last activity; long implement
+  runs show stale until the submit/land activity refreshes them (accepted, not mitigated).
+- **`perk address` emission** — deferred (no activity on the address stage).
+- **Agent plan checklist** (`agentSessionUpdate.plan`; Agent Plan API is a technology preview) —
+  deferred.
+- **Remote-created session invisible to a local land** — `agent-session.json` stays in the
+  runner's checkout; a later local land skips its emission (stderr note).
+
 ## Recorded observations
 
 > Append dated entries after each live run. Each observation feeds the named follow-up.
