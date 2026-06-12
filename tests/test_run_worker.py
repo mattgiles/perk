@@ -48,7 +48,7 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
         repo_root=tmp_path,
         run_id="RID123",
         stage_id="implement",
-        plan=42,
+        plan="42",
         base="main",
         environ={"PATH": "/usr/bin"},
     )
@@ -83,7 +83,7 @@ def test_spawn_argv_env_and_forwarded_exit_code(tmp_path, fake_github, monkeypat
         repo_root=tmp_path,
         run_id="RID9",
         stage_id="address",
-        plan=42,
+        plan="42",
         base=None,
         environ={"PATH": "/usr/bin"},
     )
@@ -113,7 +113,7 @@ def test_reporting_brackets_the_spawn_and_is_exit_code_neutral(tmp_path, fake_gi
         repo_root=tmp_path,
         run_id="RIDX",
         stage_id="implement",
-        plan=42,
+        plan="42",
         base=None,
         environ={"PATH": "/usr/bin"},
     )
@@ -129,7 +129,7 @@ def test_plan_not_found_is_loud(tmp_path, monkeypatch):
             repo_root=tmp_path,
             run_id="R",
             stage_id="implement",
-            plan=99,
+            plan="99",
             base=None,
             environ={},
         )
@@ -143,7 +143,7 @@ def test_non_drivable_stage_is_rejected(tmp_path, fake_github):
             run_id="R",
             stage_id="plan",  # warm/cold_local only, no cold_remote door
             base=None,
-            plan=42,
+            plan="42",
             environ={},
         )
     assert exc.value.error_type == "stage_not_drivable"
@@ -156,7 +156,7 @@ def test_unknown_stage_is_rejected(tmp_path, fake_github):
             run_id="R",
             stage_id="nope",
             base=None,
-            plan=42,
+            plan="42",
             environ={},
         )
     assert exc.value.error_type == "stage_not_drivable"
@@ -170,7 +170,7 @@ def test_missing_worker_entry_is_loud(tmp_path, fake_github):
             run_id="R",
             stage_id="implement",
             base=None,
-            plan=42,
+            plan="42",
             environ={},
         )
     assert exc.value.error_type == "worker_entry_missing"

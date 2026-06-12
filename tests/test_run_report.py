@@ -96,7 +96,7 @@ def test_read_outcome_no_run_finished_is_none(tmp_path):
 
 def test_format_started_has_marker_and_no_github_prose():
     body = run_report.format_started(
-        run_id="RID", stage="implement", plan=42, run_url="https://gh/runs/1"
+        run_id="RID", stage="implement", plan="42", run_url="https://gh/runs/1"
     )
     assert body.startswith("<!-- perk:run-report:RID -->")
     assert "implement" in body and "plan #42" in body and "RID" in body
@@ -104,7 +104,7 @@ def test_format_started_has_marker_and_no_github_prose():
 
 
 def test_format_started_without_run_url_omits_link():
-    body = run_report.format_started(run_id="RID", stage="implement", plan=42, run_url=None)
+    body = run_report.format_started(run_id="RID", stage="implement", plan="42", run_url=None)
     assert "Run:" not in body
     assert body.startswith("<!-- perk:run-report:RID -->")
 
@@ -116,7 +116,7 @@ def test_format_outcome_completed_with_pr():
     body = run_report.format_outcome(
         run_id="RID",
         stage="implement",
-        plan=42,
+        plan="42",
         run_url="https://gh/runs/1",
         outcome=_outcome(pr={"number": 7, "url": "https://gh/pull/7"}),
         exit_code=0,
@@ -132,7 +132,7 @@ def test_format_outcome_failed_carries_failure_summary():
     body = run_report.format_outcome(
         run_id="RID",
         stage="implement",
-        plan=42,
+        plan="42",
         run_url=None,
         outcome=_outcome(status="failed", error={"summary": "boom: it broke"}),
         exit_code=1,
@@ -146,7 +146,7 @@ def test_format_outcome_budget_exhausted_and_aborted_have_failure_section():
         body = run_report.format_outcome(
             run_id="RID",
             stage="address",
-            plan=5,
+            plan="5",
             run_url=None,
             outcome=_outcome(status=status, error={"summary": f"{status} detail"}),
             exit_code=1,
@@ -159,7 +159,7 @@ def test_format_outcome_address_with_null_pr_omits_pr_line():
     body = run_report.format_outcome(
         run_id="RID",
         stage="address",
-        plan=5,
+        plan="5",
         run_url=None,
         outcome=_outcome(pr=None),
         exit_code=0,
@@ -169,10 +169,10 @@ def test_format_outcome_address_with_null_pr_omits_pr_line():
 
 def test_format_outcome_degraded_when_outcome_none():
     ok = run_report.format_outcome(
-        run_id="RID", stage="implement", plan=42, run_url=None, outcome=None, exit_code=0
+        run_id="RID", stage="implement", plan="42", run_url=None, outcome=None, exit_code=0
     )
     bad = run_report.format_outcome(
-        run_id="RID", stage="implement", plan=42, run_url=None, outcome=None, exit_code=2
+        run_id="RID", stage="implement", plan="42", run_url=None, outcome=None, exit_code=2
     )
     assert "no structured outcome on disk" in ok and "completed" in ok
     assert "no structured outcome on disk" in bad and "failed" in bad
@@ -184,7 +184,7 @@ def test_format_outcome_degraded_when_outcome_none():
 
 def test_format_step_summary_completed():
     summary = run_report.format_step_summary(
-        stage="implement", plan=42, run_url="https://gh/runs/1", outcome=_outcome(), exit_code=0
+        stage="implement", plan="42", run_url="https://gh/runs/1", outcome=_outcome(), exit_code=0
     )
     assert summary.startswith("## perk remote implement")
     assert "Status: completed" in summary and "turns=3" in summary
@@ -193,7 +193,7 @@ def test_format_step_summary_completed():
 def test_format_step_summary_failed_has_failure_summary():
     summary = run_report.format_step_summary(
         stage="implement",
-        plan=42,
+        plan="42",
         run_url=None,
         outcome=_outcome(status="failed", error={"summary": "kaboom"}),
         exit_code=1,
@@ -203,7 +203,7 @@ def test_format_step_summary_failed_has_failure_summary():
 
 def test_format_step_summary_degraded_when_none():
     summary = run_report.format_step_summary(
-        stage="implement", plan=42, run_url=None, outcome=None, exit_code=1
+        stage="implement", plan="42", run_url=None, outcome=None, exit_code=1
     )
     assert "no structured outcome on disk" in summary
 
@@ -219,7 +219,7 @@ def test_report_started_upserts_marker_comment(tmp_path, monkeypatch):
         return github.CommentResult(posted=True)
 
     monkeypatch.setattr(github, "upsert_marked_comment", fake_upsert)
-    run_report.report_started(tmp_path, run_id="RID", stage="implement", plan=42, environ={})
+    run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
     assert calls["issue"] == 42
     assert calls["marker"] == "<!-- perk:run-report:RID -->"
     assert calls["marker"] in calls["body"]
@@ -231,7 +231,7 @@ def test_report_started_swallows_github_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(github, "upsert_marked_comment", boom)
     # Fail-soft: must not raise.
-    run_report.report_started(tmp_path, run_id="RID", stage="implement", plan=42, environ={})
+    run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
 
 
 def test_report_terminal_upserts_and_appends_step_summary(tmp_path, monkeypatch):
@@ -259,7 +259,7 @@ def test_report_terminal_upserts_and_appends_step_summary(tmp_path, monkeypatch)
         tmp_path,
         run_id="RID",
         stage="implement",
-        plan=42,
+        plan="42",
         exit_code=1,
         environ={"GITHUB_STEP_SUMMARY": str(summary_file)},
     )
@@ -281,7 +281,7 @@ def test_report_terminal_skips_summary_when_env_unset(tmp_path, monkeypatch):
     )
     # No GITHUB_STEP_SUMMARY -> no file write, no raise.
     run_report.report_terminal(
-        tmp_path, run_id="RID", stage="implement", plan=42, exit_code=0, environ={}
+        tmp_path, run_id="RID", stage="implement", plan="42", exit_code=0, environ={}
     )
 
 
@@ -291,5 +291,5 @@ def test_report_terminal_swallows_github_error(tmp_path, monkeypatch):
 
     monkeypatch.setattr(github, "upsert_marked_comment", boom)
     run_report.report_terminal(
-        tmp_path, run_id="RID", stage="implement", plan=42, exit_code=1, environ={}
+        tmp_path, run_id="RID", stage="implement", plan="42", exit_code=1, environ={}
     )

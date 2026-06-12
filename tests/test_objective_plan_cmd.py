@@ -406,7 +406,7 @@ def test_seed_prompt_injects_objective_explorer_model_when_configured():
     from perk.cli.commands.objective_plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
-    primed = _seed_prompt(7, node, "Ship it", "test/model")
+    primed = _seed_prompt("7", node, "Ship it", "test/model")
     assert 'model: "test/model"' in primed
     assert "[subagents] objective-explorer model" in primed
 
@@ -415,4 +415,4 @@ def test_seed_prompt_omits_model_when_unset():
     from perk.cli.commands.objective_plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
-    assert "passing `model:" not in _seed_prompt(7, node, "Ship it")
+    assert "passing `model:" not in _seed_prompt("7", node, "Ship it")
