@@ -8,7 +8,7 @@ Negative fixtures use a GOOD constant + per-test single-line mutation (mirroring
 
 import pytest
 
-from perk.providers import (
+from perk.substrate.providers import (
     Provider,
     ProvidersError,
     ProviderSet,

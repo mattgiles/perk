@@ -4,7 +4,7 @@ from click.testing import CliRunner
 
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
-from perk.config import Config
+from perk.substrate.config import Config
 
 
 def _ctx(repo: Path) -> PerkContext:
@@ -101,7 +101,7 @@ def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
     # PREVIEW (success:true), not the retired not-driven error exit.
     import json
 
-    from perk import cache
+    from perk.state import cache
 
     cache.write_plan_ref(
         git_repo,

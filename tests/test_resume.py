@@ -5,8 +5,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import cache, github, issue_backend, launch, resume
+from perk import github, issue_backend, launch, resume
 from perk.cli.cli import cli
+from perk.state import cache
 
 
 def _pr(state: str) -> github.PullRequest:

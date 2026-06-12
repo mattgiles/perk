@@ -1,7 +1,7 @@
 """Cross-verb helpers for the `perk registry` group."""
 
 from perk.cli.ensure import UserFacingCliError
-from perk.registry import Registry, RegistryError, load_registry
+from perk.substrate.registry import Registry, RegistryError, load_registry
 
 
 def load_or_die() -> Registry:

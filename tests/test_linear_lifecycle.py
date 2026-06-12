@@ -27,9 +27,10 @@ from typing import cast
 import pytest
 from click.testing import CliRunner
 
-from perk import cache, github, issues, linear, plan, run_report
+from perk import github, issues, linear, plan, run_report
 from perk.cli.cli import cli
 from perk.linear import LinearGraphQLError
+from perk.state import cache
 
 _PAGE = 2  # deliberately tiny so the suite exercises the cursor loop on real data
 
@@ -278,12 +279,12 @@ def _pr(*, number: int = 51, state: str = "OPEN", draft: bool = False) -> github
 def _patch_pr_tier_for_submit(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """The GitHub PR-tier fakes (the test_pr_land/test_pr_submit pattern): push/PR open."""
     calls: dict[str, object] = {"pushed": None, "pr_body": None}
-    monkeypatch.setattr("perk.git.is_dirty", lambda root: False)
+    monkeypatch.setattr("perk.substrate.git.is_dirty", lambda root: False)
 
     def _push(root, branch, *, force=False):
         calls["pushed"] = branch
 
-    monkeypatch.setattr("perk.git.push", _push)
+    monkeypatch.setattr("perk.substrate.git.push", _push)
     monkeypatch.setattr(github, "default_branch", lambda root: "main")
     monkeypatch.setattr(github, "create_pr", lambda **k: _pr(draft=True))
 

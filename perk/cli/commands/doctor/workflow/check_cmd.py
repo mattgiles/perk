@@ -8,7 +8,7 @@ from perk import doctor, init
 from perk.cli.commands.doctor.workflow.shared import checks_to_dict, fail, render_checks
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output
+from perk.substrate.output import machine_output
 
 
 @click.command("check")

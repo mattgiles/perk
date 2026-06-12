@@ -27,8 +27,8 @@ from perk.cli.commands.objective.shared import parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
-from perk.registry import Stage, load_registry
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 

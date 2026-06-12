@@ -15,10 +15,11 @@ from typing import Self
 
 import click
 
-from perk import git, github
+from perk import github
 from perk.cli.ensure import UserFacingCliError
-from perk.config import Config, load_config
 from perk.github import AuthStatus
+from perk.substrate import git
+from perk.substrate.config import Config, load_config
 
 
 @dataclass

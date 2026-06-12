@@ -29,7 +29,7 @@ from typing import Any
 import yaml
 
 from perk._resources import shared_dir
-from perk.registry import Issue, Severity
+from perk.substrate.registry import Issue, Severity
 
 PROVIDERS_FILENAME = "providers.yaml"
 SUPPORTED_SCHEMA_VERSION = 1

@@ -3,7 +3,7 @@
 import click
 
 from perk.doctor import Check, DoctorReport
-from perk.output import user_output
+from perk.substrate.output import user_output
 
 GROUP_ORDER = (
     "environment",

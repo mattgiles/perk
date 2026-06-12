@@ -14,12 +14,13 @@ from pathlib import Path
 
 import click
 
-from perk import cache, issue_backend, issues
+from perk import issue_backend, issues
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.state import cache
+from perk.substrate.output import machine_output, user_output
 
 
 @dataclass(frozen=True)

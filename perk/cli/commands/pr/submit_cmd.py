@@ -15,13 +15,15 @@ from pathlib import Path
 
 import click
 
-from perk import cache, git, github, issue_backend, issues, launch, linear_agent, plan
+from perk import github, issue_backend, issues, launch, linear_agent, plan
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.state import cache
+from perk.substrate import git
+from perk.substrate.output import machine_output, user_output
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ import click
 
 from perk import objective
 from perk.cli.commands.resume_cmd import parse_plan_id
-from perk.output import machine_output, user_output
+from perk.substrate.output import machine_output, user_output
 
 EXIT_FOR_TYPE = {"not_a_repo": 2}
 

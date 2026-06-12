@@ -7,8 +7,8 @@ import click
 from perk.cli.alias import alias
 from perk.cli.commands.registry.shared import load_or_die
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output, user_output
-from perk.registry import Severity, validate
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Severity, validate
 
 
 @alias("ch")

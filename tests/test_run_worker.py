@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from perk import cache, github, linear_agent, run_report, run_worker
+from perk import github, linear_agent, run_report, run_worker
 from perk.cli.ensure import UserFacingCliError
+from perk.state import cache
 
 
 def _plan_state(number: int = 42) -> github.PlanState:

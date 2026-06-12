@@ -12,7 +12,7 @@ import subprocess
 
 import pytest
 
-from perk import capabilities, git, github, init, linear_backend
+from perk import capabilities, github, init, linear_backend
 from perk import doctor as doctor_mod
 from perk.cli.commands.doctor import render
 from perk.doctor import (
@@ -24,6 +24,7 @@ from perk.doctor import (
     run_doctor,
 )
 from perk.init import run_init
+from perk.substrate import git
 
 
 def _check(name="x", group="g", status="ok", **kw):
@@ -445,7 +446,7 @@ def test_cache_gc_warns_on_prunable_state(git_repo):
 
     from ulid import ULID
 
-    from perk import cache
+    from perk.state import cache
 
     _scaffold(git_repo)
     rid = str(ULID.from_datetime(datetime.now(UTC) - timedelta(days=20)))
@@ -671,7 +672,7 @@ def test_render_fix_errors(capsys):
 
 def _install_default_skills(root, subdir=".agents/skills"):
     """Plant a SKILL.md for each of the 8 shipped default binding skills under ``subdir``."""
-    from perk.bindings import load_bindings
+    from perk.substrate.bindings import load_bindings
 
     for binding in load_bindings().bindings:
         path = root / subdir / binding.skill / "SKILL.md"

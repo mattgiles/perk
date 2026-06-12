@@ -4,12 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from perk import cache, launch
-from perk import git as git_mod
-from perk.bindings import Binding
+from perk import launch
 from perk.cli.ensure import UserFacingCliError
-from perk.config import Config
-from perk.git import GitError
 from perk.launch import (
     _initial_prompt,
     _pi_agent_dir,
@@ -19,7 +15,12 @@ from perk.launch import (
     resolve_target,
     resolve_worktree,
 )
-from perk.registry import Stage, load_registry
+from perk.state import cache
+from perk.substrate import git as git_mod
+from perk.substrate.bindings import Binding
+from perk.substrate.config import Config
+from perk.substrate.git import GitError
+from perk.substrate.registry import Stage, load_registry
 
 _PLAN_REF = {
     "provider": "github",

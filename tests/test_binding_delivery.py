@@ -6,8 +6,8 @@ The shipped defaults are passed explicitly so the tests are independent of the b
 
 from pathlib import Path
 
-from perk.binding_delivery import _HEADER, render_cold_bindings
-from perk.bindings import Binding, load_bindings
+from perk.substrate.binding_delivery import _HEADER, render_cold_bindings
+from perk.substrate.bindings import Binding, load_bindings
 
 _DEFAULTS = [
     Binding("stage:implement", "stage", "implement", "perk-implement", "nudge"),

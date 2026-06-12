@@ -29,8 +29,8 @@ from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError, LearnIssueSummary
-from perk.output import machine_output, user_output
-from perk.registry import Stage, load_registry
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage, load_registry
 
 _INBOX_REL = Path(".pi/workflow/scratch/learn-docs-inbox.md")
 

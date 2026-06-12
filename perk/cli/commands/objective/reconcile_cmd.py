@@ -11,7 +11,7 @@ from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.substrate.output import machine_output, user_output
 
 
 @alias("rec")

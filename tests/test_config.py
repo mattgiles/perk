@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from perk.config import (
+from perk.init import PERK_TOML_TEMPLATE
+from perk.substrate.config import (
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_config,
 )
-from perk.init import PERK_TOML_TEMPLATE
 
 
 def _write(repo: Path, name: str, text: str) -> None:

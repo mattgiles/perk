@@ -11,8 +11,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, github, launch
+from perk import github, launch
 from perk.cli.cli import cli
+from perk.state import cache
 
 _PLAN_REF = {
     "provider": "github",

@@ -17,9 +17,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk import github, run_id, runner
+from perk import github, runner
 from perk.github import GitHubError
-from perk.output import user_output
+from perk.state import run_id
+from perk.substrate.output import user_output
 
 # The sentinel dispatch inputs. The run-name embeds "smoke" (as the `stage`) for human legibility;
 # `plan` is a sentinel too — the smoke short-circuit never checks out a plan branch.

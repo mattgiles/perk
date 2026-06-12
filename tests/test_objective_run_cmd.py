@@ -10,9 +10,10 @@ import subprocess
 
 from click.testing import CliRunner
 
-from perk import cache, github, launch, objective, run_report, runner
+from perk import github, launch, objective, run_report, runner
 from perk.cli.cli import cli
 from perk.cli.commands.objective import run_cmd
+from perk.state import cache
 
 N = objective.NodeStatus
 

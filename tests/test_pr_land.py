@@ -4,7 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, github, linear_agent, objective
+from perk import github, linear_agent, objective
 from perk.cli.cli import cli
 from perk.cli.commands.pr import land_cmd
 from perk.cli.commands.pr.land_cmd import (
@@ -17,6 +17,7 @@ from perk.cli.commands.pr.land_cmd import (
     _render_human,
     _result_to_dict,
 )
+from perk.state import cache
 
 _REF = {
     "provider": "github",

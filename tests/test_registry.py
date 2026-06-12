@@ -7,7 +7,7 @@ while the real registry's reads/writes are still empty.
 
 import pytest
 
-from perk.registry import RegistryError, Severity, load_registry, validate
+from perk.substrate.registry import RegistryError, Severity, load_registry, validate
 
 # A minimal-but-complete, valid 2-stage registry. Each negative test mutates one line.
 GOOD = """\

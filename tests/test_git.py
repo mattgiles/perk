@@ -1,6 +1,6 @@
 import subprocess
 
-from perk import git
+from perk.substrate import git
 
 
 def _sha(repo, ref: str = "HEAD") -> str:

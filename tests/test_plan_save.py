@@ -248,7 +248,7 @@ def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
 
 def _run_with_handoff(monkeypatch, args, handoff, run_id="run-abc"):
     """Run plan-save in an isolated repo seeded with a handoff for ``run_id`` (#78)."""
-    from perk import cache
+    from perk.state import cache
 
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

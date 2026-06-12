@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from perk.output import user_output
+from perk.substrate.output import user_output
 
 # The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")

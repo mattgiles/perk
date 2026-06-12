@@ -6,7 +6,7 @@ import click
 
 from perk import runner
 from perk.cli.commands.workflow.run.shared import action_payload, fail, resolve_target
-from perk.output import machine_output, user_output
+from perk.substrate.output import machine_output, user_output
 
 
 @click.command("retry")

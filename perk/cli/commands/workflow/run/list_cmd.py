@@ -6,12 +6,13 @@ from typing import Any
 
 import click
 
-from perk import cache, github, issue_backend, issues, runner
+from perk import github, issue_backend, issues, runner
 from perk.cli.alias import alias
 from perk.cli.commands.workflow.run.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output, user_output
+from perk.state import cache
+from perk.substrate.output import machine_output, user_output
 
 # Per-column display clamps for the human table (the full RUN_ID is never clamped).
 _COL_CAP = 14

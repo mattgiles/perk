@@ -4,7 +4,7 @@ import json
 
 import click
 
-from perk.output import machine_output, user_output
+from perk.substrate.output import machine_output, user_output
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 

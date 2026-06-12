@@ -26,8 +26,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from perk import cache, registry, run_id
-from perk.output import user_output
+from perk.state import cache, run_id
+from perk.substrate import registry
+from perk.substrate.output import user_output
 
 # The age threshold (days) below which a non-terminal candidate is kept. A module constant
 # (the contract pins 14); a `[gc]` TOML table is deliberately deferred (premature).

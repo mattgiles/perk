@@ -10,7 +10,7 @@ from perk.cli.commands.objective.shared import fail, node_to_dict, parse_objecti
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.substrate.output import machine_output, user_output
 
 
 @alias("n")

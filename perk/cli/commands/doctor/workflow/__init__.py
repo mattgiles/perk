@@ -15,7 +15,7 @@ import click
 
 from perk.cli.commands.doctor.workflow.check_cmd import check_workflow
 from perk.cli.commands.doctor.workflow.smoke_test_cmd import smoke_test_workflow
-from perk.output import user_output
+from perk.substrate.output import user_output
 
 
 @click.group("workflow", invoke_without_command=True)

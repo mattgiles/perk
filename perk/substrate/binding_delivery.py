@@ -16,7 +16,7 @@ launch.
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.bindings import (
+from perk.substrate.bindings import (
     SKILL_FILENAME,
     SKILLS_DIR,
     Binding,
@@ -24,7 +24,7 @@ from perk.bindings import (
     load_bindings,
     resolve_bindings,
 )
-from perk.registry import Issue
+from perk.substrate.registry import Issue
 
 _HEADER = "The following skill binding(s) apply here:"
 
