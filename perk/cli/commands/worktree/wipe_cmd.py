@@ -1,12 +1,13 @@
 """`perk worktree wipe` — remove merged, safe-to-delete plan worktrees."""
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
 import click
 
-from perk.backends import issues
+from perk.backends import issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_repo
 from perk.state import cache
@@ -58,6 +59,47 @@ def _classify_worktree(
     return WipeDecision(remove=True, reason="PR merged")
 
 
+# Gather (PR-state lookups) is network-bound, so parallelize it; removal stays sequential.
+_MAX_GATHER_WORKERS = 32
+
+
+@dataclass(frozen=True)
+class _GatheredFacts:
+    """Per-worktree facts collected concurrently; consumed sequentially on the main thread."""
+
+    skip_reason: str | None  # pre-classification skip (backend error / no issue / no PR)
+    pr_state: str | None  # PR state when skip_reason is None
+    is_dirty: bool
+    has_pending_learn: bool
+
+
+def _gather_facts(
+    *, backend: issue_backend.IssueBackend, wt_path: Path, plan_id: str
+) -> _GatheredFacts:
+    """Read-only per-worktree fact gathering — runs on worker threads; never writes output."""
+
+    def _skip_facts(reason: str) -> _GatheredFacts:
+        return _GatheredFacts(
+            skip_reason=reason, pr_state=None, is_dirty=False, has_pending_learn=False
+        )
+
+    # Determine PR state (network); skip on any uncertainty — never delete on doubt.
+    try:
+        state = backend.get_plan(issue_id=plan_id)
+    except IssueBackendError as exc:
+        return _skip_facts(f"could not determine PR state ({exc})")
+    if state is None:
+        return _skip_facts("plan issue not found")
+    if state.pr is None:
+        return _skip_facts("no PR linked to plan")
+    return _GatheredFacts(
+        skip_reason=None,
+        pr_state=state.pr.state,
+        is_dirty=git.is_dirty(wt_path),
+        has_pending_learn=cache.has_marker(wt_path, cache.PENDING_LEARN),
+    )
+
+
 _PLAN_WT_RE = re.compile(r"^plan-(\S+)$")
 
 
@@ -84,36 +126,58 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
         user_output("no plan worktrees to wipe")
         return
 
+    # Partition on the main thread: current-worktree skips never reach the gather pool.
+    # (Never wipe the worktree the command is being run from — git refuses; surface clearly.)
+    targets = [wt for wt in candidates if wt.path.resolve() != repo_resolved]
+
+    # Gather phase: collect per-worktree facts concurrently (read-only, no output from workers).
+    facts_by_path: dict[Path, _GatheredFacts] = {}
+    if targets:
+        try:
+            backend = issues.resolve_issue_backend(repo_root)
+        except IssueBackendError as exc:
+            reason = f"could not determine PR state ({exc})"
+            facts_by_path = {
+                wt.path: _GatheredFacts(
+                    skip_reason=reason, pr_state=None, is_dirty=False, has_pending_learn=False
+                )
+                for wt in targets
+            }
+        else:
+            user_output(f"checking {len(targets)} plan worktree(s)…")
+            with ThreadPoolExecutor(max_workers=min(_MAX_GATHER_WORKERS, len(targets))) as pool:
+                futures = {}
+                for wt in targets:
+                    plan_id = _plan_id(wt.path.name)  # non-None by the regex filter above
+                    assert plan_id is not None
+                    futures[wt.path] = pool.submit(
+                        lambda p=wt.path, i=plan_id: _gather_facts(
+                            backend=backend, wt_path=p, plan_id=i
+                        )
+                    )
+                # Unexpected (non-IssueBackendError) worker exceptions propagate here —
+                # same crash semantics as the previous inline code.
+                facts_by_path = {path: fut.result() for path, fut in futures.items()}
+
+    # Act phase: sequential, in original candidate order (deterministic output + git mutations).
     removed = 0
     skipped = 0
     for wt in candidates:
         name = wt.path.name
-        # Never wipe the worktree the command is being run from (git refuses; surface clearly).
         if wt.path.resolve() == repo_resolved:
             _skip(name, "current worktree")
             skipped += 1
             continue
-        plan_id = _plan_id(name)  # guaranteed non-None by the regex filter above
-        assert plan_id is not None
-        # Determine PR state (network); skip on any uncertainty — never delete on doubt.
-        try:
-            state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=plan_id)
-        except IssueBackendError as exc:
-            _skip(name, f"could not determine PR state ({exc})")
+        facts = facts_by_path[wt.path]
+        if facts.skip_reason is not None:
+            _skip(name, facts.skip_reason)
             skipped += 1
             continue
-        if state is None:
-            _skip(name, "plan issue not found")
-            skipped += 1
-            continue
-        if state.pr is None:
-            _skip(name, "no PR linked to plan")
-            skipped += 1
-            continue
+        assert facts.pr_state is not None
         decision = _classify_worktree(
-            pr_state=state.pr.state,
-            is_dirty=git.is_dirty(wt.path),
-            has_pending_learn=cache.has_marker(wt.path, cache.PENDING_LEARN),
+            pr_state=facts.pr_state,
+            is_dirty=facts.is_dirty,
+            has_pending_learn=facts.has_pending_learn,
             force=force,
         )
         if not decision.remove:

@@ -6,7 +6,7 @@ read_when: You are writing a worktree-batch CLI command, matching git worktree p
 # Worktree filesystem lifecycle
 
 perk worktrees are filesystem checkouts (`plan-<N>/`) created per worktree stage. Batch operations over
-them — like `perk worktree wipe` (`perk/cli/commands/worktree_cmd.py`) — are a distinct concern from a
+them — like `perk worktree wipe` (`perk/cli/commands/worktree/wipe_cmd.py`) — are a distinct concern from a
 worktree's plan-ref *binding* role (see `plan-ref-lifecycle.md`). The mechanics below generalize to any
 worktree-batch command.
 
@@ -41,6 +41,18 @@ required so git itself doesn't refuse a dirty tree.
 The pure `_classify_worktree(...) -> WipeDecision` helper encodes all of this and is unit-testable with
 no I/O. **Push the decision into a pure classifier, keep I/O in the loop.**
 
+## Gather (parallel) → act (sequential) split
+
+`_wipe_impl` runs in two phases. **Gather**: per-worktree facts (`backend.get_plan`, `git.is_dirty`,
+`cache.has_marker`) are network/subprocess-bound, read-only, and thread-safe, so they run
+concurrently on a `ThreadPoolExecutor` (capped by `_MAX_GATHER_WORKERS`), each producing a frozen
+`_GatheredFacts`. The issue backend is resolved **once** before the pool; an `IssueBackendError`
+there marks every target skipped with `could not determine PR state (...)` — the offline no-op
+posture is preserved. **Act**: classification, all `user_output` reporting, and the
+`git.worktree_remove`/`delete_branch` mutations run sequentially on the main thread in original
+candidate order (git worktree mutations contend on `.git` locks; deterministic output is asserted
+by tests). **No output from worker threads, ever** — workers return facts; the main thread reports.
+
 ## Branch deletion is best-effort
 
 `git.delete_branch(repo, name, *, force=False)` uses `git branch -d` (safe; refuses unmerged) / `-D`
@@ -63,7 +75,7 @@ is the sole signal under test.
 
 ## Cross-references
 
-- `perk/cli/commands/worktree_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`
-- `perk/git.py` — `delete_branch`, `worktree_remove`, `worktree_list`
+- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`
+- `perk/substrate/git.py` — `delete_branch`, `worktree_remove`, `worktree_list`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule
