@@ -2,9 +2,9 @@
 
 The one genuinely-new CLI command this phase: resolve any plan to its current actionable stage and
 launch it. Reads the plan from the issue backend (`IssueBackend.get_plan`), reconstructs the
-`cache.plan-ref`, derives the stage (`perk.resume`), then reuses T4a's `launch_stage` (idempotent
-worktree + materialize + exec pi). Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, stable
-exit codes.
+`cache.plan-ref`, derives the stage (`perk.run.resume`), then reuses T4a's `launch_stage`
+(idempotent worktree + materialize + exec pi). Supervisor surface (cli-vs-pi §3.2): `--json` to
+stdout, stable exit codes.
 
 Exit codes: 0 resumed / nothing-to-resume · 1 invalid input / unauthed / plan-not-found / op
 failure · 2 not-a-repo.

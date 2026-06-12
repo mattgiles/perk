@@ -34,7 +34,7 @@ import {
 } from "./worker.ts";
 
 // The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS
-// `initialPromptFor` output and the Python `perk/launch.py` prompts. The same literals live in
+// `initialPromptFor` output and the Python `perk/run/launch.py` prompts. The same literals live in
 // tests/test_worker_prompt_parity.py, so drift in EITHER plane fails CI.
 const IMPLEMENT_SUBSTRINGS = [
   "You are implementing perk plan",

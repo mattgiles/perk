@@ -1,10 +1,11 @@
 """The Linear issue backend — plans, learn issues, labels, and the generic comment ops
 (Objective #252, Node 2.2).
 
-``LinearIssueBackend`` implements the issue-tier contract (``perk.issue_backend.IssueBackend``)
-over the Node 2.1 GraphQL client substrate (``perk.linear.LinearClient``), with team-scoped +
-label-scoped queries and body-marker idempotency matching the ``find_plan_issue`` semantics of
-the GitHub backend. The objective tier (Node 2.3) mirrors ``perk.github``'s behavior shapes
+``LinearIssueBackend`` implements the issue-tier contract
+(``perk.backends.issue_backend.IssueBackend``) over the Node 2.1 GraphQL client substrate
+(``perk.backends.linear.LinearClient``), with team-scoped + label-scoped queries and body-marker
+idempotency matching the ``find_plan_issue`` semantics of the GitHub backend. The objective tier
+(Node 2.3) mirrors ``perk.github``'s behavior shapes
 (the two-step create with comment-id backfill, header LBYL, authoritative roadmap writes +
 best-effort comment re-renders, the Reconcilable splice).
 

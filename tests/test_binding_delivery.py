@@ -1,4 +1,5 @@
-"""Node 2.1: cold-door delivery of user-originated skill bindings (`perk/binding_delivery.py`).
+"""Node 2.1: cold-door delivery of user-originated skill bindings
+(`perk/substrate/binding_delivery.py`).
 
 The shipped defaults are passed explicitly so the tests are independent of the bundled
 `bindings.yaml`, except where they deliberately exercise the no-double-delivery filter.
@@ -16,8 +17,9 @@ _DEFAULTS = [
 
 
 def test_binding_header_is_the_cross_plane_dedup_marker():
-    # Pinned byte-for-byte alongside the TS sibling (extension/bindingDelivery.test.ts): both planes
-    # render under this exact literal so a cold launch + a warm injection never double-deliver.
+    # Pinned byte-for-byte alongside the TS sibling (extension/substrate/bindingDelivery.test.ts):
+    # both planes render under this exact literal so a cold launch + a warm injection never
+    # double-deliver.
     assert _HEADER == "The following skill binding(s) apply here:"
 
 

@@ -1,6 +1,7 @@
 """`perk state prune` (alias `gc`) — prune stale `.pi/workflow/` run state.
 
-Executes the GC policy in ``perk/gc.py``: terminal-stage prune + age-based prune (default 14d).
+Executes the GC policy in ``perk/state/gc.py``: terminal-stage prune + age-based prune (default
+14d).
 ``require_repo`` anchors at the checkout root and refuses outside a repo — pruning is
 destructive, so cwd-anchoring (like ``new-run``) is not acceptable here. Deletion lives
 *exclusively* in this command; the ``cache-gc`` doctor check only reports (no ``--fix`` arm).

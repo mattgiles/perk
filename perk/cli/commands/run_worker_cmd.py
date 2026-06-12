@@ -3,7 +3,7 @@
 The managed ``perk-run.yml`` workflow checks out the plan branch, then invokes this command to
 position the checkout and drive the dispatched stage headlessly via the Node worker (Node 1.2). It
 is a deterministic supervisor/CI surface (no agentic reasoning): it exits with the worker's exit
-code so the workflow step's success reflects the drive outcome. See :mod:`perk.run_worker`.
+code so the workflow step's success reflects the drive outcome. See :mod:`perk.run.run_worker`.
 """
 
 import os

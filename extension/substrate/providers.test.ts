@@ -2,7 +2,7 @@
 // the two reference entries (perk-plan, perk-checkpoints — both default) plus one REAL foreign
 // entry per seam (tombell-plan, Node 2.3; juicesharp-todo, Node 3.2). The Python plane
 // (tests/test_providers.py) is the authoritative validator; this is the thin TS-side structural
-// parse (mirror of extension/bindings.test.ts).
+// parse (mirror of extension/substrate/bindings.test.ts).
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

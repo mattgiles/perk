@@ -1,7 +1,7 @@
 // The session-data accessor seam (Objective #339 Node 1.2, contracts.md §8.1).
 //
 // Every run-scoped session artifact lives under `.pi/workflow/scratch/runs/<run_id>/data/`, and
-// ALL session-data paths flow through this module (interior) or `perk/cache.py` (exterior) — the
+// ALL session-data paths flow through this module (interior) or `perk/state/cache.py` (exterior) — the
 // guard tests (cacheGuard.test.ts / tests/test_cache_guard.py) forbid manual construction of the
 // `scratch`/`runs` path segments anywhere else.
 //

@@ -1,15 +1,17 @@
 """Cross-plane prompt-parity invariant (Node 1.2).
 
-The headless worker (`extension/worker.ts` `initialPromptFor`) re-derives the `implement`/`address`
-initial prompts in TypeScript, and MUST stay textually in lockstep with the Python cold door
-(`perk/launch.py._implement_prompt`/`_address_prompt`). These substrings are the shared invariant:
-the SAME literals are asserted from the TS side in `extension/worker.test.ts`, so a drift in EITHER
+The headless worker (`extension/worker/worker.ts` `initialPromptFor`) re-derives the
+`implement`/`address` initial prompts in TypeScript, and MUST stay textually in lockstep with the
+Python cold door (`perk/run/launch.py._implement_prompt`/`_address_prompt`). These substrings are
+the shared invariant: the SAME literals are asserted from the TS side in
+`extension/worker/worker.test.ts`, so a drift in EITHER
 plane (someone edits one prompt but not the other) fails CI here or there.
 """
 
 from perk.run.launch import _address_prompt, _implement_prompt, _learn_prompt
 
-# Keep in lockstep with IMPLEMENT_SUBSTRINGS / ADDRESS_SUBSTRINGS in extension/worker.test.ts.
+# Keep in lockstep with IMPLEMENT_SUBSTRINGS / ADDRESS_SUBSTRINGS in
+# extension/worker/worker.test.ts.
 IMPLEMENT_SUBSTRINGS = [
     "You are implementing perk plan",
     "First, read the full plan:",
@@ -21,7 +23,7 @@ IMPLEMENT_SUBSTRINGS = [
     "otherwise don't invent step numbers",
 ]
 # The Node 3.1 linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
-# extension/worker.test.ts (the literal fragments of the shared linear arm).
+# extension/worker/worker.test.ts (the literal fragments of the shared linear arm).
 LINEAR_READ_SUBSTRINGS = [
     "use the `linear_get_issue` tool",
     "then `linear_list_comments`",
@@ -58,7 +60,7 @@ def test_address_prompt_carries_invariant_substrings() -> None:
 
 
 # The review-classifier model clause (#196) — byte-identical to ADDRESS_MODEL_CLAUSE in
-# extension/worker.test.ts. Drift in either plane fails the paired suites.
+# extension/worker/worker.test.ts. Drift in either plane fails the paired suites.
 _ADDRESS_MODEL_CLAUSE = (
     ', passing `model: "test/model"` on that call '
     "(the configured [subagents] review-classifier model)"
@@ -88,7 +90,7 @@ _LINEAR_PLAN_REF = {
 
 def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
     """Node 3.1: the linear arm of the implement prompt — the same literals are asserted from
-    the TS side (LINEAR_READ_SUBSTRINGS in extension/worker.test.ts)."""
+    the TS side (LINEAR_READ_SUBSTRINGS in extension/worker/worker.test.ts)."""
     prompt = _implement_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear implement prompt drifted — missing: {needle!r}"

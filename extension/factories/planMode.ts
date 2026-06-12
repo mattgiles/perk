@@ -1,5 +1,5 @@
 // P2.T2a — perk-owned plan mode. The first consumer of T1's tool-gating primitive
-// (extension/toolGating.ts). This is the *toggle surface* on top of T1's structural gate: a
+// (extension/substrate/toolGating.ts). This is the *toggle surface* on top of T1's structural gate: a
 // `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`.
 // perk owns NO parallel enforcement here — T1 is the single read-only authority.
 //
@@ -7,7 +7,7 @@
 // erk context-preservation-prompting) under its own `perk:plan-context` customType (display:false),
 // keyed directly off the read-only gate (read-only ⟹ plan in the Phase-2 main session). The
 // content is stripped from `context` when the gate is off — the same hygiene T1 applies to its
-// `perk:mode-context`. An optional `[workflow] plan_authoring` config addendum (extension/config.ts)
+// `perk:mode-context`. An optional `[workflow] plan_authoring` config addendum (extension/substrate/config.ts)
 // is appended when present.
 //
 // Grounded in pi's official `examples/extensions/plan-mode/` recipe, but perk adopts ONLY the

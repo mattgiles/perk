@@ -1,7 +1,7 @@
-// P2.T2a — the minimal TS config port (D1b). Mirrors `perk/config.py`'s overlay: read
+// P2.T2a — the minimal TS config port (D1b). Mirrors `perk/substrate/config.py`'s overlay: read
 // `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml` (gitignored, local wins). The only
 // setting consumed today is an optional `[workflow]` plan-authoring addendum, appended into the
-// `perk:plan-context` injection (extension/planMode.ts) when present.
+// `perk:plan-context` injection (extension/factories/planMode.ts) when present.
 //
 // Deliberately dependency-free: rather than pull a runtime TOML dependency into the published
 // extension for a single optional string, this reads the narrow TOML subset perk actually uses —
@@ -180,7 +180,7 @@ function readTomlFile(path: string): TomlSubset {
 
 /**
  * Overlay `over` onto `base` (local wins). Section tables merge leaf-by-leaf; array-of-tables
- * replace as a whole array (mirror of perk/config.py's list-replaces-list overlay).
+ * replace as a whole array (mirror of perk/substrate/config.py's list-replaces-list overlay).
  */
 function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
   const tables: StringTable = {};
@@ -193,7 +193,7 @@ function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
   return { tables, arrays };
 }
 
-/** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/config.py). */
+/** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/substrate/config.py). */
 export function loadPerkConfig(cwd: string): PerkConfig {
   const piDir = join(cwd, ".pi");
   let merged: TomlSubset = emptySubset();
@@ -269,7 +269,7 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
  * Reads ONLY committed `.pi/perk.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
  * the Python committed-only read (the backend decides where canonical durable state is written;
  * a per-user `perk.local.toml` override would fragment the canonical store). Python
- * (`perk/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
+ * (`perk/backends/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
  * "linear"/unknown; this mirror is fail-safe (absence/unknown/any error → `"github"`) because
  * the TS plane only renders prompts — it never writes canonical issues. Ships DORMANT (no
  * consumer until Node 3.1's backend-aware prompt rendering), mirroring the providers.ts

@@ -21,7 +21,7 @@
 // are the produced-contract landing for the PLAN seam (`adapter-architecture.md` Invariant 1) — the
 // Node 2.3 adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
 // they must stay always-registered. They do NOT defer when a foreign `[providers] plan` is selected
-// — only perk's own authoring surface (`extension/planMode.ts`: `/plan`, `Ctrl+Alt+P`, `--plan`,
+// — only perk's own authoring surface (`extension/factories/planMode.ts`: `/plan`, `Ctrl+Alt+P`, `--plan`,
 // the `perk:plan-context` injection) steps aside. Deferring this substrate would break Node 2.3.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";

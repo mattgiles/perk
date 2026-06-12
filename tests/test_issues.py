@@ -4,7 +4,7 @@ Covers: static protocol conformance (ty-checked), per-method delegation onto ``p
 issue-tier functions (constructor-bound ``repo_root``, ``dry_run`` passthrough, str-id results),
 ``GitHubError`` → ``IssueBackendError`` translation (message verbatim, cause chained), the
 non-numeric-id guard, the resolver, the late-binding monkeypatch-interception guarantee, and the
-consumer-boundary source scan (no production module outside ``perk/issues.py`` calls a
+consumer-boundary source scan (no production module outside ``perk/backends/issues.py`` calls a
 ``github.<issue-tier-fn>`` directly).
 """
 
@@ -460,7 +460,8 @@ class TestLateBinding:
 
 
 # The 21 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
-# Production code must reach them through perk.issues.resolve_issue_backend, never directly.
+# Production code must reach them through perk.backends.issues.resolve_issue_backend, never
+# directly.
 ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
     "create_label",
     "find_plan_issue",

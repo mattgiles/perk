@@ -241,7 +241,7 @@ def _initial_prompt(
 
 def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
     """The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the
-    saved plan". Byte-identical to `extension/lifecycleGates.ts::planReadInstruction` (the TS
+    saved plan". Byte-identical to `extension/doors/lifecycleGates.ts::planReadInstruction` (the TS
     twin); drift in either plane fails the paired parity suites. ``github`` reads via `gh`;
     ``linear`` points at the pi-mono-linear tools with an `open <url>` fallback; any other
     provider falls back to opening the url."""
@@ -327,8 +327,8 @@ def _learn_prompt(plan_ref: dict[str, Any]) -> str:
             "      gh pr diff <n>   # and: gh pr view <n>\n"
         )
     elif provider == "linear":
-        # PRs are GitHub-universal under every issue backend (perk/issue_backend.py), so the
-        # merged-PR derivation stays `gh` even when the plan issue lives in Linear.
+        # PRs are GitHub-universal under every issue backend (perk/backends/issue_backend.py),
+        # so the merged-PR derivation stays `gh` even when the plan issue lives in Linear.
         read_lines = (
             f"  - Read the saved plan: {_plan_read_instruction(provider, pr_id, url)}\n"
             "  - Find the merged PR for this plan and diff it:\n"

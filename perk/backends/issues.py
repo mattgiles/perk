@@ -1,13 +1,15 @@
 """The issue-tracking tier seam (Objective #252, Node 1.2): the GitHub backend + the resolver.
 
-Node 1.1 (``perk/issue_backend.py``) shipped the issue-tier **contract** — the ``IssueBackend``
-``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``. This module makes
-it live: ``GitHubIssueBackend`` is a thin delegation adapter over ``perk.github``'s issue-tier
-module functions (which remain the GitHub backend's private implementation substrate), and
-``resolve_issue_backend`` is the resolver every issue-tier consumer goes through.
+Node 1.1 (``perk/backends/issue_backend.py``) shipped the issue-tier **contract** — the
+``IssueBackend`` ``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``.
+This module makes it live: ``GitHubIssueBackend`` is a thin delegation adapter over
+``perk.github``'s issue-tier module functions (which remain the GitHub backend's private
+implementation substrate), and ``resolve_issue_backend`` is the resolver every issue-tier
+consumer goes through.
 
-This is deliberately the only module that imports both ``perk.github`` and ``perk.issue_backend``
-(preserving Node 1.1's one-way import guard: ``github.py`` never references the contract).
+This is deliberately the only module that imports both ``perk.github`` and
+``perk.backends.issue_backend`` (preserving Node 1.1's one-way import guard: ``perk/github/``
+never references the contract).
 
 Adapter disciplines:
 

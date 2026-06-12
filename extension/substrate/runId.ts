@@ -1,6 +1,6 @@
 // Mint perk run ids in the TS plane (contracts.md §8.2 mint doctrine).
 // Warm sessions with no identity (decideClaim's `none` path) mint their own ULID;
-// cold launches still mint in Python (perk/run_id.py) and hand off via PERK_RUN_ID.
+// cold launches still mint in Python (perk/state/run_id.py) and hand off via PERK_RUN_ID.
 //
 // Hand-rolled spec-conformant ULID (no npm dependency): a 48-bit `Date.now()` timestamp
 // + 80 bits of `randomBytes(10)`, Crockford base32, 26 chars (10 time + 16 randomness).

@@ -1,5 +1,5 @@
 // Node 1.1 (objective #339) — the TS-plane ULID mint. The grammar assertions here are the
-// cross-plane validity proof: spec-conformant ULIDs are exactly what `perk/run_id.py`'s
+// cross-plane validity proof: spec-conformant ULIDs are exactly what `perk/state/run_id.py`'s
 // `ULID.from_str` parses (decision: no node-subprocess pytest).
 
 import assert from "node:assert/strict";

@@ -3,7 +3,7 @@
 This is the Python plane's reader of the *second* parsed cross-plane contract (the first
 being `shared/registry.yaml`). It maps a `trigger` (`"<kind>:<id>"`) to a `skill` plus a
 per-binding delivery `mode` (`nudge`/`transclude`). The TS extension has an independent
-reader (`extension/bindings.ts`) over the *same* bundled file.
+reader (`extension/substrate/bindings.ts`) over the *same* bundled file.
 
 Validation is **shape-only and registry-free**: the validator checks that each binding's
 fields are well formed (and that no trigger repeats), but it does NOT cross-check that a
@@ -36,8 +36,9 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # The `command:<id>` targets that perk's binding-delivery layer actually fires (Node 3.1, D5).
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
 # only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
-# extension/objectivePlan.ts + extension/learnDocs.ts + extension/prReview.ts) plus the cold
-# `binding_trigger="command:learn-docs"` override in perk/launch.py. Commands that ARE registry
+# extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
+# extension/doors/prReview.ts) plus the cold
+# `binding_trigger="command:learn-docs"` override in perk/run/launch.py. Commands that ARE registry
 # stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
     {"objective-reconcile", "learn-docs", "pr-review"}

@@ -1,4 +1,4 @@
-"""`perk init` — thin Click adapter over the convergent init operation (perk/init.py).
+"""`perk init` — thin Click adapter over the convergent init operation (perk/convergence/init.py).
 
 `init` is a **supervisor surface** (cli-vs-pi.md §3.2): `--json` to stdout + stable
 exit codes (0 converged / 1 invalid input / 2 environment-not-ready), human text to stderr.

@@ -1,11 +1,11 @@
 // The TS plane's reader for the shared skill-binding set (`shared/bindings.yaml`).
 //
-// Twin of perk/bindings.py: both planes parse the SAME bundled file (no codegen). This is
+// Twin of perk/substrate/bindings.py: both planes parse the SAME bundled file (no codegen). This is
 // the SECOND parsed cross-plane contract (the first being registry.yaml). A binding maps a
 // `trigger` ("<kind>:<id>", kind ∈ {stage, command}) to a `skill` plus a per-binding
 // delivery `mode` (nudge/transclude).
 //
-// The Python CLI is the authoritative validator (perk/bindings.py); this side does a thin
+// The Python CLI is the authoritative validator (perk/substrate/bindings.py); this side does a thin
 // structural parse only — no deep content validation here. This node (1.1) ships the seam
 // with no consumer: the resolver is Node 1.2; delivery is Nodes 2.1/2.2.
 
