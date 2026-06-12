@@ -225,11 +225,28 @@ def _initial_prompt(
     return None
 
 
+def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
+    """The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the
+    saved plan". Byte-identical to `extension/lifecycleGates.ts::planReadInstruction` (the TS
+    twin); drift in either plane fails the paired parity suites. ``github`` reads via `gh`;
+    ``linear`` points at the pi-mono-linear tools with an `open <url>` fallback; any other
+    provider falls back to opening the url."""
+    if provider == "github":
+        return f"gh issue view {pr_id} --comments"
+    if provider == "linear":
+        return (
+            f"use the `linear_get_issue` tool (id `{pr_id}`), then `linear_list_comments` — "
+            "the plan body is the first comment; "
+            f"if the linear tools are unavailable, open {url}"
+        )
+    return f"open {url}"
+
+
 def _implement_prompt(plan_ref: dict[str, Any]) -> str:
     provider = str(plan_ref.get("provider", ""))
     pr_id = str(plan_ref.get("pr_id", ""))
     url = str(plan_ref.get("url", ""))
-    read_cmd = f"gh issue view {pr_id} --comments" if provider == "github" else f"open {url}"
+    read_cmd = _plan_read_instruction(provider, pr_id, url)
     return (
         f"You are implementing perk plan {provider} #{pr_id} ({url}) on this branch.\n\n"
         f"First, read the full plan:\n    {read_cmd}\n\n"
@@ -290,6 +307,15 @@ def _learn_prompt(plan_ref: dict[str, Any]) -> str:
     if provider == "github":
         read_lines = (
             f"  - Read the saved plan: gh issue view {pr_id} --comments\n"
+            "  - Find the merged PR for this plan and diff it:\n"
+            f"      gh pr list --head {branch} --state merged\n"
+            "      gh pr diff <n>   # and: gh pr view <n>\n"
+        )
+    elif provider == "linear":
+        # PRs are GitHub-universal under every issue backend (perk/issue_backend.py), so the
+        # merged-PR derivation stays `gh` even when the plan issue lives in Linear.
+        read_lines = (
+            f"  - Read the saved plan: {_plan_read_instruction(provider, pr_id, url)}\n"
             "  - Find the merged PR for this plan and diff it:\n"
             f"      gh pr list --head {branch} --state merged\n"
             "      gh pr diff <n>   # and: gh pr view <n>\n"

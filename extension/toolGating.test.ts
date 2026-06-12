@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import { isReadOnlyBashCommand, READ_ONLY_TOOLS } from "./toolGating.ts";
+import { isReadOnlyBashCommand, READ_ONLY_CONTEXT, READ_ONLY_TOOLS } from "./toolGating.ts";
 
 test("READ_ONLY_TOOLS: contains plan_review (the plannotator review bridge is callable in plan mode)", () => {
   assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
@@ -19,6 +19,30 @@ test("READ_ONLY_TOOLS: contains the four pi-web-access research tools (web resea
   for (const tool of ["web_search", "code_search", "fetch_content", "get_search_content"]) {
     assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
   }
+});
+
+test("READ_ONLY_TOOLS: contains the read-only linear_* tools, never the mutating ones (Node 3.1)", () => {
+  for (const tool of [
+    "linear_get_issue",
+    "linear_list_comments",
+    "linear_list_issues",
+    "linear_search_issues",
+    "linear_whoami",
+  ]) {
+    assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
+  }
+  for (const tool of [
+    "linear_create_issue",
+    "linear_update_issue",
+    "linear_create_comment",
+    "linear_upload_file",
+    "linear_upload_file_to_issue_comment",
+    "linear_configure_auth",
+  ]) {
+    assert.ok(!READ_ONLY_TOOLS.includes(tool), `mutating tool allowlisted: ${tool}`);
+  }
+  // The injected read-only context interpolates the allowlist, so it names the linear tools too.
+  assert.ok(READ_ONLY_CONTEXT.includes("linear_get_issue"));
 });
 
 test("isReadOnlyBashCommand: allows read-only commands", () => {

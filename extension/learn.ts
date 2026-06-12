@@ -122,8 +122,21 @@ export function learnGuidance(planRef: PlanRef | null): string {
   const lines = ["perk /learn — the knowledge-capture pass."];
   if (planRef) {
     const branch = `plan-${planRef.pr_id}`;
+    // The plan-read clause is backend-aware (Node 3.1); the merged-PR derivation stays `gh`
+    // under every issue backend — PRs are GitHub-universal.
+    let readClause: string;
+    if (planRef.provider === "github") {
+      readClause = `gh issue view ${planRef.pr_id} --comments`;
+    } else if (planRef.provider === "linear") {
+      readClause =
+        `use the \`linear_get_issue\` tool (id \`${planRef.pr_id}\`), then ` +
+        "`linear_list_comments` — the plan body is the first comment; fallback: " +
+        `open ${planRef.url}`;
+    } else {
+      readClause = `open ${planRef.url}`;
+    }
     lines.push(
-      `1. Read the saved plan (gh issue view ${planRef.pr_id} --comments) and the merged PR for ` +
+      `1. Read the saved plan (${readClause}) and the merged PR for ` +
         `this plan — derive it from the head branch ${branch}: gh pr list --head ${branch} ` +
         "--state merged, then gh pr diff <n> / gh pr view <n>.",
     );

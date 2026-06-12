@@ -35,6 +35,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
+import { planReadInstruction } from "./lifecycleGates.ts";
 import { capForModel } from "./readOnlySession.ts";
 import { rebuildWorkflowState } from "./workflowState.ts";
 
@@ -462,7 +463,7 @@ export function initialPromptFor(
   const prId = String(planRef.pr_id ?? "");
   const url = String(planRef.url ?? "");
   if (stage === "implement") {
-    const readCmd = provider === "github" ? `gh issue view ${prId} --comments` : `open ${url}`;
+    const readCmd = planReadInstruction(provider, prId, url);
     return (
       `You are implementing perk plan ${provider} #${prId} (${url}) on this branch.\n\n` +
       `First, read the full plan:\n    ${readCmd}\n\n` +
