@@ -25,6 +25,10 @@ export const READ_ONLY_TOOLS = [
   "bash",
   "ask_user_question",
   "plan_review",
+  // The Node 2.1 carve-out (#339): plan_draft is structurally limited to the one working-plan
+  // artifact in the run-scoped session data dir (gitignored scratch), so the read-only invariant
+  // (worktree untouched) holds; the `tool_call` edit/write/bash blocking below is unchanged.
+  "plan_draft",
   // pi-web-access's research tools (borrowed package): none mutate the repo — fetch_content's
   // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to
   // the already-allowlisted curl. Allowlisting foreign tool names is safe when the package is
@@ -44,6 +48,7 @@ You are in perk read-only mode — a structurally enforced exploration mode.
 
 - You can only use: ${READ_ONLY_TOOLS.join(", ")}.
 - You CANNOT use edit or write (file modifications are blocked).
+- plan_draft is the sole sanctioned write: it writes only the working-plan artifact in the session data dir.
 - bash is restricted to an allowlist of read-only commands.
 
 These restrictions are enforced by perk, not advisory. Do not attempt to make changes.`;

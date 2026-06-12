@@ -11,6 +11,10 @@ test("READ_ONLY_TOOLS: contains plan_review (the plannotator review bridge is ca
   assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
 });
 
+test("READ_ONLY_TOOLS: contains plan_draft (the #339 Node 2.1 session-data carve-out)", () => {
+  assert.ok(READ_ONLY_TOOLS.includes("plan_draft"));
+});
+
 test("READ_ONLY_TOOLS: contains the four pi-web-access research tools (web research during planning)", () => {
   for (const tool of ["web_search", "code_search", "fetch_content", "get_search_content"]) {
     assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);

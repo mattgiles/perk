@@ -151,6 +151,10 @@ def test_stage_io_contract():
     assert cold_remote == {"implement", "address"}
 
     assert "github.learn" in registry.state_keys
+    # #339 Node 2.1: the session-data vocabulary key, declared in writes by both authoring stages.
+    assert "cache.session-data" in registry.state_keys
+    assert "cache.session-data" in by_id["plan"].writes
+    assert "cache.session-data" in by_id["objective-plan"].writes
 
 
 def test_good_fixture_is_valid(tmp_path):

@@ -68,9 +68,25 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `coldDoor.activeRunId`). Helpers degrade gracefully: absence and I/O failure → `None`/`null`
   plus a stderr warning, never an exception. Manual construction of the `scratch`/`runs` path
   segments outside the seam is forbidden and guard-tested in both planes
-  (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). No new state key:
-  `cache.scratch` already names the substrate; a dedicated `cache.session-data` key is deferred
-  to the first stage that declares it in `requires`/`reads`/`writes` (Node 2.1).
+  (`extension/cacheGuard.test.ts`, `tests/test_cache_guard.py`). The dedicated
+  `cache.session-data` state key is now real (Node 2.1): it names the run-scoped session data
+  dir artifacts and is declared in `writes` by the two read-only authoring stages, `plan` and
+  `objective-plan` (`cache.scratch` still names the broader substrate).
+
+  **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
+  twin) is the first session-data producer: it writes the working plan during read-only plan
+  authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/toolGating.ts`) as a **narrow
+  structural carve-out**: the tool has no path/name parameter — the artifact name is the fixed
+  constant `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/planDraft.ts`) and the path is
+  derived exclusively through the accessor seam (`writeSessionArtifact`: file + provenance
+  pointer) — so the only bytes it can ever write are the one working-plan artifact in the
+  current run's data dir (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash
+  blocking is unchanged. Semantics: full rewrite per call, non-terminating, NOT a save —
+  `plan_save`/`/plan-save` remain the canonical GitHub persist surface. Failure taxonomy (soft
+  results, never throws): mistyped params → `bad_input`; empty/whitespace plan →
+  `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
+  `write_failed`. Consumers read the draft only via `readSessionArtifact` (digest-validated,
+  fail-open) — the file-first save preference is Node 2.2.
 
   **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
@@ -121,7 +137,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
     reconciliation in §8.3.
 
 State keys (registry vocabulary): `cache.plan`, `cache.plan-ref`, `cache.scratch`,
-`cache.handoff`, `cache.markers`.
+`cache.handoff`, `cache.markers`, `cache.session-data`.
 
 ---
 
