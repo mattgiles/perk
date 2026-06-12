@@ -246,6 +246,34 @@ def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
+def test_cache_gc_ok_when_no_prunable_state(git_repo):
+    # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "cache-gc")
+    assert check.status == "ok" and check.group == "state"
+    assert report.exit_code == 0
+
+
+def test_cache_gc_warns_on_prunable_state(git_repo):
+    # A backdated warm run dir is prunable → `cache-gc` warns with the `perk state prune`
+    # remediation; a warn never fails doctor (exit stays 0).
+    from datetime import UTC, datetime, timedelta
+
+    from ulid import ULID
+
+    from perk import cache
+
+    _scaffold(git_repo)
+    rid = str(ULID.from_datetime(datetime.now(UTC) - timedelta(days=20)))
+    cache.write_scratch(git_repo, rid, "x", "y")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "cache-gc")
+    assert check.status == "warn"
+    assert check.remediation == "perk state prune"
+    assert report.exit_code == 0
+
+
 def test_skills_manifest_drift_detected_and_fixed(git_repo):
     # The committed manifest fragment is a managed convergence: tampering is drift, and `--fix`
     # re-converges it idempotently (grouped under "skills").

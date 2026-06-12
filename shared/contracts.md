@@ -84,9 +84,21 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   dir persist through the LWW rebuild. Consumers fail open to their fallback when validation
   refuses (the reader returns `null`; mismatched-run_id refusals are silent by design, broken
   promises — missing file, digest mismatch — warn on stderr).
-- **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` for runs whose
-  terminal stage completed, or older than N days — surfaced later as a `doctor` check + a
-  prune command (erk accumulated session dirs precisely because GC was undefined).
+- **GC is perk-owned:** prune `scratch/runs/<id>/` + `handoff/<id>.json` per two rules —
+  **terminal-stage** (a *consumed* handoff whose `stage` has empty registry `successors`;
+  currently exactly `learn`, computed never hardcoded) ⇒ eligible regardless of age; and
+  **age** (older than `max_age_days`, default **14**) ⇒ eligible. The age is the run's ULID
+  self-date (`run_id` names self-date; fork suffixes strip via the base ULID), with the run
+  dir's / handoff file's `st_mtime` as the fallback for stray non-ULID names. Warm-minted run
+  dirs (no handoff ⇒ no stage) are age-pruned only. Current-run protection: a candidate whose
+  base ULID matches `$PERK_RUN_ID` (incl. its `<ulid>.<n>` fork children) is always kept.
+  Degrade-graceful: an unreadable handoff contributes no stage (age rule only — never
+  terminal-prune on a guess); a broken registry degrades the terminal set to empty (the age
+  rule still applies — GC never crashes on a broken install). Surfaces: the `cache-gc` `doctor`
+  check (a `warn` with remediation `perk state prune` whenever anything is prunable — **no
+  `--fix` arm**: deletion is *exclusively* `perk state prune`) and the `perk state prune`
+  command (alias `gc`; `--dry-run`/`--max-age-days`/`--json`). Policy home: `perk/gc.py`
+  (exterior-owned; no TS twin). (erk accumulated session dirs precisely because GC was undefined.)
 - `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
   locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
   `/.pi/workflow/plan-ref.json` and `/.pi/workflow/plan.md` — local mirrors; the canonical plan
@@ -2177,8 +2189,9 @@ scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` alr
 The supervisor (Node 3.1) enumerates `scratch/runs/*/dispatch.json` to correlate
 `run_id ↔ plan ↔ PR` (the `perk workflow run list` read surface, §8.17); that enumeration is its
 work, not this node's. A **failed** record is kept
-(not deleted) for that visibility. GC of dispatch records rides the existing `.pi/workflow/` GC
-story (records live under `scratch/runs/<run_id>/`).
+(not deleted) for that visibility — until the §8.1 age rule reclaims it. GC of dispatch records
+rides the existing `.pi/workflow/` GC story (§8.1): records live *inside* `scratch/runs/<run_id>/`
+and so are pruned wholesale with the run dir by `perk state prune` / the `cache-gc` check.
 
 ### Persist-then-trigger + read-back-verify (the establish-before-consume gate)
 
