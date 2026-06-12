@@ -991,6 +991,11 @@ close_and_label_consolidated{ issue }               -> bool
   present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
   (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
   `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
+  The warm door's `learn_issue` decode is **lenient** (render-only field): a `success: true`
+  envelope yields the captured-ok terminating result and mirrors the marker-clear even when the
+  sub-object is undecodable (e.g. under CLI↔extension version skew); the generic decode-null
+  `bad_output` message across doors now names probable version skew while keeping the
+  `unexpected payload` substring.
 
   **P2.T17 — learn is now ACTIVE (primed launch + guided warm door).** The capture mechanism above
   is unchanged; what's added is the *driver*. The `learn` cold launch is **primed** (`launch.py`

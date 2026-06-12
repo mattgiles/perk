@@ -285,7 +285,9 @@ test("decode returning null fails as bad_output (unexpected payload)", async () 
   });
   assert.deepEqual(r, {
     ok: false,
-    message: "perk pr-submit returned an unexpected payload",
+    message:
+      "perk pr-submit reported success but returned an unexpected payload — the perk CLI and " +
+      "the perk extension may be version-skewed (update/rebase so both planes match)",
     errorType: "bad_output",
   });
 });
@@ -300,7 +302,9 @@ test("a throwing decode fails as bad_output (no throw escapes the client)", asyn
   });
   assert.deepEqual(r, {
     ok: false,
-    message: "perk pr-submit returned an unexpected payload",
+    message:
+      "perk pr-submit reported success but returned an unexpected payload — the perk CLI and " +
+      "the perk extension may be version-skewed (update/rebase so both planes match)",
     errorType: "bad_output",
   });
 });

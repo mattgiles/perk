@@ -115,7 +115,9 @@ function parseObject(stdout: string): ColdJson | null {
 /**
  * Run a Python `--json` cold door and decode its success payload. The canonical seven-step flow:
  * bin resolution → stdin staging → exec → envelope-aware killed/code check → JSON boundary →
- * envelope check → validated decode. Never throws.
+ * envelope check → validated decode. Never throws. The decode-null arm (a `success: true`
+ * envelope whose payload the door cannot narrow) names probable CLI↔extension version skew —
+ * the most likely cause when both planes are individually self-consistent.
  */
 export async function runColdDoor<T>(
   pi: ExecHost,
@@ -202,7 +204,9 @@ export async function runColdDoor<T>(
   if (data === null) {
     return {
       ok: false,
-      message: `${opts.label} returned an unexpected payload`,
+      message:
+        `${opts.label} reported success but returned an unexpected payload — the perk CLI and ` +
+        "the perk extension may be version-skewed (update/rebase so both planes match)",
       errorType: "bad_output",
     };
   }
