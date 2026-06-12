@@ -15,10 +15,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
   approvedSaveResult,
+  executeObjectiveReview,
   executePlanReview,
+  objectiveReviewOutcomeResult,
   type PlanReviewUI,
   type ReviewOutcome,
   reviewOutcomeResult,
@@ -322,11 +325,34 @@ test("dispatch: a foreign non-plannotator selection (tombell) -> first-party run
   assert.equal(details.reason, "dismissed");
 });
 
-test("execute: objective-author stage -> skipped/objective-author, no backend invoked", async () => {
+// ------------------------------------------------ the objective review arm (#352 Node 2.2)
+
+const OBJECTIVE_APPROVE = "Approve — objective is ready (save via /objective-save)";
+const OBJECTIVE_DENY = "Deny — send feedback for revision";
+const OBJECTIVE_SKIP = "Skip — decide later (manual /objective-save)";
+
+const OBJECTIVE_STATE = { run_id: "RID", mode: "read-only", stage: "objective-author" };
+const OBJECTIVE_PAYLOAD = `${JSON.stringify({
+  schema_version: 1,
+  title: "Conform planning",
+  prose: "The why and the design.\n",
+  roadmap: [{ id: "1.1", description: "first node", depends_on: ["0.9"] }],
+})}\n`;
+
+/** Plant the objective-draft artifact (file + pointer) on a live branch. */
+function plantObjectiveDraft(
+  ctx: SessionDataCtx & ReportTarget,
+  branch: unknown[],
+  content = OBJECTIVE_PAYLOAD,
+): string {
+  const written = writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, content);
+  assert.ok(written, "the objective draft artifact landed");
+  return written;
+}
+
+test("objective arm: no draft -> skipped/no_objective_draft, no backend invoked", async () => {
   const cwd = scaffoldRepo();
-  const branch: unknown[] = [
-    stateEntry({ run_id: "RID", mode: "read-only", stage: "objective-author" }),
-  ];
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
   const ui = fakeUI({});
   const ctx = headfulCtx(cwd, branch, ui);
   const bridge = cannedBridge(APPROVED);
@@ -336,14 +362,180 @@ test("execute: objective-author stage -> skipped/objective-author, no backend in
     ctx as unknown as ExtensionContext,
     fakeGating(true),
     bridge,
-    { plan: "# A plan" },
+    { plan: "# A plan param (never a source here)" },
   );
   const details = result.details as { status?: string; reason?: string };
   assert.equal(details.status, "skipped");
-  assert.equal(details.reason, "objective-author");
+  assert.equal(details.reason, "no_objective_draft");
   assert.equal(bridge.reviewed.length, 0, "the bridge was never invoked");
   assert.equal(ui.editors.length, 0, "no first-party dialog opened");
-  assert.match(String(result.content[0]?.text), /objective_save/);
+  assert.match(String(result.content[0]?.text), /write the working objective with objective_draft/);
+});
+
+test("objective arm: plannotator selected -> the bridge receives the RENDERED markdown", async () => {
+  const cwd = scaffoldRepo();
+  selectPlanProvider(cwd, "plannotator-plan");
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantObjectiveDraft(ctx, branch);
+  const bridge = cannedBridge(DENIED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    {},
+  );
+  assert.equal(bridge.reviewed.length, 1, "the bridge reviewed once");
+  const reviewed = String(bridge.reviewed[0]);
+  assert.match(reviewed, /# Conform planning/);
+  assert.match(reviewed, /The why and the design\./);
+  assert.match(reviewed, /\| 1\.1 \| first node \| 0\.9 \| pending \|/, "a roadmap table row");
+  assert.doesNotMatch(reviewed, /schema_version/, "never raw JSON");
+  assert.match(String(result.content[0]?.text), /objective DENIED/);
+});
+
+test("objective arm: default selection -> first-party runs VIEW-ONLY with objective labels", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ui = fakeUI({ editor: ["# Edited by the human\n"], select: [OBJECTIVE_APPROVE] });
+  const ctx = headfulCtx(cwd, branch, ui);
+  const drafted = plantObjectiveDraft(ctx, branch);
+  const bridge = cannedBridge(APPROVED);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    {},
+  );
+  assert.equal(bridge.reviewed.length, 0, "the plannotator bridge was never invoked");
+  assert.equal(ui.editors.length, 1, "the editor dialog opened once");
+  assert.match(String(ui.editors[0]?.title), /Objective review \(view only/);
+  assert.match(String(ui.editors[0]?.prefill), /# Conform planning/, "the rendered draft shown");
+  assert.deepEqual(ui.selects[0]?.options, [OBJECTIVE_APPROVE, OBJECTIVE_DENY, OBJECTIVE_SKIP]);
+  assert.equal(
+    readFileSync(drafted, "utf8"),
+    OBJECTIVE_PAYLOAD,
+    "view-only: the edited editor return is NEVER written back to the artifact",
+  );
+  // Approved is non-terminating and non-saving in this node (Node 2.3 adds the orchestration).
+  assert.equal(result.terminate, undefined, "approval never terminates here");
+  assert.equal(argvs.length, 0, "the cold door / approvalSave was never invoked");
+  const details = result.details as Record<string, unknown>;
+  assert.equal(details.saved, false);
+  assert.equal(details.subject, "objective");
+  assert.equal(details.approved, true);
+  assert.equal(details.edited, undefined, "edited never set on the objective path");
+  assert.match(String(result.content[0]?.text), /objective APPROVED by reviewer/);
+  assert.match(String(result.content[0]?.text), /nothing is saved yet/);
+  assert.match(String(result.content[0]?.text), /\/objective-save/);
+});
+
+test("objective arm: denied + feedback -> objective_draft redirect, no save", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ui = fakeUI({
+    editor: ["# whatever was shown", "the roadmap is too coarse"],
+    select: [OBJECTIVE_DENY],
+  });
+  const ctx = headfulCtx(cwd, branch, ui);
+  plantObjectiveDraft(ctx, branch);
+  const argvs: string[][] = [];
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON, argvs });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    cannedBridge(APPROVED),
+    {},
+  );
+  const text = String(result.content[0]?.text);
+  assert.match(text, /objective DENIED/);
+  assert.match(text, /rewrite the working draft with objective_draft/);
+  assert.match(text, /call plan_review again/);
+  assert.match(text, /the roadmap is too coarse/);
+  assert.equal(argvs.length, 0, "no save on a deny");
+  assert.equal((result.details as { subject?: string }).subject, "objective");
+});
+
+test("objective arm: headless -> the standard skipResult", async () => {
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const cwd = scaffoldRepo();
+  const ctx = { ...headfulCtx(cwd, branch), hasUI: false };
+  const result = await executeObjectiveReview(
+    ctx as unknown as ExtensionContext,
+    cannedBridge(APPROVED),
+  );
+  assert.equal((result.details as { status?: string }).status, "skipped");
+  assert.match(String(result.content[0]?.text), /no interactive review surface available/);
+});
+
+test("objective arm: mistyped plan param still -> bad_input (decode-first order pinned)", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry(OBJECTIVE_STATE)];
+  const ctx = headfulCtx(cwd, branch);
+  plantObjectiveDraft(ctx, branch);
+  const bridge = cannedBridge(APPROVED);
+  const pi = fakeColdDoorPi(branch, { stdout: PLAN_JSON });
+  const result = await executePlanReview(
+    pi,
+    ctx as unknown as ExtensionContext,
+    fakeGating(true),
+    bridge,
+    { plan: 5 },
+  );
+  const details = result.details as { status?: string; reason?: string };
+  assert.equal(details.status, "skipped");
+  assert.equal(details.reason, "bad_input");
+  assert.equal(bridge.reviewed.length, 0, "nothing reviewed");
+});
+
+test("objectiveReviewOutcomeResult: the non-completed arms carry subject + objective texts", () => {
+  const unavailable = objectiveReviewOutcomeResult({ status: "unavailable", warning: "no bus" });
+  assert.match(String(unavailable.content[0]?.text), /WARNING: no bus/);
+  assert.match(
+    String(unavailable.content[0]?.text),
+    /Present the complete objective \+ structured roadmap/,
+  );
+  assert.deepEqual(unavailable.details, { status: "unavailable", subject: "objective" });
+
+  const aborted = objectiveReviewOutcomeResult({ status: "aborted" });
+  assert.match(String(aborted.content[0]?.text), /objective review aborted \(turn interrupted\)/);
+  assert.deepEqual(aborted.details, { status: "aborted", subject: "objective" });
+
+  const dismissed = objectiveReviewOutcomeResult({ status: "dismissed" });
+  assert.match(String(dismissed.content[0]?.text), /\/objective-save \(the manual failsafe\)/);
+  assert.deepEqual(dismissed.details, {
+    status: "skipped",
+    reason: "dismissed",
+    subject: "objective",
+  });
+});
+
+test("objectiveReviewOutcomeResult: approved is non-terminating with saved:false", () => {
+  const result = objectiveReviewOutcomeResult({
+    status: "completed",
+    approved: true,
+    reviewId: "rev-o",
+    feedback: "tighten phase 2",
+  });
+  assert.equal(result.terminate, undefined, "never terminates (Node 2.3 owns the save)");
+  const text = String(result.content[0]?.text);
+  assert.match(text, /objective APPROVED by reviewer — nothing is saved yet/);
+  assert.match(text, /run \/objective-save to persist it/);
+  assert.match(text, /tighten phase 2/);
+  assert.deepEqual(result.details, {
+    status: "completed",
+    approved: true,
+    feedback: "tighten phase 2",
+    reviewId: "rev-o",
+    subject: "objective",
+    saved: false,
+  });
 });
 
 test("execute: no draft + no param NEVER reviews the transcript -> skipped/no_plan", async () => {
@@ -701,6 +893,29 @@ test("runFirstPartyReview: deny -> the feedback editor; blank/dismissed feedback
   });
   assert.equal(dismissed.outcome.status, "completed", "a dismissed feedback editor still denies");
   assert.equal((dismissed.outcome as { feedback?: string }).feedback, undefined);
+});
+
+test("runFirstPartyReview: viewOnly skips the write-back; custom title/labels rendered", async () => {
+  const writes: string[] = [];
+  const ui = fakeUI({ editor: ["# Plan v2 (edited)"], select: ["Custom approve"] });
+  const r = await runFirstPartyReview({
+    ui,
+    plan: "# Plan",
+    writeDraft: (p) => {
+      writes.push(p);
+      return true;
+    },
+    viewOnly: true,
+    editorTitle: "Custom title",
+    verdicts: { approve: "Custom approve", deny: "Custom deny", skip: "Custom skip" },
+  });
+  assert.equal(writes.length, 0, "viewOnly never writes back");
+  assert.equal(r.plan, "# Plan", "the original bytes are returned unchanged");
+  assert.equal(r.edited, false);
+  assert.equal(r.outcome.status, "completed");
+  assert.equal((r.outcome as { approved: boolean }).approved, true);
+  assert.equal(ui.editors[0]?.title, "Custom title");
+  assert.deepEqual(ui.selects[0]?.options, ["Custom approve", "Custom deny", "Custom skip"]);
 });
 
 test("runFirstPartyReview: verdict dismissed or Skip -> dismissed", async () => {
