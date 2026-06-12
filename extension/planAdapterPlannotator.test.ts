@@ -673,7 +673,7 @@ function okSave(gateExited: boolean): ApprovalSaveOutcome {
     content: [{ type: "text", text: "Saved plan #42 → https://gh/o/r/issues/42" }],
     details: {
       ok: true,
-      issue: { number: 42, url: "https://gh/o/r/issues/42" },
+      issue: { id: "42", url: "https://gh/o/r/issues/42" },
       plan_ref: {
         provider: "github",
         pr_id: "42",
