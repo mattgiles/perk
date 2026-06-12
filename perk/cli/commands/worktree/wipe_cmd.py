@@ -6,11 +6,13 @@ from pathlib import Path
 
 import click
 
-from perk import cache, git, issues
+from perk.backends import issues
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_repo
-from perk.git import GitError
-from perk.issue_backend import IssueBackendError
-from perk.output import user_output
+from perk.state import cache
+from perk.substrate import git
+from perk.substrate.git import GitError
+from perk.substrate.output import user_output
 
 
 @click.command("wipe")

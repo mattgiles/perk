@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from perk import cache, github, runner
+from perk import github
+from perk.run import runner
+from perk.state import cache
 
 ROOT = Path("/repo")
 

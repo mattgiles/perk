@@ -16,16 +16,19 @@ from typing import Any
 
 import click
 
-from perk import cache, github, issue_backend, issues, launch, objective, resume, run_report, runner
+from perk import github, objective
+from perk.backends import issue_backend, issues
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.config import Config
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
-from perk.registry import Stage, load_registry
+from perk.run import launch, resume, run_report, runner
+from perk.state import cache
+from perk.substrate.config import Config
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage, load_registry
 
 # The `--wait` polling cadence (D4). Local to this module by design (do not import from
 # workflow_smoke) — same *values*, independent lifecycle. A timeout is inconclusive, not unhealthy.

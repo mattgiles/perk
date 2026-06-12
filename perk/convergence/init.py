@@ -19,20 +19,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from perk import (
-    __version__,
-    bindings,
-    cache,
-    capabilities,
-    env,
-    git,
-    github,
-    linear,
-    linear_backend,
-    workflow_artifacts,
-)
+from perk import __version__, github
+from perk.backends import linear, linear_backend
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
-from perk.config import (
+from perk.convergence import capabilities, env
+from perk.convergence.env import EnvCheck
+from perk.github import AuthStatus, GitHubError, RepoAccess
+from perk.run import workflow_artifacts
+from perk.state import cache
+from perk.substrate import bindings, git
+from perk.substrate.config import (
     CONFIG_FILENAME,
     LOCAL_CONFIG_FILENAME,
     load_committed_compaction,
@@ -40,11 +37,8 @@ from perk.config import (
     load_committed_issues_team,
     load_config,
 )
-from perk.env import EnvCheck
-from perk.github import AuthStatus, GitHubError, RepoAccess
-from perk.issue_backend import IssueBackendError
-from perk.output import user_confirm
-from perk.providers import ProviderSet, load_providers, resolve_providers
+from perk.substrate.output import user_confirm
+from perk.substrate.providers import ProviderSet, load_providers, resolve_providers
 
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
 

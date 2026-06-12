@@ -15,12 +15,14 @@ from pathlib import Path
 
 import click
 
-from perk import cache, issue_backend, issues, objective, plan
+from perk import objective, plan
+from perk.backends import issue_backend, issues
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.state import cache
+from perk.substrate.output import machine_output, user_output
 
 # error_type -> process exit code (default 1).
 _EXIT_FOR_TYPE = {"not_a_repo": 2}

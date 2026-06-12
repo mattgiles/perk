@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import cache, github
+from perk import github
 from perk.cli.cli import cli
+from perk.state import cache
 
 
 def _git_init(path: str) -> None:
@@ -211,7 +212,7 @@ def test_aliases_resolve(args):
 
 # --- cancel / retry (control surface, Node 3.2) ---------------------------------------
 
-from perk import runner as _runner  # noqa: E402
+from perk.run import runner as _runner  # noqa: E402
 
 
 def _noop_cancel(self, handle, *, repo_root):

@@ -11,11 +11,11 @@ from typing import Any
 
 import click
 
-from perk import gc
 from perk.cli.alias import alias
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output, user_output
+from perk.state import gc
+from perk.substrate.output import machine_output, user_output
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 

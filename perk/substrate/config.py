@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from perk.bindings import Binding, parse_user_bindings
+from perk.substrate.bindings import Binding, parse_user_bindings
 
 CONFIG_FILENAME = "perk.toml"
 LOCAL_CONFIG_FILENAME = "perk.local.toml"

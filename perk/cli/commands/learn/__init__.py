@@ -20,7 +20,7 @@ from perk.cli.alias import AliasGroup
 from perk.cli.commands.learn.capture_cmd import capture_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
 from perk.cli.stages import make_stage_launcher
-from perk.registry import RegistryError, load_registry
+from perk.substrate.registry import RegistryError, load_registry
 
 _LAUNCHER_NAME = "launch"
 

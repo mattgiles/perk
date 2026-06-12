@@ -4,7 +4,9 @@ import json
 
 import pytest
 
-from perk import cache, github, run_report
+from perk import github
+from perk.run import run_report
+from perk.state import cache
 
 
 def _outcome(

@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from perk.cli.alias import AliasGroup, SectionedGroup, get_aliases
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
-from perk.config import Config
+from perk.substrate.config import Config
 
 
 def _ctx(repo: Path) -> PerkContext:

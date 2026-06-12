@@ -51,8 +51,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, cast
 
-from perk import cache
-from perk.linear import LinearClient
+from perk.backends.linear import LinearClient
+from perk.state import cache
 
 AGENT_TOKEN_ENV = "LINEAR_AGENT_TOKEN"
 """The env var carrying the OAuth ``actor=app`` agent token (the emission gate's second half)."""

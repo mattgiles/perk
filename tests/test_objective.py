@@ -333,7 +333,7 @@ def test_replace_reconcilable_section_none_when_markers_absent():
 
 
 def test_replace_reconcilable_section_preserves_inline_code_form():
-    from perk.linear_backend import to_linear_markdown
+    from perk.backends.linear_backend import to_linear_markdown
 
     comment = to_linear_markdown(o.render_body_comment(_nodes(), prose="Old prose."))
     comment = comment + "\n## Immutable history\nnever touch this\n"
@@ -348,7 +348,7 @@ def test_replace_reconcilable_section_preserves_inline_code_form():
 
 
 def test_rerender_body_table_preserves_inline_code_form():
-    from perk.linear_backend import to_linear_markdown
+    from perk.backends.linear_backend import to_linear_markdown
 
     nodes = _nodes()
     comment = to_linear_markdown(o.render_body_comment(nodes, prose="Some prose."))

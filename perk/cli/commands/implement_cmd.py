@@ -19,14 +19,16 @@ from pathlib import Path
 
 import click
 
-from perk import cache, issues, launch, resume
+from perk.backends import issues
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
 from perk.cli.commands.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
-from perk.registry import Stage, load_registry
+from perk.run import launch, resume
+from perk.state import cache
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage, load_registry
 
 
 def _implement_stage() -> Stage:

@@ -20,7 +20,7 @@ inputs ``run_id``/``stage``/``plan``/``base``; a per-plan ``concurrency`` group.
 from pathlib import Path
 
 from perk import __version__
-from perk.runner import GITHUB_ACTIONS_WORKFLOW
+from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
 # The two managed files (repo-relative). The composite action lives at a fixed local path the
 # workflow references as `./.github/actions/perk-remote-setup`.

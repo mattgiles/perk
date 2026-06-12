@@ -20,15 +20,19 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from perk import cache, git, github, issues, linear_agent, run_id, runner
-from perk.binding_delivery import render_cold_bindings
+from perk import github
+from perk.backends import issues, linear_agent
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import Ensure, UserFacingCliError
-from perk.config import Config
-from perk.git import GitError
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
-from perk.registry import Stage
+from perk.run import runner
+from perk.state import cache, run_id
+from perk.substrate import git
+from perk.substrate.binding_delivery import render_cold_bindings
+from perk.substrate.config import Config
+from perk.substrate.git import GitError
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage
 
 # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
 # (atomic mkdir). A stale regular *file* at one of these paths makes pi's startup rmdir fail

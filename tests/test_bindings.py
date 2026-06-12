@@ -9,7 +9,7 @@ the loader itself stays registry-free (target-existence is doctor's job, Node 3.
 
 import pytest
 
-from perk.bindings import (
+from perk.substrate.bindings import (
     DELIVERABLE_COMMAND_TARGETS,
     Binding,
     BindingsError,
@@ -19,7 +19,7 @@ from perk.bindings import (
     resolve_bindings,
     validate,
 )
-from perk.registry import load_registry
+from perk.substrate.registry import load_registry
 
 # A minimal-but-complete, valid binding set. Each negative test mutates one line.
 GOOD = """\

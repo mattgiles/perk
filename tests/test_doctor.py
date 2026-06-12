@@ -12,10 +12,12 @@ import subprocess
 
 import pytest
 
-from perk import capabilities, git, github, init, linear_backend
-from perk import doctor as doctor_mod
+from perk import github
+from perk.backends import linear_backend
 from perk.cli.commands.doctor import render
-from perk.doctor import (
+from perk.convergence import capabilities, init
+from perk.convergence import doctor as doctor_mod
+from perk.convergence.doctor import (
     Check,
     DoctorReport,
     _runner_checks,
@@ -23,7 +25,8 @@ from perk.doctor import (
     report_to_dict,
     run_doctor,
 )
-from perk.init import run_init
+from perk.convergence.init import run_init
+from perk.substrate import git
 
 
 def _check(name="x", group="g", status="ok", **kw):
@@ -445,7 +448,7 @@ def test_cache_gc_warns_on_prunable_state(git_repo):
 
     from ulid import ULID
 
-    from perk import cache
+    from perk.state import cache
 
     _scaffold(git_repo)
     rid = str(ULID.from_datetime(datetime.now(UTC) - timedelta(days=20)))
@@ -671,7 +674,7 @@ def test_render_fix_errors(capsys):
 
 def _install_default_skills(root, subdir=".agents/skills"):
     """Plant a SKILL.md for each of the 8 shipped default binding skills under ``subdir``."""
-    from perk.bindings import load_bindings
+    from perk.substrate.bindings import load_bindings
 
     for binding in load_bindings().bindings:
         path = root / subdir / binding.skill / "SKILL.md"
@@ -847,7 +850,7 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path, converge_skills_work
 
     monkeypatch.setattr(github, "check_auth", boom)
     # The _build_checks wrapper degrades to a single info (driven via run_doctor under verify).
-    from perk import doctor
+    from perk.convergence import doctor
 
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
@@ -908,7 +911,7 @@ def test_every_required_capability_has_a_doctor_check(git_repo):
 
 
 def test_workflow_checks_verify_false_only_managed(git_repo):
-    from perk import doctor
+    from perk.convergence import doctor
 
     _scaffold(git_repo)
     checks = doctor.workflow_checks(git_repo, False, verify=False)
@@ -917,7 +920,8 @@ def test_workflow_checks_verify_false_only_managed(git_repo):
 
 
 def test_workflow_checks_managed_fail_on_deleted_workflow(git_repo):
-    from perk import doctor, workflow_artifacts
+    from perk.convergence import doctor
+    from perk.run import workflow_artifacts
 
     _scaffold(git_repo)
     (git_repo / workflow_artifacts.RUNNER_WORKFLOW_PATH).unlink()
@@ -927,7 +931,7 @@ def test_workflow_checks_managed_fail_on_deleted_workflow(git_repo):
 
 
 def test_workflow_checks_composes_github_and_runner_under_verify(monkeypatch, git_repo):
-    from perk import doctor
+    from perk.convergence import doctor
 
     _scaffold(git_repo)
     _runner_env(monkeypatch, authed=True)
@@ -943,7 +947,7 @@ def test_workflow_checks_composes_github_and_runner_under_verify(monkeypatch, gi
 
 
 def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
-    from perk import doctor
+    from perk.convergence import doctor
 
     _scaffold(git_repo)
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])

@@ -16,13 +16,16 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github, issue_backend, issues, launch, linear_agent, objective
+from perk import github, objective
+from perk.backends import issue_backend, issues, linear_agent
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
-from perk.issue_backend import IssueBackendError
-from perk.output import machine_output, user_output
+from perk.run import launch
+from perk.state import cache
+from perk.substrate.output import machine_output, user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 # `consumed_learn` (so `no_consumed_learn` is expected) and a dry run early-returns `dry_run`.

@@ -1,7 +1,7 @@
 import time
 from datetime import datetime
 
-from perk.run_id import base_ulid, derive_child, is_run_id, mint, timestamp
+from perk.state.run_id import base_ulid, derive_child, is_run_id, mint, timestamp
 
 
 def test_mint_is_unique_and_parseable():

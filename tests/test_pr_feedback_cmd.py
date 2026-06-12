@@ -4,8 +4,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import cache, github
+from perk import github
 from perk.cli.cli import cli
+from perk.state import cache
 
 _REF = {
     "provider": "github",

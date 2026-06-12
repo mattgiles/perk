@@ -16,8 +16,8 @@ from perk.cli.commands.doctor.render import render_report
 from perk.cli.commands.doctor.workflow import workflow_group
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.doctor import DoctorReport, report_to_dict, run_doctor
-from perk.output import machine_output
+from perk.convergence.doctor import DoctorReport, report_to_dict, run_doctor
+from perk.substrate.output import machine_output
 
 
 @click.group("doctor", invoke_without_command=True)

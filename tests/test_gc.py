@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from ulid import ULID
 
-from perk import cache, gc, registry
+from perk.state import cache, gc
+from perk.substrate import registry
 
 
 def _repo(tmp_path):

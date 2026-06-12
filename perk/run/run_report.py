@@ -18,8 +18,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from perk import cache, issues
-from perk.output import user_output
+from perk.backends import issues
+from perk.state import cache
+from perk.substrate.output import user_output
 
 # One marker-keyed comment per `run_id` (started -> terminal upsert; reruns are distinct run_ids).
 RUN_REPORT_MARKER = "<!-- perk:run-report:{run_id} -->"

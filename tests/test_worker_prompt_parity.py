@@ -7,7 +7,7 @@ the SAME literals are asserted from the TS side in `extension/worker.test.ts`, s
 plane (someone edits one prompt but not the other) fails CI here or there.
 """
 
-from perk.launch import _address_prompt, _implement_prompt, _learn_prompt
+from perk.run.launch import _address_prompt, _implement_prompt, _learn_prompt
 
 # Keep in lockstep with IMPLEMENT_SUBSTRINGS / ADDRESS_SUBSTRINGS in extension/worker.test.ts.
 IMPLEMENT_SUBSTRINGS = [

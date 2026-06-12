@@ -17,12 +17,12 @@ import json
 
 import click
 
-from perk import launch
 from perk.cli.alias import alias
 from perk.cli.context import require_config, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output, user_output
-from perk.registry import Stage, load_registry
+from perk.run import launch
+from perk.substrate.output import machine_output, user_output
+from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 

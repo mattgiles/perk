@@ -10,8 +10,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, launch
+from perk import github
 from perk.cli.cli import cli
+from perk.run import launch
 
 _SCRATCH_REL = ".pi/workflow/scratch/replan-42.md"
 _RUN_ID = "01ABCDEF0123456789ABCDEFGH"

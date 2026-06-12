@@ -5,7 +5,8 @@ from typing import cast
 
 from click.testing import CliRunner
 
-from perk import github, issue_backend, issues
+from perk import github
+from perk.backends import issue_backend, issues
 from perk.cli.cli import cli
 
 PLAN = "# My Feature\n\nDo the thing.\n"
@@ -248,7 +249,7 @@ def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
 
 def _run_with_handoff(monkeypatch, args, handoff, run_id="run-abc"):
     """Run plan-save in an isolated repo seeded with a handoff for ``run_id`` (#78)."""
-    from perk import cache
+    from perk.state import cache
 
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

@@ -18,12 +18,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk import cache, issues, launch, linear_agent, resume, run_report
+from perk.backends import issues, linear_agent
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
-from perk.init import GIT_PACKAGE
-from perk.issue_backend import IssueBackendError
-from perk.output import user_output
-from perk.registry import Stage, load_registry
+from perk.convergence.init import GIT_PACKAGE
+from perk.run import launch, resume, run_report
+from perk.state import cache
+from perk.substrate.output import user_output
+from perk.substrate.registry import Stage, load_registry
 
 # The cold remote door: only stages that declare it are remotely drivable (implement/address).
 DRIVABLE_DOOR = "cold_remote"

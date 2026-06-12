@@ -14,10 +14,12 @@ from typing import Any
 
 import pytest
 
-from perk import github, issue_backend, issues, objective
-from perk.issue_backend import IssueBackendError
-from perk.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
-from perk.linear_backend import LinearIssueBackend
+import perk
+from perk import github, objective
+from perk.backends import issue_backend, issues
+from perk.backends.issue_backend import IssueBackendError
+from perk.backends.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
+from perk.backends.linear_backend import LinearIssueBackend
 
 
 def _make_backend(repo_root: Path) -> issue_backend.IssueBackend:
@@ -486,10 +488,10 @@ ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
 
 class TestConsumerBoundary:
     def test_no_production_module_calls_issue_tier_directly(self) -> None:
-        """Source scan: outside perk/issues.py (the adapter) and the perk/github/ package
-        itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call."""
-        perk_dir = Path(issues.__file__).parent
-        allowed = {perk_dir / "issues.py"}
+        """Source scan: outside perk/backends/issues.py (the adapter) and the perk/github/
+        package itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call."""
+        perk_dir = Path(perk.__file__).parent
+        allowed = {perk_dir / "backends" / "issues.py"}
         github_pkg_dir = perk_dir / "github"
         pattern = re.compile(
             r"github\.(" + "|".join(re.escape(fn) for fn in ISSUE_TIER_FUNCTIONS) + r")\("
@@ -503,6 +505,6 @@ class TestConsumerBoundary:
                     offenders.append(
                         f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
                     )
-        assert not offenders, "issue-tier calls must go through perk.issues:\n" + "\n".join(
-            offenders
+        assert not offenders, (
+            "issue-tier calls must go through perk.backends.issues:\n" + "\n".join(offenders)
         )

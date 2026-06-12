@@ -32,7 +32,7 @@ from typing import cast
 
 import httpx
 
-from perk.issue_backend import IssueBackendError
+from perk.backends.issue_backend import IssueBackendError
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 

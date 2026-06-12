@@ -4,7 +4,7 @@ import click
 
 from perk.cli.alias import alias
 from perk.cli.commands.registry.shared import load_or_die
-from perk.output import user_output
+from perk.substrate.output import user_output
 
 
 @alias("s")

@@ -4,11 +4,13 @@ import json
 
 import click
 
-from perk import doctor, github, init, workflow_artifacts, workflow_smoke
+from perk import github
 from perk.cli.commands.doctor.workflow.shared import fail, render_checks
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.output import machine_output, user_output
+from perk.convergence import doctor, init
+from perk.run import workflow_artifacts, workflow_smoke
+from perk.substrate.output import machine_output, user_output
 
 
 @click.command("smoke-test")

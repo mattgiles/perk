@@ -1,5 +1,5 @@
-from perk import env
-from perk.env import EnvCheck, check_environment, required_tools_ok
+from perk.convergence import env
+from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
 
 
 def test_check_environment_covers_required_tools():
