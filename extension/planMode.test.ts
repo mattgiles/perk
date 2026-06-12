@@ -167,6 +167,10 @@ test("partial vacate: a plannotator-plan selection keeps /plan + injection but d
 
 test("--plan cold start enters read-only on session_start", async () => {
   const cwd = scaffoldRepo();
+  // Registration-time branching resolves `process.cwd()` at factory time — point it at the
+  // scaffold so the host repo's committed [providers] selection cannot vacate --plan.
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
   // Unset PERK_RUN_ID so session_start takes the warm-mint "none" path (ad-hoc `pi --plan`).
   const h = await loadPerkSession({
     cwd,
@@ -184,5 +188,6 @@ test("--plan cold start enters read-only on session_start", async () => {
     assert.equal((await h.emitToolCall("write", { path: "x", content: "y" }))?.block, true);
   } finally {
     h.dispose();
+    process.chdir(savedCwd);
   }
 });
