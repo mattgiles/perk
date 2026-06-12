@@ -20,7 +20,7 @@ const CAPTURE_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  learn_issue: { number: 99, url: "https://gh/o/r/issues/99", existed: false },
+  learn_issue: { id: "99", url: "https://gh/o/r/issues/99", existed: false },
   plan_issue: 7,
   commented: true,
   pending_cleared: true,
@@ -145,11 +145,11 @@ test("tool: learn with a summary delegates capture, surfaces the issue, and clea
     const details = result.details as {
       ok: boolean;
       captured?: boolean;
-      learn_issue?: { number?: number };
+      learn_issue?: { id?: string };
     };
     assert.equal(details.ok, true);
     assert.equal(details.captured, true);
-    assert.equal(details.learn_issue?.number, 99);
+    assert.equal(details.learn_issue?.id, "99");
     assert.match(result.content[0]?.text ?? "", /#99/);
     assert.ok(!existsSync(markerPath(cwd, PENDING_LEARN)), "pending-learn cleared after capture");
   } finally {
@@ -164,7 +164,7 @@ test("tool: learn with a malformed learn_issue payload fails as bad_output (mark
     success: true,
     error_type: null,
     message: null,
-    learn_issue: { number: "99", url: "https://gh/o/r/issues/99" },
+    learn_issue: { id: 99, url: "https://gh/o/r/issues/99" }, // id a number → reject (string ids, §8.21)
   });
   const bin = fakePerk(cwd, { stdout: malformed });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });

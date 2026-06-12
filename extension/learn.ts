@@ -8,14 +8,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { clearMarker, hasMarker, PENDING_LEARN, type PlanRef, readPlanRef } from "./cache.ts";
-import {
-  booleanField,
-  type ColdJson,
-  numberField,
-  objectField,
-  runColdDoor,
-  stringField,
-} from "./coldDoor.ts";
+import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "./coldDoor.ts";
 import { report } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import { paramsOf, stringParam } from "./toolParams.ts";
@@ -25,14 +18,15 @@ import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 export interface LearnOk {
   was_pending: boolean;
   captured: boolean;
-  learn_issue?: { number: number; url: string; existed: boolean };
+  /** `id` is the opaque string issue id (GitHub "42", Linear "ENG-123") — §8.21. */
+  learn_issue?: { id: string; url: string; existed: boolean };
 }
 
 export type LearnResult = Result<LearnOk>;
 
 /** The decoded `perk learn capture --json` payload slice the warm door consumes. */
 interface LearnCapturePayload {
-  learn_issue: { number: number; url: string; existed: boolean };
+  learn_issue: { id: string; url: string; existed: boolean };
 }
 
 /**
@@ -42,11 +36,11 @@ interface LearnCapturePayload {
 function decodeLearnCapture(payload: ColdJson): LearnCapturePayload | null {
   const issue = objectField(payload, "learn_issue");
   if (issue === undefined) return null;
-  const number = numberField(issue, "number");
+  const id = stringField(issue, "id");
   const url = stringField(issue, "url");
   const existed = booleanField(issue, "existed");
-  if (number === undefined || url === undefined || existed === undefined) return null;
-  return { learn_issue: { number, url, existed } };
+  if (id === undefined || url === undefined || existed === undefined) return null;
+  return { learn_issue: { id, url, existed } };
 }
 
 /** Clear `pending-learn` (idempotent — a no-op if it was not set). Reports whether it was set. */
@@ -90,7 +84,7 @@ export async function learnDone(
   const { wasPending } = clearPending(ctx);
   const verb = r.data.learn_issue.existed ? "Found existing" : "Created";
   return ok(
-    `${verb} learn issue #${r.data.learn_issue.number}; pending-learn cleared.`,
+    `${verb} learn issue #${r.data.learn_issue.id}; pending-learn cleared.`,
     { was_pending: wasPending, captured: true, learn_issue: r.data.learn_issue },
     { terminate: true },
   );

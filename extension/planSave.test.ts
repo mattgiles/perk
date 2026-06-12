@@ -30,7 +30,7 @@ const PLAN_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
   plan_ref: {
     provider: "github",
     pr_id: "42",
@@ -46,7 +46,7 @@ const PLAN_RESAVE_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  issue: { number: 42, url: "https://gh/o/r/issues/42", existed: true },
+  issue: { id: "42", url: "https://gh/o/r/issues/42", existed: true },
   plan_ref: {
     provider: "github",
     pr_id: "42",
@@ -63,7 +63,7 @@ const PLAN_NODE_FAIL_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  issue: { number: 122, url: "https://gh/o/r/issues/122", existed: false },
+  issue: { id: "122", url: "https://gh/o/r/issues/122", existed: false },
   plan_ref: {
     provider: "github",
     pr_id: "122",
@@ -80,7 +80,7 @@ const PLAN_NODE_OK_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  issue: { number: 122, url: "https://gh/o/r/issues/122", existed: false },
+  issue: { id: "122", url: "https://gh/o/r/issues/122", existed: false },
   plan_ref: {
     provider: "github",
     pr_id: "122",
@@ -372,7 +372,7 @@ test("tool: success:true with a malformed plan_ref fails as bad_output, no linka
     success: true,
     error_type: null,
     message: null,
-    issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+    issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
     plan_ref: {
       provider: "github",
       pr_id: 42, // number, not string → reject
@@ -401,7 +401,7 @@ test("tool: a malformed objective_node is dropped (advisory), save still succeed
     success: true,
     error_type: null,
     message: null,
-    issue: { number: 42, url: "https://gh/o/r/issues/42", existed: false },
+    issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
     plan_ref: {
       provider: "github",
       pr_id: "42",
@@ -846,12 +846,13 @@ test("tool: plan_save with a mistyped consumed_learn → bad_input, no exec", as
 });
 
 test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
+  // consumed_learn: string ids are canonical (§8.21); bare numbers coerce via String().
   assert.deepEqual(decodePlanSaveParams({ plan: "# P", consumed_learn: [1, 2] }), {
     plan: "# P",
     title: undefined,
     objective_id: undefined,
     node_id: undefined,
-    consumed_learn: [1, 2],
+    consumed_learn: ["1", "2"],
   });
   // plan absent decodes to undefined (Node 2.2: resolvePlanSource owns the fallback chain).
   assert.equal(decodePlanSaveParams({})?.plan, undefined);
@@ -861,7 +862,12 @@ test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
   assert.equal(decodePlanSaveParams({ plan: "p", objective_id: 7 }), null);
   assert.equal(decodePlanSaveParams({ plan: "p", node_id: 1.2 }), null);
   assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: "x" }), null);
-  assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: [1, "2"] }), null);
+  // mixed string/number ids are fine now (coerced); a non-id element still strict-fails.
+  assert.deepEqual(
+    decodePlanSaveParams({ plan: "p", consumed_learn: [1, "ENG-2"] })?.consumed_learn,
+    ["1", "ENG-2"],
+  );
+  assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: [true] }), null);
 });
 
 // --- Node 2.3 (#339): warm node-link recovery (the objective_node_claim carrier) -----------

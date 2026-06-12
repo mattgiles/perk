@@ -250,7 +250,7 @@ test("/objective-plan registers and is headless-safe", async () => {
 // --- pure helpers (offline unit) --------------------------------------------------------
 
 test("buildObjectiveNodeArgs: shapes", () => {
-  assert.deepEqual(buildObjectiveNodeArgs({ objective: 7, node: "1.2", pr: "#9" }), [
+  assert.deepEqual(buildObjectiveNodeArgs({ objective: "7", node: "1.2", pr: "#9" }), [
     "objective",
     "node",
     "7",
@@ -260,7 +260,7 @@ test("buildObjectiveNodeArgs: shapes", () => {
     "#9",
     "--json",
   ]);
-  assert.deepEqual(buildObjectiveNodeArgs({ objective: 7, node: "1.2", status: "planning" }), [
+  assert.deepEqual(buildObjectiveNodeArgs({ objective: "7", node: "1.2", status: "planning" }), [
     "objective",
     "node",
     "7",
@@ -271,22 +271,22 @@ test("buildObjectiveNodeArgs: shapes", () => {
     "--json",
   ]);
   assert.deepEqual(
-    buildObjectiveNodeArgs({ objective: 7, node: "1.2", status: "in_progress", pr: "#9" }),
+    buildObjectiveNodeArgs({ objective: "7", node: "1.2", status: "in_progress", pr: "#9" }),
     ["objective", "node", "7", "--node", "1.2", "--status", "in_progress", "--pr", "#9", "--json"],
   );
   // neither status nor pr nor description -> structurally invalid.
-  assert.equal(buildObjectiveNodeArgs({ objective: 7, node: "1.2" }), null);
+  assert.equal(buildObjectiveNodeArgs({ objective: "7", node: "1.2" }), null);
 });
 
 test("buildObjectiveNodeArgs: description alone is valid (P2.T11)", () => {
   assert.deepEqual(
-    buildObjectiveNodeArgs({ objective: 7, node: "1.2", description: "reconciled scope" }),
+    buildObjectiveNodeArgs({ objective: "7", node: "1.2", description: "reconciled scope" }),
     ["objective", "node", "7", "--node", "1.2", "--description", "reconciled scope", "--json"],
   );
   // description with status + pr -> all three pushed in order.
   assert.deepEqual(
     buildObjectiveNodeArgs({
-      objective: 7,
+      objective: "7",
       node: "1.2",
       status: "done",
       pr: "#9",
@@ -457,7 +457,7 @@ test("tool: objective_node with a mistyped objective → bad_input, no exec", as
   const bin = fakePerk(cwd, { stdout: OK_JSON, argvFile });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
   try {
-    const result = await h.invokeTool("objective_node", { objective: "7", node: "1.2", pr: "#9" });
+    const result = await h.invokeTool("objective_node", { objective: true, node: "1.2", pr: "#9" });
     const details = result.details as { ok: boolean; error_type?: string };
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "bad_input");
@@ -504,8 +504,9 @@ test("tool: reconcile_objective with a mistyped prose → bad_input, no exec", a
 });
 
 test("decodeObjectiveNodeParams: tri-state strict-fail shapes", () => {
+  // objective ids are opaque strings (§8.21); bare numbers coerce via String().
   assert.deepEqual(decodeObjectiveNodeParams({ objective: 7, node: "1.2", pr: "#9" }), {
-    objective: 7,
+    objective: "7",
     node: "1.2",
     status: undefined,
     pr: "#9",
@@ -514,7 +515,11 @@ test("decodeObjectiveNodeParams: tri-state strict-fail shapes", () => {
   });
   assert.equal(decodeObjectiveNodeParams(undefined), null);
   assert.equal(decodeObjectiveNodeParams("x"), null);
-  assert.equal(decodeObjectiveNodeParams({ objective: "7", node: "1.2" }), null);
+  assert.deepEqual(
+    decodeObjectiveNodeParams({ objective: "ENG-7", node: "1.2", pr: "#9" })?.objective,
+    "ENG-7",
+  );
+  assert.equal(decodeObjectiveNodeParams({ objective: true, node: "1.2" }), null);
   assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "" }), null);
   assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", status: "bogus" }), null);
   assert.equal(decodeObjectiveNodeParams({ objective: 7, node: "1.2", status: 5 }), null);
@@ -528,11 +533,15 @@ test("decodeObjectiveNodeParams: tri-state strict-fail shapes", () => {
 
 test("decodeReconcileParams: tri-state strict-fail shapes", () => {
   assert.deepEqual(decodeReconcileParams({ objective: 5, prose: "p" }), {
-    objective: 5,
+    objective: "5",
+    prose: "p",
+  });
+  assert.deepEqual(decodeReconcileParams({ objective: "ENG-5", prose: "p" }), {
+    objective: "ENG-5",
     prose: "p",
   });
   assert.equal(decodeReconcileParams(undefined), null);
-  assert.equal(decodeReconcileParams({ objective: "5", prose: "p" }), null);
+  assert.equal(decodeReconcileParams({ objective: true, prose: "p" }), null);
   assert.equal(decodeReconcileParams({ objective: 5, prose: 5 }), null);
   assert.equal(decodeReconcileParams({ objective: 5 }), null);
 });

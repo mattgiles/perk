@@ -18,7 +18,8 @@ import { report } from "./report.ts";
 /** The decoded `perk learn docs --gather --json` payload slice the warm door consumes. */
 interface LearnDocsGatherPayload {
   inbox_path: string;
-  learn_numbers: number[];
+  /** Opaque string learn-issue ids (GitHub "45", Linear "ENG-45") — §8.21. */
+  learn_numbers: string[];
 }
 
 /** Strict decode — the guidance dereferences both fields; `launched` is unconsumed. */
@@ -26,8 +27,14 @@ function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
   const inboxPath = stringField(payload, "inbox_path");
   const numbers = payload.learn_numbers;
   if (inboxPath === undefined) return null;
-  if (!Array.isArray(numbers) || !numbers.every((n) => typeof n === "number")) return null;
-  return { inbox_path: inboxPath, learn_numbers: numbers };
+  // String ids are canonical (§8.21); numbers are tolerated + coerced (older envelopes).
+  if (
+    !Array.isArray(numbers) ||
+    !numbers.every((n) => typeof n === "string" || typeof n === "number")
+  ) {
+    return null;
+  }
+  return { inbox_path: inboxPath, learn_numbers: numbers.map((n) => String(n)) };
 }
 
 /**
@@ -35,7 +42,7 @@ function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
  * skill pointer rides the skill-binding suffix — Node 2.3 — not hardcoded here). Pure + exported
  * for offline tests.
  */
-export function learnDocsGuidance(inboxPath: string, learnNumbers: number[]): string {
+export function learnDocsGuidance(inboxPath: string, learnNumbers: string[]): string {
   const numList = learnNumbers.join(", ");
   return [
     "perk /learn-docs — the learned-docs plan factory.",
