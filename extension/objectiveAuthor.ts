@@ -2,7 +2,8 @@
 // half). A `perk objective-author` cold launch opens a READ-ONLY session whose handoff `stage` is
 // `objective-author`; this module injects the objective-authoring contract under its own
 // `perk:objective-author-context` customType, keyed off (read-only gate AND stage ===
-// objective-author). planMode.ts defers when the stage is objective-author, so exactly one
+// objective-author), optionally extended by the same `[workflow] plan_authoring` addendum the
+// plan-authoring injection consumes (verbatim reuse, read per-event via loadPerkConfig). planMode.ts defers when the stage is objective-author, so exactly one
 // authoring context is injected — the coupling break (#58): plan-authoring is no longer keyed off
 // the bare read-only gate.
 //
@@ -10,6 +11,7 @@
 // the mirror of planSave.ts.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { loadPerkConfig } from "./config.ts";
 import type { ToolGating } from "./toolGating.ts";
 import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
@@ -49,6 +51,14 @@ Either path saves: call the objective_save tool directly after exiting read-only
 converged prose + structured roadmap. Either way the structured save flows through the tool — never
 hand-write roadmap YAML.`;
 
+/** Build the full objective-authoring injection, appending the project config addendum when present. */
+export function objectiveAuthoringContextContent(cwd: string): string {
+  const addendum = loadPerkConfig(cwd).planAuthoring;
+  return addendum
+    ? `${OBJECTIVE_AUTHORING_CONTEXT}\n\n${addendum.trim()}`
+    : OBJECTIVE_AUTHORING_CONTEXT;
+}
+
 /** Whether the current branch is an objective-author session (read-only gate AND stage match). */
 function isObjectiveAuthoring(gating: ToolGating, branch: readonly BranchEntry[]): boolean {
   return gating.isActive() && rebuildWorkflowState(branch).stage === OBJECTIVE_AUTHOR_STAGE;
@@ -65,7 +75,7 @@ export function registerObjectiveAuthor(pi: ExtensionAPI, gating: ToolGating): v
     return {
       message: {
         customType: OBJECTIVE_AUTHOR_CONTEXT_TYPE,
-        content: OBJECTIVE_AUTHORING_CONTEXT,
+        content: objectiveAuthoringContextContent(ctx.cwd),
         display: false,
       },
     };

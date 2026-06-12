@@ -4,16 +4,41 @@
 // exactly one authoring context is present. A normal plan read-only session is unaffected.
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_AUTHOR_CONTEXT_TYPE } from "./objectiveAuthor.ts";
+import {
+  OBJECTIVE_AUTHOR_CONTEXT_TYPE,
+  OBJECTIVE_AUTHORING_CONTEXT,
+  objectiveAuthoringContextContent,
+} from "./objectiveAuthor.ts";
 import { PLAN_CONTEXT_TYPE } from "./planMode.ts";
 import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
+
+const ADDENDUM_TOML = '[workflow]\nplan_authoring = "House rule: cite a file path per change."\n';
+
+function writeAddendumConfig(cwd: string): void {
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), ADDENDUM_TOML, "utf8");
+}
+
+test("objectiveAuthoringContextContent: carries the authoring contract; appends the config addendum", () => {
+  const cwd = scaffoldRepo();
+  const base = objectiveAuthoringContextContent(cwd);
+  assert.match(base, /\[OBJECTIVE AUTHORING\]/);
+  assert.equal(base, OBJECTIVE_AUTHORING_CONTEXT, "no addendum without config");
+
+  writeAddendumConfig(cwd);
+  const withAddendum = objectiveAuthoringContextContent(cwd);
+  assert.match(withAddendum, /House rule: cite a file path per change\./);
+});
 
 test("objective-author session injects objective-authoring context; planMode defers", async () => {
   const cwd = scaffoldRepo({
     handoff: { runId: "01RID", mode: "read-only", stage: "objective-author" },
   });
+  writeAddendumConfig(cwd);
   const h = await loadPerkSession({
     cwd,
     sessionManager: SessionManager.inMemory(cwd),
@@ -30,6 +55,14 @@ test("objective-author session injects objective-authoring context; planMode def
           String(m.content).includes("[OBJECTIVE AUTHORING]"),
       ),
       "objective-authoring context injected",
+    );
+    assert.ok(
+      injected.some(
+        (m) =>
+          m.customType === OBJECTIVE_AUTHOR_CONTEXT_TYPE &&
+          String(m.content).includes("House rule: cite a file path per change."),
+      ),
+      "the [workflow] plan_authoring addendum flows into the injected context per-event",
     );
     assert.equal(
       injected.some((m) => m.customType === PLAN_CONTEXT_TYPE),
