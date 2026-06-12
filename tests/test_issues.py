@@ -457,8 +457,8 @@ class TestLateBinding:
         assert rec.kwargs == {"number": 1, "repo_root": tmp_path}
 
 
-# The 21 issue-tier functions on perk/github.py (the GitHubIssueBackend substrate). Production
-# code must reach them through perk.issues.resolve_issue_backend, never directly.
+# The 21 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
+# Production code must reach them through perk.issues.resolve_issue_backend, never directly.
 ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
     "create_label",
     "find_plan_issue",
@@ -486,16 +486,17 @@ ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
 
 class TestConsumerBoundary:
     def test_no_production_module_calls_issue_tier_directly(self) -> None:
-        """Source scan: outside perk/issues.py (the adapter) and perk/github.py itself, no
-        module under perk/ may contain a `github.<issue-tier-fn>(` call."""
+        """Source scan: outside perk/issues.py (the adapter) and the perk/github/ package
+        itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call."""
         perk_dir = Path(issues.__file__).parent
-        allowed = {perk_dir / "issues.py", perk_dir / "github.py"}
+        allowed = {perk_dir / "issues.py"}
+        github_pkg_dir = perk_dir / "github"
         pattern = re.compile(
             r"github\.(" + "|".join(re.escape(fn) for fn in ISSUE_TIER_FUNCTIONS) + r")\("
         )
         offenders: list[str] = []
         for path in sorted(perk_dir.rglob("*.py")):
-            if path in allowed:
+            if path in allowed or path.is_relative_to(github_pkg_dir):
                 continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if pattern.search(line):

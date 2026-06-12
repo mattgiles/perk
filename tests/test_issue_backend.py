@@ -320,17 +320,27 @@ class TestErrorType:
             raise issue_backend.IssueBackendError("boom")
 
 
+def _github_package_source() -> str:
+    """Every ``*.py`` under the ``perk/github/`` package, concatenated.
+
+    ``github.__file__`` is the near-empty ``__init__.py``; the guard must scan the whole
+    package or it goes vacuous.
+    """
+    package_dir = Path(github.__file__).parent
+    return "\n".join(path.read_text(encoding="utf-8") for path in sorted(package_dir.rglob("*.py")))
+
+
 class TestImportDirection:
     def test_github_module_never_imports_issue_backend(self) -> None:
         # The one-way import decision: issue_backend imports github (PullRequest), never the
-        # reverse — Node 1.2 must not invert the dependency from inside github.py.
-        source = Path(github.__file__).read_text(encoding="utf-8")
+        # reverse — Node 1.2 must not invert the dependency from inside the github package.
+        source = _github_package_source()
         assert "issue_backend" not in source
 
     def test_github_module_never_imports_issues(self) -> None:
         # Node 1.2's adapter module (perk/issues.py) is the only module importing both sides;
-        # github.py must never reach back into it.
-        source = Path(github.__file__).read_text(encoding="utf-8")
+        # the github package must never reach back into it.
+        source = _github_package_source()
         assert "perk.issues" not in source
         assert "import issues" not in source
 

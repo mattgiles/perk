@@ -41,7 +41,7 @@ def test_prek_ruff_rev_matches_pyproject_floor():
 # (module stem, function name), and passes explicit `check=` and `timeout=` keywords.
 _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("git", "_run"),
-    ("github", "_run"),
+    ("_exec", "_run"),
     ("env", "_node_version"),
     ("init", "sync_skills"),
     ("run_worker", "_spawn_worker"),

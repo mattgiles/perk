@@ -302,7 +302,7 @@ def test_gateway_review_path_sends_event_comment(monkeypatch):
             return _Proc(0, "{}")
         return _Proc(0, "{}")
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(github._exec, "_run", fake_run)
     result = github.post_pr_review(
         pr_number=42,
         summary="ok",
@@ -326,7 +326,7 @@ def test_gateway_falls_back_to_comment_on_review_failure(monkeypatch):
             return _Proc(0, "{}")
         return _Proc(0, "{}")
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(github._exec, "_run", fake_run)
     result = github.post_pr_review(
         pr_number=42,
         summary="ok",
@@ -341,7 +341,7 @@ def test_gateway_raises_when_even_fallback_fails(monkeypatch):
     def fake_run(args, **_):
         return _Proc(1, "", "boom")
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(github._exec, "_run", fake_run)
     try:
         github.post_pr_review(pr_number=42, summary="ok", comments=[], repo_root=Path())
     except github.GitHubError:
@@ -353,7 +353,7 @@ def test_gateway_dry_run_does_not_shell(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("dry-run must not shell gh")
 
-    monkeypatch.setattr(github, "_run", boom)
+    monkeypatch.setattr(github._exec, "_run", boom)
     result = github.post_pr_review(
         pr_number=42, summary="ok", comments=[], repo_root=Path(), dry_run=True
     )
@@ -370,7 +370,7 @@ def test_gateway_add_pr_reaction_success(monkeypatch):
         seen["args"] = list(args)
         return _Proc(0, "{}")
 
-    monkeypatch.setattr(github, "_run", fake_run)
+    monkeypatch.setattr(github._exec, "_run", fake_run)
     result = github.add_pr_reaction(pr_number=42, repo_root=Path())
     assert result.ok is True and result.mode == "reaction"
     assert result.pr_number == 42 and result.comment_count == 0
@@ -381,7 +381,7 @@ def test_gateway_add_pr_reaction_success(monkeypatch):
 
 
 def test_gateway_add_pr_reaction_failure_raises(monkeypatch):
-    monkeypatch.setattr(github, "_run", lambda *a, **k: _Proc(1, "", "boom"))
+    monkeypatch.setattr(github._exec, "_run", lambda *a, **k: _Proc(1, "", "boom"))
     try:
         github.add_pr_reaction(pr_number=42, repo_root=Path())
     except github.GitHubError:
@@ -393,6 +393,6 @@ def test_gateway_add_pr_reaction_dry_run_does_not_shell(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("dry-run must not shell gh")
 
-    monkeypatch.setattr(github, "_run", boom)
+    monkeypatch.setattr(github._exec, "_run", boom)
     result = github.add_pr_reaction(pr_number=42, repo_root=Path(), dry_run=True)
     assert result.ok is True and result.mode == "reaction" and result.comment_count == 0
