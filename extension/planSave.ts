@@ -11,6 +11,12 @@
 // fallback for sessions that never wrote a draft; `extractPlanMarkdown` (the transcript scrape)
 // is the universal last resort. A differing ignored param is surfaced, never silent.
 //
+// APPROVAL→SAVE ORCHESTRATION (Node 2.3). The exported `approvalSave` seam is the shared
+// APPROVED-review → save flow: artifact-first resolution → `savePlan` (warm node-link recovery
+// inside, from the `objective_node_claim` carrier) → gate exit on a successful save (D1a). The
+// `/plan-save` command is the MANUAL FAILSAFE invocation of the same seam; from Node 2.4 on, the
+// review backends (plannotator / first-party / tombell) wire their APPROVED outcome into it.
+//
 // SEAM-SHARED SUBSTRATE (Node 2.2). `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
 // are the produced-contract landing for the PLAN seam (`adapter-architecture.md` Invariant 1) — the
 // Node 2.3 adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
@@ -29,6 +35,7 @@ import {
   runColdDoor,
   stringField,
 } from "./coldDoor.ts";
+import { nodeClaimsEqual, readNodeClaim } from "./objectivePlan.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import { generatePlanTitle } from "./planTitle.ts";
 import { report, type Severity } from "./report.ts";
@@ -253,17 +260,32 @@ export async function savePlan(
   // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
 
+  // Node 2.3 (#339): warm node-link recovery. When BOTH link params are absent (an
+  // approval-triggered save carries no model params), fill both-or-neither from the rebuilt
+  // `objective_node_claim`. Any explicit value (even one) wins outright — a half-specified link
+  // is the caller's, never mixed with the claim. Fail-open: a malformed/missing claim never
+  // blocks a save (readNodeClaim returns null). Mirrors the cold `_link_from_handoff` (#78).
+  let objectiveId = opts.objectiveId;
+  let nodeId = opts.nodeId;
+  if (objectiveId === undefined && nodeId === undefined) {
+    const claim = readNodeClaim(ctx);
+    if (claim !== null) {
+      objectiveId = claim.objective;
+      nodeId = claim.node;
+    }
+  }
+
   const args = ["plan-save", "--json"];
   if (runId) args.push("--run-id", runId);
   // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
   if (title) args.push("--title", title);
   // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
   // number; non-objective plans omit it (unchanged behavior).
-  if (opts.objectiveId) args.push("--objective-id", opts.objectiveId);
+  if (objectiveId) args.push("--objective-id", objectiveId);
   // P2.T10: the objective plan factory passes the node id alongside the objective id; the cold
   // door commits the node→plan backlink + `in_progress` advance atomically. Non-factory plans
   // omit it (unchanged behavior).
-  if (opts.nodeId) args.push("--node-id", opts.nodeId);
+  if (nodeId) args.push("--node-id", nodeId);
   // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
   // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
   if (opts.consumedLearn && opts.consumedLearn.length > 0) {
@@ -291,6 +313,23 @@ export async function savePlan(
 
   const verb = r.data.issue.existed ? "Updated" : "Saved";
   const nodeLink = r.data.objective_node;
+  // Node 2.3 (#339): a successful node-linked save clears the matching claim (best-effort —
+  // failure only risks a stale claim silently linking a later, unrelated save; surfaced via
+  // appendWorkflowState's report()). An unrelated claim is never clobbered.
+  if (nodeLink?.linked === true) {
+    const linkedNode = nodeLink.node ?? nodeId ?? null;
+    const claim = readNodeClaim(ctx);
+    if (linkedNode !== null && claim !== null && claim.node === linkedNode) {
+      appendWorkflowState(pi, ctx, {
+        data: { objective_node_claim: null },
+        field: "objective_node_claim",
+        expected: null,
+        scope: "plan-save",
+        failure: `objective_node_claim clear read-back failed for node ${linkedNode}`,
+        equals: nodeClaimsEqual,
+      });
+    }
+  }
   // Render all THREE node-link outcomes (the silent-partial-failure fix, #124). A failed advance
   // (`linked: false`) is a non-fatal sub-step — the plan genuinely saved — but it must be VISIBLE
   // (the §8.4 "warn + retriable" intent), not swallowed. Both surfaces render content[0].text, so
@@ -329,6 +368,46 @@ export async function savePlan(
     },
     { terminate: true },
   );
+}
+
+/** The approval→save orchestration outcome (Node 2.3 of #339). */
+export type ApprovalSaveOutcome =
+  | { status: "no-plan" }
+  | { status: "saved" | "save-failed"; result: SaveResult; gateExited: boolean };
+
+/**
+ * The shared approval→save orchestration seam (Node 2.3 of #339): an APPROVED review outcome
+ * (plannotator / first-party / tombell — Nodes 2.4–2.6) and the manual `/plan-save` failsafe both
+ * run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
+ * the explicit fallback, the transcript scrape last) → `savePlan` (warm node-link recovery happens
+ * inside) → gate exit on a successful save while read-only (the D1a pattern: snapshot
+ * `gating.isActive()` before the save; a failed save leaves the gate ON). No resolvable plan
+ * source → `no-plan` (nothing saved, the gate untouched); callers render their own fallback.
+ * The returned `SaveResult` keeps `terminate: true` for future tool-path callers.
+ */
+export async function approvalSave(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  opts: { reviewedPlan?: string; title?: string } = {},
+): Promise<ApprovalSaveOutcome> {
+  const src = resolvePlanSource(ctx, opts.reviewedPlan);
+  if (src === null) return { status: "no-plan" };
+  // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
+  // read-write boundary in one gesture. A failed save leaves the gate on.
+  const wasReadOnly = gating.isActive();
+  const result = await savePlan(pi, ctx, {
+    plan: src.plan,
+    source: src.source,
+    paramMismatch: src.paramMismatch,
+    title: opts.title,
+  });
+  let gateExited = false;
+  if (result.details.ok && wasReadOnly) {
+    gating.exit(ctx);
+    gateExited = true;
+  }
+  return { status: result.details.ok ? "saved" : "save-failed", result, gateExited };
 }
 
 /** The decoded `plan_save` tool params (snake_case, as the schema declares them). */
@@ -456,12 +535,17 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
   });
 
   pi.registerCommand("plan-save", {
-    description: "Save the latest proposed plan to GitHub (the read-only → read-write boundary).",
+    description:
+      "Save the latest proposed plan to GitHub — the manual failsafe for the approval→save flow " +
+      "(the read-only → read-write boundary).",
     handler: async (args, ctx) => {
-      // Node 2.2: artifact-first; the transcript scrape is the demoted universal fallback. No
-      // explicit param on the command path ⇒ paramMismatch is always false.
-      const src = resolvePlanSource(ctx);
-      if (src === null) {
+      const title = args.trim() || undefined;
+      // Node 2.3: the manual-failsafe invocation of the shared approval→save seam. Artifact-first
+      // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit
+      // lives in the seam. (The tool path never exits the gate — it is structurally unreachable
+      // while read-only.)
+      const outcome = await approvalSave(pi, ctx, gating, { title });
+      if (outcome.status === "no-plan") {
         report(
           ctx,
           "plan-save",
@@ -471,18 +555,10 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
         );
         return;
       }
-      const title = args.trim() || undefined;
-      // D1a: the command may run while read-only; on a successful save, exit the gate so save marks
-      // the read-only → read-write boundary in one gesture. (The tool path never does this — it is
-      // structurally unreachable while read-only.)
-      const wasReadOnly = gating.isActive();
-      const result = await savePlan(pi, ctx, { plan: src.plan, title, source: src.source });
-      if (result.details.ok && wasReadOnly) {
-        gating.exit(ctx);
-      }
       // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
       // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
       // saved) — but it MUST surface (the #124 silent-partial-failure fix), in headless runs too.
+      const result = outcome.result;
       const message = result.content[0]?.text ?? "plan-save done";
       const severity: Severity = !result.details.ok
         ? "error"

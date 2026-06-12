@@ -39,6 +39,13 @@ export interface WorkflowState {
   last_review_batch?: unknown;
   /** Session-artifact provenance pointers, keyed by artifact name (Node 1.3, §8.3). */
   session_artifacts?: Record<string, SessionArtifactPointer> | null;
+  /**
+   * The objective node this session has claimed `planning` (Node 2.3 of #339, §8.3) — the warm
+   * node-link carrier an approval-triggered save recovers from. Written by the `objective_node`
+   * tool on a successful `planning` transition; cleared on a non-planning transition for the same
+   * node and after a successful node-linked plan save. Best-effort tier.
+   */
+  objective_node_claim?: { objective: string; node: string } | null;
 }
 
 /** The structural slice of a session entry that the rebuild cares about. */
