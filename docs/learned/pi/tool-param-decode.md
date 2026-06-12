@@ -1,6 +1,6 @@
 ---
 title: The tool-boundary typed param decode (toolParams.ts) — tri-state seam, strict-fail refusals, ordering proofs
-read_when: You are decoding registered-tool params, adding a tool handler, choosing strict vs lenient decode semantics at a boundary, or testing decode-before-side-effect ordering.
+read_when: You are decoding registered-tool params, adding a tool handler, choosing strict vs lenient decode semantics at a boundary, making a required param optional behind a fallback chain, adding a backend-agnostic id param (idParam/idArrayParam), or testing decode-before-side-effect ordering.
 ---
 
 # Tool-boundary typed param decode
@@ -22,6 +22,26 @@ encode an *advisory-payload* policy (see `workflow/cold-door-client.md`); the to
 strict-fail. Resisting the urge to "reuse" kept both policies honest and caused **zero churn** in
 the seven door modules importing the cold-door helpers. When two boundaries have different failure
 philosophies, separate helper families are the cheap option, not duplication.
+
+## Fallback-chain optionality: flip absent to `undefined`
+
+When a previously-required param grows a **fallback chain** (e.g. `plan_save`'s `plan` once
+`resolvePlanSource` landed), the decode must flip the absent case from `""`-coercion to
+`undefined`: the empty-string coercion existed so the core's `invalid_input` arm owned the message,
+but with a resolver chain the *resolver's* null arm owns "nothing anywhere", and `undefined` is
+what lets an absent param fall through to the next source. Present-but-mistyped → `null`
+strict-fail is unchanged — **the tri-state survives the optionality flip**.
+
+The one-comparison fold that falls out: `paramsOf(params) === null` (non-object params) and a
+mistyped field both fold into a single `=== null` bad_input check, while `undefined` (absent)
+proceeds — mistyped-vs-absent for free with one comparison.
+
+## Backend-agnostic id params: `idParam` / `idArrayParam`
+
+`extension/toolParams.ts` exports a string-or-number pair for opaque backend-owned ids: strings
+pass through, numbers coerce via `String()`, anything else is the strict-fail `null`. This is the
+standard shape for id params once ids are backend-owned opaque strings (see
+`workflow/issue-backend.md`'s opaque-id relaxation) — don't type new id params as `number`.
 
 ## Refusal shapes and the sweep invariant
 
@@ -78,3 +98,5 @@ programmatic callers, not live-session drift.
 - `docs/learned/workflow/cold-door-client.md` — the contrasting advisory decode policy (never reuse
   its helpers here)
 - `docs/learned/pi/extension-api.md` — the `headfulUIContext` gap that forces the pure-decode export
+- `docs/learned/workflow/issue-backend.md` — the opaque-id relaxation behind `idParam`
+- `docs/learned/workflow/plan-save-surfaces.md` — the fallback chain that forced the optionality flip

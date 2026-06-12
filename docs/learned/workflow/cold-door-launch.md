@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -98,6 +98,12 @@ surface nesting a command that calls `machine_output` must isolate that inner st
 *before* its `--json` payload, `json.loads(result.output)` fails. Parse the **last non-empty line** of
 `result.output`. (Sibling tests that `json.loads(result.output)` directly get away with it only because
 those commands emit nothing to stderr ahead of the JSON.)
+
+Refinement (Click ≥8.2): `Result.output` is an independent **combined** stdout+stderr stream, but
+`result.stdout` and `result.stderr` are still available separately. For "fail-soft never changes
+the `--json` payload" byte-identity asserts, compare `result.stdout` against the baseline's and
+assert the loud-but-non-fatal note via `result.stderr` — comparing `.output` fails spuriously
+because the stderr note lands in the combined stream.
 
 ## Cross-references
 

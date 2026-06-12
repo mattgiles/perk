@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, hitting the `headfulUIContext` select/input gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
 # Pi extension API (0.78.x)
@@ -53,6 +53,19 @@ The `context` event (= SDK `transformContext`) runs on **every** provider call o
 message list** — not once per session. So an *unconditional* strip of an injected custom type would
 remove it even on its own injection turn (defeating delivery). Any strip of injected context must be
 **conditional** — see `pi/context-injection.md` for the inject-and-conditionally-strip pattern.
+
+## `ctx.ui.editor` facts (pi 0.78.x)
+
+`editor(title, prefill) → Promise<string | undefined>`. Enter submits, Shift+Enter inserts a
+newline, Esc resolves `undefined`, Ctrl+G opens `$EDITOR`. Two non-obvious contours:
+
+- **It takes NO AbortSignal** (unlike `select`/`confirm`/`input`) — so a multi-dialog flow must
+  check `signal?.aborted` *between* dialogs and let the aborted arm win over an in-flight dialog's
+  result.
+- **Key hints must ride the dialog *title*** — pi renders no other affordance for them.
+
+The editor-dialog UX (long-plan scrolling, the Ctrl+G round-trip) is automation-untested — pinned
+only by the type contract; first real interactive use should confirm.
 
 ## `registerTool` execute results details requirement
 
@@ -136,10 +149,13 @@ guidance injection (prior tests only asserted notifies + side effects).
 
 ## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`
 
-The test harness's headful UI fake has **no `select`/`input`**, so a registered-tool-level
-UI-interaction test isn't possible offline. The workaround is the exported pure decode + pure core
-pattern — the handler stays a thin wiring layer and the decode + core are tested directly with a
-fake UI (see `pi/tool-param-decode.md`).
+The test harness's headful UI fake has **no `select`/`input`** — and **no `editor`** either — so a
+registered-tool-level UI-interaction test isn't possible offline. The workaround is the exported
+pure decode + pure core pattern — the handler stays a thin wiring layer and the decode + core are
+tested directly with a fake UI (see `pi/tool-param-decode.md`). Editor-dialog flows specifically
+can only be harness-tested for arms that never reach a dialog (headless / bad_input / no_plan /
+bridge); dialog arms test via an extracted core + a scripted UI fake — see
+`workflow/plan-review-flow.md` for the realized recipe.
 
 ## Sources
 
@@ -157,3 +173,4 @@ fake UI (see `pi/tool-param-decode.md`).
 - `docs/learned/pi/tool-param-decode.md` — the pure-decode export that works around the
   `headfulUIContext` gap
 - `docs/learned/workflow/session-data.md` — the run-id lifecycle behind the `PERK_RUN_ID` leak
+- `docs/learned/workflow/plan-review-flow.md` — the `ctx.ui.editor` consumer + its testing split

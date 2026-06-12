@@ -1,6 +1,6 @@
 ---
 title: plan-save surfaces — fidelity gap, handoff_extra carrier, asymmetric write paths
-read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, or adding context that must survive a model's choice of save surface.
+read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, adding context that must survive a model's choice of save surface, touching resolvePlanSource's artifact→param→transcript chain, or extending the warm objective_node_claim recovery carrier.
 ---
 
 # plan-save surfaces
@@ -40,6 +40,23 @@ The TS `Handoff` interface already has `[key: string]: unknown`, so **arbitrary 
 zero TS change** — a reusable seam for any CLI→session context that must survive a model's surface
 choice.
 
+### The two-plane recovery-carrier pattern is now complete
+
+The handoff carrier covers **cold** sessions; warm sessions got the matching half: the
+`objective_node_claim` carrier in `perk:workflow-state`, written on a successful `planning`
+transition by the `objective_node` tool (`extension/objectivePlan.ts` — the claim helpers live
+there, typed over the structural `BranchSource` slice so `planSave.ts` imports them with no module
+cycle), cleared on a non-planning transition for the same node or after a successful node-linked
+save keyed off the cold door's *reported* node. Both planes implement **identical semantics**:
+explicit values win outright (even one — never mixed), fill both-or-neither, fail-open (a malformed
+carrier never blocks a save).
+
+**When a new factory-threaded save param appears, mirror this pattern on both planes** rather than
+inventing a query.
+
+Residual: an abandoned planning claim lingers until a matching transition/save for that node —
+bounded (session-tier, and recovery is fill-only when BOTH params are absent), but real.
+
 ### Fragile seam: handoff write/read locations must agree
 
 The recovery works **only because `objective-plan` is a `worktree: none` stage** — its session runs
@@ -47,6 +64,41 @@ at repo root, so the handoff write (`write_handoff(repo_root, …)`) and the pla
 (`read_handoff(repo_root, …)`) agree on location. If a future stage that ferries link context ran in
 a worktree, the locations would diverge and recovery would silently miss. **Tie any new
 `handoff_extra` consumer to the stage's `worktree` mode.**
+
+## The plan-source resolution chain
+
+`resolvePlanSource` in `extension/planSave.ts` resolves the plan to save as: validated plan-draft
+artifact → `plan` param → transcript scrape → null. The artifact tier needs `run_id`; the param
+tier doesn't. Success messages annotate **only the NEW sources** (` · plan source: plan-draft
+artifact`/`transcript`) — the param path stays byte-identical by design, so existing tests and
+downstream regexes don't churn; machine consumers read `details.plan_source` instead of parsing the
+suffix. **Gotcha for surface work:** the param-path source suffix is *intentionally absent* — a
+test expecting `plan source: param` in the message is wrong by design (assert
+`details.plan_source === "param"` instead).
+
+Review surfaces use a deliberately shorter chain (artifact → param ONLY, never the transcript) —
+see `plan-review-flow.md` for the asymmetric-tiering law.
+
+### Surfacing an ignored input beats both silence and hard-fail
+
+When the artifact and a differing `plan` param conflict, the artifact wins but the save message
+visibly flags the ignored differing param — never silent (model confusion would be invisible),
+never fatal (the validated artifact is by construction the better bytes). The mismatch compares
+`.trim()`-ed bytes so trailing-whitespace deltas don't false-positive.
+
+### The stale-draft hazard (known, open)
+
+If the model revises the plan in its final message **without re-calling `plan_draft`**, the older
+artifact beats the fresher transcript; `/plan-save` has no param to compare against, so it saves
+the stale draft with no mismatch flag. Keep-the-draft-current (the `plan_draft` guideline) is the
+mitigation.
+
+### Optional-param fallback decode flip
+
+Making `plan` optional required flipping the absent case from `""`-coercion to `undefined` so an
+absent param falls through to the next source — the resolver's null arm now owns "nothing
+anywhere". Present-but-mistyped → `null` strict-fail is unchanged. See `pi/tool-param-decode.md`
+for the general fallback-chain optionality pattern.
 
 ## Asymmetric write paths — the re-save bug class
 
@@ -83,6 +135,10 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 
 ## Cross-references
 
+- `extension/planSave.ts` — `resolvePlanSource`, `savePlan`, the `approvalSave` seam
+- `extension/objectivePlan.ts` — the `objective_node_claim` writer + claim helpers
+- `docs/learned/workflow/plan-review-flow.md` — the review-side tiering + the approvalSave seam
+- `docs/learned/pi/tool-param-decode.md` — the fallback-chain optionality flip
 - `perk/cli/commands/plan_save_cmd.py` — `_link_from_handoff`, the re-save merge via `update_plan_header`
 - `perk/launch.py` — `launch_stage` `handoff_extra` param
 - `tests/test_plan_save.py` — recover/override/unlinked + the empty-dict skip assertion
