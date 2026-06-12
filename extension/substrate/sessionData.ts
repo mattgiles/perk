@@ -36,8 +36,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import type { ReportTarget } from "../surfaces/report.ts";
 import { sessionDataDir } from "./cache.ts";
-import type { ReportTarget } from "./report.ts";
 import {
   appendWorkflowState,
   type BranchSource,

@@ -11,7 +11,7 @@ import {
   completeStructured,
   type ModelAuthContext,
   resolveModelAuth,
-} from "../structuredOutput.ts";
+} from "../substrate/structuredOutput.ts";
 
 /** Bounds shared by the schema and the sanitizer. */
 const STEPS_MIN = 2;

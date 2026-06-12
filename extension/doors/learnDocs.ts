@@ -11,9 +11,9 @@
 // (the gather still runs so the inbox is materialized, but no turn is driven).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { type ColdJson, runColdDoor, stringField } from "../coldDoor.ts";
-import { report } from "../report.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { type ColdJson, runColdDoor, stringField } from "../substrate/coldDoor.ts";
+import { report } from "../surfaces/report.ts";
 
 /** The decoded `perk learn docs --gather --json` payload slice the warm door consumes. */
 interface LearnDocsGatherPayload {

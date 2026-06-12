@@ -10,8 +10,8 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { PlanRef } from "../cache.ts";
-import { runEventsPath } from "../cache.ts";
+import type { PlanRef } from "../substrate/cache.ts";
+import { runEventsPath } from "../substrate/cache.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   applyEvent,

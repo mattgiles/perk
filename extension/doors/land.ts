@@ -4,8 +4,9 @@
 // sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { PENDING_LEARN, setMarker } from "../cache.ts";
+import { reconcileGuidance } from "../factories/objectivePlan.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { PENDING_LEARN, setMarker } from "../substrate/cache.ts";
 import {
   type ColdJson,
   nullableStringField,
@@ -13,10 +14,9 @@ import {
   objectField,
   runColdDoor,
   stringField,
-} from "../coldDoor.ts";
-import { reconcileGuidance } from "../factories/objectivePlan.ts";
-import { report } from "../report.ts";
-import { failFor, ok, type Result } from "../result.ts";
+} from "../substrate/coldDoor.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
+import { report } from "../surfaces/report.ts";
 
 // Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.

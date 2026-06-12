@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ReportTarget, Severity } from "./report.ts";
+import type { ReportTarget, Severity } from "../surfaces/report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 
 /** A fake ReportTarget that records every notify call (mirrors report.test.ts). */

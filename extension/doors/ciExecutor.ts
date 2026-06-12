@@ -28,12 +28,12 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch, scratchDir } from "../cache.ts";
-import { loadPerkConfig } from "../config.ts";
-import { report } from "../report.ts";
-import { paramsOf, stringParam } from "../toolParams.ts";
+import { ensureRunScratch, scratchDir } from "../substrate/cache.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { paramsOf, stringParam } from "../substrate/toolParams.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { report } from "../surfaces/report.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
 
 /** A named-checks map: `name -> shell command` (the whole `[ci]` config section). */
 export type CiChecks = Record<string, string>;

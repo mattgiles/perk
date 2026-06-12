@@ -7,8 +7,8 @@
 // reconstruction discipline (scan getBranch on session_start AND session_tree, per-field LWW)
 // and the verified-linkage claim (Q3) live here.
 
+import { type ReportTarget, report } from "../surfaces/report.ts";
 import { listRunIds, type PlanRef, readHandoff } from "./cache.ts";
-import { type ReportTarget, report } from "./report.ts";
 
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 

@@ -19,9 +19,14 @@
 // best-effort and never throw (logged-not-thrown, like checkpoints).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadPerkConfig } from "../config.ts";
-import { formatBudgetLine, MARK_OBJECTIVE, type PerkStatusHandle, report } from "../surfaces.ts";
-import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../workflowState.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
+import {
+  formatBudgetLine,
+  MARK_OBJECTIVE,
+  type PerkStatusHandle,
+  report,
+} from "../surfaces/surfaces.ts";
 
 /** The dedicated budget/activation session entry type (kept off `perk:workflow-state`). */
 export const OBJECTIVE_BUDGET_TYPE = "perk:objective-budget";

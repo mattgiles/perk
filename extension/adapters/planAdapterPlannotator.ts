@@ -38,8 +38,8 @@ import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
 import type { ReviewOutcome } from "../factories/planReview.ts";
-import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../providers.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";

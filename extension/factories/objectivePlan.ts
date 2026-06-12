@@ -18,21 +18,21 @@
 // "are we done?" judgment text lives in the perk-objective-plan skill.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { readPlanRef } from "../cache.ts";
-import { booleanField, type ColdJson, runColdDoor } from "../coldDoor.ts";
-import { loadPerkConfig } from "../config.ts";
-import { report } from "../report.ts";
-import { failFor, ok, type Result } from "../result.ts";
-import type { ToolGating } from "../toolGating.ts";
-import { idParam, paramsOf, stringParam } from "../toolParams.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { readPlanRef } from "../substrate/cache.ts";
+import { booleanField, type ColdJson, runColdDoor } from "../substrate/coldDoor.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
+import type { ToolGating } from "../substrate/toolGating.ts";
+import { idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import {
   appendWorkflowState,
   type BranchSource,
   branchOf,
   rebuildWorkflowState,
   type WorkflowState,
-} from "../workflowState.ts";
+} from "../substrate/workflowState.ts";
+import { report } from "../surfaces/report.ts";
 
 /** The valid node statuses (mirrors the Python `objective.NodeStatus` StrEnum). */
 const NODE_STATUSES = ["pending", "planning", "in_progress", "done", "blocked", "skipped"] as const;

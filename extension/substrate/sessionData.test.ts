@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ReportTarget } from "../surfaces/report.ts";
 import { sessionDataDir } from "./cache.ts";
-import type { ReportTarget } from "./report.ts";
 import {
   activeSessionDataDir,
   activeSessionRunId,

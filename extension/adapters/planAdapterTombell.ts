@@ -36,8 +36,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
 import { resolvedPlanProviderId } from "../factories/planMode.ts";
-import { TOMBELL_PLAN_PROVIDER_ID } from "../providers.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { TOMBELL_PLAN_PROVIDER_ID } from "../substrate/providers.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 
 /** The tombell plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE = "perk:plan-adapter-tombell";

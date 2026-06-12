@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { writePlanRef } from "../cache.ts";
+import { writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   buildObjectiveNodeArgs,

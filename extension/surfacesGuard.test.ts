@@ -1,6 +1,6 @@
 // Rich-UI call-site regression guard — Objective #251, node 4.1 (`docs/design/tui-charter.md` §7).
 // Production extension code may reach the rich UI only inside the surfaces module
-// (surfaces.ts + report.ts); everything else goes through the seams (`report()`,
+// (surfaces/surfaces.ts + surfaces/report.ts); everything else goes through the seams (`report()`,
 // `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator` is never
 // called anywhere (charter D5 rescinded). This source-scan test fails CI on drift.
 
@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 // The surfaces module: the only files allowed to make rich-UI calls (see the surfaces.ts header —
 // "the surfaces module" is surfaces.ts + report.ts for this node-4.1 guard).
-const SURFACES_MODULE = ["report.ts", "surfaces.ts"];
+const SURFACES_MODULE = ["surfaces/report.ts", "surfaces/surfaces.ts"];
 
 // pattern → allowlist of relative paths. The `.`-prefixed patterns intentionally match
 // call/member sites only — structural-type DECLARATIONS like `setStatus(slot: string, …): void;`
@@ -69,12 +69,15 @@ function violationsOf(files: string[], pattern: RegExp, allowlist: string[]): st
   return violations;
 }
 
-test("rich-UI calls live only in the surfaces module (surfaces.ts + report.ts)", () => {
+test("rich-UI calls live only in the surfaces module (surfaces/surfaces.ts + surfaces/report.ts)", () => {
   const files = productionFiles();
   // Self-check: a future path/layout change that silently empties the scan must fail loudly
   // instead of passing vacuously.
   assert.ok(files.length > 0, "production-file scan came up empty — guard is vacuous");
-  assert.ok(files.includes("surfaces.ts"), "scan missed surfaces.ts — guard is misaimed");
+  assert.ok(
+    files.includes("surfaces/surfaces.ts"),
+    "scan missed surfaces/surfaces.ts — guard is misaimed",
+  );
   assert.ok(files.includes("index.ts"), "scan missed index.ts — guard is misaimed");
 
   const violations = RULES.flatMap(({ pattern, allowlist }) =>
@@ -84,8 +87,8 @@ test("rich-UI calls live only in the surfaces module (surfaces.ts + report.ts)",
     violations,
     [],
     `rich-UI calls outside the surfaces module:\n${violations.join("\n")}\n` +
-      "Route notifies through report() (extension/report.ts) and standing surfaces through " +
-      "createPerkStatus/setStandingWidget/installPerkFooter (extension/surfaces.ts), per " +
+      "Route notifies through report() (extension/surfaces/report.ts) and standing surfaces through " +
+      "createPerkStatus/setStandingWidget/installPerkFooter (extension/surfaces/surfaces.ts), per " +
       "docs/design/tui-charter.md and the contracts surfaces-discipline passage.",
   );
 });

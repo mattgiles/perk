@@ -29,8 +29,8 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolvedTodoProviderId } from "../checkpoints/checkpoints.ts";
-import { JUICESHARP_TODO_PROVIDER_ID } from "../providers.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { JUICESHARP_TODO_PROVIDER_ID } from "../substrate/providers.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 
 /** The juicesharp todo-adapter bridge customType (distinct from checkpoints' `perk:checkpoint`). */
 export const TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE = "perk:todo-adapter-juicesharp";

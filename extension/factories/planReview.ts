@@ -48,9 +48,9 @@ import {
   createPlannotatorBridge,
   isPlannotatorPlanSelected,
 } from "../adapters/planAdapterPlannotator.ts";
-import type { ToolGating } from "../toolGating.ts";
-import { paramsOf, stringParam } from "../toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import type { ToolGating } from "../substrate/toolGating.ts";
+import { paramsOf, stringParam } from "../substrate/toolParams.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
 import { type ObjectiveApprovalSaveOutcome, objectiveApprovalSave } from "./objectiveSave.ts";

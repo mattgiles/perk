@@ -10,13 +10,13 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { sessionDataDir } from "../cache.ts";
-import type { ReportTarget } from "../report.ts";
-import { type SessionDataCtx, writeSessionArtifact } from "../sessionData.ts";
+import { sessionDataDir } from "../substrate/cache.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "../substrate/sessionData.ts";
+import type { ToolGating } from "../substrate/toolGating.ts";
+import type { BranchEntry, EntrySink } from "../substrate/workflowState.ts";
+import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
+import type { ReportTarget } from "../surfaces/report.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
-import type { ToolGating } from "../toolGating.ts";
-import type { BranchEntry, EntrySink } from "../workflowState.ts";
-import { rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../workflowState.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
 import {
   approvalSave,

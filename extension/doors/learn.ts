@@ -9,13 +9,25 @@
 // `decodeLearnCapture`).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { clearMarker, hasMarker, PENDING_LEARN, type PlanRef, readPlanRef } from "../cache.ts";
-import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "../coldDoor.ts";
-import { report } from "../report.ts";
-import { failFor, ok, type Result } from "../result.ts";
-import { paramsOf, stringParam } from "../toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import {
+  clearMarker,
+  hasMarker,
+  PENDING_LEARN,
+  type PlanRef,
+  readPlanRef,
+} from "../substrate/cache.ts";
+import {
+  booleanField,
+  type ColdJson,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "../substrate/coldDoor.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
+import { paramsOf, stringParam } from "../substrate/toolParams.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { report } from "../surfaces/report.ts";
 
 /** The ok-arm fields. */
 export interface LearnOk {

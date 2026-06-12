@@ -16,12 +16,18 @@
 // no-draft fallback (objectives have no transcript scrape by design).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "../coldDoor.ts";
-import { report, type Severity } from "../report.ts";
-import { failFor, ok, type Result } from "../result.ts";
-import type { ToolGating } from "../toolGating.ts";
-import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import {
+  booleanField,
+  type ColdJson,
+  objectField,
+  runColdDoor,
+  stringField,
+} from "../substrate/coldDoor.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
+import type { ToolGating } from "../substrate/toolGating.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { report, type Severity } from "../surfaces/report.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import {
   decodeObjectiveSaveParams,

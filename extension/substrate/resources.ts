@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 function packageRoot(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..");
+  return join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 }
 
 /** Absolute path to the bundled `shared/` contracts directory. */

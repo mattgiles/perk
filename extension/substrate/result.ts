@@ -3,7 +3,7 @@
 // cold-door-delegating doors share one discriminated union instead of ad-hoc *Result/*Details
 // pairs (cf. report.ts, branchOf — the node 1.1/1.2 seams).
 
-import { type ReportTarget, report } from "./report.ts";
+import { type ReportTarget, report } from "../surfaces/report.ts";
 
 /** The single text block every warm-door result renders ("one text field, two doors"). */
 export interface TextBlock {

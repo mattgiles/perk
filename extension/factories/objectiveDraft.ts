@@ -29,17 +29,17 @@
 
 import { relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ReportTarget } from "../report.ts";
-import { failFor, ok, type Result } from "../result.ts";
+import { failFor, ok, type Result } from "../substrate/result.ts";
 import {
   activeSessionRunId,
   digestSessionData,
   readSessionArtifact,
   type SessionDataCtx,
   writeSessionArtifact,
-} from "../sessionData.ts";
-import { arrayParam, paramsOf, stringParam } from "../toolParams.ts";
-import type { EntrySink } from "../workflowState.ts";
+} from "../substrate/sessionData.ts";
+import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
+import type { EntrySink } from "../substrate/workflowState.ts";
+import type { ReportTarget } from "../surfaces/report.ts";
 
 /** The decoded `objective_save` tool params (shared with `objective_draft` — #352 Node 2.1). */
 export interface ObjectiveSaveParams {

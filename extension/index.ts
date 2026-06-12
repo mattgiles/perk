@@ -10,14 +10,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
-import { registerBindingDelivery } from "./bindingDelivery.ts";
-import {
-  ensureRunScratch,
-  markHandoffConsumed,
-  readHandoff,
-  readPlanRef,
-  setMarker,
-} from "./cache.ts";
 import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAskUser } from "./doors/askUser.ts";
@@ -39,12 +31,18 @@ import { registerPlanDraft } from "./factories/planDraft.ts";
 import { registerPlanMode } from "./factories/planMode.ts";
 import { registerPlanReview } from "./factories/planReview.ts";
 import { registerPlanSave } from "./factories/planSave.ts";
-import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
-import { report } from "./report.ts";
-import { perkVersion, sharedDir } from "./resources.ts";
-import { mintRunId } from "./runId.ts";
-import { createPerkStatus, installPerkFooter } from "./surfaces.ts";
-import { registerToolGating } from "./toolGating.ts";
+import { registerBindingDelivery } from "./substrate/bindingDelivery.ts";
+import {
+  ensureRunScratch,
+  markHandoffConsumed,
+  readHandoff,
+  readPlanRef,
+  setMarker,
+} from "./substrate/cache.ts";
+import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
+import { perkVersion, sharedDir } from "./substrate/resources.ts";
+import { mintRunId } from "./substrate/runId.ts";
+import { registerToolGating } from "./substrate/toolGating.ts";
 import {
   appendWorkflowState,
   branchOf,
@@ -54,7 +52,9 @@ import {
   resolveRunStage,
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
-} from "./workflowState.ts";
+} from "./substrate/workflowState.ts";
+import { report } from "./surfaces/report.ts";
+import { createPerkStatus, installPerkFooter } from "./surfaces/surfaces.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";

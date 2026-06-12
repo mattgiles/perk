@@ -17,9 +17,9 @@
 // Headless-safe: rich UI is guarded by `ctx.hasUI`; without a UI it logs to stderr.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "../bindingDelivery.ts";
-import { loadPerkConfig } from "../config.ts";
-import { report } from "../report.ts";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { report } from "../surfaces/report.ts";
 
 /**
  * The seed guidance the warm `/pr-review` injects to spawn the reviewer (the perk-pr-review skill

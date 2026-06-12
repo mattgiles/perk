@@ -8,13 +8,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
+  loadPerkSession,
+  plantRawSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
+import {
   BINDING_CONTEXT_TYPE,
   BINDING_HEADER,
   bindingSuffix,
   renderBindings,
   resolvedBindings,
 } from "./bindingDelivery.ts";
-import { loadPerkSession, plantRawSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 /** Write a `.pi/perk.toml` with the given `[[bindings]]` rows. */
 function writeBindings(

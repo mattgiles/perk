@@ -34,14 +34,14 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, workflowDir, writePlanRef } from "../cache.ts";
 import perk from "../index.ts";
+import { type PlanRef, workflowDir, writePlanRef } from "../substrate/cache.ts";
 import {
   type BranchEntry,
   branchOf,
   rebuildWorkflowState,
   type WorkflowState,
-} from "../workflowState.ts";
+} from "../substrate/workflowState.ts";
 
 /**
  * Pi's run-mode union. Mirrors `@earendil-works/pi-coding-agent`'s `ExtensionMode` (which the

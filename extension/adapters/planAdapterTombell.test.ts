@@ -9,8 +9,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { BranchEntry } from "../substrate/workflowState.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
-import type { BranchEntry } from "../workflowState.ts";
 import {
   isTombellPlanModeEnabled,
   isTombellPlanSelected,

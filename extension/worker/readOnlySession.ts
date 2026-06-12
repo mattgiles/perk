@@ -30,7 +30,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, scratchDir } from "../cache.ts";
+import { runScratchDir, scratchDir } from "../substrate/cache.ts";
 
 /**
  * The SDK-level read-only allowlist (no `bash`; stricter than T1's in-session READ_ONLY_TOOLS).

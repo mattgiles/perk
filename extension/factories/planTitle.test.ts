@@ -10,7 +10,7 @@ import {
   type Model,
   registerFauxProvider,
 } from "@earendil-works/pi-ai";
-import type { ModelAuthContext } from "../structuredOutput.ts";
+import type { ModelAuthContext } from "../substrate/structuredOutput.ts";
 import { generatePlanTitle, llmTitlesEnabled, sanitizeTitle } from "./planTitle.ts";
 
 test("sanitizeTitle: strips a leading heading marker", () => {

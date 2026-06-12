@@ -4,9 +4,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../cache.ts";
+import type { PlanRef } from "../substrate/cache.ts";
+import { type BranchEntry, branchOf, type WorkflowState } from "../substrate/workflowState.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
-import { type BranchEntry, branchOf, type WorkflowState } from "../workflowState.ts";
 import {
   DEFAULT_COMPACT_THRESHOLD,
   findBudgetMarker,
