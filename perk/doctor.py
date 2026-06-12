@@ -22,7 +22,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Self
 
-from perk import bindings, cache, capabilities, env, git, github, init, issues, providers, registry
+from perk import (
+    bindings,
+    cache,
+    capabilities,
+    env,
+    gc,
+    git,
+    github,
+    init,
+    issues,
+    providers,
+    registry,
+)
 from perk.cli.ensure import UserFacingCliError
 from perk.config import (
     CONFIG_FILENAME,
@@ -757,6 +769,28 @@ def _cache_check(root: Path) -> Check:
     return Check("cache-handoff", "state", "ok", "handoff blobs valid")
 
 
+def _gc_check(root: Path) -> Check:
+    """Report prunable run state (warn + remediation). No ``--fix`` arm: deletion is exclusively
+    ``perk state prune`` (doctor's fixes are documented non-destructive). Pure filesystem + the
+    bundled registry, so it is not verify-gated (deterministic in unit tests, like the cache check).
+    """
+    plan = gc.plan_prune(root)
+    n = len(plan.eligible)
+    if n == 0:
+        return Check("cache-gc", "state", "ok", "no prunable run state")
+    detail = "; ".join(f"{c.run_id} ({c.reason})" for c in plan.eligible[:3])
+    if n > 3:
+        detail += f" (+{n - 3} more)"
+    return Check(
+        "cache-gc",
+        "state",
+        "warn",
+        f"{n} prunable run dir(s)/handoff blob(s)",
+        detail,
+        "perk state prune",
+    )
+
+
 def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     """Assemble all groups. ``verify=False`` skips only the external shells (env/github)."""
     checks: list[Check] = []
@@ -779,6 +813,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_issues_check(root))
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
+    checks.append(_gc_check(root))
     return checks
 
 
