@@ -3,7 +3,7 @@
 The saved plan is a Linear issue; the plan body is posted as the **first comment**. Read it with
 the pi-mono-linear tools:
 
-1. `linear_get_issue` — `issueId` accepts the plan-ref UUID or an identifier like `ENG-123`.
+1. `linear_get_issue` — `issueId` accepts the plan-ref identifier (`ENG-123`) or the issue UUID.
 2. `linear_list_comments` with the same `issueId` — the plan body is the first comment.
 
 **Fallback:** if the `linear_*` tools are unavailable in this session, open the plan URL instead.
