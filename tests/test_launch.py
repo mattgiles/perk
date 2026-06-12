@@ -392,6 +392,48 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
 
 
+def _launch_and_capture_env(git_repo, monkeypatch) -> dict[str, str]:
+    """Drive a real implement launch to the exec and capture the child env."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+
+    envs: list[dict[str, str]] = []
+    monkeypatch.setattr("perk.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.launch.os.execvpe", lambda f, a, e: envs.append(dict(e)))
+    monkeypatch.setattr("perk.launch.github.get_plan_body", lambda **_k: None)
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert len(envs) == 1
+    return envs[0]
+
+
+def test_launch_injects_npm_quiet_env(git_repo, monkeypatch):
+    """The child env carries the npm-quieting vars so pi's startup npm installs inherit
+    them, and PERK_RUN_ID survives the merge (regression guard)."""
+    monkeypatch.delenv("npm_config_loglevel", raising=False)
+    env = _launch_and_capture_env(git_repo, monkeypatch)
+    assert env["npm_config_loglevel"] == "error"
+    assert env["npm_config_fund"] == "false"
+    assert env["npm_config_audit"] == "false"
+    assert env["PERK_RUN_ID"]
+
+
+def test_launch_npm_quiet_env_user_override_wins(git_repo, monkeypatch):
+    """Setdefault semantics: an operator's own npm_config_* env var beats the injected map."""
+    monkeypatch.setenv("npm_config_loglevel", "verbose")
+    env = _launch_and_capture_env(git_repo, monkeypatch)
+    assert env["npm_config_loglevel"] == "verbose"
+    assert env["npm_config_fund"] == "false"
+
+
 def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
     """Integration: the real launch path sweeps the stale agent-dir lock before exec'ing pi."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
