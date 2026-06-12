@@ -443,6 +443,8 @@ export async function loadPerkSession(opts: {
   headful?: boolean;
   /** Pi run mode forwarded to `bindExtensions` (drives `ctx.mode`). Defaults to Pi's "print". */
   mode?: ExtensionMode;
+  /** Session model override (e.g. a faux-provider model); defaults to the keyless anthropic model. */
+  model?: unknown;
 }): Promise<PerkSession> {
   const { cwd, headful = true } = opts;
   const agentDir = mkdtempSync(join(tmpdir(), "perk-agent-"));
@@ -460,7 +462,10 @@ export async function loadPerkSession(opts: {
   const workingIndicators: unknown[] = [];
   const loader = new DefaultResourceLoader({ cwd, agentDir, extensionFactories: [perk] });
   await loader.reload();
-  const model = getModel("anthropic", "claude-sonnet-4-5") ?? undefined;
+  const model =
+    (opts.model as ReturnType<typeof getModel> | undefined) ??
+    getModel("anthropic", "claude-sonnet-4-5") ??
+    undefined;
   const { session } = await createAgentSession({
     cwd,
     agentDir,

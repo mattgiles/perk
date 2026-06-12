@@ -255,8 +255,9 @@ def _implement_prompt(plan_ref: dict[str, Any]) -> str:
         "command.\n\n"
         "Progress markers: when the plan has a `## Steps` list, "
         "emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is "
-        "COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) these markers "
-        "are no-ops, so don't invent step numbers."
+        "COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) perk may "
+        "inject a generated checklist as a context message — when it does, use exactly those step "
+        "numbers; otherwise don't invent step numbers."
     )
 
 

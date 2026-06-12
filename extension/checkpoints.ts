@@ -33,7 +33,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { readHandoff, readPlanBody } from "./cache.ts";
 import { loadPerkConfig } from "./config.ts";
+import { generatePlanSteps } from "./planSteps.ts";
 import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
+import { digestSessionData, readSessionArtifact, writeSessionArtifact } from "./sessionData.ts";
 import {
   MARK_CHECKPOINTS,
   type PerkStatusHandle,
@@ -49,6 +51,12 @@ import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The dedicated checkpoint session entry type (D3). */
 export const CHECKPOINT_TYPE = "perk:checkpoint";
+
+/** The once-only generated-checklist context injection's custom message type (#342). */
+export const STEPS_CONTEXT_TYPE = "perk:steps-context";
+
+/** The generated-steps session artifact (written via the #339 accessor seam, node 1.2/1.3). */
+export const STEPS_ARTIFACT_NAME = "plan-steps.json";
 
 /**
  * The resolved `[providers] todo` selection id for `cwd`, read fresh per-event (no static state —
@@ -227,6 +235,56 @@ export function rebuildCheckpoint(branch: readonly BranchEntry[]): CheckpointSta
   return { steps: seed, current };
 }
 
+// --- generated steps (#342) ----------------------------------------------------------------------
+
+/**
+ * Recomputed (never stored) generated-ness: a checkpoint state is "generated" iff it is non-inert
+ * AND the current plan body parses to NO explicit `## Steps` — explicit steps could only have been
+ * seeded from the body, so a non-inert state over a prose body must be LLM-derived.
+ */
+export function isGeneratedState(cwd: string, state: CheckpointState): boolean {
+  return !isInert(state) && extractSteps(readPlanBody(cwd)).length === 0;
+}
+
+/** Promote generated step texts to checkpoint steps (1-based, all incomplete). */
+function toCheckpointSteps(texts: string[]): CheckpointStep[] {
+  return texts.map((text, i) => ({ step: i + 1, text, completed: false }));
+}
+
+/**
+ * Read the generated-steps artifact through the #339 accessor seam (provenance-pointer validated)
+ * and return its steps — but only when its stored `plan_body_digest` matches the CURRENT plan
+ * body (a replan/rematerialized body invalidates the cache). `null` on any refusal: no pointer,
+ * digest mismatch (file or plan body), unparseable JSON, or an unusable steps shape.
+ */
+function readGeneratedStepsArtifact(
+  ctx: Parameters<typeof readSessionArtifact>[0],
+  planBody: string,
+): string[] | null {
+  const artifact = readSessionArtifact(ctx, STEPS_ARTIFACT_NAME);
+  if (artifact === null) return null;
+  try {
+    const parsed = JSON.parse(artifact.content) as { plan_body_digest?: unknown; steps?: unknown };
+    if (parsed.plan_body_digest !== digestSessionData(planBody)) return null;
+    const steps = parsed.steps;
+    if (!Array.isArray(steps) || steps.length < 2) return null;
+    if (!steps.every((s) => typeof s === "string" && s.length > 0)) return null;
+    return steps as string[];
+  } catch {
+    return null;
+  }
+}
+
+/** The hidden context message teaching the model the generated checklist's exact numbering. */
+function stepsContextContent(steps: readonly CheckpointStep[]): string {
+  const lines = steps.map((s) => `${s.step}. ${s.text}`);
+  return (
+    "perk generated the following implementation checklist for this prose plan. Emit `[WIP:n]` " +
+    "when you start step n and `[DONE:n]` when it completes, using EXACTLY these numbers:\n\n" +
+    lines.join("\n")
+  );
+}
+
 // --- the controller -----------------------------------------------------------------------------
 
 /** A coarse descriptor of the active plan when there is no `## Steps` checklist (the prose path). */
@@ -310,8 +368,42 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
       // Seed once: only when there is no checkpoint yet, a workflow is active, and the plan body
       // carries a `## Steps` list. Otherwise stay inert (no entry appended).
       if (isInert(existing)) {
-        const active = rebuildWorkflowState(branch).active_plan_ref != null;
-        const steps = active ? extractSteps(readPlanBody(ctx.cwd)) : [];
+        const wf = rebuildWorkflowState(branch);
+        const active = wf.active_plan_ref != null;
+        const planBody = active ? readPlanBody(ctx.cwd) : null;
+        let steps = active ? extractSteps(planBody) : [];
+        // Generation branch (#342): an active IMPLEMENT session over a prose plan body (no usable
+        // `## Steps` — the extractor already maps malformed sections to []) asks the session model
+        // for a bounded checklist. Artifact reuse first (the #339 pointer-validated cache, keyed on
+        // the plan-body digest); every failure falls through to the coarse fallback unchanged.
+        if (steps.length === 0 && planBody !== null && wf.active_plan_ref != null) {
+          const stageRaw = wf.run_id != null ? readHandoff(ctx.cwd, wf.run_id)?.stage : undefined;
+          if (stageRaw === "implement") {
+            let texts = readGeneratedStepsArtifact(ctx, planBody);
+            if (texts === null) {
+              texts = await generatePlanSteps(ctx, planBody);
+              if (texts !== null) {
+                // Best-effort persistence for reuse across reload/compaction: a failed artifact
+                // write (already warned by the seam) never drops a successful generation.
+                writeSessionArtifact(
+                  pi,
+                  ctx,
+                  STEPS_ARTIFACT_NAME,
+                  `${JSON.stringify(
+                    {
+                      plan_id: wf.active_plan_ref.pr_id,
+                      plan_body_digest: digestSessionData(planBody),
+                      steps: texts,
+                    },
+                    null,
+                    2,
+                  )}\n`,
+                );
+              }
+            }
+            if (texts !== null) steps = toCheckpointSteps(texts);
+          }
+        }
         if (steps.length > 0) {
           pi.appendEntry(CHECKPOINT_TYPE, { steps });
           renderStatus(ctx, status, { steps, current: computeCurrent(steps, null) }, branch);
@@ -366,6 +458,31 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
     }
   });
 
+  // #342 — the once-only generated-checklist injection: when the seeded checkpoints are
+  // LLM-generated (recomputed: non-inert over a prose plan body), inject the numbered list as a
+  // hidden context message so `[WIP:n]`/`[DONE:n]` markers use exactly these numbers. Injected
+  // custom messages persist to the branch, so the branch-carries-it guard makes this once-only
+  // (and a rewind past the injection naturally re-injects). No strip handler: the steps stay
+  // relevant for the whole implement session (there is no off state).
+  pi.on("before_agent_start", async (_event, ctx) => {
+    try {
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
+      const branch = branchOf(ctx);
+      if (branch.some((entry) => JSON.stringify(entry).includes(STEPS_CONTEXT_TYPE))) return;
+      const state = rebuildCheckpoint(branch);
+      if (isInert(state) || !isGeneratedState(ctx.cwd, state)) return;
+      return {
+        message: {
+          customType: STEPS_CONTEXT_TYPE,
+          content: stepsContextContent(state.steps),
+          display: false,
+        },
+      };
+    } catch (error) {
+      console.error(`perk: steps-context injection failed on before_agent_start — ${error}`);
+    }
+  });
+
   pi.registerCommand("checkpoints", {
     description: "Show perk implementation checkpoints (read-only).",
     handler: async (_args, ctx) => {
@@ -382,9 +499,10 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
       // One line (charter D8): `done/total · ▸n <current step text>`; the tail drops when no
       // step is current (all complete).
       const current = state.steps.find((s) => s.step === state.current);
+      const generated = !isInert(state) && isGeneratedState(ctx.cwd, state) ? " (generated)" : "";
       const message = isInert(state)
         ? "no checkpoints — this plan has no `## Steps` list (checkpoints are inert)."
-        : `${progressLine(state)}${current ? ` ${current.text}` : ""}`;
+        : `${progressLine(state)}${current ? ` ${current.text}` : ""}${generated}`;
       report(ctx, "checkpoints", "info", message);
     },
   });
