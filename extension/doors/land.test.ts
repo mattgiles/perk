@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { markerPath, PENDING_LEARN } from "../cache.ts";
+import { markerPath, PENDING_LEARN } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { driveReconcileAfterLand, type LandDetails, landPr } from "./land.ts";
 

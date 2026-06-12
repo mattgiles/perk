@@ -14,9 +14,9 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "../cache.ts";
-import { report } from "../report.ts";
-import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import type { PlanRef } from "../substrate/cache.ts";
+import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { report } from "../surfaces/report.ts";
 
 const DIRTY_MESSAGE = "uncommitted changes — commit or stash before switching/forking this stage.";
 const HANDOFF_DIRTY_MESSAGE =

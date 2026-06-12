@@ -6,9 +6,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, writePlanRef } from "./cache.ts";
+import { type PlanRef, writePlanRef } from "./substrate/cache.ts";
+import { WORKFLOW_STATE_TYPE } from "./substrate/workflowState.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",

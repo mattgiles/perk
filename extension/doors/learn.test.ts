@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { test } from "node:test";
-import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../cache.ts";
+import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { learnGuidance } from "./learn.ts";
 

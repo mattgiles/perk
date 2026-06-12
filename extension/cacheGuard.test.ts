@@ -1,6 +1,6 @@
 // Scratch-path construction regression guard (Objective #339 Node 1.2, contracts.md §8.1).
 // Production extension code may build the `scratch`/`runs` path segments only inside the
-// cache seam (cache.ts); everything else goes through its helpers (`scratchDir`,
+// cache seam (substrate/cache.ts); everything else goes through its helpers (`scratchDir`,
 // `runScratchDir`, `sessionDataDir`, `ensureRunScratch`, `listRunIds`) or the ctx-level
 // session-data seam (sessionData.ts). This source-scan test fails CI on drift. The Python twin
 // is tests/test_cache_guard.py.
@@ -12,7 +12,7 @@ import { test } from "node:test";
 
 // The path-primitive seam: the only file allowed to carry the segment literals.
 // sessionData.ts composes via cache.ts helpers, so it needs no literal and no allowlisting.
-const ALLOWLIST = ["cache.ts"];
+const ALLOWLIST = ["substrate/cache.ts"];
 
 // The banned path-segment string literals.
 const PATTERN = /["'](scratch|runs)["']/;
@@ -59,28 +59,31 @@ function violationsOf(files: string[]): string[] {
   return violations;
 }
 
-test("scratch/runs path segments are built only inside the cache seam (cache.ts)", () => {
+test("scratch/runs path segments are built only inside the cache seam (substrate/cache.ts)", () => {
   const files = productionFiles();
   // Self-checks: a future path/layout change that silently empties the scan must fail loudly
   // instead of passing vacuously.
   assert.ok(files.length > 0, "production-file scan came up empty — guard is vacuous");
-  assert.ok(files.includes("cache.ts"), "scan missed cache.ts — guard is misaimed");
+  assert.ok(
+    files.includes("substrate/cache.ts"),
+    "scan missed substrate/cache.ts — guard is misaimed",
+  );
   assert.ok(files.includes("index.ts"), "scan missed index.ts — guard is misaimed");
 
   // Non-vacuous pattern check: the seam itself DOES carry the literals the guard bans.
   const cacheSource = stripComments(
-    readFileSync(path.join(import.meta.dirname, "cache.ts"), "utf8"),
+    readFileSync(path.join(import.meta.dirname, "substrate", "cache.ts"), "utf8"),
   );
   assert.ok(
     PATTERN.test(cacheSource),
-    "cache.ts no longer matches the banned pattern — guard is vacuous",
+    "substrate/cache.ts no longer matches the banned pattern — guard is vacuous",
   );
 
   const violations = violationsOf(files);
   assert.deepEqual(
     violations,
     [],
-    "manual scratch/runs path construction outside cache.ts — go through the cache seam " +
+    "manual scratch/runs path construction outside substrate/cache.ts — go through the cache seam " +
       "(scratchDir/runScratchDir/sessionDataDir) or the sessionData.ts ctx seam:\n" +
       violations.join("\n"),
   );

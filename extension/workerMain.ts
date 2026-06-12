@@ -11,14 +11,14 @@
 import { argv, env, exit, stderr, stdout } from "node:process";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { runEventsPath } from "./cache.ts";
+import { runEventsPath } from "./substrate/cache.ts";
 import {
   type DriveBudget,
   type DriveStage,
   driveStage,
   initialPromptForWorktree,
   type RunOutcome,
-} from "./worker.ts";
+} from "./worker/worker.ts";
 
 /** Documented defaults for the budget watchdog (overridable via flags). */
 const DEFAULT_BUDGET: DriveBudget = {

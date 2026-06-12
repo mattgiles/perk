@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, workflowDir } from "./cache.ts";
+import { runScratchDir, workflowDir } from "./substrate/cache.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () => {
