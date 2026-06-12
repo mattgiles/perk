@@ -300,8 +300,9 @@ so a successful cold save can never be reported as a warm failure by render-only
 resolution (`resolvePlanSource`) → `savePlan` → gate exit on success (the D1a pattern — snapshot
 `gating.isActive()` before the save, `gating.exit` only on a successful save; a failed save leaves
 the gate on). The `/plan-save` command is now the **manual failsafe** invocation of the same seam;
-plannotator's `plan_review` (Node 2.4) is the **first wired review backend** — its APPROVED
-outcome runs this seam (first-party / tombell remain Nodes 2.5/2.6). No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
+the `plan_review` door wires **two review backends** into it — plannotator's browser review
+(Node 2.4) and the **first-party in-TUI editor review (Node 2.5)** — their APPROVED outcomes run
+this seam (tombell's re-aim remains Node 2.6). No resolvable plan source → a `no-plan` outcome, nothing saved, gate untouched
 (fail-open; callers render their own fallback). **Warm node-link recovery:** when a save reaches
 `savePlan` with **both** `objectiveId` and `nodeId` absent (an approval-triggered save carries no
 model params), the link is recovered **both-or-neither** from the rebuilt `objective_node_claim`;
@@ -2008,49 +2009,65 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `plannotator-plan` (skip only the `--plan` flag + the `Ctrl+Alt+P` shortcut + the `--plan`
 > session_start handler — the two real registration collisions; duplicate flag/shortcut
 > registration is the potentially-fatal Pi behavior), and the full vacate for any other foreign id
-> (tombell, unchanged). (2) The bridge is the model-callable **`plan_review` tool**
-> (`extension/planAdapterPlannotator.ts`): the `plan` param is **optional/fallback** — the
-> reviewed plan resolves **file-first** via `resolvePlanSource` (the validated `plan-draft.md`
-> artifact → the param; the **transcript tier is explicitly excluded from review** — no draft +
-> no param soft-skips with `reason: "no_plan"` and a `plan_draft` redirect, since an approval
-> would otherwise auto-save scraped conversation bytes). It emits plannotator's published
-> `plannotator:request` plan-review envelope on the in-process `pi.events` bus (pinned against
+> (tombell, unchanged). (2) **`plan_review` is the backend-neutral review door** (Node 2.5,
+> `extension/planReview.ts`): the `plan` param is **optional/fallback** — the reviewed plan
+> resolves **file-first** via `resolvePlanSource` (the validated `plan-draft.md` artifact → the
+> param; the **transcript tier is explicitly excluded from review** — no draft + no param
+> soft-skips with `reason: "no_plan"` and a `plan_draft` redirect, since an approval would
+> otherwise auto-save scraped conversation bytes). **Dispatch:** when `plannotator-plan` is
+> selected the door runs the **event-bus bridge** (`createPlannotatorBridge`, kept in
+> `extension/planAdapterPlannotator.ts`): it emits plannotator's published `plannotator:request`
+> plan-review envelope on the in-process `pi.events` bus (pinned against
 > `@plannotator/pi-extension@0.20.0`), awaits the in-payload `respond` handshake bounded at 5s,
 > then awaits the human decision on `plannotator:review-result` (no decision timeout; honors the
-> turn-abort signal). An **APPROVED** decision wires into the **`approvalSave` seam** (Node 2.4:
-> auto-save → D1a gate exit on success → a **terminating** result; the objective node link is
-> recovered from the `objective_node_claim` carrier inside `savePlan`; a failed save is
-> non-terminating, leaves the gate read-only, and directs the human `/plan-save` failsafe). A
-> human **DENY** is strict: feedback returned with a directive to rewrite the working draft via
-> `plan_draft` + re-review. A new **objective-author soft-skip** (`reason: "objective-author"`)
-> mirrors the injection's stage exception. **Fail-open semantics:** not-selected / headless
-> (`!ctx.hasUI`) / handshake-timeout / `unavailable` / `error` all **soft-skip** with a result
-> instructing the model to present the plan to the user directly — plan authoring never wedges.
-> `plan_review` is in `READ_ONLY_TOOLS` so review happens **inside** plan mode, before the gate
-> ever comes off; the tool is safe on the default path (soft-skip unless plannotator is selected).
-> (3) The shim also injects a hidden `perk:plan-adapter-plannotator` context (gate-active AND
-> selected AND not objective-author) and otherwise keeps the standard adapter hygiene: never
+> turn-abort signal). On **ANY other selection** (perk-plan, tombell, unknown ids) the door runs
+> the **first-party in-TUI editor review** (`runFirstPartyReview`): the plan is displayed in pi's
+> built-in `ctx.ui.editor` dialog (scrollable; Ctrl+G opens the user's external `$EDITOR`); a
+> non-blank human edit differing from the displayed plan is **written back to the draft via
+> `writePlanDraft` BEFORE the verdict** (reviewed bytes == artifact bytes == saved bytes — a
+> failed write-back **aborts the review fail-open** with a loud `unavailable` warning, nothing
+> saved); then a 3-option approve/deny/skip `ctx.ui.select` verdict, with optional deny feedback
+> via a second editor dialog. **Esc anywhere = fail-open skip** (`reason: "dismissed"`,
+> mirroring `ask_user_question`'s dismissal — deny is always explicit); `ctx.ui.editor` takes no
+> AbortSignal, so `signal?.aborted` is checked between dialogs (the aborted arm wins over an
+> in-flight dialog's result). An **APPROVED** decision (either backend) wires into the
+> **`approvalSave` seam** (auto-save → D1a gate exit on success → a **terminating** result; on
+> the first-party path the saved bytes carry any write-back edits and the result flags
+> `edited: true`; the objective node link is recovered from the `objective_node_claim` carrier
+> inside `savePlan`; a failed save is non-terminating, leaves the gate read-only, and directs
+> the human `/plan-save` failsafe). A human **DENY** is strict: feedback returned with a
+> directive to rewrite the working draft via `plan_draft` + re-review. The **objective-author
+> soft-skip** (`reason: "objective-author"`) mirrors the injections' stage exception.
+> **Fail-open semantics:** headless (`!ctx.hasUI`) / dismissed / handshake-timeout /
+> `unavailable` / `error` all **soft-skip** with a result instructing the model to present the
+> plan to the user directly — plan authoring never wedges. `plan_review` is in
+> `READ_ONLY_TOOLS` so review happens **inside** plan mode, before the gate ever comes off.
+> (3) The plannotator adapter shim is **injection-only again** (Node 2.5): it owns the hidden
+> `perk:plan-adapter-plannotator` context (gate-active AND selected AND not objective-author)
+> plus the bridge core, and otherwise keeps the standard adapter hygiene: never
 > `setActiveTools`, never a `tool_call` handler, never restamps `cache.plan-ref.provider` (stays
-> `"github"`); it composes the gate and the save **only** through the `approvalSave` seam (never
-> owns the gate, never writes GitHub itself). The catalog entry carries no `package_filter`
-> (`pi.extensions: ["./"]` — the sole extension is the package root).
+> `"github"`); the door composes the gate and the save **only** through the `approvalSave` seam
+> (never owns the gate, never writes GitHub itself). The catalog entry carries no
+> `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
 >
-> **Corrected interactive save discipline (landed with plannotator-plan; as of Node 2.4 scoped to
-> the perk-plan default path, tombell, and plannotator's fail-open arms — the plannotator
-> APPROVED path now auto-saves via `approvalSave` instead):** the prior `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode
-> (/plan off), then call the plan_save tool") was structurally broken — `/plan` is a user command
-> the model cannot run, and the `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while
-> the gate is on). The corrected discipline, now spoken by `PLAN_AUTHORING_CONTEXT`,
-> `PLAN_ADAPTER_TOMBELL_CONTEXT`, `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, and
-> `skills/perk-plan/SKILL.md`: the model **presents the complete plan as its final message and
-> never attempts to save**; the **human** runs `/plan-save` when satisfied (its
-> `extractPlanMarkdown` scrape is now reliable by construction — the final message is the clean
+> **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
+> FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
+> `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
+> tool") was structurally broken — `/plan` is a user command the model cannot run, and the
+> `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while the gate is on). The
+> review-first discipline, now spoken by `PLAN_AUTHORING_CONTEXT`,
+> `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, and `skills/perk-plan/SKILL.md`: keep the working draft
+> current with `plan_draft`, call `plan_review` when decision-complete, and an approval
+> **auto-saves** via `approvalSave`. Only when `plan_review` reports **skipped or unavailable**
+> (headless, dismissed, no surface) does the model **present the complete plan as its final
+> message and never attempt to save**; the **human** runs `/plan-save` (its
+> `extractPlanMarkdown` scrape is reliable by construction — the final message is the clean
 > plan; as of Node 2.2 `/plan-save` prefers the validated plan-draft artifact when one exists,
-> and the scrape is the demoted universal fallback). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched** (no browser launch on
-> a manual save), and the orchestrated **factory flows** (objective-plan, learn-docs, replan) still
-> instruct an autonomous `plan_save` tool call — unchanged. On the plannotator path this discipline
-> applies only when `plan_review` reports skipped/unavailable (the fail-open arms); `/plan-save`
-> remains the **manual failsafe** there.
+> and the scrape is the demoted universal fallback). `PLAN_ADAPTER_TOMBELL_CONTEXT` still
+> speaks the present + `/plan-save` flow as its primary discipline (its `plan_review` re-aim is
+> Node 2.6). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**, and the
+> orchestrated **factory flows** (objective-plan, learn-docs, replan) still instruct an
+> autonomous `plan_save` tool call — unchanged.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

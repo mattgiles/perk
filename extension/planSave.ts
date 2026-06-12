@@ -386,8 +386,9 @@ export type ApprovalSaveOutcome =
 
 /**
  * The shared approval→save orchestration seam (Node 2.3 of #339): an APPROVED review outcome
- * (plannotator's `plan_review` — the first wired backend, Node 2.4; first-party / tombell follow
- * in Nodes 2.5/2.6) and the manual `/plan-save` failsafe both run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
+ * (the `plan_review` door, planReview.ts — the plannotator bridge, Node 2.4, AND the first-party
+ * in-TUI editor review, Node 2.5; tombell's re-aim remains Node 2.6) and the manual `/plan-save`
+ * failsafe both run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
  * the explicit fallback, the transcript scrape last) → `savePlan` (warm node-link recovery happens
  * inside) → gate exit on a successful save while read-only (the D1a pattern: snapshot
  * `gating.isActive()` before the save; a failed save leaves the gate ON). No resolvable plan

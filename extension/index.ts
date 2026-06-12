@@ -31,6 +31,7 @@ import { registerPlanAdapterPlannotator } from "./planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./planAdapterTombell.ts";
 import { registerPlanDraft } from "./planDraft.ts";
 import { registerPlanMode } from "./planMode.ts";
+import { registerPlanReview } from "./planReview.ts";
 import { registerPlanSave } from "./planSave.ts";
 import { registerPrReview } from "./prReview.ts";
 import { registerReady } from "./ready.ts";
@@ -107,12 +108,18 @@ export default function (pi: ExtensionAPI) {
   registerPlanAdapterTombell(pi);
 
   // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
-  // its browser plan-review UI via the `plan_review` bridge tool while perk's plan surface + gate
-  // stay (planMode skips only `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but
-  // INERT unless `[providers] plan = "plannotator-plan"`. It takes `gating` only to COMPOSE the
-  // approvalSave seam on an APPROVED review (Node 2.4: auto-save → D1a gate exit) — Invariant 1
-  // still holds: the adapter composes the gate through the seam, never owns it.
-  registerPlanAdapterPlannotator(pi, gating);
+  // its browser plan-review UI while perk's plan surface + gate stay (planMode skips only
+  // `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but INERT unless
+  // `[providers] plan = "plannotator-plan"`. Injection-only as of Node 2.5 — the `plan_review`
+  // tool moved to planReview.ts (below), which dispatches to this adapter's event-bus bridge
+  // when plannotator is selected.
+  registerPlanAdapterPlannotator(pi);
+
+  // Node 2.5 — `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
+  // bridge; ANY other selection → the first-party in-TUI editor review. It takes `gating` only to
+  // COMPOSE the approvalSave seam on an APPROVED review (auto-save → D1a gate exit) — Invariant 1
+  // holds: the door composes the gate through the seam, never owns it.
+  registerPlanReview(pi, gating);
 
   // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.

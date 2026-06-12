@@ -13,9 +13,9 @@ import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 /**
  * Tools available while read-only mode is active (mirrors plan-mode's PLAN_MODE_TOOLS).
- * `plan_review` is the plannotator review bridge (planAdapterPlannotator) — allowlisted so the
- * model can request a human plan review INSIDE plan mode (review happens before the gate ever
- * comes off); safe on the default path because the tool soft-skips unless plannotator is selected.
+ * `plan_review` is the backend-neutral review door (planReview.ts) — allowlisted so the model
+ * can request a human plan review INSIDE plan mode (review happens before the gate ever comes
+ * off); fail-open everywhere (headless / dismissed soft-skip), so it is safe on every path.
  */
 export const READ_ONLY_TOOLS = [
   "read",
