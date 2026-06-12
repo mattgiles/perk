@@ -276,6 +276,34 @@ def write_plan_body(root: Path, body: str) -> Path:
     return path
 
 
+# --- agent-session: the Linear AgentSession pointer for this worktree (agent-session.json) ---
+
+
+def agent_session_path(root: Path) -> Path:
+    """The ``cache.agent-session`` pointer file (the Linear ``AgentSession`` mirror, §8.22)."""
+    return workflow_dir(root) / "agent-session.json"
+
+
+def write_agent_session(root: Path, data: dict[str, Any]) -> Path:
+    """Write the Linear agent-session pointer (§8.22) to ``agent-session.json``; return its path.
+
+    Shape: ``{"session_id": str, "issue": str, "url": str | None}`` — mirrors the
+    ``write_plan_ref``/``read_plan_ref`` conventions.
+    """
+    path = agent_session_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def read_agent_session(root: Path) -> dict[str, Any] | None:
+    """Read the agent-session pointer, or ``None`` if it does not exist."""
+    path = agent_session_path(root)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------
 
 

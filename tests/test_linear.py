@@ -59,6 +59,20 @@ class TestRequestComposition:
             "variables": {"id": "abc"},
         }
 
+    def test_bearer_mode_sends_the_oauth_header_form(self) -> None:
+        # `bearer=True` is the OAuth (actor=app agent token) form used by perk/linear_agent.py.
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(200, json={"data": {}})
+
+        client = LinearClient(
+            api_key="lin_oauth_test", transport=httpx.MockTransport(handler), bearer=True
+        )
+        client.request("query Q { viewer { id } }")
+        assert seen[0].headers["Authorization"] == "Bearer lin_oauth_test"
+
     def test_omitted_variables_default_to_empty_object(self) -> None:
         client, seen = _client_with_response(body={"data": {}})
         client.request("query Q { viewer { id } }")
