@@ -438,7 +438,8 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   node**: `perk objective create` rejects an empty roadmap with `error_type: empty_roadmap` (exit 1)
   and `create_objective_issue` raises `GitHubError` — the parse/read layer stays lenient (existing
   node-less issues remain readable/closable). The judgment layer lives in the `perk-objective-author`
-  skill.
+  skill, which now speaks the review-first discipline (draft via `objective_draft` → `plan_review`
+  → approval auto-save; `/objective-save` is the artifact-first failsafe) — #352 Node 3.2.
 
 **Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
 of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
@@ -450,7 +451,12 @@ of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
   `gating.enter` and reports a dedicated announce line — parity with the cold door's registry
   `mode: read-only` handoff claim. Gate **exit** remains owned by `plan_save` (D1a, approval
   auto-save included) / `/plan` off; the no-objective warning path never enters the gate.
-  (Objective #352 Node 1.2.)
+  (Objective #352 Node 1.2.) As of #352 Node 3.1 the injected factory guidance (warm
+  `factoryGuidance`; mirrored by the cold `_seed_prompt`, which adds handoff claim recovery and
+  drops the mark step) instructs the **file-first loop**: the **unconditional** `planning` mark
+  (the successful transition records the `objective_node_claim`), `plan_draft`/`plan_review`,
+  the approval-driven save with both-or-neither link recovery from the claim, and
+  `plan_save`-with-both-ids as the manual failsafe.
 - **`objective_node` tool** — the BOUNDED model-facing transition. It **delegates** the mutation to
   the Python cold door (`perk objective node`, canonical mutations in Python) and **never throws**
   (soft `details.ok`, mirrors `resolve_review_threads`). Params `{ objective, node, status?, pr?,
@@ -2161,7 +2167,10 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > tool") was structurally broken — `/plan` is a user command the model cannot run, and the
 > `plan_save` tool is excluded from `READ_ONLY_TOOLS` (hidden while the gate is on). The
 > review-first discipline, now spoken by `PLAN_AUTHORING_CONTEXT`,
-> `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, and `skills/perk-plan/SKILL.md`: keep the working draft
+> `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`, `OBJECTIVE_AUTHORING_CONTEXT`, the objective-plan factory
+> guidance on both planes (warm `factoryGuidance` / cold `_seed_prompt` — #352 Node 3.1),
+> `skills/perk-plan/SKILL.md`, `skills/perk-objective-author/SKILL.md`, and
+> `skills/perk-objective-plan/SKILL.md` (#352 Node 3.2): keep the working draft
 > current with `plan_draft`, call `plan_review` when decision-complete, and an approval
 > **auto-saves** via `approvalSave`. Only when `plan_review` reports **skipped or unavailable**
 > (headless, dismissed, no surface) does the model **present the complete plan as its final
@@ -2173,9 +2182,11 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > list; the present + `/plan-save` (artifact-preferred, scrape-fallback) flow remains its
 > explicit **fail-open** arm — including when `@tombell/pi-plan`'s own interactive `/plan`
 > `setActiveTools` restriction hides `plan_draft`/`plan_review` from the tool set.
-> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**, and the
-> orchestrated **factory flows** (objective-plan, learn-docs, replan) still instruct an
-> autonomous `plan_save` tool call — unchanged.
+> `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched**. The orchestrated
+> **factory flows** that still instruct an autonomous `plan_save` tool call narrow to
+> **learn-docs and replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
+> approval-driven save recovers the node link from the `objective_node_claim` carrier, with
+> `plan_save`-with-both-ids demoted to the manual failsafe.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

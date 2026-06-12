@@ -25,7 +25,8 @@ const OBJECTIVE_AUTHOR_MARKER = "[OBJECTIVE AUTHORING]";
 /**
  * The cooperative gather-then-author contract for objectives. Prompting, NOT enforcement (T1's gate
  * is the enforcement). Mirrors skills/perk-objective-author/SKILL.md: clarify the goal, explore
- * read-only, structure a roadmap, then save via the tool — never hand-write roadmap YAML.
+ * read-only, structure a roadmap, keep the draft current with `objective_draft`, review via
+ * `plan_review`, approval auto-saves — never hand-write roadmap YAML.
  */
 export const OBJECTIVE_AUTHORING_CONTEXT = `${OBJECTIVE_AUTHOR_MARKER}
 You are authoring a perk OBJECTIVE in read-only mode — a long-running goal that GENERATES bounded
