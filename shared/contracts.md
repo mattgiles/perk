@@ -370,7 +370,10 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   read-only, so plan mode now **defers** when `stage === "objective-author"`, and
   `extension/objectiveAuthor.ts` injects its own `perk:objective-author-context` instead (keyed off
   read-only gate **AND** the stage; stripped from `context` when no longer authoring — the same
-  hygiene plan mode applies). Exactly one authoring context is present.
+  hygiene plan mode applies). Exactly one authoring context is present. The injected
+  objective-authoring context is optionally extended by the **same** `[workflow] plan_authoring`
+  addendum the plan-authoring injection consumes (read per-event via `extension/config.ts`'s
+  `loadPerkConfig`) — verbatim reuse, no new config key.
 - **`objective_save` warm door** (`extension/objectiveSave.ts`, the mirror of `planSave.ts`). The
   `objective_save` **tool** takes `prose` + a **structured `roadmap`** (a JSON array of nodes —
   never hand-written YAML) and delegates the write to `perk objective create --body <file> --roadmap
