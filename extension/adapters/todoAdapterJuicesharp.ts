@@ -28,9 +28,9 @@
 //     own differently-named command(s) — so Node 3.1's runtime deferral is already sufficient.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolvedTodoProviderId } from "./checkpoints.ts";
-import { JUICESHARP_TODO_PROVIDER_ID } from "./providers.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
+import { resolvedTodoProviderId } from "../checkpoints/checkpoints.ts";
+import { JUICESHARP_TODO_PROVIDER_ID } from "../providers.ts";
+import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
 
 /** The juicesharp todo-adapter bridge customType (distinct from checkpoints' `perk:checkpoint`). */
 export const TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE = "perk:todo-adapter-juicesharp";

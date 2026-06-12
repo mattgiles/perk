@@ -18,7 +18,7 @@ import {
   driveStage,
   initialPromptForWorktree,
   type RunOutcome,
-} from "./worker.ts";
+} from "./worker/worker.ts";
 
 /** Documented defaults for the budget watchdog (overridable via flags). */
 const DEFAULT_BUDGET: DriveBudget = {

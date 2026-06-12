@@ -7,8 +7,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { PLAN_CONTEXT_TYPE, planContextContent } from "./planMode.ts";
-import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("planContextContent: carries the gather-then-plan contract; appends the config addendum", () => {
   const cwd = scaffoldRepo();

@@ -8,7 +8,11 @@
 // intentionally ignored for now.
 
 import { type Static, StringEnum, Type } from "@earendil-works/pi-ai";
-import { completeStructured, type ModelAuthContext, resolveModelAuth } from "./structuredOutput.ts";
+import {
+  completeStructured,
+  type ModelAuthContext,
+  resolveModelAuth,
+} from "../structuredOutput.ts";
 
 /** The structured result schema. `StringEnum` (not `Type.Enum`) per pi-ai's Google-compat guidance. */
 const PlanTitleSchema = Type.Object({

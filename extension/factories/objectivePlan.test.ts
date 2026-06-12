@@ -9,7 +9,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { writePlanRef } from "./cache.ts";
+import { writePlanRef } from "../cache.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   buildObjectiveNodeArgs,
   decodeObjectiveNodeParams,
@@ -22,7 +23,6 @@ import {
   reconcileGuidance,
   resolveReconcileObjective,
 } from "./objectivePlan.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("factoryGuidance injects the configured objective-explorer model when set", () => {
   const text = factoryGuidance("42", "1.2", "x/y");

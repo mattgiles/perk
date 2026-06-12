@@ -33,11 +33,11 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "./cache.ts";
-import { loadPerkConfig } from "./config.ts";
-import { planReadInstruction } from "./doors/lifecycleGates.ts";
+import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../cache.ts";
+import { loadPerkConfig } from "../config.ts";
+import { planReadInstruction } from "../doors/lifecycleGates.ts";
+import { rebuildWorkflowState } from "../workflowState.ts";
 import { capForModel } from "./readOnlySession.ts";
-import { rebuildWorkflowState } from "./workflowState.ts";
 
 // --- contract types (additive-stable; §B of docs/design/headless-worker.md) ---------------------
 

@@ -44,15 +44,18 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  createPlannotatorBridge,
+  isPlannotatorPlanSelected,
+} from "../adapters/planAdapterPlannotator.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { paramsOf, stringParam } from "../toolParams.ts";
+import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 import { readObjectiveDraft, renderObjectiveDraft } from "./objectiveDraft.ts";
 import { type ObjectiveApprovalSaveOutcome, objectiveApprovalSave } from "./objectiveSave.ts";
-import { createPlannotatorBridge, isPlannotatorPlanSelected } from "./planAdapterPlannotator.ts";
 import { writePlanDraft } from "./planDraft.ts";
 import { type ApprovalSaveOutcome, approvalSave, resolvePlanSource } from "./planSave.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { paramsOf, stringParam } from "./toolParams.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 // ----------------------------------------------------------------------------- review outcomes
 

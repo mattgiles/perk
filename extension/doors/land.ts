@@ -14,7 +14,7 @@ import {
   runColdDoor,
   stringField,
 } from "../coldDoor.ts";
-import { reconcileGuidance } from "../objectivePlan.ts";
+import { reconcileGuidance } from "../factories/objectivePlan.ts";
 import { report } from "../report.ts";
 import { failFor, ok, type Result } from "../result.ts";
 

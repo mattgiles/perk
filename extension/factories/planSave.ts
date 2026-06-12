@@ -25,7 +25,7 @@
 // the `perk:plan-context` injection) steps aside. Deferring this substrate would break Node 2.3.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "./cache.ts";
+import type { PlanRef } from "../cache.ts";
 import {
   booleanField,
   type ColdJson,
@@ -33,22 +33,22 @@ import {
   objectField,
   runColdDoor,
   stringField,
-} from "./coldDoor.ts";
-import { nodeClaimsEqual, readNodeClaim } from "./objectivePlan.ts";
-import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
-import { generatePlanTitle } from "./planTitle.ts";
-import { report, type Severity } from "./report.ts";
-import { failFor, ok, type Result } from "./result.ts";
-import { readSessionArtifact, type SessionDataCtx } from "./sessionData.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { idArrayParam, paramsOf, stringParam } from "./toolParams.ts";
+} from "../coldDoor.ts";
+import { report, type Severity } from "../report.ts";
+import { failFor, ok, type Result } from "../result.ts";
+import { readSessionArtifact, type SessionDataCtx } from "../sessionData.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { idArrayParam, paramsOf, stringParam } from "../toolParams.ts";
 import {
   appendWorkflowState,
   type BranchEntry,
   branchOf,
   planRefsEqual,
   rebuildWorkflowState,
-} from "./workflowState.ts";
+} from "../workflowState.ts";
+import { nodeClaimsEqual, readNodeClaim } from "./objectivePlan.ts";
+import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
+import { generatePlanTitle } from "./planTitle.ts";
 
 /** The ok-arm fields (turn-3 D6) — the `details` surface doubles as branch-safe persisted state. */
 export interface PlanSaveOk {

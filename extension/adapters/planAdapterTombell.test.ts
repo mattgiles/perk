@@ -9,13 +9,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import type { BranchEntry } from "../workflowState.ts";
 import {
   isTombellPlanModeEnabled,
   isTombellPlanSelected,
   PLAN_ADAPTER_TOMBELL_CONTEXT_TYPE,
 } from "./planAdapterTombell.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { BranchEntry } from "./workflowState.ts";
 
 function selectTombell(cwd: string): void {
   mkdirSync(join(cwd, ".pi"), { recursive: true });

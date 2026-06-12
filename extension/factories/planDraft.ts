@@ -17,16 +17,16 @@
 
 import { relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { ReportTarget } from "./report.ts";
-import { failFor, ok, type Result } from "./result.ts";
+import type { ReportTarget } from "../report.ts";
+import { failFor, ok, type Result } from "../result.ts";
 import {
   activeSessionRunId,
   digestSessionData,
   type SessionDataCtx,
   writeSessionArtifact,
-} from "./sessionData.ts";
-import { paramsOf, stringParam } from "./toolParams.ts";
-import type { EntrySink } from "./workflowState.ts";
+} from "../sessionData.ts";
+import { paramsOf, stringParam } from "../toolParams.ts";
+import type { EntrySink } from "../workflowState.ts";
 
 /** The fixed working-plan artifact name (NOT `plan.md` — `cache.plan` is a different file). */
 export const PLAN_DRAFT_ARTIFACT = "plan-draft.md";

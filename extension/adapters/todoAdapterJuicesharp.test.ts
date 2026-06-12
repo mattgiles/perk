@@ -8,13 +8,13 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "./cache.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
+import type { PlanRef } from "../cache.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import type { WorkflowState } from "../workflowState.ts";
 import {
   isJuicesharpTodoSelected,
   TODO_ADAPTER_JUICESHARP_CONTEXT_TYPE,
 } from "./todoAdapterJuicesharp.ts";
-import type { WorkflowState } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",

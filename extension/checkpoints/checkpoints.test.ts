@@ -8,7 +8,15 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, planBodyPath, sessionDataDir } from "./cache.ts";
+import { type PlanRef, planBodyPath, sessionDataDir } from "../cache.ts";
+import { digestSessionData } from "../sessionData.ts";
+import {
+  loadPerkSession,
+  plantRawSession,
+  plantSession,
+  scaffoldRepo,
+} from "../testing/harness.ts";
+import type { SessionArtifactPointer, WorkflowState } from "../workflowState.ts";
 import {
   CHECKPOINT_TYPE,
   type CheckpointStep,
@@ -24,9 +32,6 @@ import {
   STEPS_ARTIFACT_NAME,
   STEPS_CONTEXT_TYPE,
 } from "./checkpoints.ts";
-import { digestSessionData } from "./sessionData.ts";
-import { loadPerkSession, plantRawSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { SessionArtifactPointer, WorkflowState } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",

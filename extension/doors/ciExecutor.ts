@@ -30,9 +30,9 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ensureRunScratch, scratchDir } from "../cache.ts";
 import { loadPerkConfig } from "../config.ts";
-import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../readOnlySession.ts";
 import { report } from "../report.ts";
 import { paramsOf, stringParam } from "../toolParams.ts";
+import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
 import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
 
 /** A named-checks map: `name -> shell command` (the whole `[ci]` config section). */

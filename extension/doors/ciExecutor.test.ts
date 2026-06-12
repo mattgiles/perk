@@ -8,8 +8,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { DEFAULT_MODEL_VISIBLE_CAP } from "../readOnlySession.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
 import { type CiExec, decideCiScope, renderCiProse, runCiChecks } from "./ciExecutor.ts";
 
 function tmpCwd(): string {

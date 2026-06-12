@@ -7,7 +7,11 @@
 // behavior) takes over — a session start is never failed by this path.
 
 import { Type } from "@earendil-works/pi-ai";
-import { completeStructured, type ModelAuthContext, resolveModelAuth } from "./structuredOutput.ts";
+import {
+  completeStructured,
+  type ModelAuthContext,
+  resolveModelAuth,
+} from "../structuredOutput.ts";
 
 /** Bounds shared by the schema and the sanitizer. */
 const STEPS_MIN = 2;

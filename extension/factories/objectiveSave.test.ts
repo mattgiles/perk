@@ -10,14 +10,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ReportTarget } from "../report.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "../sessionData.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { type EntrySink, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../workflowState.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import { objectiveApprovalSave, objectiveSaveGuidance } from "./objectiveSave.ts";
-import type { ReportTarget } from "./report.ts";
-import { type SessionDataCtx, writeSessionArtifact } from "./sessionData.ts";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { type EntrySink, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 const CREATE_JSON = JSON.stringify({
   success: true,

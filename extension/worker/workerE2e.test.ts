@@ -19,13 +19,13 @@ import {
   type Model,
 } from "@earendil-works/pi-ai";
 import { AuthStorage } from "@earendil-works/pi-coding-agent";
-import { type PlanRef, runEventsPath } from "./cache.ts";
-import perk from "./index.ts";
+import { type PlanRef, runEventsPath } from "../cache.ts";
+import perk from "../index.ts";
 import {
   fakePerkRouter,
   fauxModelRegistration,
   scaffoldWorkerWorktree,
-} from "./testing/harness.ts";
+} from "../testing/harness.ts";
 import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 
 // Deviation from plan Discovery #1 (recorded in docs/planning/phase-2-turn-*-outcomes): the production

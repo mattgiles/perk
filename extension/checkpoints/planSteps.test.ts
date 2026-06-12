@@ -10,8 +10,8 @@ import {
   type Model,
   registerFauxProvider,
 } from "@earendil-works/pi-ai";
+import type { ModelAuthContext } from "../structuredOutput.ts";
 import { generatePlanSteps, llmStepsEnabled, sanitizeSteps } from "./planSteps.ts";
-import type { ModelAuthContext } from "./structuredOutput.ts";
 
 test("sanitizeSteps: strips echoed list markers and collapses whitespace", () => {
   assert.deepEqual(

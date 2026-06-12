@@ -31,11 +31,10 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { readHandoff, readPlanBody } from "./cache.ts";
-import { loadPerkConfig } from "./config.ts";
-import { generatePlanSteps } from "./planSteps.ts";
-import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "./providers.ts";
-import { digestSessionData, readSessionArtifact, writeSessionArtifact } from "./sessionData.ts";
+import { readHandoff, readPlanBody } from "../cache.ts";
+import { loadPerkConfig } from "../config.ts";
+import { loadProviders, PERK_CHECKPOINTS_PROVIDER_ID, resolveProviders } from "../providers.ts";
+import { digestSessionData, readSessionArtifact, writeSessionArtifact } from "../sessionData.ts";
 import {
   MARK_CHECKPOINTS,
   type PerkStatusHandle,
@@ -45,9 +44,10 @@ import {
   setStandingWidget,
   type ThemeLike,
   WIDGET_SLOT_CHECKPOINTS,
-} from "./surfaces.ts";
-import type { BranchEntry } from "./workflowState.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
+} from "../surfaces.ts";
+import type { BranchEntry } from "../workflowState.ts";
+import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { generatePlanSteps } from "./planSteps.ts";
 
 /** The dedicated checkpoint session entry type (D3). */
 export const CHECKPOINT_TYPE = "perk:checkpoint";

@@ -11,9 +11,9 @@
 // the mirror of planSave.ts.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadPerkConfig } from "./config.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowState.ts";
+import { loadPerkConfig } from "../config.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { type BranchEntry, branchOf, rebuildWorkflowState } from "../workflowState.ts";
 
 /** The registry stage id of the objective-authoring session (shared with planMode's defer check). */
 export const OBJECTIVE_AUTHOR_STAGE = "objective-author";

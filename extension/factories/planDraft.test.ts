@@ -8,22 +8,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { sessionDataDir } from "./cache.ts";
+import { sessionDataDir } from "../cache.ts";
+import type { ReportTarget } from "../report.ts";
+import { digestSessionData, readSessionArtifact, type SessionDataCtx } from "../sessionData.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  type EntrySink,
+  rebuildWorkflowState,
+  type SessionArtifactPointer,
+  WORKFLOW_STATE_TYPE,
+} from "../workflowState.ts";
 import {
   decodePlanDraftParams,
   PLAN_DRAFT_ARTIFACT,
   type PlanDraftResult,
   writePlanDraft,
 } from "./planDraft.ts";
-import type { ReportTarget } from "./report.ts";
-import { digestSessionData, readSessionArtifact, type SessionDataCtx } from "./sessionData.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import {
-  type EntrySink,
-  rebuildWorkflowState,
-  type SessionArtifactPointer,
-  WORKFLOW_STATE_TYPE,
-} from "./workflowState.ts";
 
 const PLAN_MD = "# Add retry\n\n## Summary\nAdd retry to the gateway.\n";
 

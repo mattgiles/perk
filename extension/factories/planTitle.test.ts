@@ -10,8 +10,8 @@ import {
   type Model,
   registerFauxProvider,
 } from "@earendil-works/pi-ai";
+import type { ModelAuthContext } from "../structuredOutput.ts";
 import { generatePlanTitle, llmTitlesEnabled, sanitizeTitle } from "./planTitle.ts";
-import type { ModelAuthContext } from "./structuredOutput.ts";
 
 test("sanitizeTitle: strips a leading heading marker", () => {
   assert.equal(sanitizeTitle("# Add a retry to the gateway"), "Add a retry to the gateway");

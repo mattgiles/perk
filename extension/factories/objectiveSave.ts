@@ -16,18 +16,18 @@
 // no-draft fallback (objectives have no transcript scrape by design).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "./bindingDelivery.ts";
-import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "./coldDoor.ts";
+import { bindingSuffix } from "../bindingDelivery.ts";
+import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "../coldDoor.ts";
+import { report, type Severity } from "../report.ts";
+import { failFor, ok, type Result } from "../result.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../workflowState.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
 import {
   decodeObjectiveSaveParams,
   ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
 } from "./objectiveDraft.ts";
-import { report, type Severity } from "./report.ts";
-import { failFor, ok, type Result } from "./result.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { appendWorkflowState, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface ObjectiveSaveOk {

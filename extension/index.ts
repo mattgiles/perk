@@ -7,6 +7,9 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
+import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
+import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
 import { registerBindingDelivery } from "./bindingDelivery.ts";
 import {
   ensureRunScratch,
@@ -15,7 +18,7 @@ import {
   readPlanRef,
   setMarker,
 } from "./cache.ts";
-import { registerCheckpoints } from "./checkpoints.ts";
+import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAskUser } from "./doors/askUser.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
@@ -27,23 +30,20 @@ import { registerPrReview } from "./doors/prReview.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
-import { registerObjective } from "./objective.ts";
-import { registerObjectiveAuthor } from "./objectiveAuthor.ts";
-import { registerObjectiveDraft } from "./objectiveDraft.ts";
-import { registerObjectivePlan } from "./objectivePlan.ts";
-import { registerObjectiveSave } from "./objectiveSave.ts";
-import { registerPlanAdapterPlannotator } from "./planAdapterPlannotator.ts";
-import { registerPlanAdapterTombell } from "./planAdapterTombell.ts";
-import { registerPlanDraft } from "./planDraft.ts";
-import { registerPlanMode } from "./planMode.ts";
-import { registerPlanReview } from "./planReview.ts";
-import { registerPlanSave } from "./planSave.ts";
+import { registerObjective } from "./factories/objective.ts";
+import { registerObjectiveAuthor } from "./factories/objectiveAuthor.ts";
+import { registerObjectiveDraft } from "./factories/objectiveDraft.ts";
+import { registerObjectivePlan } from "./factories/objectivePlan.ts";
+import { registerObjectiveSave } from "./factories/objectiveSave.ts";
+import { registerPlanDraft } from "./factories/planDraft.ts";
+import { registerPlanMode } from "./factories/planMode.ts";
+import { registerPlanReview } from "./factories/planReview.ts";
+import { registerPlanSave } from "./factories/planSave.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./registry.ts";
 import { report } from "./report.ts";
 import { perkVersion, sharedDir } from "./resources.ts";
 import { mintRunId } from "./runId.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces.ts";
-import { registerTodoAdapterJuicesharp } from "./todoAdapterJuicesharp.ts";
 import { registerToolGating } from "./toolGating.ts";
 import {
   appendWorkflowState,

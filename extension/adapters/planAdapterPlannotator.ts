@@ -34,12 +34,12 @@
 
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
-import { resolvedPlanProviderId } from "./planMode.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "../factories/objectiveAuthor.ts";
+import { resolvedPlanProviderId } from "../factories/planMode.ts";
 // Type-only (erased at runtime — no cycle): the outcome vocabulary lives with the review door.
-import type { ReviewOutcome } from "./planReview.ts";
-import { PLANNOTATOR_PLAN_PROVIDER_ID } from "./providers.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
+import type { ReviewOutcome } from "../factories/planReview.ts";
+import { PLANNOTATOR_PLAN_PROVIDER_ID } from "../providers.ts";
+import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
 
 /** The plannotator plan-adapter bridge customType (distinct from planMode's `perk:plan-context`). */
 export const PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE = "perk:plan-adapter-plannotator";

@@ -31,17 +31,17 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
-import { loadPerkConfig } from "./config.ts";
-import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
+import { loadPerkConfig } from "../config.ts";
 import {
   loadProviders,
   PERK_PLAN_PROVIDER_ID,
   PLANNOTATOR_PLAN_PROVIDER_ID,
   resolveProviders,
-} from "./providers.ts";
-import { report } from "./report.ts";
-import type { ToolGating } from "./toolGating.ts";
-import { branchOf, rebuildWorkflowState } from "./workflowState.ts";
+} from "../providers.ts";
+import { report } from "../report.ts";
+import type { ToolGating } from "../toolGating.ts";
+import { branchOf, rebuildWorkflowState } from "../workflowState.ts";
+import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 
 /** The plan-authoring context customType (distinct from T1's `perk:mode-context`). */
 export const PLAN_CONTEXT_TYPE = "perk:plan-context";

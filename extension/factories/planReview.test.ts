@@ -15,6 +15,12 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ReportTarget } from "../report.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "../sessionData.ts";
+import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import type { ToolGating } from "../toolGating.ts";
+import type { EntrySink } from "../workflowState.ts";
+import { WORKFLOW_STATE_TYPE } from "../workflowState.ts";
 import { OBJECTIVE_DRAFT_ARTIFACT } from "./objectiveDraft.ts";
 import type { ObjectiveApprovalSaveOutcome, ObjectiveSaveResult } from "./objectiveSave.ts";
 import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
@@ -30,12 +36,6 @@ import {
   runFirstPartyReview,
 } from "./planReview.ts";
 import type { ApprovalSaveOutcome, SaveResult } from "./planSave.ts";
-import type { ReportTarget } from "./report.ts";
-import { type SessionDataCtx, writeSessionArtifact } from "./sessionData.ts";
-import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
-import type { ToolGating } from "./toolGating.ts";
-import type { EntrySink } from "./workflowState.ts";
-import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
   mkdirSync(join(cwd, ".pi"), { recursive: true });

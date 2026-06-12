@@ -12,6 +12,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { PLAN_CONTEXT_TYPE } from "../factories/planMode.ts";
+import { reviewOutcomeResult } from "../factories/planReview.ts";
+import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   createPlannotatorBridge,
   isPlannotatorPlanSelected,
@@ -19,9 +22,6 @@ import {
   PLAN_ADAPTER_PLANNOTATOR_CONTEXT_TYPE,
   type PlannotatorBus,
 } from "./planAdapterPlannotator.ts";
-import { PLAN_CONTEXT_TYPE } from "./planMode.ts";
-import { reviewOutcomeResult } from "./planReview.ts";
-import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 function selectPlannotator(cwd: string): void {
   mkdirSync(join(cwd, ".pi"), { recursive: true });

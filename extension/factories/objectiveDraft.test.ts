@@ -9,7 +9,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { sessionDataDir } from "./cache.ts";
+import { sessionDataDir } from "../cache.ts";
+import type { ReportTarget } from "../report.ts";
+import {
+  digestSessionData,
+  readSessionArtifact,
+  type SessionDataCtx,
+  writeSessionArtifact,
+} from "../sessionData.ts";
+import { loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import {
+  type EntrySink,
+  rebuildWorkflowState,
+  type SessionArtifactPointer,
+  WORKFLOW_STATE_TYPE,
+} from "../workflowState.ts";
 import {
   decodeObjectiveSaveParams,
   OBJECTIVE_DRAFT_ARTIFACT,
@@ -20,20 +34,6 @@ import {
   renderObjectiveDraft,
   writeObjectiveDraft,
 } from "./objectiveDraft.ts";
-import type { ReportTarget } from "./report.ts";
-import {
-  digestSessionData,
-  readSessionArtifact,
-  type SessionDataCtx,
-  writeSessionArtifact,
-} from "./sessionData.ts";
-import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import {
-  type EntrySink,
-  rebuildWorkflowState,
-  type SessionArtifactPointer,
-  WORKFLOW_STATE_TYPE,
-} from "./workflowState.ts";
 
 const PROSE = "# Conform objective planning\n\nThe why, the design, the boundaries.\n";
 const ROADMAP = [
