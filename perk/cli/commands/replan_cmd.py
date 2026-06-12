@@ -24,7 +24,7 @@ from pathlib import Path
 
 import click
 
-from perk import issues, launch
+from perk import cache, issues, launch
 from perk.cli.alias import alias
 from perk.cli.commands.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
@@ -51,7 +51,7 @@ def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -
 def _scratch_path(repo_root: Path, number: int) -> Path:
     """The per-plan scratch file the read-only session reads (parameterized by plan number so
     concurrent replans don't collide)."""
-    return repo_root / ".pi" / "workflow" / "scratch" / f"replan-{number}.md"
+    return cache.scratch_dir(repo_root) / f"replan-{number}.md"
 
 
 def _render_existing_plan(number: int, title: str, url: str, body: str) -> str:

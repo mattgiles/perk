@@ -47,9 +47,28 @@ export function markHandoffConsumed(
 }
 
 // --- scratch -----------------------------------------------------------------------------
+//
+// This module is the INTERIOR path-primitive seam for scratch/session-data (contracts.md §8.1,
+// Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
+// outside this module (guard-tested by cacheGuard.test.ts; the ctx-level current-run seam is
+// sessionData.ts and the exterior twin is perk/cache.py).
+
+export function scratchDir(cwd: string): string {
+  return join(workflowDir(cwd), "scratch");
+}
 
 export function runScratchDir(cwd: string, runId: string): string {
-  return join(workflowDir(cwd), "scratch", "runs", runId);
+  return join(scratchDir(cwd), "runs", runId);
+}
+
+/**
+ * The session data dir for a run (Objective #339 Node 1.2) — a dedicated `data/` subdir so
+ * run-scoped session artifacts never overlap perk machine records (dispatch.json,
+ * events.ndjson, ci-*.md) living directly in the run dir. Pure path — created lazily by the
+ * sessionData.ts write helpers.
+ */
+export function sessionDataDir(cwd: string, runId: string): string {
+  return join(runScratchDir(cwd, runId), "data");
 }
 
 export function ensureRunScratch(cwd: string, runId: string): string {
@@ -69,7 +88,7 @@ export function runEventsPath(cwd: string, runId: string): string {
 
 /** Names of all run scratch dirs (used to enumerate fork siblings). */
 export function listRunIds(cwd: string): string[] {
-  const dir = join(workflowDir(cwd), "scratch", "runs");
+  const dir = join(scratchDir(cwd), "runs");
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

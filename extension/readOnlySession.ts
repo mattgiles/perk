@@ -30,7 +30,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { runScratchDir, workflowDir } from "./cache.ts";
+import { runScratchDir, scratchDir } from "./cache.ts";
 
 /**
  * The SDK-level read-only allowlist (no `bash`; stricter than T1's in-session READ_ONLY_TOOLS).
@@ -203,7 +203,7 @@ function resolveScratchPath(cwd: string, runId?: string, step?: string): string 
     mkdirSync(dir, { recursive: true });
     return join(dir, `${step ?? "child"}.md`);
   }
-  const base = join(workflowDir(cwd), "scratch");
+  const base = scratchDir(cwd);
   mkdirSync(base, { recursive: true });
   const dir = mkdtempSync(join(base, "child-"));
   return join(dir, `${step ?? "child"}.md`);
