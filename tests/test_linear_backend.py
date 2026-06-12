@@ -143,16 +143,19 @@ class TestTeamStateLabelCaching:
     def test_done_state_picks_lowest_position_completed(self) -> None:
         backend, fake = _make_backend(
             {
+                "UuidForIssue": [{"issue": {"id": "uuid-1"}}, {"issue": {"id": "uuid-2"}}],
                 "teams(filter": [_TEAM_RESPONSE],
                 "team(id": [_STATES_RESPONSE],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
-        assert backend.close_issue(issue_id="iss-1") is True
+        assert backend.close_issue(issue_id="ENG-1") is True
         [(_, variables)] = _queries(fake, "issueUpdate(")
         assert variables["input"] == {"stateId": "state-done"}
+        # the mutation id is the resolved UUID, never the boundary identifier
+        assert variables["id"] == "uuid-1"
         # cached: a second close re-uses both team and state ids
-        backend.close_issue(issue_id="iss-2")
+        backend.close_issue(issue_id="ENG-2")
         assert len(_queries(fake, "team(id")) == 1
 
     def test_no_completed_state_raises(self) -> None:
@@ -217,21 +220,35 @@ class TestFindAndCreatePlan:
     def test_find_matches_inline_encoded_description_across_pages(self) -> None:
         page1 = {
             "issues": _page(
-                [{"id": "iss-a", "url": "u-a", "description": _inline_plan_description("01OTHER")}],
+                [
+                    {
+                        "id": "iss-a",
+                        "identifier": "ENG-1",
+                        "url": "u-a",
+                        "description": _inline_plan_description("01OTHER"),
+                    }
+                ],
                 has_next=True,
                 cursor="C1",
             )
         }
         page2 = {
             "issues": _page(
-                [{"id": "iss-b", "url": "u-b", "description": _inline_plan_description("01HIT")}]
+                [
+                    {
+                        "id": "iss-b",
+                        "identifier": "ENG-2",
+                        "url": "u-b",
+                        "description": _inline_plan_description("01HIT"),
+                    }
+                ]
             )
         }
         backend, fake = _make_backend(
             {"teams(filter": [_TEAM_RESPONSE], "issues(first": [page1, page2]}
         )
         found = backend.find_plan_issue(run_id="01HIT")
-        assert found == issue_backend.IssueRef(id="iss-b", url="u-b", existed=True)
+        assert found == issue_backend.IssueRef(id="ENG-2", url="u-b", existed=True)
         pages = _queries(fake, "issues(first")
         assert len(pages) == 2
         query, variables = pages[0]
@@ -247,12 +264,23 @@ class TestFindAndCreatePlan:
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [
-                    {"issues": _page([{"id": "iss-h", "url": "u-h", "description": description}])}
+                    {
+                        "issues": _page(
+                            [
+                                {
+                                    "id": "iss-h",
+                                    "identifier": "ENG-3",
+                                    "url": "u-h",
+                                    "description": description,
+                                }
+                            ]
+                        )
+                    }
                 ],
             }
         )
         found = backend.find_plan_issue(run_id="01HTML")
-        assert found is not None and found.id == "iss-h"
+        assert found is not None and found.id == "ENG-3"
 
     def test_find_no_match_is_none_and_failure_raises(self) -> None:
         backend, _ = _make_backend(
@@ -278,6 +306,7 @@ class TestFindAndCreatePlan:
                             [
                                 {
                                     "id": "iss-x",
+                                    "identifier": "ENG-4",
                                     "url": "u-x",
                                     "description": _inline_plan_description("01DUP"),
                                 }
@@ -288,7 +317,7 @@ class TestFindAndCreatePlan:
             }
         )
         ref = backend.create_plan_issue(title="t", body="b", run_id="01DUP")
-        assert ref == issue_backend.IssueRef(id="iss-x", url="u-x", existed=True)
+        assert ref == issue_backend.IssueRef(id="ENG-4", url="u-x", existed=True)
         assert not _queries(fake, "issueCreate(")
 
     def test_create_dry_run_shape(self) -> None:
@@ -305,12 +334,17 @@ class TestFindAndCreatePlan:
                 "issues(first": [_no_issues()],
                 "issueLabels(filter": [_LABEL_FOUND],
                 "issueCreate(": [
-                    {"issueCreate": {"success": True, "issue": {"id": "iss-n", "url": "u-n"}}}
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "iss-n", "identifier": "ENG-5", "url": "u-n"},
+                        }
+                    }
                 ],
             }
         )
         ref = backend.create_plan_issue(title="t", body=github_body, run_id="01NEW")
-        assert ref == issue_backend.IssueRef(id="iss-n", url="u-n", existed=False)
+        assert ref == issue_backend.IssueRef(id="ENG-5", url="u-n", existed=False)
         [(_, variables)] = _queries(fake, "issueCreate(")
         input_payload = _input_payload(variables)
         description = input_payload["description"]
@@ -333,6 +367,7 @@ class TestLearnTwins:
                             [
                                 {
                                     "id": "iss-plan",
+                                    "identifier": "ENG-6",
                                     "url": "u",
                                     "description": _inline_plan_description("01RUN"),
                                 }
@@ -353,14 +388,19 @@ class TestLearnTwins:
                 "issues(first": [_no_issues()],
                 "issueLabels(filter": [_LABEL_FOUND],
                 "issueCreate(": [
-                    {"issueCreate": {"success": True, "issue": {"id": "iss-l", "url": "u-l"}}}
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "iss-l", "identifier": "ENG-7", "url": "u-l"},
+                        }
+                    }
                 ],
             }
         )
         ref = backend.create_learn_issue(
-            title="t", body="learnings", run_id="01LEARN", plan_id="plan-uuid-1"
+            title="t", body="learnings", run_id="01LEARN", plan_id="ENG-1"
         )
-        assert ref.existed is False
+        assert ref.existed is False and ref.id == "ENG-7"
         [(_, variables)] = _queries(fake, "issueCreate(")
         input_payload = _input_payload(variables)
         description = input_payload["description"]
@@ -369,7 +409,7 @@ class TestLearnTwins:
         header = plan.find_metadata_block(description, plan.LEARN_HEADER_KEY)
         assert header is not None
         assert header["run_id"] == "01LEARN"
-        assert header["plan"] == "plan-uuid-1"  # the boundary string, verbatim
+        assert header["plan"] == "ENG-1"  # the boundary string, verbatim
         assert description.endswith("learnings\n")
 
     def test_create_learn_issue_is_idempotent_via_find(self) -> None:
@@ -382,16 +422,21 @@ class TestLearnTwins:
                 "issues(first": [
                     {
                         "issues": _page(
-                            [{"id": "iss-l", "url": "u-l", "description": learn_description}]
+                            [
+                                {
+                                    "id": "iss-l",
+                                    "identifier": "ENG-7",
+                                    "url": "u-l",
+                                    "description": learn_description,
+                                }
+                            ]
                         )
                     }
                 ],
             }
         )
-        ref = backend.create_learn_issue(
-            title="t", body="b", run_id="01LEARN", plan_id="plan-uuid-1"
-        )
-        assert ref == issue_backend.IssueRef(id="iss-l", url="u-l", existed=True)
+        ref = backend.create_learn_issue(title="t", body="b", run_id="01LEARN", plan_id="ENG-1")
+        assert ref == issue_backend.IssueRef(id="ENG-7", url="u-l", existed=True)
         assert not _queries(fake, "issueCreate(")
 
     def test_list_learn_issues_maps_fields_and_raises_on_failure(self) -> None:
@@ -401,7 +446,15 @@ class TestLearnTwins:
                 "issues(first": [
                     {
                         "issues": _page(
-                            [{"id": "iss-1", "title": "T", "url": "u", "description": "body"}]
+                            [
+                                {
+                                    "id": "iss-1",
+                                    "identifier": "ENG-8",
+                                    "title": "T",
+                                    "url": "u",
+                                    "description": "body",
+                                }
+                            ]
                         )
                     }
                 ],
@@ -409,7 +462,7 @@ class TestLearnTwins:
         )
         summaries = backend.list_learn_issues()
         assert summaries == (
-            issue_backend.LearnIssueSummary(id="iss-1", title="T", url="u", body="body"),
+            issue_backend.LearnIssueSummary(id="ENG-8", title="T", url="u", body="body"),
         )
         [(_, variables)] = _queries(fake, "issues(first")
         assert variables["label"] == "perk:learn"
@@ -432,6 +485,7 @@ class TestPlanUpserts:
         existing = to_linear_markdown(plan.render_plan_body("# Old plan"))
         backend, fake = _make_backend(
             {
+                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [
                     _comments_response(
                         [
@@ -457,10 +511,12 @@ class TestPlanUpserts:
         assert isinstance(body, str) and "<!--" not in body and "# New plan" in body
         [(_, title_vars)] = _queries(fake, "issueUpdate(")
         assert title_vars["input"] == {"title": "t2"}
+        assert title_vars["id"] == "uuid-iss-1"  # mutation id resolved to the UUID
 
     def test_update_plan_issue_posts_fresh_on_a_legacy_issue(self) -> None:
         backend, fake = _make_backend(
             {
+                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [_comments_response([])],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
@@ -544,6 +600,7 @@ class TestGetPlan:
                     {
                         "issue": {
                             "id": "iss-1",
+                            "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
                             "description": _inline_plan_description("01S"),
@@ -553,8 +610,9 @@ class TestGetPlan:
                 ]
             }
         )
-        state = backend.get_plan(issue_id="iss-1")
+        state = backend.get_plan(issue_id="ENG-1")
         assert state is not None
+        assert state.id == "ENG-1"  # the boundary id is the human identifier
         assert state.state == expected
         assert state.pr is None
         assert state.header["run_id"] == "01S"
@@ -571,6 +629,7 @@ class TestGetPlan:
                     {
                         "issue": {
                             "id": "iss-1",
+                            "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
                             "description": description,
@@ -607,6 +666,7 @@ class TestGetPlan:
                     {
                         "issue": {
                             "id": "iss-1",
+                            "identifier": "ENG-1",
                             "url": "u",
                             "title": "T",
                             "description": description,
@@ -693,6 +753,7 @@ class TestCommentOps:
         marker = run_report.RUN_REPORT_MARKER.format(run_id="01R")
         posted, post_fake = _make_backend(
             {
+                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [_comments_response([])],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
             }
@@ -742,12 +803,18 @@ class TestCommentOps:
         assert fake.requests == []
 
     def test_add_issue_comment_transcodes(self) -> None:
-        backend, fake = _make_backend({"commentCreate(": [{"commentCreate": {"success": True}}]})
-        result = backend.add_issue_comment(issue_id="iss-1", body="<!-- perk:run-report:X -->\nhi")
+        backend, fake = _make_backend(
+            {
+                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
+                "commentCreate(": [{"commentCreate": {"success": True}}],
+            }
+        )
+        result = backend.add_issue_comment(issue_id="ENG-1", body="<!-- perk:run-report:X -->\nhi")
         assert result == issue_backend.CommentResult(posted=True)
         [(_, variables)] = _queries(fake, "commentCreate(")
         create_input = _input_payload(variables)
         assert create_input["body"] == "`perk:run-report:X`\nhi"
+        assert create_input["issueId"] == "uuid-iss-1"  # issueId resolved to the UUID
 
 
 class TestCloseOps:
@@ -759,6 +826,7 @@ class TestCloseOps:
     def test_close_issue_is_fail_loud(self) -> None:
         backend, _ = _make_backend(
             {
+                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
                 "teams(filter": [_TEAM_RESPONSE],
                 "team(id": [_STATES_RESPONSE],
                 "issueUpdate(": [{"issueUpdate": {"success": False}}],
@@ -820,7 +888,15 @@ def _inline_objective_description(
 
 
 def _objective_issue_response(description: str) -> dict[str, object]:
-    return {"issue": {"id": "obj-1", "url": "u-obj", "title": "Obj", "description": description}}
+    return {
+        "issue": {
+            "id": "obj-1",
+            "identifier": "ENG-9",
+            "url": "u-obj",
+            "title": "Obj",
+            "description": description,
+        }
+    }
 
 
 _COMMENT_CREATED: dict[str, object] = {
@@ -835,12 +911,23 @@ class TestFindObjectiveIssue:
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [
-                    {"issues": _page([{"id": "obj-1", "url": "u", "description": description}])}
+                    {
+                        "issues": _page(
+                            [
+                                {
+                                    "id": "obj-1",
+                                    "identifier": "ENG-9",
+                                    "url": "u",
+                                    "description": description,
+                                }
+                            ]
+                        )
+                    }
                 ],
             }
         )
         found = backend.find_objective_issue(run_id="01OBJ")
-        assert found == issue_backend.IssueRef(id="obj-1", url="u", existed=True)
+        assert found == issue_backend.IssueRef(id="ENG-9", url="u", existed=True)
         [(_, variables)] = _queries(fake, "issues(first")
         assert variables["label"] == "perk:objective"
 
@@ -879,14 +966,25 @@ class TestCreateObjectiveIssue:
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [
-                    {"issues": _page([{"id": "obj-1", "url": "u", "description": description}])}
+                    {
+                        "issues": _page(
+                            [
+                                {
+                                    "id": "obj-1",
+                                    "identifier": "ENG-9",
+                                    "url": "u",
+                                    "description": description,
+                                }
+                            ]
+                        )
+                    }
                 ],
             }
         )
         ref = backend.create_objective_issue(
             title="t", body="b", run_id="01DUP", roadmap_nodes=_objective_nodes()
         )
-        assert ref == issue_backend.IssueRef(id="obj-1", url="u", existed=True)
+        assert ref == issue_backend.IssueRef(id="ENG-9", url="u", existed=True)
         assert not _queries(fake, "issueCreate(")
 
     def test_empty_roadmap_raises(self) -> None:
@@ -913,7 +1011,12 @@ class TestCreateObjectiveIssue:
                 "issues(first": [_no_issues()],
                 "issueLabels(filter": [_LABEL_FOUND],
                 "issueCreate(": [
-                    {"issueCreate": {"success": True, "issue": {"id": "obj-1", "url": "u-obj"}}}
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "obj-1", "identifier": "ENG-9", "url": "u-obj"},
+                        }
+                    }
                 ],
                 "commentCreate(": [_COMMENT_CREATED],
                 # the backfill's _get_issue read: returns the freshly created description
@@ -927,7 +1030,7 @@ class TestCreateObjectiveIssue:
             run_id="01NEW",
             roadmap_nodes=_objective_nodes(),
         )
-        assert ref == issue_backend.IssueRef(id="obj-1", url="u-obj", existed=False)
+        assert ref == issue_backend.IssueRef(id="ENG-9", url="u-obj", existed=False)
 
         # 1) the issue description is composed directly inline-code-encoded
         [(_, create_vars)] = _queries(fake, "issueCreate(")
@@ -965,9 +1068,9 @@ class TestGetObjective:
     def test_happy_path(self) -> None:
         description = _inline_objective_description("01OBJ", comment_id="cmt-1")
         backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        state = backend.get_objective(issue_id="obj-1")
+        state = backend.get_objective(issue_id="ENG-9")
         assert state is not None
-        assert state.id == "obj-1" and state.url == "u-obj" and state.title == "Obj"
+        assert state.id == "ENG-9" and state.url == "u-obj" and state.title == "Obj"
         assert state.header["run_id"] == "01OBJ"
         assert state.header["objective_comment_id"] == "cmt-1"
         assert [n.id for n in state.nodes] == ["1.1", "1.2"]
@@ -1194,6 +1297,47 @@ class TestUpdateObjectiveBody:
         assert "never touch this" in patched  # the Immutable tail is preserved
         assert "`perk:roadmap-table`" in patched  # the Mechanical block above is preserved
         assert "<!--" not in patched
+
+
+class TestUuidResolution:
+    """The D3 mutation-path identifier→UUID resolution (`_uuid_for`): cached, read-seeded."""
+
+    def test_uuid_for_resolves_once_and_caches(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
+                "commentCreate(": [{"commentCreate": {"success": True}}],
+            }
+        )
+        backend.add_issue_comment(issue_id="ENG-1", body="a")
+        backend.add_issue_comment(issue_id="ENG-1", body="b")
+        assert len(_queries(fake, "UuidForIssue")) == 1  # second mutation hits the cache
+        for _, variables in _queries(fake, "commentCreate("):
+            assert _input_payload(variables)["issueId"] == "uuid-1"
+
+    def test_issue_reads_seed_the_uuid_cache(self) -> None:
+        # update_plan_header reads the issue first; the follow-up mutation must not issue a
+        # separate UuidForIssue lookup (the read seeded the cache).
+        description = _inline_plan_description("01HDR")
+        backend, fake = _make_backend(
+            {
+                "issue(id": [{"issue": {"id": "uuid-1", "description": description}}],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        backend.update_plan_header(issue_id="ENG-1", fields={"pr": "12"})
+        assert not _queries(fake, "UuidForIssue")
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        assert variables["id"] == "uuid-1"
+
+    def test_uuid_for_missing_entity_raises_not_found(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "UuidForIssue": [_not_found_error()],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="'ENG-404' not found"):
+            backend.add_issue_comment(issue_id="ENG-404", body="x")
 
 
 class TestImportDirection:
