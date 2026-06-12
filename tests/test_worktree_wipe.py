@@ -170,6 +170,61 @@ def test_wipe_ignores_non_plan_worktrees(git_repo, monkeypatch):
     assert "no plan worktrees to wipe" in result.output
 
 
+def test_wipe_gathers_concurrently(git_repo, monkeypatch):
+    """Both get_plan calls must be in flight simultaneously (parallel gather phase)."""
+    import threading
+
+    _add_plan_wt(git_repo, 1)
+    _add_plan_wt(git_repo, 2)
+    barrier = threading.Barrier(2, timeout=10)
+
+    def fake_get_plan(*, number: int, repo_root: Path) -> github.PlanState:
+        barrier.wait()  # times out (BrokenBarrierError) if gathering were sequential
+        return _plan_state("MERGED")
+
+    monkeypatch.setattr(github, "get_plan", fake_get_plan)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not (git_repo / ".worktrees" / "plan-1").exists()
+    assert not (git_repo / ".worktrees" / "plan-2").exists()
+    assert "wiped 2 worktree(s); 0 skipped" in result.output
+
+
+def test_wipe_output_in_candidate_order(git_repo, monkeypatch):
+    """Per-worktree lines appear in worktree-name order regardless of gather completion order."""
+    for n in (1, 2, 3):
+        _add_plan_wt(git_repo, n)
+    states = {1: "MERGED", 2: "OPEN", 3: "MERGED"}
+
+    def fake_get_plan(*, number: int, repo_root: Path) -> github.PlanState:
+        return _plan_state(states[number])
+
+    monkeypatch.setattr(github, "get_plan", fake_get_plan)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    positions = [result.output.index(f"plan-{n}") for n in (1, 2, 3)]
+    assert positions == sorted(positions), result.output
+
+
+def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
+    from perk.backends import issues
+    from perk.backends.issue_backend import IssueBackendError
+
+    _add_plan_wt(git_repo, 1)
+    _add_plan_wt(git_repo, 2)
+
+    def boom(repo_root: Path):
+        raise IssueBackendError("offline")
+
+    monkeypatch.setattr(issues, "resolve_issue_backend", boom)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert (git_repo / ".worktrees" / "plan-1").exists()
+    assert (git_repo / ".worktrees" / "plan-2").exists()
+    assert result.output.count("could not determine PR state") == 2
+    assert "wiped 0 worktree(s); 2 skipped" in result.output
+
+
 def test_wipe_empty(git_repo):
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
