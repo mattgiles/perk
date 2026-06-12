@@ -51,8 +51,9 @@ draft artifact.
 
 - If the review is DENIED: revise per the feedback, rewrite the working draft with
   objective_draft, then call plan_review again.
-- If the review is APPROVED: nothing auto-saves yet — relay the approval (and any feedback) and
-  ask the user to run \`/objective-save\` to persist it.
+- If the review is APPROVED: the objective is auto-saved (created + activated) and the turn ends
+  — never re-dump the objective as a final message and never tell the user to run
+  \`/objective-save\`; relay the save outcome instead.
 - If plan_review reports it was skipped or unavailable: present the complete objective +
   structured roadmap to the user; the human runs \`/objective-save\` (the manual failsafe).`;
 

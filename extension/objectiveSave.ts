@@ -5,15 +5,28 @@
 // and delegates to `perk objective create --json` via the shared cold-door client (`runColdDoor`,
 // Node 1.4 — the prose rides the run-scratch stdin channel), then links the live session: `active_objective` + a fresh `perk:objective-budget` activation marker
 // (mirrors the `/objective <id>` activation in objective.ts). Failures are loud-but-non-fatal.
+//
+// APPROVAL→SAVE ORCHESTRATION (#352 Node 2.3, mirroring planSave.ts's `approvalSave`). The
+// exported `objectiveApprovalSave` seam is the shared APPROVED-review → save flow: re-read the
+// STRUCTURED artifact (`readObjectiveDraft` — never the rendered markdown, never the transcript)
+// → `saveObjective` → D1a gate exit on a successful save (snapshot `gating.isActive()` BEFORE the
+// save; a failed save leaves the gate ON). `plan_review`'s objective arm (planReview.ts) wires
+// its APPROVED outcome into it; the `/objective-save` command is the artifact-first MANUAL
+// FAILSAFE invocation of the same seam, keeping the legacy drive-the-session behavior as the
+// no-draft fallback (objectives have no transcript scrape by design).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "./bindingDelivery.ts";
 import { booleanField, type ColdJson, objectField, runColdDoor, stringField } from "./coldDoor.ts";
 import { OBJECTIVE_BUDGET_TYPE } from "./objective.ts";
-import { report } from "./report.ts";
+import {
+  decodeObjectiveSaveParams,
+  ROADMAP_PARAM_SCHEMA,
+  readObjectiveDraft,
+} from "./objectiveDraft.ts";
+import { report, type Severity } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import type { ToolGating } from "./toolGating.ts";
-import { arrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "./workflowState.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
@@ -38,56 +51,6 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
   const url = stringField(objective, "url");
   if (id === undefined || url === undefined) return null;
   return { objective: { id, url, existed: booleanField(objective, "existed") } };
-}
-
-/** The decoded `objective_save` tool params (shared with `objective_draft` — #352 Node 2.1). */
-export interface ObjectiveSaveParams {
-  prose: string;
-  title?: string;
-  roadmap?: unknown[];
-}
-
-/**
- * The roadmap-node items JSON schema, shared between `objective_save` and `objective_draft`
- * (#352 Node 2.1) so the two tools' roadmap contracts cannot drift.
- */
-export const ROADMAP_PARAM_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "description"],
-  properties: {
-    id: { type: "string", description: 'A stable node id, e.g. "1.1".' },
-    description: { type: "string", description: "What this node delivers." },
-    status: {
-      type: "string",
-      enum: ["pending", "planning", "in_progress", "done", "blocked", "skipped"],
-      description: "Optional initial status (defaults to pending).",
-    },
-    slug: { type: "string", description: "Optional short slug." },
-    pr: { type: "string", description: 'Optional plan/PR backlink, e.g. "#42".' },
-    depends_on: {
-      type: "array",
-      items: { type: "string" },
-      description: "Optional explicit dependency node ids.",
-    },
-    comment: { type: "string", description: "Optional note." },
-  },
-} as const;
-
-/**
- * Decode unknown `objective_save` tool-call params (the tool-boundary seam — Node 3.2). `prose`
- * absent decodes to `""` (so `saveObjective`'s "no objective prose to save" `invalid_input` arm
- * keeps owning that message) but present-but-mistyped → null (strict-fail). `roadmap` stays
- * `unknown[]` — the Python cold door owns node-shape validation.
- */
-export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams | null {
-  const p = paramsOf(params);
-  if (p === null) return null;
-  const prose = stringParam(p, "prose");
-  const title = stringParam(p, "title");
-  const roadmap = arrayParam(p, "roadmap");
-  if (prose === null || title === null || roadmap === null) return null;
-  return { prose: prose ?? "", title, roadmap };
 }
 
 /**
@@ -154,6 +117,47 @@ export async function saveObjective(
     },
     { terminate: true },
   );
+}
+
+/** The approval→save orchestration outcome (#352 Node 2.3 — the objective `ApprovalSaveOutcome`). */
+export type ObjectiveApprovalSaveOutcome =
+  | { status: "no-draft" }
+  | { status: "saved" | "save-failed"; result: ObjectiveSaveResult; gateExited: boolean };
+
+/**
+ * The shared approval→save orchestration seam (#352 Node 2.3, the objective sibling of
+ * planSave.ts's `approvalSave`): an APPROVED objective review (`plan_review`'s objective arm)
+ * and the manual `/objective-save` failsafe both run THIS. Flow: re-read the STRUCTURED draft
+ * artifact at save time (`readObjectiveDraft` — never the rendered markdown, never in-hand
+ * bytes) → `saveObjective` → gate exit on a successful save while read-only (the D1a pattern:
+ * snapshot `gating.isActive()` before the save; a failed save leaves the gate ON). No draft →
+ * `no-draft` (nothing saved, the gate untouched); callers render their own fallback. Title
+ * precedence: an explicit `opts.title` wins; else the draft's `title`; else the cold door
+ * derives from the prose heading. The returned result keeps `saveObjective`'s `terminate: true`
+ * for tool-path callers.
+ */
+export async function objectiveApprovalSave(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  gating: ToolGating,
+  opts: { title?: string } = {},
+): Promise<ObjectiveApprovalSaveOutcome> {
+  const draft = readObjectiveDraft(ctx);
+  if (draft === null) return { status: "no-draft" };
+  // D1a: snapshot the gate BEFORE the save; on success, exit it so save marks the read-only →
+  // read-write boundary in one gesture. A failed save leaves the gate on.
+  const wasReadOnly = gating.isActive();
+  const result = await saveObjective(pi, ctx, {
+    prose: draft.prose,
+    title: opts.title ?? draft.title,
+    roadmap: draft.roadmap,
+  });
+  let gateExited = false;
+  if (result.details.ok && wasReadOnly) {
+    gating.exit(ctx);
+    gateExited = true;
+  }
+  return { status: result.details.ok ? "saved" : "save-failed", result, gateExited };
 }
 
 const TOOL_GUIDELINES = [
@@ -235,22 +239,34 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
 
   pi.registerCommand("objective-save", {
     description:
-      "Drive the structured objective save: exit read-only (so the objective_save tool is " +
-      "reachable) and inject guidance for the session to call objective_save with prose + the " +
-      "structured roadmap.",
+      "Save the working objective draft to GitHub — the manual failsafe for the approval→save " +
+      "flow (artifact-first; drives the structured save only when no draft exists).",
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
-      // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS) becomes
-      // reachable on the driven turn, then drive the turn — unlike /learn-docs (which early-returns
-      // on headless), /objective-save has no pre-gather artifact, so the only useful action is the
-      // gate-exit + drive (mirrors /address and /objective-plan).
-      if (gating.isActive()) gating.exit(ctx);
-      report(ctx, "objective-save", "info", "handing the structured save to the session");
-      // The perk-objective-author pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
-      // /objective-save outside a stage:objective-author session gets none from Mechanism A.
-      pi.sendUserMessage(
-        objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),
-      );
+      // #352 Node 2.3: the artifact-first manual-failsafe invocation of the shared approval→save
+      // seam (the D1a gate exit lives in the seam). The legacy drive-the-session behavior is kept
+      // as the NO-DRAFT fallback — objectives have no transcript scrape by design, so a draftless
+      // session still needs a working save path.
+      const outcome = await objectiveApprovalSave(pi, ctx, gating, { title });
+      if (outcome.status === "no-draft") {
+        // Exit the read-only gate so the objective_save tool (excluded from READ_ONLY_TOOLS)
+        // becomes reachable on the driven turn, then drive the turn (mirrors /address and
+        // /objective-plan).
+        if (gating.isActive()) gating.exit(ctx);
+        report(ctx, "objective-save", "info", "handing the structured save to the session");
+        // The perk-objective-author pointer rides the skill-binding suffix (Node 2.3, D5) since a
+        // warm /objective-save outside a stage:objective-author session gets none from Mechanism A.
+        pi.sendUserMessage(
+          objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),
+        );
+        return;
+      }
+      // Saved or save-failed: relay the save message. No node-link sub-step on the objective path,
+      // so the severity ladder is simpler than /plan-save's (no warning tier).
+      const result = outcome.result;
+      const message = result.content[0]?.text ?? "objective-save done";
+      const severity: Severity = result.details.ok ? "info" : "error";
+      report(ctx, "objective-save", severity, message);
     },
   });
 }

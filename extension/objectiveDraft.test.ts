@@ -11,14 +11,15 @@ import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { sessionDataDir } from "./cache.ts";
 import {
+  decodeObjectiveSaveParams,
   OBJECTIVE_DRAFT_ARTIFACT,
   type ObjectiveDraft,
   type ObjectiveDraftResult,
+  ROADMAP_PARAM_SCHEMA,
   readObjectiveDraft,
   renderObjectiveDraft,
   writeObjectiveDraft,
 } from "./objectiveDraft.ts";
-import { decodeObjectiveSaveParams } from "./objectiveSave.ts";
 import type { ReportTarget } from "./report.ts";
 import {
   digestSessionData,
@@ -87,7 +88,7 @@ function pointerOf(branch: unknown[]): SessionArtifactPointer | undefined {
   return rebuildWorkflowState(branchOfArr(branch)).session_artifacts?.[OBJECTIVE_DRAFT_ARTIFACT];
 }
 
-// --- decode (shared with objective_save; pure cases live in objectiveSave.test.ts) ---------------
+// --- decode (shared with objective_save; the full vocabulary tests live at the bottom) -----------
 
 test("decode smoke: absent prose decodes to empty string (the core owns invalid_input)", () => {
   assert.deepEqual(decodeObjectiveSaveParams({}), {
@@ -401,4 +402,35 @@ test("harness: mistyped params ⇒ bad_input", async () => {
     h.dispose();
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+// --- the shared draft/save param vocabulary (moved in with its module — #352 Node 2.3) ----------
+
+test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
+  assert.deepEqual(decodeObjectiveSaveParams({ prose: "p", roadmap: [{ id: "1.1" }] }), {
+    prose: "p",
+    title: undefined,
+    roadmap: [{ id: "1.1" }],
+  });
+  // prose absent decodes to "" (saveObjective's invalid_input arm keeps owning that message).
+  assert.equal(decodeObjectiveSaveParams({})?.prose, "");
+  assert.equal(decodeObjectiveSaveParams(undefined), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: 5 }), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", title: 5 }), null);
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", roadmap: "x" }), null);
+});
+
+test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape (#352 Node 2.1)", () => {
+  assert.equal(ROADMAP_PARAM_SCHEMA.type, "object");
+  assert.equal(ROADMAP_PARAM_SCHEMA.additionalProperties, false);
+  assert.deepEqual([...ROADMAP_PARAM_SCHEMA.required], ["id", "description"]);
+  assert.deepEqual(Object.keys(ROADMAP_PARAM_SCHEMA.properties), [
+    "id",
+    "description",
+    "status",
+    "slug",
+    "pr",
+    "depends_on",
+    "comment",
+  ]);
 });

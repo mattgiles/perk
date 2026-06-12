@@ -19,12 +19,16 @@
 // approval→`objective_save` orchestration (node 2.3, forthcoming) feeds the recovered roadmap
 // back as structured JSON.
 //
-// Imports stay node builtins + sibling seams (sessionData.ts, objectiveSave.ts, result.ts) so the
-// module loads under `node --test`; no manual `scratch`/`runs` path segments (cacheGuard.test.ts).
+// Vocabulary ownership (#352 Node 2.3): this module owns the shared draft/save param vocabulary
+// (`ObjectiveSaveParams`, `decodeObjectiveSaveParams`, `ROADMAP_PARAM_SCHEMA`) — objectiveDraft is
+// the LEAF (mirroring planDraft←planSave's direction); objectiveSave.ts consumes it, so it may
+// value-import `readObjectiveDraft` cycle-free for the approval→save orchestration.
+//
+// Imports stay node builtins + sibling seams (sessionData.ts, result.ts) so the module loads
+// under `node --test`; no manual `scratch`/`runs` path segments (cacheGuard.test.ts).
 
 import { relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { decodeObjectiveSaveParams, ROADMAP_PARAM_SCHEMA } from "./objectiveSave.ts";
 import type { ReportTarget } from "./report.ts";
 import { failFor, ok, type Result } from "./result.ts";
 import {
@@ -34,7 +38,58 @@ import {
   type SessionDataCtx,
   writeSessionArtifact,
 } from "./sessionData.ts";
+import { arrayParam, paramsOf, stringParam } from "./toolParams.ts";
 import type { EntrySink } from "./workflowState.ts";
+
+/** The decoded `objective_save` tool params (shared with `objective_draft` — #352 Node 2.1). */
+export interface ObjectiveSaveParams {
+  prose: string;
+  title?: string;
+  roadmap?: unknown[];
+}
+
+/**
+ * The roadmap-node items JSON schema, shared between `objective_save` and `objective_draft`
+ * (#352 Node 2.1) so the two tools' roadmap contracts cannot drift.
+ */
+export const ROADMAP_PARAM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "description"],
+  properties: {
+    id: { type: "string", description: 'A stable node id, e.g. "1.1".' },
+    description: { type: "string", description: "What this node delivers." },
+    status: {
+      type: "string",
+      enum: ["pending", "planning", "in_progress", "done", "blocked", "skipped"],
+      description: "Optional initial status (defaults to pending).",
+    },
+    slug: { type: "string", description: "Optional short slug." },
+    pr: { type: "string", description: 'Optional plan/PR backlink, e.g. "#42".' },
+    depends_on: {
+      type: "array",
+      items: { type: "string" },
+      description: "Optional explicit dependency node ids.",
+    },
+    comment: { type: "string", description: "Optional note." },
+  },
+} as const;
+
+/**
+ * Decode unknown `objective_save` tool-call params (the tool-boundary seam — Node 3.2). `prose`
+ * absent decodes to `""` (so `saveObjective`'s "no objective prose to save" `invalid_input` arm
+ * keeps owning that message) but present-but-mistyped → null (strict-fail). `roadmap` stays
+ * `unknown[]` — the Python cold door owns node-shape validation.
+ */
+export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const prose = stringParam(p, "prose");
+  const title = stringParam(p, "title");
+  const roadmap = arrayParam(p, "roadmap");
+  if (prose === null || title === null || roadmap === null) return null;
+  return { prose: prose ?? "", title, roadmap };
+}
 
 /** The fixed working-objective artifact name (one JSON file: prose + the structured roadmap). */
 export const OBJECTIVE_DRAFT_ARTIFACT = "objective-draft.json";

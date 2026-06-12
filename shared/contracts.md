@@ -126,9 +126,15 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `renderObjectiveDraft` (the prose plus a `## Roadmap` markdown table; a `Phase` column only
   when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
   never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
-  `objective_draft` redirect. Approval is **non-saving** pending node 2.3 — the
-  approval→`objective_save` orchestration stays forthcoming; every arm directs the human
-  `/objective-save` gesture.
+  `objective_draft` redirect. **The approval→save orchestration (node 2.3, landed):** an
+  APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/objectiveSave.ts`,
+  the objective sibling of `approvalSave`): the seam **re-reads the structured artifact at save
+  time** (`readObjectiveDraft` — never the rendered markdown, never a param, never the
+  transcript) → `saveObjective` → D1a gate exit on a successful save (snapshot
+  `gating.isActive()` before the save) → a **terminating** result; a failed save is
+  non-terminating, the gate stays read-only, and the human `/objective-save` failsafe is
+  directed. Title precedence: an explicit title wins; else the draft's `title`; else the cold
+  door derives from the prose heading.
 
   **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
@@ -413,15 +419,17 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
   it links the live session: appends `active_objective` **and** seeds a fresh `perk:objective-budget`
   activation marker (mirrors `/objective <id>`), so budget tracking starts immediately; it
-  **terminates** the turn. The `/objective-save` **command drives the structured save**: it exits the
-  read-only gate (so the `objective_save` tool becomes reachable) and injects guidance via
-  `pi.sendUserMessage` instructing the model to call `objective_save` with `prose` + the structured
-  `roadmap` (mirrors `/address`, `/objective-plan`, `/learn-docs`). It still performs **no GitHub
-  mutation itself** — the canonical write flows through the tool, never a prose scrape. This
-  is asymmetric with `/plan-save`: a plan *is* its prose, so the `/plan-save` command genuinely
-  saves; an objective's roadmap is structured data that is unscrapeable, so its command cannot. The
-  tool is structurally unreachable while read-only, so the model exits read-only (`/plan` off) before
-  calling it.
+  **terminates** the turn. The `/objective-save` **command is the artifact-first manual
+  failsafe** (#352 Node 2.3): it invokes the shared `objectiveApprovalSave` seam (re-read the
+  structured `objective-draft.json` artifact → `saveObjective` → D1a gate exit on success) and
+  relays the save message (`error` severity on a failed save — the gate stays read-only). Only
+  when **no draft exists** does it fall back to the legacy drive-the-session behavior: exit the
+  read-only gate (so the `objective_save` tool becomes reachable) and inject guidance via
+  `pi.sendUserMessage` instructing the model to call `objective_save` with `prose` + the
+  structured `roadmap` (mirrors `/address`, `/objective-plan`) — objectives have no transcript
+  scrape by design (a roadmap is structured data, unscrapeable), so a draftless session still
+  needs the driven save path. The tool is structurally unreachable while read-only and remains
+  the post-gate-exit direct failsafe.
 - **Structured roadmap (never hand-written YAML).** `create_objective_issue` gains an optional
   `roadmap_nodes`; `perk objective create` gains `--roadmap <json>` (parsed via
   `objective.parse_structured_roadmap`, where per-node `status` is optional and defaults to
@@ -2126,9 +2134,12 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `readObjectiveDraft` + `renderObjectiveDraft`; the `plan` param is decoded first — a mistyped
 > param still `bad_input` — but never a source), dispatched to the same backends; the
 > first-party editor runs **view-only** (edits are never written back — deny+feedback is the
-> change channel) with objective verdict labels. **APPROVED is non-saving** until Node 2.3:
-> `approvalSave` is never called — a non-terminating result (`details.subject: "objective"`,
-> `saved: false`) relays the approval and directs the human `/objective-save`.
+> change channel) with objective verdict labels. An **APPROVED** outcome (#352 Node 2.3) wires
+> into the **`objectiveApprovalSave` seam** (the structured artifact is re-read at save time —
+> never the rendered bytes → `saveObjective` → D1a gate exit on success): a successful save is a
+> **terminating** result (`details.subject: "objective"`, `saved: true`, `gateExited`,
+> `terminate: true`); a failed save is non-terminating, leaves the gate read-only, and directs
+> the human `/objective-save` failsafe.
 > **Fail-open semantics:** headless (`!ctx.hasUI`) / dismissed / handshake-timeout /
 > `unavailable` / `error` all **soft-skip** with a result instructing the model to present the
 > plan to the user directly — plan authoring never wedges. `plan_review` is in
