@@ -1,0 +1,653 @@
+"""The Linear issue backend — plans, learn issues, labels, and the generic comment ops
+(Objective #252, Node 2.2).
+
+``LinearIssueBackend`` implements the issue-tier contract (``perk.issue_backend.IssueBackend``)
+over the Node 2.1 GraphQL client substrate (``perk.linear.LinearClient``), with team-scoped +
+label-scoped queries and body-marker idempotency matching the ``find_plan_issue`` semantics of
+the GitHub backend. The **objective-tier** methods are explicit fail-loud stubs — they land with
+Node 2.3.
+
+Deliberately dormant: no consumer exists yet. The resolver in the issues module still raises on
+``backend = "linear"`` until Nodes 2.3/2.4 wire it (config ``[issues] team`` parsing, init/doctor
+validation, and the contracts §8.21 amendment all land there).
+
+**Linear-safe encoding.** Caller-composed bodies arrive in the GitHub encoding — HTML-comment
+metadata-block delimiters + ``<details>`` wrappers (rendered by ``perk.plan``). Linear stores
+descriptions/comments as ProseMirror documents and round-trips markdown on write/read; HTML
+comments and ``<details>`` are not in its supported markdown set and must be assumed lossy
+(inline code and code fences ARE supported). So every outgoing body is transcoded by
+:func:`to_linear_markdown` into the inline-code sentinel encoding (``perk.plan``'s dual-encoding
+engine parses both forms), and every incoming ``marker`` argument is transcoded the same way so
+marker-keyed comment upserts stay idempotent end-to-end. The round-trip fidelity is verified
+live at Node 4.1's smoke gate (flagged deferral — mitigated here, not proven).
+
+Explicit deferrals (flagged, not silently omitted):
+
+- **Objective tier** — Node 2.3 (the stubs below raise).
+- **``[issues] team`` config + init/doctor validation + contracts §8.21** — Node 2.4.
+- **Envelope id re-shaping** (the tagged ``# GitHub-numeric id assumption`` edges in
+  ``perk/cli/commands/``) — Nodes 2.3/3.1.
+- **Rate-limit retry/backoff** — unchanged from Node 2.1 (fail loud).
+"""
+
+import re
+from pathlib import Path
+from typing import Protocol, cast
+
+from perk import github, issue_backend, objective, plan
+from perk.github import GitHubError
+from perk.issue_backend import IssueBackendError
+from perk.linear import LinearGraphQLError
+
+_OBJECTIVE_STUB_MESSAGE = (
+    "the Linear backend does not support objective issues yet — objective #252 Node 2.3"
+)
+
+_PAGE_SIZE = 50
+
+# Every perk HTML-comment marker — metadata-block delimiters AND the run-report marker —
+# rewritten generically to its inline-code sentinel.
+_PERK_MARKER_RE = re.compile(r"<!--\s*(/?perk:[^>]+?)\s*-->")
+
+# The exact perk-rendered `<details>` wrapper shapes (perk.plan's html-style renderers).
+_DETAILS_OPEN_RE = re.compile(r"^<details><summary><code>[^<]*</code></summary>$")
+_DETAILS_CLOSE = "</details>"
+
+
+class GraphQLClient(Protocol):
+    """The structural client seam: ``LinearClient`` satisfies it; offline tests pass a fake."""
+
+    def request(
+        self, query: str, variables: dict[str, object] | None = None
+    ) -> dict[str, object]: ...
+
+
+def to_linear_markdown(text: str) -> str:
+    """Transcode perk's GitHub-encoded markers into the Linear-safe inline-code encoding.
+
+    Rewrites every perk HTML-comment marker (``<!-- perk:… -->`` / ``<!-- /perk:… -->``) to its
+    inline-code sentinel (`` `perk:…` `` / `` `/perk:…` ``) and drops the perk-rendered
+    ``<details>`` wrapper lines. Identity for any other text (non-perk markers pass through
+    untouched). Pure; applied to every outgoing body/description/comment and every incoming
+    ``marker`` argument.
+    """
+    rewritten = _PERK_MARKER_RE.sub(lambda m: f"`{m.group(1)}`", text)
+    lines = [
+        line
+        for line in rewritten.splitlines()
+        if not (_DETAILS_OPEN_RE.match(line) or line == _DETAILS_CLOSE)
+    ]
+    result = "\n".join(lines)
+    if rewritten.endswith("\n"):
+        result += "\n"
+    return result
+
+
+def _require_dict(value: object, what: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return cast("dict[str, object]", value)
+
+
+def _require_list(value: object, what: str) -> list[object]:
+    if not isinstance(value, list):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return cast("list[object]", value)
+
+
+def _require_str(value: object, what: str) -> str:
+    if not isinstance(value, str):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return value
+
+
+def _hex_color(color: str) -> str:
+    """Map the GitHub bare-hex label colors into Linear's ``#``-prefixed form."""
+    return color if color.startswith("#") else f"#{color}"
+
+
+class LinearIssueBackend:
+    """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
+    string UUIDs at the boundary (``IssueRef.url`` carries the human form), Linear-safe-encoded
+    bodies, and the GitHub-twin behavior shapes for every plan/learn/label/comment op."""
+
+    # The `[issues] backend` vocabulary id — a module-level literal (never imported from the
+    # resolver module, which will import us at wiring time).
+    backend_id = "linear"
+
+    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+        # `repo_root` exists solely for the PR-tier `github.get_pr` call in `get_plan` —
+        # the PR tier is GitHub-universal for every backend (the protocol docstring).
+        self._client = client
+        self._team_key = team_key
+        self._repo_root = repo_root
+        self._team_id_cache: str | None = None
+        self._done_state_id_cache: str | None = None
+        self._label_ids: dict[str, str] = {}
+
+    # ------------------------------------------------------------------ internal helpers
+
+    def _team_id(self) -> str:
+        """Resolve (and cache) the team UUID from the constructor-bound team key."""
+        if self._team_id_cache is not None:
+            return self._team_id_cache
+        query = "query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id } } }"
+        data = self._client.request(query, {"key": self._team_key})
+        teams = _require_dict(data.get("teams"), "teams")
+        nodes = _require_list(teams.get("nodes"), "teams.nodes")
+        if not nodes:
+            raise IssueBackendError(f"Linear team {self._team_key!r} not found")
+        node = _require_dict(nodes[0], "teams.nodes[0]")
+        self._team_id_cache = _require_str(node.get("id"), "team id")
+        return self._team_id_cache
+
+    def _done_state_id(self) -> str:
+        """The team's first Done-category workflow state (lowest-position ``completed``)."""
+        if self._done_state_id_cache is not None:
+            return self._done_state_id_cache
+        query = (
+            "query($teamId: String!) { team(id: $teamId) "
+            "{ states { nodes { id name type position } } } }"
+        )
+        data = self._client.request(query, {"teamId": self._team_id()})
+        team = _require_dict(data.get("team"), "team")
+        states = _require_dict(team.get("states"), "team.states")
+        nodes = _require_list(states.get("nodes"), "team.states.nodes")
+        completed: list[tuple[float, str]] = []
+        for raw in nodes:
+            node = _require_dict(raw, "workflow state")
+            if node.get("type") != "completed":
+                continue
+            position = node.get("position")
+            if not isinstance(position, int | float):
+                raise IssueBackendError(
+                    f"unexpected Linear payload shape (state position): {position!r}"
+                )
+            completed.append((float(position), _require_str(node.get("id"), "state id")))
+        if not completed:
+            raise IssueBackendError(
+                f"Linear team {self._team_key!r} has no completed-type workflow state"
+            )
+        self._done_state_id_cache = min(completed)[1]
+        return self._done_state_id_cache
+
+    def _paginate(
+        self, query: str, variables: dict[str, object], *path: str
+    ) -> list[dict[str, object]]:
+        """Generic cursor loop over a ``nodes`` + ``pageInfo`` connection at ``path``.
+
+        ``query`` must accept a ``$cursor: String`` variable and select
+        ``pageInfo { hasNextPage endCursor }``. Malformed payload shapes raise (never silently
+        truncate).
+        """
+        nodes: list[dict[str, object]] = []
+        cursor: str | None = None
+        while True:
+            data = self._client.request(query, {**variables, "cursor": cursor})
+            connection: object = data
+            for key in path:
+                connection = _require_dict(connection, ".".join(path)).get(key)
+            conn = _require_dict(connection, ".".join(path))
+            for raw in _require_list(conn.get("nodes"), "nodes"):
+                nodes.append(_require_dict(raw, "node"))
+            page_info = _require_dict(conn.get("pageInfo"), "pageInfo")
+            if not page_info.get("hasNextPage"):
+                return nodes
+            cursor = _require_str(page_info.get("endCursor"), "endCursor")
+
+    def _issue_or_none(self, issue_id: str, selection: str) -> dict[str, object] | None:
+        """Fetch one issue by id; ``None`` when Linear reports the entity missing."""
+        query = f"query($id: String!) {{ issue(id: $id) {{ {selection} }} }}"
+        try:
+            data = self._client.request(query, {"id": issue_id})
+        except LinearGraphQLError as exc:
+            # Linear reports a missing issue as "Entity not found" — a message-substring
+            # dependence (no stable extensions.code observed yet); tightens to `.codes` if one
+            # is observed at the Node 4.1 smoke gate. Every other error re-raises.
+            if "not found" in str(exc).lower():
+                return None
+            raise
+        issue = data.get("issue")
+        if issue is None:
+            return None
+        return _require_dict(issue, "issue")
+
+    def _get_issue(self, issue_id: str, selection: str) -> dict[str, object]:
+        """Fetch one issue by id; a missing issue raises (the mutation-path read)."""
+        issue = self._issue_or_none(issue_id, selection)
+        if issue is None:
+            raise IssueBackendError(f"Linear issue {issue_id!r} not found")
+        return issue
+
+    def _comments(self, issue_id: str) -> list[dict[str, object]]:
+        """All comments on an issue, sorted ascending by ``createdAt`` — pins GitHub's
+        oldest-first first-match semantics without depending on Linear's connection ordering."""
+        query = (
+            "query($id: String!, $cursor: String) { issue(id: $id) "
+            f"{{ comments(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id body createdAt } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._paginate(query, {"id": issue_id}, "issue", "comments")
+        return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
+
+    def _ensure_label_id(self, name: str, *, color: str, description: str) -> tuple[str, bool]:
+        """Lookup-first label idempotency. Returns ``(label UUID, created)``; caches.
+
+        The lookup is deliberately **unscoped**: a workspace-level label with the name also
+        counts (and would make a team-scoped create a duplicate-name error).
+        """
+        cached = self._label_ids.get(name)
+        if cached is not None:
+            return cached, False
+        found = self._lookup_label_id(name)
+        if found is not None:
+            self._label_ids[name] = found
+            return found, False
+        mutation = (
+            "mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) "
+            "{ success issueLabel { id } } }"
+        )
+        variables: dict[str, object] = {
+            "input": {
+                "name": name,
+                "color": _hex_color(color),
+                "description": description,
+                "teamId": self._team_id(),
+            }
+        }
+        try:
+            data = self._client.request(mutation, variables)
+        except LinearGraphQLError as exc:
+            # A duplicate-name race: another writer created the label between lookup and
+            # create — re-lookup and treat as existed.
+            if "duplicate" in str(exc).lower() or "already exists" in str(exc).lower():
+                refound = self._lookup_label_id(name)
+                if refound is not None:
+                    self._label_ids[name] = refound
+                    return refound, False
+            raise
+        payload = _require_dict(data.get("issueLabelCreate"), "issueLabelCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear label {name!r}")
+        label = _require_dict(payload.get("issueLabel"), "issueLabelCreate.issueLabel")
+        label_id = _require_str(label.get("id"), "label id")
+        self._label_ids[name] = label_id
+        return label_id, True
+
+    def _lookup_label_id(self, name: str) -> str | None:
+        query = (
+            "query($name: String!) { issueLabels(filter: { name: { eq: $name } }) "
+            "{ nodes { id } } }"
+        )
+        data = self._client.request(query, {"name": name})
+        labels = _require_dict(data.get("issueLabels"), "issueLabels")
+        nodes = _require_list(labels.get("nodes"), "issueLabels.nodes")
+        if not nodes:
+            return None
+        node = _require_dict(nodes[0], "issueLabels.nodes[0]")
+        return _require_str(node.get("id"), "label id")
+
+    def _list_label_issues(self, label: str, selection: str) -> list[dict[str, object]]:
+        """List the team's **open** issues carrying ``label`` (the find_plan_issue-semantics
+        listing: team-scoped, label-scoped, non-terminal workflow states only)."""
+        query = (
+            "query($teamId: ID!, $label: String!, $cursor: String) { "
+            f"issues(first: {_PAGE_SIZE}, after: $cursor, filter: {{ "
+            "team: { id: { eq: $teamId } }, "
+            "labels: { name: { eq: $label } }, "
+            'state: { type: { nin: ["completed", "canceled"] } } '
+            f"}}) {{ nodes {{ {selection} }} pageInfo {{ hasNextPage endCursor }} }} }}"
+        )
+        return self._paginate(query, {"teamId": self._team_id(), "label": label}, "issues")
+
+    def _find_issue_by_run_id(
+        self, *, label: str, header_key: str, run_id: str
+    ) -> issue_backend.IssueRef | None:
+        """The ``find_plan_issue``-semantics core: list open label-scoped issues, match the
+        header block's ``run_id``. None after exhausting pages; infra/query failures propagate
+        (never masked as None)."""
+        for node in self._list_label_issues(label, "id url description"):
+            description = node.get("description")
+            if (
+                isinstance(description, str)
+                and plan.extract_run_id(description, header_key=header_key) == run_id
+            ):
+                return issue_backend.IssueRef(
+                    id=_require_str(node.get("id"), "issue id"),
+                    url=_require_str(node.get("url"), "issue url"),
+                    existed=True,
+                )
+        return None
+
+    def _create_issue(
+        self, *, title: str, description: str, label_id: str
+    ) -> issue_backend.IssueRef:
+        mutation = (
+            "mutation($input: IssueCreateInput!) { issueCreate(input: $input) "
+            "{ success issue { id url } } }"
+        )
+        variables: dict[str, object] = {
+            "input": {
+                "teamId": self._team_id(),
+                "title": title,
+                "description": description,
+                "labelIds": [label_id],
+            }
+        }
+        data = self._client.request(mutation, variables)
+        payload = _require_dict(data.get("issueCreate"), "issueCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear issue {title!r}")
+        issue = _require_dict(payload.get("issue"), "issueCreate.issue")
+        return issue_backend.IssueRef(
+            id=_require_str(issue.get("id"), "issue id"),
+            url=_require_str(issue.get("url"), "issue url"),
+            existed=False,
+        )
+
+    def _update_issue(self, issue_id: str, fields: dict[str, object], *, what: str) -> None:
+        mutation = (
+            "mutation($id: String!, $input: IssueUpdateInput!) "
+            "{ issueUpdate(id: $id, input: $input) { success } }"
+        )
+        data = self._client.request(mutation, {"id": issue_id, "input": fields})
+        payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to {what} on Linear issue {issue_id!r}")
+
+    def _create_comment(self, issue_id: str, body: str) -> None:
+        """Post a comment. ``body`` is already Linear-encoded (callers transcode once)."""
+        mutation = (
+            "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
+        )
+        variables: dict[str, object] = {"input": {"issueId": issue_id, "body": body}}
+        data = self._client.request(mutation, variables)
+        payload = _require_dict(data.get("commentCreate"), "commentCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to comment on Linear issue {issue_id!r}")
+
+    def _update_comment(self, comment_id: str, body: str) -> None:
+        """Patch a comment. ``body`` is already Linear-encoded (callers transcode once)."""
+        mutation = (
+            "mutation($id: String!, $input: CommentUpdateInput!) "
+            "{ commentUpdate(id: $id, input: $input) { success } }"
+        )
+        data = self._client.request(mutation, {"id": comment_id, "input": {"body": body}})
+        payload = _require_dict(data.get("commentUpdate"), "commentUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
+
+    # ------------------------------------------------------------------ labels
+
+    def ensure_label(
+        self, name: str, *, color: str, description: str, dry_run: bool = False
+    ) -> issue_backend.Label:
+        if dry_run:
+            return issue_backend.Label(name=name, created=False)
+        _, created = self._ensure_label_id(name, color=color, description=description)
+        return issue_backend.Label(name=name, created=created)
+
+    # ------------------------------------------------------------------ plan issues
+
+    def find_plan_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        return self._find_issue_by_run_id(
+            label=plan.PLAN_LABEL, header_key=plan.PLAN_HEADER_KEY, run_id=run_id
+        )
+
+    def create_plan_issue(
+        self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
+    ) -> issue_backend.IssueRef:
+        if dry_run:
+            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        if run_id:
+            existing = self.find_plan_issue(run_id=run_id)
+            if existing is not None:
+                return existing
+        label_id, _ = self._ensure_label_id(
+            plan.PLAN_LABEL,
+            color=plan.PLAN_LABEL_COLOR,
+            description=plan.PLAN_LABEL_DESCRIPTION,
+        )
+        return self._create_issue(
+            title=title, description=to_linear_markdown(body), label_id=label_id
+        )
+
+    def update_plan_issue(
+        self, *, issue_id: str, title: str, body_comment: str, dry_run: bool = False
+    ) -> issue_backend.PlanUpdate:
+        if dry_run:
+            return issue_backend.PlanUpdate(
+                issue_id=issue_id, body_updated=False, title_updated=False, dry_run=True
+            )
+        transcoded = to_linear_markdown(body_comment)
+        comment_id: str | None = None
+        for comment in self._comments(issue_id):
+            comment_body = comment.get("body")
+            if isinstance(comment_body, str) and plan.extract_plan_body(comment_body) is not None:
+                comment_id = _require_str(comment.get("id"), "comment id")
+                break
+        if comment_id is not None:
+            self._update_comment(comment_id, transcoded)
+            body_updated = True
+        else:
+            self._create_comment(issue_id, transcoded)
+            body_updated = False
+        self._update_issue(issue_id, {"title": title}, what="update title")
+        return issue_backend.PlanUpdate(
+            issue_id=issue_id, body_updated=body_updated, title_updated=True, dry_run=False
+        )
+
+    def update_plan_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> issue_backend.PlanHeaderUpdate:
+        unknown = set(fields) - plan.PLAN_HEADER_FIELDS
+        if unknown:
+            raise IssueBackendError(f"unknown plan-header field(s): {sorted(unknown)}")
+        issue = self._get_issue(issue_id, "id description")
+        description = issue.get("description")
+        body = description if isinstance(description, str) else ""
+        header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+        new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
+        if dry_run:
+            return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
+        self._update_issue(issue_id, {"description": new_body}, what="update plan-header")
+        return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+    def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
+        issue = self._issue_or_none(issue_id, "id url title description state { type }")
+        if issue is None:
+            return None
+        description = issue.get("description")
+        body = description if isinstance(description, str) else ""
+        header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+        pr_field = header.get("pr")
+        pr = (
+            self._get_pr(int(pr_field))
+            if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
+            else None
+        )
+        state = _require_dict(issue.get("state"), "issue.state")
+        state_type = _require_str(state.get("type"), "issue.state.type")
+        return issue_backend.PlanState(
+            id=_require_str(issue.get("id"), "issue id"),
+            url=_require_str(issue.get("url"), "issue url"),
+            title=_require_str(issue.get("title"), "issue title"),
+            header=header,
+            pr=pr,
+            state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
+        )
+
+    def _get_pr(self, number: int) -> github.PullRequest | None:
+        """The PR tier is GitHub-universal for every backend (the protocol docstring). Late-bound
+        module-attribute access (the adapter discipline) so test monkeypatches keep working."""
+        try:
+            return github.get_pr(number=number, repo_root=self._repo_root)
+        except GitHubError as exc:
+            raise IssueBackendError(str(exc)) from exc
+
+    def get_plan_body(self, *, issue_id: str) -> str | None:
+        issue = self._issue_or_none(issue_id, "id description")
+        if issue is None:
+            return None
+        description = issue.get("description")
+        candidates = [description if isinstance(description, str) else ""]
+        candidates.extend(
+            comment_body
+            for comment in self._comments(issue_id)
+            if isinstance(comment_body := comment.get("body"), str)
+        )
+        for text in candidates:
+            body = plan.extract_plan_body(text)
+            if body:
+                return body
+        return None
+
+    # ------------------------------------------------------------------ learn issues
+
+    def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        return self._find_issue_by_run_id(
+            label=plan.LEARN_LABEL, header_key=plan.LEARN_HEADER_KEY, run_id=run_id
+        )
+
+    def create_learn_issue(
+        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+    ) -> issue_backend.IssueRef:
+        if dry_run:
+            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        if run_id:
+            existing = self.find_learn_issue(run_id=run_id)
+            if existing is not None:
+                return existing
+        label_id, _ = self._ensure_label_id(
+            plan.LEARN_LABEL,
+            color=plan.LEARN_LABEL_COLOR,
+            description=plan.LEARN_LABEL_DESCRIPTION,
+        )
+        # Rendered directly in the inline-code style (no transcoding needed). The header `plan`
+        # field stores the boundary `plan_id` string verbatim (headers are backend-owned opaque
+        # values — GitHub stores its int issue number; Linear stores its string id).
+        header = plan.render_metadata_block(
+            plan.LEARN_HEADER_KEY,
+            {"run_id": run_id, "created": plan.now_iso(), "plan": plan_id},
+            style="inline-code",
+        )
+        full_body = f"{header}\n\n{to_linear_markdown(body.strip())}\n"
+        return self._create_issue(title=title, description=full_body, label_id=label_id)
+
+    def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
+        summaries: list[issue_backend.LearnIssueSummary] = []
+        for node in self._list_label_issues(plan.LEARN_LABEL, "id title url description"):
+            description = node.get("description")
+            summaries.append(
+                issue_backend.LearnIssueSummary(
+                    id=_require_str(node.get("id"), "issue id"),
+                    title=_require_str(node.get("title"), "issue title"),
+                    url=_require_str(node.get("url"), "issue url"),
+                    body=description if isinstance(description, str) else "",
+                )
+            )
+        return tuple(summaries)
+
+    def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        if dry_run:
+            return True
+        label_id, _ = self._ensure_label_id(
+            plan.CONSOLIDATED_LABEL,
+            color=plan.CONSOLIDATED_LABEL_COLOR,
+            description=plan.CONSOLIDATED_LABEL_DESCRIPTION,
+        )
+        # Additive labelling: read the existing label ids, union in the consolidated label
+        # (issueUpdate's labelIds REPLACES the set — never write it without the existing ids).
+        issue = self._get_issue(issue_id, "id labels { nodes { id } }")
+        labels = _require_dict(issue.get("labels"), "issue.labels")
+        existing = [
+            _require_str(_require_dict(raw, "label").get("id"), "label id")
+            for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
+        ]
+        label_ids = existing if label_id in existing else [*existing, label_id]
+        self._update_issue(issue_id, {"labelIds": label_ids}, what="label consolidated")
+        self._update_issue(issue_id, {"stateId": self._done_state_id()}, what="close")
+        return True
+
+    # ------------------------------------------------------------------ generic issue ops
+
+    def close_issue(self, *, issue_id: str, dry_run: bool = False) -> bool:
+        if dry_run:
+            return False
+        self._update_issue(issue_id, {"stateId": self._done_state_id()}, what="close")
+        return True
+
+    def add_issue_comment(
+        self, *, issue_id: str, body: str, dry_run: bool = False
+    ) -> issue_backend.CommentResult:
+        if dry_run:
+            return issue_backend.CommentResult(posted=False)
+        self._create_comment(issue_id, to_linear_markdown(body))
+        return issue_backend.CommentResult(posted=True)
+
+    def find_comment_id_by_marker(self, *, issue_id: str, marker: str) -> str | None:
+        # The incoming marker is GitHub-encoded (e.g. the run-report HTML comment); transcode it
+        # so it matches the transcoded comment this backend previously wrote.
+        needle = to_linear_markdown(marker)
+        for comment in self._comments(issue_id):
+            comment_body = comment.get("body")
+            if isinstance(comment_body, str) and needle in comment_body:
+                return _require_str(comment.get("id"), "comment id")
+        return None
+
+    def upsert_marked_comment(
+        self, *, issue_id: str, marker: str, body: str, dry_run: bool = False
+    ) -> issue_backend.CommentResult:
+        if dry_run:
+            return issue_backend.CommentResult(posted=False)
+        transcoded = to_linear_markdown(body)
+        comment_id = self.find_comment_id_by_marker(issue_id=issue_id, marker=marker)
+        if comment_id is not None:
+            self._update_comment(comment_id, transcoded)
+        else:
+            self._create_comment(issue_id, transcoded)
+        return issue_backend.CommentResult(posted=True)
+
+    # ------------------------------------------------------------------ objective issues
+    # Fail-loud stubs — the objective tier lands with Node 2.3. Full Protocol signatures so the
+    # annotated-binding conformance check passes.
+
+    def find_objective_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)
+
+    def create_objective_issue(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str,
+        status: str = "active",
+        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)
+
+    def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)
+
+    def update_objective_header(
+        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> issue_backend.ObjectiveHeaderUpdate:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)
+
+    def update_objective_node(
+        self,
+        *,
+        issue_id: str,
+        node_id: str,
+        status: objective.NodeStatus | None = None,
+        pr: str | None = None,
+        description: str | None = None,
+        dry_run: bool = False,
+    ) -> issue_backend.ObjectiveNodeUpdate:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)
+
+    def update_objective_body(
+        self, *, issue_id: str, prose: str, dry_run: bool = False
+    ) -> issue_backend.ObjectiveBodyUpdate:
+        raise IssueBackendError(_OBJECTIVE_STUB_MESSAGE)

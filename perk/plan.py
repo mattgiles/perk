@@ -18,6 +18,7 @@ Storage shape (PRIOR_ART §2, erk's metadata-blocks, perk-namespaced):
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 
 import yaml
 
@@ -52,6 +53,15 @@ PLAN_HEADER_FIELDS = frozenset(
 _OPEN = "<!-- perk:metadata-block:{key} -->"
 _CLOSE = "<!-- /perk:metadata-block:{key} -->"
 _FENCE = "```"
+
+# The Linear-safe delimiter encoding (objective #252 Node 2.2): inline-code sentinels on their
+# own lines, with NO `<details>` wrapper. Linear stores bodies as ProseMirror documents and
+# round-trips markdown on write/read — HTML comments and `<details>` are not in its supported
+# markdown set and must be assumed lossy; inline code and fenced code blocks ARE supported.
+_INLINE_OPEN = "`perk:metadata-block:{key}`"
+_INLINE_CLOSE = "`/perk:metadata-block:{key}`"
+
+BlockStyle = Literal["html", "inline-code"]
 
 
 class LifecycleStage(StrEnum):
@@ -120,9 +130,20 @@ class PlanRef:
 # --------------------------------------------------------------------- block engine
 
 
-def render_metadata_block(key: str, data: dict[str, object]) -> str:
-    """Render a structured (YAML) perk metadata block. Inverse of :func:`find_metadata_block`."""
+def render_metadata_block(key: str, data: dict[str, object], *, style: BlockStyle = "html") -> str:
+    """Render a structured (YAML) perk metadata block. Inverse of :func:`find_metadata_block`.
+
+    ``style="html"`` (the default — every GitHub call site, unchanged) uses HTML-comment
+    delimiters + a collapsible ``<details>`` wrapper; ``style="inline-code"`` is the Linear-safe
+    encoding (inline-code sentinels, no wrapper — see the ``_INLINE_OPEN`` note).
+    """
     body = yaml.safe_dump(data, sort_keys=False, default_flow_style=False).strip()
+    if style == "inline-code":
+        return (
+            f"{_INLINE_OPEN.format(key=key)}\n\n"
+            f"{_FENCE}yaml\n{body}\n{_FENCE}\n\n"
+            f"{_INLINE_CLOSE.format(key=key)}"
+        )
     return (
         f"{_OPEN.format(key=key)}\n"
         f"<details><summary><code>{key}</code></summary>\n\n"
@@ -137,29 +158,43 @@ def replace_metadata_block(text: str, key: str, data: dict[str, object]) -> str:
     :func:`find_metadata_block`). Appends if the block is absent; a no-op if the open marker
     exists but its close marker is missing (malformed — caller validates via
     :func:`find_metadata_block`)."""
-    rendered = render_metadata_block(key, data)
     start = text.find(_OPEN.format(key=key))
-    if start == -1:
-        return f"{text.rstrip()}\n\n{rendered}\n" if text.strip() else f"{rendered}\n"
-    close = _CLOSE.format(key=key)
-    end = text.find(close, start)
-    if end == -1:
-        return text
-    return text[:start] + rendered + text[end + len(close) :]
+    if start != -1:
+        rendered = render_metadata_block(key, data)
+        close = _CLOSE.format(key=key)
+        end = text.find(close, start)
+        if end == -1:
+            return text
+        return text[:start] + rendered + text[end + len(close) :]
+    # Form preservation: an existing inline-code (Linear-safe) block re-renders inline-code.
+    start = text.find(_INLINE_OPEN.format(key=key))
+    if start != -1:
+        rendered = render_metadata_block(key, data, style="inline-code")
+        close = _INLINE_CLOSE.format(key=key)
+        end = text.find(close, start)
+        if end == -1:
+            return text
+        return text[:start] + rendered + text[end + len(close) :]
+    # Append-when-absent keeps the html form (only GitHub callers append today; the Linear
+    # backend always finds an existing block before replacing).
+    rendered = render_metadata_block(key, data)
+    return f"{text.rstrip()}\n\n{rendered}\n" if text.strip() else f"{rendered}\n"
 
 
 def find_metadata_block(text: str, key: str) -> dict[str, object] | None:
     """Parse a single structured perk metadata block by key. None if absent or malformed.
 
-    No custom regex beyond the delimiter scan (metadata-blocks best-practice 1).
+    No custom regex beyond the delimiter scan (metadata-blocks best-practice 1). Dual-encoding
+    scan: the HTML delimiters are tried first (the unchanged GitHub path), then the Linear-safe
+    inline-code sentinels; the fence scan inside the segment is shared.
     """
-    start = text.find(_OPEN.format(key=key))
-    if start == -1:
+    segment = _delimited_segment(text, _OPEN.format(key=key), _CLOSE.format(key=key))
+    if segment is None:
+        segment = _delimited_segment(
+            text, _INLINE_OPEN.format(key=key), _INLINE_CLOSE.format(key=key)
+        )
+    if segment is None:
         return None
-    end = text.find(_CLOSE.format(key=key), start)
-    if end == -1:
-        return None
-    segment = text[start:end]
 
     fence = segment.find(f"{_FENCE}yaml")
     if fence == -1:
@@ -176,12 +211,33 @@ def find_metadata_block(text: str, key: str) -> dict[str, object] | None:
     return data if isinstance(data, dict) else None
 
 
-def render_plan_body(plan_markdown: str) -> str:
+def _delimited_segment(text: str, open_marker: str, close_marker: str) -> str | None:
+    """The text between ``open_marker`` and ``close_marker`` (exclusive). None when absent."""
+    start = text.find(open_marker)
+    if start == -1:
+        return None
+    end = text.find(close_marker, start + len(open_marker))
+    if end == -1:
+        return None
+    return text[start + len(open_marker) : end]
+
+
+def render_plan_body(plan_markdown: str, *, style: BlockStyle = "html") -> str:
     """Render the ``plan-body`` comment — the full plan markdown in a collapsible block.
 
     The body is **prose markdown** (not YAML), so this is a write-only wrapper: T2a never
     parses it back (idempotency reads only the header). Stored **verbatim**.
+
+    ``style="inline-code"`` (the Linear-safe encoding) wraps the verbatim plan markdown between
+    the ``plan-body`` sentinels with no ``<details>`` wrapper — the plan markdown is NOT fenced
+    (it is full markdown); the sentinels alone delimit it, mirroring the HTML encoding.
     """
+    if style == "inline-code":
+        return (
+            f"{_INLINE_OPEN.format(key=PLAN_BODY_KEY)}\n\n"
+            f"{plan_markdown.strip()}\n\n"
+            f"{_INLINE_CLOSE.format(key=PLAN_BODY_KEY)}"
+        )
     return (
         f"{_OPEN.format(key=PLAN_BODY_KEY)}\n"
         f"<details><summary><code>{PLAN_BODY_KEY}</code></summary>\n\n"
@@ -195,23 +251,30 @@ def extract_plan_body(text: str) -> str | None:
     """Extract the verbatim plan markdown from a ``plan-body`` block (inverse of
     :func:`render_plan_body`). ``text`` is an issue body or a comment body. ``None`` when the block
     is absent or malformed. Used to materialize the plan body for in-session checkpoints (P2.T2c).
+
+    Dual-encoding scan (mirrors :func:`find_metadata_block`): HTML first, then the Linear-safe
+    inline-code sentinels — on that branch the body is the text strictly between the sentinels.
     """
-    start = text.find(_OPEN.format(key=PLAN_BODY_KEY))
-    if start == -1:
+    segment = _delimited_segment(
+        text, _OPEN.format(key=PLAN_BODY_KEY), _CLOSE.format(key=PLAN_BODY_KEY)
+    )
+    if segment is not None:
+        summary = f"<details><summary><code>{PLAN_BODY_KEY}</code></summary>"
+        inner_start = segment.find(summary)
+        if inner_start == -1:
+            return None
+        inner_start += len(summary)
+        inner_end = segment.rfind("</details>")
+        if inner_end == -1 or inner_end < inner_start:
+            return None
+        body = segment[inner_start:inner_end].strip()
+        return body or None
+    segment = _delimited_segment(
+        text, _INLINE_OPEN.format(key=PLAN_BODY_KEY), _INLINE_CLOSE.format(key=PLAN_BODY_KEY)
+    )
+    if segment is None:
         return None
-    end = text.find(_CLOSE.format(key=PLAN_BODY_KEY), start)
-    if end == -1:
-        return None
-    segment = text[start:end]
-    summary = f"<details><summary><code>{PLAN_BODY_KEY}</code></summary>"
-    inner_start = segment.find(summary)
-    if inner_start == -1:
-        return None
-    inner_start += len(summary)
-    inner_end = segment.rfind("</details>")
-    if inner_end == -1 or inner_end < inner_start:
-        return None
-    body = segment[inner_start:inner_end].strip()
+    body = segment.strip()
     return body or None
 
 
