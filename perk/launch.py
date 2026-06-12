@@ -35,6 +35,16 @@ from perk.registry import Stage
 # with ENOTDIR and print a "(startup session lookup, global settings)" warning on every launch.
 _PI_AGENT_LOCK_FILES = ("settings.json.lock", "auth.json.lock")
 
+# Quiet the npm installs pi runs at startup when a fresh worktree's gitignored
+# .pi/npm/ is empty (funding nags, audit advisories, allow-scripts warnings).
+# loglevel=error keeps real install failures visible on pi's inherited stdio.
+# Setdefault semantics: a user's own npm_config_* env vars win (see launch_stage).
+_NPM_QUIET_ENV = {
+    "npm_config_loglevel": "error",
+    "npm_config_fund": "false",
+    "npm_config_audit": "false",
+}
+
 
 def _pi_agent_dir() -> Path:
     """Mirror pi's ``config.js getAgentDir()``: ``PI_CODING_AGENT_DIR`` env var if set/non-empty,
@@ -439,7 +449,7 @@ def launch_stage(
             run_id=rid,
             environ=os.environ,
         )
-    env = {**os.environ, "PERK_RUN_ID": rid}
+    env = {**_NPM_QUIET_ENV, **os.environ, "PERK_RUN_ID": rid}
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
