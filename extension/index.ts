@@ -398,8 +398,10 @@ export default function (pi: ExtensionAPI) {
 
   // P2.T10 — the objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
-  // `/objective-plan` command (select the next node and author a bounded plan).
-  registerObjectivePlan(pi);
+  // `/objective-plan` command (select the next node and author a bounded plan). The command now
+  // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
+  // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
+  registerObjectivePlan(pi, gating);
 
   // hop-2 — the learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
   // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
