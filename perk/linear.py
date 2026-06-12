@@ -15,8 +15,9 @@ Status-based handling is the fallback for non-2xx responses whose bodies carry n
 errors. Partial success (``errors`` alongside partial ``data``) fails loud — perk's narrow
 queries never want partial results.
 
-Deliberately dormant: no consumer exists until Node 2.2 (``LinearIssueBackend``); the resolver
-in ``perk/issues.py`` still raises on ``backend = "linear"``.
+Deliberately dormant: the consumer now exists (``perk/linear_backend.py``'s
+``LinearIssueBackend``, Node 2.2), but the resolver in ``perk/issues.py`` still raises on
+``backend = "linear"`` until Nodes 2.3/2.4 wire it.
 
 Explicit deferrals (flagged, not silently omitted):
 

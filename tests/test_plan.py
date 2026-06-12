@@ -134,3 +134,68 @@ def test_derive_title_prefers_real_h1_over_fenced_hash():
 
 def test_derive_title_ignores_indented_code_hash():
     assert plan.derive_title("    # four-space code, not a heading\n") == "perk plan"
+
+
+# --------------------------------------------------------------- dual encoding (Node 2.2)
+
+
+def test_render_metadata_block_inline_code_golden_shape():
+    rendered = plan.render_metadata_block("plan-header", {"a": 1}, style="inline-code")
+    lines = rendered.splitlines()
+    assert lines[0] == "`perk:metadata-block:plan-header`"
+    assert lines[-1] == "`/perk:metadata-block:plan-header`"
+    assert "```yaml" in rendered
+    assert "<details>" not in rendered and "<!--" not in rendered
+
+
+def test_find_metadata_block_parses_both_encodings():
+    data: dict[str, object] = {"run_id": "01DUAL", "pr": None}
+    html = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
+    inline = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data, style="inline-code")
+    assert plan.find_metadata_block(html, plan.PLAN_HEADER_KEY) == data
+    assert plan.find_metadata_block(inline, plan.PLAN_HEADER_KEY) == data
+
+
+def test_extract_run_id_from_inline_code_body():
+    rendered = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, {"run_id": "01INLINE"}, style="inline-code"
+    )
+    body = f"intro text\n\n{rendered}\n\ntrailing\n"
+    assert plan.extract_run_id(body) == "01INLINE"
+
+
+def test_replace_metadata_block_preserves_inline_code_form():
+    original = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, {"run_id": "01X"}, style="inline-code"
+    )
+    text = f"prefix\n\n{original}\n\nsuffix"
+    replaced = plan.replace_metadata_block(text, plan.PLAN_HEADER_KEY, {"run_id": "01X", "pr": "7"})
+    assert "<!--" not in replaced and "<details>" not in replaced
+    assert "`perk:metadata-block:plan-header`" in replaced
+    parsed = plan.find_metadata_block(replaced, plan.PLAN_HEADER_KEY)
+    assert parsed == {"run_id": "01X", "pr": "7"}
+    assert replaced.startswith("prefix") and replaced.endswith("suffix")
+
+
+def test_replace_metadata_block_preserves_html_form():
+    original = plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"run_id": "01Y"})
+    replaced = plan.replace_metadata_block(
+        original, plan.PLAN_HEADER_KEY, {"run_id": "01Y", "pr": "9"}
+    )
+    assert "<!-- perk:metadata-block:plan-header -->" in replaced
+    assert "<details><summary><code>plan-header</code></summary>" in replaced
+    assert plan.find_metadata_block(replaced, plan.PLAN_HEADER_KEY) == {"run_id": "01Y", "pr": "9"}
+
+
+def test_replace_metadata_block_append_when_absent_stays_html():
+    appended = plan.replace_metadata_block("just prose", plan.PLAN_HEADER_KEY, {"run_id": "01Z"})
+    assert "<!-- perk:metadata-block:plan-header -->" in appended
+    assert "`perk:metadata-block:plan-header`" not in appended
+
+
+def test_render_plan_body_inline_code_round_trips():
+    markdown = "# Plan\n\n## Steps\n1. one\n\n```python\nprint('#### not a heading')\n```\n"
+    comment = plan.render_plan_body(markdown, style="inline-code")
+    assert "<details>" not in comment and "<!--" not in comment
+    wrapped = f"preamble\n\n{comment}\n\ntrailing\n"
+    assert plan.extract_plan_body(wrapped) == markdown.strip()
