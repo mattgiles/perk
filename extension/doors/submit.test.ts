@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
+import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 
 const SUBMIT_JSON = JSON.stringify({
   success: true,

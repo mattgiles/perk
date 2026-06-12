@@ -11,17 +11,17 @@
 // submitPr).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { bindingSuffix } from "./bindingDelivery.ts";
+import { bindingSuffix } from "../bindingDelivery.ts";
 import {
   booleanField,
   type ColdJson,
   nullableStringField,
   runColdDoor,
   stringField,
-} from "./coldDoor.ts";
-import { loadPerkConfig } from "./config.ts";
-import { report } from "./report.ts";
-import { failFor, ok, type Result } from "./result.ts";
+} from "../coldDoor.ts";
+import { loadPerkConfig } from "../config.ts";
+import { report } from "../report.ts";
+import { failFor, ok, type Result } from "../result.ts";
 import {
   arrayParam,
   numberParam,
@@ -29,8 +29,8 @@ import {
   paramsOf,
   stringParam,
   type ToolParams,
-} from "./toolParams.ts";
-import { appendWorkflowState } from "./workflowState.ts";
+} from "../toolParams.ts";
+import { appendWorkflowState } from "../workflowState.ts";
 
 interface ThreadInput {
   thread_id: string;

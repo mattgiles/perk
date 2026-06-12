@@ -12,9 +12,9 @@ import {
   objectField,
   runColdDoor,
   stringField,
-} from "./coldDoor.ts";
-import { report } from "./report.ts";
-import { failFor, ok, type Result } from "./result.ts";
+} from "../coldDoor.ts";
+import { report } from "../report.ts";
+import { failFor, ok, type Result } from "../result.ts";
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface SubmitOk {

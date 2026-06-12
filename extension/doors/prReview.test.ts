@@ -4,8 +4,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { prReviewGuidance } from "./prReview.ts";
-import { loadPerkSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("prReviewGuidance spawns perk.pr-reviewer with a fresh context", () => {
   const text = prReviewGuidance();

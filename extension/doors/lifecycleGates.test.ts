@@ -5,10 +5,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { PlanRef } from "./cache.ts";
+import type { PlanRef } from "../cache.ts";
+import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
+import type { WorkflowState } from "../workflowState.ts";
 import { gateDecision, implementHandoffPrompt, planReadInstruction } from "./lifecycleGates.ts";
-import { gitInit, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { WorkflowState } from "./workflowState.ts";
 
 const REF: PlanRef = {
   provider: "github",
