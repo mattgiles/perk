@@ -8,6 +8,9 @@ sources:
          mattpocock:
            url: https://github.com/mattpocock/skills
            ref: main
+         spillwave:
+           url: https://github.com/SpillwaveSolutions/mastering-typescript-skill
+           ref: main
 skills:
         - source: dagster
           name: dignified-python
@@ -21,3 +24,5 @@ skills:
           name: grill-with-docs
         - source: mattpocock
           name: improve-codebase-architecture
+        - source: spillwave
+          name: mastering-typescript
