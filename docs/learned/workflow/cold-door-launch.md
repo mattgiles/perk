@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering), pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -46,6 +46,24 @@ pi parses args last-wins, so perk injects its default **before** `*pi_args`; a u
 `--no-approve`/`-na` then naturally wins with zero extra perk code. **General CLI-wrapping pattern:**
 when wrapping a last-wins CLI, inject your default *before* pass-through args to leave the user an
 override.
+
+## Env setdefault via merge order (the launch-seam env layering)
+
+The cheapest override-respecting env injection at the launch seam is **merge order**:
+`{**injected_defaults, **os.environ, **perk_stamps}` yields three clean precedence tiers (injected
+defaults < operator env < perk-owned stamps) with **no conditional logic**. The precedent is
+`_NPM_QUIET_ENV` in `launch_stage` (npm loglevel=error, fund/audit off). Slot new launch-seam env
+vars into this layering rather than writing `env.setdefault()` loops.
+
+- **Test hygiene:** pytest inherits the operator's real environment, so a test asserting an
+  *injected default* must `monkeypatch.delenv` first — otherwise a developer's exported value
+  causes a phantom failure. Pair it with a `setenv` override test proving the operator wins.
+  `tests/test_launch.py`'s exec-capture fixture family has an env-capturing member
+  (`_launch_and_capture_env`) — reuse it for any child-env claim.
+- **The two spawn sites diverge on purpose:** `run_worker.spawn` (remote/CI) deliberately does
+  NOT get the quiet vars — CI logs keep full npm output.
+- **Fail-soft:** the quieting is advisory; if pi ever sanitizes the child env before spawning npm,
+  the noise returns silently (no breakage, no detection).
 
 ## `stage.worktree != "none"` is the canonical worktree-stage predicate
 

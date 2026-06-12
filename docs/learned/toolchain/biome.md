@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
 ---
 
 # Biome / tsc gotchas
@@ -51,6 +51,20 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 Distribution fires only when the checked type is the naked param `T`; **inlining the union in the
 conditional does NOT distribute.** Reusable any time you stamp common fields onto a union member.
 
+## Unescaped backticks in template-literal prose + `--write` = silent mangling
+
+A markdown-style backtick inside a template-literal prose constant terminates the string — and
+`biome check --write` then "repairs" the parse break into garbage code instead of erroring. The
+corruption is visible only by reading `git diff` after the format pass. Rules: escape backticks as
+`` \` `` when editing prose inside template literals, and always review the diff after any
+`--write` run on touched files — **formatter exit 0 ≠ semantic preservation**.
+
+## Biome reorders imports during path-rewrite sweeps
+
+After rewriting import paths (e.g. a module-move sweep), `biome check --write` re-sorts the import
+block — expect whole-import-line moves when auditing "only path literals changed". See
+`toolchain/ts-module-moves.md` for the full two-commit mv+sweep recipe.
+
 ## Formatting is enforced in `lint` — auto-fix, don't hand-wrap
 
 Biome formatting (line-wrapping long string literals, multi-line imports) is part of the `lint` gate.
@@ -70,3 +84,4 @@ Always run `npx biome check --write extension` to apply import sorting alongside
 - `extension/config.ts` — `parseTomlSubset` (where these three rules all bit at once)
 - `docs/learned/toolchain/ruff.md` — the Python-side check-vs-format split
 - `docs/learned/toolchain/worktree-node-modules.md` — why tsc/tests can use a stale SDK in a worktree
+- `docs/learned/toolchain/ts-module-moves.md` — the two-commit mv+sweep recipe whose audits hit the import reorder

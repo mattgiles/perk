@@ -1,6 +1,6 @@
 ---
 title: Adding a parsed shared/ contract — the registry/bindings recipe
-read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
+read_when: You are adding a new cross-plane parsed data file under shared/, adding a registry stage, changing a stage's registry `writes` (the two-pytest-pins gotcha), making a prompt fragment agree byte-for-byte across planes (the SSOT helper + lockstep-substring pattern), wording-pinning content-parallel prompts in both suites, deferring/landing a registry vocabulary key, or tracing how a shared contract ripples into both planes + the test suite.
 ---
 
 # Parsed `shared/` contracts
@@ -51,6 +51,13 @@ contracts intro line (e.g. "the one parsed contract" → "two parsed contracts")
 corrected in two places — grep for such count-prose. More generally: **any implementation that
 changes cross-plane behavior amends `shared/contracts.md` in the same turn.**
 
+The same-turn rule has an observed failure mode: a runtime-tier prose change (injected guidance
+constants) that skips contracts creates drift a *later node* must repair. When changing
+factory/authoring guidance, check whether `shared/contracts.md` **and** the skills still teach the
+old flow (the three-tier prose mirror — see `plan-review-flow.md`). Note also that §8.10's
+"factory flows still instructing an autonomous `plan_save`" list is now learn-docs + replan only
+and is expected to narrow further — future guidance edits should amend §8.10 again.
+
 **`shared/contracts.md` §-numbering is not contiguous.** §8.8 is skipped entirely and §8.10 was
 already taken (provider selection), so the headless worker contract landed as **§8.11**. Always **grep the
 existing `## §8.` headings in `shared/contracts.md` before assigning a section number** — do not trust
@@ -81,6 +88,21 @@ The §8.1 deferral discipline is proven: `cache.session-data` was deferred at on
 the moment a stage declared it in `writes` — the Python self-check validates membership
 automatically and the TS parser carries lists opaquely, so the whole change is YAML + one pytest
 assertion. **Never add registry vocabulary speculatively.**
+
+**Registry `writes` changes trip TWO pytest pins, not one.** Beyond the vocabulary-membership
+assertion in `test_stage_io_contract`, stage-shape tests in `tests/test_registry.py` (e.g.
+`test_objective_author_is_the_single_initial`) pin a stage's **exact `writes` list**. Grep
+`tests/test_registry.py` for the stage id whenever changing any stage's I/O in
+`shared/registry.yaml`.
+
+## Wording-pinning tests on both planes are the anti-drift mechanism
+
+For content-parallel prompts (the "mirror factory-threaded guidance on both planes" rule), pin the
+same **property list** in both suites — draft tool present, review step present,
+approval-carries-link present, old mandate absent — in `node:test` for the TS constant and
+`pytest` for the Python seed prompt. Each suite guards its own plane; the shared property list is
+the contract. The pinned regexes deliberately couple tests to prose phrasing — that's the drift
+alarm, not a defect — so guidance polish must update the pins in **both** suites.
 
 ## Adding a registry stage ripples into both planes + hardcoded tests
 

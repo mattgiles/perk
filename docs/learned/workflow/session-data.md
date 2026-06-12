@@ -1,6 +1,6 @@
 ---
 title: Session data, run identity, provenance & GC
-read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers, adding a session-data producer or consumer (the full recipe — incl. the `plan_draft` read-only carve-out), or `perk state prune` / the `cache-gc` doctor check.
+read_when: You are working on run_id minting/claiming, `extension/sessionData.ts` / the `perk/cache.py` data-dir accessors, session-artifact provenance pointers (incl. the two-digests-two-roles split — integrity vs cache invalidation), adding a session-data producer or consumer (the full recipe — incl. the read-only carve-out 2-instance template and its JSON-artifact variant), deciding whether to store a derived flag, or `perk state prune` / the `cache-gc` doctor check.
 ---
 
 # Session data, run identity, provenance & GC
@@ -64,6 +64,16 @@ stray-file-in-`runs/` semantics live in one place.
   strict-appended. Pointer-append failure returns `null` and deliberately leaves an orphan file
   (gitignored scratch; GC prunes). Consumers must treat `null` as "not consumable", even if the
   file visibly exists.
+- **Two digests, two roles.** The pointer digest validates *file integrity* (rewind/tamper,
+  enforced inside `readSessionArtifact`). A consumer wanting *cache invalidation* must add its own
+  content-key field (the checkpoint generator's `plan_body_digest` over the current `plan.md`) and
+  check it **after** the seam validates. Reuse the `sha256:` convention for both so there is one
+  digest vocabulary, but never conflate the roles.
+- **Recompute, don't store, derived flags.** Generated-ness of checkpoint steps is *derived*
+  (non-inert AND `extractSteps(planBody)` empty) rather than stored — no entry-schema fork, zero
+  downstream migration for rebuild/advance/render. Storing an always-derivable flag forks the
+  schema for nothing. Bonus: an empty `extractSteps` result deliberately covers both "missing" and
+  "malformed" `## Steps` with one trigger — no new parser state.
 
 ## Adding a session-data consumer (the full recipe)
 
@@ -90,15 +100,26 @@ The full producer→consumer recipe, composed from the rules proven above and in
    owns the artifact, declare `cache.session-data` in its registry `writes` (vocabulary keys land
    with their first declaring stage — see `shared-contracts.md`).
 
-### The read-only carve-out recipe (proven end-to-end by `plan_draft`)
+### The read-only carve-out recipe (a proven 2-instance template)
 
-For any future writer that must work in read-only mode (step 2 above):
+For any future writer that must work in read-only mode (step 2 above). `objective_draft` confirmed
+the `plan_draft` checklist generalizes — a third stage-scoped draft tool should copy
+`extension/objectiveDraft.ts` mechanically:
 
 1. A **fixed artifact-name constant** — no path/name tool parameter.
 2. The path derived **exclusively through the session-data accessor seam**
    (`writeSessionArtifact` = file + provenance pointer in one gesture).
-3. Allowlist only the tool *name* in `extension/toolGating.ts::READ_ONLY_TOOLS` — the gate's
-   edit/write/bash blocking stays untouched.
+3. Allowlist only the tool *name* in `extension/toolGating.ts::READ_ONLY_TOOLS`, with a carve-out
+   comment — the gate's edit/write/bash blocking stays untouched.
+4. Register in the factory **before the gate snapshots tools**.
+5. The `invalid_input`/`no_run_id`/`write_failed` failure taxonomy via `failFor`.
+6. A contracts §8.1 paragraph + registry `cache.session-data` in the owning stage's `writes` +
+   both planes' registry tests.
+
+**JSON-artifact variant**: when the draft carries structured data, serialize one explicit-literal
+payload, compute the digest over the **serialized JSON** (not the prose), and let the structured
+part ride verbatim (`unknown[]`) — deep validation stays with the owning plane at save time (see
+`objective-lifecycle.md` for the store-as-JSON / render-at-the-door split).
 
 Harness proof pattern: plant a session with `mode: "read-only"`, then `invokeTool` succeeds while
 `workflowState().mode` confirms the gate is up. `READ_ONLY_CONTEXT` is exported and interpolates

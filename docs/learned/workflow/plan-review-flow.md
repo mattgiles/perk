@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, or wiring a new review surface's APPROVED/DENIED arms.
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, or changing factory/authoring guidance prose (the three-tier prose mirror).
 ---
 
 # The plan review → approval → save pipeline
@@ -45,6 +45,58 @@ backend.
 arms — tests assert `result.terminate === undefined` on the failed arm. Follow the same shape when
 new tools propagate the seam's terminate intent.
 
+## The plan↔objective approval-save mirror is complete
+
+Both review subjects now follow the same approval→save shape: **approved-first routing in the
+execute path** (`outcome.status === "completed" && outcome.approved` → the save seam → a dedicated
+`approved*SaveResult` renderer), with the generic `*ReviewOutcomeResult` mapper's `completed` case
+demoted to **DENIED-only** (kept total for safety, never reached with `approved: true`). A third
+review subject (e.g. a tombell objective arm) should copy this exact split — the
+DENIED-renders-by-default footgun is structural, not incidental.
+
+Residual lie-in-waiting: `objectiveReviewOutcomeResult`'s completed arm still emits
+`approved: outcome.approved` in its details (not hardcoded `false`) — harmless today, but
+re-routing approved outcomes back through it would render "objective DENIED" text for an approval.
+
+## Flavoring the shared first-party core
+
+`runFirstPartyReview` serves both subjects via **optional presentation params**
+(`editorTitle?`/`verdicts?`/`viewOnly?`) whose defaults keep the plan path byte-stable — the proof
+being that every pre-existing first-party test stayed untouched. When extending a shared
+interactive core for a second consumer, prefer optional presentation options + the
+"existing tests unchanged" byte-stability proof over forking the core.
+
+The objective arm's **asymmetric param handling**: in an objective-author session a *well-typed*
+`plan` param is silently ignored (the draft artifact is the SOLE source — no param tier, no
+transcript tier), but a *mistyped* one still strict-fails `bad_input`, because param decode runs
+**before** the stage branch. That decode-first order is pinned by a test — preserve it when
+reworking either arm.
+
+Under `viewOnly`, the editor's return value must **never** be the save source — the seam re-reads
+the artifact at save time (tests pin this by asserting the cold-door body file equals the
+artifact's prose, not the editor return).
+
+## The three-tier prose mirror (factory/authoring guidance)
+
+Factory and authoring guidance lives in three tiers that must move together:
+
+1. **Runtime injected constants** — the source of truth, wording-pinned by tests.
+2. **`shared/contracts.md`** — the cross-plane record.
+3. **`skills/*/SKILL.md`** — the judgment layer.
+
+Changing one tier without the others is the drift mode (a runtime-tier rewrite that skipped
+contracts created drift a later repair node had to close). Facts that make the drift easy to miss:
+
+- **Skill bodies have no content-pinning tests** (`tests/test_packaging.py` asserts presence only),
+  so skill rewrites are CI-inert — nothing alarms when the skill tier goes stale.
+- A grep hit for an old phrase in a test file may pin a **runtime constant** via `doesNotMatch`,
+  not the skill — check the assertion target before assuming a conflict.
+- Shipped `skills/<name>/SKILL.md` must stay **consumer-repo-agnostic**: repo-local disciplines
+  (e.g. perk's grill addendum in `.pi/perk.toml` `[workflow] plan_authoring`) land in skills as
+  generic posture lines, never by naming a repo-local skill.
+- Only the tracked `skills/<name>/` sources are editable — `.agents/skills/` is gitignored and
+  resynced by `perk init`.
+
 ## First-party review mechanics
 
 - **Edit write-back-or-abort:** an edited plan is written back via `plan_draft`'s writer *before*
@@ -82,6 +134,18 @@ new tools propagate the seam's terminate intent.
 - **Forcing a `writePlanDraft` failure:** a branch with no `run_id` fails the artifact-tier
   write-back (`no_run_id`) while a `plan` *param* still resolves as the review source (the artifact
   tier needs run_id; the param tier doesn't) — a clean lever for the write-back-failure arm.
+- **Prompt-rewrite testing discipline:** design negative asserts *together with* the replacement
+  prose — choose unique anchors for the retired sentence while wording the survivor, so the
+  `doesNotMatch` pins stay meaningful (a naive pin on a shared phrase collides with the surviving
+  sentence). And when a feature is "covered by construction" (A calls B, both tested separately),
+  still add the one **composition test** for the path real sessions take — claim recovery was
+  proven on the `plan_save` tool path and `approvalSave`'s mechanics separately, yet no test drove
+  `approvalSave` with a claim present until the gap was named.
+- **The pure-fake `approvalSave` recipe extends to workflow-state preconditions:** seed the
+  branch's workflow-state entry data (e.g. `{ run_id, objective_node_claim }`), drive
+  `approvalSave` with the fake pi + reportable ctx over the same live branch array, then assert
+  post-state via `rebuildWorkflowState(branch)` — no harness/session needed even for
+  claim-clear read-back, because the fake `appendEntry` lands on the branch the ctx reads.
 
 ## Residual risks
 
@@ -95,6 +159,7 @@ new tools propagate the seam's terminate intent.
 ## Sources
 
 - Issues #379, #383, #388, #401 (plans #374, #380, #384, #390 → PRs #377, #382, #386, #396)
+- Issues #424, #433, #434, #444 (plans #422, #427, #430, #437 → PRs #423, #431, #432, #441)
 
 ## Cross-references
 

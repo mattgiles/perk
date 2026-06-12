@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline, hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
 # Pi extension API (0.78.x)
@@ -146,6 +146,14 @@ branch inspection can't prove the injection happened. The SDK's extension API de
 instance-property override — assigning a capturing async function to `session.sendUserMessage` —
 cleanly captures the injected guidance. This is the harness-level pattern for pinning a command's
 guidance injection (prior tests only asserted notifies + side effects).
+
+**The spy is MANDATORY for any `invokeCommand` test of a seed-turn command, even when the test
+doesn't assert the injection.** The harness's `invokeCommand` drives a real `session.prompt`, so a
+handler's `pi.sendUserMessage` queues a model turn the keyless offline session can't run — the
+test fails for reasons unrelated to what it asserts. Overwrite `h.session.sendUserMessage` with a
+capture/no-op (the existing recipe in `extension/doors/learnDocs.test.ts` /
+`objectivePlan.test.ts`) in every such test, and plan authors writing test specs for warm-door
+commands should call for the spy explicitly rather than just waiving the assertion.
 
 ## `headfulUIContext` fakes only `notify`/`setStatus`/`setWidget`
 

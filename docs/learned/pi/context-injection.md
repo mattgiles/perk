@@ -1,6 +1,6 @@
 ---
 title: Pi context injection — the conditional inject-and-strip pattern, stage-field disambiguation
-read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, or disambiguating two stages that share a read-only mode.
+read_when: You are injecting context into a session (planMode/objectiveAuthor/bindings) and stripping it later, deduplicating a once-only injection (the stringify-includes branch scan), serving two stages from one adapter (two flavors, one customType), or disambiguating two stages that share a read-only mode.
 ---
 
 # Context injection and stripping
@@ -26,6 +26,22 @@ conditional**, not unconditional:
 The pattern: **keep while relevant, strip only when stale.** Injected custom messages persist to the
 branch (`pi/extension-api.md`), so after compaction drops the original entry the context naturally
 disappears and re-injects — the ongoing value of keying on live state rather than a one-shot flag.
+
+## Once-only injection dedup: the stringify-includes branch scan
+
+Injected custom messages persist to the branch as *message* entries whose exact shape (where
+`customType` sits) varies — so the proven once-only dedup guard is
+`branch.some(e => JSON.stringify(e).includes(TYPE))` (the bindingDelivery `branchHasHeader` form),
+**not** a typed customType scan. It is safe as long as the type string can't appear in other
+entries' data — the known false-positive risk (e.g. a quoted doc embedding the type string in a
+message payload); a typed scan over message-entry customType is the fix if that ever bites.
+
+## Two content flavors, one customType
+
+When one adapter serves two stages, don't mint a second customType: branch on `state.stage` inside
+one `before_agent_start` handler to pick the injected content, and have the strip handler cover
+**both** marker substrings — the customType filter already catches injected messages regardless of
+content. Cheaper and safer than a second customType; deselect hygiene stays one filter.
 
 ## Strip-scope discipline: don't strip more than you own
 

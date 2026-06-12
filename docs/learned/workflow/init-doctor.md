@@ -101,6 +101,12 @@ This made `<!-- BEGIN perk managed -->` a **cross-plane string contract**: `perk
 (`AGENTS_BEGIN`) writes it, `extension/selfcheck.ts` (`MANAGED_AGENTS_MARKER`) reads it. Changing the
 literal in one plane must update the other in the same turn (recorded in `shared/contracts.md` §8.7).
 
+**Byte-match proof for the managed AGENTS block:** after editing the convergence source
+(`_agents_inner()`) and the committed `AGENTS.md` in parallel, prove they're in sync with a small
+`uv run python` snippet that splits the file on the `AGENTS_BEGIN`/`AGENTS_END` markers and
+compares the inner text to the function output — cheaper and exact, versus re-running `perk init`
+and eyeballing. (The scratch-dir `perk init` smoke still validates end-to-end convergence.)
+
 The selfcheck probes are tolerant by design: an **absent** on-disk ambient index counts as wired (a
 fresh consumer repo has none until the first `/learn-docs` lands), so selfcheck never false-fails on
 it; only an index that *exists but didn't reach* the prompt is a gap. The "reached" probe is a
