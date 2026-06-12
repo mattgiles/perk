@@ -34,6 +34,24 @@ test("factoryGuidance omits the model override when unset", () => {
   assert.doesNotMatch(factoryGuidance("42", "1.2"), /model: "/);
 });
 
+test("factoryGuidance instructs the file-first loop (draft → review → approval-driven save)", () => {
+  const text = factoryGuidance("42", "1.2");
+  // The draft tool and the review step are present.
+  assert.match(text, /plan_draft/);
+  assert.match(text, /plan_review/);
+  // The unconditional planning mark (re-records the claim even on resume).
+  assert.match(text, /even if it is already `planning`/);
+  assert.match(text, /records the in-session claim/);
+  // Approval carries the node link.
+  assert.match(text, /recovers `objective_id`\/`node_id` automatically/);
+  // The old primary-save mandate is gone (the failsafe sentence is phrased differently).
+  assert.doesNotMatch(text, /then persist with/);
+  assert.doesNotMatch(text, /passing BOTH `objective_id: "/);
+  // The failsafe + never-implement mandate survive.
+  assert.match(text, /Manual failsafe: `\/plan-save`/);
+  assert.match(text, /ALWAYS save, NEVER implement directly/);
+});
+
 const OK_JSON = JSON.stringify({
   success: true,
   error_type: null,
