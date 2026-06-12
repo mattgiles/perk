@@ -56,13 +56,14 @@ def _classify_worktree(
     return WipeDecision(remove=True, reason="PR merged")
 
 
-_PLAN_WT_RE = re.compile(r"^plan-(\d+)$")
+_PLAN_WT_RE = re.compile(r"^plan-(\S+)$")
 
 
-def _plan_number(name: str) -> int | None:
-    """The integer plan id from a ``plan-<N>`` worktree name, or None if not a numeric plan wt."""
+def _plan_id(name: str) -> str | None:
+    """The opaque plan id from a ``plan-<id>`` worktree name (``plan-42`` / ``plan-ENG-123``),
+    or None if not a plan worktree."""
     m = _PLAN_WT_RE.match(name)
-    return int(m.group(1)) if m else None
+    return m.group(1) if m else None
 
 
 def _skip(name: str, reason: str) -> None:
@@ -90,11 +91,11 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
             _skip(name, "current worktree")
             skipped += 1
             continue
-        number = _plan_number(name)  # guaranteed non-None by the regex filter above
-        assert number is not None
+        plan_id = _plan_id(name)  # guaranteed non-None by the regex filter above
+        assert plan_id is not None
         # Determine PR state (network); skip on any uncertainty — never delete on doubt.
         try:
-            state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(number))
+            state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=plan_id)
         except IssueBackendError as exc:
             _skip(name, f"could not determine PR state ({exc})")
             skipped += 1

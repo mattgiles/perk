@@ -54,7 +54,7 @@ def test_create_json(monkeypatch):
     )
     assert result.exit_code == 0
     payload = json.loads(result.output)
-    assert payload["success"] is True and payload["objective"]["number"] == 42
+    assert payload["success"] is True and payload["objective"]["id"] == "42"
     assert captured["title"] == "Ship it"  # derived from the body heading
 
 

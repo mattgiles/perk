@@ -67,7 +67,7 @@ def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["success"] is True and payload["launched"] is False
-        assert payload["learn_numbers"] == [45, 50]
+        assert payload["learn_numbers"] == ["45", "50"]  # opaque string ids (contracts §8.21)
         inbox = Path(d) / _INBOX_REL
         assert inbox.is_file()
         text = inbox.read_text(encoding="utf-8")
@@ -110,7 +110,7 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
     assert launched["binding_trigger"] == "command:learn-docs"
     # #102: the gathered perk:learn numbers ride the handoff so `perk plan-save` recovers
     # `consumed_learn` even when the read-only factory saves via the /plan-save command.
-    assert launched["handoff_extra"] == {"consumed_learn": [45, 50]}
+    assert launched["handoff_extra"] == {"consumed_learn": ["45", "50"]}
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt

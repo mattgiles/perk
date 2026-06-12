@@ -87,6 +87,7 @@ def test_dry_run_is_offline_and_sets_no_marker():
         data = json.loads(result.output)
         assert data["success"] is True and data["dry_run"] is True
         assert data["branch"] == "plan-7" and data["pending_learn"] is False
+        assert data["issue"] == "7"  # opaque string id (contracts §8.21)
         assert not cache.has_marker(Path(d), cache.PENDING_LEARN)
 
 
@@ -179,8 +180,9 @@ def test_reconcile_on_land_no_objective_link():
 
 
 def test_reconcile_on_land_bad_objective_id():
+    # Ids are opaque strings now — only an empty (post-`#`-strip) id is "bad".
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "not-a-number", "pr_id": "7"}, repo_root=Path()
+        plan_ref={"objective_id": "#", "pr_id": "7"}, repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(None, (), "bad_objective_id")
 
@@ -190,7 +192,7 @@ def test_reconcile_on_land_objective_not_found(monkeypatch):
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out == ObjectiveLandUpdate(5, (), "objective_not_found")
+    assert out == ObjectiveLandUpdate("5", (), "objective_not_found")
 
 
 def test_reconcile_on_land_no_linked_node(monkeypatch):
@@ -200,7 +202,7 @@ def test_reconcile_on_land_no_linked_node(monkeypatch):
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out == ObjectiveLandUpdate(5, (), "no_linked_node")
+    assert out == ObjectiveLandUpdate("5", (), "no_linked_node")
 
 
 def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
@@ -225,7 +227,7 @@ def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
         plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path()
     )
     # node 1.2 stays non-terminal → roadmap incomplete → no close.
-    assert out == ObjectiveLandUpdate(5, ("1.1",), None)
+    assert out == ObjectiveLandUpdate("5", ("1.1",), None)
     assert out.closed is False
     assert marked == ["1.1"]
     assert closed == []
@@ -244,7 +246,7 @@ def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out == ObjectiveLandUpdate(5, (), None, closed=True)
+    assert out == ObjectiveLandUpdate("5", (), None, closed=True)
     assert closed == [5]
 
 
@@ -273,7 +275,7 @@ def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatc
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out == ObjectiveLandUpdate(5, ("1.3",), None, closed=True)
+    assert out == ObjectiveLandUpdate("5", ("1.3",), None, closed=True)
     assert closed == [5]
 
 
@@ -314,7 +316,7 @@ def test_reconcile_on_land_is_fail_open(monkeypatch):
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
-    assert out.objective == 5 and out.nodes_marked == ()
+    assert out.objective == "5" and out.nodes_marked == ()
     assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
 
 
@@ -322,27 +324,30 @@ def test_result_to_dict_carries_objective():
     result = PrLandResult(
         pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
         branch="plan-7",
-        issue=7,
+        issue="7",
         pending_learn=True,
         dry_run=False,
-        objective=ObjectiveLandUpdate(5, ("1.1",), None),
-        learn=LearnConsumeUpdate((45, 50), None),
+        objective=ObjectiveLandUpdate("5", ("1.1",), None),
+        learn=LearnConsumeUpdate(("45", "50"), None),
     )
     data = _result_to_dict(result)
+    # Opaque string ids at the machine boundary (contracts §8.21; Node 4.1).
+    assert data["issue"] == "7"
+    assert data["plan_issue_closed"] is False
     assert data["objective"] == {
-        "number": 5,
+        "id": "5",
         "nodes_marked": ["1.1"],
         "skipped_reason": None,
         "closed": False,
     }
-    assert data["learn"] == {"closed": [45, 50], "skipped_reason": None}
+    assert data["learn"] == {"closed": ["45", "50"], "skipped_reason": None}
 
 
 def _land_result(learn: LearnConsumeUpdate) -> PrLandResult:
     return PrLandResult(
         pr=github.PullRequest(number=42, url="u", is_draft=False, state="MERGED", existed=True),
         branch="plan-7",
-        issue=7,
+        issue="7",
         pending_learn=True,
         dry_run=False,
         objective=ObjectiveLandUpdate(None, (), "no_objective_link"),
@@ -352,7 +357,7 @@ def _land_result(learn: LearnConsumeUpdate) -> PrLandResult:
 
 def test_render_human_surfaces_non_benign_learn_skip(capsys):
     # #102: a non-benign skip (a partial `failed: …`) is surfaced, not silent.
-    _render_human(_land_result(LearnConsumeUpdate((45,), "failed: #50")))
+    _render_human(_land_result(LearnConsumeUpdate(("45",), "failed: #50")))
     out = capsys.readouterr().err
     assert "consolidated learn issue(s) #45" in out
     assert "learn consume incomplete: failed: #50" in out
@@ -383,7 +388,7 @@ def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
     out = _consume_learn_on_land(
         plan_ref={"consumed_learn": [45, 50], "pr_id": "7"}, repo_root=Path()
     )
-    assert out.closed == (45, 50) and out.skipped_reason is None
+    assert out.closed == ("45", "50") and out.skipped_reason is None
     assert closed == [45, 50]
 
 
@@ -413,7 +418,7 @@ def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
     out = _consume_learn_on_land(
         plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path()
     )
-    assert out.closed == (45, 51)
+    assert out.closed == ("45", "51")
     assert closed == [45, 51]
     assert out.skipped_reason == "failed: #50"
 
@@ -438,7 +443,7 @@ def test_dry_run_objective_is_inert():
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["objective"] == {
-            "number": None,
+            "id": None,
             "nodes_marked": [],
             "skipped_reason": "dry_run",
             "closed": False,

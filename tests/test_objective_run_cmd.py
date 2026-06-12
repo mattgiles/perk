@@ -364,20 +364,44 @@ def test_active_run_with_wait_refetches_objective_state(monkeypatch):
     assert _payload(result)["action"] == "completed"
 
 
-def test_in_flight_malformed_pr_id_falls_back_to_plan_required(monkeypatch):
-    """A non-numeric `node.pr` must not raise — it degrades to plan_required (D7 fallback)."""
+def test_in_flight_missing_pr_id_falls_back_to_plan_required(monkeypatch):
+    """An in-flight node with no `pr` backlink degrades to plan_required (D7 fallback)."""
     _authed(monkeypatch)
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=N.DONE, depends_on=()),
         objective.ObjectiveNode(
-            id="1.2", description="B", status=N.IN_PROGRESS, pr="#abc", depends_on=("1.1",)
+            id="1.2", description="B", status=N.IN_PROGRESS, pr=None, depends_on=("1.1",)
         ),
     ]
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(nodes))
     assert result.exit_code == 0
     payload = _payload(result)
     assert payload["action"] == "plan_required" and payload["node"] == "1.2"
+
+
+def test_in_flight_opaque_pr_id_is_passed_to_the_backend(monkeypatch):
+    """Node 4.1: any non-empty `pr` backlink IS the plan id — passed to the backend verbatim
+    (the Linear `#ENG-N` shape resolves; the backend is the authority on junk ids)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
+    seen: list[int] = []
+
+    def _get_plan(**k):
+        seen.append(k["number"])
+        return _plan_state(pr=_pr(state="MERGED"))
+
+    monkeypatch.setattr(github, "get_plan", _get_plan)
+    nodes = [
+        objective.ObjectiveNode(
+            id="1.1", description="A", status=N.IN_PROGRESS, pr="#7", depends_on=()
+        ),
+    ]
+    result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(nodes))
+    assert result.exit_code == 0
+    assert seen == [7]
+    payload = _payload(result)
+    assert payload["action"] == "merged_pending_reconcile" and payload["node"] == "1.1"
 
 
 def test_active_run_with_wait_timeout_is_inconclusive(monkeypatch):

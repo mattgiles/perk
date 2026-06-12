@@ -30,7 +30,7 @@ _DRIVABLE_STAGE_IDS = sorted(
     type=click.Choice(_DRIVABLE_STAGE_IDS),
     help="The stage to drive (implement | address).",
 )
-@click.option("--plan", required=True, help="The plan issue number (e.g. 42 or #42).")
+@click.option("--plan", required=True, help="The plan issue id (e.g. 42, #42, or ENG-123).")
 @click.option("--base", help="The base branch the plan branch targets.")
 @click.pass_context
 def run_worker_cmd(
@@ -50,12 +50,12 @@ def run_worker_cmd(
     """
     repo_root = require_repo(ctx)
     require_github(ctx)
-    number = parse_plan_id(plan)
+    plan_id = parse_plan_id(plan)
     code = run_worker.run_worker(
         repo_root=repo_root,
         run_id=run_id,
         stage_id=stage_id,
-        plan=number,
+        plan=plan_id,
         base=base,
         environ=dict(os.environ),
     )

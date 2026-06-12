@@ -614,13 +614,14 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, A
     Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for
     plan-body materialization, §1.10).
 
-    Best-effort: a non-github provider, a non-numeric id, or any GitHub failure is reported but
-    never blocks the launch (checkpoints simply stay inert). Honest, not silent.
+    Best-effort: a missing/empty id or any backend failure is reported but never blocks the
+    launch (checkpoints simply stay inert). Honest, not silent. Backend-agnostic: the resolved
+    issue backend owns the id shape (GitHub numeric, Linear ``ENG-123``).
     """
-    if plan_ref is None or str(plan_ref.get("provider")) != "github":
+    if plan_ref is None:
         return
     pr_id = str(plan_ref.get("pr_id", "")).strip()
-    if not pr_id.isdigit():
+    if not pr_id:
         return
     try:
         body = issues.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)

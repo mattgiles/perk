@@ -128,7 +128,7 @@ def _outcome_body(*, outcome: dict[str, Any] | None, exit_code: int, run_url: st
     return body
 
 
-def format_started(*, run_id: str, stage: str, plan: int, run_url: str | None) -> str:
+def format_started(*, run_id: str, stage: str, plan: str, run_url: str | None) -> str:
     """The started body (marker first). No GitHub-sourced prose."""
     marker = RUN_REPORT_MARKER.format(run_id=run_id)
     return (
@@ -144,7 +144,7 @@ def format_outcome(
     *,
     run_id: str,
     stage: str,
-    plan: int,
+    plan: str,
     run_url: str | None,
     outcome: dict[str, Any] | None,
     exit_code: int,
@@ -164,7 +164,7 @@ def format_outcome(
 def format_step_summary(
     *,
     stage: str,
-    plan: int,
+    plan: str,
     run_url: str | None,
     outcome: dict[str, Any] | None,
     exit_code: int,
@@ -178,7 +178,7 @@ def format_step_summary(
 
 
 def report_started(
-    repo_root: Path, *, run_id: str, stage: str, plan: int, environ: Mapping[str, str]
+    repo_root: Path, *, run_id: str, stage: str, plan: str, environ: Mapping[str, str]
 ) -> None:
     """Post the started note as a marker-keyed plan-issue comment. Fully fail-soft."""
     try:
@@ -200,7 +200,7 @@ def report_terminal(
     *,
     run_id: str,
     stage: str,
-    plan: int,
+    plan: str,
     exit_code: int,
     environ: Mapping[str, str],
 ) -> None:

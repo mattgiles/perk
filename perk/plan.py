@@ -86,7 +86,9 @@ class PlanHeader:
     branch: str | None = None
     pr: str | None = None
     objective_id: str | None = None  # Phase 2
-    consumed_learn: tuple[int, ...] = ()  # hop-2: the perk:learn issues this docs plan consumes
+    # hop-2: the perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
+    # Linear "ENG-45"; contracts §8.21).
+    consumed_learn: tuple[str, ...] = ()
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -114,7 +116,8 @@ class PlanRef:
     url: str
     labels: tuple[str, ...]
     objective_id: str | None = None
-    consumed_learn: tuple[int, ...] = ()  # hop-2: consumed perk:learn issues (closed on land)
+    # hop-2: consumed perk:learn issue ids (opaque strings; closed on land).
+    consumed_learn: tuple[str, ...] = ()
 
     def to_data(self) -> dict[str, object]:
         return {

@@ -65,8 +65,8 @@ def implement(
     """Do the work on a branch (requires fresh context; cold-only).
 
     \b
-    PLAN is an optional plan issue number (e.g. 42 or #42). Omit it to implement the active
-    saved plan in this repo.
+    PLAN is an optional plan issue id (e.g. 42, #42, or ENG-123). Omit it to implement the
+    active saved plan in this repo.
 
     \b
     Examples:
@@ -93,21 +93,21 @@ def implement(
         )
         return
 
-    # A plan id was given: resolve it from GitHub and make it the active plan-ref.
+    # A plan id was given: resolve it from the issue backend and make it the active plan-ref.
     require_github(ctx)
-    number = parse_plan_id(plan)
+    plan_id = parse_plan_id(plan)
     try:
         backend = issues.resolve_issue_backend(repo_root)
-        state = backend.get_plan(issue_id=str(number))
+        state = backend.get_plan(issue_id=plan_id)
     except IssueBackendError as exc:
         raise UserFacingCliError(f"implement failed\n{exc}", error_type="github_error") from exc
     if state is None:
-        raise UserFacingCliError(f"Plan issue #{number} not found", error_type="plan_not_found")
+        raise UserFacingCliError(f"Plan issue #{plan_id} not found", error_type="plan_not_found")
     ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
     worktree_name = launch.resolve_plan_worktree_name(ref)
 
     if dry_run:
-        _render_dry_run(repo_root, number, worktree_name, ref, base)
+        _render_dry_run(repo_root, plan_id, worktree_name, ref, base)
         return
 
     # Select #N as the active plan (mirrors `perk resume`), then launch (worktree derived + the
@@ -126,7 +126,7 @@ def implement(
 
 
 def _render_dry_run(
-    repo_root: Path, number: int, worktree: str, ref: dict[str, object], base: str | None
+    repo_root: Path, plan_id: str, worktree: str, ref: dict[str, object], base: str | None
 ) -> None:
     # No worktree exists yet on a fresh plan, so resolve the base the same way the active-ref
     # dry-run create does (local refs only, no fetch) to keep the two dry-run JSONs consistent.
@@ -136,7 +136,7 @@ def _render_dry_run(
             {
                 "success": True,
                 "stage": "implement",
-                "plan": number,
+                "plan": plan_id,
                 "worktree": worktree,
                 "plan_ref": ref,
                 "base": resolved_base,
@@ -145,4 +145,4 @@ def _render_dry_run(
         )
     )
     user_output(click.style("implement --dry-run (resolve only, no launch)", dim=True))
-    user_output(f"  plan=#{number}  worktree={worktree}")
+    user_output(f"  plan=#{plan_id}  worktree={worktree}")

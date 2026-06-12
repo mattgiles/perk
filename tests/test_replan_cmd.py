@@ -73,7 +73,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["success"] is True
-        assert payload["plan"] == 42
+        assert payload["plan"] == "42"
         assert payload["run_id"] == _RUN_ID
         scratch = (Path(d) / _SCRATCH_REL).resolve()
         assert Path(payload["scratch_path"]).resolve() == scratch
@@ -159,11 +159,12 @@ def test_remote_blocked(monkeypatch):
 
 
 def test_invalid_plan_id_rejected(monkeypatch):
+    # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
     _authed(monkeypatch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "garbage", "--json"])
+        result = runner.invoke(cli, ["replan", "bad/id", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "invalid_input"
 
@@ -176,7 +177,7 @@ def test_accepts_hash_prefixed_plan_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["replan", "#42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["plan"] == 42
+        assert json.loads(result.output)["plan"] == "42"
 
 
 def test_not_a_repo_exit_2():

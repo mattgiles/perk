@@ -109,8 +109,8 @@ def create_objective(
     payload = {
         "success": True,
         "error_type": None,
-        # GitHub-numeric id assumption — re-shape when Linear lands (#252 Phase 2/3)
-        "objective": {"number": int(issue.id), "url": issue.url, "existed": issue.existed},
+        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+        "objective": {"id": issue.id, "url": issue.url, "existed": issue.existed},
         "dry_run": dry_run,
     }
     if as_json:

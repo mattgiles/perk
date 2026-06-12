@@ -15,7 +15,7 @@ from pathlib import Path
 
 import click
 
-from perk import cache, github, issues, launch, objective
+from perk import cache, github, issue_backend, issues, launch, objective
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -33,14 +33,14 @@ _BENIGN_LEARN_SKIPS = frozenset({"no_consumed_learn", "dry_run"})
 class ObjectiveLandUpdate:
     """The mechanical auto-on-merge node-done outcome (P2.T11a).
 
-    ``objective`` is the linked objective number (``None`` when no link / unparseable).
+    ``objective`` is the linked objective id (``None`` when no link / unparseable).
     ``nodes_marked`` is the ids the merge marked ``done``. ``skipped_reason`` records why nothing
     was marked (or an error string) — the land result is **never** affected by this step.
     ``closed`` is ``True`` when this land completed the roadmap (every node terminal) and the
     objective issue was closed.
     """
 
-    objective: int | None
+    objective: str | None
     nodes_marked: tuple[str, ...]
     skipped_reason: str | None
     closed: bool = False
@@ -51,11 +51,11 @@ class LearnConsumeUpdate:
     """The hop-2 on-land consume outcome: the ``perk:learn`` issues this docs plan consumed are
     closed + labelled ``perk:consolidated``.
 
-    ``closed`` is the issue numbers successfully consolidated. ``skipped_reason`` records why
+    ``closed`` is the issue ids successfully consolidated. ``skipped_reason`` records why
     nothing was consumed (or an error string) — the land result is **never** affected by this step.
     """
 
-    closed: tuple[int, ...]
+    closed: tuple[str, ...]
     skipped_reason: str | None
 
 
@@ -63,11 +63,14 @@ class LearnConsumeUpdate:
 class PrLandResult:
     pr: github.PullRequest
     branch: str
-    issue: int
+    issue: str  # the opaque plan-issue id (GitHub: "42"; Linear: "ENG-123")
     pending_learn: bool
     dry_run: bool
     objective: ObjectiveLandUpdate
     learn: LearnConsumeUpdate
+    # Non-github backends get an explicit on-land plan-issue close (GitHub relies on the squash
+    # footer's `Closes #N` autoclose). Fail-open: False when skipped or the close failed.
+    plan_issue_closed: bool = False
 
 
 @click.command("land")
@@ -123,7 +126,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             error_type="no_plan_ref",
         )
     branch = launch.resolve_plan_worktree_name(plan_ref)
-    issue = int(str(plan_ref["pr_id"]))
+    issue = str(plan_ref["pr_id"])
 
     if dry_run:
         return PrLandResult(
@@ -138,6 +141,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             learn=LearnConsumeUpdate((), "dry_run"),
         )
 
+    backend = issues.resolve_issue_backend(repo_root)
     pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
     if pr is None:
         raise UserFacingCliError(
@@ -149,9 +153,15 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         pr = github.merge_pr(
             number=pr.number,
             repo_root=repo_root,
-            commit_message=_squash_commit_message(issue=issue, repo_root=repo_root),
+            commit_message=_squash_commit_message(
+                issue=issue,
+                url=str(plan_ref.get("url", "")),
+                backend_id=backend.backend_id,
+                repo_root=repo_root,
+            ),
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
+    plan_issue_closed = _close_plan_issue_on_land(backend, issue=issue)
     obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
     learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
     return PrLandResult(
@@ -162,7 +172,30 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         dry_run=False,
         objective=obj_update,
         learn=learn_update,
+        plan_issue_closed=plan_issue_closed,
     )
+
+
+def _close_plan_issue_on_land(backend: issue_backend.IssueBackend, *, issue: str) -> bool:
+    """Explicitly close the plan issue after the merge — **non-github backends only** (D4).
+
+    GitHub's autoclose (the squash footer's ``Closes #N``) already closes the plan issue there;
+    other backends have no commit-footer autoclose perk can assume (Linear's Done-on-merge
+    automation is integration/team-config dependent), so perk closes the issue itself.
+    Fail-open + idempotent beside any tracker automation: a failure is logged
+    loud-but-non-fatal and NEVER changes the land result (mirrors
+    :func:`_reconcile_objective_on_land`).
+    """
+    if backend.backend_id == "github":
+        return False
+    try:
+        return bool(backend.close_issue(issue_id=issue))
+    except Exception as exc:  # fail-open: closing the plan issue never blocks landing
+        print(
+            f"perk pr land: plan issue close skipped (non-fatal): {exc}",
+            file=sys.stderr,
+        )
+        return False
 
 
 def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> ObjectiveLandUpdate:
@@ -177,24 +210,23 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
     raw = plan_ref.get("objective_id")
     if not raw:
         return ObjectiveLandUpdate(None, (), "no_objective_link")
-    try:
-        number = int(str(raw).lstrip("#"))
-    except ValueError:
+    objective_id = str(raw).lstrip("#").strip()
+    if not objective_id:
         return ObjectiveLandUpdate(None, (), "bad_objective_id")
     backend = issues.resolve_issue_backend(repo_root)
     try:
-        state = backend.get_objective(issue_id=str(number))
+        state = backend.get_objective(issue_id=objective_id)
         if state is None:
-            return ObjectiveLandUpdate(number, (), "objective_not_found")
+            return ObjectiveLandUpdate(objective_id, (), "objective_not_found")
         targets = objective.nodes_for_pr(list(state.nodes), str(plan_ref["pr_id"]))
         if not targets:
-            return ObjectiveLandUpdate(number, (), "no_linked_node")
+            return ObjectiveLandUpdate(objective_id, (), "no_linked_node")
         marked: list[str] = []
         for node in targets:
             if node.status in objective.TERMINAL:
                 continue
             backend.update_objective_node(
-                issue_id=str(number),
+                issue_id=objective_id,
                 node_id=node.id,
                 status=objective.NodeStatus.DONE,
             )
@@ -210,25 +242,25 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
             node.id in target_ids or node.status in objective.TERMINAL for node in state.nodes
         )
         if not complete:
-            return ObjectiveLandUpdate(number, tuple(marked), None)
+            return ObjectiveLandUpdate(objective_id, tuple(marked), None)
         try:
             # Isolated fail-open: a close failure must NOT fall into the outer handler (which
             # would discard the already-marked node ids). No closing comment — symmetric with the
             # supervisor's completion close (§8.20).
-            backend.close_issue(issue_id=str(number))
+            backend.close_issue(issue_id=objective_id)
         except Exception as exc:
             print(
                 f"perk pr land: objective close skipped (non-fatal): {exc}",
                 file=sys.stderr,
             )
-            return ObjectiveLandUpdate(number, tuple(marked), f"close_failed: {exc}")
-        return ObjectiveLandUpdate(number, tuple(marked), None, closed=True)
+            return ObjectiveLandUpdate(objective_id, tuple(marked), f"close_failed: {exc}")
+        return ObjectiveLandUpdate(objective_id, tuple(marked), None, closed=True)
     except Exception as exc:  # fail-open: objective tracking never blocks landing
         print(
             f"perk pr land: objective reconciliation skipped (non-fatal): {exc}",
             file=sys.stderr,
         )
-        return ObjectiveLandUpdate(number, (), f"error: {exc}")
+        return ObjectiveLandUpdate(objective_id, (), f"error: {exc}")
 
 
 def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUpdate:
@@ -243,45 +275,51 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
     raw = plan_ref.get("consumed_learn")
     if not raw:
         return LearnConsumeUpdate((), "no_consumed_learn")
-    try:
-        numbers = [int(str(n).lstrip("#")) for n in raw]
-    except (TypeError, ValueError):
+    if not isinstance(raw, list):
+        return LearnConsumeUpdate((), "bad_consumed_learn")
+    ids = [cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())]
+    if not ids:
         return LearnConsumeUpdate((), "bad_consumed_learn")
     # Per-issue isolation (#102): close each issue independently so one bad issue (already-deleted,
     # transient infra error) does NOT strand the rest — the #89-residual that made the accumulated
     # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
     # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
     backend = issues.resolve_issue_backend(repo_root)
-    closed: list[int] = []
-    failed: list[int] = []
-    for number in numbers:
+    closed: list[str] = []
+    failed: list[str] = []
+    for learn_id in ids:
         try:
-            backend.close_and_label_consolidated(issue_id=str(number))
-            closed.append(number)
+            backend.close_and_label_consolidated(issue_id=learn_id)
+            closed.append(learn_id)
         except Exception as exc:  # fail-open: consuming learn issues never blocks landing
             print(
-                f"perk pr land: learn consume skipped issue #{number} (non-fatal): {exc}",
+                f"perk pr land: learn consume skipped issue #{learn_id} (non-fatal): {exc}",
                 file=sys.stderr,
             )
-            failed.append(number)
+            failed.append(learn_id)
     skipped_reason = f"failed: {', '.join(f'#{n}' for n in failed)}" if failed else None
     return LearnConsumeUpdate(tuple(closed), skipped_reason)
 
 
-def _squash_commit_message(*, issue: int, repo_root: Path) -> str:
-    """The deepened squash commit message (P2.T8b, D8): plain ``"<plan title>\\n\\nCloses #N"``.
+def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: Path) -> str:
+    """The deepened squash commit message (P2.T8b, D8): plain ``"<plan title>\\n\\n<footer>"``.
+
+    The footer branches per backend (D4): GitHub keeps ``Closes #N`` (the autoclose target —
+    byte-identical to the pre-Linear shape); non-github backends get a plain
+    ``Plan: <id> — <url>`` reference line — NO commit magic words (Linear's commit-linking needs
+    a non-assumable extra webhook; perk closes the plan issue explicitly at land instead).
 
     This is the second of the two PR targets (the GitHub HTML body is the other, T8a) — plain text
     only, so no HTML leaks into ``git log``. Best-effort title fetch: a missing/empty title (or any
-    GitHub read failure) falls back to the bare ``Closes #N``.
+    backend read failure) falls back to the bare footer.
     """
-    closes = f"Closes #{issue}"
+    footer = f"Closes #{issue}" if backend_id == "github" else f"Plan: {issue} — {url}"
     try:
-        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=str(issue))
+        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=issue)
     except (GitHubError, IssueBackendError):
-        return closes
+        return footer
     title = state.title.strip() if state is not None else ""
-    return f"{title}\n\n{closes}" if title else closes
+    return f"{title}\n\n{footer}" if title else footer
 
 
 def _result_to_dict(result: PrLandResult) -> dict[str, object]:
@@ -291,11 +329,13 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
         "message": None,
         "pr": {"number": result.pr.number, "state": result.pr.state},
         "branch": result.branch,
+        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
         "issue": result.issue,
         "pending_learn": result.pending_learn,
+        "plan_issue_closed": result.plan_issue_closed,
         "dry_run": result.dry_run,
         "objective": {
-            "number": result.objective.objective,
+            "id": result.objective.objective,
             "nodes_marked": list(result.objective.nodes_marked),
             "skipped_reason": result.objective.skipped_reason,
             "closed": result.objective.closed,
