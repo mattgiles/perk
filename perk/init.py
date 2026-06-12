@@ -19,16 +19,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from perk import __version__, bindings, cache, capabilities, env, git, github, workflow_artifacts
+from perk import (
+    __version__,
+    bindings,
+    cache,
+    capabilities,
+    env,
+    git,
+    github,
+    linear,
+    linear_backend,
+    workflow_artifacts,
+)
 from perk.cli.ensure import UserFacingCliError
 from perk.config import (
     CONFIG_FILENAME,
     LOCAL_CONFIG_FILENAME,
     load_committed_compaction,
+    load_committed_issues_backend,
+    load_committed_issues_team,
     load_config,
 )
 from perk.env import EnvCheck
 from perk.github import AuthStatus, GitHubError, RepoAccess
+from perk.issue_backend import IssueBackendError
 from perk.output import user_confirm
 from perk.providers import ProviderSet, load_providers, resolve_providers
 
@@ -53,6 +67,13 @@ BORROWED_PACKAGES = [
     "npm:pi-subagents",
     "npm:pi-web-access",
 ]
+
+# `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
+# selects the linear issue backend (`[issues] backend = "linear"` in committed .pi/perk.toml) —
+# two-directional like provider packages: added on select, removed on deselect (hand-adding it
+# without selecting linear is unsupported). Unpinned plain-string entry (the borrowed-set
+# convention); its bundled `linear` skill is accepted wholesale (no package_filter).
+LINEAR_PACKAGE = "npm:pi-mono-linear"
 
 # The canonical perk skill names (directory names under `skills/`). This list is the SSOT
 # for the skills-CLI manifest fragment; update it here when perk skills are added/removed.
@@ -180,14 +201,17 @@ root = ".worktrees"
 # keep_recent_tokens = 20000 # recent tokens kept verbatim (pi default)
 
 # Issue backend (optional) — where canonical plan/learn/objective issues live.
-# "github" (the default when unset) is the only supported backend today;
-# "linear" is reserved — selecting it errors until the Linear backend ships
-# (objective #252 Phase 2). Committed-only: this key is read from THIS file,
-# never from the perk.local.toml overlay (a per-user override would fragment
-# the canonical issue store).
+# "github" (the default when unset) and "linear" are supported. Selecting
+# "linear" requires `team` (the Linear team key, e.g. "ENG") and the
+# LINEAR_API_KEY environment variable (a personal API key — never stored in
+# config). Both keys are committed-only: read from THIS file, never from the
+# perk.local.toml overlay (a per-user override would fragment the canonical
+# issue store). `perk init` converges the npm:pi-mono-linear Pi package when
+# linear is selected (and removes it when deselected).
 #
 # [issues]
-# backend = "github"
+# backend = "linear"
+# team = "ENG"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
@@ -229,6 +253,25 @@ class GitHubReport:
 
 
 @dataclass(frozen=True)
+class LinearReport:
+    """The init-time Linear readiness snapshot (verify-gated; only when linear is selected).
+
+    Wraps a ``LinearReadiness`` probe result, or carries the degrade ``error`` when the probe
+    could not even be attempted (missing ``LINEAR_API_KEY`` / missing ``[issues] team``) —
+    non-fatal either way (the GitHub D3 discipline: file convergence already succeeded).
+    """
+
+    readiness: linear_backend.LinearReadiness | None
+    team: str | None = None
+    error: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        r = self.readiness
+        return self.error is None and r is not None and r.auth_ok and r.team_ok and r.error is None
+
+
+@dataclass(frozen=True)
 class InitReport:
     """Structured result of a ``run_init`` (rendered human or ``--json`` by the command)."""
 
@@ -241,6 +284,7 @@ class InitReport:
     capabilities: tuple[str, ...] = ()
     error_type: str | None = None
     message: str | None = None
+    linear: LinearReport | None = None
 
     @property
     def exit_code(self) -> int:
@@ -303,9 +347,32 @@ def report_to_dict(report: InitReport) -> dict[str, object]:
                 "error": gh.repo.error,
             },
         },
+        "linear": _linear_to_dict(report.linear),
         "capabilities": list(report.capabilities),
         "changes": report.changes,
         "handoff": report.handoff,
+    }
+
+
+def _linear_to_dict(report: LinearReport | None) -> dict[str, object] | None:
+    """Serialize the nullable ``LinearReport`` (§8.5: a `linear` key parallel to `github`)."""
+    if report is None:
+        return None
+    r = report.readiness
+    return {
+        "ok": report.ok,
+        "team": report.team,
+        "error": report.error,
+        "readiness": None
+        if r is None
+        else {
+            "auth_ok": r.auth_ok,
+            "user": r.user,
+            "team_ok": r.team_ok,
+            "missing_labels": list(r.missing_labels),
+            "created_labels": list(r.created_labels),
+            "error": r.error,
+        },
     }
 
 
@@ -449,6 +516,11 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     packages, provider_changes = _converge_provider_packages(root, packages)
     added.extend(provider_changes.added)
 
+    # Linear-selection two-directional wiring (Node 2.4). Composes within this same body, so it
+    # rides the `settings-wiring` ManagedConvergence — doctor dry-runs/fixes it for free.
+    packages, linear_changes = _converge_linear_package(root, packages)
+    added.extend(linear_changes.added)
+
     settings["packages"] = packages
     # Converge pi's interactive auto-compaction from committed `[compaction]` (composes within
     # this same body, so it flows into the no-op short-circuit and stays inside `settings-wiring`
@@ -464,8 +536,9 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     parts: list[str] = []
     if added:
         parts.append(f"added {', '.join(added)}")
-    if provider_changes.removed:
-        parts.append(f"removed {', '.join(provider_changes.removed)}")
+    removed = [*provider_changes.removed, *linear_changes.removed]
+    if removed:
+        parts.append(f"removed {', '.join(removed)}")
     parts.extend(compaction_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
@@ -564,6 +637,39 @@ def _managed_identities(provider_set: ProviderSet) -> set[str]:
         for provider in provider_set.providers
         if provider.package and (identity := _package_identity(provider.package))
     }
+
+
+def _converge_linear_package(
+    root: Path, packages: list[object]
+) -> tuple[list[object], _ProviderChanges]:
+    """Reconcile the `npm:pi-mono-linear` entry against the committed `[issues]` selection.
+
+    Two-directional, mirroring ``_converge_provider_packages``: ``backend = "linear"`` selected →
+    the plain-string ``LINEAR_PACKAGE`` entry is appended (unless an entry with its identity is
+    already present); not selected → any entry matching the identity is **removed** (perk treats
+    the package as managed by the selection; hand-adding it without selecting linear is
+    unsupported). A malformed committed TOML defers to the config check by treating the selection
+    as absent.
+    """
+    try:
+        selected = load_committed_issues_backend(root)
+    except tomllib.TOMLDecodeError:
+        selected = None
+    identity = _package_identity(LINEAR_PACKAGE)
+
+    if selected != "linear":
+        removed: list[str] = []
+        kept: list[object] = []
+        for entry in packages:
+            if _package_identity(entry) == identity:
+                removed.append(cast("str", identity))
+                continue
+            kept.append(entry)
+        return kept, _ProviderChanges(added=[], removed=removed)
+
+    if any(_package_identity(entry) == identity for entry in packages):
+        return packages, _ProviderChanges(added=[], removed=[])
+    return [*packages, LINEAR_PACKAGE], _ProviderChanges(added=[LINEAR_PACKAGE], removed=[])
 
 
 def _desired_skills_manifest(self_repo: bool) -> str:
@@ -962,6 +1068,9 @@ def run_init(
             auth = AuthStatus(ok=False, user=None, scopes=(), error=str(exc))
             repo = RepoAccess.skipped()
         github_report = GitHubReport(auth=auth, repo=repo)
+    linear_report: LinearReport | None = None
+    if verify:
+        linear_report = _linear_readiness(root)
     handoff = _write_post_init(root, self_repo)
     managed = tuple(cap.name for cap in capabilities.applicable(self_repo))
 
@@ -973,4 +1082,34 @@ def run_init(
         github=github_report,
         handoff=handoff,
         capabilities=managed,
+        linear=linear_report,
     )
+
+
+def _linear_readiness(root: Path) -> LinearReport | None:
+    """The verify-gated Linear readiness step (non-fatal, the GitHub D3 mirror).
+
+    ``None`` unless the committed backend selection is ``"linear"`` (a config error → skip;
+    the config/issues checks own it). Missing ``LINEAR_API_KEY`` / ``[issues] team`` degrade
+    to an errored report; otherwise the shared probe runs with ``ensure_labels=True`` (init
+    converges the four perk labels upfront — created names land on the report, not `changes`).
+    """
+    try:
+        selected = load_committed_issues_backend(root)
+    except tomllib.TOMLDecodeError:
+        return None
+    if selected != "linear":
+        return None
+    team = load_committed_issues_team(root)
+    if team is None:
+        return LinearReport(
+            readiness=None,
+            error='[issues] team is required when backend = "linear" — '
+            "set the Linear team key in .pi/perk.toml",
+        )
+    try:
+        client = linear.client_from_env()
+    except IssueBackendError as exc:
+        return LinearReport(readiness=None, error=str(exc))
+    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)
+    return LinearReport(readiness=readiness, team=team)
