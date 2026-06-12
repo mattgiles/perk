@@ -86,7 +86,20 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   results, never throws): mistyped params → `bad_input`; empty/whitespace plan →
   `invalid_input`; no session `run_id` → `no_run_id`; file-or-pointer write failure →
   `write_failed`. Consumers read the draft only via `readSessionArtifact` (digest-validated,
-  fail-open) — the file-first save preference is Node 2.2.
+  fail-open).
+
+  **File-first plan save (Node 2.2).** Both save surfaces resolve their plan through one shared
+  resolver (`resolvePlanSource`, `extension/planSave.ts`), in order: (1) the validated
+  `plan-draft.md` artifact (`readSessionArtifact` — digest-validated, fail-open: no run_id / no
+  pointer / fork run_id mismatch / missing file / digest mismatch all fall through); (2) the
+  explicit `plan` param (tool only — now **optional** in the `plan_save` schema); (3) the
+  `extractPlanMarkdown` transcript scrape — the universal fail-open last resort for every save
+  surface; else the save refuses (`invalid_input` on the tool, a warning report on the command).
+  When the artifact wins over a differing non-blank `plan` param, the ignored param is **surfaced**
+  in the success message ("⚠ differing plan param ignored"), never silent and never a hard-fail.
+  Non-param sources are announced in the success message (`plan source: …`; param-path messages
+  stay byte-stable) and the machine-readable `plan_source` (`"plan-draft" | "param" |
+  "transcript" | null`) always lands in the tool's `details`.
 
   **Provenance (Node 1.3).** Session artifacts become *consumable* only via their
   `session_artifacts` pointer in `perk:workflow-state` (§8.3) — a bare file on disk is never
@@ -1989,7 +2002,8 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `skills/perk-plan/SKILL.md`: the model **presents the complete plan as its final message and
 > never attempts to save**; the **human** runs `/plan-save` when satisfied (its
 > `extractPlanMarkdown` scrape is now reliable by construction — the final message is the clean
-> plan). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched** (no browser launch on
+> plan; as of Node 2.2 `/plan-save` prefers the validated plan-draft artifact when one exists,
+> and the scrape is the demoted universal fallback). `savePlan()` / the `plan_save` tool / `/plan-save` are **untouched** (no browser launch on
 > a manual save), and the orchestrated **factory flows** (objective-plan, learn-docs, replan) still
 > instruct an autonomous `plan_save` tool call — unchanged.
 

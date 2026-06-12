@@ -4,13 +4,23 @@
 // twin is unit-tested separately below.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { decodePlanSaveParams, extractPlanMarkdown, isPlanModeActive } from "./planSave.ts";
+import { sessionDataDir } from "./cache.ts";
+import { PLAN_DRAFT_ARTIFACT } from "./planDraft.ts";
+import {
+  decodePlanSaveParams,
+  extractPlanMarkdown,
+  isPlanModeActive,
+  resolvePlanSource,
+} from "./planSave.ts";
+import type { ReportTarget } from "./report.ts";
+import { type SessionDataCtx, writeSessionArtifact } from "./sessionData.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
-import type { BranchEntry } from "./workflowState.ts";
+import type { BranchEntry, EntrySink } from "./workflowState.ts";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
 
 const PLAN_JSON = JSON.stringify({
@@ -581,6 +591,238 @@ test("extractPlanMarkdown: the whole latest assistant text; null when absent", (
   assert.equal(extractPlanMarkdown([]), null);
 });
 
+// --- Node 2.2: resolvePlanSource (pure, offline fakes — the planDraft.test.ts recipe) ------
+
+/** A `SessionDataCtx & ReportTarget` over a live branch array (headless, notify is a no-op). */
+function reportableCtx(cwd: string, branch: unknown[]): SessionDataCtx & ReportTarget {
+  return {
+    cwd,
+    sessionManager: { getBranch: () => branch },
+    hasUI: false,
+    ui: { notify() {} },
+  };
+}
+
+function fakeSink(branch: unknown[]): EntrySink {
+  return {
+    appendEntry: (customType, data) => branch.push({ type: "custom", customType, data }),
+  };
+}
+
+function runIdEntry(runId: string): unknown {
+  return { type: "custom", customType: WORKFLOW_STATE_TYPE, data: { run_id: runId } };
+}
+
+function assistantEntry(text: string): unknown {
+  return { type: "message", message: { role: "assistant", content: text } };
+}
+
+/** A temp-cwd ctx with the draft artifact written; calls `fn`, then cleans up. */
+function withSourceCtx(
+  opts: { artifact?: string; assistant?: string },
+  fn: (ctx: SessionDataCtx & ReportTarget) => void,
+): void {
+  const cwd = mkdtempSync(join(tmpdir(), "plan-save-source-test-"));
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    if (opts.assistant !== undefined) branch.push(assistantEntry(opts.assistant));
+    const ctx = reportableCtx(cwd, branch);
+    if (opts.artifact !== undefined) {
+      const written = writeSessionArtifact(
+        fakeSink(branch),
+        ctx,
+        PLAN_DRAFT_ARTIFACT,
+        opts.artifact,
+      );
+      assert.ok(written, "the draft artifact landed");
+    }
+    fn(ctx);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}
+
+test("resolvePlanSource: the artifact wins over param + transcript", () => {
+  withSourceCtx({ artifact: "# Draft\nplan\n", assistant: "# Scraped" }, (ctx) => {
+    const src = resolvePlanSource(ctx, "# Draft\nplan\n");
+    assert.deepEqual(src, { plan: "# Draft\nplan\n", source: "plan-draft", paramMismatch: false });
+  });
+});
+
+test("resolvePlanSource: paramMismatch only for a differing non-blank param under an artifact win", () => {
+  withSourceCtx({ artifact: "# Draft\n" }, (ctx) => {
+    assert.equal(resolvePlanSource(ctx, "# Other")?.paramMismatch, true);
+    // Trim-equal param is NOT a mismatch.
+    assert.equal(resolvePlanSource(ctx, "# Draft")?.paramMismatch, false);
+    // Blank / absent params are not mismatches either.
+    assert.equal(resolvePlanSource(ctx, "   ")?.paramMismatch, false);
+    assert.equal(resolvePlanSource(ctx)?.paramMismatch, false);
+  });
+});
+
+test("resolvePlanSource: param when no artifact; blank param falls to transcript", () => {
+  withSourceCtx({ assistant: "# Scraped" }, (ctx) => {
+    assert.deepEqual(resolvePlanSource(ctx, "# Param"), {
+      plan: "# Param",
+      source: "param",
+      paramMismatch: false,
+    });
+    assert.deepEqual(resolvePlanSource(ctx, "  \n"), {
+      plan: "# Scraped",
+      source: "transcript",
+      paramMismatch: false,
+    });
+  });
+});
+
+test("resolvePlanSource: transcript when neither; null when everything misses", () => {
+  withSourceCtx({ assistant: "# Scraped" }, (ctx) => {
+    assert.deepEqual(resolvePlanSource(ctx), {
+      plan: "# Scraped",
+      source: "transcript",
+      paramMismatch: false,
+    });
+  });
+  withSourceCtx({}, (ctx) => {
+    assert.equal(resolvePlanSource(ctx), null);
+  });
+});
+
+// --- Node 2.2: file-first save surfaces (harness) ------------------------------------------
+
+const DRAFT_MD = "# Draft plan\n\n## Summary\nThe validated working draft.\n";
+
+function stagedPlan(argvFile: string): string {
+  const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
+  const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
+  return readFileSync(planFile, "utf8");
+}
+
+test("tool: the artifact wins over a differing param — staged bytes, suffix, plan_source", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    const result = await h.invokeTool("plan_save", { plan: "# A different param plan" });
+    assert.equal(stagedPlan(argvFile), DRAFT_MD.trim(), "the artifact bytes were staged");
+    const text = result.content[0]?.text ?? "";
+    assert.match(text, /plan source: plan-draft artifact/);
+    assert.match(text, /⚠ differing plan param ignored/);
+    assert.equal((result.details as { plan_source?: string }).plan_source, "plan-draft");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: no artifact + param — byte-stable legacy message, plan_source param", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(stagedPlan(argvFile), PLAN_MD.trim(), "the param bytes were staged");
+    const text = result.content[0]?.text ?? "";
+    assert.doesNotMatch(text, /plan source:/, "param-path success messages stay byte-stable");
+    assert.equal((result.details as { plan_source?: string }).plan_source, "param");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: no artifact + no param falls back to the transcript scrape", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText: "# Scraped plan\n\nFrom the transcript.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    const result = await h.invokeTool("plan_save", {});
+    assert.equal(stagedPlan(argvFile), "# Scraped plan\n\nFrom the transcript.");
+    assert.match(result.content[0]?.text ?? "", /plan source: transcript/);
+    assert.equal((result.details as { plan_source?: string }).plan_source, "transcript");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: nothing anywhere → invalid_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", {});
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "invalid_input");
+    assert.match(result.content[0]?.text ?? "", /no plan to save/);
+    assert.throws(() => readFileSync(argvFile, "utf8"), "no exec happened (argv file absent)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: /plan-save prefers the artifact over a trailing assistant message", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText: "# Scraped plan\n\nNot the draft.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    await h.invokeCommand("plan-save");
+    assert.equal(stagedPlan(argvFile), DRAFT_MD.trim(), "the artifact bytes were staged");
+    assert.ok(
+      h.notifies.some((n) => /plan source: plan-draft artifact/.test(n)),
+      "the artifact source was announced",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("command: a tampered artifact fails open to the transcript (digest mismatch)", async () => {
+  const cwd = scaffoldRepo();
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
+  const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-write" }], {
+    assistantText: "# Scraped plan\n\nThe fallback.\n",
+  });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_draft", { plan: DRAFT_MD });
+    // Tamper with the on-disk bytes so the pointer's digest no longer matches (rewind/tamper).
+    writeFileSync(join(sessionDataDir(cwd, "01RID"), PLAN_DRAFT_ARTIFACT), "# tampered\n", "utf8");
+    await h.invokeCommand("plan-save");
+    assert.equal(stagedPlan(argvFile), "# Scraped plan\n\nThe fallback.");
+    assert.ok(
+      h.notifies.some((n) => /plan source: transcript/.test(n)),
+      "fell open to the transcript source",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 // --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: plan_save with a mistyped consumed_learn → bad_input, no exec", async () => {
@@ -608,8 +850,8 @@ test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
     node_id: undefined,
     consumed_learn: [1, 2],
   });
-  // plan absent decodes to "" (savePlan's invalid_input arm keeps owning that message).
-  assert.equal(decodePlanSaveParams({})?.plan, "");
+  // plan absent decodes to undefined (Node 2.2: resolvePlanSource owns the fallback chain).
+  assert.equal(decodePlanSaveParams({})?.plan, undefined);
   assert.equal(decodePlanSaveParams(undefined), null);
   assert.equal(decodePlanSaveParams({ plan: 5 }), null);
   assert.equal(decodePlanSaveParams({ plan: "p", title: 5 }), null);
