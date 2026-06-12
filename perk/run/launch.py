@@ -10,7 +10,7 @@ Arbitrary plan-``#N`` resolution is ``perk resume`` (T5c); here the *active* ref
 
 A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
 (Node 2.1, contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
-linkage, verifies it, then triggers the runner via :mod:`perk.runner` (it positions nothing
+linkage, verifies it, then triggers the runner via :mod:`perk.run.runner` (it positions nothing
 locally — the Node 2.2 workflow positions the worker in CI).
 """
 
