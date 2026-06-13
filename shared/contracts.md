@@ -586,8 +586,12 @@ hard gate); idempotent on resume (an already-correct symlink is left untouched, 
 entry is never clobbered). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
 present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
 optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
-(`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start` AND
-`session_tree`**; `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
+(`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start`, `session_tree`, AND
+`session_compact`** (the `session_compact` re-render — rebuild + render only, NO re-seed, mirroring
+`session_tree` — was adapted from `@juicesharp/rpiv-todo`; its `catch` arm swallows the pi-core
+stale-`ctx` compaction race silently — the proxy `/stale after session replacement/` error fired
+when pi replaces the running session out from under the in-flight handler — while logging genuine
+replay failures); `turn_end` scans the assistant message for `[DONE:n]` and, when a step advances,
 appends a new `perk:checkpoint` marker carrying completion forward. The rebuild uses the
 **scan-after-marker** discipline: the latest `perk:checkpoint` entry is the marker, and `[DONE:n]`/
 `[WIP:n]` are re-folded only from assistant messages **after** it (stale markers from a previous
@@ -636,6 +640,19 @@ implement-progress overlay via this perk-owned `perk:checkpoint` seam. `@tombell
 likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single last-wins slot, and
 pi-status's `session_start` footer install replaced perk's footer — borrowed packages must not own
 the footer.
+
+**Rejected `@juicesharp/rpiv-todo` ideas (deliberate non-adoptions).** A survey of rpiv-todo's
+model-driven todo design against perk's passive, plan-derived, linear checkpoints (see
+`docs/design/checkpoints-rpiv-todo-comparison.md`) adopted only the `session_compact` stale-`ctx`
+robustness above. Rejected with rationale: (1) the **model-callable `todo` tool / `blockedBy`
+dependency graph / dynamic create-update-delete** — reverses the P2.T2c charter that separates a
+read-only plan from a linear, marker-driven, never-model-mutated checklist; (2) the **`activeForm`
+present-continuous label** — there is no channel for the model to supply one (markers are
+`[WIP:n]`/`[DONE:n]`) and the step *text* already serves as the in-progress label (`▸n <text>`);
+adopting it would expand the marker grammar (a protocol change, not polish); (3) the
+**completed-fall-away overlay** — `windowProgress` already does richer overflow handling (a sliding
+window with `… +N earlier`/`… +N later` elision); rpiv's drop-after-next-turn is a different
+philosophy, not clearly better for an ordered linear checklist.
 
 **Generated checkpoint steps for prose plans (#342).** When the implement-session `session_start`
 seeding finds a **materialized plan body with no usable `## Steps`** (`extractSteps` → `[]` covers

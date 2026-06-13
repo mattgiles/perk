@@ -26,6 +26,7 @@ import {
   extractWipSteps,
   isInert,
   isPerkCheckpointsReferenceSelected,
+  isStaleCtxError,
   markCompletedSteps,
   rebuildCheckpoint,
   resolvedTodoProviderId,
@@ -281,6 +282,42 @@ test("rebuild restored on session_tree across a seeded checkpoint", async () => 
   } finally {
     h.dispose();
   }
+});
+
+test("session_compact re-renders the 📋 status over a seeded checkpoint branch", async () => {
+  const cwd = scaffoldRepo();
+  // Seed marker (two steps) + an assistant [DONE:1] after it -> rebuild yields 1/2 done, current 2.
+  const file = plantRawSession(cwd, [
+    {
+      custom: {
+        type: CHECKPOINT_TYPE,
+        data: {
+          steps: [
+            { step: 1, text: "one", completed: false },
+            { step: 2, text: "two", completed: false },
+          ],
+        },
+      },
+    },
+    { assistant: "completed [DONE:1]" },
+  ]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    const before = h.statuses.filter((s) => s.slot === "perk").length;
+    await h.emitLifecycle({ type: "session_compact" });
+    const perkStatuses = h.statuses.filter((s) => s.slot === "perk");
+    assert.ok(perkStatuses.length > before, "session_compact published a fresh status");
+    assert.equal(perkStatuses.at(-1)?.value, "📋 1/2 · ▸2", "rebuilt progress re-rendered");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("isStaleCtxError matches the pi-core compaction race only", () => {
+  assert.equal(isStaleCtxError(new Error("ctx is stale after session replacement")), true);
+  assert.equal(isStaleCtxError("stale after session replacement"), true);
+  assert.equal(isStaleCtxError(new Error("some unrelated rebuild bug")), false);
+  assert.equal(isStaleCtxError(null), false);
 });
 
 test("coarse fallback: active prose plan sets `📋 <stage>` status; no plan clears", async () => {
