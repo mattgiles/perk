@@ -7,6 +7,7 @@ import pytest
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
+    _address_prompt,
     _initial_prompt,
     _pi_agent_dir,
     _sweep_stale_pi_agent_locks,
@@ -296,6 +297,23 @@ def test_initial_prompt_primes_implement_and_address():
     assert _initial_prompt(_stage("plan"), _PLAN_REF) is None
     assert _initial_prompt(_stage("implement"), None) is None
     assert _initial_prompt(_stage("address"), None) is None
+    # The new defaulted `preview` param leaves the non-preview address prompt unchanged.
+    assert _initial_prompt(_stage("address"), _PLAN_REF, preview=False) == addr
+
+
+def test_address_prompt_preview_is_classification_only():
+    """Node 3.3: the cold `--preview` flag shapes the address seed to classify-only (no action),
+    mirroring the warm `addressGuidance(preview=true)` shape; non-preview body is unchanged."""
+    preview = _address_prompt(_PLAN_REF, preview=True)
+    assert "PREVIEWING" in preview
+    assert "take NO action" in preview and "preview only" in preview
+    # The fix→resolve→land tail is omitted in preview.
+    assert "resolve_review_threads" not in preview
+    assert "/land" not in preview
+    # The non-preview body (the default) keeps the full loop.
+    full = _address_prompt(_PLAN_REF)
+    assert _address_prompt(_PLAN_REF, preview=False) == full
+    assert "resolve_review_threads" in full and "PREVIEWING" not in full
 
 
 def test_initial_prompt_injects_classifier_model_from_config():

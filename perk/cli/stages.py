@@ -19,6 +19,12 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
         "learn",  # perk/cli/commands/learn/__init__.py (hybrid group; hidden launcher, Node 2.2)
         "objective-author",  # perk/cli/commands/objective_author_cmd.py (P3.T2)
         "objective-plan",  # perk/cli/commands/objective_plan_cmd.py (P2.T10)
+        # Objective #495 Node 3.3 (the pr group): submit/land are merged launcher+worker commands
+        # and address is the launcher-only door, all under `perk pr` + flat aliases — so the
+        # generic generator must not also build the flat `perk submit`/`address`/`land` launchers.
+        "submit",
+        "address",
+        "land",
     }
 )
 
