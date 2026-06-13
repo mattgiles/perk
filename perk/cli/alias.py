@@ -20,7 +20,7 @@ perk has no shared CLI package, so the whole (small) mechanism lives here:
 
 import os
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import click
 
@@ -34,9 +34,12 @@ ALIAS_ATTR = "_perk_aliases"
 # module-level global — avoids cross-test leakage.
 FLAT_ALIAS_ATTR = "_perk_flat_aliases"
 
-# A per-command kind marker (``"launcher"`` / ``"worker"``), stashed under this attribute and read
-# by ``SectionedAliasGroup`` to partition a group's help into sections.
+# A per-command kind marker, stashed under this attribute and read by ``SectionedAliasGroup`` to
+# partition a group's help into sections.
 KIND_ATTR = "_perk_command_kind"
+
+# The fixed kind vocabulary (compared with ``==`` in ``SectionedAliasGroup.format_commands``).
+CommandKind = Literal["launcher", "worker"]
 
 
 def alias(*names: str) -> Callable[[F], F]:
@@ -105,7 +108,7 @@ def get_flat_aliases(group: click.Group) -> set[str]:
     return getattr(group, FLAT_ALIAS_ATTR, set())
 
 
-def mark_kind[C: click.Command](cmd: C, kind: str) -> C:
+def mark_kind[C: click.Command](cmd: C, kind: CommandKind) -> C:
     """Mark ``cmd`` as a ``"launcher"`` or ``"worker"`` (read by ``SectionedAliasGroup``).
 
     **Objective #495 Node 2.1**; enables SSOT §11.7-Q5 (group-internal sectioned help). Mirrors
@@ -115,7 +118,7 @@ def mark_kind[C: click.Command](cmd: C, kind: str) -> C:
     return cmd
 
 
-def get_kind(cmd: click.Command) -> str | None:
+def get_kind(cmd: click.Command) -> CommandKind | None:
     """Return the kind marker on ``cmd`` (``None`` when unmarked)."""
     return getattr(cmd, KIND_ATTR, None)
 
