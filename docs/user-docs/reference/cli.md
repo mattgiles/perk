@@ -20,9 +20,8 @@ read-write boundaries (`save`, `objective-save`) and the working stages (`implem
 `address`, `land`, `learn`).
 
 The in-session, warm `/…` commands and the model-facing tools you use *inside* a `pi` session are
-a separate surface, documented in a later reference page (coming with Objective
-[#453](https://github.com/mattgiles/perk/issues/453) Node 2.2). This page covers only the `perk`
-CLI you run from your shell.
+a separate surface, documented in [In-session commands & tools](./in-session.md). This page covers
+only the `perk` CLI you run from your shell.
 
 Aliases are noted inline next to each command. Common flags: launcher commands accept `--worktree`
 (position a worktree), `--dry-run` (print the resolved launch plan without exec'ing `pi`), and
