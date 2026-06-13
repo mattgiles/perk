@@ -577,7 +577,13 @@ entry). The `cache.plan` body (`.pi/workflow/plan.md`) is **materialized by the 
 (`github.get_plan_body` → the `plan-body` block in the issue's first comment, parsed by
 `plan.extract_plan_body`) and writes it into the worktree alongside the plan-ref + handoff
 (best-effort + loud-but-non-fatal — an unreachable body just yields inert checkpoints, never a failed
-launch). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
+launch). The cold door also **mirrors `repo_root/.agents/skills/*` into the worktree** as per-skill
+symlinks (`launch.materialize_skills`): a linked worktree never carries the gitignored
+`.agents/skills/` tree and pi discovers skills only up to the worktree's own git root, so without the
+mirror a worktree session sees zero skills (ENOENT on `perk-implement/SKILL.md`). Best-effort +
+loud-but-non-fatal (a missing source set warns; doctor's fail-level `skills-delivery` check owns the
+hard gate); idempotent on resume (an already-correct symlink is left untouched, a real non-symlink
+entry is never clobbered). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
 present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
 optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
 (`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start` AND

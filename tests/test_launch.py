@@ -11,6 +11,7 @@ from perk.run.launch import (
     _pi_agent_dir,
     _sweep_stale_pi_agent_locks,
     launch_stage,
+    materialize_skills,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
@@ -513,6 +514,87 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     assert execs == ["pi"], "launch still proceeded"
     assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
     assert "could not fetch plan #42 body" in capsys.readouterr().err
+
+
+def _seed_skills(repo_root: Path, *names: str) -> None:
+    """Materialize `repo_root/.agents/skills/<name>/SKILL.md` for each name (the gitignored tree
+    `perk init` produces in the main repo but a linked worktree never carries)."""
+    for name in names:
+        skill = repo_root / ".agents" / "skills" / name
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(f"# {name}\n", encoding="utf-8")
+
+
+def _drive_implement(git_repo, monkeypatch) -> tuple[Path, list[str]]:
+    """Drive a real implement launch to the exec; return (worktree, execs)."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    return config.worktree_root / "plan-42", execs
+
+
+def test_implement_mirrors_skills_into_worktree(git_repo, monkeypatch):
+    """The cold door mirrors repo_root/.agents/skills/* into the worktree as per-skill symlinks,
+    delivering perk's own skill AND borrowed ones — both must resolve and be readable."""
+    _seed_skills(git_repo, "perk-implement", "ruff")
+    wt, execs = _drive_implement(git_repo, monkeypatch)
+    assert execs == ["pi"]
+    perk_skill = wt / ".agents" / "skills" / "perk-implement"
+    assert perk_skill.is_symlink()  # mirrored as a symlink, not a copy
+    # both perk + borrowed skill files resolve through the symlink target chain and are readable
+    assert (perk_skill / "SKILL.md").read_text(encoding="utf-8") == "# perk-implement\n"
+    assert (wt / ".agents" / "skills" / "ruff" / "SKILL.md").read_text(
+        encoding="utf-8"
+    ) == "# ruff\n"
+
+
+def test_skills_mirror_is_idempotent_on_resume(git_repo, monkeypatch):
+    """D4 resume: a second launch leaves the correct symlink untouched — no error, resolves."""
+    _seed_skills(git_repo, "perk-implement")
+    wt, _ = _drive_implement(git_repo, monkeypatch)
+    wt2, execs = _drive_implement(git_repo, monkeypatch)
+    assert wt2 == wt
+    assert len(execs) == 1  # second drive reached exec (execs is fresh per drive)
+    assert (wt / ".agents" / "skills" / "perk-implement" / "SKILL.md").read_text(
+        encoding="utf-8"
+    ) == "# perk-implement\n"
+
+
+def test_skills_mirror_missing_source_is_non_fatal(git_repo, monkeypatch, capsys):
+    """A repo with no .agents/skills/ (perk init never ran) warns but never blocks the launch."""
+    wt, execs = _drive_implement(git_repo, monkeypatch)
+    assert execs == ["pi"]  # exec still reached — launch never blocked
+    assert not (wt / ".agents" / "skills").exists()  # nothing mirrored
+    assert "skills: repo .agents/skills/ missing" in capsys.readouterr().err
+
+
+def test_skills_mirror_never_clobbers_real_dir(tmp_path):
+    """A pre-existing real (non-symlink) skill dir + sentinel survive — the helper skips it."""
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "perk-implement")
+    worktree = tmp_path / "wt"
+    real = worktree / ".agents" / "skills" / "perk-implement"
+    real.mkdir(parents=True)
+    sentinel = real / "sentinel.txt"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+
+    materialize_skills(repo_root, worktree)
+
+    link = worktree / ".agents" / "skills" / "perk-implement"
+    assert not link.is_symlink()  # real dir left untouched
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
 
 
 def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):

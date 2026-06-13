@@ -443,6 +443,7 @@ def launch_stage(
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
     if stage.worktree != "none":
         materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
+        materialize_skills(repo_root, wt)
     # Node 5.1 (stretch): mirror the implement-run start into Linear's Agents UI. Gated inside
     # the emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
     # it can never block the exec below. Not reached on --dry-run or --remote (early returns).
@@ -655,3 +656,45 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, A
         return
     if body:
         cache.write_plan_body(worktree, body)
+
+
+def materialize_skills(repo_root: Path, worktree: Path) -> None:
+    """Mirror repo_root's `.agents/skills/*` into the worktree as per-skill symlinks.
+
+    Linked worktrees never carry the gitignored `.agents/skills/` tree, and pi discovers skills
+    only up to the worktree's own git root (never the main repo), so without this a worktree
+    session sees zero skills (ENOENT on `perk-implement/SKILL.md`). Replicates the exact per-skill
+    structure pi already discovers in repo_root, delivering ALL skills (perk + borrowed).
+
+    Best-effort + loud-but-non-fatal: a missing/empty source set (perk init never ran / skills sync
+    failed) warns and continues — doctor's fail-level `skills-delivery` check owns the hard gate.
+    Idempotent (D4 resume): an already-correct symlink is left untouched; a stale symlink is
+    repointed; a real (non-symlink) entry already present is left alone (never clobbered).
+    """
+    src = repo_root / ".agents" / "skills"
+    if not src.is_dir():
+        user_output(
+            "  (skills: repo .agents/skills/ missing — run `perk init`; "
+            "this session may have no skills)"
+        )
+        return
+    sources = [entry for entry in sorted(src.iterdir()) if entry.is_dir()]
+    if not sources:
+        user_output("  (skills: repo .agents/skills/ is empty — run `perk init`)")
+        return
+    dst = worktree / ".agents" / "skills"
+    dst.mkdir(parents=True, exist_ok=True)
+    linked = 0
+    for entry in sources:
+        target = entry.resolve()  # single-hop symlink to the real skill dir (cache or self)
+        link = dst / entry.name
+        if link.is_symlink():
+            if link.readlink() == target:
+                continue
+            link.unlink()
+        elif link.exists():
+            continue  # a real dir/file already there — never clobber
+        link.symlink_to(target, target_is_directory=True)
+        linked += 1
+    if linked:
+        user_output(f"  (skills: mirrored {linked} skill(s) into the worktree)")
