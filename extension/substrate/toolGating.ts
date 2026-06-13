@@ -123,6 +123,10 @@ const DESTRUCTIVE_PATTERNS = [
 ];
 
 const SAFE_PATTERNS = [
+  // `cd` mutates nothing — it is the common prefix for scoping a read-only query
+  // (`cd repo && perk objective show …`). Safe under the per-segment model: every other
+  // segment is still independently validated and the whole-string destructive veto is unchanged.
+  /^\s*cd\b/,
   /^\s*cat\b/,
   /^\s*head\b/,
   /^\s*tail\b/,
@@ -186,16 +190,79 @@ const SAFE_PATTERNS = [
 ];
 
 /**
- * Whether a bash command is allowed under read-only mode: it must match a known read-only command
- * AND must not match any destructive pattern (destructive wins). Pure → unit-testable offline.
+ * Split a command into top-level shell segments for the per-segment safe check. Walks the string
+ * character by character tracking single- and double-quote state, splitting only on UNQUOTED
+ * sequencing operators `;`, `&&`, `||`, and `|` (`&&`/`||` are two-char operators; a lone `|` is
+ * the pipe). Quoted operators must not split — load-bearing: a `|` inside `grep -iE 'a|b'` stays
+ * in one segment. Segments are trimmed and empties dropped.
+ *
+ * Known limitation: backslash-escaped quote characters are not handled. This is acceptable — the
+ * whole-string destructive veto in isReadOnlyBashCommand remains the backstop.
+ */
+function splitTopLevelSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ";" || ch === "|" || ch === "&") {
+      const next = command[i + 1];
+      if ((ch === "|" && next === "|") || (ch === "&" && next === "&")) {
+        // two-char operator (`||` / `&&`)
+        segments.push(current);
+        current = "";
+        i++;
+        continue;
+      }
+      if (ch === ";" || ch === "|") {
+        // single-char sequencing operator (`;` / `|`)
+        segments.push(current);
+        current = "";
+        continue;
+      }
+      // a lone `&` (background / part of `&>`): keep it in the segment so `&>` redirect detection
+      // and the destructive veto see it intact.
+      current += ch;
+      continue;
+    }
+    current += ch;
+  }
+  segments.push(current);
+  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/**
+ * Whether a bash command is allowed under read-only mode. Two independent checks:
+ *  - NOT destructive: a WHOLE-STRING scan against DESTRUCTIVE_PATTERNS (destructive-wins — content
+ *    anywhere in the string, incl. command substitutions, still vetoes). Two redirect carve-outs
+ *    are neutralized first: FD duplications (`2>&1`, `1>&2`) and redirects to `/dev/null`
+ *    (`>/dev/null`, `2>/dev/null`, `&>/dev/null`, `>>/dev/null`) — both discard output and write
+ *    nothing to the filesystem. Redirects to a REAL path (`> file`, `&> file`, `>> file`) are NOT
+ *    carved out and stay destructive.
+ *  - SAFE per segment: split into quote-aware top-level segments (on `;`/`&&`/`||`/`|`) and require
+ *    EVERY segment's leading command to match a SAFE_PATTERNS entry. This unblocks `cd`-prefixed
+ *    chains and tightens the model — a non-safe command anywhere in a chain is now blocked, not
+ *    just when it leads.
+ * Pure → unit-testable offline.
  */
 export function isReadOnlyBashCommand(command: string): boolean {
-  // File-descriptor duplications (`2>&1`, `>&2`, `1>&2`) are not file writes — neutralize them so
-  // the redirect-detection pattern doesn't false-positive on the `>` they contain. `&>file`
-  // (writes both streams to a file) is deliberately NOT carved out: it stays destructive.
-  const withoutFdRedirects = command.replace(/\d*>&\d+/g, " ");
+  const withoutFdRedirects = command
+    .replace(/\d*>&\d+/g, " ")
+    .replace(/(?:\d+|&)?>>?\s*\/dev\/null\b/g, " ");
   const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(withoutFdRedirects));
-  const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
+  const segments = splitTopLevelSegments(command);
+  const isSafe =
+    segments.length > 0 && segments.every((seg) => SAFE_PATTERNS.some((p) => p.test(seg)));
   return !isDestructive && isSafe;
 }
 

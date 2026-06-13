@@ -30,12 +30,25 @@ architecture.
 to:
 
 ```
-cat / head / tail / grep / find / ls
+cd / cat / head / tail / grep / find / ls
 git status | git log | git diff
 jq
 curl
 gh <issue|pr|repo|run|release|label> <view|list|diff|status|checks> | gh search … | gh auth status
 ```
+
+Since #485 the safe check is applied **per top-level segment**, not just to the leading command:
+`isReadOnlyBashCommand` splits the command into quote-aware top-level segments (on `;`/`&&`/`||`/`|`,
+ignoring operators inside single/double quotes) and requires **every** segment's leading command to
+match a `SAFE_PATTERNS` entry. This unblocks `cd`-prefixed chains (`cd repo && perk objective show …`)
+and **tightens** the model: a non-safe command *anywhere* in a compound command is now blocked
+(`git status && some-unknown-binary` no longer slips through on its safe leading token). Loops
+(`for`/`while`) stay blocked — their leading segment matches no safe pattern.
+
+**Redirect carve-outs (not destructive):** the destructive scan neutralizes FD duplications
+(`2>&1`, `1>&2`) **and** redirects to the null device (`>/dev/null`, `2>/dev/null`, `&>/dev/null`,
+`>>/dev/null`) before scanning — both discard output and write nothing to the filesystem. Redirects
+to a **real path** (`> file`, `&> file`, `>> file`) are *not* carved out and stay destructive.
 
 Excluded: `gh` mutating subcommands (create/edit/merge/close/comment/clone/…) **and `gh api`**
 (it can POST/PATCH — GET-vs-mutation by regex is fragile), `perk` (mutating subcommands), `npm`,
