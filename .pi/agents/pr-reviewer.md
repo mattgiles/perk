@@ -41,6 +41,15 @@ never resolve threads, never spawn further subagents** — you review and post.
    - **Simplicity / maintainability** — needless complexity, unclear naming, dead code.
    - **Adherence to the plan** — does the diff implement what `plan_body` describes? Flag drift.
 
+   **Repo coding standards (perk repo).** When the diff changes `.py` files, read
+   `.agents/skills/dignified-python/SKILL.md` (and follow its referenced files as relevant) and
+   review the changed Python against those standards. When the diff changes `.ts` files, read
+   `.agents/skills/mastering-typescript/SKILL.md` likewise. Apply these only to the **changed
+   lines**, and only when the diff actually touches that language — a PR that touches neither needs
+   neither read. Standards violations are ordinary review findings: post them only when they clear
+   the binary "the author should act before landing" bar (otherwise they ride `fyi`, or are
+   dropped).
+
 4. **Decide the verdict first — the bar is binary.** A finding is posted as a PR comment **only if
    the author should act on it before landing**. If no finding clears that bar, the verdict is
    **`clean`** — the PR gets a single 👍 reaction and **zero text**. No compliments, no praise, no
