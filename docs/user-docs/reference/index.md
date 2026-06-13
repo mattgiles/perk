@@ -15,6 +15,11 @@ find the matching page.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.
 
+## Pages
+
+- **[CLI commands](./cli.md)** — every `perk …` command, written against real `--help` and
+  guarded by a pytest existence check.
+
 > **Status:** pages are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist (currently: none).
+> that actually exist (currently: the CLI commands reference).
