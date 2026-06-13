@@ -17,9 +17,6 @@ def test_all_stages_are_generated():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
     for stage_id in (
-        "objective-author",
-        "objective-save",
-        "objective-plan",
         "plan",
         "implement",
         "submit",
@@ -33,27 +30,30 @@ def test_all_stages_are_generated():
 def test_objective_plan_is_dedicated_not_generic():
     # P2.T10: objective-plan is a dedicated command (in DEDICATED_STAGES), skipped by the generic
     # generator — so it carries its own positional NUMBER arg, not the generic launcher shape.
+    # Node 3.1: it now lives inside the `objective` group as `objective plan`.
     from perk.cli.stages import DEDICATED_STAGES
 
     assert "objective-plan" in DEDICATED_STAGES
-    result = CliRunner().invoke(cli, ["objective-plan", "--help"])
+    assert "objective-save" in DEDICATED_STAGES
+    result = CliRunner().invoke(cli, ["objective", "plan", "--help"])
     assert result.exit_code == 0
     assert "NUMBER" in result.output  # the dedicated command's positional arg
 
 
 def test_objective_author_is_dedicated_and_local_only(git_repo):
-    # P3.T2: objective-author is a dedicated seeded launcher (no positional number); local-only.
+    # P3.T2: objective author is a dedicated seeded launcher (no positional number); local-only.
+    # Node 3.1: it now lives inside the `objective` group as `objective author`.
     from perk.cli.stages import DEDICATED_STAGES
 
     assert "objective-author" in DEDICATED_STAGES
-    helped = CliRunner().invoke(cli, ["objective-author", "--help"])
+    helped = CliRunner().invoke(cli, ["objective", "author", "--help"])
     assert helped.exit_code == 0
     # A dry-run resolves + prints the launch plan (seeded prompt), launching nothing.
-    dry = CliRunner().invoke(cli, ["objective-author", "--dry-run"], obj=_ctx(git_repo))
+    dry = CliRunner().invoke(cli, ["objective", "author", "--dry-run"], obj=_ctx(git_repo))
     assert dry.exit_code == 0, dry.output
     assert "would launch stage 'objective-author'" in dry.output
     # --remote is rejected (cold_remote:false).
-    remote = CliRunner().invoke(cli, ["objective-author", "--remote"], obj=_ctx(git_repo))
+    remote = CliRunner().invoke(cli, ["objective", "author", "--remote"], obj=_ctx(git_repo))
     assert remote.exit_code == 1
     assert "local-only" in remote.output
 

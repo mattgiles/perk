@@ -132,9 +132,6 @@ STAGE_LAUNCHERS = [
     # submit/address/land are flat aliases (FLAT_ALIAS_ATTR), not generated launchers (Node 3.3):
     # SectionedGroup routes flat aliases into the launcher bucket before consulting this list.
     "learn",  # the hybrid learn group still reads as the stage launcher
-    "objective-author",
-    "objective-plan",
-    "objective-save",
 ]
 COMMAND_GROUPS = ["objective", "pr", "registry", "state", "worktree", "workflow"]
 SETUP_HEALTH = ["init", "doctor"]

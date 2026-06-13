@@ -1,5 +1,5 @@
 // P3.T2 — objective-authoring context injection (the objective mirror of planMode's plan-authoring
-// half). A `perk objective-author` cold launch opens a READ-ONLY session whose handoff `stage` is
+// half). A `perk objective author` cold launch opens a READ-ONLY session whose handoff `stage` is
 // `objective-author`; this module injects the objective-authoring contract under its own
 // `perk:objective-author-context` customType, keyed off (read-only gate AND stage ===
 // objective-author), optionally extended by the same `[workflow] plan_authoring` addendum the

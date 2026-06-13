@@ -257,7 +257,7 @@ The spine `plan -> save -> implement -> submit -> land -> learn` is **closed and
 node (select the next actionable objective node, emit a bounded plan); `/address` sits between
 `submit` and `land` (classify review feedback, resolve threads).
 
-**Start here:** `perk plan` (or `perk objective-plan` to drive from an objective roadmap)
+**Start here:** `perk plan` (or `perk objective plan` to drive from an objective roadmap)
 mints a `run_id`, positions a worktree, and launches a primed `pi` session. `perk resume`
 resolves any plan to its current actionable stage. `perk doctor` reports on this setup.
 """

@@ -160,6 +160,16 @@ flat-alias mechanism, and the sectioned help land in node 2.1; the three restruc
 (`objective`/`plan`/`pr`) in 3.1–3.3; doc/test reconciliation in 4.1. This playbook's
 realized-shape examples update as each node lands.
 
+**Node 3.1 landed (`objective` group folded).** The three objective **launchers** (`author` /
+`save` / `plan`) now live inside `perk/cli/commands/objective/` as `{verb}_cmd.py` files beside the
+six workers; the flat `objective-author`/`objective-plan`/`objective-save` spellings and the
+`oauthor`/`oplan` aliases are gone. The group uses `SectionedAliasGroup` + `mark_kind` to render
+**Launchers** + **Workers** sections (SSOT §11.7-Q5). Objective is **pure relocation** — it has no
+launcher+worker *merge* (the launchers are launcher-only L, no worker half) and **no earned flat
+alias** (SSOT §11.7-Q4: bare `perk objective` stays group help, no hybrid bare-launch). Registry
+stage ids (`objective-author`/`objective-save`/`objective-plan`) stayed stable; only the cold CLI
+spelling and the informational registry `command:` fields changed.
+
 ## Warm-plane ids are decoupled from cold spellings
 
 A CLI regrouping does not ripple into the warm plane: `/learn-docs`, `command:learn-docs`,

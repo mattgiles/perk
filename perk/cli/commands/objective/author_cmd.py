@@ -1,48 +1,35 @@
-"""``perk objective-author`` — the objective-authoring cold door (P3.T2).
+"""``perk objective author`` — the objective-authoring cold door (P3.T2).
 
 Opens a **read-only** plan-mode session seeded to draft a *new* objective + roadmap, the mirror
-of the ``plan`` stage for objectives. Unlike ``objective-plan`` (which plans one node of an
+of the ``plan`` stage for objectives. Unlike ``objective plan`` (which plans one node of an
 *existing* objective) this stage **creates** the objective — so it takes no objective number and
 requires no GitHub auth up front (the later ``objective_save`` write is the first mutation).
 
 A **dedicated** command (in ``DEDICATED_STAGES``), not the generic registry launcher, so it can
-seed the authoring prompt. Mirrors ``objective_plan_cmd`` / ``implement_cmd``.
+seed the authoring prompt. Mirrors ``objective/plan_cmd`` / ``implement_cmd``.
 
 Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo). The judgment (what makes a good
 objective + roadmap) lives in the ``perk-objective-author`` skill.
 """
 
-import json
-
 import click
 
-from perk.cli.alias import alias
+from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_config, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
-from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
-
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 def _objective_author_stage() -> Stage:
     return next(s for s in load_registry().stages if s.id == "objective-author")
 
 
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
-
-
 def _seed_prompt() -> str:
     """The authoring-seed initial prompt for the read-only objective-author session."""
     return (
-        "You are running the perk objective-author flow.\n\n"
+        "You are running the perk objective author flow.\n\n"
         "You are authoring a NEW objective: a long-running goal that GENERATES bounded plans "
         "rather than being implemented directly. In short:\n"
         "  1. Clarify the goal with the user; explore the codebase read-only for design context. "
@@ -62,9 +49,8 @@ def _seed_prompt() -> str:
     )
 
 
-@alias("oauthor")
-@click.command("objective-author", context_settings={"ignore_unknown_options": True})
-@click.option("--worktree", help="Worktree to position (objective-author runs at repo root).")
+@click.command("author", context_settings={"ignore_unknown_options": True})
+@click.option("--worktree", help="Worktree to position (objective author runs at repo root).")
 @click.option("--dry-run", is_flag=True, help="Resolve + print; launch nothing.")
 @click.option(
     "--remote",
@@ -72,12 +58,12 @@ def _seed_prompt() -> str:
     default=None,
     is_flag=False,
     flag_value="",
-    help="Local (default) or a remote runner; objective-author is local-only (cold_remote:false).",
+    help="Local (default) or a remote runner; objective author is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def objective_author(
+def author_objective(
     ctx: click.Context,
     *,
     worktree: str | None,
@@ -90,8 +76,8 @@ def objective_author(
 
     \b
     Examples:
-      perk objective-author              # open a read-only authoring session
-      perk objective-author --dry-run    # resolve + print, launch nothing
+      perk objective author              # open a read-only authoring session
+      perk objective author --dry-run    # resolve + print, launch nothing
     """
     try:
         repo_root = require_repo(ctx)
@@ -100,7 +86,7 @@ def objective_author(
         # Reject --remote on this local-only stage before any launch (mirrors launch_stage).
         launch.resolve_target(stage, remote)
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
