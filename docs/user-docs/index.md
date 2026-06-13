@@ -21,5 +21,4 @@ gets its own directory, and every page belongs to exactly one.
 | [Reference](./reference/index.md) | `reference/` | you need to look up how something works — a command, a tool, a config key |
 | [Explanation](./explanation/index.md) | `explanation/` | you want to understand why perk is shaped the way it is |
 
-> **Status:** this tree is being populated; the roadmap lives in Objective
-> [#453](https://github.com/mattgiles/perk/issues/453).
+New to perk? Start with [Get started with perk](./tutorials/get-started.md).

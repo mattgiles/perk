@@ -47,6 +47,10 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   are historical records once written — reconcile via outcomes, don't rewrite history.
 - **Amend the contract, don't drift.** If an implementation changes cross-plane *behavior*, amend
   `shared/contracts.md` in the **same turn**.
+- **Update the user docs, don't drift.** A change to user-facing behavior — a command, an
+  in-session tool/door, a config key, a provider/backend — updates `docs/user-docs/` in the
+  **same turn**, in the matching Divio quadrant. The operator-facing mirror of "amend the
+  contract, don't drift."
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
   `setWidget`/`setFooter` are called only inside `extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`;
   everything else uses their seams (`report()`, `createPerkStatus`, `setStandingWidget`,

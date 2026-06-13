@@ -25,6 +25,5 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   with a small roadmap and drive its first node from plan to a merged PR, watching perk
   auto-mark the node done and reconcile the roadmap.
 
-> **Status:** more pages are added by later Objective
-> [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist.
+This quadrant is deliberately small — exactly two tutorials; everything else is a
+[how-to guide](../how-to/index.md).
