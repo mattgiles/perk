@@ -7,7 +7,8 @@ from click.testing import CliRunner
 
 from perk import github
 from perk.backends import issue_backend, issues
-from perk.cli.cli import cli
+from perk.cli.commands.plan.save_cmd import plan_save
+from perk.cli.context import PerkContext
 
 PLAN = "# My Feature\n\nDo the thing.\n"
 
@@ -57,13 +58,13 @@ def _run(monkeypatch, args, *, write_plan=True):
         _git_init(d)
         if write_plan:
             (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
-        return runner.invoke(cli, args)
+        return runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
 
 
 def test_plan_save_success(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md"])
     assert result.exit_code == 0
     assert "#123" in result.output
     assert calls["commented"] is True
@@ -72,7 +73,7 @@ def test_plan_save_success(monkeypatch):
 def test_plan_save_json_shape(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["success"] is True
@@ -95,7 +96,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md"])
+        result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
         ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
     assert ref == {
@@ -130,7 +131,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md"])
+        result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
         ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
     assert ref["provider"] == "linear"
@@ -152,7 +153,11 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md", "--objective-id", "7"])
+        result = runner.invoke(
+            plan_save,
+            ["--plan-file", "plan.md", "--objective-id", "7"],
+            obj=PerkContext(cwd=Path(d)),
+        )
         assert result.exit_code == 0, result.output
         ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
     assert "objective_id: '7'" in captured["body"]
@@ -175,7 +180,6 @@ def test_plan_save_node_id_commits_objective_node(monkeypatch):
     result = _run(
         monkeypatch,
         [
-            "plan-save",
             "--plan-file",
             "plan.md",
             "--objective-id",
@@ -213,7 +217,6 @@ def test_plan_save_node_link_failure_is_non_fatal(monkeypatch):
     result = _run(
         monkeypatch,
         [
-            "plan-save",
             "--plan-file",
             "plan.md",
             "--objective-id",
@@ -240,9 +243,7 @@ def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
         raise AssertionError("must not link a node without --node-id")
 
     monkeypatch.setattr(github, "update_objective_node", _boom)
-    result = _run(
-        monkeypatch, ["plan-save", "--plan-file", "plan.md", "--objective-id", "7", "--json"]
-    )
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--objective-id", "7", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["objective_node"] is None
 
@@ -258,7 +259,7 @@ def _run_with_handoff(monkeypatch, args, handoff, run_id="run-abc"):
         if handoff is not None:
             cache.write_handoff(Path(d), run_id, handoff)
         monkeypatch.setenv("PERK_RUN_ID", run_id)
-        return runner.invoke(cli, args)
+        return runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
 
 
 def test_plan_save_recovers_objective_link_from_handoff(monkeypatch):
@@ -278,7 +279,7 @@ def test_plan_save_recovers_objective_link_from_handoff(monkeypatch):
     monkeypatch.setattr(github, "update_objective_node", _update_node)
     result = _run_with_handoff(
         monkeypatch,
-        ["plan-save", "--plan-file", "plan.md", "--json"],
+        ["--plan-file", "plan.md", "--json"],
         {"stage": "objective-plan", "mode": "read-only", "objective_id": "63", "node_id": "1.1"},
     )
     assert result.exit_code == 0, result.output
@@ -309,7 +310,6 @@ def test_plan_save_explicit_flags_override_handoff(monkeypatch):
     result = _run_with_handoff(
         monkeypatch,
         [
-            "plan-save",
             "--plan-file",
             "plan.md",
             "--objective-id",
@@ -337,7 +337,7 @@ def test_plan_save_handoff_without_objective_is_unlinked(monkeypatch):
     monkeypatch.setattr(github, "update_objective_node", _boom)
     result = _run_with_handoff(
         monkeypatch,
-        ["plan-save", "--plan-file", "plan.md", "--json"],
+        ["--plan-file", "plan.md", "--json"],
         {"stage": "plan", "mode": "read-only"},
     )
     assert result.exit_code == 0, result.output
@@ -354,7 +354,7 @@ def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
     _stub_writes(monkeypatch)
     result = _run_with_handoff(
         monkeypatch,
-        ["plan-save", "--plan-file", "plan.md", "--json"],
+        ["--plan-file", "plan.md", "--json"],
         {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
     )
     assert result.exit_code == 0, result.output
@@ -368,7 +368,7 @@ def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
     _stub_writes(monkeypatch)
     result = _run_with_handoff(
         monkeypatch,
-        ["plan-save", "--plan-file", "plan.md", "--consumed-learn", "7,9", "--json"],
+        ["--plan-file", "plan.md", "--consumed-learn", "7,9", "--json"],
         {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
     )
     assert result.exit_code == 0, result.output
@@ -381,7 +381,7 @@ def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
     _stub_writes(monkeypatch)
     result = _run_with_handoff(
         monkeypatch,
-        ["plan-save", "--plan-file", "plan.md", "--json"],
+        ["--plan-file", "plan.md", "--json"],
         {"stage": "plan", "mode": "read-only"},
     )
     assert result.exit_code == 0, result.output
@@ -393,7 +393,11 @@ def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md", "--dry-run", "--json"])
+        result = runner.invoke(
+            plan_save,
+            ["--plan-file", "plan.md", "--dry-run", "--json"],
+            obj=PerkContext(cwd=Path(d)),
+        )
         assert result.exit_code == 0
         assert json.loads(result.stdout)["cached"] is False
         assert not (Path(d) / ".pi" / "workflow" / "plan-ref.json").exists()
@@ -403,14 +407,14 @@ def test_plan_save_unauthed_exit_1(monkeypatch):
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(False, None, (), "not logged in")
     )
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "github_unauthed"
 
 
 def test_plan_save_missing_plan_file_exit_1(monkeypatch):
     _authed(monkeypatch)
-    result = _run(monkeypatch, ["plan-save", "--json"], write_plan=False)
+    result = _run(monkeypatch, ["--json"], write_plan=False)
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "invalid_input"
 
@@ -421,7 +425,7 @@ def test_plan_save_empty_plan_file_exit_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         (Path(d) / "plan.md").write_text("   \n", encoding="utf-8")
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md"])
+        result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
     assert result.exit_code == 1
     assert "empty" in result.output
 
@@ -429,8 +433,10 @@ def test_plan_save_empty_plan_file_exit_1(monkeypatch):
 def test_plan_save_not_a_repo_exit_2(monkeypatch):
     _authed(monkeypatch)
     runner = CliRunner()
-    with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["plan-save", "--plan-file", "plan.md", "--json"])
+    with runner.isolated_filesystem() as d:  # no git init
+        result = runner.invoke(
+            plan_save, ["--plan-file", "plan.md", "--json"], obj=PerkContext(cwd=Path(d))
+        )
     assert result.exit_code == 2
     assert json.loads(result.stdout)["error_type"] == "not_a_repo"
 
@@ -442,7 +448,7 @@ def test_plan_save_dry_run_offline(monkeypatch):
         raise AssertionError("dry run must not shell gh")
 
     monkeypatch.setattr(github._exec, "_run", boom)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--dry-run"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--dry-run"])
     assert result.exit_code == 0
     assert "plan-header" in result.output and "plan-body" in result.output
 
@@ -455,7 +461,7 @@ def test_plan_save_github_error_exit_1(monkeypatch):
         raise github.GitHubError("403 forbidden")
 
     monkeypatch.setattr(github, "create_plan_issue", _boom)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "github_error"
 
@@ -463,7 +469,7 @@ def test_plan_save_github_error_exit_1(monkeypatch):
 def test_plan_save_resave_updates_in_place(monkeypatch):
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch, existed=True)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md"])
     assert result.exit_code == 0
     assert "Updated" in result.output
     assert calls["commented"] is False  # existing issue -> no add_issue_comment dup
@@ -486,7 +492,6 @@ def test_plan_save_resave_merges_header_fields(monkeypatch):
     result = _run(
         monkeypatch,
         [
-            "plan-save",
             "--plan-file",
             "plan.md",
             "--consumed-learn",
@@ -508,7 +513,7 @@ def test_plan_save_resave_without_header_fields_skips_update(monkeypatch):
     # no needless write, no clobber of a previously linked objective/learn set.
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch, existed=True)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md"])
     assert result.exit_code == 0
     assert calls["header"] is None
 
@@ -516,7 +521,7 @@ def test_plan_save_resave_without_header_fields_skips_update(monkeypatch):
 def test_plan_save_resave_json_reports_updated(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch, existed=True)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["updated"] is True
@@ -527,7 +532,7 @@ def test_plan_save_resave_json_reports_updated(monkeypatch):
 def test_plan_save_fresh_create_reports_not_updated(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
-    result = _run(monkeypatch, ["plan-save", "--plan-file", "plan.md", "--json"])
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     payload = json.loads(result.stdout)
     assert payload["updated"] is False
     assert payload["cached"] is True

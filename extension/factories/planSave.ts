@@ -1,6 +1,6 @@
 // P1.T3 — the warm `/plan-save` door (turn-3 §5/§6). The in-session twin of the Python cold
-// door (`perk plan-save`): a deterministic, terminating tool + command that WRAP T2's storage —
-// they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan-save --json` via
+// door (`perk plan save`): a deterministic, terminating tool + command that WRAP T2's storage —
+// they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan save --json` via
 // the shared cold-door client (`runColdDoor`, Node 1.4 — the plan markdown rides the run-scratch
 // stdin channel), then appends `active_plan_ref` so the live session is linked immediately
 // (strict read-back, idempotent, headless-safe). Failures are loud-but-non-fatal — never throw.
@@ -62,7 +62,7 @@ export interface PlanSaveOk {
   plan_source: PlanSource | null;
 }
 
-/** The atomic objective node→plan commit surfaced by `perk plan-save` (P2.T10). */
+/** The atomic objective node→plan commit surfaced by `perk plan save` (P2.T10). */
 export interface ObjectiveNodeLink {
   linked: boolean;
   node: string | null;
@@ -75,7 +75,7 @@ export type SaveResult = Result<PlanSaveOk>;
 export type PlanSaveDetails = SaveResult["details"];
 
 /**
- * The decoded `perk plan-save --json` payload slice the warm door consumes. Decode policy
+ * The decoded `perk plan save --json` payload slice the warm door consumes. Decode policy
  * (`docs/learned/workflow/cold-door-client.md`: strict iff appended to workflow-state): only
  * `plan_ref` is strict. The rendered `issue.id`/`url` are DERIVED from the strict ref — the cold
  * door constructs the ref from the issue (`pr_id == issue.id`, `url == issue.url`), so they are
@@ -129,7 +129,7 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
 }
 
 /**
- * Narrow the `perk plan-save --json` success payload. Strict ONLY on `plan_ref` (malformed →
+ * Narrow the `perk plan save --json` success payload. Strict ONLY on `plan_ref` (malformed →
  * bad_output — it is appended to workflow-state, where a half-formed ref would poison
  * `planRefsEqual`). The rendered issue id/url are derived from the strict ref instead of decoded
  * independently — the cold door builds the ref FROM the issue, so they are byte-identical by
@@ -284,7 +284,7 @@ export async function savePlan(
     }
   }
 
-  const args = ["plan-save", "--json"];
+  const args = ["plan", "save", "--json"];
   if (runId) args.push("--run-id", runId);
   // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
   if (title) args.push("--title", title);
@@ -301,7 +301,7 @@ export async function savePlan(
     args.push("--consumed-learn", opts.consumedLearn.join(","));
   }
   const r = await runColdDoor<PlanSavePayload>(pi, ctx, args, {
-    label: "perk plan-save",
+    label: "perk plan save",
     decode: decodePlanSave,
     stdin: { flag: "--plan-file", content: plan, filename: "plan.md" },
   });

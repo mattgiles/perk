@@ -26,8 +26,7 @@ import click
 
 from perk.backends import issues
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.alias import alias
-from perk.cli.commands.resume_cmd import parse_plan_id
+from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
@@ -99,7 +98,6 @@ def _seed_prompt(scratch_path: Path, plan_id: str, url: str) -> str:
     )
 
 
-@alias("rp")
 @click.command("replan", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
 @click.option("--worktree", help="Worktree to position (replan runs at repo root).")
@@ -129,8 +127,8 @@ def replan(
 
     \b
     Examples:
-      perk replan 42            # re-investigate + rewrite plan #42 in place
-      perk replan 42 --dry-run  # materialize the prior plan + print the seed, launch nothing
+      perk plan replan 42            # re-investigate + rewrite plan #42 in place
+      perk plan replan 42 --dry-run  # materialize the prior plan + print the seed, launch nothing
     """
     try:
         repo_root = require_repo(ctx)

@@ -90,7 +90,7 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["resume", "42", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["plan", "resume", "42", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["resumed_stage"] == "implement" and data["worktree"] == "plan-7"
@@ -111,7 +111,7 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["resume", "7"])
+        result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0
         assert launched["stage"] == "submit"  # PR open -> submit
         # the ref was materialized at the repo root for launch_stage to derive from
@@ -124,7 +124,7 @@ def test_nothing_to_resume_exits_0(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["resume", "7", "--json"])
+        result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 0
         assert json.loads(result.output)["resumed_stage"] is None
 
@@ -135,7 +135,7 @@ def test_plan_not_found_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["resume", "999", "--json"])
+        result = runner.invoke(cli, ["plan", "resume", "999", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "plan_not_found"
 
@@ -146,7 +146,7 @@ def test_invalid_plan_id_exits_1(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         # Ids are opaque strings now — only empty / path-unsafe ids are rejected up front.
-        result = runner.invoke(cli, ["resume", "bad/id", "--json"])
+        result = runner.invoke(cli, ["plan", "resume", "bad/id", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "invalid_input"
 
@@ -154,6 +154,6 @@ def test_invalid_plan_id_exits_1(monkeypatch):
 def test_not_a_repo_exits_2():
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["resume", "7", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["plan", "resume", "7", "--dry-run", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"

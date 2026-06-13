@@ -18,7 +18,7 @@ from perk.cli.commands.learn import learn_group
 from perk.cli.commands.objective import objective_group
 from perk.cli.commands.objective_author_cmd import objective_author
 from perk.cli.commands.objective_plan_cmd import objective_plan
-from perk.cli.commands.plan_save_cmd import plan_save
+from perk.cli.commands.plan import plan_group
 from perk.cli.commands.pr import (
     pr_address_command,
     pr_group,
@@ -27,8 +27,6 @@ from perk.cli.commands.pr import (
 )
 from perk.cli.commands.pr.ready_cmd import ready_pr
 from perk.cli.commands.registry import registry_group
-from perk.cli.commands.replan_cmd import replan
-from perk.cli.commands.resume_cmd import resume_cmd
 from perk.cli.commands.run_worker_cmd import run_worker_cmd
 from perk.cli.commands.state import state_group
 from perk.cli.commands.workflow import workflow_group
@@ -49,7 +47,11 @@ def cli(ctx: click.Context) -> None:
 
 
 cli.add_command(init_perk)
-register_with_aliases(cli, plan_save)
+cli.add_command(plan_group)
+# The `plan` group is hybrid (Node 3.2): bare `perk plan` default-dispatches to the hidden
+# plan-stage launcher, while `save` (merged launcher+worker under --json), `resume`, and `replan`
+# are registered verbs. `plan` + `save` are in DEDICATED_STAGES, so register_stage_commands skips
+# generating flat `perk plan` / `perk save` launchers.
 cli.add_command(pr_group)
 # Flat hot-path aliases (Objective #495 Node 3.3, §11.3): the SAME command objects registered at
 # the root under a flat name, so `perk submit` resolves to the merged `pr submit`, etc. `ready` is
@@ -63,7 +65,6 @@ cli.add_command(learn_group)
 # The `learn` group is hybrid (Node 2.2): bare `perk learn` default-dispatches to the hidden
 # stage launcher, while `capture` and `docs` are the cold workers. `docs` is a dedicated cold
 # door but NOT a registry stage (hop-2): it borrows the `plan` stage to launch.
-register_with_aliases(cli, resume_cmd)
 register_with_aliases(cli, implement)
 cli.add_command(doctor_group)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
@@ -75,11 +76,11 @@ register_with_aliases(cli, objective_author)
 register_with_aliases(cli, objective_plan)
 # objective-author + objective-plan are registered above; register_stage_commands skips them
 # (DEDICATED_STAGES).
-register_with_aliases(cli, replan)
 register_with_aliases(cli, workflow_group)
 cli.add_command(run_worker_cmd)
-# replan is likewise a dedicated cold door, not a registry stage: it borrows `plan` to re-launch
-# with the target plan's original run_id (in-place upsert), so DEDICATED_STAGES is unchanged.
+# `resume` and `replan` now live under the `plan` group (Node 3.2). `replan` is still a dedicated
+# cold door, not a registry stage: it borrows `plan` to re-launch with the target plan's original
+# run_id (in-place upsert).
 register_stage_commands(cli)
 
 

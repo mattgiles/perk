@@ -35,9 +35,6 @@ EXPECTED_ROOT_ALIASES = {
     "state": "st",
     "implement": "impl",
     "objective-plan": "oplan",
-    "resume": "res",
-    "replan": "rp",
-    "plan-save": "psave",
 }
 
 

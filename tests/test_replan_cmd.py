@@ -70,7 +70,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["success"] is True
@@ -93,7 +93,7 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "plan"  # borrows the plan stage
     assert launched["run_id_override"] == _RUN_ID  # re-enters the existing plan's run
@@ -110,7 +110,7 @@ def test_refuses_non_open_plan(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "plan_not_open"
 
@@ -121,7 +121,7 @@ def test_refuses_missing_plan(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "plan_not_found"
 
@@ -132,7 +132,7 @@ def test_refuses_plan_without_run_id(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "no_run_id"
 
@@ -143,7 +143,7 @@ def test_refuses_empty_body(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "no_plan_body"
 
@@ -154,7 +154,7 @@ def test_remote_blocked(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "42", "--remote", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "remote_blocked"
 
@@ -165,7 +165,7 @@ def test_invalid_plan_id_rejected(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "bad/id", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "bad/id", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "invalid_input"
 
@@ -176,7 +176,7 @@ def test_accepts_hash_prefixed_plan_id(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["replan", "#42", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "#42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["plan"] == "42"
 
@@ -184,6 +184,6 @@ def test_accepts_hash_prefixed_plan_id(monkeypatch):
 def test_not_a_repo_exit_2():
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["replan", "42", "--json"])
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 2
         assert json.loads(result.output)["error_type"] == "not_a_repo"

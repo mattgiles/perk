@@ -376,7 +376,8 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         payload = _invoke(
             runner,
             [
-                "plan-save",
+                "plan",
+                "save",
                 "--plan-file",
                 "plan.md",
                 "--run-id",
@@ -410,7 +411,8 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         payload = _invoke(
             runner,
             [
-                "plan-save",
+                "plan",
+                "save",
                 "--plan-file",
                 "plan.md",
                 "--run-id",
@@ -496,7 +498,8 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         payload = _invoke(
             runner,
             [
-                "plan-save",
+                "plan",
+                "save",
                 "--plan-file",
                 "docs-plan.md",
                 "--run-id",
@@ -601,7 +604,8 @@ def test_objective_run_resolves_in_flight_over_an_eng_backlink(
         _invoke(
             runner,
             [
-                "plan-save",
+                "plan",
+                "save",
                 "--plan-file",
                 "plan.md",
                 "--run-id",
@@ -633,7 +637,9 @@ def test_run_report_marker_upsert_is_idempotent_through_the_transcoder(
         root = Path(d)
         _scaffold_repo(root)
         (root / "plan.md").write_text(_PLAN_MD, encoding="utf-8")
-        _invoke(runner, ["plan-save", "--plan-file", "plan.md", "--run-id", "01PLANRUN", "--json"])
+        _invoke(
+            runner, ["plan", "save", "--plan-file", "plan.md", "--run-id", "01PLANRUN", "--json"]
+        )
         run_report.report_started(root, run_id="01RID", stage="implement", plan="ENG-1", environ={})
         run_report.report_terminal(
             root, run_id="01RID", stage="implement", plan="ENG-1", exit_code=0, environ={}
@@ -656,7 +662,9 @@ def test_foreign_linkback_comment_does_not_perturb_marker_scans(
         root = Path(d)
         _scaffold_repo(root)
         (root / "plan.md").write_text(_PLAN_MD, encoding="utf-8")
-        _invoke(runner, ["plan-save", "--plan-file", "plan.md", "--run-id", "01PLANRUN", "--json"])
+        _invoke(
+            runner, ["plan", "save", "--plan-file", "plan.md", "--run-id", "01PLANRUN", "--json"]
+        )
         # The Linear GitHub integration posts linkback comments on linked issues; perk's
         # marker-keyed scans must tolerate this foreign writer.
         ws.add_foreign_comment("ENG-1", "Linked to PR mattgiles/perk#51 by the GitHub sync.")

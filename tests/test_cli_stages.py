@@ -21,7 +21,6 @@ def test_all_stages_are_generated():
         "objective-save",
         "objective-plan",
         "plan",
-        "save",
         "implement",
         "submit",
         "address",
@@ -89,11 +88,46 @@ def test_learn_is_dedicated_hybrid_group(git_repo):
         assert "No such command" in gone.output
 
 
-def test_remote_door_blocked():
-    # plan is cold_remote:false (P2.T8c) -> local-only.
-    result = CliRunner().invoke(cli, ["plan", "--remote"], obj=_ctx(Path("/repo")))
-    assert result.exit_code == 1
-    assert "local-only" in result.output
+def test_plan_is_dedicated_hybrid_group(git_repo):
+    # Node 3.2: `plan` is a hand-written hybrid group mirroring `learn` — bare invocation
+    # default-dispatches to the hidden stage launcher; `save`/`resume`/`replan` are verbs.
+    from perk.cli.stages import DEDICATED_STAGES
+
+    assert "plan" in DEDICATED_STAGES
+
+    # Bare launcher preserved: a non-verb invocation falls through to the hidden launcher, with
+    # launcher options (--dry-run/--remote) surviving group-level parsing intact.
+    dry = CliRunner().invoke(cli, ["plan", "--dry-run"], obj=_ctx(git_repo))
+    assert dry.exit_code == 0, dry.output
+    assert "would launch stage 'plan'" in dry.output
+    # plan is cold_remote:false (P2.T8c) -> local-only, even through the hidden launcher.
+    remote = CliRunner().invoke(cli, ["plan", "--remote"], obj=_ctx(git_repo))
+    assert remote.exit_code == 1
+    assert "local-only" in remote.output
+
+    # `--help` renders the GROUP help (listing the verbs), not the launcher's.
+    helped = CliRunner().invoke(cli, ["plan", "--help"])
+    assert helped.exit_code == 0
+    assert all(v in helped.output for v in ("save", "resume", "replan"))
+
+    # The verbs resolve.
+    assert CliRunner().invoke(cli, ["plan", "save", "--help"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["plan", "resume", "--help"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["plan", "replan", "--help"]).exit_code == 0
+
+    # The old flat spellings (and their aliases) are gone with no back-compat alias.
+    for old in (
+        ["save"],
+        ["resume", "42"],
+        ["replan", "42"],
+        ["plan-save"],
+        ["psave"],
+        ["res"],
+        ["rp"],
+    ):
+        gone = CliRunner().invoke(cli, old)
+        assert gone.exit_code == 2, old
+        assert "No such command" in gone.output
 
 
 def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
@@ -120,11 +154,32 @@ def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
     assert payload["stage"] == "implement"
 
 
-def test_plan_local_dry_run_still_launches(git_repo):
-    # No --remote: the local path is unchanged (dry-run prints the launch plan, exits 0).
-    result = CliRunner().invoke(cli, ["plan", "--dry-run"], obj=_ctx(git_repo))
-    assert result.exit_code == 0
-    assert "would launch stage 'plan'" in result.output
+def test_plan_save_merged_launcher_default(git_repo):
+    # Node 3.2: `perk plan save` with NO --json hits the launcher half (a session), end-to-end
+    # through the registered `cli` (not an unregistered factory build).
+    (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # save reuses an existing worktree
+    result = CliRunner().invoke(
+        cli, ["plan", "save", "--worktree", "wt1", "--dry-run"], obj=_ctx(git_repo)
+    )
+    assert result.exit_code == 0, result.output
+    assert "would launch stage 'save'" in result.output
+
+
+def test_plan_save_merged_json_routes_to_worker(git_repo):
+    # Node 3.2: `perk plan save --json` routes to the deterministic worker (machine output).
+    import json
+
+    plan_file = git_repo / "plan.md"
+    plan_file.write_text("# A plan\n\nbody\n", encoding="utf-8")
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "save", "--json", "--dry-run", "--plan-file", str(plan_file)],
+        obj=_ctx(git_repo),
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["success"] is True
+    assert payload["dry_run"] is True
 
 
 def test_implement_requires_plan_ref():

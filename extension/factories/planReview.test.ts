@@ -769,7 +769,11 @@ test("execute: approved (bridge) -> auto-save runs, gate exits, result terminate
       {},
     );
     const argv = argvs[0] ?? [];
-    assert.equal(argv[0], "plan-save", "the cold door ran plan-save");
+    assert.deepEqual(
+      argv.slice(0, 2),
+      ["plan", "save"],
+      "the cold door ran the merged `perk plan save`",
+    );
     assert.ok(argv.includes("--json"), "json mode");
     assert.ok(argv.includes("--plan-file"), "the plan rode the stdin channel");
     assert.equal(result.terminate, true, "a saved approval terminates the turn");
