@@ -20,7 +20,7 @@ perk has no shared CLI package, so the whole (small) mechanism lives here:
 
 import os
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 import click
 
@@ -28,6 +28,18 @@ F = TypeVar("F", bound=click.Command)
 
 # Alias metadata is stashed on the Command object under this attribute.
 ALIAS_ATTR = "_perk_aliases"
+
+# Flat-alias bookkeeping is stashed on the root *group* object under this attribute (a set of the
+# flat names registered via ``register_flat_alias``). Per-group state on the root object — NOT a
+# module-level global — avoids cross-test leakage.
+FLAT_ALIAS_ATTR = "_perk_flat_aliases"
+
+# A per-command kind marker, stashed under this attribute and read by ``SectionedAliasGroup`` to
+# partition a group's help into sections.
+KIND_ATTR = "_perk_command_kind"
+
+# The fixed kind vocabulary (compared with ``==`` in ``SectionedAliasGroup.format_commands``).
+CommandKind = Literal["launcher", "worker"]
 
 
 def alias(*names: str) -> Callable[[F], F]:
@@ -64,6 +76,51 @@ def register_with_aliases(group: click.Group, cmd: click.Command, name: str | No
     group.add_command(cmd, name=cmd_name)
     for alias_name in get_aliases(cmd):
         group.add_command(cmd, name=alias_name)
+
+
+def register_flat_alias(
+    root: click.Group, subcommand: click.Command, flat_name: str | None = None
+) -> None:
+    """Register a group's ``subcommand`` at ``root`` under a flat name (e.g. ``perk submit``).
+
+    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.3 (the flat-top-level
+    alias). The same trick as ``register_with_aliases`` — the *same* ``Command`` object is added
+    under another name — but across the group→root boundary, so ``perk submit`` can later resolve
+    to ``perk pr submit``. Dormant in 2.1: no live flat alias is registered.
+
+    The flat name is recorded on the ``root`` group itself (``FLAT_ALIAS_ATTR``) so
+    ``SectionedGroup`` can route its row into the launcher section (D4). Per-group state on the
+    root object — not a module-level global — avoids cross-test leakage.
+    """
+    name = flat_name or subcommand.name
+    if name is None:
+        raise ValueError("register_flat_alias needs a flat_name when the subcommand is unnamed")
+    root.add_command(subcommand, name=name)
+    flat = getattr(root, FLAT_ALIAS_ATTR, None)
+    if flat is None:
+        flat = set()
+        setattr(root, FLAT_ALIAS_ATTR, flat)
+    flat.add(name)
+
+
+def get_flat_aliases(group: click.Group) -> set[str]:
+    """Return the flat-alias names registered on ``group`` (empty set when none)."""
+    return getattr(group, FLAT_ALIAS_ATTR, set())
+
+
+def mark_kind[C: click.Command](cmd: C, kind: CommandKind) -> C:
+    """Mark ``cmd`` as a ``"launcher"`` or ``"worker"`` (read by ``SectionedAliasGroup``).
+
+    **Objective #495 Node 2.1**; enables SSOT §11.7-Q5 (group-internal sectioned help). Mirrors
+    the ``alias``/``ALIAS_ATTR`` mechanism: a marker stashed on the ``Command`` object.
+    """
+    setattr(cmd, KIND_ATTR, kind)
+    return cmd
+
+
+def get_kind(cmd: click.Command) -> CommandKind | None:
+    """Return the kind marker on ``cmd`` (``None`` when unmarked)."""
+    return getattr(cmd, KIND_ATTR, None)
 
 
 # Root-group section taxonomy (curated, erk-faithful). Anything live but unlisted falls into
@@ -150,6 +207,7 @@ class SectionedGroup(AliasGroup):
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         alias_names = _collect_alias_names(self, ctx)
+        flat = get_flat_aliases(self)
         show_hidden = _show_hidden()
 
         launchers: list[tuple[str, click.Command]] = []
@@ -166,7 +224,11 @@ class SectionedGroup(AliasGroup):
                 if show_hidden:
                     hidden.append((name, cmd))
                 continue
-            if name in COMMAND_GROUPS:
+            if name in flat:
+                # Flat top-level aliases feed the existing launcher bucket (D4). Empty in 2.1 ⇒
+                # rendered output byte-identical.
+                launchers.append((name, cmd))
+            elif name in COMMAND_GROUPS:
                 groups.append((name, cmd))
             elif name in SETUP_HEALTH:
                 setup.append((name, cmd))
@@ -181,6 +243,48 @@ class SectionedGroup(AliasGroup):
             ("Setup & Health", setup),
             ("Other", other),
             ("Hidden", hidden),
+        ]
+        for label, bucket in sections:
+            if not bucket:
+                continue
+            with formatter.section(label):
+                formatter.write_dl(_section_rows(bucket, formatter))
+
+
+class SectionedAliasGroup(AliasGroup):
+    """An ``AliasGroup`` that partitions its ``--help`` into Launchers / Workers / Commands.
+
+    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.7-Q5 (group-internal
+    sectioned help). Commands marked via ``mark_kind`` render under their section: ``"launcher"``
+    → **Launchers**, ``"worker"`` → **Workers**; unmarked commands fall into a catch-all
+    **Commands** section (so an unmarked group renders exactly like ``AliasGroup``). Sections
+    render in order Launchers, Workers, Commands; empty sections are omitted. Dormant in 2.1: no
+    live group uses this — ``pr``/``objective``/etc. stay plain ``AliasGroup``.
+    """
+
+    def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        alias_names = _collect_alias_names(self, ctx)
+
+        launchers: list[tuple[str, click.Command]] = []
+        workers: list[tuple[str, click.Command]] = []
+        commands: list[tuple[str, click.Command]] = []
+
+        for name in self.list_commands(ctx):
+            cmd = self.get_command(ctx, name)
+            if cmd is None or cmd.hidden or name in alias_names:
+                continue
+            kind = get_kind(cmd)
+            if kind == "launcher":
+                launchers.append((name, cmd))
+            elif kind == "worker":
+                workers.append((name, cmd))
+            else:
+                commands.append((name, cmd))
+
+        sections: list[tuple[str, list[tuple[str, click.Command]]]] = [
+            ("Launchers", launchers),
+            ("Workers", workers),
+            ("Commands", commands),
         ]
         for label, bucket in sections:
             if not bucket:
