@@ -2,7 +2,7 @@
 
 T1 ships ``--version`` and a minimal, idempotent ``init``. Stage subcommands are
 generated from the stage registry (foundational #3) in a later turn; worktrees,
-launch, and ``doctor`` follow. See docs/phase-0-plan.md.
+launch, and ``doctor`` follow.
 """
 
 from pathlib import Path

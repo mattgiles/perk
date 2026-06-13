@@ -14,7 +14,7 @@ Pi-native, issue-canonical model gives it nothing to migrate. The value of this 
 ## Why perk has (almost) no migration surface
 
 erk was wired **into Claude Code**, so its entire workflow surface lived under `.claude/`
-(`.prior-art/erk/.claude/` contains `agents/`, `commands/`, `hooks/`, `settings.json`, `skills/`).
+(erk's `.claude/` contains `agents/`, `commands/`, `hooks/`, `settings.json`, `skills/`).
 perk is **Pi-native**: it lives entirely under `.pi/` and reads **nothing** from `.claude/` —
 verified by grepping `\.claude` across `perk/**/*.py`, which returns **no matches**.
 
@@ -34,17 +34,17 @@ components**". The audit therefore adopts nothing in code; where knowledge would
 
 | Surface | erk artifact (evidence) | perk's model today | Decision | Why |
 |---|---|---|---|---|
-| 1. Import draft-PR plans | `.prior-art/erk/packages/erk-shared/src/erk_shared/pr_store/` (`create_plan_draft_pr.py`, `planned_pr_lifecycle.py`, `planned_pr.py`, `conversion.py`, `backend.py`, `types.py`); `erk_shared/impl_folder.py` | Issue-canonical: `perk/plan.py` (metadata-block header/body) + `perk/cache.py` (`plan-ref.json` mirror) | **DROP** | No perk draft-PR artifacts ever existed; an external-erk import is a one-shot hand migration, not worth a drift-prone importer with no test corpus |
-| 2. Translate objective markers | `.prior-art/erk/src/erk/cli/commands/exec/scripts/migrate_objective_schema.py` (v2/v3→v4 converger); `erk_shared/gateway/github/metadata/roadmap.py` | `perk/objective.py`: `OBJECTIVE_SCHEMA_VERSION="1"`, writer emits latest (`render`), parser version-gates ("unsupported schema_version") | **ADOPTED (pattern) + DROP (migrator)** | The version-gating pattern is already in perk; no legacy perk objectives exist, so an in-place migrator is unneeded at v1 |
-| 3. Residual `.claude` references | `.prior-art/erk/.claude/settings.json` (hooks → `erk exec …`), `.claude/commands/erk/`, `.claude/agents/`, `.claude/hooks/`; artifact-sync (`src/erk/cli/commands/artifact/`) | Zero `.claude/` references in `perk/**/*.py`; only `.claude` here is `.gitignore`'s `/.claude/skills/` (the skills-tool runtime) | **DROP** (incl. rejected doctor check) | perk reads nothing from `.claude/`; inert artifacts are harmless; a standing advisory check wasn't judged worth the noise |
-| 4. Session import | `.prior-art/erk/src/erk/cli/commands/cc/session/` (`list_cmd.py`, `show_cmd.py`) reading `~/.claude/projects/` JSONL via `erk_shared.extraction.claude_code_session_store` | No Claude Code sessions exist in a Pi-native repo; the analogue is the unbuilt `docs/design/session-introspection.md` (a reader over **pi** session JSONL) | **DROP** (Claude import) + **DEFER** (Pi introspection) | Nothing to read; the Pi analogue is a separate, larger, loosely-coupled effort |
-| Adjacent: `erk artifact sync/check/list/show` | `.prior-art/erk/src/erk/cli/commands/artifact/` (`sync_cmd.py`, `check.py`, `list_cmd.py`, `show.py`) | `perk init` forward-converges into `.pi/` | **DROP** | No `.claude/` artifacts to sync; convergence is `init`'s job |
+| 1. Import draft-PR plans | erk's `packages/erk-shared/src/erk_shared/pr_store/` (`create_plan_draft_pr.py`, `planned_pr_lifecycle.py`, `planned_pr.py`, `conversion.py`, `backend.py`, `types.py`); `erk_shared/impl_folder.py` | Issue-canonical: `perk/plan.py` (metadata-block header/body) + `perk/cache.py` (`plan-ref.json` mirror) | **DROP** | No perk draft-PR artifacts ever existed; an external-erk import is a one-shot hand migration, not worth a drift-prone importer with no test corpus |
+| 2. Translate objective markers | erk's `src/erk/cli/commands/exec/scripts/migrate_objective_schema.py` (v2/v3→v4 converger); `erk_shared/gateway/github/metadata/roadmap.py` | `perk/objective.py`: `OBJECTIVE_SCHEMA_VERSION="1"`, writer emits latest (`render`), parser version-gates ("unsupported schema_version") | **ADOPTED (pattern) + DROP (migrator)** | The version-gating pattern is already in perk; no legacy perk objectives exist, so an in-place migrator is unneeded at v1 |
+| 3. Residual `.claude` references | erk's `.claude/settings.json` (hooks → `erk exec …`), `.claude/commands/erk/`, `.claude/agents/`, `.claude/hooks/`; artifact-sync (`src/erk/cli/commands/artifact/`) | Zero `.claude/` references in `perk/**/*.py`; only `.claude` here is `.gitignore`'s `/.claude/skills/` (the skills-tool runtime) | **DROP** (incl. rejected doctor check) | perk reads nothing from `.claude/`; inert artifacts are harmless; a standing advisory check wasn't judged worth the noise |
+| 4. Session import | erk's `src/erk/cli/commands/cc/session/` (`list_cmd.py`, `show_cmd.py`) reading `~/.claude/projects/` JSONL via `erk_shared.extraction.claude_code_session_store` | No Claude Code sessions exist in a Pi-native repo; the analogue is the unbuilt `docs/design/session-introspection.md` (a reader over **pi** session JSONL) | **DROP** (Claude import) + **DEFER** (Pi introspection) | Nothing to read; the Pi analogue is a separate, larger, loosely-coupled effort |
+| Adjacent: `erk artifact sync/check/list/show` | erk's `src/erk/cli/commands/artifact/` (`sync_cmd.py`, `check.py`, `list_cmd.py`, `show.py`) | `perk init` forward-converges into `.pi/` | **DROP** | No `.claude/` artifacts to sync; convergence is `init`'s job |
 | Adjacent: bootstrap-from-erk-repo | RESEARCH.md §1 ("inspect an existing erk repo and generate Pi config") — never built | `perk/init.py` forward-converges, has no erk-inspection (grep `\.erk\|bootstrap\|inspect` → no matches) | **DROP** | `init` is a forward-converging path, never an erk-importer |
 
 ## Surface 1 — Import draft-PR plans → issue-canonical
 
 **What erk does.** erk stored plans as **draft PRs**. The machinery lives in
-`.prior-art/erk/packages/erk-shared/src/erk_shared/pr_store/`: `create_plan_draft_pr.py` opens the
+erk's `packages/erk-shared/src/erk_shared/pr_store/`: `create_plan_draft_pr.py` opens the
 draft PR, `planned_pr_lifecycle.py` / `planned_pr.py` model its lifecycle, `conversion.py` converts
 between shapes, and `backend.py` / `types.py` carry the storage backend and types. An impl-folder
 surface (`erk_shared/impl_folder.py`) accompanied it. PRIOR_ART.md §2 records that erk itself moved
@@ -72,7 +72,7 @@ This knowledge is recorded here precisely so it is not lost despite no tool bein
 
 ## Surface 2 — Translate objective markers
 
-**What erk does.** `.prior-art/erk/src/erk/cli/commands/exec/scripts/migrate_objective_schema.py`
+**What erk does.** erk's `src/erk/cli/commands/exec/scripts/migrate_objective_schema.py`
 is an **in-place schema-version converger** (v2/v3 → v4 frontmatter), surfaced as
 `.claude/commands/erk/migrate-objective-schema.md`. erk's roadmap blocks carry a `schema_version`
 and are parsed by `erk_shared/gateway/github/metadata/roadmap.py`.
@@ -94,7 +94,7 @@ schema "2".
 **What erk does.** erk's `.claude/settings.json` registered Claude Code hooks
 (`UserPromptSubmit` / `PreToolUse` / `PostToolUse` → `erk exec …`; see RESEARCH.md §15), alongside
 `.claude/commands/erk/`, `.claude/agents/`, `.claude/hooks/`, and an artifact-sync surface
-(`.prior-art/erk/src/erk/cli/commands/artifact/`).
+(erk's `src/erk/cli/commands/artifact/`).
 
 **What perk has today.** **Zero** `.claude` references in perk's code (`grep \.claude perk/**/*.py`
 → no matches). The only `.claude` mention anywhere in this repo is `.gitignore`'s
@@ -112,7 +112,7 @@ This is recorded as considered-and-rejected, not silently omitted.
 
 ## Surface 4 — Session import
 
-**What erk does.** `.prior-art/erk/src/erk/cli/commands/cc/session/` (`list_cmd.py`,
+**What erk does.** erk's `src/erk/cli/commands/cc/session/` (`list_cmd.py`,
 `show_cmd.py`) reads Claude Code JSONL sessions from `~/.claude/projects/` via
 `erk_shared.extraction.claude_code_session_store` (a `ClaudeCodeSessionStore` ABC with `Real` /
 `Fake` implementations).
@@ -130,7 +130,7 @@ separate, larger, loosely-coupled effort tracked by its own design doc — link 
 
 Both adjacent surfaces are drops:
 
-- **`erk artifact sync/check/list/show`** (`.prior-art/erk/src/erk/cli/commands/artifact/` —
+- **`erk artifact sync/check/list/show`** (erk's `src/erk/cli/commands/artifact/` —
   `sync_cmd.py`, `check.py`, `list_cmd.py`, `show.py`) syncs `.claude/` artifacts from the
   installed erk package. perk manages its surface via `perk init`'s forward convergence into
   `.pi/`; there are no `.claude/` artifacts to sync. **DROP.**

@@ -1,16 +1,16 @@
 # erk Prior Art — Findings for perk
 
-A systematic reading of erk's learned-knowledge corpus (`.prior-art/erk/docs/learned/`),
+A systematic reading of erk's learned-knowledge corpus (the erk repo's `docs/learned/`),
 distilled to what matters for building perk. erk is a Python/Click CLI wired into Claude
 Code; perk is a Pi-native package. So this document keeps the **durable workflow model and
 hard-won lessons** and discards the **Python/gateway/Textual implementation detail** that
 will not port.
 
 How to read: each section states *what erk does*, *the lesson*, and *implications for
-perk* (the Pi mapping). Source files are under `.prior-art/erk/docs/learned/`.
+perk* (the Pi mapping). Source files are under the erk repo's `docs/learned/`.
 
 Companion docs: [RESEARCH.md](./RESEARCH.md) (architecture rationale),
-[ROADMAP.md](./ROADMAP.md) (phasing).
+ROADMAP.md (phasing).
 
 ---
 

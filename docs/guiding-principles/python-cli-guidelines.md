@@ -3,7 +3,7 @@
 perk's CLI — the session *exterior* (see [cli-vs-pi.md](./cli-vs-pi.md)) — is built with
 **[Click](https://click.palletsprojects.com/)**. These are the conventions every `perk`
 command follows. They are distilled from the erk prior-art
-(`.prior-art/erk/docs/learned/cli/*`, `.prior-art/erk/docs/learned/architecture/click-*`),
+(erk's `docs/learned/cli/*`, erk's `docs/learned/architecture/click-*`),
 which paid for them in production.
 
 > Status: **fully implemented + converged** (Objective #225). Live today: `perk/cli/`

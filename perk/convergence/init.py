@@ -2,7 +2,7 @@
 
 `init` is **declarative and convergent**: it edits files toward a desired state and
 is safe to re-run (re-running on a converged repo is a no-op). It owns *all* Pi
-wiring from the first turn (the init-spine principle, docs/phase-0-plan.md).
+wiring from the first turn (the init-spine principle).
 
 T1 scope: wire ``.pi/settings.json`` (perk's own extension + the borrowed default
 set), create the base ``.pi/workflow/`` dir, manage ``.gitignore``, and write a

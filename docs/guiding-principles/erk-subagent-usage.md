@@ -1,7 +1,7 @@
 # erk's use of subagents — findings and governing principles
 
 A systematic reading of the subagent-related learned docs in
-`.prior-art/erk/docs/learned/`. The goal is to extract the *governing principles* —
+the erk repo's `docs/learned/`. The goal is to extract the *governing principles* —
 when erk delegates to subagents, why, and how — so perk can port the **judgment**, not
 the Claude-Code-specific mechanism. A perk/Pi mapping closes the document (§11).
 

@@ -13,7 +13,7 @@ from perk.github import _exec, prs
 # `isResolved` or the `resolveReviewThread`/`addPullRequestReviewThreadReply` mutations), so these
 # ops shell `gh api graphql` (the lone exceptions to the REST-over-porcelain convention, alongside
 # `mark_pr_ready`). Discussion comments live on the issue and stay REST. The GraphQL shapes are
-# verbatim from erk (`.prior-art/erk/.../graphql_queries.py`), the durable prior art (§8.4).
+# verbatim from erk (its `.../graphql_queries.py`), the durable prior art (§8.4).
 #
 # Error model (§8.4): `get_pr_feedback` is a read that **raises** `GitHubError` on infra failure;
 # `resolve_review_threads` captures *per-item* failures into its result (so one bad thread does not

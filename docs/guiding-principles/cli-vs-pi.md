@@ -3,7 +3,7 @@
 How responsibilities split between the **`perk` CLI** (a Python command-line tool, the
 spiritual successor to `erk`) and the **Pi extension** (TypeScript, loaded into a running
 `pi` session). This is a foundational architecture decision; everything in
-[ROADMAP.md](./ROADMAP.md) is built on top of it.
+ROADMAP.md is built on top of it.
 
 See [PRIOR_ART.md](./PRIOR_ART.md) for the erk learnings this is derived from, and
 [RESEARCH.md](./RESEARCH.md) for the Pi-native rationale.

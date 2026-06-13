@@ -5,9 +5,7 @@ A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the ses
 **perk bootstraps itself**.
 
 > perk is in active development, dogfooded on its own repo. **Using perk on your own repo?**
-> Start at [`docs/user-docs/`](docs/user-docs/index.md). The phased build plan and dogfood
-> gates live in [docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans in
-> [docs/planning/](docs/planning/).
+> Start at [`docs/user-docs/`](docs/user-docs/index.md).
 
 ## What perk is
 
@@ -66,10 +64,7 @@ Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** 
 (retiring `@tombell/pi-plan`, P2.T2a) **and** implement-progress checkpoints (retiring
 `@juicesharp/rpiv-todo`, P2.T12). The surviving borrows are `@tombell/pi-diff` and the
 `pi-subagents` **engine** (behind perk's thin seam — perk
-owns the agent definitions). **Phase 3** adds the headless worker + queue (autonomy). The phasing,
-dogfood gates, and locked decisions live in [docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans (and
-the [Phase-1](docs/planning/phase-1-gate.md) / [Phase-2](docs/planning/phase-2-gate.md) gate
-records) live in [docs/planning/](docs/planning/).
+owns the agent definitions). **Phase 3** adds the headless worker + queue (autonomy).
 
 ## Layout
 
@@ -77,7 +72,7 @@ records) live in [docs/planning/](docs/planning/).
 - `extension/` — the TypeScript Pi extension (the session interior).
 - `shared/` — cross-plane contracts (the stage registry + specs), bundled into both build
   artifacts.
-- `docs/` — research, roadmap, and per-turn plans.
+- `docs/` — research inputs, design notes, and durable learnings.
 
 ## Develop
 
