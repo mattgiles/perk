@@ -61,6 +61,30 @@ def test_wheel_bundles_shared(tmp_path):
     assert expected <= names, expected - names
 
 
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+def test_wheel_bundles_agents(tmp_path):
+    # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
+    # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs.
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    wheels = list(tmp_path.glob("*.whl"))
+    assert len(wheels) == 1, wheels
+    with zipfile.ZipFile(wheels[0]) as zf:
+        names = set(zf.namelist())
+    expected = {
+        "perk/_agents/pr-reviewer.md",
+        "perk/_agents/review-classifier.md",
+        "perk/_agents/objective-explorer.md",
+    }
+    assert expected <= names, expected - names
+
+
 @pytest.mark.skipif(shutil.which("npm") is None, reason="npm not on PATH")
 def test_npm_pack_lists_shipped_and_excludes_dev():
     result = subprocess.run(
@@ -85,6 +109,8 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths
     assert not any(p.endswith(".test.ts") for p in paths), paths
+    # Agent defs are delivered by the Python plane only — never via the npm tarball.
+    assert not any(p.startswith("agents/") for p in paths), paths
 
 
 def test_skills_shipped():

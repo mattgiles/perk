@@ -758,23 +758,25 @@ def _linear_checks(root: Path) -> list[Check]:
 def _subagent_engine_check(root: Path) -> Check:
     """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
 
-    Enumerates the committed perk-owned agent defs (`.pi/agents/*.md`) for the detail — package/dir
-    drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and `subagent-agents`
-    (`.pi/agents/`). Status `ok` keeps a healthy repo's summary clean; the detail carries the
-    honesty note that the live-spawn smoke is a Phase-3 deferral.
+    Enumerates the perk-owned agent defs delivered into `.pi/agents/perk/*.md` for the detail —
+    package/dir drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and
+    `subagent-agents` (which materializes + drift-repairs `.pi/agents/perk/`). Status `ok` keeps a
+    healthy repo's summary clean; the detail carries the honesty note that the live-spawn smoke is a
+    Phase-3 deferral.
     """
-    agents_dir = root / ".pi" / "agents"
-    names = sorted(p.stem for p in agents_dir.glob("*.md")) if agents_dir.is_dir() else []
+    perk_dir = root / ".pi" / "agents" / "perk"
+    names = sorted(p.stem for p in perk_dir.glob("*.md")) if perk_dir.is_dir() else []
     listing = ", ".join(f"perk.{n}" for n in names) if names else "(none)"
     return Check(
         "subagent-engine",
         "package",
         "ok",
         "borrowed pi-subagents engine + perk-owned agent defs",
-        "presence owned by settings-wiring; defs dir owned by subagent-agents; "
-        "perk agents are namespaced (package: perk) and invoked by explicit perk.* name; "
-        f"committed defs: {listing}; legacy .agents/skills/*/SKILL.md surface as stray agents "
-        "(benign — never invoked); the live-spawn smoke is deferred to Phase 3 `doctor workflow`.",
+        "presence owned by settings-wiring; defs delivered into .pi/agents/perk/ by init "
+        "(subagent-agents convergence); perk agents are namespaced (package: perk) and invoked "
+        f"by explicit perk.* name; delivered defs: {listing}; legacy .agents/skills/*/SKILL.md "
+        "surface as stray agents (benign — never invoked); the live-spawn smoke is deferred to "
+        "Phase 3 `doctor workflow`.",
     )
 
 

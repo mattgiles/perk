@@ -31,8 +31,13 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:pi-web-access" in packages  # borrowed web-research engine (#250)
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
-    # P2.T6: perk-owned agent-definitions home (committed; T7 populates it).
+    # perk-owned agent-definitions home (committed `.gitkeep`).
     assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
+    # perk's three agent defs are delivered into the perk-owned `.pi/agents/perk/` subdir.
+    from perk.convergence.init import PERK_AGENTS
+
+    for name in PERK_AGENTS:
+        assert (tmp_path / ".pi" / "agents" / "perk" / f"{name}.md").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
     assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
