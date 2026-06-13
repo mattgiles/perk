@@ -952,9 +952,18 @@ session's history never biases the review.
 - **No workflow-state record (deferral).** There is no parent-side tool turn (the child posts), so
   no `last_review_batch`-style record is written; the PR comment is the canonical record. A richer
   in-session record is a future enhancement.
-- **Agent-def delivery (deferral).** `pr-reviewer.md` is hand-committed in perk's `.pi/agents/`
-  (matching `review-classifier.md`/`objective-explorer.md`); delivering perk agent defs to *consumer*
-  repos remains the pre-existing gap, out of scope here.
+- **Agent-def delivery.** perk's agent **sources** live at top-level `agents/<name>.md` (no leading
+  dot, so pi never discovers them in the source tree) and are bundled into the wheel as `perk/_agents`
+  (hatchling `force-include`) + the sdist `only-include`. `perk init` materializes them into the
+  consumer-owned **`.pi/agents/perk/`** subdir as a **committed managed convergence** (the
+  `subagent-agents` capability): each `<name>.md` is written byte-for-byte from its source, strays
+  inside `perk/` are pruned, and drift is `doctor --fix`-repaired. The agent frontmatter (`name`,
+  `package: perk`, …) is unchanged, so the runtime names stay `perk.*` and the spawn sites need no
+  edits. perk owns ONLY the `.pi/agents/perk/` subdir — **custom user agents** live at
+  `.pi/agents/<name>.md` (top-level or any non-`perk/` subdir), set their model/tools in frontmatter,
+  and are invoked via pi's native `subagent` tool (the fixed-key `[subagents]` table configures only
+  perk's own three agents). Linked worktrees inherit the delivered defs via git checkout (no worktree
+  mirror).
 
 - **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
   workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a

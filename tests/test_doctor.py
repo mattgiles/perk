@@ -355,13 +355,31 @@ def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypat
 
 def test_subagent_engine_signal_and_defs_dir(git_repo):
     # P2.T6: the constant informational pointer is `ok`, and the defs-dir convergence is `ok`
-    # on a freshly-converged repo.
+    # on a freshly-converged repo. The informational detail lists the delivered defs.
     _scaffold(git_repo)
     report = run_doctor(git_repo, verify=False)
     engine = next(c for c in report.checks if c.name == "subagent-engine")
     assert engine.status == "ok" and engine.group == "package"
+    assert "perk.pr-reviewer" in engine.detail  # delivered defs enumerated from .pi/agents/perk/
     defs = next(c for c in report.checks if c.name == "subagent-agents")
     assert defs.status == "ok"
+
+
+def test_edited_delivered_def_reports_drift_and_is_fixed(git_repo):
+    # Hand-editing a delivered `.pi/agents/perk/*.md` makes the `subagent-agents` convergence
+    # report drift; `--fix` rewrites it byte-for-byte from the bundled source.
+    from perk import _resources
+    from perk.convergence.init import PERK_AGENTS
+
+    _scaffold(git_repo)
+    name = PERK_AGENTS[0]
+    delivered = git_repo / ".pi" / "agents" / "perk" / f"{name}.md"
+    delivered.write_text("hand-edited\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    assert "subagent-agents" in {c.name for c in report.checks if c.status == "fail"}
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    assert delivered.read_bytes() == (_resources.agents_dir() / f"{name}.md").read_bytes()
 
 
 def test_missing_agents_dir_is_fail_only_on_owning_check(git_repo):
