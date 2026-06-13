@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering), pi project-trust on ephemeral worktrees, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -71,6 +71,49 @@ It already gates `_materialize_plan_body` — reuse it rather than enumerating s
 none` stages (objective-author/save/plan, plan, save) run in `repo_root`; create/reuse stages run in a
 fresh `plan-<id>` worktree.
 
+## Worktree positioning must mirror `.agents/skills/` (#467)
+
+A session launched in a **linked worktree** (`stage.worktree` create/reuse —
+implement/submit/address/land/learn) sees **zero skills** unless the cold door mirrors them at
+positioning time. Two compounding root causes:
+
+1. `.agents/skills/` is **gitignored** (the `skills managed runtime artifacts` block), so
+   `git worktree add` — which checks out only *tracked* files — never carries it. A fresh worktree's
+   `.agents/` has only the tracked `manifest.yaml`/`manifest.d/`.
+2. pi discovers `.agents/skills/` in cwd + ancestors **only up to the git repo root** (pi
+   `docs/skills.md`), and a linked worktree **is its own git root** — so pi never ascends to the
+   main repo's skills. The dangling skill-binding warnings (`bindingDelivery.ts` pointer fallback)
+   are a *symptom* of this, not a separate bug.
+
+**The fix shape:** `materialize_skills(repo_root, worktree)` in `perk/run/launch.py` mirrors
+`materialize_plan_body`, wired into `launch_stage`'s `if stage.worktree != "none":` block **right
+after `materialize_plan_body`** (after the `dry_run` early return, before `os.chdir`/`os.execvpe`).
+It creates **per-skill symlinks** — one per entry of `repo_root/.agents/skills/*` — each pointing at
+`entry.resolve()` (single-hop straight to the real cache dir, avoiding a symlink-to-symlink chain).
+This delivers ALL skills (perk's own + borrowed).
+
+**Rejected alternatives (settled with the user):**
+
+- **A single top-level `skills/` dir symlink** — avoided so there's zero risk of pi declining to
+  follow a symlinked discovery *root*; per-skill links keep each target a real directory.
+- **`skills update --sync` in the worktree** — re-clones sources into the worktree's own
+  `.agents/cache`; needs network, heavy.
+- **`perk init` per launch** — heavy: GitHub checks, config convergence, network re-clone.
+
+**Posture:** loud-but-non-fatal + idempotent (D4 resume). A missing/empty `repo_root/.agents/skills/`
+(perk init never ran) warns via `user_output` and continues — the launch is **never** blocked
+(doctor's fail-level `skills-delivery` check stays the hard gate for the main repo). Idempotency:
+an already-correct symlink is left untouched, a **stale** symlink is repointed, and a **real
+(non-symlink) entry already present is never clobbered** (skip on `link.exists()` after the
+`is_symlink()` branch).
+
+**Scope boundary — local cold-launch only.** `run_worker.position_worktree` (remote CI) positions
+into `repo_root` itself (worktree == repo_root), so mirroring would be a self-referential no-op —
+the CI setup action owns skills delivery there. **No TS change:** `bindingDelivery.ts` already reads
+`.agents/skills` from `ctx.cwd` (the worktree) and resolves automatically once mirrored. (No
+`.claude/skills` mirror — pi reads `.agents/skills`.) See `workflow/skill-bindings.md` for the
+delivery side and `pi/extension-api.md` for the git-root skill-discovery boundary.
+
 ## The headless worker is NOT subject to this seam
 
 `perk run-worker` spawns `node` against the worker entry and builds its session without pi-CLI arg
@@ -129,3 +172,5 @@ because the stderr note lands in the combined stream.
 - `perk/cli/commands/objective_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`
+- `docs/learned/workflow/skill-bindings.md` — the skill-delivery subsystem the worktree mirror feeds
+- `docs/learned/pi/extension-api.md` — pi's git-root skill-discovery boundary

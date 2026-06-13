@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, or hitting a config value that silently vanishes.
+read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
 ---
 
 # Adding a `perk.toml` config table
@@ -67,6 +67,67 @@ settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser +
 `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
 the **"local overlay is ignored"** case — it's the whole point of the shape.
 
+## Change-scoped CI gating: the `[[ci]]` glob convention (#490)
+
+Each `[[ci]]` row may carry an optional `glob`; when present, the check is **skipped** unless a
+changed file matches it. The cross-cutting facts below are what the `ciExecutor.ts` /
+`parseCiChecks` code can't tell you on its own.
+
+### The basename glob convention (a reconciled rule)
+
+The glob→regex translation distinguishes `**` (→ `.*`, crosses `/`) from `*` (→ `[^/]*`, stays
+within a path segment), but the **anchoring** is the subtle part. The rule perk actually ships is
+the **gitignore/fnmatch convention**:
+
+- A **slash-free** pattern matches the path's **basename at any depth** — `glob = "*.py"` matches
+  `a/b/c.py`, not just a top-level `c.py`.
+- A pattern **containing `/`** matches the **full repo-relative path**.
+
+This was a reconciliation, not the plan's literal mechanism. The plan specified `*` → `[^/]*` over a
+**top-level-anchored** full path (`^…$`) *and* specified perk's own config as `glob = "*.py"` with a
+test expecting `*.py` to match `a/b/c.py`. Those contradict: `^[^/]*\.py$` does **not** match
+`a/b/c.py`, so a top-level-anchored `*.py` would silently false-skip Python checks whenever
+`perk/foo.py` changed (the repo has no top-level `.py`) — defeating the whole feature. **Lesson:**
+when a plan's stated mechanism contradicts its own examples/config, the examples + the feature's
+purpose win — implement what makes the feature correct and reconcile via a well-known convention,
+not the literal-but-broken rule.
+
+### The skip-result shape
+
+A skipped check does **not** execute its command: its `CiCheckResult` is `{skipped:true,
+passed:true, exitCode:0, shown:"", …}`. Two non-obvious points:
+
+- **Skips never fail** — an all-skip run is `passed:true`.
+- `renderCiProse` needs the glob for its `⊘ name (skipped — no changed files match <glob>)` line, so
+  the skipped result carries an **extra optional `glob?` field purely for the prose**. Don't smuggle
+  the glob through `shown` (which must stay `""`).
+
+### Run-all-only gating discipline (never skip on uncertainty)
+
+The gating only applies to a *run-all* invocation, and the git work is computed defensively:
+
+- Compute `changedFiles` **once**, and **only** when some selected row is actually globbed (no git
+  work otherwise).
+- An explicit `only` check **always runs** — no glob gate, no git work.
+- `changed === null` (any git error → fail-open) **runs everything** — never skip on uncertainty,
+  never a false success. `changedFiles` is merge-base vs detected trunk ∪ untracked, and trunk
+  detection probes both `main`/`master`, so default-branch-name uncertainty is harmless.
+
+### The harness limitation (where to put gating tests)
+
+The registered `run_ci` **tool** path calls `runCiImpl` with prod `piExec` only — there is **no
+injectable `exec`**, so a harness test cannot inject a fake git/exec through the tool. End-to-end
+gating coverage therefore needs EITHER a **real git repo** (init + a branch + a docs-only commit to
+prove a real skip) OR the **fail-open path** (a non-git scaffold cwd → git errors → check still
+runs). Deterministic injected-exec gating lives instead at the `runCiChecks` **unit layer**.
+
+### Plumbing boundary: Python never reads `[ci]`
+
+`[[ci]]` is a **TS-only** concern — no Python plumbing reads it (init only scaffolds a commented
+`[[ci]]` example in `PERK_TOML_TEMPLATE`). To make the globs gate per-toolchain, the **justfile
+split** `lint`/`typecheck`/`test` into per-language recipes (`-py`/`-js`) with aggregates retained,
+so a `glob = "*.py"` row can run only the Python toolchain.
+
 ## Two consumption models
 
 - **Interior gate (`[trust]`).** Consumed at runtime by a TS gate — `decideCiScope` in
@@ -120,8 +181,8 @@ interior-only.
 
 ## Cross-references
 
-- `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser)
-- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate)
+- `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser); `parseCiChecks` (`[[ci]]` → `CiCheck[]`)
+- `extension/doors/ciExecutor.ts` — `decideCiScope` (the `[trust]` interior gate); `changedFiles`/`matchesGlob`/skip plumbing (the `[[ci]]` glob gating)
 - `perk/substrate/config.py` — `parse_compaction_table`, `load_committed_compaction`,
   `load_committed_issues_backend` (the committed-only reads)
 - `perk/convergence/init.py` — `_converge_settings` / `_converge_compaction` composition

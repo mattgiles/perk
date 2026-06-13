@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
 ---
 
 # Biome / tsc gotchas
@@ -21,6 +21,25 @@ rules are general.
 - **`noUselessUndefinedInitialization` → `noImplicitAnyLet` (the `let x = undefined` trap chain).**
   Biome rewrites `let x = undefined` to `let x;`, which then trips `noImplicitAnyLet`. Resolve by
   giving an explicit type instead of an initializer: e.g. `let model: Model<Api> | undefined;`.
+
+## `noControlCharactersInRegex` rejects a sentinel placeholder — single-pass alternation instead
+
+Translating a glob to a regex, the obvious two-stage approach is to first protect `**` (a
+multi-segment wildcard) from the single-`*` rule by replacing it with a sentinel, then translate the
+remaining `*`, then restore the sentinel. **Anti-pattern:** a control-character sentinel like `\^@`
+(`\x00`) trips Biome's `noControlCharactersInRegex` the moment it lands in a regex literal.
+
+The clean fix is a **single-pass alternation replace** that handles both wildcards in one go, with
+the **two-star alternative ordered first** so the single-star rule never clobbers it — no sentinel
+needed (allowed as an explicitly-marked example):
+
+```ts
+escaped.replace(/\\\*\\\*|\\\*/g, (m) => (m === "\\*\\*" ? ".*" : "[^/]*"));
+```
+
+Generalize: when a two-pass rewrite tempts you toward a placeholder, a single alternation with the
+longer pattern listed first does the same job without a sentinel (and without the control-char
+lint).
 
 ## Node 22 type-stripping rejects TS parameter properties
 
@@ -85,3 +104,4 @@ Always run `npx biome check --write extension` to apply import sorting alongside
 - `docs/learned/toolchain/ruff.md` — the Python-side check-vs-format split
 - `docs/learned/toolchain/worktree-node-modules.md` — why tsc/tests can use a stale SDK in a worktree
 - `docs/learned/toolchain/ts-module-moves.md` — the two-commit mv+sweep recipe whose audits hit the import reorder
+- `docs/learned/workflow/config-tables.md` — the `[[ci]]` glob convention this regex translates
