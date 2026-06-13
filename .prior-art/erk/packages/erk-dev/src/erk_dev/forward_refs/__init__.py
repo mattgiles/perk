@@ -1,1 +1,0 @@
-"""Forward reference detection utilities."""

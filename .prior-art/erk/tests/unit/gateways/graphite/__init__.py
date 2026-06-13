@@ -1,1 +1,0 @@
-# Graphite gateway unit tests
