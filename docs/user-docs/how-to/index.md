@@ -47,3 +47,10 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an
   installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override.
+
+### Providers & backends
+
+- [How to select a plan or todo provider](./select-a-provider.md) — point the `[providers]` table
+  at a supported plan-authoring or todo provider, then converge and validate.
+- [How to switch the issue backend to Linear](./switch-to-linear.md) — move the canonical issue
+  store from GitHub to Linear (auth, labels, what changes).

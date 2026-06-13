@@ -94,8 +94,9 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | `todo` | string | `perk-checkpoints` | The checkpoint/todo provider. |
 
 An absent key falls back to the behavior-preserving default. This is **config-key reference depth
-only**; provider-selection mechanics (the supported set, switching, caveats) are documented by
-Objective [#453](https://github.com/mattgiles/perk/issues/453) Node 4.2.
+only**; the supported provider set, postures, and selection mechanics are in the
+[providers & issue backends reference](./providers-and-backends.md), and the recipe is
+[How to select a plan or todo provider](../how-to/select-a-provider.md).
 
 ```toml
 [providers]
@@ -114,8 +115,10 @@ Where canonical plan / learn / objective issues live. **Committed-only** — rea
 | `team` | string | _(none)_ | The Linear team key (e.g. `"ENG"`); required when `backend = "linear"`. |
 
 Selecting `linear` also requires the `LINEAR_API_KEY` environment variable (a personal API key —
-never stored in config). This is **config-key reference depth only**; the Linear backend switch
-how-to (auth, labels, caveats) is Node 4.2.
+never stored in config). This is **config-key reference depth only**; the Linear backend reference
+(auth, labels, identifiers, maturity) is in the
+[providers & issue backends reference](./providers-and-backends.md#issue-backend--linear-reference),
+and the recipe is [How to switch the issue backend to Linear](../how-to/switch-to-linear.md).
 
 ```toml
 [issues]
@@ -229,9 +232,10 @@ plane and stay **native ints** (`reserve_tokens = 16384`).
 - [How to attach your own skill to a stage or command](../how-to/attach-a-skill-to-a-stage.md) —
   the `[[bindings]]` recipe.
 - [How to run CI checks in a session](../how-to/run-ci-in-session.md) — the `[ci]` recipe.
-- Provider selection and the Linear issue-backend switch get a dedicated how-to in Objective
-  [#453](https://github.com/mattgiles/perk/issues/453) Node 4.2; this page documents their config
-  keys only.
+- [Providers & issue backends](./providers-and-backends.md) — the supported provider set and the
+  Linear backend reference; this page documents their config keys only.
+- [How to select a plan or todo provider](../how-to/select-a-provider.md) /
+  [How to switch the issue backend to Linear](../how-to/switch-to-linear.md) — the selection recipes.
 
 ---
 
