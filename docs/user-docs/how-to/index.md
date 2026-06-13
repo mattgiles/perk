@@ -26,7 +26,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
 - [How to run CI checks in a session](./run-ci-in-session.md) — run the project's configured
-  `[ci]` checks and read results in-session.
+  `[[ci]]` checks and read results in-session.
 - [How to recover a dirty worktree](./recover-a-dirty-worktree.md) — get unblocked when
   uncommitted changes are in the way.
 - [How to work with implementation checkpoints](./work-with-checkpoints.md) — track step-by-step

@@ -83,7 +83,8 @@ entry that nothing else reaches into (C4). perk's checkpoints are the behavior-p
 `extension/ciExecutor.ts` `registerCiExecutor`, the `run_ci` tool + `/ci` command +
 `--allow-project-ci`) and a behavior-preserving default exists (C1, C3 pass). But it is **already
 config-pluggable** via the `[ci]` named-checks map in `.pi/perk.toml` — projects already swap *what
-runs* without a provider boundary — and its `CiReport` is an internal, loop-bound shape rather than a
+runs* without a provider boundary <!-- #490: `[ci]` is now a `[[ci]]` array-of-tables
+(name/command/optional glob); the config-pluggable conclusion is unchanged. --> — and its `CiReport` is an internal, loop-bound shape rather than a
 stable swap contract (C2 weak). Decisively, it is **tightly bound to the parent's
 Run→Report→Fix→Verify loop and the T4 handoff contract** (C4 fails): a foreign "CI provider" would
 have to re-implement that coupling for no added value. **Not a seam worth building.**
@@ -140,8 +141,8 @@ exercised against an actual foreign implementation (Nodes 2.3 / 3.2), not a hypo
 
 The **other five surfaces are explicitly out of scope**, each with its disqualifying criterion:
 
-- **CI executor** — already config-pluggable via `[ci]`; tightly bound to the parent loop (C4). No
-  foreign-provider value.
+- **CI executor** — already config-pluggable via `[ci]` (a `[[ci]]` array-of-tables since #490);
+  tightly bound to the parent loop (C4). No foreign-provider value.
 - **address loop** — GitHub-API-shaped contract (C2), no behavior-preserving default (C3), "act" is
   irreducible parent judgment (C4).
 - **objectives** — it *is* perk's differentiator (C3); deeply coupled through plan-ref + reconcile

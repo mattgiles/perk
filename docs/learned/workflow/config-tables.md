@@ -14,9 +14,15 @@ the two models, not either table in isolation.
 ## Placement: own `[section]` vs a sub-key
 
 A sibling key under an existing table is silently mis-parsed when that table is consumed *wholesale*.
-`loadPerkConfig` consumes the entire `[ci]` table as the named-checks map, so a `[ci] trust = …`
+`loadPerkConfig` consumed the entire `[ci]` table as the named-checks map, so a `[ci] trust = …`
 sub-key would have been swallowed as a (bogus) named check. Trust therefore had to be its own
 `[trust]` section:
+
+> **Update (#490):** `[ci]` migrated from a `name = "command"` **map** to a `[[ci]]`
+> **array-of-tables** (each row `name`/`command`/optional `glob`), parsed by `parseCiChecks` into
+> `CiCheck[]`. The wholesale-map collision footgun above **no longer applies** under
+> array-of-tables (a `trust` key would just be an ignored row field) — but the placement decision
+> (trust as its own `[trust]` section) stands and is now also the cleaner shape.
 
 ```toml
 [trust]

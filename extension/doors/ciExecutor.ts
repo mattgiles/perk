@@ -29,14 +29,11 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ensureRunScratch, scratchDir } from "../substrate/cache.ts";
-import { loadPerkConfig } from "../substrate/config.ts";
+import { type CiCheck, loadPerkConfig } from "../substrate/config.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { capForModel, DEFAULT_MODEL_VISIBLE_CAP } from "../worker/readOnlySession.ts";
-
-/** A named-checks map: `name -> shell command` (the whole `[ci]` config section). */
-export type CiChecks = Record<string, string>;
 
 /** The result of running one configured check. `passed = exitCode === 0`. */
 export interface CiCheckResult {
@@ -44,6 +41,14 @@ export interface CiCheckResult {
   command: string;
   exitCode: number;
   passed: boolean;
+  /**
+   * True when the check was NOT executed because its `glob` matched no changed file (vs trunk) on
+   * the run-all path. A skipped result is `passed:true, exitCode:0, shown:"", scratchPath:null`,
+   * carrying its `glob` for the prose line.
+   */
+  skipped?: boolean;
+  /** The check's declared glob (present only on a skipped result, for the rendered reason). */
+  glob?: string;
   /** The capped, model-visible output (route-don't-relay — the full output lives in scratch). */
   shown: string;
   scratchPath: string | null;
@@ -173,9 +178,92 @@ export async function runOneCheck(
   };
 }
 
+/**
+ * Compute the set of files changed vs the repo's trunk (merge-base diff ∪ untracked), reusing the
+ * injectable `CiExec` so git goes through the same offline-testable seam. Mirrors
+ * `perk/substrate/git.py::detect_trunk_branch` for trunk detection.
+ *
+ * **Fail-open sentinel:** any non-zero git exit or throw returns `null` ("unknown") — the caller
+ * then runs ALL checks (never skip on uncertainty, never a false success). Repo-relative POSIX
+ * paths; the returned set is empty (not null) only when git succeeds and reports no changes.
+ */
+export async function changedFiles(
+  cwd: string,
+  exec: CiExec,
+  signal?: AbortSignal,
+): Promise<Set<string> | null> {
+  const run = (command: string) => exec(command, { cwd, signal });
+  try {
+    // (1) Detect trunk: origin/HEAD symbolic-ref → strip prefix; else main/master; else "main".
+    let trunk = "main";
+    const head = await run("git symbolic-ref refs/remotes/origin/HEAD");
+    const prefix = "refs/remotes/origin/";
+    if (head.code === 0 && head.output.trim().startsWith(prefix)) {
+      trunk = head.output.trim().slice(prefix.length);
+    } else {
+      let found = false;
+      for (const candidate of ["main", "master"]) {
+        const ref = await run(`git show-ref --verify --quiet refs/heads/${candidate}`);
+        if (ref.code === 0) {
+          trunk = candidate;
+          found = true;
+          break;
+        }
+      }
+      if (!found) trunk = "main";
+    }
+
+    // (2) merge-base <trunk> HEAD.
+    const mergeBase = await run(`git merge-base ${trunk} HEAD`);
+    if (mergeBase.code !== 0) return null;
+    const base = mergeBase.output.trim();
+    if (!base) return null;
+
+    // (3) changed = diff(base) ∪ untracked.
+    const diff = await run(`git diff --name-only ${base}`);
+    if (diff.code !== 0) return null;
+    const untracked = await run("git ls-files --others --exclude-standard");
+    if (untracked.code !== 0) return null;
+
+    const files = new Set<string>();
+    for (const block of [diff.output, untracked.output]) {
+      for (const line of block.split(/\r?\n/)) {
+        const path = line.trim();
+        if (path) files.add(path);
+      }
+    }
+    return files;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Dependency-free glob match. `glob` is a single comma-separated pattern string; the path matches
+ * iff it matches ANY pattern. Each pattern is translated to an anchored RegExp: regex metachars
+ * escaped, then `**` → `.*` (crosses directories) and `*` → `[^/]*` (one segment). A slash-free
+ * pattern is matched against the path's BASENAME (so `*.py` gates any `.py` at any depth, the
+ * gitignore/fnmatch rule); a pattern containing `/` is matched against the full repo-relative
+ * POSIX path.
+ */
+export function matchesGlob(path: string, glob: string): boolean {
+  for (const raw of glob.split(",")) {
+    const pattern = raw.trim();
+    if (!pattern) continue;
+    // Escape regex metachars, including `*` (restored below to glob semantics).
+    const escaped = pattern.replace(/[.+^${}()|[\]\\*]/g, "\\$&");
+    // Restore glob stars in one pass (so the single-`*` rule never clobbers a `**`): the escaped
+    // forms are `\*\*` (→ `.*`, crosses dirs) and `\*` (→ `[^/]*`, one segment).
+    const body = escaped.replace(/\\\*\\\*|\\\*/g, (m) => (m === "\\*\\*" ? ".*" : "[^/]*"));
+    const subject = pattern.includes("/") ? path : (path.split("/").pop() ?? path);
+    if (new RegExp(`^${body}$`).test(subject)) return true;
+  }
+  return false;
+}
+
 export interface RunCiChecksOpts {
   cwd: string;
-  checks: CiChecks;
+  checks: CiCheck[];
   only?: string;
   runId?: string;
   cap?: number;
@@ -186,18 +274,43 @@ export interface RunCiChecksDeps {
   exec: CiExec;
 }
 
+/** A skipped-check result: not executed because its glob matched no changed file (vs trunk). */
+function skippedResult(check: CiCheck): CiCheckResult {
+  return {
+    name: check.name,
+    command: check.command,
+    exitCode: 0,
+    passed: true,
+    skipped: true,
+    ...(check.glob ? { glob: check.glob } : {}),
+    shown: "",
+    scratchPath: null,
+    bytesTotal: 0,
+    bytesShown: 0,
+    truncated: false,
+  };
+}
+
 /**
  * Run the selected check (or all in declared order when `only` is omitted) and report every
  * result. Empty checks ⇒ inert/non-fatal `no_checks_configured`; an unknown `only` name ⇒ an
  * actionable `unknown_check` listing the available names (back-pressure, not a silent failure).
  * Does NOT stop at the first failure. `passed = checks.every(c => c.passed)`.
+ *
+ * **Change-scoped gating (run-all path only).** When any selected check declares a `glob`, the
+ * changed-file set (vs trunk) is computed ONCE and each globbed check is skipped when no changed
+ * file matches (a `passed:true` skip — never a failure). A check with no `glob` always runs; an
+ * explicit `only` always runs (no glob gate, no git work); a fail-open `null` changed-set (git
+ * error) runs everything (never skip on uncertainty). No git work happens when no row is globbed.
  */
 export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps): Promise<CiReport> {
-  const names = Object.keys(opts.checks);
-  if (names.length === 0) {
+  const checks = opts.checks;
+  if (checks.length === 0) {
     return { ok: true, passed: true, checks: [], error_type: "no_checks_configured" };
   }
-  if (opts.only !== undefined && !(opts.only in opts.checks)) {
+  const names = checks.map((c) => c.name);
+  const only = opts.only !== undefined ? checks.find((c) => c.name === opts.only) : undefined;
+  if (opts.only !== undefined && !only) {
     return {
       ok: false,
       passed: false,
@@ -208,15 +321,36 @@ export async function runCiChecks(opts: RunCiChecksOpts, deps: RunCiChecksDeps):
   }
 
   const cap = opts.cap ?? DEFAULT_MODEL_VISIBLE_CAP;
-  const selected = opts.only !== undefined ? [opts.only] : names;
-  const checks: CiCheckResult[] = [];
-  for (const name of selected) {
-    const command = opts.checks[name] ?? "";
-    checks.push(
-      await runOneCheck(opts.cwd, opts.runId, name, command, cap, deps.exec, opts.signal),
+  // Explicit `only` always runs (no gating, no git work); else the full ordered set, with gating.
+  const selected = only ? [only] : checks;
+  const gate = !only && selected.some((c) => c.glob);
+  const changed = gate ? await changedFiles(opts.cwd, deps.exec, opts.signal) : null;
+
+  const results: CiCheckResult[] = [];
+  for (const check of selected) {
+    // Skip a globbed check only when we KNOW the changed set (changed !== null) and nothing matches.
+    if (
+      !only &&
+      check.glob &&
+      changed !== null &&
+      ![...changed].some((f) => matchesGlob(f, check.glob as string))
+    ) {
+      results.push(skippedResult(check));
+      continue;
+    }
+    results.push(
+      await runOneCheck(
+        opts.cwd,
+        opts.runId,
+        check.name,
+        check.command,
+        cap,
+        deps.exec,
+        opts.signal,
+      ),
     );
   }
-  return { ok: true, passed: checks.every((c) => c.passed), checks };
+  return { ok: true, passed: results.every((c) => c.passed), checks: results };
 }
 
 /**
@@ -233,7 +367,7 @@ export function renderCiProse(report: CiReport): string {
     );
   }
   if (report.error_type === "no_checks_configured") {
-    return "No CI checks configured ([ci] in .pi/perk.toml is empty). Nothing to run.";
+    return "No CI checks configured ([[ci]] in .pi/perk.toml is empty). Nothing to run.";
   }
   if (report.error_type === "unknown_check") {
     return `perk CI: ${report.error}`;
@@ -243,7 +377,11 @@ export function renderCiProse(report: CiReport): string {
   const allPassed = report.passed;
   lines.push(allPassed ? "perk CI: all checks passed." : "perk CI: failures detected.");
   for (const c of report.checks) {
-    lines.push(c.passed ? `✓ ${c.name}` : `✗ ${c.name} (exit ${c.exitCode})`);
+    if (c.skipped) {
+      lines.push(`⊘ ${c.name} (skipped — no changed files match ${c.glob ?? "glob"})`);
+    } else {
+      lines.push(c.passed ? `✓ ${c.name}` : `✗ ${c.name} (exit ${c.exitCode})`);
+    }
   }
   for (const c of report.checks) {
     if (c.passed) continue;
@@ -305,7 +443,7 @@ async function runCiImpl(
   deps: RunCiDeps = {},
 ): Promise<CiResult> {
   const cfg = loadPerkConfig(ctx.cwd);
-  const checks: CiChecks = cfg.ci ?? {};
+  const checks: CiCheck[] = cfg.ci;
   const wrap = (report: CiReport): CiResult => ({
     content: [{ type: "text", text: renderCiProse(report) }],
     details: report,
@@ -314,7 +452,7 @@ async function runCiImpl(
   const runId = rebuildWorkflowState(branchOf(ctx)).run_id;
 
   // Scope gate only matters when there is something to run.
-  if (Object.keys(checks).length > 0) {
+  if (checks.length > 0) {
     const decideScope = deps.decideScope ?? decideCiScope;
     const allowFlag = pi.getFlag("allow-project-ci") === true;
     const trusted = cfg.trust.ci === true;
@@ -335,9 +473,7 @@ async function runCiImpl(
     }
 
     if (scope === "confirm") {
-      const list = Object.entries(checks)
-        .map(([name, command]) => `  ${name}: ${command}`)
-        .join("\n");
+      const list = checks.map((c) => `  ${c.name}: ${c.command}`).join("\n");
       const yes = await ctx.ui.confirm(
         "Run project CI checks?",
         `These project-supplied commands will run with full shell access:\n${list}`,

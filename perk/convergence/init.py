@@ -173,8 +173,24 @@ root = ".worktrees"
 # review-classifier = "anthropic/claude-haiku-4-5"
 # objective-explorer = "anthropic/claude-haiku-4-5"
 
+# CI checks (optional) — named checks the `run_ci` tool / `/ci` command run and
+# REPORT pass/fail (they never edit or fix). Each [[ci]] row is name/command plus
+# an optional `glob` (a comma-separated pattern string); a check with a `glob` is
+# SKIPPED on the run-all path when no changed file (vs the repo's trunk) matches
+# it — so a docs-only change reports success fast. A row without `glob` always
+# runs. Project-supplied CI is untrusted by default (see [trust] below).
+#
+# [[ci]]
+# name = "lint"
+# command = "just lint"
+# glob = "*.py,*.ts"
+#
+# [[ci]]
+# name = "test"
+# command = "just test"
+
 # Trust (optional) — declare parts of this repo trusted so perk skips a safety
-# prompt. With `ci = "true"`, the [ci] checks above run WITHOUT a per-session
+# prompt. With `ci = "true"`, the [[ci]] checks above run WITHOUT a per-session
 # confirm (and headless runs need no --allow-project-ci). Leave it unset for
 # cloned/untrusted repos. Value is a quoted string. The table may grow later.
 #
