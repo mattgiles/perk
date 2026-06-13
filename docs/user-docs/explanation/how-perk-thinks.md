@@ -178,9 +178,9 @@ exact flags and outputs for these belong to the command reference, not to this p
 A required word on maturity: this remote/headless surface is the **newest and least-proven**
 part of perk. The runner artifact and the worker entrypoint are wired and declaratively
 complete — the pieces are in place — but their live, end-to-end execution is not yet fully
-proven. Treat it as **emerging rather than battle-tested**. The dedicated headless documentation
-is where the operational depth and the current caveats will live as that surface matures; this
-page is just placing it correctly in the mental model.
+proven. Treat it as **emerging rather than battle-tested**. For the operational depth and the current
+maturity caveats, see [Headless and remote: how it works, and how proven it is](./headless-and-remote.md);
+this page just places the surface in the mental model.
 
 ## Why this shape
 
