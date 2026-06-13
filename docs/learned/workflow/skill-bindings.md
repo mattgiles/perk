@@ -1,6 +1,6 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, or debugging double-delivered / missing binding context.
+read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), or debugging double-delivered / missing binding context.
 ---
 
 # Skill bindings
@@ -79,6 +79,16 @@ Two delivery-surface boundaries that held:
   `perk/substrate/binding_delivery.py`, keeping `perk/substrate/bindings.py` a pure model/resolver. Resolver `issues` +
   delivery `warnings` are **returned, never raised**, and surfaced loud-but-non-fatal: a missing
   transclude target degrades to the nudge pointer with a warning, never blocking a launch.
+
+## Linked-worktree delivery depends on the cold door mirroring `.agents/skills/`
+
+Both delivery doors read `.agents/skills/<name>/SKILL.md` from the **session cwd** (the worktree),
+but a linked worktree's `.agents/skills/` is empty unless the cold door **mirrors it during launch
+positioning** — `.agents/skills/` is gitignored (so `git worktree add` never carries it) and pi only
+discovers skills up to the worktree's own git root. A dangling-binding warning in a worktree session
+is the **symptom** of a missing mirror, not a config error. The mirror mechanism
+(`materialize_skills` in `launch_stage`, per-skill single-hop symlinks, loud-but-non-fatal +
+idempotent) lives in `workflow/cold-door-launch.md`.
 
 ## Skills `references:` frontmatter + subdirectory routing needs no wiring
 
@@ -194,3 +204,4 @@ checks *capability* coverage, not an enumerated group set, so a free-form group 
 - `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the
   pre-sync `is_skill_installed` fallback)
 - `docs/learned/pi/subagents.md` — `/pr-review` (`command:pr-review`), the concrete `command:<id>` binding instance
+- `docs/learned/workflow/cold-door-launch.md` — the worktree `.agents/skills/` mirror (`materialize_skills`)
