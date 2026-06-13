@@ -55,6 +55,7 @@ symbol, contract §-refs) follow the table.
 |---|---|---|---|---|---|
 | **plan** | ✅ authoring surface | ✅ `cache.plan-ref` (§8.4) | ✅ perk planMode/planSave | ✅ consumers read only the ref | **Candidate (primary)** |
 | **todo** | ✅ implement-progress overlay | ✅ `perk:checkpoint` + `## Steps`/`[DONE:n]` vocab | ✅ perk checkpoints | ✅ dedicated entry, inert-by-default | **Candidate (primary)** |
+| **askuser** | ✅ `ask_user_question` tool | ✅ **interface seam** — tool *name* + non-terminating-answer semantics (no durable artifact) | ✅ perk's own tool is the default | ✅ model just continues its turn with the answer | **Candidate (interface seam)** |
 | CI executor | ✅ Run→Report oracle | ⚠️ `CiReport` internal, loop-bound | ✅ exists | ❌ tightly bound to parent loop + handoff | **Not** — already config-pluggable via `[ci]`; no foreign-provider value |
 | address loop | ✅ classify-then-act | ❌ GitHub-API-shaped, not an internal artifact | ❌ no behavior-preserving foreign default | ❌ "act" = irreducible parent judgment | **Not** |
 | objectives | ✅ goal-as-plan-factory | ⚠️ GitHub-issue + DependencyGraph | ❌ it *is* perk's differentiator | ❌ threads through plan-ref + reconcile | **Not** (core, not seam) |
@@ -97,6 +98,22 @@ behavior-preserving foreign default** for it (C3 fails), and the "act" half is *
 judgment** — the three never-delegate boundaries — which cannot be handed to a provider (C4 fails).
 **Not a seam.**
 
+**askuser — Candidate (interface seam).** askuser owns one coherent, nameable tool surface: the
+`ask_user_question` tool (`extension/doors/askUser.ts` `registerAskUser`) that lets a model ask the
+human a clarifying question mid-turn and continue with the answer. It passes all four criteria, but
+C2 is satisfied as an **interface seam** rather than an artifact seam: ask-user produces **no**
+durable state key or session-entry vocabulary (no `cache.plan-ref`/`perk:checkpoint` analogue). Its
+stable contract is instead the **tool name `ask_user_question` + its non-terminating-answer
+semantics** — a downstream model calls that name and continues its turn (C4: nothing reaches into
+ask-user internals). perk's own tool is the behavior-preserving default (C3); the foreign
+`@juicesharp/rpiv-ask-user-question` multi-question dialog is strictly opt-in. Because the foreign
+tool shares the **exact** name `ask_user_question` and tools (unlike commands) are not `:N`-suffixed
+(they replace/warn by load order), the adapter is **vacate-only**: under a foreign selection perk's
+`registerAskUser` registers nothing at registration time (`adapter: null` in `providers.yaml`, no
+shim, no injected context — the foreign tool self-documents via its own `promptGuidelines`). This
+**extends** the original two-seam scope fence below (which remains the #115 historical record); it
+does not contradict it.
+
 **objectives — Not (core, not seam).** A coherent surface (the goal-as-plan-factory:
 `extension/objective.ts`, `objectivePlan.ts`, `objectiveAuthor.ts`, `objectiveSave.ts` over the
 deterministic `perk/objective.py` `DependencyGraph`), but it is **deeply coupled** to GitHub-issue
@@ -134,6 +151,13 @@ own borrow-then-retire history**:
   keep-wrap-vs-own decision).
 - **todo** ↔ `@juicesharp/rpiv-todo` — the checklist overlay surviving `/reload` and compaction,
   retired **P2.T12** in favor of the perk-owned `perk:checkpoint` seam.
+
+> **Post-#115 extension — the `askuser` interface seam.** A third seam, **`askuser`**
+> (`ask_user_question` ↔ `@juicesharp/rpiv-ask-user-question`), was added after #115. It is an
+> **interface seam** (its contract is the tool *name* + non-terminating-answer semantics, with no
+> durable artifact), so it sits slightly outside the artifact-seam framing this fence was authored
+> around — see the **askuser** analysis above. This note records that the fence **grew** to three
+> seams; the two-seam framing below remains the #115 historical record.
 
 Those two foreign packages are real surfaces perk has already swapped against — the **empirical
 reason** plan and todo are the validatable seams: the provider machinery built for #115 can be

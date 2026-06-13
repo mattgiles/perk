@@ -15,7 +15,7 @@
 # Vocabulary — each provider entry:
 #   id      — the stable provider id; for the `plan` seam it is exactly the
 #             cache.plan-ref `provider` string (provider-contract.md dimension 1).
-#   seam    — `plan` | `todo` (the two seams pluggability-taxonomy.md scope-fenced).
+#   seam    — `plan` | `todo` | `askuser` (the three seams pluggability-taxonomy.md scope-fenced).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
 #             provider (nothing to add — perk produces the contract natively).
@@ -34,8 +34,8 @@
 # name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
 # loaders. The Python plane is the authoritative validator.
 #
-# Status (Node 2.1 → 3.2): this file ships the substrate (the two reference entries +
-# foreign entries per seam), and BOTH seams now have a REAL foreign provider. The PLAN
+# Status (Node 2.1 → 3.2): this file ships the substrate (the three reference entries +
+# foreign entries per seam), and ALL THREE seams now have a REAL foreign provider. The PLAN
 # adapter landed at Node 2.3: `tombell-plan` is a REAL, selectable plan provider —
 # `planAdapterTombell` bridges `@tombell/pi-plan`'s free-form prose surface to perk's
 # canonical `plan_save` → `cache.plan-ref` contract, and perk VACATES the plan surface at
@@ -46,7 +46,16 @@
 # `@juicesharp/rpiv-todo`'s checklist overlay (injection-only, active-workflow-gated), and
 # perk's own checkpoints simply DEFER at runtime (Node 3.1) — NO registration-time vacating,
 # because the todo seam has no command-name collision (`/checkpoints` vs the overlay's own
-# command). The DEFAULT path (both reference providers) is the hard guarantee.
+# command). The DEFAULT path (the reference providers) is the hard guarantee.
+#
+# The ASKUSER seam is an INTERFACE seam (no durable artifact to bridge): its stable contract is
+# the tool NAME `ask_user_question` plus its non-terminating-answer semantics. `juicesharp-ask-user`
+# (`@juicesharp/rpiv-ask-user-question`) registers a tool with the IDENTICAL name, and tools
+# (unlike commands) do NOT get `:N` suffixes — a same-named tool replaces/warns by extension load
+# order. So the adapter is VACATE-ONLY (`adapter: null`, no shim, no injected context): under a
+# foreign askuser selection perk's `registerAskUser` registers NOTHING at REGISTRATION time,
+# leaving exactly one `ask_user_question` standing. Under the default (`perk-ask-user`) the foreign
+# package is never installed, so perk's tool is the sole registrant.
 
 schema_version: 1
 
@@ -61,6 +70,11 @@ providers:
     package: null
     adapter: null
     default: true            # the behavior-preserving no-config pick for the todo seam
+  - id: perk-ask-user        # perk's own ask_user_question tool (extension/doors/askUser.ts)
+    seam: askuser
+    package: null
+    adapter: null
+    default: true            # the behavior-preserving no-config pick for the askuser seam
 
   # --- foreign entries ---
   - id: tombell-plan         # REAL plan provider (Node 2.3) — planAdapterTombell bridges it
@@ -93,3 +107,14 @@ providers:
     # No `package_filter`: `@juicesharp/rpiv-todo` is a single-concern checklist overlay, so omitting
     # the filter ("load all of that type") loads its bundled extension. The smoke's manual half is the
     # gate that no perk surface collides; a targeted `extensions` filter is a follow-up if one ever does.
+  - id: juicesharp-ask-user  # REAL askuser provider — VACATE-ONLY (interface seam, no adapter)
+    seam: askuser
+    package: "npm:@juicesharp/rpiv-ask-user-question"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: the foreign tool shares the exact name `ask_user_question`,
+                             # so perk's `registerAskUser` registers NOTHING under this selection —
+                             # there is no durable artifact to bridge (interface seam), and the
+                             # foreign tool self-documents via its own `promptGuidelines`.
+    default: false
+    # No `package_filter`: the verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
+    # filter ("load all of that type") loads exactly that one extension — the same reasoning as the
+    # tombell-plan / juicesharp-todo entries.

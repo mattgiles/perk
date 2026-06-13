@@ -2,11 +2,18 @@
 // a pure core over an injected fake UI (no network, no real dialogs). See askUser.ts.
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { scaffoldRepo } from "../testing/harness.ts";
 import {
   type AskUserUI,
   decodeAskUserParams,
+  isPerkAskUserReferenceSelected,
   OTHER_CHOICE,
+  registerAskUser,
+  resolvedAskUserProviderId,
   runAskUserQuestion,
 } from "./askUser.ts";
 
@@ -175,4 +182,72 @@ test("decodeAskUserParams: valid options pass through (select path preserved)", 
     question: "Pick",
     options: ["A", "B"],
   });
+});
+
+// --- askuser interface seam: registration-time vacating ------------------------------------
+
+/** A minimal fake `pi` that records every `registerTool` call by name (the only API used). */
+function recordingPi(): { pi: ExtensionAPI; toolNames: string[] } {
+  const toolNames: string[] = [];
+  const pi = {
+    registerTool(tool: { name: string }) {
+      toolNames.push(tool.name);
+    },
+  } as unknown as ExtensionAPI;
+  return { pi, toolNames };
+}
+
+test("resolvedAskUserProviderId: default repo resolves to perk-ask-user (reference selected)", () => {
+  const cwd = scaffoldRepo();
+  assert.equal(resolvedAskUserProviderId(cwd), "perk-ask-user");
+  assert.equal(isPerkAskUserReferenceSelected(cwd), true);
+});
+
+test("resolvedAskUserProviderId: a foreign askuser selection resolves to juicesharp-ask-user", () => {
+  const cwd = scaffoldRepo();
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "perk.toml"),
+    '[providers]\naskuser = "juicesharp-ask-user"\n',
+    "utf8",
+  );
+  assert.equal(resolvedAskUserProviderId(cwd), "juicesharp-ask-user");
+  assert.equal(isPerkAskUserReferenceSelected(cwd), false);
+});
+
+test("registerAskUser: default repo registers the ask_user_question tool (zero behavior change)", () => {
+  const cwd = scaffoldRepo();
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    const { pi, toolNames } = recordingPi();
+    registerAskUser(pi);
+    assert.deepEqual(toolNames, ["ask_user_question"]);
+  } finally {
+    process.chdir(savedCwd);
+  }
+});
+
+test("registerAskUser: a foreign askuser selection vacates (registers NO tool)", () => {
+  const cwd = scaffoldRepo();
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".pi", "perk.toml"),
+    '[providers]\naskuser = "juicesharp-ask-user"\n',
+    "utf8",
+  );
+  // Factory-time `process.cwd()` resolution mirrors registerPlanMode — point cwd at the scaffold.
+  const savedCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    const { pi, toolNames } = recordingPi();
+    registerAskUser(pi);
+    assert.deepEqual(
+      toolNames,
+      [],
+      "perk registers no ask_user_question under a foreign selection",
+    );
+  } finally {
+    process.chdir(savedCwd);
+  }
 });

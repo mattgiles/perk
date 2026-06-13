@@ -9,6 +9,7 @@ Negative fixtures use a GOOD constant + per-test single-line mutation (mirroring
 import pytest
 
 from perk.substrate.providers import (
+    SEAMS,
     Provider,
     ProvidersError,
     ProviderSet,
@@ -32,7 +33,16 @@ providers:
     package: null
     adapter: null
     default: true
+  - id: perk-ask-user
+    seam: askuser
+    package: null
+    adapter: null
+    default: true
 """
+
+
+def test_seams_tuple_includes_askuser():
+    assert SEAMS == ("plan", "todo", "askuser")
 
 
 def _write(tmp_path, text):
@@ -50,16 +60,28 @@ def _messages(tmp_path, text):
 # --- load (real bundled file) ---------------------------------------------------------------
 
 
-def test_real_providers_load_the_five_entries():
+def test_real_providers_load_the_entries():
     providers = load_providers()
     by_id = providers.by_id()
     assert set(by_id) == {
         "perk-plan",
         "perk-checkpoints",
+        "perk-ask-user",
         "tombell-plan",
         "plannotator-plan",
         "juicesharp-todo",
+        "juicesharp-ask-user",
     }
+    # askuser reference: perk's own tool (behavior-preserving default, no package/adapter).
+    ask = by_id["perk-ask-user"]
+    assert (ask.seam, ask.package, ask.adapter, ask.default) == ("askuser", None, None, True)
+    # juicesharp-ask-user: VACATE-ONLY interface seam (adapter null, no package_filter).
+    juice_ask = by_id["juicesharp-ask-user"]
+    assert juice_ask.seam == "askuser"
+    assert juice_ask.package == "npm:@juicesharp/rpiv-ask-user-question"
+    assert juice_ask.adapter is None
+    assert juice_ask.default is False
+    assert juice_ask.package_filter is None
     plan = by_id["perk-plan"]
     assert (plan.seam, plan.package, plan.adapter, plan.default) == ("plan", None, None, True)
     tombell = by_id["tombell-plan"]
@@ -97,8 +119,10 @@ def test_default_for_returns_the_seam_default():
     providers = load_providers()
     plan = providers.default_for("plan")
     todo = providers.default_for("todo")
+    askuser = providers.default_for("askuser")
     assert plan is not None and plan.id == "perk-plan"
     assert todo is not None and todo.id == "perk-checkpoints"
+    assert askuser is not None and askuser.id == "perk-ask-user"
 
 
 def test_unsupported_schema_version_raises(tmp_path):
@@ -158,7 +182,22 @@ def test_resolve_absent_keys_fall_back_to_defaults_silently():
     resolved = resolve_providers({}, _set())
     assert resolved.plan.id == "perk-plan"
     assert resolved.todo.id == "perk-checkpoints"
+    assert resolved.askuser.id == "perk-ask-user"
     assert resolved.issues == []
+
+
+def test_resolve_askuser_selection():
+    # default → perk-ask-user silently; foreign selected → resolves; wrong-seam → fallback + issue.
+    assert resolve_providers({"askuser": "juicesharp-ask-user"}, _set()).askuser.id == (
+        "juicesharp-ask-user"
+    )
+    mismatch = resolve_providers({"askuser": "perk-plan"}, _set())
+    assert mismatch.askuser.id == "perk-ask-user"
+    assert len(mismatch.issues) == 1
+    assert "is a `plan` provider, not `askuser`" in mismatch.issues[0].message
+    unknown = resolve_providers({"askuser": "ghost"}, _set())
+    assert unknown.askuser.id == "perk-ask-user"
+    assert len(unknown.issues) == 1
 
 
 def test_resolve_valid_selection_picks_the_named_provider():

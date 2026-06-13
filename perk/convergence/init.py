@@ -615,7 +615,7 @@ def _converge_provider_packages(
     resolved = resolve_providers(selection, provider_set)
 
     desired: dict[str, dict[str, object] | None] = {}  # spec -> filter (for object-form addition)
-    for provider in (resolved.plan, resolved.todo):
+    for provider in (resolved.plan, resolved.todo, resolved.askuser):
         if provider.package:
             desired[provider.package] = provider.package_filter
     desired_identities = {i for spec in desired if (i := _package_identity(spec))}

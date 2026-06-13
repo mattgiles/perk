@@ -5,24 +5,26 @@ back to perk's default). perk ships zero-config defaults — `perk-plan` and `pe
 selecting a provider is just pointing the `[providers]` table at a different id from the supported
 set.
 
-**Prerequisite:** know which seam you want to change (`plan` or `todo`) and which provider id from
+**Prerequisite:** know which seam you want to change (`plan`, `todo`, or `askuser`) and which provider id from
 the [supported set](../reference/providers-and-backends.md#provider-seam--the-supported-set) you
 want. The `[providers]` row shape is documented in the
 [configuration reference](../reference/configuration.md#providers).
 
 ## Steps
 
-1. **Pick a seam.** There are two: `plan` (plan-authoring) and `todo` (checkpoints/todo overlay).
-   Each is selected independently.
+1. **Pick a seam.** There are three: `plan` (plan-authoring), `todo` (checkpoints/todo overlay),
+   and `askuser` (the `ask_user_question` tool). Each is selected independently.
 
 2. **Pick a provider id** from the supported set:
    - `plan`: `perk-plan` (default), `tombell-plan` (REPLACE posture,
      `npm:@tombell/pi-plan`), `plannotator-plan` (AUGMENT posture, `npm:@plannotator/pi-extension`).
    - `todo`: `perk-checkpoints` (default), `juicesharp-todo` (runtime-defer,
      `npm:@juicesharp/rpiv-todo`).
+   - `askuser`: `perk-ask-user` (default), `juicesharp-ask-user` (REPLACE / vacate-only,
+     `npm:@juicesharp/rpiv-ask-user-question`).
 
    See the [providers reference](../reference/providers-and-backends.md#postures) for what each
-   posture does — REPLACE vacates perk's plan surface at registration time; AUGMENT keeps it and
+   posture does — REPLACE vacates perk's surface at registration time; AUGMENT keeps it and
    skips only the colliding flag/shortcut; runtime-defer (todo) just stands perk's checkpoints down
    at runtime.
 
@@ -40,8 +42,8 @@ want. The `[providers]` row shape is documented in the
    have no package, so selecting a default adds nothing.
 
 5. **Run `perk doctor` to validate.** The `providers` check resolves the selection and reports
-   `plan=…, todo=…`. It **warns** on problems but is never fatal — the default path is the hard
-   guarantee.
+   `plan=…, todo=…, askuser=…`. It **warns** on problems but is never fatal — the default path is the
+   hard guarantee.
 
 ## Fallback behavior
 

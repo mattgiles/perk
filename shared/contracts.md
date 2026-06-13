@@ -1924,14 +1924,14 @@ dangling-pointer warning, which stays a last-resort signal).
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
-and `bindings.yaml`), is the **supported set** — the catalog of plan/todo *providers* perk knows
-how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser *providers* perk
+knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
-(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, issues }`
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
@@ -1941,7 +1941,7 @@ default).
 
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
 stable provider id (for the `plan` seam, exactly the `cache.plan-ref` `provider` string); `seam ∈
-{plan, todo}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+{plan, todo, askuser}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
 (`null` for perk's own bundled reference provider — nothing to add); `adapter` is the perk-owned
 shim module bridging a foreign surface to the artifact boundary (`null` for the reference
 provider); `default` is a bool — **exactly one `true` per seam**, the behavior-preserving no-config
@@ -1950,9 +1950,9 @@ into a foreign package's object-form `packages` entry. Because both planes read 
 full YAML readers, it can carry the nested `package_filter` object that the narrow-TOML config
 reader cannot.
 
-**Shipped set (Node 2.1 → 3.2):** the two reference entries `perk-plan` (seam `plan`) and
-`perk-checkpoints` (seam `todo`), both `package: null` / `adapter: null` / `default: true`, plus a
-**real** foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter:
+**Shipped set (Node 2.1 → 3.2 + askuser):** the three reference entries `perk-plan` (seam `plan`),
+`perk-checkpoints` (seam `todo`), and `perk-ask-user` (seam `askuser`), all `package: null` /
+`adapter: null` / `default: true`, plus a **real** foreign entry per seam. `tombell-plan` (→ `npm:@tombell/pi-plan`, `adapter:
 planAdapterTombell`) is a real, selectable plan provider (Node 2.3); `juicesharp-todo`
 (→ `npm:@juicesharp/rpiv-todo`, `adapter: todoAdapterJuicesharp`) is now a real, selectable **todo**
 provider (Node 3.2) — neither is illustrative any longer. **Both seams are behavior-complete:** the
@@ -1960,8 +1960,8 @@ provider (Node 3.2) — neither is illustrative any longer. **Both seams are beh
 see the Node 2.3 status note) and the **todo** seam (perk's `checkpoints` **defers at runtime** under
 a foreign `[providers] todo` selection — Node 3.1 — with **no** registration-time vacating, because
 the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
-progress discipline onto the foreign overlay — see the Node 3.2 status note). The **default** path
-(both reference providers) is unaffected and is the hard guarantee.
+progress discipline onto the foreign overlay — see the Node 3.2 status note). The **askuser** seam is an **interface seam** — see the askuser status
+note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -1975,12 +1975,12 @@ untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
-`seam ∈ {plan, todo}`, and that **exactly one `default: true`** exists per seam. They do **not**
+`seam ∈ {plan, todo, askuser}`, and that **exactly one `default: true`** exists per seam. They do **not**
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
 **The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
-one key per seam (`plan` / `todo`), values are **bare provider-id strings** (the TS narrow-TOML
+one key per seam (`plan` / `todo` / `askuser`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
@@ -1988,7 +1988,7 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 `default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
-issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+askuser, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
@@ -2207,6 +2207,33 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > **learn-docs and replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
 > approval-driven save recovers the node link from the `objective_node_claim` carrier, with
 > `plan_save`-with-both-ids demoted to the manual failsafe.
+>
+> **Status (askuser — the third seam, an INTERFACE seam):** a third seam, **`askuser`**, lets a repo
+> swap perk's first-party `ask_user_question` tool (`extension/doors/askUser.ts`) for the foreign
+> `@juicesharp/rpiv-ask-user-question` extension, which registers a tool with the **identical name**
+> `ask_user_question` (a richer multi-question dialog). (1) **Interface seam, not artifact seam:**
+> ask-user produces **no** durable state key or session-entry vocabulary (no `cache.plan-ref` /
+> `perk:checkpoint` analogue); its stable contract is the **tool name `ask_user_question` + its
+> non-terminating-answer semantics**. (2) **Vacate-only adapter** (`adapter: null` in
+> `providers.yaml`, **no shim module**, no injected context): the foreign tool self-documents via
+> its own `promptGuidelines`, so there is nothing to bridge. (3) **Registration-time vacating** in
+> `registerAskUser` (mirroring the plan seam's `registerPlanMode`): because the foreign tool shares
+> the **exact** name `ask_user_question` and tools — unlike commands — are **not** `:N`-suffixed
+> (they replace/warn by extension load order, non-deterministically), `registerAskUser` resolves the
+> provider id once at factory time (`resolvedAskUserProviderId(process.cwd())`, fail-safe to
+> `perk-ask-user`) and **early-returns before `pi.registerTool`** under any foreign selection,
+> leaving exactly one `ask_user_question` standing. The default/fail-safe path registers exactly as
+> before (zero behavior change). (4) The foreign package is **two-directionally** wired by
+> `_converge_provider_packages` (installed only when selected, removed on deselect), so under the
+> default the foreign package is never loaded and perk's tool is the sole registrant. (5) **No
+> `READ_ONLY_TOOLS` / `SDK_READ_ONLY_TOOLS` change:** `ask_user_question` is already in
+> `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so the foreign same-named tool is
+> allowlisted in read-only/plan mode automatically (the shared-name allowlist precedent); the
+> read-only notice interpolates `READ_ONLY_TOOLS` so it self-updates. `SDK_READ_ONLY_TOOLS`
+> (`extension/worker/readOnlySession.ts`) intentionally does **not** include `ask_user_question`
+> (headless children never prompt a human) — unchanged. Catalog entry carries no `package_filter`
+> (verified manifest `{"extensions": ["./index.ts"]}`). Validation record:
+> `docs/design/provider-smoke-juicesharp-ask-user.md`.
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

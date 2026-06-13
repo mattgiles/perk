@@ -85,8 +85,17 @@ def test_providers_selection_absent_is_empty(tmp_path):
 
 
 def test_providers_selection_parsed(tmp_path):
-    _write(tmp_path, "perk.toml", '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n')
-    assert load_config(tmp_path).providers == {"plan": "tombell-plan", "todo": "perk-checkpoints"}
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n'
+        'askuser = "juicesharp-ask-user"\n',
+    )
+    assert load_config(tmp_path).providers == {
+        "plan": "tombell-plan",
+        "todo": "perk-checkpoints",
+        "askuser": "juicesharp-ask-user",
+    }
 
 
 def test_providers_selection_local_overlay_wins(tmp_path):
