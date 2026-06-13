@@ -43,6 +43,17 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - [How to run the learn-docs factory](./run-the-learn-docs-factory.md) — consolidate accumulated
   `perk:learn` issues into committed `docs/learned/` knowledge.
 
+### Headless & remote
+
+- [How to set up and verify the remote runner](./set-up-the-remote-runner.md) — converge the
+  managed runner and prove the wiring with `doctor workflow smoke-test`.
+- [How to dispatch a stage to a remote runner](./dispatch-a-stage-to-ci.md) — hand an unattended
+  stage off to CI with `--remote`.
+- [How to observe and control dispatched runs](./supervise-dispatched-runs.md) — list, cancel,
+  and retry remote runs from a cold shell.
+- [How to advance an objective with the run supervisor](./advance-an-objective-headlessly.md) —
+  push an objective forward one safe step with `perk objective run`.
+
 ### Customization
 
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an

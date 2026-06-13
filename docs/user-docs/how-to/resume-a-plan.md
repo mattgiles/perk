@@ -17,7 +17,8 @@ machine, or any time you want a clean session against an existing plan.
    opening a session — handy to confirm *where* a plan will resume before committing to it:
    `perk resume 42 --dry-run`.
 4. **Dispatch to CI (optional).** Add `--remote` to run the resumed stage on a CI runner instead of
-   locally: `perk resume 42 --remote`. Only the unattended stages are remotely runnable.
+   locally: `perk resume 42 --remote`. Only the unattended stages are remotely runnable. For the
+   fuller recipe, see [How to dispatch a stage to a remote runner](dispatch-a-stage-to-ci.md).
 
 Why fresh context rather than a continued conversation? Because the plan is canonical in GitHub and
 every stage is re-enterable through its cold door — see

@@ -16,8 +16,11 @@ help with a task in progress.
 
 - [How perk thinks](./how-perk-thinks.md) — the mental model behind perk: the
   plan-oriented workflow, the two planes, the state tiers, and the warm/cold door model.
+- [Headless and remote: how it works, and how proven it is](./headless-and-remote.md) — how the
+  dispatch substrate, the deterministic supervisor, and the remote runner fit together, and the
+  load-bearing declarative-correct/execution-untested maturity caveat.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.
 
-> **Status:** this quadrant now has its first page; more are added by later Objective
+> **Status:** this quadrant now has two pages; more are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes as the tree is populated.
