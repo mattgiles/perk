@@ -21,7 +21,10 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   guarded by a pytest existence check.
 - **[In-session commands & tools](./in-session.md)** — the warm `/…` commands, the
   model-facing tools, and the stage/door table for the session interior.
+- **[Objectives — the roadmap model](./objectives.md)** — the objective command recap, the
+  roadmap node schema, node statuses, and the objective metadata blocks.
 
 > **Status:** pages are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist (currently: the CLI commands reference and the in-session reference).
+> that actually exist (currently: the CLI commands reference, the in-session reference, and
+> the objectives roadmap-model reference).

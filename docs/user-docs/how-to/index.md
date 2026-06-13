@@ -15,6 +15,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 
 ## Guides
 
+### Core workflow
+
 - [How to drive a change through the full spine](./drive-the-full-spine.md) — walk one change
   plan → learn, staying in-session where possible (the connective map to the recipes below).
 - [How to resume a plan at its current stage](./resume-a-plan.md) — re-enter an in-flight plan
@@ -29,3 +31,14 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   uncommitted changes are in the way.
 - [How to work with implementation checkpoints](./work-with-checkpoints.md) — track step-by-step
   implement progress with `## Steps` + `[WIP:n]`/`[DONE:n]`.
+
+### Objectives & learnings
+
+- [How to author an objective roadmap](./author-a-roadmap.md) — stand up a new objective + roadmap
+  in a read-only authoring session.
+- [How to advance or skip roadmap nodes manually](./advance-or-skip-nodes.md) — change a node's
+  status by hand outside the auto-on-land path.
+- [How to reconcile an objective manually](./reconcile-an-objective.md) — re-sync an objective's
+  roadmap prose to what landed when the automatic reconcile didn't.
+- [How to run the learn-docs factory](./run-the-learn-docs-factory.md) — consolidate accumulated
+  `perk:learn` issues into committed `docs/learned/` knowledge.
