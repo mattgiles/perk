@@ -2,7 +2,7 @@
 
 This tree is the documentation for the **operator** — someone using perk on their own
 repository. It is never for perk contributors: perk's internal research and planning record
-lives in [`docs/planning/`](../planning/), [`docs/guiding-principles/`](../guiding-principles/),
+lives in [`docs/guiding-principles/`](../guiding-principles/), [`docs/design/`](../design/),
 and [`shared/contracts.md`](../../shared/contracts.md), and is never duplicated here.
 
 ## How this tree is organized

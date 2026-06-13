@@ -402,5 +402,5 @@ scripts in the same directory.
 | `<untrusted_objective>` wrapping | hygiene for GitHub-sourced text fed to the model |
 
 The repo is, in effect, a living style guide for the exact Pi primitives perk's
-[ROADMAP.md](./ROADMAP.md) and [cli-vs-pi.md](./cli-vs-pi.md) depend on — worth re-reading
+ROADMAP.md and [cli-vs-pi.md](./cli-vs-pi.md) depend on — worth re-reading
 `goal.ts`, `loop.ts`, `go-to-bed.ts`, and `uv.ts` before implementing Phase 1.

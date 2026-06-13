@@ -3,10 +3,10 @@
 **Status:** design sketch (unbuilt)
 **Motivation:** perk can drive a workflow but cannot *look back at what happened in a session*. Two
 consumers want this: `learn` (the knowledge loop — see
-[`docs/bugs/learn-is-a-stub.md`](../bugs/learn-is-a-stub.md) Tier 3) and **planning** (point at bad
+`docs/bugs/learn-is-a-stub.md` Tier 3) and **planning** (point at bad
 behavior in a session and turn it into a bug or a fix-plan — which is exactly what
-[`docs/bugs/plan-updates.md`](../bugs/plan-updates.md) and
-[`docs/bugs/learn-is-a-stub.md`](../bugs/learn-is-a-stub.md) were, written by hand).
+`docs/bugs/plan-updates.md` and
+`docs/bugs/learn-is-a-stub.md` were, written by hand).
 
 ## The framing: a substrate, not a feature
 

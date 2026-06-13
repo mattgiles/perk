@@ -48,15 +48,14 @@ self = true
 python-version = "3.13"
 
 [tool.ty.src]
-# Only type-check perk's own code, never the vendored .prior-art/ tree.
+# Only type-check perk's own code.
 include = ["perk", "tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-# Only lint/format perk's own code, never the vendored .prior-art/ tree.
+# Only lint/format perk's own code.
 include = ["perk/**/*.py", "tests/**/*.py"]
-extend-exclude = [".prior-art"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PLW1514", "PTH", "PLR1702", "PLC0415"]

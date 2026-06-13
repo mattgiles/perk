@@ -32,7 +32,7 @@ lands the worker.**
   `docs/cli-vs-pi.md` §4.5 records: "Phase 2 builds and resolves the target; the Phase-3 worker
   drives it."
 - **The prior-art reference (erk) drives a *subprocess* CLI, not in-process SDK.**
-  `.prior-art/erk/.github/workflows/plan-implement.yml`'s "Run implementation" step is
+  erk's `.github/workflows/plan-implement.yml`'s "Run implementation" step is
   `claude --print --output-format stream-json --dangerously-skip-permissions /erk:plan-implement`,
   capturing the exit code as the success signal. perk's objective #137 chooses the **in-process SDK**
   pathway instead (`createAgentSession`/`SessionManager`), which is why this audit exists: the SDK

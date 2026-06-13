@@ -7,7 +7,7 @@ the same helpers with `apply=True`. Everything downstream of the group *builders
 over a `list[Check]` (report / exit-code / json / render), so that layer tests without any
 monkeypatch.
 
-Principles (T6, from `phase-0-plan.md` §T6 + the erk prior-art pass):
+Principles (T6, from the erk prior-art pass):
 - **No silent pass:** a check that cannot be evaluated reports `warn`/`info` *with the reason*,
   never a silent `ok`.
 - **GitHub is non-fatal** (D3): unauthed / no-access / `gh` errored ⇒ `warn`, never `fail`.

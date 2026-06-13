@@ -361,5 +361,5 @@ Useful exported helpers: `complete` (one-shot inference), `convertToLlm` /
 Read `plan-mode/`, `preset.ts`, `subagent/`, `handoff.ts`, and the `sdk/` set before
 implementing perk's modes (Phase 1), CI executor (Phase 2), and headless worker (Phase 3).
 Together with [agent-stuff-best-practices.md](./agent-stuff-best-practices.md), these are the
-concrete proof that everything in [ROADMAP.md](./ROADMAP.md) and [cli-vs-pi.md](./cli-vs-pi.md)
+concrete proof that everything in ROADMAP.md and [cli-vs-pi.md](./cli-vs-pi.md)
 is built from primitives Pi already ships.

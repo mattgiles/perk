@@ -1,7 +1,7 @@
 # Foundation Open Questions
 
 Decisions that must be settled (or explicitly deferred) before **Phase 0** of
-[ROADMAP.md](./ROADMAP.md) begins. Each question records: why it matters, the options, a
+ROADMAP.md begins. Each question records: why it matters, the options, a
 recommendation, and a **Resolution** field filled in once we agree.
 
 Status legend: 🔴 **must settle before Phase 0** · 🟡 **cheap confirm** · 🟢 **structural,
@@ -36,7 +36,7 @@ fields a write actually touches are updated).
 Qualifications carefully noted:
 
 - **Why (b) does not transfer.** erk chose scattered single-purpose markers almost entirely
-  for environmental reasons perk does not share. Per `.prior-art/erk/docs/learned/planning/workflow-markers.md`,
+  for environmental reasons perk does not share. Per erk's `docs/learned/planning/workflow-markers.md`,
   erk had **no in-session state store** (Claude Code exposed none), and its workflow steps are
   **separate OS processes** (a hook fires and exits, a command runs and exits, a later hook
   fires), so state had to outlive a process via a file on disk keyed by `CLAUDE_SESSION_ID`.
@@ -51,7 +51,7 @@ Qualifications carefully noted:
   update-objective-node, and the objective roadmap table **silently fails to update**." That
   silent-loss pathology is exactly what (a) + the verified-linkage rule (Q3) kills.
 - **erk consolidated where it had schema control.** For its *durable* tier
-  (`.prior-art/erk/docs/learned/architecture/metadata-blocks.md`), erk used structured keyed
+  (erk's `docs/learned/architecture/metadata-blocks.md`), erk used structured keyed
   YAML blocks with the explicit best practices "Keep blocks self-contained" and "flat is
   better than nested" — i.e., it chose option (a)'s shape wherever it actually controlled the
   schema. The scattering appears only where it was forced into file-based IPC.
@@ -59,7 +59,7 @@ Qualifications carefully noted:
   partially survives: the Python CLI must sometimes read workflow state *before* a Pi session
   exists (the cold-door launch in Q4–Q6), and existence-based **friction semaphores** (erk's
   `pending-learn`, which blocks a destructive *exterior* op until cleared — see
-  `.prior-art/erk/docs/learned/architecture/markers.md`) are CLI-checked, not in-session. Such
+  erk's `docs/learned/architecture/markers.md`) are CLI-checked, not in-session. Such
   genuinely cross-process / pre-session / semaphore state lives in the **`.pi/workflow/` cache
   tier (Q2)**, *not* in session entries. Do not try to make `perk:workflow-state` carry
   handoffs it structurally cannot. Q1 governs the session-entry (tier 3) transient state only.
@@ -167,7 +167,7 @@ at the right moment. Any cross-tier link must be explicit and verified.
 missing read-back — it was that the link was written *at the wrong moment* (the
 `objective-context` marker had to exist **before** entering plan mode, and nothing enforced
 that ordering, so it silently failed; see
-`.prior-art/erk/docs/learned/planning/workflow-markers.md`). So verified-linkage means both:
+erk's `docs/learned/planning/workflow-markers.md`). So verified-linkage means both:
 
 1. **Read-back verification.** After writing a cross-tier link, read it back and assert it
    resolves to the expected target before proceeding; on mismatch raise a **hard, actionable
