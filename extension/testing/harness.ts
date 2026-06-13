@@ -122,11 +122,12 @@ export interface PerkSession {
   emitBeforeAgentStart(): Promise<{ customType?: string; content?: unknown }[]>;
   /** Run messages through the `context` filter chain; returns the surviving messages. */
   emitContext(messages: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
-  /** Fire a lifecycle event (session_before_fork / session_before_switch) and return its result. */
+  /** Fire a lifecycle event (session_before_fork / session_before_switch / session_compact) and return its result. */
   emitLifecycle(
     event:
       | { type: "session_before_fork"; entryId: string; position: "before" | "at" }
-      | { type: "session_before_switch"; reason: "new" | "resume"; targetSessionFile?: string },
+      | { type: "session_before_switch"; reason: "new" | "resume"; targetSessionFile?: string }
+      | { type: "session_compact" },
   ): Promise<{ cancel?: boolean } | undefined>;
   /** Set a registered CLI flag value (simulates `pi --<name>`); take effect on the next reload. */
   setFlag(name: string, value: boolean | string): void;

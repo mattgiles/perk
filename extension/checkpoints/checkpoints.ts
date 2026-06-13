@@ -293,6 +293,18 @@ function stepsContextContent(steps: readonly CheckpointStep[]): string {
   );
 }
 
+/**
+ * Whether `e` is pi-core's stale-`ctx` compaction proxy error. During `session_compact` pi may
+ * replace the running session out from under an in-flight event handler, invalidating the extension
+ * runner's `ctx` proxy; the next read off it throws `/stale after session replacement/`. That is a
+ * benign race (the dying session is discarded and the replacement session's `session_start`
+ * re-renders), so the `session_compact` handler swallows it. Adapted from `@juicesharp/rpiv-todo`'s
+ * `index.ts` `isStaleCtxError`.
+ */
+export function isStaleCtxError(e: unknown): boolean {
+  return /stale after session replacement/.test(String(e));
+}
+
 // --- the controller -----------------------------------------------------------------------------
 
 /** A coarse descriptor of the active plan when there is no `## Steps` checklist (the prose path). */
@@ -431,6 +443,22 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
       renderStatus(ctx, status, rebuildCheckpoint(branch), branch);
     } catch (error) {
       console.error(`perk: checkpoint rebuild failed on session_tree — ${error}`);
+    }
+  });
+
+  // session_compact re-render (adapted from `@juicesharp/rpiv-todo`): a compaction replaces the
+  // session entries, so rebuild + re-render the progress surface (mirror `session_tree`: NO
+  // re-seed). The catch arm diverges from the other handlers — a stale-`ctx` compaction race is
+  // benign and swallowed silently (the replacement session's `session_start` re-renders); only
+  // genuine replay bugs are logged per the log-not-throw convention.
+  pi.on("session_compact", async (_event, ctx) => {
+    try {
+      if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
+      const branch = branchOf(ctx);
+      renderStatus(ctx, status, rebuildCheckpoint(branch), branch);
+    } catch (error) {
+      if (isStaleCtxError(error)) return;
+      console.error(`perk: checkpoint rebuild failed on session_compact — ${error}`);
     }
   });
 
