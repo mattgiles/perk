@@ -1,4 +1,4 @@
-"""`perk plan-save` — the Python/worker GitHub plan-write (the cold save door).
+"""`perk plan save` — the Python/worker GitHub plan-write (the cold save door).
 
 The first `require_github` consumer and the first GitHub *mutation* (contracts.md §8.4;
 T2a). The warm in-session twin is the TS `/plan-save` tool (T3). Supervisor surface
@@ -18,7 +18,6 @@ import click
 from perk import objective, plan
 from perk.backends import issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.alias import alias
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
@@ -43,8 +42,7 @@ class PlanSaveResult:
     objective_node: dict[str, object] | None = None
 
 
-@alias("psave")
-@click.command("plan-save")
+@click.command("save")
 @click.option(
     "--plan-file",
     # Deliberately no exists=True: existence/emptiness are tier-2 (UserFacingCliError) so the
@@ -87,9 +85,9 @@ def plan_save(
 
     \b
     Examples:
-      perk plan-save --plan-file plan.md           # create the plan issue
-      perk plan-save --plan-file plan.md --dry-run # compose + print, no GitHub
-      perk plan-save --plan-file plan.md --json    # machine-readable (supervisor surface)
+      perk plan save --plan-file plan.md           # create the plan issue
+      perk plan save --plan-file plan.md --dry-run # compose + print, no GitHub
+      perk plan save --plan-file plan.md --json    # machine-readable (supervisor surface)
     """
     try:
         repo_root = require_repo(ctx)
@@ -334,7 +332,7 @@ def _plan_save_impl(
             }
         except Exception as exc:  # fail-loud, non-fatal: the plan already exists.
             print(
-                f"perk plan-save: objective node link skipped (non-fatal): {exc}",
+                f"perk plan save: objective node link skipped (non-fatal): {exc}",
                 file=sys.stderr,
             )
             objective_node_result = {

@@ -9,7 +9,8 @@ The perk CLI's command surface is organized as group directories under `perk/cli
 sectioned root help. This doc is the structure playbook: the group-dir template, the hybrid
 default-dispatch recipe for stage-name/group collisions, byte-compat discipline across folds, the
 help taxonomy, and the test patterns that made the migrations cheap. Realized shapes to copy:
-`perk/cli/commands/objective/`, `perk/cli/commands/pr/`, `perk/cli/commands/learn/`.
+`perk/cli/commands/objective/`, `perk/cli/commands/pr/`, `perk/cli/commands/learn/`,
+`perk/cli/commands/plan/`.
 
 ## The §8.1 group-dir template
 
@@ -186,6 +187,8 @@ only the `pi.exec` argv arrays in the extension change.
 
 - `perk/cli/commands/objective/`, `perk/cli/commands/pr/` — realized group-dir shapes
 - `perk/cli/commands/learn/__init__.py` — `LearnGroup`, the hybrid default-dispatch template
+- `perk/cli/commands/plan/__init__.py` — `PlanGroup`, the hybrid group with a merged `save` verb
+  (the `MergedCommand` launcher+worker folded under `--json`, Node 3.2)
 - `perk/cli/alias.py` — `AliasGroup`, `SectionedGroup`, `COMMAND_GROUPS`, `register_with_aliases`
 - `perk/cli/stages.py` — `make_stage_launcher`, `DEDICATED_STAGES`
 - `docs/learned/workflow/init-doctor.md` — the bottom-of-file-imports idiom this doc supersedes for

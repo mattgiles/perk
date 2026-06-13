@@ -22,7 +22,7 @@ import click
 from perk.backends import issues
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
-from perk.cli.commands.resume_cmd import parse_plan_id
+from perk.cli.commands.plan.resume_cmd import parse_plan_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume

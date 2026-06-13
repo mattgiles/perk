@@ -113,7 +113,7 @@ stages:
     worktree: none            # still no branch; save writes the plan issue + ref
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: save             # T3 warm door: the plan_save terminating tool + /plan-save command
+    command: plan save        # cold: the merged `perk plan save` door (Node 3.2); warm twin: the plan_save tool + /plan-save command
     requires: []
     reads: []
     writes: [github.plan, cache.plan-ref, session.workflow-state]  # T2a: plan issue; T2b: plan-ref pointer; T3: warm door appends active_plan_ref

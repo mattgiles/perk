@@ -124,17 +124,14 @@ def get_kind(cmd: click.Command) -> CommandKind | None:
 
 
 # Root-group section taxonomy (curated, erk-faithful). Anything live but unlisted falls into
-# the ``Other`` catch-all (e.g. the `plan-save` / `run-worker` worker doors); ``cmd.hidden``
+# the ``Other`` catch-all (e.g. the `run-worker` worker door); ``cmd.hidden``
 # commands fall into ``Hidden`` (gated by env, see below).
 STAGE_LAUNCHERS = [
-    "plan",
-    "save",
+    "plan",  # the hybrid plan group still reads as the stage launcher (save/resume/replan verbs)
     "implement",
     # submit/address/land are flat aliases (FLAT_ALIAS_ATTR), not generated launchers (Node 3.3):
     # SectionedGroup routes flat aliases into the launcher bucket before consulting this list.
     "learn",  # the hybrid learn group still reads as the stage launcher
-    "resume",
-    "replan",
     "objective-author",
     "objective-plan",
     "objective-save",

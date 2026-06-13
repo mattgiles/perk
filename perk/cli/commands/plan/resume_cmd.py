@@ -16,7 +16,6 @@ import click
 
 from perk.backends import issues
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.alias import alias
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
@@ -27,7 +26,6 @@ from perk.substrate.registry import load_registry
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
-@alias("res")
 @click.command("resume", context_settings={"ignore_unknown_options": True})
 @click.argument("plan")
 @click.option("--dry-run", is_flag=True, help="Resolve + print the stage without launching.")
@@ -55,8 +53,8 @@ def resume_cmd(
 
     \b
     Examples:
-      perk resume 42            # resolve #42's stage and launch it (fresh context)
-      perk resume 42 --dry-run  # print the resolved stage + launch plan, launch nothing
+      perk plan resume 42            # resolve #42's stage and launch it (fresh context)
+      perk plan resume 42 --dry-run  # print the resolved stage + launch plan, launch nothing
     """
     try:
         repo_root = require_repo(ctx)

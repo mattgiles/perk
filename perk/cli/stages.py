@@ -25,6 +25,8 @@ DEDICATED_STAGES: frozenset[str] = frozenset(
         "submit",
         "address",
         "land",
+        "plan",  # perk/cli/commands/plan/__init__.py (hybrid group; hidden launcher, Node 3.2)
+        "save",  # perk/cli/commands/plan/__init__.py (merged save verb, Node 3.2)
     }
 )
 
