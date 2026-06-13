@@ -1,0 +1,31 @@
+# How to resume a plan at its current stage
+
+Re-enter an in-flight plan from a cold shell, picking it back up at whatever lifecycle stage it
+left off — with **fresh context**, not a kept-alive session. Use this after a break, on a different
+machine, or any time you want a clean session against an existing plan.
+
+## Steps
+
+1. **Find the plan id.** A plan is a GitHub issue; its id is what you resume by. List candidates
+   with `gh issue list` (or inspect the local cache with
+   [`perk state show`](../reference/cli.md#perk-state-show-alias-s)). The id may be a bare number
+   (`42`), a hash form (`#42`), or a backend key like `ENG-123`.
+2. **Resume it.** Run [`perk resume 42`](../reference/cli.md#perk-resume-plan-alias-res) (alias
+   `perk res 42`). perk resolves the plan's current stage, positions the right worktree, and
+   launches a fresh `pi` session primed to continue from there.
+3. **Preview without launching (optional).** Add `--dry-run` to print the resolved stage without
+   opening a session — handy to confirm *where* a plan will resume before committing to it:
+   `perk resume 42 --dry-run`.
+4. **Dispatch to CI (optional).** Add `--remote` to run the resumed stage on a CI runner instead of
+   locally: `perk resume 42 --remote`. Only the unattended stages are remotely runnable.
+
+Why fresh context rather than a continued conversation? Because the plan is canonical in GitHub and
+every stage is re-enterable through its cold door — see
+[How perk thinks → Stages and doors](../explanation/how-perk-thinks.md#stages-and-doors-how-you-move-through-the-workflow).
+
+> **Resume vs. replan.** `resume` *continues* the plan at its current stage. To rewrite the plan
+> body itself before it lands, use [How to replan an open plan](replan-an-open-plan.md) instead.
+
+---
+
+← Back to the [how-to router](index.md).
