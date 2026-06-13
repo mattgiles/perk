@@ -21,6 +21,9 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 
 - [Get started with perk](./get-started.md) — drive one tiny change through perk's complete
   spine (`plan → save → implement → submit → land → learn`) on a throwaway scratch repo.
+- [Drive a multi-plan goal with an objective](./drive-an-objective.md) — author an objective
+  with a small roadmap and drive its first node from plan to a merged PR, watching perk
+  auto-mark the node done and reconcile the roadmap.
 
 > **Status:** more pages are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
