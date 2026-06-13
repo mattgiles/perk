@@ -34,7 +34,6 @@ EXPECTED_ROOT_ALIASES = {
     "registry": "reg",
     "state": "st",
     "implement": "impl",
-    "objective-plan": "oplan",
 }
 
 

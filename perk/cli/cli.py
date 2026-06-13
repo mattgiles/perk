@@ -16,8 +16,6 @@ from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
 from perk.cli.commands.learn import learn_group
 from perk.cli.commands.objective import objective_group
-from perk.cli.commands.objective_author_cmd import objective_author
-from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan import plan_group
 from perk.cli.commands.pr import (
     pr_address_command,
@@ -72,10 +70,8 @@ register_with_aliases(cli, registry_group)
 register_with_aliases(cli, state_group)
 register_with_aliases(cli, worktree_group)
 register_with_aliases(cli, objective_group)
-register_with_aliases(cli, objective_author)
-register_with_aliases(cli, objective_plan)
-# objective-author + objective-plan are registered above; register_stage_commands skips them
-# (DEDICATED_STAGES).
+# The objective launchers (author/save/plan) now live inside the `objective` group beside its
+# workers; register_stage_commands skips all three objective stages (DEDICATED_STAGES).
 register_with_aliases(cli, workflow_group)
 cli.add_command(run_worker_cmd)
 # `resume` and `replan` now live under the `plan` group (Node 3.2). `replan` is still a dedicated

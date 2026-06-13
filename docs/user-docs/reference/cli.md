@@ -8,15 +8,16 @@ sessions for each stage of the plan workflow. It describes the surface; it does 
 quadrant fits the whole.
 
 Following the reference quadrant's rule, every entry is written against the command's real
-`--help` output and guarded by a pytest existence check, so a documented-but-missing command (or
-an undocumented new one) fails CI.
+`--help` output. Structural surface tests (`tests/test_cli_parity_smoke.py` and the
+`tests/test_cli_help_sections.py` drift guard) catch real surface regressions; this prose is kept
+current by hand as the taxonomy lands.
 
 ## Orientation
 
 The sections below mirror `perk --help`: **Setup & Health**, **Stage launchers**, **Other**, and
 **Command groups**. Each stage launcher opens a primed `pi` session for one stage of the workflow
-— the read-only authoring stages (`plan`, `objective-author`, `objective-plan`) and the
-read-write boundaries (`save`, `objective-save`) and the working stages (`implement`, `submit`,
+— the read-only authoring stages (`plan`, `objective author`, `objective plan`) and the
+read-write boundaries (`save`, `objective save`) and the working stages (`implement`, `submit`,
 `address`, `land`, `learn`).
 
 The in-session, warm `/…` commands and the model-facing tools you use *inside* a `pi` session are
@@ -85,27 +86,11 @@ Classify PR review feedback (in an isolated child) and resolve the threads (the 
 
 Merge the ready/approved PR and reconcile, setting the pending-learn marker (the `land` stage).
 
-### `perk objective-save`
-
-Persist the drafted objective to GitHub — the read-only → read-write objective boundary (the
-`objective-save` stage).
-
 ### `perk implement [PLAN]` (alias `impl`)
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
 (`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. Adds
 `--base` to branch off a ref other than `origin/<trunk>` (e.g. to stack on an unlanded branch).
-
-### `perk objective-author` (alias `oauthor`)
-
-Draft a new objective and roadmap in a read-only authoring session. Local-only
-(`cold_remote:false`); adds `--json`.
-
-### `perk objective-plan [NUMBER]` (alias `oplan`)
-
-Select the next objective node and author a bounded plan (read-only). `NUMBER` is the objective
-issue id (required — a cold session has no active objective); `--node` plans a specific node id
-instead of the next actionable one. Local-only; adds `--json`.
 
 ### `perk learn`
 
@@ -258,8 +243,26 @@ Print the stages and their transitions (a dev/doctor convenience).
 
 ### `perk objective` (alias `obj`)
 
-Deterministic objective storage and mechanics (a dev/CI/T10 surface, not an agent affordance):
-`create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run` (`r`).
+The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
+`save`, `plan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
+agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run`
+(`r`)). Bare `perk objective` shows this group help.
+
+### `perk objective author`
+
+Draft a new objective and roadmap in a read-only authoring session. Local-only
+(`cold_remote:false`); adds `--json`.
+
+### `perk objective save`
+
+Persist the drafted objective to GitHub — the read-only → read-write objective boundary (the
+`objective-save` stage). Local-only; adds `--json`.
+
+### `perk objective plan [NUMBER]`
+
+Select the next objective node and author a bounded plan (read-only). `NUMBER` is the objective
+issue id (required — a cold session has no active objective); `--node` plans a specific node id
+instead of the next actionable one. Local-only; adds `--json`.
 
 ### `perk objective create` (alias `new`)
 

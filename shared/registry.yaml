@@ -61,7 +61,7 @@ stages:
     worktree: none            # interactive authoring, like plan — no branch, no objective yet
     doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local authoring
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: objective-author  # P3.T2: dedicated seeded cold door (perk objective-author)
+    command: objective author  # P3.T2: dedicated seeded cold door (perk objective author)
     requires: []                       # nothing exists yet — this stage CREATES the objective
     reads: []
     writes: [session.workflow-state, cache.session-data]   # the read-only `mode` append (the gate toggle); #352 Node 2.1: objective_draft writes the objective-draft artifact + its session_artifacts pointer
@@ -74,7 +74,7 @@ stages:
     worktree: none            # still no branch; save writes the objective issue
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: objective-save   # P3.T2: the objective_save terminating tool + /objective-save command
+    command: objective save   # P3.T2: the objective_save terminating tool + /objective-save command
     requires: []
     reads: []
     writes: [github.objective, session.workflow-state]  # create the objective issue; link active_objective
@@ -87,7 +87,7 @@ stages:
     worktree: none            # interactive planning, like plan — no branch yet
     doors: { warm: true, cold_local: true, cold_remote: false }  # interactive local exploration
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: objective-plan   # P2.T10: dedicated cold door (perk objective-plan) + /objective-plan
+    command: objective plan   # P2.T10: dedicated cold door (perk objective plan) + /objective-plan
     requires: [github.objective]                        # an objective issue must exist
     reads: [github.objective]                           # roadmap nodes + next-node selection
     writes: [github.objective, session.workflow-state, cache.session-data]  # mark node planning; set active_objective; #339 Node 2.1: plan_draft writes the working-plan artifact + its session_artifacts pointer

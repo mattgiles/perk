@@ -1,4 +1,4 @@
-"""``perk objective-plan [NUMBER] [--node ID]`` — the objective plan-factory cold door (P2.T10).
+"""``perk objective plan [NUMBER] [--node ID]`` — the objective plan-factory cold door (P2.T10).
 
 The objective **transition** surface on top of T9's deterministic mechanics: select the next
 actionable objective node (**pending-first** dependency-graph order — unblocked ``pending`` nodes
@@ -24,27 +24,16 @@ import click
 from perk import objective
 from perk.backends import issues
 from perk.backends.issue_backend import IssueBackendError
-from perk.cli.alias import alias
-from perk.cli.commands.objective.shared import parse_objective_id
+from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
-_EXIT_FOR_TYPE = {"not_a_repo": 2}
-
 
 def _objective_plan_stage() -> Stage:
     return next(s for s in load_registry().stages if s.id == "objective-plan")
-
-
-def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
-    if as_json:
-        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
-    else:
-        user_output(click.style("Error: ", fg="red") + message)
-    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 def _node_not_plannable_error(
@@ -120,11 +109,10 @@ def _seed_prompt(
     )
 
 
-@alias("oplan")
-@click.command("objective-plan", context_settings={"ignore_unknown_options": True})
+@click.command("plan", context_settings={"ignore_unknown_options": True})
 @click.argument("number", required=False)
 @click.option("--node", "node_id", help="Plan a specific node id (else next actionable).")
-@click.option("--worktree", help="Worktree to position (objective-plan runs at repo root).")
+@click.option("--worktree", help="Worktree to position (objective plan runs at repo root).")
 @click.option("--dry-run", is_flag=True, help="Resolve + print; mark nothing, launch nothing.")
 @click.option(
     "--remote",
@@ -132,12 +120,12 @@ def _seed_prompt(
     default=None,
     is_flag=False,
     flag_value="",
-    help="Local (default) or a remote runner; objective-plan is local-only (cold_remote:false).",
+    help="Local (default) or a remote runner; objective plan is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def objective_plan(
+def plan_objective(
     ctx: click.Context,
     *,
     number: str | None,
@@ -154,16 +142,16 @@ def objective_plan(
     NUMBER is the objective issue id (required — a cold session has no active objective).
     \b
     Examples:
-      perk objective-plan 7                 # plan the next actionable node of objective #7
-      perk objective-plan 7 --node 2.3      # plan a specific node
-      perk objective-plan 7 --dry-run       # resolve + print, mark/launch nothing
+      perk objective plan 7                 # plan the next actionable node of objective #7
+      perk objective plan 7 --node 2.3      # plan a specific node
+      perk objective plan 7 --dry-run       # resolve + print, mark/launch nothing
     """
     try:
         repo_root = require_repo(ctx)
         config = require_config(ctx)
         if number is None:
             raise UserFacingCliError(
-                "An objective number is required (e.g. `perk objective-plan 7`).",
+                "An objective number is required (e.g. `perk objective plan 7`).",
                 error_type="objective_required",
             )
         number = parse_objective_id(number)
@@ -235,10 +223,10 @@ def objective_plan(
                 status=marked_status,
             )
     except IssueBackendError as exc:
-        _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
+        fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:
-        _fail(
+        fail(
             ctx,
             as_json=as_json,
             error_type=exc.error_type or "invalid_input",
@@ -267,7 +255,7 @@ def objective_plan(
             )
         else:
             user_output(
-                click.style("objective-plan --dry-run (resolve only; no mark, no launch)", dim=True)
+                click.style("objective plan --dry-run (resolve only; no mark, no launch)", dim=True)
             )
             user_output(f"  objective=#{number}  node={node.id}  would-mark={marked_status.value}")
         return

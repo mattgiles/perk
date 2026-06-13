@@ -99,7 +99,7 @@ def test_plannable_emits_plan_required_and_dispatches_nothing(monkeypatch):
     payload = _payload(result)
     assert payload["action"] == "plan_required"
     assert payload["node"] == "1.1"
-    assert payload["remediation"] == "perk objective-plan 137 --node 1.1"
+    assert payload["remediation"] == "perk objective plan 137 --node 1.1"
     assert "called" not in launched
 
 

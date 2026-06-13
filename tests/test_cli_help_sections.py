@@ -222,6 +222,20 @@ def test_sectioned_alias_group_omits_empty_sections():
     assert "Commands:" in result.output
 
 
+def test_objective_group_renders_launchers_and_workers():
+    # Node 3.1 (SSOT §11.7-Q5): the live `objective` group sections its folded launchers/workers.
+    result = CliRunner().invoke(cli, ["objective", "--help"])
+    assert result.exit_code == 0
+    assert "Launchers:" in result.output
+    assert "Workers:" in result.output
+    launchers_slice = _between(result.output, "Launchers:", "Workers:")
+    for name in ("author", "save", "plan"):
+        assert name in launchers_slice, name
+    workers_slice = _between(result.output, "Workers:", None)
+    for name in ("create", "show", "node", "next", "reconcile", "run"):
+        assert name in workers_slice, name
+
+
 def test_section_lists_drift_guard():
     ctx = click.Context(cli)
     alias_names = {a for name in cli.commands for a in get_aliases(cli.commands[name])}

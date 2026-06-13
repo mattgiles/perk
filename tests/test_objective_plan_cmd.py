@@ -1,4 +1,4 @@
-"""P2.T10 — `perk objective-plan [NUMBER] [--node ID]`: the objective plan-factory cold door.
+"""P2.T10 — `perk objective plan [NUMBER] [--node ID]`: the objective plan-factory cold door.
 
 `github.get_objective` + `github.update_objective_node` + `launch.launch_stage` are stubbed (no
 GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py.
@@ -73,7 +73,7 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     # The next actionable node (1.2) is selected + marked planning, then launched with the seed.
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
@@ -102,7 +102,7 @@ def test_explicit_node_selects_it(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--node", "1.3", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.3", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.3"
 
@@ -122,7 +122,7 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["success"] is True and payload["dry_run"] is True
@@ -135,7 +135,7 @@ def test_objective_required_when_number_omitted(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "objective_required"
 
@@ -146,7 +146,7 @@ def test_objective_not_found(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "99", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "99", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "objective_not_found"
 
@@ -165,11 +165,11 @@ def test_no_actionable_node(monkeypatch):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         # next-node path
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "no_actionable_node"
         # explicit non-actionable node path
-        result2 = runner.invoke(cli, ["objective-plan", "7", "--node", "1.1", "--json"])
+        result2 = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result2.exit_code == 1
         assert json.loads(result2.output)["error_type"] == "no_actionable_node"
 
@@ -212,7 +212,7 @@ def test_parallel_second_launch_selects_next_pending(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
         assert "node(s) 1.1 have unresumed planning claims" in result.stderr
         assert "--node <id>" in result.stderr
@@ -235,7 +235,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--dry-run", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["node"] == "1.2"
@@ -273,7 +273,7 @@ def test_resumes_orphaned_planning_claim(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.1" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
@@ -308,7 +308,7 @@ def test_in_flight_node_reports_objective_in_flight(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "objective_in_flight"
 
@@ -326,7 +326,7 @@ def test_complete_objective_reports_complete_message(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
         payload = json.loads(result.output)
         assert payload["error_type"] == "no_actionable_node"
@@ -361,7 +361,7 @@ def test_explicit_node_resumes_planning_claim(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--node", "1.1", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result.exit_code == 0, result.output
     assert marked["node_id"] == "1.1"
 
@@ -376,7 +376,7 @@ def test_explicit_in_flight_node_rejected(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--node", "1.1", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "objective_in_flight"
 
@@ -387,7 +387,7 @@ def test_remote_blocked(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        result = runner.invoke(cli, ["objective-plan", "7", "--remote", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--remote", "--json"])
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "remote_blocked"
 
@@ -395,7 +395,7 @@ def test_remote_blocked(monkeypatch):
 def test_not_a_repo_exit_2():
     runner = CliRunner()
     with runner.isolated_filesystem():  # no git init
-        result = runner.invoke(cli, ["objective-plan", "7", "--json"])
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 2
         assert json.loads(result.output)["error_type"] == "not_a_repo"
 
@@ -404,7 +404,7 @@ def test_not_a_repo_exit_2():
 
 
 def test_seed_prompt_injects_objective_explorer_model_when_configured():
-    from perk.cli.commands.objective_plan_cmd import _seed_prompt
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
     primed = _seed_prompt("7", node, "Ship it", "test/model")
@@ -413,7 +413,7 @@ def test_seed_prompt_injects_objective_explorer_model_when_configured():
 
 
 def test_seed_prompt_omits_model_when_unset():
-    from perk.cli.commands.objective_plan_cmd import _seed_prompt
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
     assert "passing `model:" not in _seed_prompt("7", node, "Ship it")
@@ -422,7 +422,7 @@ def test_seed_prompt_omits_model_when_unset():
 def test_seed_prompt_instructs_the_file_first_loop():
     """Node 3.1: the cold seed prompt mirrors the warm file-first loop (draft → review →
     approval-driven save), with the cold link carrier (handoff recovery, no planning mark)."""
-    from perk.cli.commands.objective_plan_cmd import _seed_prompt
+    from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     node = objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING, depends_on=())
     primed = _seed_prompt("7", node, "Ship it")

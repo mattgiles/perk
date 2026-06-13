@@ -217,7 +217,7 @@ def _resolve_in_flight_stage(
     dry_run: bool,
 ) -> dict[str, Any]:
     """Resolve the action for an in-flight node by inspecting its linked plan's PR state (D7)."""
-    remediation = f"perk objective-plan {number} --node {node.id}"
+    remediation = f"perk objective plan {number} --node {node.id}"
     # The node's `pr` backlink carries the PLAN id — an opaque string (GitHub "42", Linear
     # "ENG-123"; contracts §8.21): any non-empty value IS the plan id (the resolved backend is
     # the authority on whether it exists). Only the empty/missing case falls through to the
@@ -337,7 +337,7 @@ def _run_impl(
         payload.update(
             action="plan_required",
             node=node.id,
-            remediation=f"perk objective-plan {number} --node {node.id}",
+            remediation=f"perk objective plan {number} --node {node.id}",
         )
         return payload
     # in_flight

@@ -391,7 +391,7 @@ def launch_stage(
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
     ``prompt_override`` (P2.T10): when given, it is the seeded initial prompt instead of the
-    stage-derived ``_initial_prompt`` — the dedicated ``perk objective-plan`` command supplies a
+    stage-derived ``_initial_prompt`` — the dedicated ``perk objective plan`` command supplies a
     node-seeded prompt (objective-plan has no plan-ref, so ``_initial_prompt`` returns ``None``).
     All existing callers pass ``None`` and are unaffected.
 
