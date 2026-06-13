@@ -16,11 +16,27 @@ import { parseUserBindings, type SkillBinding } from "./bindings.ts";
 const CONFIG_FILENAME = "perk.toml";
 const LOCAL_CONFIG_FILENAME = "perk.local.toml";
 
+/**
+ * One configured CI check (a `[[ci]]` array-of-tables row). `name`/`command` are required
+ * non-blank strings; an optional `glob` (a single comma-separated pattern string, e.g.
+ * `"*.ts,*.tsx"`) declares which changed files the check is relevant to — the read-only CI
+ * executor (P2.T5) skips it on the run-all path when no changed file (vs trunk) matches.
+ */
+export interface CiCheck {
+  name: string;
+  command: string;
+  glob?: string;
+}
+
 export interface PerkConfig {
   /** Optional project-supplied plan-authoring addendum (`[workflow] plan_authoring = "..."`). */
   planAuthoring?: string;
-  /** The `[ci]` named-checks map (`name = "shell command"`); the executor (P2.T5) consumes it. */
-  ci?: Record<string, string>;
+  /**
+   * The `[[ci]]` checks (an ordered array-of-tables, each row name/command/optional glob); the
+   * read-only CI executor (P2.T5) consumes it. Always-present ordered array (mirror of
+   * `bindings`/`providers`); absent/empty ⇒ `[]`.
+   */
+  ci: CiCheck[];
   /**
    * The agent-keyed `[subagents]` table (#196): a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`). Each configured
@@ -211,13 +227,33 @@ export function loadPerkConfig(cwd: string): PerkConfig {
   return {
     planAuthoring:
       typeof planAuthoring === "string" && planAuthoring.trim() ? planAuthoring : undefined,
-    ci: merged.tables.ci ?? {},
+    ci: parseCiChecks(merged.arrays.ci ?? []),
     subagents: parseSubagentsSelection(merged.tables.subagents),
     objectiveCompactThreshold,
     bindings: parseUserBindings(merged.arrays.bindings ?? []),
     providers: parseProvidersSelection(merged.tables.providers),
     trust: parseTrustSelection(merged.tables.trust),
   };
+}
+
+/**
+ * Read the `[[ci]]` array-of-tables into an ordered `CiCheck[]`. A row is kept only when both
+ * `name` and `command` are non-blank strings; `glob` is kept only when a non-blank string. Declared
+ * order is preserved; ill-typed rows are silently dropped (mirror of `parseProvidersSelection`).
+ */
+export function parseCiChecks(rows: Array<Record<string, string>>): CiCheck[] {
+  const checks: CiCheck[] = [];
+  for (const row of rows) {
+    const name = row.name;
+    const command = row.command;
+    if (typeof name !== "string" || !name.trim()) continue;
+    if (typeof command !== "string" || !command.trim()) continue;
+    const check: CiCheck = { name, command };
+    const glob = row.glob;
+    if (typeof glob === "string" && glob.trim()) check.glob = glob;
+    checks.push(check);
+  }
+  return checks;
 }
 
 /** The perk-owned project agents configurable via the `[subagents]` table. */

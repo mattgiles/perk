@@ -34,15 +34,35 @@ fmt:
     uv run ruff format perk tests
     npm run format
 
-# lint everything (ruff + biome)
-lint:
+# lint python (ruff)
+lint-py:
     uv run ruff check perk tests
+
+# lint typescript (biome)
+lint-js:
     npm run lint
 
-# type-check everything (ty + tsc)
-typecheck:
+# lint everything (ruff + biome)
+lint: lint-py lint-js
+
+# type-check python (ty)
+typecheck-py:
     uv run ty check
+
+# type-check typescript (tsc)
+typecheck-js:
     npm run typecheck
+
+# type-check everything (ty + tsc)
+typecheck: typecheck-py typecheck-js
+
+# run the python test suite (pytest)
+test-py *args:
+    uv run pytest {{args}}
+
+# run the typescript test suite (node:test)
+test-js:
+    node --test "extension/**/*.test.ts"
 
 # run the test suite (python: pytest, typescript: node:test)
 test *args:

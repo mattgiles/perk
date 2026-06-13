@@ -4,13 +4,16 @@ Run your project's configured CI checks from inside a `pi` session and read the 
 leaving the session. perk **runs and reports** — it executes the checks and surfaces pass/fail plus
 failure output; it **never auto-fixes**. You own the fix; perk is the oracle.
 
-**Prerequisite:** a populated `[ci]` table in `.pi/perk.toml`. The table is commented out by default
-after [`perk init`](../reference/cli.md#perk-init) — you define the named checks your project runs.
+**Prerequisite:** one or more `[[ci]]` checks in `.pi/perk.toml`. The block is commented out by
+default after [`perk init`](../reference/cli.md#perk-init) — you define the named checks your
+project runs.
 
 ## Steps
 
-1. **Configure the checks.** Add named checks to the `[ci]` table in `.pi/perk.toml` (each entry is
-   a check name mapped to its command).
+1. **Configure the checks.** Add `[[ci]]` rows to `.pi/perk.toml` — each row is a `name`, a
+   `command`, and an optional `glob`. A check with a `glob` (a comma-separated pattern string,
+   e.g. `glob = "*.py"`) is **skipped** when no changed file (vs the repo's trunk) matches it, so a
+   docs-only change reports success fast; a row without a `glob` always runs.
 2. **Run all checks.** Run warm `/ci`. perk runs every configured check in declared order and reports
    each one's result. (In-session command; its reference is coming with Objective
    [#453](https://github.com/mattgiles/perk/issues/453) Node 2.2.)
@@ -23,7 +26,7 @@ after [`perk init`](../reference/cli.md#perk-init) — you define the named chec
 
 ## The trust gate
 
-Running a project-supplied command is gated: perk will only execute your `[ci]` commands when one of
+Running a project-supplied command is gated: perk will only execute your `[[ci]]` commands when one of
 these grants trust — a committed `[trust] ci = "true"` in config, the `--allow-project-ci` flag, an
 interactive confirmation, or a per-session approval latch. A headless session with **none** of these
 **refuses** to run (fail-closed) rather than executing untrusted commands unattended.

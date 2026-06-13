@@ -67,19 +67,33 @@ Project-supplied plan-authoring guidance.
 plan_authoring = "Prefer the smallest diff that satisfies the acceptance criteria."
 ```
 
-### `[ci]`
+### `[[ci]]`
 
-A named-checks map: each entry is a check name mapped to its shell command. Consumed by the
-in-session CI executor (warm `/ci`) and run automatically at `/ready`.
+An array-of-tables: each `[[ci]]` row declares one check. Consumed by the in-session CI executor
+(warm `/ci` + the `run_ci` tool) and run automatically at `/ready`. Declared order is preserved.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| _(check name)_ | string (shell command) | _(none)_ | One entry per check; the key is the check name, the value its command. |
+| `name` | string | _(required)_ | The check name (selected by `/ci <name>`). |
+| `command` | string (shell command) | _(required)_ | The command to run. |
+| `glob` | string | _(unset)_ | A comma-separated pattern string (e.g. `"*.ts,*.tsx"`). When set, the check is **skipped** on the run-all path if no changed file (vs the repo's trunk) matches; unset ⇒ the check always runs. |
+
+**Change-scoped gating.** A check with a `glob` runs only when at least one changed file (merge-base
+vs the detected trunk, plus untracked files) matches one of its patterns — a docs-only change skips
+the code checks and reports success fast. A pattern with no `/` matches a file's basename at any
+depth (so `*.py` gates any `.py`); `**` crosses directories, `*` matches one path segment. Gating
+applies only when running **all** checks: an explicit `/ci <name>` always runs that check, and any
+git error **fails open** (all checks run) so uncertainty never produces a false success.
 
 ```toml
-[ci]
-test = "just test"
-lint = "just lint"
+[[ci]]
+name = "lint"
+command = "just lint"
+glob = "*.py,*.ts"
+
+[[ci]]
+name = "test"
+command = "just test"
 ```
 
 See [How to run CI checks in a session](../how-to/run-ci-in-session.md) for the recipe.
@@ -150,7 +164,7 @@ Per-repo trust declarations.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `ci` | string | _(unset)_ | The string `"true"` marks the repo's `[ci]` checks trusted — they run without a per-session confirm (including headless). |
+| `ci` | string | _(unset)_ | The string `"true"` marks the repo's `[[ci]]` checks trusted — they run without a per-session confirm (including headless). |
 
 The value is a **quoted string** (`ci = "true"`); only that exact string grants trust.
 
@@ -231,7 +245,7 @@ plane and stay **native ints** (`reserve_tokens = 16384`).
 - [In-session commands & tools](./in-session.md) — the warm `/…` commands and model-facing tools.
 - [How to attach your own skill to a stage or command](../how-to/attach-a-skill-to-a-stage.md) —
   the `[[bindings]]` recipe.
-- [How to run CI checks in a session](../how-to/run-ci-in-session.md) — the `[ci]` recipe.
+- [How to run CI checks in a session](../how-to/run-ci-in-session.md) — the `[[ci]]` recipe.
 - [Providers & issue backends](./providers-and-backends.md) — the supported provider set and the
   Linear backend reference; this page documents their config keys only.
 - [How to select a plan or todo provider](../how-to/select-a-provider.md) /

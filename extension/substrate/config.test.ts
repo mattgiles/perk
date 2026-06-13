@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { loadPerkConfig, parseTomlSubset, resolveIssueBackendId } from "./config.ts";
+import { loadPerkConfig, parseCiChecks, parseTomlSubset, resolveIssueBackendId } from "./config.ts";
 
 function repoWith(files: Record<string, string>): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
@@ -158,6 +158,49 @@ test("loadPerkConfig: perk.local.toml [subagents] overlays perk.toml (local wins
     "perk.local.toml": '[subagents]\npr-reviewer = "local/model"\n',
   });
   assert.equal(loadPerkConfig(cwd).subagents["pr-reviewer"], "local/model");
+});
+
+// --- [[ci]] selection (#490) ---
+
+test("loadPerkConfig: [[ci]] absent -> empty array", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  assert.deepEqual(loadPerkConfig(cwd).ci, []);
+});
+
+test("parseCiChecks: keeps order; keeps glob; ill-typed/blank rows dropped", () => {
+  const checks = parseCiChecks([
+    { name: "lint", command: "just lint", glob: "*.py" },
+    { name: "test", command: "just test" }, // no glob
+    { name: "", command: "x" }, // blank name -> dropped
+    { command: "only-command" } as Record<string, string>, // missing name -> dropped
+    { name: "only-name" } as Record<string, string>, // missing command -> dropped
+    { name: "blankglob", command: "c", glob: "  " }, // blank glob -> omitted
+  ]);
+  assert.deepEqual(checks, [
+    { name: "lint", command: "just lint", glob: "*.py" },
+    { name: "test", command: "just test" },
+    { name: "blankglob", command: "c" },
+  ]);
+});
+
+test("loadPerkConfig: parses [[ci]] rows into an ordered CiCheck[]", () => {
+  const cwd = repoWith({
+    "perk.toml":
+      '[[ci]]\nname = "lint-py"\ncommand = "just lint-py"\nglob = "*.py"\n\n' +
+      '[[ci]]\nname = "test"\ncommand = "just test"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).ci, [
+    { name: "lint-py", command: "just lint-py", glob: "*.py" },
+    { name: "test", command: "just test" },
+  ]);
+});
+
+test("loadPerkConfig: perk.local.toml [[ci]] replaces perk.toml wholesale (local wins)", () => {
+  const cwd = repoWith({
+    "perk.toml": '[[ci]]\nname = "a"\ncommand = "A"\n',
+    "perk.local.toml": '[[ci]]\nname = "b"\ncommand = "B"\n',
+  });
+  assert.deepEqual(loadPerkConfig(cwd).ci, [{ name: "b", command: "B" }]);
 });
 
 // --- [providers] selection (Node 2.1) ---
