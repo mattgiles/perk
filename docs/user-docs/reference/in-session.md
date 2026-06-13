@@ -207,7 +207,11 @@ Tools available across stages, independent of a single command.
 
 - **`ask_user_question`** — ask the human a clarifying question (free-text or multiple-choice; a
   free-text escape is always added). The turn continues with the answer; returns a no-user
-  sentinel when there is no interactive UI. *Non-terminating.*
+  sentinel when there is no interactive UI. *Non-terminating.* This is perk's first-party default;
+  it is a pluggable provider seam (`askuser`) — a repo may select a foreign provider
+  (`juicesharp-ask-user`, a richer multi-question dialog) via `[providers] askuser`, in which case
+  perk vacates its own tool and the foreign same-named `ask_user_question` is what fires (see the
+  [providers reference](./providers-and-backends.md)).
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,

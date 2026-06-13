@@ -18,15 +18,15 @@ This page is **human-reviewed for accuracy** against the provider catalog
 
 Two related but distinct knobs live here:
 
-- **Provider seams** — the *plan-authoring* surface and the *todo/checkpoint* surface are each a
-  **seam** that a foreign Pi package can fill in place of perk's bundled default. There are exactly
-  two seams: `plan` and `todo`.
+- **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
+  *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
+  default. There are three seams: `plan`, `todo`, and `askuser`.
 - **Issue backend** — where canonical plan / learn / objective issues are stored: GitHub
   (the default) or Linear.
 
 Both are selected by config keys documented at key depth in the
-[configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo`) and the
-`[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+[configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
+`askuser`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -39,7 +39,7 @@ For the task recipes, see
 The supported provider catalog is `shared/providers.yaml`, read directly by both planes
 (`perk/substrate/providers.py`, `extension/substrate/providers.ts`). Every provider below is a
 **fully-supported, selectable** option; perk's own bundled providers (`perk-plan`,
-`perk-checkpoints`) are the zero-config **defaults** — the no-config hard guarantee — but the
+`perk-checkpoints`, `perk-ask-user`) are the zero-config **defaults** — the no-config hard guarantee — but the
 foreign providers are first-class selections, not experiments.
 
 | Provider id | Seam | Default? | Posture | Foreign package |
@@ -49,6 +49,8 @@ foreign providers are first-class selections, not experiments.
 | `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
 | `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
 | `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
+| `perk-ask-user` | `askuser` | ✅ | reference (native) | _(none)_ |
+| `juicesharp-ask-user` | `askuser` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-ask-user-question` |
 
 ### Postures
 
@@ -69,6 +71,15 @@ How perk yields its own surface to a selected foreign provider differs by provid
   is no registration-time vacating, because the todo seam has no command-name collision. The
   `todoAdapterJuicesharp` shim carries perk's implement-progress discipline onto the foreign
   checklist overlay (injection-only, gated to an active workflow).
+- **REPLACE / vacate-only (`juicesharp-ask-user`).** The `askuser` seam is an **interface seam** —
+  its contract is the tool *name* `ask_user_question` plus its non-terminating-answer semantics,
+  with no durable artifact to bridge. The foreign `@juicesharp/rpiv-ask-user-question` extension
+  registers a tool with the **identical name** `ask_user_question` (a richer multi-question
+  dialog), and tools (unlike commands) are not numerically suffixed — a same-named tool
+  replaces/warns by load order. So under a `juicesharp-ask-user` selection perk **vacates at
+  registration time**: `registerAskUser` registers **nothing**, leaving the foreign tool as the
+  sole `ask_user_question`. There is **no adapter shim** (`adapter: null`); the foreign tool
+  self-documents via its own guidelines.
 
 ### What selection does
 
@@ -77,7 +88,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   two-directional (`_converge_provider_packages` in `perk/convergence/init.py`). perk's own
   reference providers have no package — nothing is added.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, todo=…, askuser=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee.
 
 ### Fallback semantics

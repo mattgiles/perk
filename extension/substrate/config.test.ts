@@ -210,13 +210,15 @@ test("loadPerkConfig: [providers] absent -> empty selection", () => {
   assert.deepEqual(loadPerkConfig(cwd).providers, {});
 });
 
-test("loadPerkConfig: parses [providers] plan/todo strings", () => {
+test("loadPerkConfig: parses [providers] plan/todo/askuser strings", () => {
   const cwd = repoWith({
-    "perk.toml": '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n',
+    "perk.toml":
+      '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\naskuser = "juicesharp-ask-user"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).providers, {
     plan: "tombell-plan",
     todo: "perk-checkpoints",
+    askuser: "juicesharp-ask-user",
   });
 });
 
