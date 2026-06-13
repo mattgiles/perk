@@ -70,8 +70,8 @@ exactly one authoring context present.
 
 ## Cross-references
 
-- `extension/planMode.ts`, `extension/objectiveAuthor.ts` — the two read-only authoring injectors
-- `extension/bindingDelivery.ts` — the narrowest strip (own custom type only)
+- `extension/factories/planMode.ts`, `extension/factories/objectiveAuthor.ts` — the two read-only authoring injectors
+- `extension/substrate/bindingDelivery.ts` — the narrowest strip (own custom type only)
 - `docs/learned/pi/extension-api.md` — the every-call `context` event + injected-message persistence
 - `docs/learned/workflow/skill-bindings.md` — cold↔warm binding delivery this strip discipline serves
 - `docs/learned/workflow/objective-lifecycle.md` — the authoring loop using the `stage` discriminator

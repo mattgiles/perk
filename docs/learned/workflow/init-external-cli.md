@@ -123,10 +123,10 @@ net is the backstop.
 
 ## Cross-references
 
-- `perk/init.py` — `PERK_SKILLS`, `_desired_skills_manifest`, `_converge_skills_manifest`,
+- `perk/convergence/init.py` — `PERK_SKILLS`, `_desired_skills_manifest`, `_converge_skills_manifest`,
   `_skill_link_state`, `_sync_skills`, `_desired_packages`, `is_self_repo`, `run_init`
-- `perk/capabilities.py` — the `skills-manifest` capability
-- `perk/doctor.py` — `_MANAGED_GROUP` (`skills-manifest` → `skills` group)
+- `perk/convergence/capabilities.py` — the `skills-manifest` capability
+- `perk/convergence/doctor.py` — `_MANAGED_GROUP` (`skills-manifest` → `skills` group)
 - `tests/conftest.py` — `stub_env` (the `_sync_skills` patch seam)
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `init-doctor.md` — managed-convergence SSOT and the `changes`-delta idempotency rule

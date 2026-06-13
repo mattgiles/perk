@@ -20,12 +20,12 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 > Phase 1, when `/plan-save` knows their shape — `Q7`/`Q9`).
 >
 > **Status (T5):** the §8.4 **verification ops are implemented in the Python plane**
-> (`perk/github.py` — `check_auth` / `check_repo_access`, verification-only, never mutating);
+> (`perk/github/auth.py` — `check_auth` / `check_repo_access`, verification-only, never mutating);
 > the TS plane authors the same shapes in Phase 1. The §8.5 init machine-surface contract is
 > live (`perk init --json`).
 >
 > **Status (P1.T2a):** the §8.4 **plan-write mutations are implemented in the Python plane**
-> (`perk/github.py` `create_label` / `create_plan_issue` / `add_issue_comment` /
+> (`perk/github/plans.py` `create_label` / `create_plan_issue` / `add_issue_comment` /
 > `find_plan_issue` + `perk/plan.py` storage) — the **cold/worker** save door
 > (`perk plan-save`). The warm in-session twin (the TS `/plan-save` tool) is T3. Both planes
 > use **REST `gh api`** (never porcelain — porcelain's GraphQL has a separate, often-exhausted
@@ -52,8 +52,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
 - Keyed by the perk-owned **`run_id`** (a ULID — see §8.2), never the Pi session id (which
   does not exist yet at cold-door launch time). The keying `run_id` may be **CLI-minted**
-  (cold launch, `perk/run_id.py`) or **extension-minted** (a warm session with no identity,
-  §8.2 — `extension/runId.ts`); handoff blobs remain cold-launch-only.
+  (cold launch, `perk/state/run_id.py`) or **extension-minted** (a warm session with no identity,
+  §8.2 — `extension/substrate/runId.ts`); handoff blobs remain cold-launch-only.
 - **Handoff blob:** `{ run_id, stage, mode, consumed }` (+ `pi_session_id` once claimed). The
   CLI's cold launch (`perk <stage>`, T4) writes it; the extension claims it on `session_start`
   and sets `consumed: true` (§8.2). `stage` is the target stage id — the launched session's
@@ -62,8 +62,8 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `scratch/runs/<run_id>/data/` — a dedicated subdir so run-scoped session artifacts never
   overlap perk machine records (`dispatch.json`, `events.ndjson`, `ci-*.md`) living directly in
   the run dir — created lazily on first write (`session_start` stays artifact-free). All
-  scratch/session-data paths flow through one accessor per plane: `perk/cache.py` (exterior;
-  consumers hold an explicit `run_id`) and `extension/cache.ts` + `extension/sessionData.ts`
+  scratch/session-data paths flow through one accessor per plane: `perk/state/cache.py` (exterior;
+  consumers hold an explicit `run_id`) and `extension/substrate/cache.ts` + `extension/substrate/sessionData.ts`
   (interior; the ctx seam resolves the current `run_id` from `perk:workflow-state` and degrades
   to `null` when the session has no identity — never a stamp `run_id`, contrast
   `coldDoor.activeRunId`). Helpers degrade gracefully: absence and I/O failure → `None`/`null`
@@ -76,9 +76,9 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
   **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
   twin) is the first session-data producer: it writes the working plan during read-only plan
-  authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/toolGating.ts`) as a **narrow
+  authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) as a **narrow
   structural carve-out**: the tool has no path/name parameter — the artifact name is the fixed
-  constant `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/planDraft.ts`) and the path is
+  constant `plan-draft.md` (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`) and the path is
   derived exclusively through the accessor seam (`writeSessionArtifact`: file + provenance
   pointer) — so the only bytes it can ever write are the one working-plan artifact in the
   current run's data dir (gitignored scratch); the gate's `tool_call` `edit`/`write`/bash
@@ -90,7 +90,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   fail-open).
 
   **File-first plan save (Node 2.2).** Both save surfaces resolve their plan through one shared
-  resolver (`resolvePlanSource`, `extension/planSave.ts`), in order: (1) the validated
+  resolver (`resolvePlanSource`, `extension/factories/planSave.ts`), in order: (1) the validated
   `plan-draft.md` artifact (`readSessionArtifact` — digest-validated, fail-open: no run_id / no
   pointer / fork run_id mismatch / missing file / digest mismatch all fall through); (2) the
   explicit `plan` param (tool only — now **optional** in the `plan_save` schema); (3) the
@@ -107,7 +107,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   working objective during read-only objective authoring. It is allowlisted in `READ_ONLY_TOOLS`
   via the same structural carve-out argument (no path/name parameter; the artifact name is the
   fixed constant `objective-draft.json` — `OBJECTIVE_DRAFT_ARTIFACT`,
-  `extension/objectiveDraft.ts` — and the path derives exclusively through the accessor seam;
+  `extension/factories/objectiveDraft.ts` — and the path derives exclusively through the accessor seam;
   the gate's `edit`/`write`/bash blocking is unchanged). The artifact is a **single JSON file**
   carrying `{schema_version: 1, title?, prose, roadmap}` — the structured roadmap rides
   **verbatim** (node-shape validation stays with the Python plane at save time, the
@@ -127,7 +127,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   when some node carries one; cells sanitized) — **never raw JSON, never the `plan` param,
   never the transcript**. No draft → soft-skip `reason: "no_objective_draft"` with an
   `objective_draft` redirect. **The approval→save orchestration (node 2.3, landed):** an
-  APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/objectiveSave.ts`,
+  APPROVED outcome wires into the `objectiveApprovalSave` seam (`extension/factories/objectiveSave.ts`,
   the objective sibling of `approvalSave`): the seam **re-reads the structured artifact at save
   time** (`readObjectiveDraft` — never the rendered markdown, never a param, never the
   transcript) → `saveObjective` → D1a gate exit on a successful save (snapshot
@@ -161,7 +161,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   rule still applies — GC never crashes on a broken install). Surfaces: the `cache-gc` `doctor`
   check (a `warn` with remediation `perk state prune` whenever anything is prunable — **no
   `--fix` arm**: deletion is *exclusively* `perk state prune`) and the `perk state prune`
-  command (alias `gc`; `--dry-run`/`--max-age-days`/`--json`). Policy home: `perk/gc.py`
+  command (alias `gc`; `--dry-run`/`--max-age-days`/`--json`). Policy home: `perk/state/gc.py`
   (exterior-owned; no TS twin). (erk accumulated session dirs precisely because GC was undefined.)
 - `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
   locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
@@ -173,7 +173,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   written verbatim. One active ref per checkout/worktree (`.pi/workflow/` is per-checkout). The
   **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
   on `session_start` to reconcile `active_plan_ref` (§8.3). The cross-plane contract is the
-  *file* (`perk/cache.py` ↔ `extension/cache.ts`), not a shared module.
+  *file* (`perk/state/cache.py` ↔ `extension/substrate/cache.ts`), not a shared module.
   - **Selector vs binding duality (#43).** The file plays **two roles by checkout**. In the
     **repo root** it is a mutable **selector** — "the plan a no-arg cold `perk implement`
     consumes next" — written by `save`; the `worktree: none` stages (`plan`/`objective-plan`/
@@ -248,10 +248,10 @@ the consume mechanism independent of which save surface the model used.
 
 **Mint doctrine (three-way).** A warm in-session *stage transition* **keeps** the `run_id`
 (matches the registry per-stage `run_id` policy); a *cold* relaunch **mints** a new `run_id`
-in the **Python plane** (`perk/run_id.py`) that **records its predecessor**, so resume/relaunch
+in the **Python plane** (`perk/state/run_id.py`) that **records its predecessor**, so resume/relaunch
 chains stay traceable; and a **warm session with no identity** (decideClaim's `none` arm — no
 branch `run_id`, no `PERK_RUN_ID`: ad-hoc `pi`, `pi --plan`, spawned subagent children) **mints
-its own ULID in the TS plane** (`extension/runId.ts`) on `session_start`, recording
+its own ULID in the TS plane** (`extension/substrate/runId.ts`) on `session_start`, recording
 `{run_id, pi_session_id}` via the strict append seam (§8.3) — **no predecessor, no handoff, no
 disk artifacts**. A **failed cold claim never falls back to a mint** (`PERK_RUN_ID` set but the
 handoff missing/mismatched stays a loud unclaimed error — minting would mask a launcher bug).
@@ -335,7 +335,7 @@ so a successful cold save can never be reported as a warm failure by render-only
 (e.g. under CLI↔extension version skew, the #387/#390 incident).
 
 **Approval→save orchestration seam (Node 2.3 of #339).** The exported `approvalSave` seam
-(`extension/planSave.ts`) is the shared APPROVED-review → save orchestration: artifact-first plan
+(`extension/factories/planSave.ts`) is the shared APPROVED-review → save orchestration: artifact-first plan
 resolution (`resolvePlanSource`) → `savePlan` → gate exit on success (the D1a pattern — snapshot
 `gating.isActive()` before the save, `gating.exit` only on a successful save; a failed save leaves
 the gate on). The `/plan-save` command is now the **manual failsafe** invocation of the same seam;
@@ -356,7 +356,7 @@ ordering is preserved. A successful node-linked save clears the matching claim (
 **Plan-issue title (#129).** The warm door now **actually forwards** an explicit `title` to
 `perk plan-save --title` (it was previously accepted by `savePlan` but silently dropped). When no
 explicit `title` is given, it **best-effort generates one** via the session model
-(`extension/planTitle.ts` → `extension/structuredOutput.ts`, a reusable structured-output substrate
+(`extension/factories/planTitle.ts` → `extension/substrate/structuredOutput.ts`, a reusable structured-output substrate
 over `@earendil-works/pi-ai` tool-calling) and forwards that. Every failure mode (no model,
 unresolved auth, a model error, no tool call, schema-invalid args, an empty sanitized title) and the
 `PERK_NO_LLM` offline gate (set by the test harness, never by the production CLI) yield **no**
@@ -366,7 +366,7 @@ blocked. The cold door's `--title`/`derive_title` contract is unchanged.
 State key (registry vocabulary): `session.workflow-state`.
 
 **Objective budget + compaction (P2.T9).** With `active_objective` now live, the TS substrate
-(`extension/objective.ts`, `registerObjective`) adds three pieces, all **inert when no objective
+(`extension/factories/objective.ts`, `registerObjective`) adds three pieces, all **inert when no objective
 is active** and **never throwing** (logged-not-thrown, like checkpoints):
 - **`/objective [<id>|clear]`** — `<id>` appends `{ active_objective: <id> }` to
   `perk:workflow-state` (LWW field) **and** seeds a dedicated `perk:objective-budget` activation
@@ -390,7 +390,7 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
 - **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
   when `active_objective != null`**, read `ctx.getContextUsage()` and call `ctx.compact({…})` when
   usage crosses a threshold (default `0.8`; overridable via `[objective] compact_threshold` in
-  `.pi/perk.toml`, read through `extension/config.ts` — written as a **quoted** value because the
+  `.pi/perk.toml`, read through `extension/substrate/config.ts` — written as a **quoted** value because the
   TOML subset reads only strings). The decision is the pure `shouldCompact(usage, threshold)`;
   compaction is best-effort (`onError` logs and continues). The custom cheaper-model
   `session_before_compact` summary is **deferred** — T9 ships the simpler `ctx.compact` trigger.
@@ -404,16 +404,16 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
 - **`perk objective-author`** (a dedicated seeded cold door, like `objective-plan`) opens a
   **read-only** authoring session, seeded with the objective-authoring guidance. Its handoff records
   `stage: objective-author`, claimed into `perk:workflow-state.stage`.
-- **Coupling break (the `stage` field).** `extension/planMode.ts` previously injected its
+- **Coupling break (the `stage` field).** `extension/factories/planMode.ts` previously injected its
   plan-authoring context on *any* read-only gate. An `objective-author` session is **also**
   read-only, so plan mode now **defers** when `stage === "objective-author"`, and
-  `extension/objectiveAuthor.ts` injects its own `perk:objective-author-context` instead (keyed off
+  `extension/factories/objectiveAuthor.ts` injects its own `perk:objective-author-context` instead (keyed off
   read-only gate **AND** the stage; stripped from `context` when no longer authoring — the same
   hygiene plan mode applies). Exactly one authoring context is present. The injected
   objective-authoring context is optionally extended by the **same** `[workflow] plan_authoring`
-  addendum the plan-authoring injection consumes (read per-event via `extension/config.ts`'s
+  addendum the plan-authoring injection consumes (read per-event via `extension/substrate/config.ts`'s
   `loadPerkConfig`) — verbatim reuse, no new config key.
-- **`objective_save` warm door** (`extension/objectiveSave.ts`, the mirror of `planSave.ts`). The
+- **`objective_save` warm door** (`extension/factories/objectiveSave.ts`, the mirror of `planSave.ts`). The
   `objective_save` **tool** takes `prose` + a **structured `roadmap`** (a JSON array of nodes —
   never hand-written YAML) and delegates the write to `perk objective create --body <file> --roadmap
   <json> --run-id <rid> --json` (canonical mutation in Python, idempotent on the run_id). On success
@@ -442,7 +442,7 @@ the new single initial: `objective-author -> objective-save -> objective-plan ->
   → approval auto-save; `/objective-save` is the artifact-first failsafe) — #352 Node 3.2.
 
 **Objective plan factory + transition tools (P2.T10).** The objective **transition** surface on top
-of T9's mechanics (`extension/objectivePlan.ts`, `registerObjectivePlan`):
+of T9's mechanics (`extension/factories/objectivePlan.ts`, `registerObjectivePlan`):
 - **`/objective-plan [<number>] [--node ID]`** — the warm entry: resolve the objective (arg, else
   `active_objective` from the rebuilt `perk:workflow-state`) and `pi.sendUserMessage(...)` the
   factory guidance to start the loop (mirrors `/address`). Headless-safe. On invocation it ALSO
@@ -558,7 +558,7 @@ in-session — D2). What T2b adds is the in-process twin of the cold door usable
 impl worktree (same cwd): when `/implement` runs in an impl context (read-write + a linked
 `active_plan_ref`), it offers a lossless `ctx.newSession` fresh-context handoff seeded (via
 `withSession` → `sendUserMessage`) with the plan-read priming (`implementHandoffPrompt`, the
-in-session twin of `perk/launch.py`'s `_initial_prompt`: read the plan from its canonical source,
+in-session twin of `perk/run/launch.py`'s `_initial_prompt`: read the plan from its canonical source,
 implement, `/submit` — carry the plan forward, never summarize it). Model-visible output is capped
 (a single short confirmation; the durable state is the worktree's materialized plan-ref + the plan
 issue). Dirty-tree hygiene is gated **manually** in the handler (a `newSession` session-replace may
@@ -569,7 +569,7 @@ registry's `implement.doors.warm: false` is unchanged.
 **Checkpoints (P2.T2c).** Implementation progress is tracked in a **dedicated `perk:checkpoint`**
 session entry (D3) — kept OFF the `perk:workflow-state` record because progress is high-churn (an
 append every advancing `turn_end`), and a separate entry avoids LWW-append smell on the shared
-record. The interior (`extension/checkpoints.ts`) seeds an ordered step list from the plan body's
+record. The interior (`extension/checkpoints/checkpoints.ts`) seeds an ordered step list from the plan body's
 `## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
 active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
 entry). The `cache.plan` body (`.pi/workflow/plan.md`) is **materialized by the Python cold door**:
@@ -634,7 +634,7 @@ the footer.
 **Generated checkpoint steps for prose plans (#342).** When the implement-session `session_start`
 seeding finds a **materialized plan body with no usable `## Steps`** (`extractSteps` → `[]` covers
 both a missing and a malformed section), checkpoints **generate** the step list on the fly via the
-structured-output substrate (`extension/planSteps.ts`, the `planTitle.ts` idiom: a single
+structured-output substrate (`extension/checkpoints/planSteps.ts`, the `planTitle.ts` idiom: a single
 `set_plan_steps` tool call, TypeBox-validated, 2–12 steps sanitized to ≤200 chars each). Trigger
 conditions (ALL required): the perk-checkpoints reference is the selected todo provider; no
 existing `perk:checkpoint` entry (seed-once); an active workflow (`active_plan_ref != null`); a
@@ -658,14 +658,14 @@ text) — never a failed session start. The plan issue is never mutated (generat
 cache-tier, session-local state).
 
 **Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
-`setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces.ts` +
-`extension/report.ts`); every other extension module reaches the UI only through the seams
+`setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces/surfaces.ts` +
+`extension/surfaces/report.ts`); every other extension module reaches the UI only through the seams
 (`report()`, `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator`
 is never called anywhere (D5 rescinded). Enforced by the source-scan guard
 `extension/surfacesGuard.test.ts` (node:test, runs in `just test`/`just ci`).
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
-prompting. When `mode == "read-only"` the interior (`extension/toolGating.ts`):
+prompting. When `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`):
 (1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
 `ask_user_question` + `plan_review` + the four borrowed `pi-web-access` research tools
 `web_search`/`code_search`/`fetch_content`/`get_search_content`; foreign tool names are inert
@@ -687,14 +687,14 @@ executor (T5) consume; this primitive ships no `/plan` ownership and adds no reg
 
 **Perk-owned plan mode (P2.T2a).** `mode` is now perk-owned **end-to-end** — the borrowed
 `@tombell/pi-plan` package is retired (removed from `init.py`'s `BORROWED_PACKAGES` and
-`.pi/settings.json`). The interior (`extension/planMode.ts`) owns the toggle surface over T1's gate:
+`.pi/settings.json`). The interior (`extension/factories/planMode.ts`) owns the toggle surface over T1's gate:
 a `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`
 (perk adds **no** parallel enforcement — T1 is the single read-only authority). It also injects a
 hidden plan-authoring prompt layer under its own `perk:plan-context` customType (keyed off the
 read-only gate; stripped from `context` when off — the same hygiene T1 applies to
 `perk:mode-context`), optionally extended by a `[workflow] plan_authoring` addendum read from
-`.pi/perk.toml` + `perk.local.toml` (`extension/config.ts`, the TS twin of `perk/config.py`'s
-overlay). `isPlanModeActive` (in `extension/planSave.ts`) now reads perk's own `mode == "read-only"`
+`.pi/perk.toml` + `perk.local.toml` (`extension/substrate/config.ts`, the TS twin of `perk/substrate/config.py`'s
+overlay). `isPlanModeActive` (in `extension/factories/planSave.ts`) now reads perk's own `mode == "read-only"`
 (the P1.T3b `plan-mode-state` soft coupling is gone). The `plan_save` **tool** is structurally
 unreachable while read-only (T1's allowlist excludes it), so there is no auto-exit on the tool path;
 the `/plan-save` **command** *can* run while read-only and, on a successful save, calls
@@ -705,7 +705,7 @@ session (T2c). The `plan` registry stage now records `writes: [session.workflow-
 `/plan` enter/exit `mode` append).
 
 **Plan-provider deferral (Node 2.2).** `planMode` now *consumes* the resolved `[providers] plan`
-selection: it reads `loadPerkConfig(ctx.cwd).providers` through `extension/providers.ts`'s
+selection: it reads `loadPerkConfig(ctx.cwd).providers` through `extension/substrate/providers.ts`'s
 `resolveProviders` per-event (`resolvedPlanProviderId(cwd)` / `isPerkPlanReferenceSelected(cwd)`,
 fail-safe to `perk-plan` on any load failure) and **steps its authoring surface aside** when the
 resolved plan provider ≠ `perk-plan` — the `/plan` toggle announces the deferral headless-safe and
@@ -718,7 +718,7 @@ always-registered and never defer (only perk's own authoring surface does).
 **Todo-provider deferral (Node 3.1).** `checkpoints` (perk's reference todo provider,
 `perk-checkpoints`) now *consumes* the resolved `[providers] todo` selection — the todo-seam mirror
 of the plan-seam deferral above. It reads `loadPerkConfig(ctx.cwd).providers` through
-`extension/providers.ts`'s `resolveProviders` per-event (`resolvedTodoProviderId(cwd)` /
+`extension/substrate/providers.ts`'s `resolveProviders` per-event (`resolvedTodoProviderId(cwd)` /
 `isPerkCheckpointsReferenceSelected(cwd)`, fail-safe to `perk-checkpoints` on any load failure) and
 **steps its progress surface aside** when the resolved todo provider ≠ `perk-checkpoints`: the
 `session_start` / `session_tree` / `turn_end` handlers early-return **silently** (no seed, no
@@ -730,7 +730,7 @@ exactly as today (the default path is the hard guarantee, zero behavior change).
 
 **The `@juicesharp/rpiv-todo` adapter (Node 3.2).** `juicesharp-todo` is now a **real, selectable**
 todo provider (no longer illustrative); the todo seam is **behavior-complete**. The perk-owned shim
-`extension/todoAdapterJuicesharp.ts` (`registerTodoAdapterJuicesharp`, always registered, wired right
+`extension/adapters/todoAdapterJuicesharp.ts` (`registerTodoAdapterJuicesharp`, always registered, wired right
 after `registerCheckpoints`) is an **injection-only** bridge, inert unless `[providers] todo =
 "juicesharp-todo"` **and** the session is an active workflow (`active_plan_ref != null`). When both
 hold it injects a hidden (`display:false`) `perk:todo-adapter-juicesharp` context that carries perk's
@@ -755,7 +755,7 @@ once deselected. Two seam asymmetries this node resolves, both deliberate deviat
   `docs/design/provider-smoke-juicesharp-todo.md`.
 
 **In-process read-only child sessions (P2.T4).** The first context-isolation primitive: a
-deterministic, fully-isolated read-only child spun at the SDK level (`extension/readOnlySession.ts`,
+deterministic, fully-isolated read-only child spun at the SDK level (`extension/worker/readOnlySession.ts`,
 interior/TS-only). This is the **shared handoff contract** both context-isolation primitives honor
 (T4 in-process here; T6 the spawned shape later), so its shape is locked now and T6 conforms.
 
@@ -938,7 +938,7 @@ verify both.
 
 These are all `init`/`doctor` needs in Phase 0 (`Q9`: verification-only; the first label is
 created lazily by `/plan-save` in Phase 1). **Implemented in the Python plane (T5):**
-`perk/github.py` (typed dataclasses mirroring these shapes); the TS plane follows in Phase 1.
+`perk/github/` (typed dataclasses mirroring these shapes); the TS plane follows in Phase 1.
 
 ```
 check_auth()         -> { ok: bool, user: string|null, scopes: string[], error: string|null }
@@ -1083,7 +1083,7 @@ close_and_label_consolidated{ issue }               -> bool
 - **`/learn` (D10).** The `learn capture` worker (`perk learn capture --json --body <file>`) reads
   the agent-captured learnings markdown from a run-scoped scratch file (the stdin-less worker
   pattern), `create_learn_issue`, posts a back-link comment on the plan issue (best-effort), and
-  clears `pending-learn`. The warm `/learn` (`extension/learn.ts`) takes an optional `summary`:
+  clears `pending-learn`. The warm `/learn` (`extension/doors/learn.ts`) takes an optional `summary`:
   present → scratch + delegate + mirror the marker-clear; absent → the thin TS-only marker-clear
   (graceful — no empty issue). `learn` now reads `[cache.markers, cache.plan-ref]` and writes
   `[cache.markers, github.learn, github.comments]` (the `github.learn` vocabulary key is new).
@@ -1317,7 +1317,7 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > actionable stage** (no PR → `implement`; PR open → `submit`; PR merged + `pending-learn` →
 > `learn`; merged + learned → nothing), then reuses T4a's `launch_stage` (idempotent worktree +
 > materialize + `exec pi`). `--dry-run`/`--json` resolve + print without launching (no ref write).
-> The resolution is a **pure, unit-tested** function (`perk/resume.py`). For `reuse` stages
+> The resolution is a **pure, unit-tested** function (`perk/run/resume.py`). For `reuse` stages
 > (`submit`/`land`/`learn`) it assumes a **local** worktree; recreating one from a remote branch on
 > a fresh clone is Phase 2. This closes the spine: `plan → save → implement → submit → land →
 > learn`, resumable at any stage.
@@ -1370,7 +1370,7 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 
 The **objective layer's deterministic foundation** — a long-running goal that *generates* bounded
 plans (PRIOR_ART §3). The pure mechanics live in `perk/objective.py` (the `plan.py` twin, reusing
-its block engine); the GitHub writes live in `perk/github.py`; the cold-door workers are the
+its block engine); the GitHub writes live in `perk/github/objectives.py`; the cold-door workers are the
 `perk objective` group. **No registry stage and no model-facing tools** — those are T10.
 
 **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
@@ -1478,7 +1478,7 @@ T10 §8.3 note, the audit gate protects the model-facing tool path only).
   **isolated fail-open** handler: a close failure preserves the already-marked `nodes_marked`,
   logs loud-but-non-fatal to stderr, and reports `skipped_reason = "close_failed: <exc>"` with
   `closed=False` — the land result is never affected.
-- The warm `extension/land.ts` surfaces `objective.nodes_marked` and **auto-drives** the reconcile
+- The warm `extension/doors/land.ts` surfaces `objective.nodes_marked` and **auto-drives** the reconcile
   pass via `driveReconcileAfterLand`, which injects
   `reconcileGuidance(...) + bindingSuffix(..., "command:objective-reconcile")` — byte-for-byte the
   message `/objective-reconcile` injects — when the land succeeded with a node marked done.
@@ -1515,7 +1515,7 @@ region; everything outside it (the Mechanical roadmap table, any Immutable notes
   file-arg pattern, mirroring `learn capture`); maps the two missing-target `GitHubError`s to a
   stable `reconcile_target_missing`, other infra to `github_error`. Node-description reconciliation
   reuses the existing `objective node --description` (no new flag).
-- `extension/objectivePlan.ts` gains: a `description?` param on the `objective_node` tool
+- `extension/factories/objectivePlan.ts` gains: a `description?` param on the `objective_node` tool
   (`buildObjectiveNodeArgs` pushes `--description` and **relaxes** the structural refusal so a call
   carrying only `description` is valid — a deliberate, flagged extension of T10's contract; the
   `status:"done"` audit gate is unchanged); a `reconcile_objective` warm tool
@@ -1542,7 +1542,7 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   plan-mode session). `--gather` materializes the inbox + emits `{ inbox_path, learn_numbers }`
   with no launch (the warm path + tests consume this); `--dry-run` gathers + prints; `--remote` is
   rejected (`remote_blocked`, the `plan` stage is `cold_remote:false`); no open learn issues →
-  exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/learnDocs.ts`) delegates to
+  exit 1 `no_learn_issues`. The warm `/learn-docs` (`extension/doors/learnDocs.ts`) delegates to
   `perk learn docs --gather --json` (gate-safe — extension `pi.exec` is not subject to the
   read-only bash gate), then `pi.sendUserMessage`s the factory guidance pointing at the
   `perk-learn-docs` skill. **Headless-safe** (the inbox is still materialized; no turn is driven).
@@ -1554,7 +1554,7 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   cold CLI spellings.
 - **The factory discipline is inbox-over-gh.** The seeded factory session reads the materialized
   inbox via the `read` tool as its canonical input. Read-only `gh` query subcommands are now
-  allowlisted in the read-only bash gate (`extension/toolGating.ts`), so ad-hoc GitHub reads are
+  allowlisted in the read-only bash gate (`extension/substrate/toolGating.ts`), so ad-hoc GitHub reads are
   *possible* — but the cold door remains the canonical gatherer (deterministic, token-cheap), and
   factory sessions should not re-fetch the inbox's contents via `gh`.
 - **The `consumed_learn` thread.** `perk plan-save --consumed-learn "45,50"` (and the warm
@@ -1578,7 +1578,7 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   reconcile; the dry-run branch sets an inert `LearnConsumeUpdate((), "dry_run")`. `_result_to_dict`
   emits `"learn": { closed, skipped_reason }`; `_render_human` adds a `consolidated learn issue(s) X
   into docs/learned` line when non-empty, plus a `⚠ learn consume incomplete: <reason>` line for any
-  non-benign skip (everything except `no_consumed_learn`/`dry_run`). The warm `extension/land.ts`
+  non-benign skip (everything except `no_consumed_learn`/`dry_run`). The warm `extension/doors/land.ts`
   surfaces `learn.closed` in a `Closed N learn issue(s) … into docs/learned` line and a
   `Warning: learn consume incomplete — <reason>` line for the same non-benign skips. Closing already excludes a consumed issue from the next `state=open` gather;
   the `perk:consolidated` label is the durable/queryable record.
@@ -1618,7 +1618,7 @@ already happened before the sync); `skills_conflict` short-circuits before any c
   linear:  { ok, team, error,                              # null unless verify ran AND the committed
              readiness: { auth_ok, user, team_ok,          #   [issues] backend is "linear" (§8.21);
                           missing_labels[], created_labels[], error } | null },  # non-fatal like github
-  capabilities: string[],                                  # the managed inventory (perk/capabilities.py)
+  capabilities: string[],                                  # the managed inventory (perk/convergence/capabilities.py)
   changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
   handoff: string|null }                                   # path to the post-init markdown on-ramp
 ```
@@ -1627,7 +1627,7 @@ The **post-init handoff** (`handoff`) is an *agent-readable* markdown at
 `.pi/workflow/post-init.md` (gitignored; regenerated each init) — distinct from the §8.1
 machine run-handoff JSON. It is the Phase-0 dogfood on-ramp.
 
-**Capability inventory.** `perk/capabilities.py` is the declared SSOT of what `init` manages
+**Capability inventory.** `perk/convergence/capabilities.py` is the declared SSOT of what `init` manages
 (required-vs-optional + self-vs-consumer scope). Phase 0 ships an all-required set; `doctor`
 **(T6, implemented)** reuses it for health-check filtering (the inventory's `verify()` side). The
 installed-optional state file + `Capability` ABC are deferred until the first *optional*
@@ -1689,9 +1689,9 @@ literal markers are a cross-plane contract:
 
 - **`<!-- BEGIN perk managed -->`** — the managed `AGENTS.md` block. `perk init` (Python plane)
   writes it; Pi loads `AGENTS.md` into `contextFiles`; the extension's `/perk-selfcheck` (TS plane,
-  `extension/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
-  carries this marker. Changing the literal in `perk/init.py` **must** update
-  `MANAGED_AGENTS_MARKER` in `extension/selfcheck.ts` in the same turn.
+  `extension/doors/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
+  carries this marker. Changing the literal in `perk/convergence/init.py` **must** update
+  `MANAGED_AGENTS_MARKER` in `extension/doors/selfcheck.ts` in the same turn.
 - **`.pi/APPEND_SYSTEM.md`** — the ambient routing index (maintained by `/learn-docs`, never
   `init`). Pi joins it into `appendSystemPrompt`; selfcheck confirms the on-disk content reached the
   prompt verbatim (a trimmed-substring probe).
@@ -1713,9 +1713,9 @@ express; it is written from `ctx.mode` on both `session_start` and `session_tree
 The **second parsed cross-plane contract**, `shared/bindings.yaml` (sibling of `registry.yaml`),
 maps a **trigger** to a **skill** plus a per-binding delivery **mode**. It is bundled automatically
 via the `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both
-planes through independent readers: **`perk/bindings.py`** (`load_bindings` / `validate`, returning
+planes through independent readers: **`perk/substrate/bindings.py`** (`load_bindings` / `validate`, returning
 `BindingSet`/`Binding` + the shared `Issue`/`Severity` findings, raising `BindingsError` only for
-structural failures) and **`extension/bindings.ts`** (`loadDefaultBindings`, a thin structural
+structural failures) and **`extension/substrate/bindings.ts`** (`loadDefaultBindings`, a thin structural
 parse). The Python plane is the authoritative validator.
 
 **Trigger vocabulary — one `"<kind>:<id>"` string, kind ∈ {`stage`, `command`}:**
@@ -1760,10 +1760,10 @@ user **skill-binding overlay** is authored in `.pi/perk.toml` as a `[[bindings]]
 (`trigger`/`skill`/`mode` strings); `.pi/perk.local.toml` overlays it with a **whole-array replace**
 (local wins — the local array supersedes the committed one entirely, never merged element-wise,
 mirroring the leaf-replace overlay for scalars). Both planes parse this into the same binding shape
-(`perk/config.py` → `Config.user_bindings`; `extension/config.ts` → `PerkConfig.bindings`) and
+(`perk/substrate/config.py` → `Config.user_bindings`; `extension/substrate/config.ts` → `PerkConfig.bindings`) and
 resolve it against the shipped defaults through a **pure free function** —
-`perk.bindings.resolve_bindings(user_bindings, defaults=load_bindings().bindings)` /
-`extension/bindings.ts resolveBindings(userBindings, defaults=loadDefaultBindings())` — each
+`perk.substrate.bindings.resolve_bindings(user_bindings, defaults=load_bindings().bindings)` /
+`extension/substrate/bindings.ts resolveBindings(userBindings, defaults=loadDefaultBindings())` — each
 returning a `ResolvedBindings { bindings, issues }`. The override is **trigger-keyed**: starting from
 the defaults (order preserved), each *applied* user binding **replaces in place** the entry with the
 same trigger or **appends** at a new trigger, so the resolved set has **unique triggers by
@@ -1774,7 +1774,7 @@ trusted** (not re-validated). The resolver remains registry-free: target-existen
 **`doctor`** (Node 3.1), never the resolver. No removal/disable syntax and no multi-skill-per-trigger
 co-delivery are defined yet.
 
-**Cold-door delivery (Node 2.3, Python plane):** `perk/binding_delivery.py`
+**Cold-door delivery (Node 2.3, Python plane):** `perk/substrate/binding_delivery.py`
 (`render_cold_bindings(user_bindings, repo_root, trigger)`) renders the **full resolved** bindings
 (shipped defaults ⊕ the user overlay) whose trigger matches the launch — Node 2.3 deleted perk's
 hardcoded "Follow the … skill" strings, so the mechanism is now the **single delivery path** for
@@ -1792,7 +1792,7 @@ frontmatter stripped, degrading to the nudge pointer with a **loud-but-non-fatal
 file is absent/unreadable. Resolver `issues` and delivery `warnings` are surfaced loud-but-non-fatal
 on every launch and never block it. Target-existence remains **`doctor`** (Node 3.1).
 
-**Warm-door delivery (Node 2.2/2.3, TS extension):** `extension/bindingDelivery.ts` is the in-session
+**Warm-door delivery (Node 2.2/2.3, TS extension):** `extension/substrate/bindingDelivery.ts` is the in-session
 twin of the cold door. `resolvedBindings(cwd)` is the TS mirror of cold's `resolve_bindings(...)
 .bindings` — the **full resolved** overlay (defaults ⊕ user, no subtraction — Node 2.3), and
 `renderBindings(cwd, trigger)` / `bindingSuffix(cwd, trigger)` render exactly as the cold door does.
@@ -1830,7 +1830,7 @@ silently delivered. Injection checks only user-originated skills (installed unde
 so it uses that path **only** (no self-repo fallback).
 
 **Validation (`doctor`, Node 3.1):** `perk doctor` adds one rolled-up, non-fatal **`bindings`**
-check (`perk/doctor.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
+check (`perk/convergence/doctor.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
 SKILL.md`, with a self-repo `skills/<name>/SKILL.md` *pre-sync safety net* fallback
@@ -1908,9 +1908,9 @@ and `bindings.yaml`), is the **supported set** — the catalog of plan/todo *pro
 how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
-through independent readers: **`perk/providers.py`** (`load_providers` / `validate` /
+through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
-raising `ProvidersError` only for structural failures) and **`extension/providers.ts`**
+raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
 (`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
 authoritative validator. The
@@ -1945,7 +1945,7 @@ progress discipline onto the foreign overlay — see the Node 3.2 status note). 
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
-provider id, today it is the **issue backend** (`"github"`) — `perk/launch.py` branches on
+provider id, today it is the **issue backend** (`"github"`) — `perk/run/launch.py` branches on
 `provider == "github"`. The stamp sites (`plan_save_cmd.py` / `resume.py`'s
 `reconstruct_plan_ref` callers) no longer hardcode the `"github"` literal: the field is stamped
 from the **resolved issue backend's `backend_id`** (§8.21) — still the issue backend, still ≠
@@ -1962,12 +1962,12 @@ job (mirroring how bindings target-existence lives in doctor, not the loaders).
 **The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
 one key per seam (`plan` / `todo`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
-Both planes parse it raw (`perk/config.py` → `Config.providers`; `extension/config.ts` →
+Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
-`extension/providers.ts` `resolveProviders` resolver in TS (added Node 2.2, consumed by `planMode`). An **absent table or absent key → the seam's
+`extension/substrate/providers.ts` `resolveProviders` resolver in TS (added Node 2.2, consumed by `planMode`). An **absent table or absent key → the seam's
 `default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
 wins (standard local-override precedence). The pure resolver
-`perk.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
+`perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
 issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
@@ -1990,7 +1990,7 @@ when deselected); hand-adding a provider's package *without* selecting it is uns
 who wants that package selects the provider via `[providers]`. The retired `@tombell/pi-plan` /
 `@juicesharp/rpiv-todo` re-enter `packages` **only** when a selection names them.
 
-**Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/doctor.py::
+**Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/convergence/doctor.py::
 _providers_check`). A `ProvidersError` on the *bundled* file is a `fail` (cannot occur in a healthy
 install; "Reinstall perk"); an `ERROR` shape `Issue` on the bundled file is a `fail`. The repo
 selection is resolved against the supported set and any resolver `issue` (unknown id / seam
@@ -2004,13 +2004,13 @@ invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 table in `.pi/perk.toml` tunes pi's **interactive** global auto-compaction for `perk <stage>`
 sessions by converging into the committed `.pi/settings.json` `compaction` object (pi reads that
 natively at session boot). It is **Python-plane-only** — the extension never reads it (pi consumes
-`settings.json` itself), so `extension/config.ts` is untouched. Three snake_case keys map to pi's
+`settings.json` itself), so `extension/substrate/config.ts` is untouched. Three snake_case keys map to pi's
 camelCase `settings.json` keys: `enabled`→`enabled`, `reserve_tokens`→`reserveTokens`,
 `keep_recent_tokens`→`keepRecentTokens`. Validation is LBYL silent-omit (mirrors `[providers]`):
 `enabled` kept only if a real `bool`; the token keys kept only if `int` (not `bool`) and `> 0`;
 ill-typed/absent keys are dropped (pi fills defaults). The convergence composes inside
-`_converge_settings` (`perk/config.py::parse_compaction_table` + `load_committed_compaction`,
-`perk/init.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
+`_converge_settings` (`perk/substrate/config.py::parse_compaction_table` + `load_committed_compaction`,
+`perk/convergence/init.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
 `doctor` dry-runs/fixes it for free, **no** new check. **Committed-only read** (the deliberate
 divergence from `[providers]`' overlaid `load_config` read): `[compaction]` is read from committed
 `.pi/perk.toml` **only**, never the `perk.local.toml` overlay, so the committed `settings.json`
@@ -2029,7 +2029,7 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > shape-only loaders + the pure resolver, the `[providers]` config-reading in both planes, the
 > two-directional `init` wiring, and the `doctor` selection cross-check. The concrete adapter shims
 > (`planAdapterTombell`, `todoAdapterJuicesharp`) are **Nodes 2.3 / 3.2**; the read-only tool-gate
-> (`extension/toolGating.ts`, Invariant 1) is untouched.
+> (`extension/substrate/toolGating.ts`, Invariant 1) is untouched.
 >
 > **Status (Node 2.2):** lands the TS resolver (`resolveProviders`) and the **plan-seam runtime
 > deferral** — perk's `planMode` authoring surface (`/plan`, `Ctrl+Alt+P`, `--plan`, the
@@ -2059,7 +2059,7 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > foreign selection, registers NONE of `/plan` / `Ctrl+Alt+P` / `--plan` / the injection — so the
 > foreign surfaces are the sole registrants (Pi suffixes duplicate command names, so handler-time
 > deferral alone is insufficient once the foreign package is loaded). Fail-safe to the reference
-> registers everything. (3) The new `extension/planAdapterTombell.ts` shim is an **injection-only**
+> registers everything. (3) The new `extension/adapters/planAdapterTombell.ts` shim is an **injection-only**
 > bridge — always registered, inert unless `[providers] plan = "tombell-plan"`, injecting a hidden
 > `perk:plan-adapter-tombell` context that directs the foreign free-form prose `/plan` output into
 > perk's canonical save. The prose→plan-ref bridge **reuses the existing** `/plan-save`
@@ -2087,7 +2087,7 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > `/plan` (Pi suffixes duplicate names); the todo seam has **no command-name collision** — perk
 > registers `/checkpoints`, the foreign overlay registers its own differently-named command(s) — so
 > Node 3.1's runtime deferral is already sufficient. (3) The new
-> `extension/todoAdapterJuicesharp.ts` shim is an **injection-only**, **active-workflow-gated**
+> `extension/adapters/todoAdapterJuicesharp.ts` shim is an **injection-only**, **active-workflow-gated**
 > (`active_plan_ref != null`) bridge — always registered, inert unless `[providers] todo =
 > "juicesharp-todo"`, injecting a hidden `perk:todo-adapter-juicesharp` context that carries perk's
 > implement-progress **discipline** (seed from `## Steps`, mark each item complete in order) onto the
@@ -2108,13 +2108,13 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > session_start handler — the two real registration collisions; duplicate flag/shortcut
 > registration is the potentially-fatal Pi behavior), and the full vacate for any other foreign id
 > (tombell, unchanged). (2) **`plan_review` is the backend-neutral review door** (Node 2.5,
-> `extension/planReview.ts`): the `plan` param is **optional/fallback** — the reviewed plan
+> `extension/factories/planReview.ts`): the `plan` param is **optional/fallback** — the reviewed plan
 > resolves **file-first** via `resolvePlanSource` (the validated `plan-draft.md` artifact → the
 > param; the **transcript tier is explicitly excluded from review** — no draft + no param
 > soft-skips with `reason: "no_plan"` and a `plan_draft` redirect, since an approval would
 > otherwise auto-save scraped conversation bytes). **Dispatch:** when `plannotator-plan` is
 > selected the door runs the **event-bus bridge** (`createPlannotatorBridge`, kept in
-> `extension/planAdapterPlannotator.ts`): it emits plannotator's published `plannotator:request`
+> `extension/adapters/planAdapterPlannotator.ts`): it emits plannotator's published `plannotator:request`
 > plan-review envelope on the in-process `pi.events` bus (pinned against
 > `@plannotator/pi-extension@0.20.0`), awaits the in-payload `respond` handshake bounded at 5s,
 > then awaits the human decision on `plannotator:review-result` (no decision timeout; honors the
@@ -2190,7 +2190,7 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 
-The **stage-drive primitive** (`extension/worker.ts` `driveStage`) drives ONE read-write stage
+The **stage-drive primitive** (`extension/worker/worker.ts` `driveStage`) drives ONE read-write stage
 (`implement`/`address`) end-to-end on an **already-prepared** worktree, in-process via the SDK
 runtime factory, running the **same** `@perk/pi` extension package. It is the substrate Node 1.3
 (the structured event stream) and Node 4.1 (the e2e harness) consume. This section locks the
@@ -2203,11 +2203,11 @@ exactly as in a warm session (§8.4).
 
 | input | shape | source |
 |---|---|---|
-| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/launch.py`), **not** the worker (Gap 7) |
+| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch.py`), **not** the worker (Gap 7) |
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.pi/workflow/` | materialized by positioning; the worker does not re-write them |
-| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/launch.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
 | `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
@@ -2345,10 +2345,10 @@ A `--remote` launch of a drivable stage (`implement`/`address`, the `doors.cold_
 stages) is a **real drive** (it was `remote_not_driven` through P2.T8c). The Python plane mints a
 perk `run_id`, **persists the `run_id → plan` linkage**, reads it back to verify, then **triggers**
 a runner that is discovered + matched back to the `run_id`. This node builds the dispatch driver
-(`perk/launch.py` `_drive_remote_target`) + the runner library (`perk/runner.py`); the GitHub
+(`perk/run/launch.py` `_drive_remote_target`) + the runner library (`perk/run/runner.py`); the GitHub
 Actions workflow YAML it triggers is **Node 2.2** (named below, built there).
 
-### The `Runner` contract (`perk/runner.py`)
+### The `Runner` contract (`perk/run/runner.py`)
 
 A runner-agnostic `typing.Protocol`. GitHub Actions is the first (and currently only)
 implementation; `select_runner(ref)` returns a `GitHubActionsRunner(ref)` for any ref today (the
@@ -2456,7 +2456,7 @@ The runner side of §8.13's cold remote door: the **managed** GitHub Actions wor
 triggers, plus the `perk run-worker` positioning entrypoint that workflow invokes. Both are built in
 this node; §8.13's "until 2.2 lands" caveat is reconciled by it.
 
-### The managed artifact (`perk/workflow_artifacts.py`)
+### The managed artifact (`perk/run/workflow_artifacts.py`)
 
 Two perk-owned files, **managed by `perk init` and repaired by `perk doctor --fix`** (a
 `ManagedConvergence` in `init.managed_convergences()`, covering the `runner-workflow` capability —
@@ -2495,7 +2495,7 @@ Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited fil
 is converged back to the template. The templates are authored as code (string constants), not
 packaged data, so there is no wheel-data surface to guard.
 
-### `perk run-worker` (the CI positioning + drive entrypoint, `perk/run_worker.py`)
+### `perk run-worker` (the CI positioning + drive entrypoint, `perk/run/run_worker.py`)
 
 `perk run-worker --run-id --stage --plan [--base]` is the runner's positioning job (Gap 7), invoked
 by the workflow **after** it checks out the plan branch (so cwd = the checkout = the worktree):
@@ -2531,8 +2531,8 @@ workflow, so it is not consumed here. Reporting run progress/terminal status bac
 The **runner-side** consumer of the §8.12 structured run-event stream + the §8.11 `RunOutcome`: when
 `perk run-worker` drives a stage remotely, it makes that run **observable on GitHub**. The worker
 itself never mutates GitHub (§8.12 is explicit — surfacing the stream is this node); the reporter is
-a deterministic exterior task (no agentic reasoning) living in the Python plane (`perk/run_report.py`)
-and wired into `perk run-worker` (`perk/run_worker.py`).
+a deterministic exterior task (no agentic reasoning) living in the Python plane (`perk/run/run_report.py`)
+and wired into `perk run-worker` (`perk/run/run_worker.py`).
 
 ### The two reporting points (fail-soft, exit-code-neutral)
 
@@ -2580,7 +2580,7 @@ interpolated into the bodies). The only free text it surfaces is the worker's ow
 which is worker-generated and already capped at 2 KiB (§8.12) — never re-expanded. This preserves
 route-don't-relay from the worker's structured channel all the way into the GitHub surfaces.
 
-No change to `.github/workflows/perk-run.yml` or `perk/workflow_artifacts.py`: reporting hooks into
+No change to `.github/workflows/perk-run.yml` or `perk/run/workflow_artifacts.py`: reporting hooks into
 `run-worker` itself, so the managed artifact (and its convergence/doctor tests) stay untouched.
 
 ---
@@ -2600,7 +2600,7 @@ them ahead of time. perk init/doctor **never mutate** GitHub (Decision D2 — th
 secret-setting command); each actionable finding instead carries an exact `gh` remediation string in
 `Check.remediation` (e.g. `gh secret set PERK_GH_PAT`).
 
-### The three verification-only gateway reads (`perk/github.py`)
+### The three verification-only gateway reads (`perk/github/workflows.py`)
 
 All shell `gh` via `_run` with `cwd=repo_root` + gh's `{owner}/{repo}` placeholder auto-fill (no
 remote-URL parsing); none mutate; a gh-missing/timeout raises `GitHubError`:
@@ -2614,7 +2614,7 @@ remote-URL parsing); none mutate; a gh-missing/timeout raises `GitHubError`:
 - `get_repo_variable(*, name, repo_root) -> str | None` — `GET .../actions/variables/{name}`
   (`--jq .value`): value on returncode 0, `None` on 404/non-zero/empty. Used to read `PERK_ENABLED`.
 
-### The report-only `runner` check group (`perk/doctor.py::_runner_checks`)
+### The report-only `runner` check group (`perk/convergence/doctor.py::_runner_checks`)
 
 A **report-only** check group (no `--fix` side — `_apply_fixes` is untouched), wired into
 `_build_checks` **inside the `if verify:` block** after `_github_checks` (it shells `gh`), wrapped in
@@ -2793,7 +2793,7 @@ it, and emit `ok` (converged) / `fail` (drift — detail = joined drift, remedia
 --fix`; or unverifiable). Rendered grouped over `("github", "runner", "repository")`. Exit codes
 mirror §8.6: **1** if any `fail`, else **0** (warns allowed); **2** only on not-a-repo.
 
-### `smoke-test [--wait]` — the live proof (`perk/workflow_smoke.py`)
+### `smoke-test [--wait]` — the live proof (`perk/run/workflow_smoke.py`)
 
 Proves the genuinely CI-only prerequisites a static check cannot: that the managed workflow is
 **dispatchable**, the runner actually **starts a job**, and the secrets are **readable in the Actions
@@ -2956,9 +2956,9 @@ Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, 
 
 ## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Nodes 1.3 + 2.4)
 
-The issue-tracking tier (plan/learn/objective issues — `perk/issue_backend.py`'s `IssueBackend`
-contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/issues.py`, Node 1.2;
-the `LinearIssueBackend` over the `perk/linear.py` GraphQL client, Nodes 2.1–2.3, wired live in
+The issue-tracking tier (plan/learn/objective issues — `perk/backends/issue_backend.py`'s `IssueBackend`
+contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/backends/issues.py`, Node 1.2;
+the `LinearIssueBackend` over the `perk/backends/linear.py` GraphQL client, Nodes 2.1–2.3, wired live in
 Node 2.4) is **backend-selectable** via one committed config table:
 
 ```toml
@@ -2975,7 +2975,7 @@ only the committed file). Rationale: the backend decides where canonical durable
 store. **`LINEAR_API_KEY` lives in the environment only** — never in config/committed files
 (`linear.client_from_env`; matches pi-mono-linear's own auth order, which reads the same var).
 
-**Python is the authoritative validator** (`perk/issues.py::resolve_issue_backend_id`):
+**Python is the authoritative validator** (`perk/backends/issues.py::resolve_issue_backend_id`):
 
 - absent / `"github"` → `"github"` (the default backend);
 - `"linear"` → `"linear"` (a live selection);
@@ -2992,7 +2992,7 @@ requirement is missing: no committed `[issues] team` → remediation pointing at
 no/blank `LINEAR_API_KEY` → the hinted message from `client_from_env`. Construction is lazy (no
 network): the team key is bound and resolved to its UUID on first use.
 
-**The TS mirror is fail-safe and dormant** (`extension/config.ts::resolveIssueBackendId`):
+**The TS mirror is fail-safe and dormant** (`extension/substrate/config.ts::resolveIssueBackendId`):
 returns `"github" | "linear"`, falling back to `"github"` on absence/unknown value/any read or
 parse error — safe because the TS plane only *renders prompts*, never writes canonical issues. No
 TS consumer exists at this node; Node 3.1 (backend-aware prompt rendering) consumes it (mirrors
@@ -3021,7 +3021,7 @@ user-owned config):
 warn), a bad `[issues]` selection hard-breaks **every** issue-touching command. Network readiness
 is *not* this offline check's job — that is the `linear` group's (below).
 
-**The verify-gated `linear` doctor group** (`perk/doctor.py::_linear_checks`; present only when
+**The verify-gated `linear` doctor group** (`perk/convergence/doctor.py::_linear_checks`; present only when
 `verify` AND the committed backend is `"linear"`). All warn-level on failure — network readiness
 is non-fatal, mirroring the `github` group's D3 discipline. Built from one
 `linear_backend.check_readiness(client, team_key, ensure_labels=False)` call (the shared
@@ -3041,7 +3041,7 @@ key + team are available, `check_readiness(..., ensure_labels=True)` ensures the
 created names land on `fixed` (`Linear: created label perk:plan`), failures on `fix_errors`.
 Lookup-first idempotency: a converged workspace reports nothing (the doctor idempotency rule).
 
-**The init readiness step** (`perk/init.py::_linear_readiness`, verify-gated, non-fatal — the
+**The init readiness step** (`perk/convergence/init.py::_linear_readiness`, verify-gated, non-fatal — the
 GitHub D3 mirror: file convergence already succeeded). Only when `verify` AND the committed
 backend is `"linear"`: missing key/team degrade to an errored `LinearReport`; otherwise the probe
 runs with `ensure_labels=True` (init converges the four perk labels upfront; the lazy write-time
@@ -3049,7 +3049,7 @@ runs with `ensure_labels=True` (init converges the four perk labels upfront; the
 `LinearReport` (the `--json` `linear` key, §8.5; the human `✓ Linear: <user>, team <key>` line) —
 **never** appended to `InitReport.changes`, which stays a pure filesystem-delta list.
 
-**The `npm:pi-mono-linear` settings convergence** (`perk/init.py::_converge_linear_package`,
+**The `npm:pi-mono-linear` settings convergence** (`perk/convergence/init.py::_converge_linear_package`,
 composed inside `_converge_settings` — it rides the `settings-wiring` managed convergence, so
 doctor dry-runs and `--fix`es it for free; no new doctor check, no new capability).
 Two-directional, mirroring `_converge_provider_packages`: `backend = "linear"` selected → the
@@ -3059,15 +3059,15 @@ unpinned plain-string entry is appended (bundled `linear` skill accepted wholesa
 unsupported). A malformed committed TOML defers to the config check (selection treated as absent).
 
 **Backend-aware prompt rendering (Node 3.1).** Every plan-read prompt site branches on
-`cache.plan-ref.provider` via the per-plane helpers `perk/launch.py::_plan_read_instruction` and
-`extension/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
-paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker.test.ts`). The
+`cache.plan-ref.provider` via the per-plane helpers `perk/run/launch.py::_plan_read_instruction` and
+`extension/doors/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
+paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker/worker.test.ts`). The
 `linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools (the
 plan body is the first comment — true under every backend's `create_plan_issue`) with an
 `open <url>` fallback; unknown providers keep the plain `open <url>` arm. Learn prompts
-(`_learn_prompt`, `extension/learn.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
+(`_learn_prompt`, `extension/doors/learn.ts::learnGuidance`) keep the `gh pr list --head plan-<pr_id>
 --state merged` merged-PR derivation under every backend — PRs are GitHub-universal.
-`extension/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
+`extension/substrate/toolGating.ts::READ_ONLY_TOOLS` allowlists the 19 read-only `linear_*` tool names
 unconditionally (foreign names are inert when the package is absent); the mutating/sensitive
 tools (`linear_create_issue`, `linear_update_issue`, `linear_create_comment`, the two
 `linear_upload_file*`, `linear_configure_auth`) are deliberately excluded. The perk-implement and
@@ -3109,7 +3109,7 @@ everywhere — PRs are GitHub-universal. Concretely:
 ## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
 
 An **opt-in, fail-soft, one-way** mirror of an implement run into Linear's Agents UI
-(`perk/linear_agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
+(`perk/backends/linear_agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
 there is no TS twin).
 
 - **The gate** (checked inside every emitter): the worktree's stamped
@@ -3157,7 +3157,7 @@ The normative detail lives in §8.1 ("File-first plan save" + the `plan_draft` c
 blocks + the interactive save discipline); this section is the one-stop current shape.
 
 - **The artifact.** The working plan lives in the session data dir as `plan-draft.md`
-  (`PLAN_DRAFT_ARTIFACT`, `extension/planDraft.ts`), written **only** by the `plan_draft` tool
+  (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`), written **only** by the `plan_draft` tool
   through the session-data accessor seam (`writeSessionArtifact`: file + provenance pointer in one
   gesture), and consumable **only** via its validated provenance pointer
   (`readSessionArtifact` — digest-validated, fail-open) (→ §8.1).
@@ -3168,9 +3168,9 @@ blocks + the interactive save discipline); this section is the one-stop current 
   reviewed bytes, and scraped conversation bytes must never be what gets approved (→ §8.10's
   plannotator Status block).
 - **The review door + the approval seam.** `plan_review` (in `READ_ONLY_TOOLS`; backend-neutral,
-  `extension/planReview.ts`) dispatches: plannotator-selected → the event-bus bridge; **any**
+  `extension/factories/planReview.ts`) dispatches: plannotator-selected → the event-bus bridge; **any**
   other selection → the first-party `ctx.ui.editor` review. APPROVED (either backend) runs
-  `approvalSave` (`extension/planSave.ts`): save → D1a gate exit on success (→ §8.3). The
+  `approvalSave` (`extension/factories/planSave.ts`): save → D1a gate exit on success (→ §8.3). The
   `/plan-save` command is the **manual failsafe** invocation of the same seam, taking only an
   optional title argument.
 - **The three backends.** All three speak review-first

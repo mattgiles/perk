@@ -1,4 +1,4 @@
-// `.pi/workflow/` cache-tier I/O — the TS twin of perk/cache.py (contracts.md §8.1).
+// `.pi/workflow/` cache-tier I/O — the TS twin of perk/state/cache.py (contracts.md §8.1).
 //
 // Both planes read and write the SAME files; the cross-plane contract is the *files*, not a
 // shared module. State-tiering primitives only — no workflow semantics. Imports use no
@@ -51,7 +51,7 @@ export function markHandoffConsumed(
 // This module is the INTERIOR path-primitive seam for scratch/session-data (contracts.md §8.1,
 // Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
 // outside this module (guard-tested by cacheGuard.test.ts; the ctx-level current-run seam is
-// sessionData.ts and the exterior twin is perk/cache.py).
+// sessionData.ts and the exterior twin is perk/state/cache.py).
 
 export function scratchDir(cwd: string): string {
   return join(workflowDir(cwd), "scratch");
@@ -140,7 +140,7 @@ export function readPlanBody(cwd: string): string | null {
 
 // --- markers (existence-only) ------------------------------------------------------------
 
-/** The land->learn semaphore (Q2/Q5); the TS twin of perk.cache.PENDING_LEARN. */
+/** The land->learn semaphore (Q2/Q5); the TS twin of perk.state.cache.PENDING_LEARN. */
 export const PENDING_LEARN = "pending-learn";
 
 export function markerPath(cwd: string, name: string): string {

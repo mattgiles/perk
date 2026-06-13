@@ -174,7 +174,7 @@ bridge); dialog arms test via an extracted core + a scripted UI fake — see
 
 ## Cross-references
 
-- `extension/selfcheck.ts` — `getSystemPromptOptions` consumer (a command handler by necessity)
+- `extension/doors/selfcheck.ts` — `getSystemPromptOptions` consumer (a command handler by necessity)
 - `docs/learned/pi/context-injection.md` — conditional strip on the every-call `context` event
 - `docs/learned/workflow/skill-bindings.md` — branch persistence powering the cold↔warm dedup
 - `docs/learned/toolchain/worktree-node-modules.md` — getting the right installed SDK in a worktree

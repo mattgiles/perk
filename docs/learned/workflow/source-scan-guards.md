@@ -50,7 +50,7 @@ When banning a *string literal* (vs a call site), two additions:
 ## The binding convention these guards enforce
 
 Rich-UI calls (`ui.notify`/`setStatus`/`setWidget`/`setFooter`) live ONLY in
-`extension/surfaces.ts` + `extension/report.ts`; **extend the surfaces module rather than
+`extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`; **extend the surfaces module rather than
 allowlisting a new file** when the guard fires. `setWorkingIndicator` is banned everywhere
 (charter D5 rescinded). The convention is recorded in three places — AGENTS.md "Developing perk",
 `shared/contracts.md` §8.3, charter §7 row 4.1 — keep them in sync if the allowlist ever changes.

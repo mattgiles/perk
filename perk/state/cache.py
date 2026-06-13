@@ -1,9 +1,9 @@
 """``.pi/workflow/`` cache-tier I/O (Q2 / contracts.md §8.1).
 
 Free functions over an explicit repo ``root`` (erk's scratch/markers style). **Both
-planes read and write the same files**; the TS twin is ``extension/cache.ts``. These are
+planes read and write the same files**; the TS twin is ``extension/substrate/cache.ts``. These are
 state-tiering *primitives* — no workflow semantics (no ``pending-learn`` meaning, no GC
-policy; the GC *policy* lives in ``perk/gc.py``, surfaced as ``perk state prune`` + the
+policy; the GC *policy* lives in ``perk/state/gc.py``, surfaced as ``perk state prune`` + the
 ``cache-gc`` doctor check). LBYL throughout; absence is a normal,
 branchable condition (reads return ``None``, not an exception).
 """
@@ -19,7 +19,7 @@ SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
 # The land->learn semaphore (Q2 / Q5): `land` sets it, `learn` clears it; while present it
 # signals the worktree is not yet releasable. Single source of the name across planes (the TS
-# twin is `PENDING_LEARN` in extension/cache.ts).
+# twin is `PENDING_LEARN` in extension/substrate/cache.ts).
 PENDING_LEARN = "pending-learn"
 
 
@@ -41,7 +41,7 @@ def ensure_layout(root: Path) -> Path:
 # This module is the EXTERIOR accessor seam for scratch/session-data paths (contracts.md §8.1,
 # Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
 # outside this module (guard-tested by tests/test_cache_guard.py; the interior twins are
-# extension/cache.ts + extension/sessionData.ts).
+# extension/substrate/cache.ts + extension/substrate/sessionData.ts).
 
 
 def scratch_dir(root: Path) -> Path:
@@ -57,7 +57,8 @@ def run_scratch_dir(root: Path, run_id: str) -> Path:
 def list_run_ids(root: Path) -> list[str]:
     """Names of all run scratch dirs under ``scratch/runs/`` (sorted; ``[]`` when absent).
 
-    Twin of the TS ``listRunIds`` (extension/cache.ts). Stray non-directory entries are ignored.
+    Twin of the TS ``listRunIds`` (extension/substrate/cache.ts). Stray non-directory entries
+    are ignored.
     """
     runs_root = scratch_dir(root) / "runs"
     if not runs_root.is_dir():
@@ -138,7 +139,7 @@ def handoff_path(root: Path, run_id: str) -> Path:
 def list_handoff_run_ids(root: Path) -> list[str]:
     """Stems of all handoff blobs under ``handoff/`` (sorted; ``[]`` when absent).
 
-    Mirrors :func:`list_run_ids` so ``perk/gc.py`` collects orphan handoffs (no run dir) too.
+    Mirrors :func:`list_run_ids` so ``perk/state/gc.py`` collects orphan handoffs (no run dir) too.
     Exterior-only — there is no TS twin (GC is CLI-owned).
     """
     handoff_root = workflow_dir(root) / "handoff"

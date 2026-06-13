@@ -5,7 +5,7 @@ read_when: You are adding a warm door that shells to a `--json` cold door (the s
 
 # The cold-door client (`runColdDoor`)
 
-`extension/coldDoor.ts` is the one envelope-aware client for running a cold Python door from the
+`extension/substrate/coldDoor.ts` is the one envelope-aware client for running a cold Python door from the
 extension: it execs the door, parses the JSON envelope, and returns typed success/failure —
 replacing the per-door exec/parse copies. This doc captures the decode policy split, the exported
 narrowing helpers, and the migration playbook that keeps door tests green.
@@ -50,7 +50,7 @@ field:
 - **Fully lenient when *every* payload field is advisory display detail:** the decode defaults each
   field (`?? false`) and never returns null — the `bad_output` arm is deliberately unreachable for
   that door and needs **no decode-edge tests** (they can't fail). References: the objectivePlan
-  decode and `extension/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
+  decode and `extension/doors/learn.ts` (`decodeLearnCapture` — `learn_issue` is render-only and the
   capture mutation precedes the decode, so a success envelope must survive an undecodable
   sub-object — `learn_issue?` is optional, never null, and `bad_output` is unreachable for that
   door; the post-#387 cold/warm skew lesson).
@@ -102,7 +102,7 @@ the partial detail and plain-fail — **never render a half table**.
 
 ## Compose the exported narrowing helpers
 
-`extension/coldDoor.ts` exports `stringField` / `numberField` / `booleanField` / `objectField` (the
+`extension/substrate/coldDoor.ts` exports `stringField` / `numberField` / `booleanField` / `objectField` (the
 latter rejects arrays and null). Door decodes should compose these, not re-implement `typeof`
 checks; they're unit-covered in `coldDoor.test.ts`, so new decodes only need door-level tests.
 
@@ -160,10 +160,10 @@ Future doors only test their own decode edges.
   previously asserted `exec_failed` + stderr-tail and now asserts the structured
   `error_type`/`message`. Expect one such test rename/flip per migration.
 - **One sibling-standard envelope-aware regression per tool**, modeled on
-  `extension/submit.test.ts`.
+  `extension/doors/submit.test.ts`.
 - **Strictening a formerly-unchecked `JSON.parse … as X` requires grepping the whole tree** for
   every fake/route emitting that door's payload — door test files, `fakePerkRouter` routes, and
-  e2e scenarios (e.g. `extension/workerE2e.test.ts`) — and bringing fixtures up to full contract
+  e2e scenarios (e.g. `extension/worker/workerE2e.test.ts`) — and bringing fixtures up to full contract
   shape. **Fix the fixture, never loosen the decode** (the real cold door always emits the full
   shape).
 - **The merge-race fixture sweep.** Semantically-green-per-PR ≠ green-after-merge when two
@@ -186,12 +186,12 @@ Future doors only test their own decode edges.
 
 ## Cross-references
 
-- `extension/coldDoor.ts` — `runColdDoor`, the narrowing helpers (incl. `nullableStringField`),
+- `extension/substrate/coldDoor.ts` — `runColdDoor`, the narrowing helpers (incl. `nullableStringField`),
   `activeRunId`
-- `extension/coldDoor.test.ts` — the client mechanics pins + the compile-time `ExecHost` drift check
-- `extension/land.ts` — the advisory-drop + three-way-narrow exemplar
-- `extension/planSave.ts` — `decodePlanSave`, the derive-don't-decode exemplar
-- `extension/address.ts` — the fail-arm payload re-narrowing exemplar
+- `extension/substrate/coldDoor.test.ts` — the client mechanics pins + the compile-time `ExecHost` drift check
+- `extension/doors/land.ts` — the advisory-drop + three-way-narrow exemplar
+- `extension/factories/planSave.ts` — `decodePlanSave`, the derive-don't-decode exemplar
+- `extension/doors/address.ts` — the fail-arm payload re-narrowing exemplar
 - `docs/learned/workflow/warm-door-commands.md` — a warm door must render every cold-door outcome;
   this client is the mechanism
 - `docs/learned/pi/tool-param-decode.md` — the tool boundary's tri-state strict-fail decode (a

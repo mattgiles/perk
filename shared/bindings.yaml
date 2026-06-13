@@ -2,7 +2,7 @@
 #
 # Authored once here, bundled into each build artifact (wheel -> perk/_shared/,
 # npm tarball -> shared/), and parsed directly by both planes at runtime: the
-# Python reader is perk/bindings.py, the TS reader is extension/bindings.ts. No
+# Python reader is perk/substrate/bindings.py, the TS reader is extension/substrate/bindings.ts. No
 # codegen step — both planes read this same file.
 #
 # Vocabulary — a binding's `trigger` is one "<kind>:<id>" string, kind ∈ {stage, command}:

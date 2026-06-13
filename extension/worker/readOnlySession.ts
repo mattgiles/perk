@@ -8,7 +8,7 @@
 // never enters the parent; only a path/summary does. This is substrate only; its consumer is the
 // read-only CI executor (T5). No registry stage, no door change, no cross-CLI behavior.
 //
-// Relationship to T1 (extension/toolGating.ts): T1's READ_ONLY_TOOLS is the *in-session* allowlist
+// Relationship to T1 (extension/substrate/toolGating.ts): T1's READ_ONLY_TOOLS is the *in-session* allowlist
 // and includes a sub-allowlisted `bash`. T4's SDK-level set is the STRICTER ["read","grep","find",
 // "ls"] (no bash) — a separate constant, not a reuse. T5 composes its own allowlist when it needs a
 // gated test-runner command; that is not authored here.

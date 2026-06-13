@@ -14,10 +14,10 @@ call it, and validate the call.
 Build one `Tool` with a TypeBox `parameters` schema, put it in `Context.tools`, call `complete()`,
 then run `validateToolCall([tool], call)` on the first `content` block of `type === "toolCall"`.
 
-- `extension/structuredOutput.ts` is the reusable layer: `resolveModelAuth(ctx)` reuses the session's
+- `extension/substrate/structuredOutput.ts` is the reusable layer: `resolveModelAuth(ctx)` reuses the session's
   configured + authenticated model; `completeStructured(opts)` builds the single-tool `Context`,
   calls `complete`, and validates the returned tool call.
-- `extension/planTitle.ts` is the first consumer.
+- `extension/factories/planTitle.ts` is the first consumer.
 
 Both layers return **never-throwing soft outcomes** (`{ok, value?, error?}`) — no throw reaches the
 caller.
@@ -58,7 +58,7 @@ faux tool call with `stopReason: "toolUse"`), drive the code, assert, then unreg
   `PERK_NO_LLM`.
 - The faux model is typed `Model<string>`; cast it for the `Model<Api>` parameter.
 
-`extension/planTitle.test.ts` is the worked example (the harness code is not reproduced here).
+`extension/factories/planTitle.test.ts` is the worked example (the harness code is not reproduced here).
 
 ## Residual
 
@@ -77,8 +77,8 @@ them:
 
 ## Cross-references
 
-- `extension/structuredOutput.ts` — `resolveModelAuth`, `completeStructured`
-- `extension/planTitle.ts` — first consumer + the `PERK_NO_LLM` gate
-- `extension/planTitle.test.ts` — the faux-provider offline test
+- `extension/substrate/structuredOutput.ts` — `resolveModelAuth`, `completeStructured`
+- `extension/factories/planTitle.ts` — first consumer + the `PERK_NO_LLM` gate
+- `extension/factories/planTitle.test.ts` — the faux-provider offline test
 - `docs/learned/pi/extension-api.md` — the broader extension API surface
 - `docs/learned/toolchain/worktree-node-modules.md` — resolving the installed SDK in a worktree

@@ -339,8 +339,8 @@ class TestImportDirection:
         assert "issue_backend" not in source
 
     def test_github_module_never_imports_issues(self) -> None:
-        # Node 1.2's adapter module (perk/issues.py) is the only module importing both sides;
-        # the github package must never reach back into it.
+        # Node 1.2's adapter module (perk/backends/issues.py) is the only module importing both
+        # sides; the github package must never reach back into it.
         source = _github_package_source()
         assert "perk.backends.issues" not in source
         assert "import issues" not in source

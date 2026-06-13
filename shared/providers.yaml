@@ -3,7 +3,7 @@
 #
 # Authored once here, bundled into each build artifact (wheel -> perk/_shared/,
 # npm tarball -> shared/), and parsed directly by both planes at runtime: the
-# Python reader is perk/providers.py, the TS reader is extension/providers.ts. No
+# Python reader is perk/substrate/providers.py, the TS reader is extension/substrate/providers.ts. No
 # codegen step — both planes read this same file.
 #
 # This is the SUPPORTED SET (the full catalog of providers perk knows how to wire),
@@ -28,8 +28,8 @@
 #             conflicting surface. perk's own package is NEVER filtered (it defers at
 #             runtime instead — adapter-architecture.md Invariant 2).
 #
-# Validation split (mirrors bindings.yaml): the shape-only loaders (perk/providers.py,
-# extension/providers.ts) check schema_version, id uniqueness, seam membership, and
+# Validation split (mirrors bindings.yaml): the shape-only loaders (perk/substrate/providers.py,
+# extension/substrate/providers.ts) check schema_version, id uniqueness, seam membership, and
 # exactly-one-default-per-seam. Cross-checks — does the repo's `[providers]` selection
 # name a provider that exists / has the right seam? — are `doctor`'s job, NOT the
 # loaders. The Python plane is the authoritative validator.

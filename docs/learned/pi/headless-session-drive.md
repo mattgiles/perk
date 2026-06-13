@@ -5,7 +5,7 @@ read_when: You are constructing or driving a headless (non-TUI) Pi session via t
 
 # Headless Pi session construction & driving
 
-The Node 1.2 worker (`extension/worker.ts`, `driveStage`) constructs a headless, read-WRITE Pi
+The Node 1.2 worker (`extension/worker/worker.ts`, `driveStage`) constructs a headless, read-WRITE Pi
 session at the SDK level and drives a single stage to completion with no human in the loop. This doc
 captures the non-obvious shape of that construction — distilled so the next SDK-drive surface starts
 from the right path instead of rediscovering it.
@@ -18,11 +18,11 @@ from the right path instead of rediscovering it.
 There are two SDK-level construction recipes already in the tree, and they differ on **one axis**:
 read-only vs. read-write isolation.
 
-- `extension/readOnlySession.ts` (`createReadOnlySession`) is a fully-isolated **read-only** child:
+- `extension/worker/readOnlySession.ts` (`createReadOnlySession`) is a fully-isolated **read-only** child:
   bare `createAgentSession` + a **hand-built `DefaultResourceLoader`** with `no*` flags and the
   stricter `["read","grep","find","ls"]` allowlist (`SDK_READ_ONLY_TOOLS`), and it calls
   `loader.reload()` manually.
-- `extension/worker.ts` (`driveStage`) is the **read-WRITE inverse**: read-write defaults + the
+- `extension/worker/worker.ts` (`driveStage`) is the **read-WRITE inverse**: read-write defaults + the
   **real perk extension** loaded from the worktree's `.pi/settings.json` via cwd-discovery, with the
   user-global tier locked out by a **throwaway `agentDir`** (`mkdtemp` under `tmpdir()`).
 
@@ -114,7 +114,7 @@ extension, `session_start` claim engages) is provable **fully offline** via the 
 
 ## Driving the real runtime offline with a faux model (the e2e worker tier)
 
-The e2e worker tier (`extension/workerE2e.test.ts` + `extension/testing/harness.ts`) drives a full
+The e2e worker tier (`extension/worker/workerE2e.test.ts` + `extension/testing/harness.ts`) drives a full
 stage through the production `defaultCreateRuntime` against the real `@perk/pi` extension and a
 faux pi-ai model, GitHub-free at the `PERK_BIN` seam. Three load-bearing assumptions were wrong;
 the corrections are the durable knowledge.
@@ -161,10 +161,10 @@ check the root export list before importing a Pi type by name; mirror/derive dee
 
 ## Cross-references
 
-- `extension/worker.ts` — `driveStage`, the runtime-factory construction + budget watchdog
+- `extension/worker/worker.ts` — `driveStage`, the runtime-factory construction + budget watchdog
 - `extension/workerMain.ts` — the worker entrypoint
-- `extension/readOnlySession.ts` — the fully-isolated read-only child this inverts
-- `extension/workerE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
+- `extension/worker/readOnlySession.ts` — the fully-isolated read-only child this inverts
+- `extension/worker/workerE2e.test.ts` + `extension/testing/harness.ts` — the faux-model e2e tier
 - `docs/learned/pi/extension-api.md` — `ctx.mode`/`ctx.hasUI`, the root-export-list rule
 - `docs/learned/pi/context-system.md` — the read-only child it inverts
 - `docs/learned/toolchain/biome.md` — the TS-stripping / Biome gotchas + the distributive-`Omit` gotcha hit building the emitter

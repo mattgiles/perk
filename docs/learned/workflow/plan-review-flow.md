@@ -13,7 +13,7 @@ hit.
 
 ## The backend-neutral review door
 
-`plan_review` lives in `extension/planReview.ts` — moved out of the plannotator adapter. Dispatch:
+`plan_review` lives in `extension/factories/planReview.ts` — moved out of the plannotator adapter. Dispatch:
 plannotator-selected → the event-bus bridge; **ANY other selection** (including tombell/unknown) →
 the first-party `ctx.ui.editor` review. The first-party path is the *default substrate*, not a
 fallback of last resort — Node 2.6 (tombell) is only an injected-contract re-aim on top of it.
@@ -34,7 +34,7 @@ than fall through to the scrape.
 
 ## The approvalSave seam owns the gate exit
 
-`approvalSave` in `extension/planSave.ts` is the single approval→save orchestration: artifact-first
+`approvalSave` in `extension/factories/planSave.ts` is the single approval→save orchestration: artifact-first
 `resolvePlanSource` → `savePlan` → D1a gate exit on success. Review backends call it and must
 **NOT** call `gating.enter/exit` themselves — the seam snapshots `isActive()` pre-save and exits
 only on success. A `no-plan` outcome saves nothing and leaves the gate untouched; callers render
@@ -164,8 +164,8 @@ contracts created drift a later repair node had to close). Facts that make the d
 ## Cross-references
 
 - `shared/contracts.md` §8.23 — the consolidated file-first plan contract (the three backends)
-- `extension/planReview.ts` — the door, `executePlanReview`, the first-party review
-- `extension/planSave.ts` — `approvalSave`, `resolvePlanSource`, `savePlan`
+- `extension/factories/planReview.ts` — the door, `executePlanReview`, the first-party review
+- `extension/factories/planSave.ts` — `approvalSave`, `resolvePlanSource`, `savePlan`
 - `docs/learned/workflow/plan-save-surfaces.md` — the save-side source resolution + recovery carrier
 - `docs/learned/workflow/provider-seam.md` — the plannotator augment-posture provider
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap

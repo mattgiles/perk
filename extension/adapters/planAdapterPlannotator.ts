@@ -5,7 +5,7 @@
 // `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions).
 //
 // INJECTION + BRIDGE ONLY (Node 2.5 split): as of Node 2.5 the `plan_review` TOOL lives in
-// `extension/planReview.ts` — perk's backend-neutral review door — and this module is back to
+// `extension/factories/planReview.ts` — perk's backend-neutral review door — and this module is back to
 // the injection-only adapter shape: it owns (1) the plannotator review-step authoring context
 // (injected while the gate is active AND plannotator is selected — TWO content flavors, one
 // customType: the plan bridge context, or the objective flavor when the stage is

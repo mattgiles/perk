@@ -1,5 +1,5 @@
 // Node 2.2/2.3 — warm-door (TS-extension) delivery of resolved skill bindings. The in-session twin
-// of the cold door (perk/binding_delivery.py): both planes render the SAME resolved overlay
+// of the cold door (perk/substrate/binding_delivery.py): both planes render the SAME resolved overlay
 // (defaults ⊕ the user bindings; `nudge` -> a pointer line, `transclude` -> the inlined skill body)
 // under the SAME header literal. The cold door appends it to a launch's initial prompt; this module
 // renders it at two WARM surfaces:
@@ -33,7 +33,7 @@ import { type BranchEntry, branchOf, rebuildWorkflowState } from "./workflowStat
 
 /**
  * The cross-plane dedup marker AND render header. MUST stay byte-identical to the Python cold
- * door's `_HEADER` (perk/binding_delivery.py) — both planes render under it so a cold launch and a
+ * door's `_HEADER` (perk/substrate/binding_delivery.py) — both planes render under it so a cold launch and a
  * warm injection never double-deliver. Pinned by a literal test in both planes (§8.9).
  */
 export const BINDING_HEADER = "The following skill binding(s) apply here:";
@@ -52,7 +52,7 @@ export interface BindingRender {
 
 /**
  * The full resolved bindings: the shipped defaults ⊕ the user overlay. The TS twin of cold's
- * `resolve_bindings(...).bindings` (perk/binding_delivery.py) — Node 2.3 delivers the defaults too
+ * `resolve_bindings(...).bindings` (perk/substrate/binding_delivery.py) — Node 2.3 delivers the defaults too
  * (perk's own nudges are no longer hardcoded), so there is no longer a default subtraction.
  */
 export function resolvedBindings(cwd: string): SkillBinding[] {

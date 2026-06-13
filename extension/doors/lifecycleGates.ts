@@ -56,13 +56,13 @@ async function guardTransition(
 
 /**
  * The plan-read priming seed for a fresh implement session (P2.T2b). The in-session twin of
- * `perk/launch.py`'s `_initial_prompt`: carry the plan FORWARD (read it from its canonical source),
+ * `perk/run/launch.py`'s `_initial_prompt`: carry the plan FORWARD (read it from its canonical source),
  * never summarize it — the plan is the only artifact that crosses the boundary (erk
  * context-preservation-prompting / impl-context). Pure → unit-testable offline.
  */
 /**
  * The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the saved
- * plan". Byte-identical to `perk/launch.py::_plan_read_instruction` (the Python twin); drift in
+ * plan". Byte-identical to `perk/run/launch.py::_plan_read_instruction` (the Python twin); drift in
  * either plane fails the paired parity suites. `github` reads via `gh`; `linear` points at the
  * pi-mono-linear tools with an `open <url>` fallback; any other provider falls back to opening
  * the url.

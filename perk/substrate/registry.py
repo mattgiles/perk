@@ -3,7 +3,7 @@
 This is the Python plane's view of the language-neutral contract both planes read
 (`Q4`/`Q6`). T4 generates `perk <stage>` subcommands from it; T6 `doctor` folds the
 validator below into its checks. The TS extension has an independent reader
-(`extension/registry.ts`) over the *same* bundled file.
+(`extension/substrate/registry.ts`) over the *same* bundled file.
 
 The validator returns structured ``Issue`` records (it never raises for invalid
 *content*) so callers — the CLI and, later, ``doctor`` — decide how to surface them.

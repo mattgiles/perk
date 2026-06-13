@@ -1,13 +1,14 @@
 """The issue-tracking tier contract (Objective #252, Node 1.1).
 
-perk's GitHub gateway (``perk/github.py``) fuses four tiers: issue tracking (plan/learn/objective
-issues, marked comments, labels), PRs, CI/workflow, and auth. Only the **issue-tracking tier** is
-backend-selectable (GitHub Issues today; Linear later) — PRs, CI, and auth stay in
-``perk/github.py`` for **all** backends (PRs are GitHub-universal even under a Linear issue
-backend). This module is that tier's contract: the ``IssueBackend`` `Protocol`, the
+perk's GitHub gateway (the ``perk/github/`` package) fuses four tiers: issue tracking
+(plan/learn/objective issues, marked comments, labels), PRs, CI/workflow, and auth. Only the
+**issue-tracking tier** is backend-selectable (GitHub Issues today; Linear later) — PRs, CI, and
+auth stay in ``perk/github/`` for **all** backends (PRs are GitHub-universal even under a Linear
+issue backend). This module is that tier's contract: the ``IssueBackend`` `Protocol`, the
 backend-neutral result dataclasses, and the one backend-neutral error type. It is deliberately
 dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracted the GitHub backend behind
-it and Node 1.3 added the ``[issues]`` config table + config-driven resolver (``perk/issues.py``).
+it and Node 1.3 added the ``[issues]`` config table + config-driven resolver
+(``perk/backends/issues.py``).
 
 Contract disciplines (every concrete backend MUST honor these):
 

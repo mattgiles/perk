@@ -1,12 +1,12 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/linear.py` / `perk/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, or planning the live smoke gate.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, or planning the live smoke gate.
 ---
 
 # The Linear issue backend
 
 Objective #252 Phase 2/3 built the Linear backend in layers: the httpx GraphQL client
-(`perk/linear.py`), the `LinearIssueBackend` adapter (`perk/linear_backend.py`), dual-encoding
+(`perk/backends/linear.py`), the `LinearIssueBackend` adapter (`perk/backends/linear_backend.py`), dual-encoding
 metadata markers in `perk/plan.py`/`perk/objective.py`, init/doctor readiness wiring, and
 backend-aware prompt rendering. Backend-agnostic protocol learnings live in `issue-backend.md`;
 this doc is the Linear-specific knowledge.
@@ -16,7 +16,7 @@ this doc is the Linear-specific knowledge.
 - **Auth**: personal API keys use a *plain* `Authorization: <key>` header — `Bearer` is
   OAuth2-only. Getting this wrong fails confusingly; the test suite pins the raw-key form.
 - **Rate limiting arrives as HTTP 400**, not 429: `errors[].extensions.code == "RATELIMITED"`.
-  Consequence: `perk/linear.py`'s client parses the JSON body **errors-array-first, regardless of
+  Consequence: `perk/backends/linear.py`'s client parses the JSON body **errors-array-first, regardless of
   HTTP status**; status-based handling is only the fallback for non-2xx bodies without GraphQL
   errors.
 - **Partial success is real**: HTTP 200 can carry `errors` alongside partial `data`. The client
@@ -89,7 +89,7 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
 - Label idempotency is **lookup-first and unscoped** (a workspace-level label counts; a
   team-scoped create on a duplicate name errors), with a duplicate-race re-lookup arm.
 - `LinearIssueBackend.backend_id` is a module-level `"linear"` literal — never import
-  `perk.issues` for it (the resolver imports `linear_backend` at wiring time; the import-direction
+  `perk.backends.issues` for it (the resolver imports `linear_backend` at wiring time; the import-direction
   test pins this).
 - The four ensured labels live in `linear_backend._PERK_LABELS` (duplicating the plan/objective
   constants by reference, not value) — **adding a fifth perk label requires touching that tuple**
@@ -115,7 +115,7 @@ gesture, never a `ManagedConvergence`.
 
 ## Agent-session emission (one-way, internally gated)
 
-`perk/linear_agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
+`perk/backends/linear_agent.py` + the `agent-session.json` cache helpers emit Linear AgentSession /
 AgentActivity updates during implement runs. Four hook sites (`launch_stage`, `run_worker`,
 `_pr_submit_impl`, `_pr_land_impl`) each make a **bare unconditional call** — the gate (stamped
 `provider == "linear"` + `LINEAR_AGENT_TOKEN` present) and the try/except live INSIDE each emitter.
@@ -169,10 +169,10 @@ every request the emitters compose without touching emitter code or the real cli
 
 ## Backend-aware prompts (Node 3.1)
 
-- **Per-plane plan-read SSOT helpers**: `perk/launch.py::_plan_read_instruction` ↔
-  `extension/lifecycleGates.ts::planReadInstruction`, byte-parity pinned by lockstep
+- **Per-plane plan-read SSOT helpers**: `perk/run/launch.py::_plan_read_instruction` ↔
+  `extension/doors/lifecycleGates.ts::planReadInstruction`, byte-parity pinned by lockstep
   `LINEAR_READ_SUBSTRINGS` lists asserted from BOTH suites
-  (`tests/test_worker_prompt_parity.py` ↔ `extension/worker.test.ts`).
+  (`tests/test_worker_prompt_parity.py` ↔ `extension/worker/worker.test.ts`).
 - **The linear plan-read arm is prose, not a command** (a `linear_get_issue` /
   `linear_list_comments` tool recipe with an `open <url>` fallback). The prompt scaffold tolerates
   either shape; parity substrings are literal fragments of the *instruction*, not the scaffold, so

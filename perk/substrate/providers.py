@@ -4,8 +4,8 @@ This is the Python plane's reader of the *third* parsed cross-plane contract (th
 being `shared/registry.yaml` and `shared/bindings.yaml`). It is the **supported set** — the
 catalog of plan/todo providers perk knows how to wire — distinct from the per-repo *selection*
 (the flat `[providers]` table in `.pi/perk.toml`, which is just a pointer into this catalog).
-The TS extension has an independent reader (`extension/providers.ts`) over the *same* bundled
-file.
+The TS extension has an independent reader (`extension/substrate/providers.ts`) over the *same*
+bundled file.
 
 Validation is **shape-only and repo-free**: the validator checks that each provider entry is
 well formed (non-empty unique `id`, `seam ∈ {plan, todo}`, exactly one `default: true` per

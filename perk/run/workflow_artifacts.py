@@ -5,10 +5,11 @@ perk ``run_id``, persists the ``run_id → plan`` linkage, verifies it, then tri
 ``workflow_dispatch`` for the workflow file ``perk-run.yml`` (``runner.GITHUB_ACTIONS_WORKFLOW``),
 verifying the run by matching the ``run_id`` embedded in the run-name. *This* module is the runner
 side: the **managed** workflow + its composite setup action, installed by ``perk init`` and repaired
-by ``perk doctor --fix`` (a ``ManagedConvergence`` in :func:`perk.init.managed_convergences`).
+by ``perk doctor --fix`` (a ``ManagedConvergence`` in
+:func:`perk.convergence.init.managed_convergences`).
 
 The workflow checks out the plan branch, installs perk + pi (the composite action), then runs
-``perk run-worker`` (the CI positioning + drive entrypoint, :mod:`perk.run_worker`) which
+``perk run-worker`` (the CI positioning + drive entrypoint, :mod:`perk.run.run_worker`) which
 materializes the worktree and spawns the Node headless worker (Node 1.2).
 
 The templates are authored as code (string constants), not packaged data — writing them is a pure
@@ -39,8 +40,8 @@ RUNNER_ENABLED_VAR = "PERK_ENABLED"
 PERK_RUN_WORKFLOW = """\
 # Managed by `perk init` (repaired by `perk doctor --fix`) — do not edit by hand.
 # The GitHub Actions runner for a perk `--remote` drive (Objective #137 Node 2.2; contracts.md
-# §8.14). The dispatcher (perk/runner.py GitHubActionsRunner) verifies the run by matching the perk
-# `run_id` embedded in `run-name`, so the run-name MUST carry `${{ inputs.run_id }}`.
+# §8.14). The dispatcher (perk/run/runner.py GitHubActionsRunner) verifies the run by matching
+# the perk `run_id` embedded in `run-name`, so the run-name MUST carry `${{ inputs.run_id }}`.
 name: perk-run
 run-name: "perk ${{ inputs.stage }} · plan #${{ inputs.plan }} · ${{ inputs.run_id }}"
 

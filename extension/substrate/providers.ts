@@ -1,11 +1,11 @@
 // The TS plane's reader for the shared provider-selection supported set (`shared/providers.yaml`).
 //
-// Twin of perk/providers.py: both planes parse the SAME bundled file (no codegen). This is the
+// Twin of perk/substrate/providers.py: both planes parse the SAME bundled file (no codegen). This is the
 // THIRD parsed cross-plane contract (after registry.yaml and bindings.yaml). It is the SUPPORTED
 // SET — the catalog of plan/todo providers perk knows how to wire — distinct from the per-repo
 // SELECTION (the flat `[providers]` table in .pi/perk.toml).
 //
-// The Python CLI is the authoritative validator (perk/providers.py); this side does a thin
+// The Python CLI is the authoritative validator (perk/substrate/providers.py); this side does a thin
 // structural parse only — no deep content validation here. This node (2.1) ships the shape-only
 // loader with no TS consumer: runtime consumption of the selection (perk's plan/todo stepping
 // aside when a foreign provider is selected) is Nodes 2.2/3.1.
@@ -75,8 +75,8 @@ export function loadProviders(): Provider[] {
 /**
  * The effective provider per seam after resolving a repo selection against the supported set.
  * `issues` collects every loud-but-non-fatal finding (an unknown id or a wrong-seam provider) as a
- * plain string — the TS plane has no `Issue`/`Severity` (those live in `perk/registry.py`); the
- * Python plane is the authoritative validator. Twin of `perk.providers.ResolvedProviders`.
+ * plain string — the TS plane has no `Issue`/`Severity` (those live in `perk/substrate/registry.py`); the
+ * Python plane is the authoritative validator. Twin of `perk.substrate.providers.ResolvedProviders`.
  */
 export interface ResolvedProviders {
   plan: Provider;

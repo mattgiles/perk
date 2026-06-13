@@ -1,4 +1,4 @@
-"""Offline tests for the Linear GraphQL client substrate (``perk/linear.py``).
+"""Offline tests for the Linear GraphQL client substrate (``perk/backends/linear.py``).
 
 Everything runs over an injected ``httpx.MockTransport`` — no network. ``client_from_env`` is
 tested with explicit ``env={...}`` mappings, never the real environ.
@@ -60,7 +60,8 @@ class TestRequestComposition:
         }
 
     def test_bearer_mode_sends_the_oauth_header_form(self) -> None:
-        # `bearer=True` is the OAuth (actor=app agent token) form used by perk/linear_agent.py.
+        # `bearer=True` is the OAuth (actor=app agent token) form used by
+        # perk/backends/linear_agent.py.
         seen: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:

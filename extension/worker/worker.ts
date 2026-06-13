@@ -12,7 +12,7 @@
 // /plan-body materialization, `run_id` mint) is the cold-door/runner's job and is a PREPARED-
 // WORKTREE input (audit Gap 7): the worker inherits `PERK_RUN_ID` from the env and never re-mints.
 //
-// Inverse of `extension/readOnlySession.ts`: that builds a fully-isolated READ-ONLY child (loads
+// Inverse of `extension/worker/readOnlySession.ts`: that builds a fully-isolated READ-ONLY child (loads
 // nothing, `["read","grep","find","ls"]`); the worker is the OPPOSITE — read-write defaults + the
 // real perk extension loaded from the worktree's `.pi/settings.json` (cwd-discovery), with the
 // user-global tier locked out via a throwaway `agentDir`.
@@ -448,7 +448,7 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
 
 /**
  * Re-derive the stage's initial prompt from the plan-ref — the TS twin of
- * `perk/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
+ * `perk/run/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
  * plane (asserted reciprocally in `worker.test.ts` + `tests/test_worker_prompt_parity.py`); the
  * resolved skill-binding suffix is delivered by the cold door and is deferred to Phase-2. Returns
  * `null` when there is no plan-ref (nothing to prime).

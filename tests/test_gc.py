@@ -1,4 +1,4 @@
-"""GC policy unit tests (`perk/gc.py`, contracts.md §8.1, Objective #339 Node 1.4).
+"""GC policy unit tests (`perk/state/gc.py`, contracts.md §8.1, Objective #339 Node 1.4).
 
 Builds tmp_path repos with ``cache.ensure_layout`` + the cache helpers. Backdated ULIDs are
 minted with ``ULID.from_datetime``; mtime-fallback cases backdate via ``os.utime``.

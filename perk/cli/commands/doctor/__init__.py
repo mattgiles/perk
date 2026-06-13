@@ -1,4 +1,4 @@
-"""`perk doctor` — `init`'s diagnostic twin (thin Click adapter over perk/doctor.py).
+"""`perk doctor` — `init`'s diagnostic twin (thin Click adapter over perk/convergence/doctor.py).
 
 The *second* canonical supervisor surface (cli-vs-pi.md §3.2): `--json` to stdout + stable exit
 codes (0 healthy / 1 unhealthy / 2 not-a-repo), grouped human text to stderr.

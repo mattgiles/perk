@@ -50,8 +50,8 @@ time a TS plane mirrors a Python set/`in` over structural objects.
 
 Cold and warm renderers are **independent code paths** that must not double-deliver when both fire
 for one session (a cold launch *and* `before_agent_start`). They dedup through one **byte-identical
-header literal**: `BINDING_HEADER` (TS, `extension/bindingDelivery.ts`) ≡ `_HEADER` (Python,
-`perk/binding_delivery.py`). The warm injector skips when **any entry on `ctx.sessionManager.getBranch()`
+header literal**: `BINDING_HEADER` (TS, `extension/substrate/bindingDelivery.ts`) ≡ `_HEADER` (Python,
+`perk/substrate/binding_delivery.py`). The warm injector skips when **any entry on `ctx.sessionManager.getBranch()`
 already contains the header** — a shape-agnostic scan (`branch.some(e => JSON.stringify(e).includes(HEADER))`)
 robust because the header is a distinctive literal. The equality is pinned by a literal test in BOTH
 planes; changing the literal in one plane must update the other in the same turn. It is idempotent
@@ -62,7 +62,7 @@ than planMode's) are pi-lifecycle facts captured in `pi/context-injection.md`.
 
 ### The `binding_trigger` "borrows-a-stage" hazard
 
-`launch_stage` (`perk/launch.py`) is the single cold-launch chokepoint every stage launcher routes
+`launch_stage` (`perk/run/launch.py`) is the single cold-launch chokepoint every stage launcher routes
 through, so binding delivery wired there covers all launches uniformly. But the trigger defaults to
 `f"stage:{stage.id}"`, and **`learn-docs` borrows the `plan` stage descriptor** — keying delivery off
 `stage.id` alone would fire `plan`'s bindings for it. The fix is an explicit
@@ -76,7 +76,7 @@ Two delivery-surface boundaries that held:
   objective body with no `pi` session / initial prompt, so `command:objective-reconcile` can only
   fire at the warm door. Don't wire cold delivery for non-launching workers.
 - **Delivery I/O lives apart from the model.** Disk reads (`SKILL.md` transclusion) live in
-  `perk/binding_delivery.py`, keeping `perk/bindings.py` a pure model/resolver. Resolver `issues` +
+  `perk/substrate/binding_delivery.py`, keeping `perk/substrate/bindings.py` a pure model/resolver. Resolver `issues` +
   delivery `warnings` are **returned, never raised**, and surfaced loud-but-non-fatal: a missing
   transclude target degrades to the nudge pointer with a warning, never blocking a launch.
 
@@ -142,19 +142,19 @@ Adding a deliverable command + skill requires **all** of these to change togethe
 break (the concrete instance is `/pr-review` → `command:pr-review`):
 
 1. **`shared/bindings.yaml`** — the `{trigger, skill, mode}` row.
-2. **`perk/bindings.py` `DELIVERABLE_COMMAND_TARGETS`** frozenset (+ its comment listing the
+2. **`perk/substrate/bindings.py` `DELIVERABLE_COMMAND_TARGETS`** frozenset (+ its comment listing the
    `bindingSuffix` call sites) — else doctor's binding-target check fails.
 3. The warm command must call **`bindingSuffix(ctx.cwd, "command:<id>")`** (Mechanism B) — the skill
    pointer is never hardcoded in the guidance body.
-4. **`perk/init.py` `PERK_SKILLS`** tuple, then **regenerate** the committed manifest fragment
+4. **`perk/convergence/init.py` `PERK_SKILLS`** tuple, then **regenerate** the committed manifest fragment
    `.agents/manifest.d/perk.yaml` (it's generated via `_desired_skills_manifest(True)`, not
    hand-edited — watch for pre-existing drift).
 5. **THREE** binding-count test sites: Python `tests/test_bindings.py` `EXPECTED_DEFAULTS`; TS
-   `extension/bindings.test.ts` `EXPECTED` array **and** the "returns the N shipped default bindings"
+   `extension/substrate/bindings.test.ts` `EXPECTED` array **and** the "returns the N shipped default bindings"
    count in the test name.
-6. If configurable: `extension/config.ts` `PerkConfig` + parser, and `perk/config.py` `Config` for
+6. If configurable: `extension/substrate/config.ts` `PerkConfig` + parser, and `perk/substrate/config.py` `Config` for
    forward parity — flag the Python side as possibly-unused until a cold door exists (don't omit it).
-   Concretely, `perk/config.py`'s `pr_review_model` is **parsed-but-unused** today; only the TS warm
+   Concretely, `perk/substrate/config.py`'s `pr_review_model` is **parsed-but-unused** today; only the TS warm
    `/pr-review` path consumes it.
 
 See `docs/learned/pi/subagents.md` for `/pr-review`'s orchestration (the per-call inline `model`
@@ -182,13 +182,13 @@ checks *capability* coverage, not an enumerated group set, so a free-form group 
 ## Cross-references
 
 - `shared/bindings.yaml`, `shared/contracts.md` §8.9 — the data contract and trigger vocabulary
-- `perk/bindings.py` — pure model + resolver; `perk/binding_delivery.py` — `_HEADER`, cold render
-- `extension/bindingDelivery.ts` — `BINDING_HEADER`, `BINDING_CONTEXT_TYPE`, warm injector + dedup scan
-- `perk/launch.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
+- `perk/substrate/bindings.py` — pure model + resolver; `perk/substrate/binding_delivery.py` — `_HEADER`, cold render
+- `extension/substrate/bindingDelivery.ts` — `BINDING_HEADER`, `BINDING_CONTEXT_TYPE`, warm injector + dedup scan
+- `perk/run/launch.py` — `launch_stage`, the `binding_trigger` param (the borrows-a-stage seam)
 - `docs/learned/workflow/shared-contracts.md` — adding a new parsed `shared/` contract
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/toolchain/biome.md` — the `parseTomlSubset` rewrite gotchas
-- `perk/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/doctor.py` — the
+- `perk/substrate/bindings.py` — `is_skill_installed(root, skill, *, self_repo)`; `perk/convergence/doctor.py` — the
   report-only `bindings` check; `DELIVERABLE_COMMAND_TARGETS`
 - `docs/learned/workflow/init-doctor.md` — why a report-only check ≠ a hand-authored managed check
 - `docs/learned/workflow/init-external-cli.md` — the `skills` CLI as single delivery path (the

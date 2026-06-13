@@ -6,7 +6,7 @@ read_when: You are touching launch_stage's argv construction, injecting child en
 # The cold-door pi-launch seam
 
 A perk *local* stage launch ends by `execvpe`-ing into `pi`: the perk CLI process **becomes** pi. This
-seam (`perk/launch.py`) carries a handful of non-obvious mechanics about argv construction, pi's
+seam (`perk/run/launch.py`) carries a handful of non-obvious mechanics about argv construction, pi's
 project-trust prompt on throwaway worktrees, and what happens when a `--json` surface composes a
 launcher that emits its own JSON.
 
@@ -85,9 +85,9 @@ human/interactive path (see `objective-lifecycle.md`).
 
 ## Refactoring launch/run behind byte-exact pins
 
-The node-4.3 dignified sweep of `perk/launch.py` / the run worker established three constraints:
+The node-4.3 dignified sweep of `perk/run/launch.py` / the run worker established three constraints:
 
-- **`perk/cache.py` is a deliberate import-leaf** (it imports only `perk.output`), and
+- **`perk/state/cache.py` is a deliberate import-leaf** (it imports only `perk.substrate.output`), and
   `github.py` *lazily* imports `cache` for cycle avoidance — so any helper that calls *into*
   `github` cannot live in `cache.py` without creating a real import cycle. When a backlog says
   "move helper X to a shared home", check the candidate home's import posture first:
@@ -125,7 +125,7 @@ because the stderr note lands in the combined stream.
 
 ## Cross-references
 
-- `perk/launch.py` — `launch_stage` argv construction + `--approve` trust injection
+- `perk/run/launch.py` — `launch_stage` argv construction + `--approve` trust injection
 - `perk/cli/commands/objective_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`

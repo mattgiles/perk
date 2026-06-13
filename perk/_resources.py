@@ -2,7 +2,7 @@
 
 The contracts in ``shared/`` are authored once (T2) and bundled into each build
 artifact (``Q12``). This resolver is the Python plane's single "where is shared/?"
-helper; the TS extension has its own twin (``extension/resources.ts``).
+helper; the TS extension has its own twin (``extension/substrate/resources.ts``).
 """
 
 from importlib import resources

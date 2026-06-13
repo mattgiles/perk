@@ -5,7 +5,7 @@ self-dating, so GC-by-age and chronological ordering need no sidecar. Mint doctr
 (contracts.md §8.2): the CLI mints at **cold launch** (handing off via ``PERK_RUN_ID``);
 a warm transition keeps the id; a fork derives a child by suffix (``<ulid>.<n>``); and a
 **warm session with no identity** mints its own ULID in the TS plane
-(``extension/runId.ts``) — the extension otherwise claims, restores, and derives.
+(``extension/substrate/runId.ts``) — the extension otherwise claims, restores, and derives.
 """
 
 from datetime import datetime

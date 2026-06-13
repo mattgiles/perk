@@ -61,7 +61,7 @@ complex dynamic schemas, there is no specialized doctor validation required for 
 ## Cross-plane parity literals
 
 For shared subagent subsystems that are executed on both planes (like `review-classifier` in
-`extension/worker.ts` and `perk/launch.py`), the model and prompt clauses must remain byte-identical
+`extension/worker/worker.ts` and `perk/run/launch.py`), the model and prompt clauses must remain byte-identical
 across TypeScript and Python. This parity must be strictly pinned by reciprocal tests in both test
 suites (e.g., `worker.test.ts` asserting `ADDRESS_MODEL_CLAUSE` and
 `test_worker_prompt_parity.py` asserting `_ADDRESS_MODEL_CLAUSE` against the same expected prompt
@@ -98,7 +98,7 @@ to *consumer* repos is still **unbuilt**. Flag as a deferral.
 ## Residual
 
 No workflow-state record of a `/pr-review` (no parent tool turn → no `last_review_batch`-style
-record); the posted PR comment is the canonical record. `perk/config.py`'s `pr_review_model` is
+record); the posted PR comment is the canonical record. `perk/substrate/config.py`'s `pr_review_model` is
 parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-review` door yet).
 
 ## Sources
@@ -109,7 +109,7 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 
 ## Cross-references
 
-- `extension/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header
+- `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header
 - `.pi/agents/pr-reviewer.md`, `.pi/agents/review-classifier.md` — the hand-committed agent defs
 - `perk/cli/commands/pr_review_post_cmd.py` — the canonical Python mutation (D1)
 - `shared/contracts.md` §8.3 — the corrected `agentOverrides` note + workflow-state schema

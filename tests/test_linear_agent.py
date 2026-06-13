@@ -1,4 +1,4 @@
-"""Offline tests for the Linear agent-session emission layer (``perk/linear_agent.py``).
+"""Offline tests for the Linear agent-session emission layer (``perk/backends/linear_agent.py``).
 
 Request *composition* only (Bearer header, mutation substrings, variables) over a recording
 ``httpx.MockTransport`` — exact GraphQL field signatures are verified live at the smoke gate
