@@ -67,6 +67,12 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "cat x 2>&1", // fd duplication is not a file write
     "grep foo bar 2>&1",
     "ls -la 1>&2",
+    "cat foo 2>/dev/null", // /dev/null redirect is not a file write
+    'grep -rn "user-docs" README.md 2>/dev/null',
+    "cd /tmp && grep foo bar", // cd prefix + per-segment safe
+    "cd repo && perk objective show 453 2>&1 | head -200", // reported example 1
+    `ls tests/ | grep -iE 'doc|user|cli|link'; echo "---"; grep -rl "user-docs" tests/ 2>/dev/null`, // reported example 3 (quoted | does not split; 2>/dev/null allowed)
+    `find tests -name '*.py' | grep -iE 'doc|user|cli' ; echo --- ; grep -rl "user-docs" tests 2>/dev/null`, // reported example 4
     "perk objective show", // perk's read-only objective queries
     "perk objective next",
     "perk obj show 42",
@@ -99,6 +105,9 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "chmod +x script.sh",
     "some-unknown-binary --flag", // not in the safe table at all
     "git status && rm file", // destructive wins over a safe prefix
+    "for f in a b c; do echo $f; done", // leading `for` segment non-safe → loops stay blocked
+    "git status && some-unknown-binary", // per-segment tightening: second segment non-safe
+    "ls | rm -rf x", // pipe whose second segment is destructive
     "perk objective create foo", // mutating objective subcommands stay blocked
     "perk objective node 1.1",
     "perk objective reconcile",
