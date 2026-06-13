@@ -21,6 +21,3 @@ help with a task in progress.
   load-bearing declarative-correct/execution-untested maturity caveat.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.
-
-> **Status:** this quadrant now has two pages; more are added by later Objective
-> [#453](https://github.com/mattgiles/perk/issues/453) nodes as the tree is populated.

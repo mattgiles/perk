@@ -4,15 +4,10 @@ A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the ses
 *exterior*) plus a TypeScript Pi extension (the session *interior*), sequenced so that
 **perk bootstraps itself**.
 
-> Status: **Phase 2 complete.** The in-session workflow **spine** (`plan → save → implement
-> → submit → land → learn`) is closed *and deepened* — perk-owned plan mode + structural
-> tool-gating, a post-edit formatter, in-process + spawned context-isolation, a read-only CI
-> executor, the `/address` review loop, deepened submit/land/learn, and objectives as plan
-> factories + reconciliation — all **dogfooded on perk's own repo** (see
-> [docs/planning/phase-2-gate.md](docs/planning/phase-2-gate.md)); any plan is resumable at
-> its current stage via `perk resume`. Phase 3 adds the headless worker + queue. See
-> [docs/index.md](docs/index.md) for the full plan and [docs/ROADMAP.md](docs/ROADMAP.md) for
-> the phasing.
+> perk is in active development, dogfooded on its own repo. **Using perk on your own repo?**
+> Start at [`docs/user-docs/`](docs/user-docs/index.md). The phased build plan and dogfood
+> gates live in [docs/ROADMAP.md](docs/ROADMAP.md); per-turn plans in
+> [docs/planning/](docs/planning/).
 
 ## What perk is
 
@@ -44,152 +39,25 @@ perk doctor                 # report health; perk doctor --fix repairs drift
 `perk init` requires a git repo + `git`, `gh`, `node ≥ 22`, and `pi` on PATH. GitHub auth
 is verified but never required (it is reported, never fatal).
 
-## The command surface (as built)
+For the guided first run, follow
+[Get started with perk](docs/user-docs/tutorials/get-started.md).
 
-| Command | What it does |
-| --- | --- |
-| `perk init` | Scaffold/converge a repo for perk: `.pi/settings.json` packages, the `.pi/workflow/` cache layout, `.gitignore` + `AGENTS.md` managed blocks, and `.pi/perk.toml` config. Idempotent. `--json`/`--force`. |
-| `perk doctor` | Diagnose the managed setup (six grouped checks); `--fix` repairs known drift; `--json` + stable exit codes for supervisors; `-v` expands the condensed view. |
-| `perk plan \| submit \| address \| land \| learn` | Stage **launchers**: mint a `run_id` and `exec` a primed `pi` session for that stage (the in-session *handlers* live in the extension). `--dry-run` resolves a launch without side effects. |
-| `perk implement [PLAN]` | Materialize the plan's worktree/branch and launch a fresh `pi` **primed to implement it**. Optional issue number selects a specific plan; omit it to use the active saved plan. |
-| `perk objective-plan` | The **plan factory**: select the next actionable objective node (dependency-graph `next`), optionally explore it read-only, and emit a bounded plan through the `plan → save` spine. The new initial node of the deepened graph. |
-| `perk objective create/show/node/next/reconcile` | Manage **objectives** (multi-plan roadmaps as GitHub issues): create an objective + its roadmap nodes, show it, advance a node's status, pick the next actionable node, and reconcile its prose against a merged diff. |
-| `perk plan-save` / `pr submit` / `pr check` / `pr ready` / `pr land` | The cold/worker GitHub doors (the in-session twins are the `plan_save` / `submit` / `land` tools): create the plan issue, open + run CI on + flip-ready + squash-merge the draft PR. `--json` + `--dry-run`. |
-| `perk pr feedback` / `pr resolve-threads` / `learn capture` | The `/address` review-loop workers (classify PR feedback, reply-then-resolve threads) and the `/learn` capture worker. |
-| `perk resume <plan>` | Resolve any plan to its current actionable stage (no PR → implement, open → submit, merged+pending-learn → learn) and launch it. |
-| `perk worktree create/list/remove` | Manage git worktrees under the configured root. |
-| `perk state` / `perk registry` | Inspect the local `.pi/workflow/` cache + run ids; inspect/validate the shared stage registry. |
+## Documentation
 
-The in-session **warm doors** (the perk extension): `/plan`, `/plan-save`, `/implement`, `/submit`,
-`/ready`, `/address`, `/land`, `/learn`, `/checkpoints`, `/objective-plan`, `/objective-reconcile`
-(+ the `plan_save`/`submit`/`land`/`learn`/`resolve_review_threads`/`objective_node`/`reconcile_objective`
-tools), and cross-stage lifecycle gates.
+The operator-facing docs live under [`docs/user-docs/`](docs/user-docs/index.md), organized as
+the four [Divio](https://docs.divio.com/documentation-system/) quadrants:
 
-## Objectives (multi-plan roadmaps)
+- **[Tutorials](docs/user-docs/tutorials/index.md)** — learning-oriented lessons; start with
+  [Get started with perk](docs/user-docs/tutorials/get-started.md).
+- **[How-to guides](docs/user-docs/how-to/index.md)** — goal-oriented recipes (resume a plan,
+  address review feedback, switch to Linear, attach a skill, …).
+- **[Reference](docs/user-docs/reference/index.md)** — the CLI surface, in-session commands &
+  tools, the objective roadmap model, configuration, and providers & backends.
+- **[Explanation](docs/user-docs/explanation/index.md)** — how perk thinks; headless/remote
+  maturity.
 
-A plan is *one* change. An **objective** is a long-running goal that **generates** bounded plans
-rather than being implemented directly — it is the unit above the spine. An objective is a GitHub
-issue (label `perk:objective`) carrying a **roadmap** of nodes; perk's `/objective-plan` factory
-selects the next actionable node and drives a normal `plan → save` session scoped to *that one node*.
-When the node's PR lands, the node is auto-marked `done` and reconciliation against what was actually
-built is automatically driven on land. (This is perk's take on erk's objective workflow.)
-
-A roadmap **node** has an `id` (e.g. `1.1`), a `description`, a `status`
-(`pending` · `planning` · `in_progress` · `done` · `blocked` · `skipped`), and optional `pr` /
-`depends_on`. Status is **explicit-only** — it is never inferred from a PR column. Nodes with
-unsatisfied `depends_on` are blocked; the factory picks the first unblocked `pending` node.
-
-The end-to-end loop:
-
-```bash
-# 1. Create the objective from authored markdown (it may embed a roadmap — see below).
-perk objective create --body @objective.md          # creates the perk:objective issue
-perk objective show 7                                # render the objective + roadmap table
-perk objective next 7                                # which node is actionable next?
-```
-
-```text
-# 2. In a pi session (warm), set it active and run the factory:
-/objective 7                 # set the active objective for this session (/objective clear to unset)
-/objective-plan              # select the next node (or /objective-plan --node 1.2 for a specific one)
-                             #   → marks the node `planning`, hands you the objective + node,
-                             #     optionally spawns the read-only `objective-explorer` child, then
-                             #     authors a BOUNDED plan for that one node and saves it linked
-                             #     to the objective (plan→node + node→plan backlinks).
-
-# 3. The emitted plan rides the normal spine:
-/implement                   # (or `perk implement <plan>`) materialize the worktree + build it
-/submit  →  /ready  →  /address  →  /land
-
-# 4. /land squash-merges AND mechanically marks the backlinked node `done`, then
-#    AUTOMATICALLY reconciles the objective's prose against the real merged diff
-#    (rewrites only the Reconcilable region — the roadmap table and any Immutable
-#     historical notes are never touched). Run /objective-reconcile manually to redo it.
-/learn                       # capture what was learned
-```
-
-The cold doors mirror the warm ones for scripting/CI: `perk objective-plan 7 [--node 1.2]
-[--dry-run]` is the factory launcher (a cold session has no active objective, so the number is
-required), and `perk objective node 7 --node 1.2 [--status …] [--pr "#42"] [--description …]`
-advances a node by hand. Advancing a node to `done` via the model-facing `objective_node` tool
-forces a **completion audit** (a requirement→evidence mapping); the cold CLI and the auto-on-merge
-path set `done` without one — those are deliberate, non-audited paths.
-
-To seed the roadmap at create time, embed an `objective-roadmap` perk metadata block in the body —
-a fenced YAML payload `{ schema_version: "1", nodes: [ … ] }`:
-
-````markdown
-# Ship the widget pipeline
-
-Prose describing the goal …
-
-<!-- perk:metadata-block:objective-roadmap -->
-```yaml
-schema_version: "1"
-nodes:
-  - id: "1.1"
-    description: "Extract the widget parser into its own module"
-    status: pending
-  - id: "1.2"
-    description: "Add the streaming encoder"
-    status: pending
-    depends_on: ["1.1"]
-```
-<!-- /perk:metadata-block:objective-roadmap -->
-````
-
-A roadmap-free objective is valid too — the prose alone is a goal you grow later.
-
-## Skill bindings
-
-A **skill binding** attaches an installed skill (a directory under `.agents/skills/<name>/`) to a
-perk **trigger** — a stage or a command — so the skill is delivered into that session automatically.
-perk ships its own workflow skills (e.g. `perk-implement`, `perk-plan`) as bindings; you can add your
-own and override perk's at the same trigger.
-
-Bindings live in `.pi/perk.toml` as an array of tables. Each row is `{ trigger, skill, mode }`:
-
-```toml
-[[bindings]]
-trigger = "stage:implement"   # fire when the implement stage starts
-skill = "house-style"         # a skill installed at .agents/skills/house-style/
-mode = "nudge"                # how to deliver it (see below)
-
-[[bindings]]
-trigger = "command:learn-docs"
-skill = "house-style"
-mode = "transclude"
-```
-
-**Triggers** are `"<kind>:<id>"`. The kind is `stage` or `command`:
-
-- `stage:<id>` fires at that stage's launch / session entry. Stage ids:
-  `objective-author`, `objective-save`, `objective-plan`, `plan`, `save`, `implement`, `submit`,
-  `address`, `land`, `learn`.
-- `command:<id>` fires when that perk command runs. Deliverable command ids:
-  `objective-reconcile`, `learn-docs`.
-
-Prefer `stage:<id>` when a command maps 1:1 to a stage; reach for `command:<id>` only for the
-deliverable commands that aren't a stage.
-
-**`mode` is the nudge-vs-transclude trade-off:**
-
-- `nudge` delivers a short *pointer* telling the session to follow the skill, leaving the skill's
-  body ambient for Pi to discover on its own. Lightweight context. Pick this for a skill that is
-  already installed and Pi can find.
-- `transclude` inlines the skill's `SKILL.md` directly into the prompt. Heavier context, but the
-  body is *guaranteed present* — the intended path for a skill Pi can't otherwise discover.
-
-perk's own skills ship as `nudge` defaults. A binding you declare **at a trigger perk already binds
-overrides** perk's default there; a binding at a new trigger is added alongside.
-
-Per-user overrides go in `.pi/perk.local.toml` (gitignored). Note the array semantics differ from
-scalar config: a local `[[bindings]]` array **replaces the committed array wholesale** — it is not
-merged element-wise.
-
-`perk doctor` validates every binding's `skill` (the directory exists) and `trigger` (a known stage
-or command) — loud-but-non-fatal, so a typo is surfaced without blocking the workflow. The
-authoritative spec is `shared/contracts.md` §8.9.
+perk's internal research and planning record lives under [`docs/`](docs/index.md) and is for
+perk's own developers.
 
 ## Where this is going
 

@@ -27,9 +27,3 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   `.pi/perk.local.toml` per-user overlay, with overlay semantics.
 - **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (plan
   and todo seams) and the Linear issue-backend reference (auth, labels, identifiers, maturity).
-
-> **Status:** pages are added by later Objective
-> [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist (currently: the CLI commands reference, the in-session reference, the
-> objectives roadmap-model reference, the configuration reference, and the providers & issue
-> backends reference).
