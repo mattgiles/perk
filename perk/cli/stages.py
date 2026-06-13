@@ -76,6 +76,91 @@ def make_stage_launcher(stage: Stage) -> click.Command:
     return _cmd
 
 
+class MergedCommand(click.Command):
+    """One command that fronts a launcher half and a deterministic worker half.
+
+    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.2 (the merged
+    launcher+worker command). Dormant in 2.1 — no live command is built with this; node 3.x
+    folds the real ``submit``/``land`` pairs.
+
+    A ``MergedCommand`` holds two intact ``click.Command`` halves built elsewhere:
+
+    - the **launcher** half (``make_stage_launcher(stage)``) — opens a primed pi session;
+    - the **worker** half (an existing deterministic worker command, e.g. ``pr submit``) —
+      runs offline and emits machine output under ``--json``.
+
+    Neither half's option schema is unioned or duplicated. ``parse_args`` pre-dispatches on the
+    presence of ``--json`` in argv (the proven ``LearnGroup`` argv-dispatch pattern): ``--json``
+    anywhere routes to the worker, otherwise the launcher runs and the remaining argv is handed
+    through to ``pi``.
+
+    Accepted edge (mirroring ``LearnGroup``): because dispatch keys on the literal ``--json``
+    token anywhere in argv, **passing ``--json`` through to ``pi`` as a launcher pi-arg is
+    unsupported via the merged command** — use the explicit stage launcher when you need that.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        launcher: click.Command,
+        worker: click.Command,
+        help: str | None = None,  # Click's own param name
+    ) -> None:
+        super().__init__(
+            name,
+            help=help,
+            context_settings={"ignore_unknown_options": True},
+        )
+        self._launcher = launcher
+        self._worker = worker
+
+    def _select(self, args: list[str]) -> click.Command:
+        """The worker when ``--json`` is present in argv, else the launcher."""
+        return self._worker if "--json" in args else self._launcher
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        # The MergedCommand's own auto `--help` fires only for the launcher-side help (no --json);
+        # a `--json --help` would route to the worker and render the worker's own help instead.
+        if ("--help" in args or "-h" in args) and "--json" not in args:
+            return super().parse_args(ctx, args)
+        chosen = self._select(args)
+        ctx._merged_chosen = chosen  # ty: ignore[unresolved-attribute]  # stash for invoke()
+        return chosen.parse_args(ctx, args)
+
+    def invoke(self, ctx: click.Context) -> object:
+        chosen = getattr(ctx, "_merged_chosen", self._launcher)
+        return chosen.invoke(ctx)
+
+    def get_help(self, ctx: click.Context) -> str:
+        body = self._launcher.get_help(ctx)
+        note = "Run with --json to execute the deterministic worker (machine output, no session)."
+        return f"{body}\n\n{note}"
+
+
+def make_merged_command(
+    stage: Stage, worker: click.Command, *, name: str | None = None
+) -> MergedCommand:
+    """Build a :class:`MergedCommand` over ``stage``'s launcher and an existing ``worker``.
+
+    **Objective #495 Node 2.1**; enables SSOT §11.2. The launcher half is
+    ``make_stage_launcher(stage)`` (reused intact); the worker half is the caller's deterministic
+    ``click.Command``. Dormant in 2.1 (no live command is wired with this).
+    """
+    launcher = make_stage_launcher(stage)
+    merged_help = (
+        f"{stage.summary}\n\n"
+        f"Opens a primed pi session for the '{stage.id}' stage by default; run with --json to "
+        "execute the deterministic worker instead."
+    )
+    return MergedCommand(
+        name or worker.name or stage.id,
+        launcher=launcher,
+        worker=worker,
+        help=merged_help,
+    )
+
+
 def register_stage_commands(cli: click.Group) -> None:
     """Add a launcher command per registry stage (no-op if the registry won't load)."""
     try:

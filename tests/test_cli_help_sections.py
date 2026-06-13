@@ -12,8 +12,10 @@ from perk.cli.alias import (
     COMMAND_GROUPS,
     SETUP_HEALTH,
     STAGE_LAUNCHERS,
+    SectionedAliasGroup,
     SectionedGroup,
     get_aliases,
+    mark_kind,
 )
 from perk.cli.cli import cli
 
@@ -160,6 +162,64 @@ def test_hidden_section_shown_with_env(monkeypatch):
     assert "Hidden:" in result.output
     hidden_slice = result.output[result.output.index("Hidden:") :]
     assert "secret" in hidden_slice
+
+
+def _kinded_group() -> SectionedAliasGroup:
+    """A synthetic SectionedAliasGroup with a launcher, a worker, and an unmarked command."""
+    grp = SectionedAliasGroup("syn")
+
+    @grp.command("open")
+    def _open() -> None:
+        """A launcher command."""
+
+    @grp.command("run-it")
+    def _run_it() -> None:
+        """A worker command."""
+
+    @grp.command("plain")
+    def _plain() -> None:
+        """An unmarked command."""
+
+    mark_kind(grp.commands["open"], "launcher")
+    mark_kind(grp.commands["run-it"], "worker")
+    return grp
+
+
+def test_sectioned_alias_group_renders_launchers_and_workers():
+    # Node 2.1 (SSOT §11.7-Q5): marked commands render under "Launchers" / "Workers".
+    result = CliRunner().invoke(_kinded_group(), ["--help"])
+    assert result.exit_code == 0
+    assert "Launchers:" in result.output
+    assert "Workers:" in result.output
+    launchers_slice = _between(result.output, "Launchers:", "Workers:")
+    assert "open" in launchers_slice
+    workers_slice = _between(result.output, "Workers:", "Commands:")
+    assert "run-it" in workers_slice
+
+
+def test_sectioned_alias_group_unmarked_under_commands():
+    result = CliRunner().invoke(_kinded_group(), ["--help"])
+    assert result.exit_code == 0
+    commands_slice = _between(result.output, "Commands:", None)
+    assert "plain" in commands_slice
+    # The marked commands do not leak into the catch-all Commands section.
+    assert "open" not in commands_slice
+    assert "run-it" not in commands_slice
+
+
+def test_sectioned_alias_group_omits_empty_sections():
+    # An all-unmarked group renders only the catch-all Commands section (== AliasGroup behavior).
+    grp = SectionedAliasGroup("syn")
+
+    @grp.command("only")
+    def _only() -> None:
+        """The only command."""
+
+    result = CliRunner().invoke(grp, ["--help"])
+    assert result.exit_code == 0
+    assert "Launchers:" not in result.output
+    assert "Workers:" not in result.output
+    assert "Commands:" in result.output
 
 
 def test_section_lists_drift_guard():

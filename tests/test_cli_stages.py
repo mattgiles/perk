@@ -134,6 +134,63 @@ def test_implement_requires_plan_ref():
     assert "needs a saved plan" in result.output
 
 
+def _submit_merged_command():
+    # Build an *unregistered* MergedCommand over the real `submit` stage + the `submit_pr` worker
+    # (Node 2.1, D1/D2): no live command is folded — this proves the factory in isolation.
+    from perk.cli.commands.pr.submit_cmd import submit_pr
+    from perk.cli.stages import make_merged_command
+    from perk.substrate.registry import load_registry
+
+    stage = next(s for s in load_registry().stages if s.id == "submit")
+    return make_merged_command(stage, submit_pr)
+
+
+def _seed_plan_ref(repo):
+    from perk.state import cache
+
+    cache.write_plan_ref(
+        repo,
+        {
+            "provider": "github",
+            "pr_id": "42",
+            "url": "u/42",
+            "labels": ["perk:plan"],
+            "objective_id": None,
+        },
+    )
+
+
+def test_merged_command_launcher_default(git_repo):
+    # No --json → launcher half → opens (here, dry-runs) the primed pi session for `submit`.
+    (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # submit reuses an existing worktree
+    cmd = _submit_merged_command()
+    result = CliRunner().invoke(cmd, ["--worktree", "wt1", "--dry-run"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert "would launch stage 'submit'" in result.output
+
+
+def test_merged_command_json_routes_to_worker(git_repo):
+    # --json anywhere → worker half → deterministic machine output (offline dry-run).
+    import json
+
+    _seed_plan_ref(git_repo)
+    cmd = _submit_merged_command()
+    result = CliRunner().invoke(cmd, ["--json", "--dry-run"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["success"] is True
+    assert payload["dry_run"] is True
+
+
+def test_merged_command_help_shows_launcher_body_and_worker_note():
+    # --help (no --json) renders the launcher half's help body PLUS the worker-routing note.
+    cmd = _submit_merged_command()
+    result = CliRunner().invoke(cmd, ["--help"])
+    assert result.exit_code == 0, result.output
+    assert "Opens a primed pi session for the 'submit' stage" in result.output
+    assert "Run with --json to execute the deterministic worker" in result.output
+
+
 def test_worktree_create_list_remove(git_repo):
     runner = CliRunner()
     obj = _ctx(git_repo)

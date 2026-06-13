@@ -9,7 +9,13 @@ from pathlib import Path
 import click
 from click.testing import CliRunner
 
-from perk.cli.alias import AliasGroup, SectionedGroup, get_aliases
+from perk.cli.alias import (
+    AliasGroup,
+    SectionedGroup,
+    get_aliases,
+    get_flat_aliases,
+    register_flat_alias,
+)
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
 from perk.substrate.config import Config
@@ -117,6 +123,50 @@ def test_root_and_subgroups_use_alias_group():
     for name in ("worktree", "objective", "registry", "state"):
         assert isinstance(cli.commands[name], AliasGroup)
         assert not isinstance(cli.commands[name], SectionedGroup)
+
+
+def _flat_root() -> SectionedGroup:
+    """A synthetic root group holding a subgroup with a verb, for flat-alias tests."""
+    root = SectionedGroup("syn")
+
+    @click.group("pr")
+    def pr_group() -> None:
+        """PR commands."""
+
+    @pr_group.command("submit")
+    def submit() -> None:
+        """Open a draft PR."""
+
+    root.add_command(pr_group)
+    return root
+
+
+def test_register_flat_alias_resolves_to_same_object():
+    # The flat alias registers the *same* Command object at root (Node 2.1, SSOT §11.3).
+    root = _flat_root()
+    pr_group = root.commands["pr"]
+    assert isinstance(pr_group, click.Group)
+    worker = pr_group.commands["submit"]
+    register_flat_alias(root, worker, "submit")
+    assert root.commands["submit"] is worker
+    assert get_flat_aliases(root) == {"submit"}
+
+
+def test_register_flat_alias_renders_in_launcher_section():
+    # D4: a flat-aliased root command lands in the existing launcher section bucket.
+    root = _flat_root()
+    pr_group = root.commands["pr"]
+    assert isinstance(pr_group, click.Group)
+    register_flat_alias(root, pr_group.commands["submit"], "submit")
+    result = CliRunner().invoke(root, ["--help"])
+    assert result.exit_code == 0
+    launchers_slice = result.output[result.output.index("Stage Launchers") :]
+    assert "submit" in launchers_slice
+
+
+def test_get_flat_aliases_empty_by_default():
+    # Per-group state on the root object (not a module global) → a fresh group has none.
+    assert get_flat_aliases(SectionedGroup("fresh")) == set()
 
 
 def test_objective_run_and_alias_resolve():
