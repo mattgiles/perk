@@ -17,6 +17,11 @@ and confident, not to cover everything.
 
 See the [user-docs router](../index.md) for how this quadrant fits the overall system.
 
-> **Status:** pages are added by later Objective
+## Available tutorials
+
+- [Get started with perk](./get-started.md) — drive one tiny change through perk's complete
+  spine (`plan → save → implement → submit → land → learn`) on a throwaway scratch repo.
+
+> **Status:** more pages are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist (currently: none).
+> that actually exist.
