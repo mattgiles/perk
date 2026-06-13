@@ -6,6 +6,12 @@ Pi extension (the session *interior*), sequenced so that **perk bootstraps itsel
 project is in the **planning stage**; the documents below are the research and the plan, not
 shipped behavior.
 
+> **Using perk on your own repo?** Start at [docs/user-docs/](./user-docs/index.md) —
+> the operator-facing documentation, organized by the
+> [Divio system](https://docs.divio.com/documentation-system/) (tutorials, how-to guides,
+> reference, explanation). Everything below this line is perk's internal research &
+> planning record, written for perk's own developers.
+
 Read order for someone new: **ROADMAP** (the plan) → **guiding-principles/foundation-open-questions** (the
 locked decisions and their rationale) → the research inputs and pattern studies as needed.
 
