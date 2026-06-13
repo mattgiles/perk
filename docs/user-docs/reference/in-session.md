@@ -1,0 +1,236 @@
+# In-session commands & tools
+
+This page references perk's **in-session surface**: the warm `/…` commands you type inside a
+running `pi` session and the model-facing **tools** the agent calls on your behalf. It is the
+interior counterpart to [CLI commands](./cli.md) (the session **exterior** — the `perk …`
+commands you run in your shell). It describes the surface; it does not teach a task (those belong
+in [how-to/](../how-to/index.md)) or argue a design (those belong in
+[explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
+quadrant fits the whole.
+
+The in-session surface is registered in the TypeScript extension, so — unlike the CLI reference's
+bi-directional pytest guard — these entries are **human-reviewed for accuracy** against the
+extension's command and tool registrations. Accuracy is the governing virtue: each summary is a
+reference paraphrase of the registered description.
+
+## Orientation
+
+Inside a `pi` session you drive perk two ways. You type **warm `/…` commands** yourself, and the
+agent calls **tools** on your behalf. For the *why* of stages, doors, the two planes, and the
+state tiers — read [How perk thinks](../explanation/how-perk-thinks.md); this page only catalogs
+the surface and links back to it.
+
+**The warm-door twin pattern.** Most stages expose the same logic two ways inside a session: a
+model **tool** the agent calls and a **`/command`** twin you can invoke yourself. The table below
+pairs them; the per-stage sections document each pair together.
+
+**The read-only-mode allowlist.** While plan mode is active the agent is structurally restricted
+to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_draft`) and the
+review door (`plan_review`) — it cannot edit or run mutating commands until the read-only → 
+read-write boundary is crossed at save. The borrowed web/Linear research tools are also allowed
+while exploring; their depth belongs to the config/provider reference nodes (4.1/4.2), so this
+page names them only as a pointer.
+
+**Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
+(`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
+The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
+`objective_node`, `reconcile_objective`, `resolve_review_threads`, `run_ci`, `ask_user_question`).
+Each entry marks this property.
+
+## The stage/door model
+
+A compact lookup of the workflow spine as the operator sees it
+(*objective-author → objective-save → objective-plan → plan → save → implement → submit →
+address → land → learn*). The columns are the registry's `mode` and `doors`, the warm command and
+its model tool twin, and the cold CLI launcher.
+
+| Stage | Warm command | Model tool(s) | Cold CLI | Mode | Doors |
+| --- | --- | --- | --- | --- | --- |
+| objective-author | *(none)* | `objective_draft` | `perk objective-author` | read-only | cold-local |
+| objective-save | `/objective-save` | `objective_draft`, `objective_save` | `perk objective-save` | read-write | warm + cold-local |
+| objective-plan | `/objective-plan` | `objective_node` | `perk objective-plan` | read-only | warm + cold-local |
+| plan | `/plan` | `plan_draft`, `plan_review` | `perk plan` | read-only | warm + cold-local |
+| save | `/plan-save` | `plan_save` | `perk save` | read-write | warm + cold-local |
+| implement | *(none)* | *(none)* | `perk implement` | read-write | cold-local + **cold-remote** |
+| submit | `/submit` | `submit` | `perk submit` | read-write | warm + cold-local |
+| address | `/address` | `resolve_review_threads` | `perk address` | read-write | warm + cold-local + **cold-remote** |
+| land | `/land` | `land` | `perk land` | read-write | warm + cold-local |
+| learn | `/learn` | `learn` | `perk learn` | read-write | warm + cold-local |
+
+Notable cells: `objective-author` has **no** warm slash command (it is reached cold via
+`perk objective-author`, or via plan-mode read-only authoring); `implement` is **cold-only**
+(`warm: false`) and remote-runnable; `address` is also remote-runnable; every other stage is warm
++ cold-local only.
+
+For *why* a stage is cold-only or remotely runnable, see
+[How perk thinks → Stages and doors](../explanation/how-perk-thinks.md).
+
+## Warm commands by stage (the spine)
+
+One subsection per spine stage, pairing the `/command` with its model tool twin where one exists.
+
+### `/plan`
+
+Toggle perk plan mode — a read-only exploration + plan-authoring session. Paired tools:
+
+- **`plan_draft`** — write (or overwrite) the working plan draft to the session data dir. This is
+  the only sanctioned write while read-only; it is **not** a save. *Non-terminating.*
+- **`plan_review`** — present the draft to the configured review surface (the Plannotator browser
+  UI when selected, else perk's in-TUI editor) and wait for the human decision; on approval the
+  plan is auto-saved and the turn ends. *Terminating on approval.*
+
+### `/plan-save`
+
+Persist the plan to GitHub as the canonical perk plan and link the session to it — the read-only
+→ read-write boundary. `/plan-save` is the manual failsafe for the approval → save flow. Paired
+tool:
+
+- **`plan_save`** — the canonical save tool. *Terminating.*
+
+### `/implement`
+
+Refresh implement context via an in-worktree handoff. The warm command only refreshes implement
+context *inside an existing implement worktree*; cross-worktree / fresh implement is the cold
+`perk implement` (cold-only in practice). No paired tool.
+
+### `/submit`
+
+Push the active plan's branch and open a draft PR linking the plan (implement → submit). Paired
+tool:
+
+- **`submit`** — push the branch and open the draft PR. *Terminating.*
+
+### `/ready`
+
+Mark the active plan's draft PR ready for review — the deliberate publish gate (`/submit` keeps
+the PR draft on purpose; `/ready` publishes). Paired tool:
+
+- **`ready`** — mark the draft PR ready. *Terminating.*
+
+### `/address`
+
+Classify PR review feedback in an isolated child, fix only the actionable items yourself, then
+batch reply-then-resolve the threads (submit → address). `--preview` classifies only. Paired
+tool:
+
+- **`resolve_review_threads`** — batch reply-then-resolve the addressed threads. *Non-terminating.*
+
+### `/land`
+
+Squash-merge the approved PR (closing the plan issue), set the pending-learn marker, and drive
+reconciliation (submit → land). When the plan is linked to an objective node, `/land`
+auto-drives `/objective-reconcile`. Paired tool:
+
+- **`land`** — squash-merge the approved PR and set pending-learn. *Terminating.*
+
+### `/learn`
+
+Investigate the landed change and capture learnings into a perk:learn issue, then clear the
+pending-learn semaphore and release the worktree. `/learn skip` clears the marker only;
+`/learn <text>` captures the text verbatim. Paired tool:
+
+- **`learn`** — capture learnings (or clear the marker only). *Terminating.*
+
+## Objective doors (warm)
+
+The objective warm commands as commands. The *objective model* depth — roadmap node schema, node
+statuses, the objective-roadmap metadata block — is a later node (3.2); this section catalogs the
+command surface only.
+
+### `/objective`
+
+Show, set (`<id>`), or clear (`clear`) the active perk objective + budget for the session. No
+paired tool.
+
+### `/objective-plan`
+
+Start the objective plan factory: select the next node and author a bounded plan. Pass an
+objective number (else the active objective) and an optional `--node`. Paired tool:
+
+- **`objective_node`** — link a saved plan to its node (`pr:"#N"`) or advance a node's status (on
+  `status:"done"` it requires a completion `audit`). *Non-terminating.*
+
+### `/objective-reconcile`
+
+Reconcile an objective's Reconcilable prose region against a merged PR (post-land); the roadmap
+table and Immutable notes are never touched. Paired tool:
+
+- **`reconcile_objective`** — rewrite the Reconcilable prose region wholesale. *Non-terminating.*
+
+### `/objective-save`
+
+Persist a drafted objective + structured roadmap to GitHub, activate it, and start budget
+tracking — the read-only → read-write objective boundary (the manual failsafe for the approval →
+save flow). Paired tools:
+
+- **`objective_draft`** — write the working objective draft to the session data dir (sanctioned
+  read-only write; not a save). *Non-terminating.*
+- **`objective_save`** — the canonical objective save tool. *Terminating.*
+
+The cold authoring door **`perk objective-author`** has **no** warm slash twin — objective
+authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →
+`plan_review` / `objective_save`).
+
+## Utility commands & tools
+
+Standalone surfaces not tied to a single spine stage.
+
+### `/checkpoints`
+
+Show perk implementation checkpoints (read-only); inert when the plan has no `## Steps` list.
+Checkpoints are driven by the `[WIP:n]` / `[DONE:n]` progress markers the implementer emits. No
+paired tool.
+
+### `/ci`
+
+Run the project's configured CI checks and report pass/fail + failure output; never auto-fixes. A
+`check` argument runs one configured check. Paired tool:
+
+- **`run_ci`** — run the configured checks and report results; read-only (the agent owns the
+  Run → Report → Fix → Verify loop: analyze a failure, fix it in its own turn, then re-verify).
+  *Non-terminating.*
+
+### `/pr-review`
+
+Automated code review: spawn a fresh-context reviewer subagent that reviews the active PR and
+posts a verdict-driven outcome (actionable → an advisory COMMENT review; clean → a single 👍
+reaction). No paired tool.
+
+### `/learn-docs`
+
+Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author a
+`docs/learned` consolidation plan. No paired tool.
+
+## Universal model-facing tools
+
+Tools available across stages, independent of a single command.
+
+- **`ask_user_question`** — ask the human a clarifying question (free-text or multiple-choice; a
+  free-text escape is always added). The turn continues with the answer; returns a no-user
+  sentinel when there is no interactive UI. *Non-terminating.*
+
+The per-stage tools documented above are enumerable here in one place (see each command's section
+for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
+`resolve_review_threads`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
+`objective_node`, `reconcile_objective`.
+
+**The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
+structurally limited to read/search/builtin tools plus the sanctioned write tools
+(`plan_draft` / `objective_draft`) and the review door (`plan_review`). The pi builtins
+(`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
+documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
+commands). The borrowed web/Linear research tools are allowed while exploring; their depth belongs
+to the config/provider reference nodes (4.1/4.2).
+
+## See also
+
+If you want the shell exterior — the `perk …` commands you run before a session — that is the
+**[CLI commands](./cli.md)** reference. For task-focused recipes, see the
+**[how-to](../how-to/index.md)** quadrant. For the *why* behind stages, doors, and the two planes,
+see **[How perk thinks](../explanation/how-perk-thinks.md)** in the
+**[explanation](../explanation/index.md)** quadrant. The **[user-docs router](../index.md)** ties
+all four quadrants together.
+
+> **Status:** this page is part of Objective
+> [#453](https://github.com/mattgiles/perk/issues/453) (Node 2.2). The in-session surface is
+> human-reviewed for accuracy against the extension's command and tool registrations.
