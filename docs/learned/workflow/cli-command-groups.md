@@ -122,6 +122,43 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
   (line-length overflow; the format hook auto-fixes then reports failure) — re-stage and re-commit,
   don't pre-wrap manually.
 
+## The decided command taxonomy (Objective #495)
+
+Objective #495 decides a single CLI taxonomy and writes it down. The **canonical SSOT is
+[`python-cli-guidelines.md` §11](../../guiding-principles/python-cli-guidelines.md)** — §11 owns the
+*what* (which commands exist, naming, the launcher/worker merge, the mapping table); this playbook
+stays the structural *how-to*. Summary of the decided shape:
+
+- **Five naming rules (§11.1).** Noun-groups organize operations about a durable domain/entity
+  (`plan`, `objective`, `pr`, `worktree`, `state`, `registry`, `workflow`, `learn`); `plan` and
+  `objective` are symmetric planning entities; one canonical command per stage (ergonomics via flat
+  aliases); a flat name is earned (`implement` is the one flat working verb); ties break on
+  ergonomics.
+- **The launcher+worker merge model (§11.2).** Where a stage has both a launcher and a deterministic
+  worker, they merge into one command: **session by default, deterministic worker under `--json`**
+  (the switch the warm door already shells). The merged (L+W) set is exactly **`pr submit`,
+  `pr land`, `plan save`**. The `--json` overload ("skip the session" + "emit JSON") is an accepted,
+  recorded trade-off.
+- **The flat-alias set (§11.3).** Surviving earned flat names: `implement` (`impl`) + the hot-path
+  PR aliases `submit` / `address` / `land` / `ready` + the short group aliases
+  (`obj` / `wt` / `st` / `reg` / `wf`).
+- **Warm/cold reconciliation (§11.4).** Warm slash = the ergonomic name; the warm plane needs zero
+  renames. Registry stage ids stay stable (cross-plane `stage:<id>` triggers); only the cold CLI
+  restructures.
+- **Clean-break removal list (§11.5).** Removed with no back-compat alias: flat
+  `objective-author`/`objective-plan`/`objective-save` (+ `oauthor`/`oplan`), flat
+  `save`/`resume`/`replan`, and `plan-save` (`psave`).
+
+**`pr ready` is worker-only (W), not L+W** — `ready` is not a registry stage and has no launcher; it
+is only the `perk pr ready` worker plus the warm `/ready` door, and merely gains the flat alias
+`perk ready`. A future implementer must **not** build a launcher for it (that would require an
+illegal `ready` registry stage). See §11.7 Correction 1.
+
+**Enactment is nodes 2.1–4.1**, not node 1.1 (which is docs-only): the merged-command factory, the
+flat-alias mechanism, and the sectioned help land in node 2.1; the three restructured groups
+(`objective`/`plan`/`pr`) in 3.1–3.3; doc/test reconciliation in 4.1. This playbook's
+realized-shape examples update as each node lands.
+
 ## Warm-plane ids are decoupled from cold spellings
 
 A CLI regrouping does not ripple into the warm plane: `/learn-docs`, `command:learn-docs`,
@@ -132,7 +169,10 @@ only the `pi.exec` argv arrays in the extension change.
 
 - `docs/guiding-principles/python-cli-guidelines.md` has been reconciled against the grouped
   surface (Objective #225, node 5.1) — its §8.1 now documents the group-dir template and
-  cross-links this doc as the detailed playbook. Keep the two in sync when the structure evolves.
+  cross-links this doc as the detailed playbook. Its §11 is now the **decided-taxonomy SSOT**
+  (Objective #495, node 1.1) — the canonical *what* for the merge model, flat aliases, mapping
+  table, and removal list. Keep the two in sync when the structure evolves; §11 is authoritative on
+  the target taxonomy.
 - **`EXIT_FOR_TYPE` naming is mixed reality**, despite the "cross-verb helpers drop the leading
   underscore" rule above: `objective/`, `workflow/run/`, and `doctor/workflow/` group `shared.py`
   files use the public name, but `pr/`, `learn/`, and the flat single-file commands use the

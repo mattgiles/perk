@@ -423,6 +423,9 @@ a command group want the **same name**, use the hybrid default-dispatch group
 (`commands/learn/__init__.py`, `LearnGroup`): bare `perk learn` routes to a hidden
 launcher, `perk learn capture|docs` dispatch to verbs — that file is the template.
 
+The decided target taxonomy + canonical mapping live in §11 (the SSOT for Objective #495's
+enactment).
+
 ### 8.2 The machine surface (perk-specific)
 
 erk made *every* command dual-surface (`--json`, `schema`, MCP) so Claude could consume the
@@ -508,3 +511,217 @@ def test_invalid_limit_rejected():
 5. Errors via `Ensure`/`UserFacingCliError` (with a stable `error_type` on machine-relevant
    failures), never `RuntimeError` for user errors.
 6. Test in flat `tests/test_*.py` with `CliRunner` + `PerkContext.for_test`.
+
+---
+
+## 11. The command taxonomy (the SSOT)
+
+This section is the **single source of truth** for the `perk` CLI command taxonomy decided in
+Objective #495 (node 1.1). It is the spec the enactment nodes (2.1, 3.1, 3.2, 3.3, 4.1) implement
+against. §1–§10 describe *how* to build a command; this section decides *which* commands exist, how
+they are named, and how the launcher/worker halves merge. The structural how-to lives in the
+[cli-command-groups playbook](../learned/workflow/cli-command-groups.md); §11 owns the *what*.
+
+Legend (used throughout): **L** = session launcher · **W** = deterministic worker (`--json`) ·
+**L+W** = the merged command (session by default, `--json` runs the worker the warm door shells) ·
+**H** = hybrid group (bare invocation launches) · `(x)` = alias · `[…]` = key flags.
+
+### 11.1 The noun-group-vs-flat principle (the north star)
+
+The rule that decides, for any command, whether it nests under a noun-group or stays a flat
+top-level verb:
+
+- **A1 — Noun-groups organize operations about a durable domain or entity.** The groups are
+  `plan`, `objective`, `pr`, `worktree`, `state`, `registry`, `workflow`, `learn`. A group may hold
+  **both** warm stage-launchers and cold deterministic workers, separated by help sections. The
+  `learn` hybrid group (bare `perk learn` launches the stage; `perk learn capture|docs` are cold
+  workers) is the proven template.
+- **A2 — `plan` and `objective` are the two durable *planning entities*** and get **symmetric**
+  group shapes: each has authoring + a save boundary + revision/reconcile + cold mechanics.
+  `perk objective plan` ("plan a node of an objective") reads naturally beside bare `perk plan`
+  ("author a standalone plan").
+- **A3 — One canonical command per stage; ergonomics via flat aliases.** Where a stage has *both*
+  a session-launcher and a deterministic worker, they **merge into one command** (see §11.2). The
+  frequently-typed spine verbs additionally get flat top-level aliases (see §11.3).
+- **A4 — A flat name is earned, not defaulted.** `implement` (`impl`) stays the one flat top-level
+  working verb (the heavy cold-only working stage; it reads as a bare imperative and is typed
+  constantly). Everything else nests under its noun; the hot-path PR verbs reappear flat only as
+  aliases.
+- **A5 — Tie-breaker = ergonomics.** When grouping is ambiguous, optimize for what the user types
+  most and what reads naturally as a sentence.
+
+### 11.2 The launcher+worker merge model + the `--json` merge-mode decision (Q1)
+
+Where a stage has both a real session-launcher half **and** a deterministic worker half, they merge
+into **one command**: **session by default, deterministic worker under `--json`** — absent `--json`
+launches a primed `pi` session; `--json` runs the worker and emits JSON (the mode the warm
+in-session door already shells out to). `--dry-run`'s meaning follows the mode (launcher: print the
+launch plan; worker: compose with no side effects).
+
+The genuinely merged (**L+W**) commands are exactly the three that have *both* halves today:
+
+- **`pr submit`** — flat launcher `submit` + worker `pr submit`.
+- **`pr land`** — flat launcher `land` + worker `pr land`.
+- **`plan save`** — flat launcher `save` + worker `plan-save` (keeps the full worker flag set, §11.7-F).
+
+**Recorded trade-off (honest).** `--json` is overloaded to mean both "skip the session" *and* "emit
+JSON," and the worker therefore cannot be run with human-readable output. This is **accepted**
+because: warm doors already pass `--json`; the §8.2 convention already couples `--json` with machine
+consumers; and the agent never reads `--json` mid-turn — there is no human-runs-worker-wants-text
+case. The rejected alternative — a dedicated `--worker`/`--no-session` flag with `--json` only
+selecting output format — was **considered and declined** (it adds a second flag for a distinction
+no real consumer needs).
+
+### 11.3 The flat-alias model (the earned flat names)
+
+A flat top-level name is *earned* (§11.1-A4), never defaulted. The surviving flat top-level names:
+
+- **`implement` (`impl`)** — the one flat working verb (unchanged).
+- **The hot-path PR aliases** `submit` / `address` / `land` / `ready`, each aliasing its
+  `perk pr <verb>`. Note `address` aliases a launcher-only command and `ready` aliases a
+  worker-only command — neither is itself a merged L+W (see §11.7-E and the `pr ready` correction).
+- **The short group aliases** `obj` / `wt` / `st` / `reg` / `wf` survive.
+
+All other historical flat names are removed with no back-compat alias (§11.5 removal list).
+
+### 11.4 The warm/cold reconciliation rule + registry-id stability (Q-warmcold)
+
+**Warm slash = the ergonomic name** — the flat alias where one exists, else the multiword name with
+spaces→hyphens. pi warm slash-commands are flat single tokens (`registerCommand("objective-plan",
+…)`; the rest of the line is a free-form arg string), so `/objective-plan` cannot literally become
+`/objective plan`. This reconciling rule **already holds for the entire warm surface** — `/submit`
+`/land` `/address` `/ready` (alias spellings) and `/plan-save` `/objective-plan` `/objective-save`
+`/objective-reconcile` `/learn-docs` (multiword) — so the **warm plane needs zero renames**. Only
+the cold CLI restructures.
+
+**Registry stage ids stay stable.** The ids (`submit`, `objective-author`, `save`, …) are the
+cross-plane identifiers and the `stage:<id>` binding triggers; only the cold CLI *invocation*,
+grouping, help sections, and flat aliases change. The registry `command` field is informational and
+is updated to record the new argv for honesty (that update is node-3.x enactment, not this node).
+
+### 11.5 The canonical mapping table (old → new) + the clean-break removal list
+
+Every command in the current surface, mapped to its new canonical spelling:
+
+| old (flat/spelling) | new canonical | kind | notes |
+| --- | --- | --- | --- |
+| `objective-author` (`oauthor`) | `objective author` | L | alias removed |
+| `objective-save` | `objective save` | L | |
+| `objective-plan` (`oplan`) | `objective plan [NUMBER]` | L | alias removed |
+| `save` | `plan save` | L+W (merged with `plan-save`) | keeps full worker flag set |
+| `plan-save` (`psave`) | `plan save --json` | (worker half of merge) | flat name + `psave` removed |
+| `resume` (`res`) | `plan resume PLAN` | L | flat `resume`/`res` removed |
+| `replan` (`rp`) | `plan replan PLAN` | L | flat `replan`/`rp` removed |
+| `submit` (flat launcher) + `pr submit` (worker) | `pr submit` (+ flat alias `submit`) | L+W merged | |
+| `land` (flat launcher) + `pr land` (worker) | `pr land` (+ flat alias `land`) | L+W merged | |
+| `address` (flat launcher) | `pr address` (+ flat alias `address`) | L, `--preview` | no worker merge |
+| `pr ready` (worker) | `pr ready` (+ flat alias `ready`) | **W only** | correction: not L+W |
+| `plan` (flat launcher) | `plan` (bare → read-only authoring; hybrid group) | H | unchanged spelling |
+| `implement` (`impl`) | `implement` (`impl`) | L | unchanged (the one flat verb) |
+| `learn` group | `learn` (bare hybrid + `capture`/`docs`) | H | unchanged |
+| `objective`/`pr`/`worktree`/`state`/`registry`/`workflow` group internals | unchanged | — | only help-section taxonomy |
+
+**Clean-break removal list (no deprecated aliases).** Consistent with perk's forward-convergence
+ethos and pre-1.0 status (v0.0.1), these are removed with **no** back-compat alias:
+
+- flat `objective-author` / `objective-plan` / `objective-save` (+ `oauthor` / `oplan`);
+- flat `save` / `resume` (`res`) / `replan` (`rp`);
+- `plan-save` (`psave`).
+
+Surviving flat names: `implement` (`impl`) + the hot-path aliases `submit` / `address` / `land` /
+`ready` + the short group aliases (`obj` / `wt` / `st` / `reg` / `wf`).
+
+### 11.6 The annotated target CLI tree
+
+Reproduced from the objective, with the `pr ready` **L+W → W** correction applied (see §11.7) — the
+single reference for node 2.1+:
+
+```
+perk
+├── init                         [--force --no-interactive --json]
+├── doctor                       [--fix --verbose --json]
+│   └── workflow
+│       ├── check                [--verbose --json]
+│       └── smoke-test           [--wait --verbose --json]
+├── implement [PLAN]  (impl)     L  [--base --worktree --dry-run --remote]     # the one flat verb
+│
+├── plan  (H: bare → read-only authoring launch)   [--worktree --dry-run --remote]
+│   ├── save        L+W  [--plan-file --run-id --title --objective-id --node-id --consumed-learn --dry-run --json]
+│   ├── resume PLAN  L   [--dry-run --remote --json]
+│   └── replan PLAN  L   [--worktree --dry-run --json]
+│
+├── objective  (obj)
+│   ├── author             L  [--worktree --dry-run --json]            # was objective-author
+│   ├── save               L  [--worktree --dry-run --json]            # was objective-save
+│   ├── plan [NUMBER]      L  [--node --dry-run --remote --json]        # was objective-plan
+│   ├── create  (new)      W  [--body --title --roadmap --run-id --dry-run --json]
+│   ├── show NUMBER  (s)   W
+│   ├── node NUMBER        W  [--node --status --pr --description --dry-run]
+│   ├── next NUMBER  (n)   W
+│   ├── reconcile NUMBER (rec)  W  [--body --dry-run]
+│   └── run NUMBER  (r)    W  [--remote --wait --dry-run]
+│
+├── pr
+│   ├── submit    L+W  [--dry-run --json]     (flat alias: perk submit)
+│   ├── address   L    [--preview]            (flat alias: perk address)
+│   ├── land      L+W  [--dry-run --json]     (flat alias: perk land)
+│   ├── ready     W    [--dry-run --json]     (flat alias: perk ready)   # worker-only (correction)
+│   ├── check                 W  [--json]
+│   ├── feedback              W  [--json]
+│   ├── resolve-threads       W  [--batch --dry-run]
+│   ├── review-context        W  [--json]
+│   └── review-post           W  [--batch --dry-run]
+│
+├── learn  (H: bare → learn launch)   [--worktree --dry-run --remote]
+│   ├── capture  W  [--body --dry-run]
+│   └── docs     L  [--gather --worktree --dry-run --remote --json]    # factory; warm twin /learn-docs
+│
+├── worktree  (wt)
+│   ├── create NAME (new)  [--branch]   ├── list (ls)
+│   ├── remove NAME (rm)   [--force]    └── wipe  [--dry-run --force]
+├── state  (st)      → new-run (nr) [--handoff] · show (s) [--run-id] · prune (gc) [--max-age-days --dry-run --json]
+├── registry (reg)   → check (ch) [--json] · show (s)
+└── workflow (wf)    → run → list (ls) [--no-refresh --limit --json] · cancel RUN_ID · retry RUN_ID [--failed]
+```
+
+### 11.7 Resolved open questions + the two Corrections
+
+**Q1 — Merge-mode flag → `--json` (the reused machine-surface switch).** Resolved in §11.2: one
+command, session by default, deterministic worker under `--json`. The overload trade-off is recorded
+there; the dedicated-flag alternative is declined.
+
+**Q2 — `pr address` shape → launcher-only (L), confirm-as-stated.** `pr address` is **L**; its only
+special flag is `--preview`; it gets **no** merged `--json` worker (its mechanics are `pr feedback`
++ `pr resolve-threads`, with no single deterministic worker). Flat alias `perk address` survives.
+
+**Q3 — `plan save` merged flag set → keep the full worker set.** The merged `plan save` keeps the
+**full** `plan-save` worker flag set — `--plan-file`, `--run-id`, `--title`, `--objective-id`,
+`--node-id`, `--consumed-learn` — plus the standard `--dry-run` / `--json` pair. (The objective
+tree's abbreviated annotation omitted `--run-id`; the SSOT keeps it.) The old `save` launcher
+carried no special flags, so nothing is lost in the merge.
+
+**Q4 — Bare `perk objective` → group help (no hybrid bare-launch).** There is no single "the"
+objective launch among author/save/plan, so bare `perk objective` renders group help (contrast bare
+`perk plan` and bare `perk learn`, which are hybrid because each has one canonical launch).
+
+**Q5 — Within-group help-section wording → lock the *taxonomy*, defer the *labels* to node 2.1.**
+The structural decision is fixed: within a group, launchers and workers render in separate help
+sections; at root, most launchers now nest under their group, so the root launcher section shrinks
+to the earned flat names (`implement` + the hot-path PR aliases). The literal label strings (e.g.
+"Launchers" vs "Sessions", "Workers" vs "Mechanics") are explicitly a **node-2.1 presentation
+choice** — honoring both this node's "resolve it" mandate and the objective body's "2.1 owns the
+wording."
+
+**Correction 1 — `pr ready` is worker-only (W), not L+W.** The objective's target tree marks
+`pr ready` as L+W, but `ready` is **not a registry stage** and has no generated launcher. Today
+`ready` is only the pr-group worker `perk pr ready` (dual-surface `--dry-run`/`--json`) plus the
+warm `/ready` door (`extension/doors/ready.ts`) that shells `["pr","ready","--json"]`. So the
+genuinely merged (L+W) commands are **`pr submit`, `pr land`, and `plan save` only**; `pr ready`
+stays **worker-only (W)** and merely gains the flat alias `perk ready`. Giving `ready` a launcher
+would mean adding a `ready` registry stage — forbidden by the objective's non-goals. §11.5 and
+§11.6 annotate `pr ready` as **W**.
+
+**Correction 2 — `--preview` is not a cold flag today.** It is currently a warm `/address`
+slash-arg parsed in `extension/doors/address.ts`. The SSOT documents `pr address` as launcher-only
+(L) with a `--preview` passthrough flag; *introducing* that cold flag is **node 3.3 enactment**, not
+this node.
