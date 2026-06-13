@@ -105,6 +105,7 @@ def test_pr_group_lists_all_verbs():
     assert result.exit_code == 0
     for verb in (
         "submit",
+        "address",
         "check",
         "ready",
         "land",

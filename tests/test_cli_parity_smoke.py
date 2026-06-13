@@ -86,6 +86,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         ("plan", ()),
         ("plan-save", ("psave",)),
         ("pr", ()),
+        ("ready", ()),
         ("registry", ("reg",)),
         ("replan", ("rp",)),
         ("resume", ("res",)),
@@ -110,6 +111,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         "plan": "launchers",
         "plan-save": "other",
         "pr": "groups",
+        "ready": "launchers",
         "registry": "groups",
         "replan": "launchers",
         "resume": "launchers",
@@ -132,6 +134,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("show", ("s",)),
         ],
         "pr": [
+            ("address", ()),
             ("check", ()),
             ("feedback", ()),
             ("land", ()),

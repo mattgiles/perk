@@ -10,7 +10,7 @@ from pathlib import Path
 import click
 
 from perk import __version__
-from perk.cli.alias import SectionedGroup, register_with_aliases
+from perk.cli.alias import SectionedGroup, register_flat_alias, register_with_aliases
 from perk.cli.commands.doctor import doctor_group
 from perk.cli.commands.implement_cmd import implement
 from perk.cli.commands.init_cmd import init_perk
@@ -19,7 +19,13 @@ from perk.cli.commands.objective import objective_group
 from perk.cli.commands.objective_author_cmd import objective_author
 from perk.cli.commands.objective_plan_cmd import objective_plan
 from perk.cli.commands.plan_save_cmd import plan_save
-from perk.cli.commands.pr import pr_group
+from perk.cli.commands.pr import (
+    pr_address_command,
+    pr_group,
+    pr_land_command,
+    pr_submit_command,
+)
+from perk.cli.commands.pr.ready_cmd import ready_pr
 from perk.cli.commands.registry import registry_group
 from perk.cli.commands.replan_cmd import replan
 from perk.cli.commands.resume_cmd import resume_cmd
@@ -45,6 +51,14 @@ def cli(ctx: click.Context) -> None:
 cli.add_command(init_perk)
 register_with_aliases(cli, plan_save)
 cli.add_command(pr_group)
+# Flat hot-path aliases (Objective #495 Node 3.3, §11.3): the SAME command objects registered at
+# the root under a flat name, so `perk submit` resolves to the merged `pr submit`, etc. `ready` is
+# worker-only (no `ready` registry stage) and gains only the flat alias. register_flat_alias
+# records each in FLAT_ALIAS_ATTR so SectionedGroup routes their rows into the launcher section.
+register_flat_alias(cli, pr_submit_command, "submit")
+register_flat_alias(cli, pr_land_command, "land")
+register_flat_alias(cli, pr_address_command, "address")
+register_flat_alias(cli, ready_pr, "ready")
 cli.add_command(learn_group)
 # The `learn` group is hybrid (Node 2.2): bare `perk learn` default-dispatches to the hidden
 # stage launcher, while `capture` and `docs` are the cold workers. `docs` is a dedicated cold

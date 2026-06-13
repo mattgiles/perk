@@ -139,7 +139,7 @@ stages:
     worktree: reuse
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: submit
+    command: pr submit
     requires: [cache.plan-ref]              # T5a: reads the active ref to derive the branch
     reads: [cache.plan-ref, github.plan]    # T5a: ref -> branch; plan issue title for the PR
     writes: [github.pr, github.plan]        # T5a: open the draft PR; populate staged branch/pr header
@@ -152,7 +152,7 @@ stages:
     worktree: reuse
     doors: { warm: true, cold_local: true, cold_remote: true }  # P2.T8c: a Phase-3 CI worker can run it
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: address
+    command: pr address
     # P2.T7: a spawned read-only child (borrowed pi-subagents) fetches + classifies feedback;
     # the parent fixes only actionable items and batch-resolves the threads (`resolve_review_threads`).
     requires: [github.pr]                                          # the PR whose feedback we address
@@ -167,7 +167,7 @@ stages:
     worktree: reuse
     doors: { warm: true, cold_local: true, cold_remote: false }
     run_id: { warm: keep, cold_local: mint, cold_remote: mint }
-    command: land
+    command: pr land
     requires: [github.pr]                    # T5b: the PR to merge must exist
     reads: [cache.plan-ref, github.pr, github.objective]   # T5b ref->branch->PR; T11a node lookup
     writes: [github.pr, cache.markers, github.objective]   # T5b merge+marker; T11a mechanical node-done
