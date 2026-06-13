@@ -42,3 +42,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   roadmap prose to what landed when the automatic reconcile didn't.
 - [How to run the learn-docs factory](./run-the-learn-docs-factory.md) — consolidate accumulated
   `perk:learn` issues into committed `docs/learned/` knowledge.
+
+### Customization
+
+- [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an
+  installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override.

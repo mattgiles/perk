@@ -23,8 +23,10 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   model-facing tools, and the stage/door table for the session interior.
 - **[Objectives — the roadmap model](./objectives.md)** — the objective command recap, the
   roadmap node schema, node statuses, and the objective metadata blocks.
+- **[Configuration files](./configuration.md)** — every `.pi/perk.toml` table and the
+  `.pi/perk.local.toml` per-user overlay, with overlay semantics.
 
 > **Status:** pages are added by later Objective
 > [#453](https://github.com/mattgiles/perk/issues/453) nodes; this page lists only pages
-> that actually exist (currently: the CLI commands reference, the in-session reference, and
-> the objectives roadmap-model reference).
+> that actually exist (currently: the CLI commands reference, the in-session reference, the
+> objectives roadmap-model reference, and the configuration reference).
