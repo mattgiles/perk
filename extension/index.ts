@@ -53,6 +53,7 @@ import {
   WORKFLOW_STATE_TYPE,
   type WorkflowState,
 } from "./substrate/workflowState.ts";
+import { isPerkFooterReferenceSelected } from "./surfaces/footerProvider.ts";
 import { report } from "./surfaces/report.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces/surfaces.ts";
 
@@ -287,7 +288,11 @@ export default function (pi: ExtensionAPI) {
     // Node 3.1 (charter D7): perk identity is standing footer state, not a transition — the
     // `v<version> loaded` toast (and its headless stderr mirror) is retired. D5 is rescinded:
     // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
-    if (ctx.hasUI && !footerInstalled) {
+    // Footer-seam install-site vacating: under a foreign `[providers] footer` selection perk does
+    // NOT install its own footer, leaving the foreign footer (`pi-powerline-footer` / `pi-bar`) as
+    // the sole footer surface. perk's objective/checkpoints progress still reaches it via the
+    // composed `perk` setStatus slot. Fail-safe: any config-read error resolves to install.
+    if (ctx.hasUI && !footerInstalled && isPerkFooterReferenceSelected(ctx.cwd)) {
       installPerkFooter(ctx, {
         identity: `perk v${version}`,
         status: perkStatus,

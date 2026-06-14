@@ -20,13 +20,13 @@ Two related but distinct knobs live here:
 
 - **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
   *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
-  default. There are three seams: `plan`, `todo`, and `askuser`.
+  default. There are four seams: `plan`, `todo`, `askuser`, and `footer`.
 - **Issue backend** — where canonical plan / learn / objective issues are stored: GitHub
   (the default) or Linear.
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
-`askuser`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+`askuser` / `footer`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -39,7 +39,7 @@ For the task recipes, see
 The supported provider catalog is `shared/providers.yaml`, read directly by both planes
 (`perk/substrate/providers.py`, `extension/substrate/providers.ts`). Every provider below is a
 **fully-supported, selectable** option; perk's own bundled providers (`perk-plan`,
-`perk-checkpoints`, `perk-ask-user`) are the zero-config **defaults** — the no-config hard guarantee — but the
+`perk-checkpoints`, `perk-ask-user`, `perk-footer`) are the zero-config **defaults** — the no-config hard guarantee — but the
 foreign providers are first-class selections, not experiments.
 
 | Provider id | Seam | Default? | Posture | Foreign package |
@@ -51,6 +51,9 @@ foreign providers are first-class selections, not experiments.
 | `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
 | `perk-ask-user` | `askuser` | ✅ | reference (native) | _(none)_ |
 | `juicesharp-ask-user` | `askuser` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-ask-user-question` |
+| `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
+| `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
+| `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
 
 ### Postures
 
@@ -80,6 +83,15 @@ How perk yields its own surface to a selected foreign provider differs by provid
   registration time**: `registerAskUser` registers **nothing**, leaving the foreign tool as the
   sole `ask_user_question`. There is **no adapter shim** (`adapter: null`); the foreign tool
   self-documents via its own guidelines.
+- **REPLACE / vacate-only (`powerline-footer`, `pi-bar-footer`).** The `footer` seam is the second
+  **interface seam** — the footer produces no durable artifact, so there is nothing to bridge. perk
+  installs its own footer (`installPerkFooter`) inside its `session_start` handler, so under a
+  foreign footer selection perk **vacates at install time**: it simply does not call
+  `installPerkFooter`, leaving the foreign footer (`pi-powerline-footer` or `pi-bar`) as the sole
+  footer surface. There is **no adapter shim** (`adapter: null`) — perk's objective/checkpoints
+  progress still reaches the foreign footer automatically because both foreign footers render
+  extension statuses, and perk's composed `perk` status slot keeps publishing those segments
+  regardless of footer ownership.
 
 ### What selection does
 
@@ -88,7 +100,7 @@ How perk yields its own surface to a selected foreign provider differs by provid
   two-directional (`_converge_provider_packages` in `perk/convergence/init.py`). perk's own
   reference providers have no package — nothing is added.
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…, askuser=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, todo=…, askuser=…, footer=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee.
 
 ### Fallback semantics

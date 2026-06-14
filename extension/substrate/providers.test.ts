@@ -11,14 +11,17 @@ import {
   loadProviders,
   PERK_ASK_USER_PROVIDER_ID,
   PERK_CHECKPOINTS_PROVIDER_ID,
+  PERK_FOOTER_PROVIDER_ID,
   PERK_PLAN_PROVIDER_ID,
+  PI_BAR_FOOTER_PROVIDER_ID,
   PLANNOTATOR_PLAN_PROVIDER_ID,
+  POWERLINE_FOOTER_PROVIDER_ID,
   PROVIDER_SEAMS,
   resolveProviders,
 } from "./providers.ts";
 
-test("PROVIDER_SEAMS includes the askuser seam", () => {
-  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser"]);
+test("PROVIDER_SEAMS includes the askuser and footer seams", () => {
+  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser", "footer"]);
 });
 
 test("loadProviders: returns the shipped supported-set entries", () => {
@@ -33,8 +36,28 @@ test("loadProviders: returns the shipped supported-set entries", () => {
       ["plannotator-plan", "plan", "npm:@plannotator/pi-extension", false],
       ["juicesharp-todo", "todo", "npm:@juicesharp/rpiv-todo", false],
       ["juicesharp-ask-user", "askuser", "npm:@juicesharp/rpiv-ask-user-question", false],
+      ["perk-footer", "footer", null, true],
+      ["powerline-footer", "footer", "npm:pi-powerline-footer", false],
+      ["pi-bar-footer", "footer", "npm:pi-bar", false],
     ],
   );
+});
+
+test("loadProviders: the foreign footer entries are VACATE-ONLY (null adapter, no filter)", () => {
+  // Interface seam #2: the footer produces no durable artifact, so there is nothing to bridge —
+  // adapter is null (vacate-only). No `package_filter` (each ships a single footer extension).
+  const powerline = loadProviders().find((p) => p.id === POWERLINE_FOOTER_PROVIDER_ID);
+  assert.equal(powerline?.adapter, null);
+  assert.equal(powerline?.package, "npm:pi-powerline-footer");
+  assert.equal(powerline?.seam, "footer");
+  assert.equal(powerline?.default, false);
+  assert.equal(powerline?.packageFilter, undefined);
+  const piBar = loadProviders().find((p) => p.id === PI_BAR_FOOTER_PROVIDER_ID);
+  assert.equal(piBar?.adapter, null);
+  assert.equal(piBar?.package, "npm:pi-bar");
+  assert.equal(piBar?.seam, "footer");
+  assert.equal(piBar?.default, false);
+  assert.equal(piBar?.packageFilter, undefined);
 });
 
 test("loadProviders: reference provider has null package/adapter and no filter", () => {
@@ -101,7 +124,27 @@ test("resolveProviders: absent keys fall back to the seam defaults silently", ()
   assert.equal(resolved.plan.id, PERK_PLAN_PROVIDER_ID);
   assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
   assert.equal(resolved.askuser.id, PERK_ASK_USER_PROVIDER_ID);
+  assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
   assert.deepEqual(resolved.issues, []);
+});
+
+test("resolveProviders: the footer seam resolves selection / mismatch / unknown", () => {
+  const set = loadProviders();
+  assert.equal(
+    resolveProviders({ footer: PI_BAR_FOOTER_PROVIDER_ID }, set).footer.id,
+    PI_BAR_FOOTER_PROVIDER_ID,
+  );
+  assert.equal(
+    resolveProviders({ footer: POWERLINE_FOOTER_PROVIDER_ID }, set).footer.id,
+    POWERLINE_FOOTER_PROVIDER_ID,
+  );
+  const mismatch = resolveProviders({ footer: "perk-plan" }, set);
+  assert.equal(mismatch.footer.id, PERK_FOOTER_PROVIDER_ID);
+  assert.equal(mismatch.issues.length, 1);
+  assert.match(mismatch.issues[0] ?? "", /is a `plan` provider, not `footer`/);
+  const unknown = resolveProviders({ footer: "ghost" }, set);
+  assert.equal(unknown.footer.id, PERK_FOOTER_PROVIDER_ID);
+  assert.equal(unknown.issues.length, 1);
 });
 
 test("resolveProviders: the askuser seam resolves selection / mismatch / unknown", () => {

@@ -224,6 +224,37 @@ def test_init_selecting_an_askuser_provider_wires_then_deselecting_removes(tmp_p
     assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
+def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_path):
+    # The footer-seam analogue: selecting the real `pi-bar-footer` provider wires `npm:pi-bar`
+    # (object form, no filter) and deselecting removes it. The vacate-only adapter (no shim) is
+    # irrelevant to init's package wiring — only the `package` field matters here.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nfooter = "pi-bar-footer"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    entry = next(p for p in packages if isinstance(p, dict) and p.get("source") == "npm:pi-bar")
+    assert entry == {"source": "npm:pi-bar"}
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+    assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
+
+    # Deselect (back to the default) → the provider-managed entry is removed; others survive.
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nfooter = "perk-footer"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:pi-bar" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+    assert "npm:@tombell/pi-diff" in _identities(packages)
+
+
 def test_init_provider_wiring_is_idempotent(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

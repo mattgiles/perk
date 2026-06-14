@@ -64,7 +64,7 @@ export interface PerkConfig {
    * `shared/providers.yaml`. Absent keys mean “use the seam default”; resolution against the
    * supported set is a downstream concern (the TS resolver is Node 2.2/3.1, not this node).
    */
-  providers: { plan?: string; todo?: string; askuser?: string };
+  providers: { plan?: string; todo?: string; askuser?: string; footer?: string };
   /**
    * The `[trust]` per-repo trust table. `trust.ci === true` (written `ci = "true"` — the subset
    * parser reads strings only) declares the project's `[ci]` checks trusted, so the read-only CI
@@ -288,11 +288,13 @@ function parseProvidersSelection(table: Record<string, string> | undefined): {
   plan?: string;
   todo?: string;
   askuser?: string;
+  footer?: string;
 } {
-  const selection: { plan?: string; todo?: string; askuser?: string } = {};
+  const selection: { plan?: string; todo?: string; askuser?: string; footer?: string } = {};
   if (typeof table?.plan === "string") selection.plan = table.plan;
   if (typeof table?.todo === "string") selection.todo = table.todo;
   if (typeof table?.askuser === "string") selection.askuser = table.askuser;
+  if (typeof table?.footer === "string") selection.footer = table.footer;
   return selection;
 }
 

@@ -34,7 +34,7 @@ from perk.substrate.registry import Issue, Severity
 PROVIDERS_FILENAME = "providers.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
 
-SEAMS: tuple[str, ...] = ("plan", "todo", "askuser")
+SEAMS: tuple[str, ...] = ("plan", "todo", "askuser", "footer")
 
 
 @dataclass(frozen=True)
@@ -193,6 +193,7 @@ class ResolvedProviders:
     plan: Provider
     todo: Provider
     askuser: Provider
+    footer: Provider
     issues: list[Issue]
 
 
@@ -242,6 +243,7 @@ def resolve_providers(
         plan=resolve_seam("plan"),
         todo=resolve_seam("todo"),
         askuser=resolve_seam("askuser"),
+        footer=resolve_seam("footer"),
         issues=issues,
     )
 
