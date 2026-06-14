@@ -292,7 +292,10 @@ Remove the worktree `NAME`. `--force` removes even with uncommitted changes.
 
 ### `perk worktree wipe`
 
-Remove all merged, safe-to-delete `plan-<N>` worktrees (and their branches). `--dry-run` previews
+Remove all merged, safe-to-delete `plan-<N>` worktrees (and their branches). Each wiped worktree's
+**remote** branch on `origin` is also deleted (best-effort — already-deleted remote branches, e.g.
+from GitHub's auto-delete-head-branch-on-merge, are tolerated; an offline run just skips the remote
+step). Worktree removal and branch cleanup are parallelized/batched for speed. `--dry-run` previews
 removals; `--force` bypasses the safety guards (removes even if dirty or pending-learn).
 
 ### `perk state` (alias `st`)

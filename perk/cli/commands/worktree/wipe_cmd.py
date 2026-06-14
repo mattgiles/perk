@@ -59,8 +59,11 @@ def _classify_worktree(
     return WipeDecision(remove=True, reason="PR merged")
 
 
-# Gather (PR-state lookups) is network-bound, so parallelize it; removal stays sequential.
+# Gather (PR-state lookups) is network-bound, so parallelize it.
 _MAX_GATHER_WORKERS = 32
+
+# Worktree removal is dominated by the filesystem rm -rf (lock-free); parallelize it too.
+_MAX_REMOVE_WORKERS = 32
 
 
 @dataclass(frozen=True)
@@ -159,19 +162,21 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
                 # same crash semantics as the previous inline code.
                 facts_by_path = {path: fut.result() for path, fut in futures.items()}
 
-    # Act phase: sequential, in original candidate order (deterministic output + git mutations).
-    removed = 0
+    # Act phase: classify (main thread) → remove (pool) → batched branch deletes. All per-worktree
+    # output is deferred to one candidate-order pass after the pool so the global ordering holds.
     skipped = 0
+
+    # a. Classify on the main thread, in candidate order. Skips are recorded (not yet emitted) so
+    #    skip + removal lines interleave in one candidate-ordered pass below.
+    skip_reasons: dict[Path, str] = {}
+    to_remove: list[git.Worktree] = []
     for wt in candidates:
-        name = wt.path.name
         if wt.path.resolve() == repo_resolved:
-            _skip(name, "current worktree")
-            skipped += 1
+            skip_reasons[wt.path] = "current worktree"
             continue
         facts = facts_by_path[wt.path]
         if facts.skip_reason is not None:
-            _skip(name, facts.skip_reason)
-            skipped += 1
+            skip_reasons[wt.path] = facts.skip_reason
             continue
         assert facts.pr_state is not None
         decision = _classify_worktree(
@@ -181,28 +186,78 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
             force=force,
         )
         if not decision.remove:
-            _skip(name, decision.reason)
+            skip_reasons[wt.path] = decision.reason
+            continue
+        to_remove.append(wt)
+
+    # b. Dry-run: report intent, no git mutations, no pool, no network.
+    if dry_run:
+        for wt in candidates:
+            reason = skip_reasons.get(wt.path)
+            if reason is not None:
+                _skip(wt.path.name, reason)
+            elif wt in to_remove:
+                user_output(f"  would remove {wt.path.name}  (PR merged)")
+        user_output(f"would wipe {len(to_remove)} worktree(s); {len(skip_reasons)} skipped")
+        if to_remove:
+            user_output(
+                f"  would delete {len(to_remove)} local + {len(to_remove)} remote branch(es)"
+            )
+        return
+
+    # c. Removal pool: parallel FS rm -rf (lock-free). No output from worker threads.
+    removal_errors: dict[Path, GitError] = {}
+    if to_remove:
+        with ThreadPoolExecutor(max_workers=min(_MAX_REMOVE_WORKERS, len(to_remove))) as pool:
+            futures = {
+                wt.path: pool.submit(
+                    lambda p=wt.path: git.worktree_remove(repo_root, p, force=force)
+                )
+                for wt in to_remove
+            }
+            for path, fut in futures.items():
+                try:
+                    fut.result()  # success → None; non-GitError propagates (crash, as before)
+                except GitError as exc:
+                    removal_errors[path] = exc
+
+    # One candidate-order pass: interleave skip lines + removal results; collect the removed.
+    removed = 0
+    removed_worktrees: list[git.Worktree] = []
+    for wt in candidates:
+        name = wt.path.name
+        reason = skip_reasons.get(wt.path)
+        if reason is not None:
+            _skip(name, reason)
             skipped += 1
             continue
-        if dry_run:
-            user_output(f"  would remove {name}  ({decision.reason})")
-            removed += 1
-            continue
-        try:
-            git.worktree_remove(repo_root, wt.path, force=force)
-        except GitError as exc:
+        exc = removal_errors.get(wt.path)
+        if exc is not None:
             _skip(name, f"git worktree remove failed: {exc}")
             skipped += 1
             continue
-        branch = wt.branch or name
-        try:
-            git.delete_branch(repo_root, branch)
-            user_output(click.style("✓ ", fg="green") + f"removed {name} (+ branch {branch})")
-        except GitError as exc:
-            user_output(
-                click.style("✓ ", fg="green") + f"removed {name}; branch {branch} kept ({exc})"
-            )
+        user_output(click.style("✓ ", fg="green") + f"removed {name}")
+        removed_worktrees.append(wt)
         removed += 1
 
-    verb = "would wipe" if dry_run else "wiped"
-    user_output(f"{verb} {removed} worktree(s); {skipped} skipped")
+    # d. Batched local branch delete (-D: the PR is provably MERGED, so force is safe).
+    branches = [wt.branch or wt.path.name for wt in removed_worktrees]
+    if branches:
+        deleted_local = git.delete_branches(repo_root, branches, force=True)
+        line = f"deleted {len(deleted_local)} local branch(es)"
+        kept = [b for b in branches if b not in deleted_local]
+        if kept:
+            line += f"; kept {', '.join(kept)}"
+        user_output(line)
+
+    # e. Batched remote branch delete (best-effort, guarded by has_remote — no-op when absent).
+    if branches and git.has_remote(repo_root):
+        deleted_remote = git.delete_remote_branches(repo_root, branches)
+        already_gone = len(branches) - len(deleted_remote)
+        user_output(
+            f"deleted {len(deleted_remote)} remote branch(es) on origin "
+            f"({already_gone} already gone)"
+        )
+
+    # f. Summary.
+    user_output(f"wiped {removed} worktree(s); {skipped} skipped")
