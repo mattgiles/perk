@@ -1,8 +1,9 @@
 # Design (deferred follow-up): split `shared/contracts.md` into current-spec vs history
 
-> **Status:** execution **IN PROGRESS** — see Objective #539. `shared/contracts-history.md` now exists
-> and the relocation is landing across the objective's nodes (the document-opening statuses have
-> already moved, and §8.4 has now relocated too; the §8.9/§8.10 clusters follow). This doc was originally written as a proposal
+> **Status:** execution **COMPLETE** (Objective #539). All `Status (…)` clusters have relocated to
+> `shared/contracts-history.md` — the document-opening statuses (Node 1.1), §8.4 (Node 2.1), and the
+> §8.9/§8.10 clusters (Node 2.2) — and **no inline `Status (…)` block remains** in
+> `shared/contracts.md`. This doc was originally written as a proposal
 > (proposed, not executed) so an objective-plan node could author the split **without
 > re-investigation**; the forward note near the top of `shared/contracts.md` points here.
 
