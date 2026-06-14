@@ -1,15 +1,31 @@
 ---
-title: The provider seam — owned-surface deferral vs always-registered substrate
-read_when: You are working on the plan/todo provider seam — the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating, the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
+title: The provider seam — artifact seams vs the askuser interface seam, owned-surface deferral vs always-registered substrate
+read_when: You are working on a provider seam (the three-seam substrate is now plan/todo/askuser) — classifying a proposed seam artifact-vs-interface (it decides whether you write an adapter at all), the vacate-only askuser interface seam, the 2→N widening census, the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating vs runtime deferral (picked by the collision kind), the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
 ---
 
 # The provider seam
 
-perk lets a repo select which **provider** owns the plan seam and the todo seam. The default is
-perk's own pair of reference providers (`perk-plan` + `perk-checkpoints`); selecting a foreign
-provider makes perk *yield* its owned authoring surface while keeping the produced-contract landing
-in place. This doc captures the non-obvious shape of that substrate and the load-bearing rules a
-future foreign-adapter node must respect.
+perk lets a repo select which **provider** owns each seam. The substrate is now **three seams** —
+`plan`, `todo`, and `askuser` — and they come in two categories. The default for each is perk's own
+reference provider; selecting a foreign provider makes perk *yield* its owned surface while keeping
+any produced-contract landing in place. This doc captures the non-obvious shape of that substrate
+and the load-bearing rules a future foreign-adapter node must respect.
+
+## Artifact seams vs the interface seam (classify first)
+
+`plan`/`todo` are **artifact seams** — their stable contract is a *durable boundary*
+(`cache.plan-ref`; `perk:checkpoint` + the `## Steps`/`[DONE:n]` vocabulary) that an `adapter` shim
+bridges **to**. `askuser` is the first **interface seam**: its contract is the **tool NAME
+`ask_user_question` plus its non-terminating-answer semantics** — no durable state key, no
+session-entry vocabulary, **nothing to bridge**. Consequence: the askuser adapter is **vacate-only**
+(`adapter: null`, no shim module, no injected context); the foreign tool self-documents via its own
+`promptGuidelines`.
+
+**Decision rule:** classify a proposed seam **artifact-vs-interface first** — it determines whether
+you write an adapter at all. An artifact seam needs a bridge shim (the produced contract must reach
+downstream consumers); an interface seam's contract *is* the foreign tool, so vacating is the whole
+job. (Per-file mechanics of the askuser instance live in
+`docs/design/provider-smoke-juicesharp-ask-user.md`.)
 
 ## The substrate is the third cross-plane parsed-YAML contract
 
@@ -90,6 +106,23 @@ way to leave exactly one surface standing.
 not just defer inside handlers. Fail-safe holds in **both** modes: any config-read error → treat as
 the reference id → register everything. The default path (reference provider) is the hard
 zero-change guarantee, so the error branch must always fall toward full registration.
+
+### The collision *kind* picks the mechanism (command vs tool name)
+
+The askuser interface seam confirmed the general decision rule across all three seams: **the kind of
+name collision picks registration-time vacating vs runtime deferral.** Tools (unlike commands) are
+**not `:N`-suffixed** — a same-named foreign tool replaces/warns by **non-deterministic extension
+load order**. The foreign `ask_user_question` tool shares perk's exact tool name, so `askuser` mirrors
+the **plan seam's registration-time vacating** (resolve once at factory-time `process.cwd()`,
+early-return before `registerTool` under a foreign selection — `registerAskUser` wiring stays a single
+unconditional call, gating lives inside, like `registerPlanMode`), **not** the todo seam's runtime
+deferral. Generalized:
+
+- **command-name collision ⇒ registration-time vacating** (plan: `/plan`; askuser: the
+  `ask_user_question` tool — tools collide the same way commands do);
+- **no name collision ⇒ runtime deferral suffices** (todo: `/checkpoints` has no foreign clash).
+
+The fail-safe mirrors the plan seam: any config-read error → reference id → keep perk's own tool.
 
 This forward-note was written plan-first and **partly mis-fired for the todo seam** — see "A sibling
 seam's forward-note must be re-derived, not mirrored" below. The escalation to registration-time
@@ -275,15 +308,54 @@ timeout by design** (interactive-only path — headless soft-skips; an unanswere
 turn abort); upstream npm install breakage is possible and perk's wiring is correct independent of
 it.
 
+## The 2→3 widening census (both planes, byte-mirrored)
+
+The substrate was already seam-generic in structure but hardcoded the two-seam tuple in several
+spots. The full census a new seam must widen (so the next author has the checklist):
+
+- the `SEAMS` / `PROVIDER_SEAMS` tuples;
+- the `ResolvedProviders` field + `resolve_providers` / `resolveProviders` return + the inner
+  `resolveSeam` signature union (`"plan"|"todo"|"askuser"`);
+- the two new id constants in `extension/substrate/providers.ts`
+  (`PERK_ASK_USER_PROVIDER_ID`, `JUICESHARP_ASK_USER_PROVIDER_ID`);
+- the config readers (`_parse_providers_selection` / `parseProvidersSelection`) + the `providers`
+  field type;
+- `init`'s `_converge_provider_packages` provider loop;
+- `doctor`'s `_providers_check` ok-summary string.
+
+Sites that need **no** change because they already iterate `SEAMS` / the whole supported set:
+`validate` (exactly-one-default), `_managed_identities`, `by_id` / `default_for`. State such "no
+change needed" conclusions explicitly so a future reader doesn't re-derive them. (Watch ruff E501: a
+widened tuple inside a docstring can push the summary line past 100 cols.)
+
+## Read-only gating: a shared tool name is free allowlisting
+
+`ask_user_question` is already in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so the
+foreign tool sharing the **exact** name is allowlisted automatically (same "foreign tool names
+inert/allowlisted by shared name" precedent as `plan_review` / `linear_*`). The read-only notice
+interpolates `READ_ONLY_TOOLS`, so it self-updates. `SDK_READ_ONLY_TOOLS`
+(`extension/worker/readOnlySession.ts`) deliberately **omits** it (headless children never prompt a
+human). No code change — state the conclusion explicitly.
+
+## Testing a vacate-only seam without a `registeredTools()` accessor
+
+The harness exposes `registeredCommands()` but **not** `registeredTools()`. Since `registerAskUser`
+only calls `pi.registerTool`, the clean test is a minimal recording fake `pi`
+(`{ registerTool(t){ names.push(t.name) } }`) driven with the chdir-before-bind pattern from
+`planMode.test.ts`: write `.pi/perk.toml`, save + `process.chdir(cwd)`, assert `[]` (foreign selected)
+vs `["ask_user_question"]` (reference), restore cwd in `finally`.
+
 ## Residual / interim limitation
 
-Both seams now have **real foreign adapters**: the plan seam (`@tombell/pi-plan`, Node 2.3) vacates
-perk's plan surface at registration time and bridges the foreign prose into the plan-ref substrate;
-the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/adapters/todoAdapterJuicesharp.ts`) carries
-perk's progress discipline onto the foreign overlay via an injected context (no `perk:checkpoint`
-population, no registration-time vacating — there is no `/checkpoints` command-name collision). The
-default path (both reference providers, `package: null`) remains the hard zero-change guarantee in
-every mode.
+Both artifact seams now have **real foreign adapters**: the plan seam (`@tombell/pi-plan`, Node 2.3)
+vacates perk's plan surface at registration time and bridges the foreign prose into the plan-ref
+substrate; the todo seam (`@juicesharp/rpiv-todo`, Node 3.2, `extension/adapters/todoAdapterJuicesharp.ts`)
+carries perk's progress discipline onto the foreign overlay via an injected context (no
+`perk:checkpoint` population, no registration-time vacating — there is no `/checkpoints`
+command-name collision). The askuser **interface** seam (`@juicesharp/rpiv-ask-user-question`) is
+**vacate-only** — no adapter, no bridge; under a foreign selection perk simply early-returns before
+registering its `ask_user_question` tool. The default path (all three reference providers,
+`package: null`) remains the hard zero-change guarantee in every mode.
 
 ## Cross-references
 
@@ -292,7 +364,9 @@ every mode.
 - `extension/adapters/planAdapterTombell.ts` — the injection-only plan adapter shim (always registered, inert by default)
 - `extension/adapters/todoAdapterJuicesharp.ts` — the injection-only todo adapter shim (Node 3.2; carries discipline by prompting)
 - `extension/factories/planSave.ts` — the seam-shared substrate that never defers
-- `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`
+- `extension/doors/askUser.ts` — `registerAskUser`, `resolvedAskUserProviderId` (the vacate-only askuser interface seam)
+- `docs/design/provider-smoke-juicesharp-ask-user.md` — the askuser per-file mechanics + recorded select/deselect smoke
+- `extension/substrate/providers.ts` — `resolveProviders`, `PERK_PLAN_PROVIDER_ID`, `PERK_ASK_USER_PROVIDER_ID`
 - `perk/substrate/providers.py` — `resolve_providers`, `ProvidersError`
 - `perk/run/launch.py` — the `provider == "github"` backend branch
 - `shared/providers.yaml` — the bundled reference defaults
