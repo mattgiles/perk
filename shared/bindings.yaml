@@ -26,11 +26,11 @@
 #             mode is per-binding (not global): one skill may be a nudge at one trigger
 #             and a transclude at another.
 #
-# Status (Node 1.1): this file LOCKS the shape + the shipped defaults with NO runtime
-# behavior. The resolver (shipped-defaults ⊕ user-bindings) is Node 1.2; nudge/transclude
-# delivery is Nodes 2.1/2.2; porting perk's own hardcoded "Follow the … skill" strings is
-# Node 2.3. Target-existence validation (is stage:<id> a real stage? is command:<id> a real
-# command?) lives in `doctor` (Node 3.1), NOT in the loaders — they validate shape only.
+# Status: the shape + the shipped defaults are LOCKED and CONSUMED. The resolver
+# (shipped-defaults ⊕ user-bindings) and nudge/transclude delivery are live in both planes
+# (cold: perk/substrate/binding_delivery.py; warm: extension/substrate/bindingDelivery.ts).
+# Target-existence validation (is stage:<id> a real stage? is command:<id> a real command?)
+# lives in `doctor`, NOT in the loaders — they validate shape only.
 
 schema_version: 1
 

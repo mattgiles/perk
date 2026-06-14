@@ -13,8 +13,9 @@
 # object — that the narrow-TOML config reader cannot.
 #
 # Vocabulary — each provider entry:
-#   id      — the stable provider id; for the `plan` seam it is exactly the
-#             cache.plan-ref `provider` string (provider-contract.md dimension 1).
+#   id      — the stable provider id. NOT the cache.plan-ref `provider` string:
+#             that field is the ISSUE BACKEND (the stamped `backend_id`, e.g.
+#             "github"), not the seam id — see contracts.md §8.10 / §8.21.
 #   seam    — `plan` | `todo` | `askuser` | `footer` | `web` (the five seams pluggability-taxonomy.md scope-fenced).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference

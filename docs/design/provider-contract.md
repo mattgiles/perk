@@ -41,6 +41,10 @@ A provider seam is a declaration filling a fixed set of **dimensions**:
 
 1. **Seam identity** — which seam (`plan` | `todo`) and the provider id. (The registry/id *shape* is
    Node 1.3's `shared/providers.yaml`; 1.2 names the dimension, not the file.)
+   > **Reconciling note (shipped contract):** the `id == cache.plan-ref.provider` equivalence this
+   > doc aspires to never shipped — in the shipped contract `cache.plan-ref.provider` is the **issue
+   > backend** (the stamped `backend_id`, e.g. `"github"`), not the seam id. See
+   > `shared/contracts.md` §8.10.
 2. **Owned surface** — the user/session-facing surface the provider fully owns end-to-end (commands,
    shortcuts, flags, tools, status/widget UI, marker vocabularies). This is the dimension **free to
    vary** across providers; a foreign package's surface need not resemble perk's.

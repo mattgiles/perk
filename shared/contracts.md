@@ -5,14 +5,20 @@ each build artifact (`Q12`). These are **prose specs** (no parser): the Python C
 and the TS extension (`@perk/pi`) each implement one side, against the exact names/paths/
 fields pinned below. `perk doctor` (T6) verifies conformance.
 
-There are now **two** parsed contracts (siblings of this file): `registry.yaml` — the stage
+There are now **three** parsed contracts (siblings of this file): `registry.yaml` — the stage
 graph, whose `state_keys` block is the canonical vocabulary referenced throughout this
-document — and `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
-in §8.9.
+document — `bindings.yaml` — the skill-binding set (trigger→skill delivery), specified
+in §8.9 — and `providers.yaml` — the provider-selection supported set, specified in §8.10.
 
 Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified linkage),
 `Q9`/`Q10` (gateway). Pi mechanics are cited against
 [pi--best-practices.md](../docs/pi--best-practices.md).
+
+> **Forward note (proposed split):** this file is currently both *spec* and *changelog* (the inline
+> `Status (…)` blocks). A **proposed, not-yet-executed** split into a compact current-spec
+> `contracts.md` + a sibling history doc is specified in
+> [`docs/design/contracts-md-split.md`](../docs/design/contracts-md-split.md). The history file does
+> not exist yet — that doc is the proposal a future objective-plan node can author from.
 
 > **Status (T2):** specs locked. Implementations land later — state helpers in **T3**, the
 > launch/`PERK_RUN_ID` emit in **T4**, the gateway verification ops in **T5** (Python) /
@@ -1788,7 +1794,7 @@ skill name (a `skills/*/` dir name today); `mode ∈ {nudge, transclude}` is **p
 Pi-discovered), `transclude` inlines the skill body. The same skill may be a nudge at one trigger
 and a transclude at another.
 
-**Shipped default set (all 8 perk skills, all `nudge` — perk's own skills are ambient package
+**Shipped default set (all 9 shipped bindings, all `nudge` — perk's own skills are ambient package
 skills, so a pointer suffices; `transclude` exists for the user-binding case):**
 
 | trigger | skill | mode |
@@ -1801,6 +1807,7 @@ skills, so a pointer suffices; `transclude` exists for the user-binding case):**
 | `stage:learn` | `perk-learn` | `nudge` |
 | `command:objective-reconcile` | `perk-objective-reconcile` | `nudge` |
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
+| `command:pr-review` | `perk-pr-review` | `nudge` |
 
 **Validation depth (shape-only, registry-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each binding has a non-empty `skill`, a
@@ -1968,12 +1975,12 @@ raising `ProvidersError` only for structural failures) and **`extension/substrat
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
-`docs/design/provider-contract.md` (the seven dimensions; the `cache.plan-ref` `provider` field ==
-the plan provider id) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving
+`docs/design/provider-contract.md` (the seven dimensions) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving
 default).
 
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
-stable provider id (for the `plan` seam, exactly the `cache.plan-ref` `provider` string); `seam ∈
+stable provider id (it is **not** the `cache.plan-ref` `provider` string — see the
+“`cache.plan-ref.provider` is the issue backend, not the seam id” paragraph below); `seam ∈
 {plan, todo, askuser, footer, web}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
 (`null` for perk's own bundled reference provider — nothing to add; **not universal** — the `web`
 seam's reference provider `pi-web-access` carries a **non-null** `package` because perk owns no

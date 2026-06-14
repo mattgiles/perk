@@ -2,20 +2,21 @@
 
 This is the Python plane's reader of the *third* parsed cross-plane contract (the first two
 being `shared/registry.yaml` and `shared/bindings.yaml`). It is the **supported set** — the
-catalog of plan/todo providers perk knows how to wire — distinct from the per-repo *selection*
-(the flat `[providers]` table in `.pi/perk.toml`, which is just a pointer into this catalog).
+catalog of plan/todo/askuser/footer/web providers perk knows how to wire — distinct from the
+per-repo *selection* (the flat `[providers]` table in `.pi/perk.toml`, a pointer into this catalog).
 The TS extension has an independent reader (`extension/substrate/providers.ts`) over the *same*
 bundled file.
 
 Validation is **shape-only and repo-free**: the validator checks that each provider entry is
-well formed (non-empty unique `id`, `seam ∈ {plan, todo}`, exactly one `default: true` per
-seam), but it does NOT cross-check that any repo *selection* names a real provider — that
+well formed (non-empty unique `id`, `seam ∈ {plan, todo, askuser, footer, web}`, exactly one
+`default: true` per seam), but it does NOT cross-check that any repo *selection* names a real
+provider — that
 cross-file validation is `doctor`'s job (D6, mirroring how bindings target-existence lives in
 doctor, not the loader).
 
-This node (2.1) ships the **selection substrate** only — the loader + the pure resolver. Runtime
-*consumption* of the selection (perk's plan/todo stepping aside when a foreign provider is
-selected) is Nodes 2.2/3.1 and is out of scope here.
+The selection substrate is **consumed**: runtime consumption of the selection (init's
+two-directional `[providers]` settings wiring + `doctor`'s selection checks, and the extension's
+plan-seam registration-time vacating / todo-seam runtime deferral) is live.
 
 The validator returns structured ``Issue`` records (it never raises for invalid *content*) so
 callers decide how to surface them; ``ProvidersError`` is reserved for structural load failures.

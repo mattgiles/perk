@@ -128,6 +128,9 @@ The fields, and what each is for:
 
 - **`id`** — the stable provider id; for the plan seam it is exactly the `cache.plan-ref` `provider`
   string (Node 1.2 dimension 1).
+  > **Reconciling note (shipped contract):** this equivalence is aspirational — in the shipped
+  > contract `cache.plan-ref.provider` is the **issue backend** (the stamped `backend_id`), not the
+  > seam id. See `shared/contracts.md` §8.10.
 - **`seam`** — `plan` | `todo`; the two seams Node 1.1 scope-fenced.
 - **`package`** (nullable) — the foreign Pi package spec added to `.pi/settings.json` `packages`;
   `null` for perk's own bundled reference provider (nothing to add).
