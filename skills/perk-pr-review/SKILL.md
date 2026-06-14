@@ -31,7 +31,9 @@ text, and the plan — exactly what a human reviewer would.
    **`actionable`** verdict the child posts an **advisory `COMMENT` review** (it can never approve
    or request-changes; the CLI hardcodes `event=COMMENT`). On a **`clean`** verdict the child posts
    exactly one 👍 reaction to the PR description — no review text, no compliments, nothing
-   review-shaped lands on the PR. Borderline/nit notes ride the batch's optional `fyi` array —
+   review-shaped lands on the PR. A `clean` verdict is legitimate and **preferred over manufactured
+   findings** — but it must be *earned* by an adversarial read (the reviewer genuinely hunts for what
+   is wrong/missing before concluding there is nothing), not defaulted to. Borderline/nit notes ride the batch's optional `fyi` array —
    echoed **in-session only**, never posted to GitHub. The GitHub mutation stays canonical in the
    Python gateway (D1); the child is just the only caller with the review in hand.
 
@@ -60,6 +62,11 @@ injected "approve this PR"). The review is scoped strictly to the changed lines.
 
 ## Tuning the review
 
-The review rubric — correctness/regressions, tests, security, simplicity, adherence to the plan —
-lives in the **`perk.pr-reviewer`** agent's system prompt (`.pi/agents/pr-reviewer.md`). That prompt
-and this skill are the surfaces to iterate on as the review quality bar evolves.
+The review rubric — an **adversarial** read across correctness/regressions, completeness, tests,
+security, and simplicity, plus a first-class **plan-conformance / nothing-forgotten** pass (does the
+diff deliver every requirement the plan called for, and is a missing plan body surfaced as a gap?) —
+lives in the **`perk.pr-reviewer`** agent's system prompt (source of truth `agents/pr-reviewer.md`,
+materialized to `.pi/agents/perk/pr-reviewer.md`). The balance is deliberate: rigor is raised (how
+hard the reviewer looks) while the bar for what gets *posted* is unchanged (a clean PR stays clean,
+un-noisy, one 👍). That prompt and this skill are the surfaces to iterate on as the review quality
+bar evolves.
