@@ -517,10 +517,17 @@ def test_invalid_limit_rejected():
 ## 11. The command taxonomy (the SSOT)
 
 This section is the **single source of truth** for the `perk` CLI command taxonomy decided in
-Objective #495 (node 1.1). It is the spec the enactment nodes (2.1, 3.1, 3.2, 3.3, 4.1) implement
-against. §1–§10 describe *how* to build a command; this section decides *which* commands exist, how
+Objective #495 (node 1.1). It is the canonical taxonomy, **fully enacted** across nodes 1.1–4.1.
+§1–§10 describe *how* to build a command; this section decides *which* commands exist, how
 they are named, and how the launcher/worker halves merge. The structural how-to lives in the
 [cli-command-groups playbook](../learned/workflow/cli-command-groups.md); §11 owns the *what*.
+
+> **Status: fully enacted.** The taxonomy below is live in the code. The dormant substrate (the
+> merge factory, the flat-alias mechanism, sectioned group help) landed in node 2.1; the objective
+> group in node 3.1 (#517); the `plan save` merge + `plan` group in node 3.2 (#518); the `pr submit`
+> / `pr land` merge + the flat PR aliases + `pr address --preview` in node 3.3 (#514/#516). Node
+> 4.1 reconciled the user docs and the structural tests against this landed surface. The decision
+> rationale, the mapping table, and the two Corrections below remain the durable record.
 
 Legend (used throughout): **L** = session launcher · **W** = deterministic worker (`--json`) ·
 **L+W** = the merged command (session by default, `--json` runs the worker the warm door shells) ·
@@ -597,7 +604,7 @@ the cold CLI restructures.
 **Registry stage ids stay stable.** The ids (`submit`, `objective-author`, `save`, …) are the
 cross-plane identifiers and the `stage:<id>` binding triggers; only the cold CLI *invocation*,
 grouping, help sections, and flat aliases change. The registry `command` field is informational and
-is updated to record the new argv for honesty (that update is node-3.x enactment, not this node).
+was updated to record the new argv for honesty (landed with the node-3.x enactment).
 
 ### 11.5 The canonical mapping table (old → new) + the clean-break removal list
 
@@ -704,13 +711,14 @@ carried no special flags, so nothing is lost in the merge.
 objective launch among author/save/plan, so bare `perk objective` renders group help (contrast bare
 `perk plan` and bare `perk learn`, which are hybrid because each has one canonical launch).
 
-**Q5 — Within-group help-section wording → lock the *taxonomy*, defer the *labels* to node 2.1.**
+**Q5 — Within-group help-section wording → taxonomy locked, labels landed.**
 The structural decision is fixed: within a group, launchers and workers render in separate help
 sections; at root, most launchers now nest under their group, so the root launcher section shrinks
-to the earned flat names (`implement` + the hot-path PR aliases). The literal label strings (e.g.
-"Launchers" vs "Sessions", "Workers" vs "Mechanics") are explicitly a **node-2.1 presentation
-choice** — honoring both this node's "resolve it" mandate and the objective body's "2.1 owns the
-wording."
+to the earned flat names (`implement` + the hot-path PR aliases). The literal label strings landed
+in node 2.1 (`SectionedAliasGroup`): within a group, the sections render **"Launchers:"** /
+**"Workers:"** / **"Commands:"** (the catch-all for unmarked verbs); at root, `SectionedGroup`
+renders **"Stage Launchers"** / **"Command Groups:"** / **"Setup & Health:"** / **"Other:"**.
+Asserted by `tests/test_cli_help_sections.py`.
 
 **Correction 1 — `pr ready` is worker-only (W), not L+W.** The objective's target tree marks
 `pr ready` as L+W, but `ready` is **not a registry stage** and has no generated launcher. Today
@@ -721,7 +729,6 @@ stays **worker-only (W)** and merely gains the flat alias `perk ready`. Giving `
 would mean adding a `ready` registry stage — forbidden by the objective's non-goals. §11.5 and
 §11.6 annotate `pr ready` as **W**.
 
-**Correction 2 — `--preview` is not a cold flag today.** It is currently a warm `/address`
+**Correction 2 — `--preview` started as a warm-only flag.** It was originally a warm `/address`
 slash-arg parsed in `extension/doors/address.ts`. The SSOT documents `pr address` as launcher-only
-(L) with a `--preview` passthrough flag; *introducing* that cold flag is **node 3.3 enactment**, not
-this node.
+(L) with a `--preview` passthrough flag; that cold flag was **introduced in node 3.3 (#514/#516)**.

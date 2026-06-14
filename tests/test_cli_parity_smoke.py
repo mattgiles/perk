@@ -1,10 +1,11 @@
-"""Structural parity-smoke harness (Objective #495 Node 2.1, D5).
+"""Structural surface fingerprint of the canonical CLI taxonomy (Objective #495).
 
-Node 2.1 ships *dormant* CLI substrate (the merge factory, the flat-alias mechanism, sectioned
-group help) with a **byte-identical live command/help surface**. This module fingerprints that
-surface structurally — the verb set of the root + every subgroup, plus each visible root command's
-section bucket — and asserts it equals a literal expected dict. A 3.x fold *edits* this dict; the
-diff is the review surface. Structural (not raw ``--help`` text), so it is terminal-width-stable.
+This module fingerprints the live ``perk`` command surface structurally — the verb set of the root
++ every subgroup, plus each visible root command's section bucket — and asserts it equals a literal
+expected dict. The dict is the canonical post-taxonomy fingerprint; the equality assertion is the
+drift guard against accidental surface regressions (any change to the verb/alias/section surface
+shows up as a diff against this dict, which is the review surface). Structural (not raw ``--help``
+text), so it is terminal-width-stable.
 """
 
 from typing import cast
@@ -68,9 +69,9 @@ def _surface_fingerprint(group: click.Group) -> dict[str, object]:
     return {"root": root, "sections": sections, "groups": groups}
 
 
-# The literal pre-node surface (today's verbs, aliases, and section classification). A 3.x fold
-# (merging a real submit/land, registering a flat alias, sectioning a group) edits THIS dict — the
-# diff is the review surface. Empty/dormant in 2.1 ⇒ this is unchanged from the pre-node surface.
+# The canonical CLI surface (the taxonomy's verbs, aliases, and section classification). Any change
+# to the surface (merging a launcher+worker, registering a flat alias, sectioning a group) edits
+# THIS dict — the diff is the review surface that catches accidental regressions.
 EXPECTED_SURFACE: dict[str, object] = {
     "root": [
         ("address", ()),
@@ -147,8 +148,8 @@ EXPECTED_SURFACE: dict[str, object] = {
 }
 
 
-def test_live_surface_is_byte_identical_to_pre_node():
-    """The dormancy proof: the live surface equals the literal pre-node fingerprint."""
+def test_live_surface_matches_canonical_fingerprint():
+    """The drift guard: the live surface equals the literal canonical fingerprint."""
     assert _surface_fingerprint(cli) == EXPECTED_SURFACE
 
 
