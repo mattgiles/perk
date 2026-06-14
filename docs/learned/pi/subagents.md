@@ -138,6 +138,62 @@ Running `perk init` in perk's own dev worktree also delivers the self-repo's `.p
 **pre-existing local-env condition, unrelated and non-blocking** (the `subagent-agents` convergence
 runs and reports its `created` lines BEFORE the skills step).
 
+## Editing a perk agent's prose rubric — the reconverge ritual + the judgment-prompt anti-pattern
+
+Editing how a perk agent *judges* (e.g. rewriting the `perk.pr-reviewer` review rubric) is a pure
+prompt change. The non-obvious mechanics and the cross-cutting lesson:
+
+### Where the rubric lives & how to reconverge it
+
+The reviewer rubric is **entirely** in the agent **system prompt** — SSOT `agents/pr-reviewer.md`
+(root `agents/`, no leading dot), materialized by `perk init`'s `_converge_subagent_agents` into
+`.pi/agents/perk/pr-reviewer.md`. The skill (`skills/perk-pr-review/SKILL.md`) and the door
+(`extension/doors/prReview.ts`) **defer** to it — **don't look there for review logic**. After
+editing the source, **re-run `perk init`** to reconverge and commit **both** copies byte-identical
+(the init-idempotency + doctor `subagent-agents` checks expect consistency). **Stale-path gotcha:**
+the materialized copy is the `perk/`-namespaced `.pi/agents/perk/pr-reviewer.md`, **not** the old
+`.pi/agents/pr-reviewer.md` the skill once cited — grep for the stale path when touching agent docs.
+
+### Two `perk init` worktree gotchas (reality, not aspiration)
+
+- In a worktree where skills are already materialized, `perk init` **fails the `skills --sync`
+  step** but prints `Converged before failure:` listing the agent copy as `updated` — the **agent
+  reconvergence happens before the skills failure**, so it's **non-fatal for an agent-only edit**
+  (confirm the agent diff is clean; don't chase the skills failure).
+- `perk init` also creates the **gitignored** `.pi/perk.local.toml` — **stage only the intended
+  files explicitly** (don't `git add -A`).
+
+### Testing reality
+
+**No test asserts an agent's prose body verbatim.** The wheel-bundling + idempotency + doctor
+guards check **presence + consistency**, not content. A pure prompt rewrite keeps `just ci` green
+without touching a single string assertion.
+
+### The judgment-agent prompt anti-pattern (the cross-cutting lesson)
+
+A reviewer's "always says no/clean" bias was **structural in the prompt, not the plumbing**. The
+verdict vocabulary (`clean` / `actionable`) and the `fyi` array already carried everything; only the
+*quality of judgment* changed — a **pure prompt-engineering change** (no Python, no door, no
+`shared/contracts.md` touch). Three structural biases caused the skew:
+
+1. a verdict that **falls through to a default** (the default conclusion wins absent active
+   contradiction);
+2. a "decide the verdict first" instruction that **anchors the conclusion before findings are
+   enumerated**;
+3. anti-noise framing repeated with **no counterweight** to hunt for problems.
+
+**Antidote:** an explicit *"earned, not defaulted"* balance statement →
+**enumerate-findings-first → derive the verdict**, plus adversarial axes / investigation license —
+while keeping the **binary posting bar unchanged** (a clean verdict stays first-class; noise isn't
+manufactured). **Generalize to any judgment-agent prompt:** remove default verdicts, order
+findings-before-conclusion, and add a counterweight to any anti-noise framing.
+
+### Residual
+
+A missing `plan_body` (the best-effort read returns `None`) is now **surfaced** in `summary` / `fyi`
+rather than silently dropping the conformance axis; **no retrieval fallback was added** (flagged as a
+follow-up if missing plan bodies prove common).
+
 ## Residual
 
 No workflow-state record of a `/pr-review` (no parent tool turn → no `last_review_batch`-style
@@ -152,8 +208,9 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 
 ## Cross-references
 
-- `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header
-- `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`)
+- `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header (defers the review rubric to the agent prompt)
+- `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
+- `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
 - `perk/convergence/init.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
 - `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
 - `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[subagents]` boundary)
