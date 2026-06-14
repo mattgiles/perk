@@ -14,28 +14,11 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 `Q9`/`Q10` (gateway). Pi mechanics are cited against
 [pi--best-practices.md](../docs/pi--best-practices.md).
 
-> **Forward note (proposed split):** this file is currently both *spec* and *changelog* (the inline
-> `Status (…)` blocks). A **proposed, not-yet-executed** split into a compact current-spec
-> `contracts.md` + a sibling history doc is specified in
-> [`docs/design/contracts-md-split.md`](../docs/design/contracts-md-split.md). The history file does
-> not exist yet — that doc is the proposal a future objective-plan node can author from.
-
-> **Status (T2):** specs locked. Implementations land later — state helpers in **T3**, the
-> launch/`PERK_RUN_ID` emit in **T4**, the gateway verification ops in **T5** (Python) /
-> Phase 1 (TS). Gateway *mutation* ops are named here but **not authored** (payloads land in
-> Phase 1, when `/plan-save` knows their shape — `Q7`/`Q9`).
->
-> **Status (T5):** the §8.4 **verification ops are implemented in the Python plane**
-> (`perk/github/auth.py` — `check_auth` / `check_repo_access`, verification-only, never mutating);
-> the TS plane authors the same shapes in Phase 1. The §8.5 init machine-surface contract is
-> live (`perk init --json`).
->
-> **Status (P1.T2a):** the §8.4 **plan-write mutations are implemented in the Python plane**
-> (`perk/github/plans.py` `create_label` / `create_plan_issue` / `add_issue_comment` /
-> `find_plan_issue` + `perk/plan.py` storage) — the **cold/worker** save door
-> (`perk plan-save`). The warm in-session twin (the TS `/plan-save` tool) is T3. Both planes
-> use **REST `gh api`** (never porcelain — porcelain's GraphQL has a separate, often-exhausted
-> rate-limit quota) and pass large bodies via `-F body=@file`.
+> **Forward note (split in progress):** the history file now exists at the sibling
+> [`contracts-history.md`](./contracts-history.md) and the document-opening `Status (…)` blocks have
+> relocated there. The remaining inline §8.4/§8.9/§8.10 `Status (…)` clusters relocate across the
+> in-progress split (Objective #539); the migration is specified in
+> [`docs/design/contracts-md-split.md`](../docs/design/contracts-md-split.md).
 
 ---
 

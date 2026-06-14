@@ -21,6 +21,9 @@ Contents (authored in **T2**):
 - **`contracts.md`** — the four *prose* specs implemented once per plane: the
   `.pi/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract.
+- **`contracts-history.md`** — the relocated chronological `Status (…)` changelog
+  sibling of the prose spec, grouped by `§N.M` anchor (keeps `contracts.md` a compact
+  current-spec document).
 
 Resolution is proven by T1's per-plane resolvers (`perk/_resources.py`,
 `extension/substrate/resources.ts`): installed bundle → editable repo-sibling fallback.

@@ -57,6 +57,7 @@ def test_wheel_bundles_shared(tmp_path):
         "perk/_shared/bindings.yaml",
         "perk/_shared/providers.yaml",
         "perk/_shared/contracts.md",
+        "perk/_shared/contracts-history.md",
     }
     assert expected <= names, expected - names
 
@@ -104,6 +105,7 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/bindings.yaml" in paths
     assert "shared/providers.yaml" in paths
     assert "shared/contracts.md" in paths
+    assert "shared/contracts-history.md" in paths
     assert "shared/README.md" in paths
 
     # Dev-only surface must be excluded.
