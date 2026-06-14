@@ -6,6 +6,12 @@
     "npm:pi-web-access",
     {
       "source": "npm:@plannotator/pi-extension"
+    },
+    {
+      "source": "npm:@juicesharp/rpiv-todo"
+    },
+    {
+      "source": "npm:@juicesharp/rpiv-ask-user-question"
     }
   ]
 }
