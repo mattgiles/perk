@@ -10,8 +10,9 @@ fields are well formed (and that no trigger repeats), but it does NOT cross-chec
 `stage:` target is a real registry stage or that a `command:` target is a real command —
 that target-existence validation is `doctor`'s job (Node 3.1).
 
-This node (1.1) locks the shape + ships the defaults with **no runtime behavior**: nothing
-imports this module yet. The resolver (`shipped-defaults ⊕ user-bindings`) is Node 1.2.
+The shape + defaults are locked **and consumed**: the resolver (`resolve_bindings`,
+`shipped-defaults ⊕ user-bindings`) and cold-door delivery (`perk/substrate/binding_delivery.py`)
+are live.
 
 The validator returns structured ``Issue`` records (it never raises for invalid *content*)
 so callers decide how to surface them; ``BindingsError`` is reserved for structural load

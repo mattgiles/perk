@@ -2,13 +2,13 @@
 //
 // Twin of perk/substrate/providers.py: both planes parse the SAME bundled file (no codegen). This is the
 // THIRD parsed cross-plane contract (after registry.yaml and bindings.yaml). It is the SUPPORTED
-// SET — the catalog of plan/todo providers perk knows how to wire — distinct from the per-repo
-// SELECTION (the flat `[providers]` table in .pi/perk.toml).
+// SET — the catalog of plan/todo/askuser/footer/web providers perk knows how to wire — distinct from
+// the per-repo SELECTION (the flat `[providers]` table in .pi/perk.toml).
 //
 // The Python CLI is the authoritative validator (perk/substrate/providers.py); this side does a thin
-// structural parse only — no deep content validation here. This node (2.1) ships the shape-only
-// loader with no TS consumer: runtime consumption of the selection (perk's plan/todo stepping
-// aside when a foreign provider is selected) is Nodes 2.2/3.1.
+// structural parse only — no deep content validation here. `resolveProviders` is CONSUMED by
+// `planMode` (plan-seam registration-time vacating when a foreign plan provider is selected); the
+// todo-seam runtime deferral is likewise live.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

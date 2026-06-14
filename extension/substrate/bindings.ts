@@ -6,8 +6,9 @@
 // delivery `mode` (nudge/transclude).
 //
 // The Python CLI is the authoritative validator (perk/substrate/bindings.py); this side does a thin
-// structural parse only — no deep content validation here. This node (1.1) ships the seam
-// with no consumer: the resolver is Node 1.2; delivery is Nodes 2.1/2.2.
+// structural parse only — no deep content validation here. The binding set is CONSUMED: the
+// resolver (`resolveBindings`) and warm-door delivery (`extension/substrate/bindingDelivery.ts`)
+// are live.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

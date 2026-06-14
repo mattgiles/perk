@@ -44,8 +44,13 @@ state_keys:
 # save -> implement -> submit -> address -> land -> learn.
 #
 # Every field is locked EXCEPT `requires`/`reads`/`writes` (empty until handlers
-# land). `run_id` is uniform now (warm keeps, cold mints + records predecessor,
-# Q2); the field is kept because the shape is locked and future stages may differ.
+# land). `run_id` is uniform AND shape-locked by the validator: `perk/substrate/registry.py`
+# `_check_doors_and_run_id` enforces `warm == keep` and `cold_local`/`cold_remote == mint`
+# for every stage (Q2). It is a shape-locked map, NOT free per-stage data — the field is kept
+# because the shape is the contract, not because stages vary.
+# `command` is the human/contract LABEL for the stage's command, not the routing table: the
+# actual dedicated cold-door routing lives in code via `perk/cli/stages.py` `DEDICATED_STAGES`
+# (the generic launcher generator skips those ids). The field documents intent; it does not route.
 # `doors.cold_remote` records which stages a remote runner may run (cli-vs-pi §4.5) —
 # a real registry-recorded constraint, not merely "not built yet". P2.T8c flips it
 # `true` on `implement` + `address` (the agentic, headless-runnable stages a Phase-3 CI
