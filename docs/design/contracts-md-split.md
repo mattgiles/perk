@@ -1,8 +1,10 @@
 # Design (deferred follow-up): split `shared/contracts.md` into current-spec vs history
 
-> **Status:** proposed, NOT executed. This doc exists so a future objective-plan node can author the
-> split **without re-investigation**. The forward note near the top of `shared/contracts.md` points
-> here. No history file exists yet — this is the proposal for one.
+> **Status:** execution **IN PROGRESS** — see Objective #539. `shared/contracts-history.md` now exists
+> and the relocation is landing across the objective's nodes (the document-opening statuses have
+> already moved; the §8.4/§8.9/§8.10 clusters follow). This doc was originally written as a proposal
+> (proposed, not executed) so an objective-plan node could author the split **without
+> re-investigation**; the forward note near the top of `shared/contracts.md` points here.
 
 ## Problem statement
 
