@@ -14,11 +14,9 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 `Q9`/`Q10` (gateway). Pi mechanics are cited against
 [pi--best-practices.md](../docs/pi--best-practices.md).
 
-> **Forward note (split in progress):** the history file now exists at the sibling
-> [`contracts-history.md`](./contracts-history.md) and the document-opening `Status (…)` blocks have
-> relocated there. The remaining inline §8.9/§8.10 `Status (…)` clusters relocate across the
-> in-progress split (Objective #539); the migration is specified in
-> [`docs/design/contracts-md-split.md`](../docs/design/contracts-md-split.md).
+> **History.** The chronological `Status (…)` landing-note changelog lives in the sibling
+> [`contracts-history.md`](./contracts-history.md), grouped by `§N.M` anchor; this file is the
+> compact current spec.
 
 ---
 
@@ -1803,28 +1801,6 @@ dangling-pointer warning, which stays a last-resort signal).
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
   still-broken state.
 
-> **Status (Node 3.1):** `doctor` target-existence/skill-presence validation landed (the non-fatal
-> `bindings` check), plus the injection-time skill-presence mirror (the `nudge` path warns;
-> `bindingSuffix` now logs its warnings). Deferred: `init` `[[bindings]]` commented template + user
-> docs → **Node 3.2**.
-
-> **Status (Node 2.3):** cold-door (Python) **and** warm-door (TS) delivery landed, **and** perk's own
-> hardcoded "Follow the … skill" strings are migrated onto the mechanism + deleted (Node 2.3) — the
-> skill-binding mechanism is now the single delivery path for perk's own nudges. The render header
-> was neutralized to `"The following skill binding(s) apply here:"` (the `.pi/perk.toml` parenthetical
-> was false for the delivered perk defaults). Known residual (out of scope, documented): in a cold
-> `learn-docs` session, after compaction Mechanism A re-renders the borrowed `stage:plan` and injects
-> `perk-plan` rather than `perk-learn-docs` — benign (learn-docs *is* a planning factory); a
-> pre-existing stage-vs-command `binding_trigger` quirk. Deferred: `doctor` target-existence
-> validation → **Node 3.1**; `init` `[[bindings]]` template + user docs → **Node 3.2**.
-
-> **Status (Node 3.2):** the `init` `[[bindings]]` commented template + user docs landed, resolving
-> the deferral above. `PERK_TOML_TEMPLATE` now seeds a comment-only `[[bindings]]` block documenting
-> `trigger` / `skill` / `mode` and the nudge-vs-transclude choice; `PERK_LOCAL_TOML_TEMPLATE` records
-> the whole-array-replace override rule. README gains a `## Skill bindings` user section. The seeded
-> block is inert (comment-only) — a fresh repo still resolves to zero user bindings and `doctor`
-> stays exit-0 (pinned by a `tests/test_config.py` regression).
-
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
@@ -1863,18 +1839,18 @@ planAdapterTombell`) is a real, selectable plan provider (Node 2.3); `juicesharp
 (→ `npm:@juicesharp/rpiv-todo`, `adapter: todoAdapterJuicesharp`) is now a real, selectable **todo**
 provider (Node 3.2) — neither is illustrative any longer. **Both seams are behavior-complete:** the
 **plan** seam (perk vacates its surface at registration time + the adapter bridges the foreign one —
-see the Node 2.3 status note) and the **todo** seam (perk's `checkpoints` **defers at runtime** under
+see the Node 2.3 status note in contracts-history.md §8.10) and the **todo** seam (perk's `checkpoints` **defers at runtime** under
 a foreign `[providers] todo` selection — Node 3.1 — with **no** registration-time vacating, because
 the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
-progress discipline onto the foreign overlay — see the Node 3.2 status note). The **askuser** seam is an **interface seam** — see the askuser status
-note below. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
+progress discipline onto the foreign overlay — see the Node 3.2 status note in contracts-history.md §8.10). The **askuser** seam is an **interface seam** — see the askuser status
+note in [`contracts-history.md`](./contracts-history.md) §8.10. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
 `default: true`) plus two **real** foreign footer providers `powerline-footer` (→ `npm:pi-powerline-footer`)
 and `pi-bar-footer` (→ `npm:pi-bar`) make the **footer** seam a **second interface seam** (vacate-only,
-`adapter: null`) — see the footer status note below. A fifth reference entry `pi-web-access` (seam
+`adapter: null`) — see the footer status note in contracts-history.md §8.10. A fifth reference entry `pi-web-access` (seam
 `web`, **`package: "npm:pi-web-access"`** — the first non-null-package default — / `adapter: null` /
 `default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
 and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam a **third interface
-seam** (vacate-only, `adapter: null`) — see the web status note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
+seam** (vacate-only, `adapter: null`) — see the web status note in contracts-history.md §8.10. The **default** path (the reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -1908,7 +1884,7 @@ falls back to the default and records a **loud-but-non-fatal** `Issue`.
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
 `npm:pi-subagents`) layer within the same `_converge_settings` body — `npm:pi-web-access` is **no
 longer borrowed** (#529): it is the `web` seam's `default: true` provider, converged via the
-provider path (see the web status note), so a default repo still installs it but deselecting `web`
+provider path (see the web status note in contracts-history.md §8.10), so a default repo still installs it but deselecting `web`
 removes it like any provider package —
 so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
 dry-runs/fixes it for free). The **whole supported set** gives the *provider-managed identity set*
@@ -1960,142 +1936,6 @@ up by hand). A malformed-TOML error defers to the config check (treated as empty
 `_converge_provider_packages`). perk's headless worker (`compaction: { enabled: false }`) and the
 objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
 
-> **Status (Node 2.1):** ships the selection **substrate** only — `shared/providers.yaml`, the two
-> shape-only loaders + the pure resolver, the `[providers]` config-reading in both planes, the
-> two-directional `init` wiring, and the `doctor` selection cross-check. The concrete adapter shims
-> (`planAdapterTombell`, `todoAdapterJuicesharp`) are **Nodes 2.3 / 3.2**; the read-only tool-gate
-> (`extension/substrate/toolGating.ts`, Invariant 1) is untouched.
->
-> **Status (Node 2.2):** lands the TS resolver (`resolveProviders`) and the **plan-seam runtime
-> deferral** — perk's `planMode` authoring surface (`/plan`, `Ctrl+Alt+P`, `--plan`, the
-> `perk:plan-context` injection) steps aside when the resolved `[providers] plan` ≠ `perk-plan`
-> (fail-safe to the reference). `savePlan`/`plan_save`/`/plan-save`/the read-only gate are
-> seam-shared substrate — always-registered, the produced-contract landing the Node 2.3 adapter
-> bridges to — and do **not** defer. The **todo**-seam deferral (`checkpoints`) is still **Node 3.1**.
->
-> **Status (Node 3.1):** lands the **todo-seam runtime deferral** — perk's `checkpoints` reference
-> surface (`session_start`/`session_tree`/`turn_end` render + the `/checkpoints` command) steps
-> aside when the resolved `[providers] todo` ≠ `perk-checkpoints` (`resolvedTodoProviderId` /
-> `isPerkCheckpointsReferenceSelected`, fail-safe to the reference) — the exact todo-seam mirror of
-> the Node 2.2 plan-seam deferral: silent early-returns on the event handlers, an announced deferral
-> on `/checkpoints`. The pure checkpoint helpers + the `perk:checkpoint` entry + `## Steps` seeding
-> are seam-shared substrate (untouched). **Runtime** deferral only — the concrete
-> `@juicesharp/rpiv-todo` adapter is **Node 3.2** (which, per Correction 1 below, adds **no**
-> registration-time vacating: the todo seam has no command-name collision, so runtime deferral is
-> already sufficient — the forward-assumption here that registration-time vacating would be needed
-> turned out not to transfer from the plan seam).
->
-> **Status (Node 2.3):** the **first 3rd-party plan adapter** lands `tombell-plan` as a real,
-> selectable plan provider. (1) The shipped entry drops `package_filter` (the illustrative
-> `extensions/*.ts` matched nothing — `@tombell/pi-plan`'s sole extension is its root `index.ts`,
-> so omitting the filter loads exactly that one extension); the `package_filter` field stays in the
-> vocabulary for future providers. (2) perk's plan surface now **vacates at REGISTRATION time** (not
-> just handler-time): `registerPlanMode` resolves the plan provider once at factory time and, under a
-> foreign selection, registers NONE of `/plan` / `Ctrl+Alt+P` / `--plan` / the injection — so the
-> foreign surfaces are the sole registrants (Pi suffixes duplicate command names, so handler-time
-> deferral alone is insufficient once the foreign package is loaded). Fail-safe to the reference
-> registers everything. (3) The new `extension/adapters/planAdapterTombell.ts` shim is an **injection-only**
-> bridge — always registered, inert unless `[providers] plan = "tombell-plan"`, injecting a hidden
-> `perk:plan-adapter-tombell` context that directs the foreign free-form prose `/plan` output into
-> perk's canonical save. The prose→plan-ref bridge **reuses the existing** `/plan-save`
-> `extractPlanMarkdown` scrape (planSave.ts); no new save machinery. The shim **never** owns or
-> duplicates the read-only gate and **never** calls `setActiveTools` (Invariant 1 — the gate stays
-> perk's, engaged by the cold-door launch; the foreign package self-enforces ad-hoc). (4) The adapter
-> does **NOT** restamp `cache.plan-ref.provider` — a tombell-authored prose plan lands with
-> `provider="github"` exactly like a perk-authored plan; the authoring-provider id lives only in the
-> `[providers] plan` selection, and all downstream stages bind only to the provider-agnostic
-> plan-ref (unchanged).
->
-> **Status (Node 2.6):** the tombell bridge context is **re-aimed to review-first**
-> (`plan_draft` → `plan_review` → the first-party in-TUI review → `approvalSave` auto-save), with
-> the present + `/plan-save` flow as its explicit fail-open arm (see §8.10's interactive save
-> discipline). The injection is now **conditioned** — it fires only when perk's gate is read-only
-> (per the persisted `perk:workflow-state.mode`) **or** tombell's own persisted `plan-mode-state`
-> entry has `enabled: true` (latest wins), and never in an objective-author session — replacing
-> Node 2.3's unconditional-on-selection injection.
->
-> **Status (Node 3.2):** the **first 3rd-party todo adapter** lands `juicesharp-todo` as a real,
-> selectable todo provider (no longer illustrative); the todo seam is **behavior-complete**. (1) The
-> shipped entry carries no `package_filter` (single-concern checklist overlay — mirrors the tombell
-> case). (2) **NO registration-time vacating** (an explicit deviation from the Node 3.1
-> forward-assumption): the plan seam needed it only because perk and `@tombell/pi-plan` both register
-> `/plan` (Pi suffixes duplicate names); the todo seam has **no command-name collision** — perk
-> registers `/checkpoints`, the foreign overlay registers its own differently-named command(s) — so
-> Node 3.1's runtime deferral is already sufficient. (3) The new
-> `extension/adapters/todoAdapterJuicesharp.ts` shim is an **injection-only**, **active-workflow-gated**
-> (`active_plan_ref != null`) bridge — always registered, inert unless `[providers] todo =
-> "juicesharp-todo"`, injecting a hidden `perk:todo-adapter-juicesharp` context that carries perk's
-> implement-progress **discipline** (seed from `## Steps`, mark each item complete in order) onto the
-> foreign overlay. (4) It does **NOT** write `perk:checkpoint` or revive the deferred marker scanner
-> (Correction 2): that entry is a transient TS-only overlay nothing downstream consumes, and perk's
-> render + scanner are already deferred (Node 3.1), so re-populating it would be dead duplication —
-> the lighter bridge the todo seam's lack of a downstream consumer permits. The shim **never** owns
-> the read-only gate, **never** `setActiveTools`, and **never** restamps any provider field.
-> Validation record: `docs/design/provider-smoke-juicesharp-todo.md`.
->
-> **Status (plannotator-plan):** the **second 3rd-party plan adapter** lands `plannotator-plan`
-> (→ `npm:@plannotator/pi-extension`, `adapter: planAdapterPlannotator`) — the first provider with
-> the **AUGMENT posture** (contrast tombell's REPLACE posture). (1) Plannotator does **not** replace
-> perk's plan surface: perk's `/plan` command, the `perk:plan-context` authoring injection, and the
-> read-only gate **stay registered**; `registerPlanMode` is now a **three-tier** branch — full
-> registration for `perk-plan` (and the fail-safe error path), a **partial vacate** under
-> `plannotator-plan` (skip only the `--plan` flag + the `Ctrl+Alt+P` shortcut + the `--plan`
-> session_start handler — the two real registration collisions; duplicate flag/shortcut
-> registration is the potentially-fatal Pi behavior), and the full vacate for any other foreign id
-> (tombell, unchanged). (2) **`plan_review` is the backend-neutral review door** (Node 2.5,
-> `extension/factories/planReview.ts`): the `plan` param is **optional/fallback** — the reviewed plan
-> resolves **file-first** via `resolvePlanSource` (the validated `plan-draft.md` artifact → the
-> param; the **transcript tier is explicitly excluded from review** — no draft + no param
-> soft-skips with `reason: "no_plan"` and a `plan_draft` redirect, since an approval would
-> otherwise auto-save scraped conversation bytes). **Dispatch:** when `plannotator-plan` is
-> selected the door runs the **event-bus bridge** (`createPlannotatorBridge`, kept in
-> `extension/adapters/planAdapterPlannotator.ts`): it emits plannotator's published `plannotator:request`
-> plan-review envelope on the in-process `pi.events` bus (pinned against
-> `@plannotator/pi-extension@0.20.0`), awaits the in-payload `respond` handshake bounded at 5s,
-> then awaits the human decision on `plannotator:review-result` (no decision timeout; honors the
-> turn-abort signal). On **ANY other selection** (perk-plan, tombell, unknown ids) the door runs
-> the **first-party in-TUI editor review** (`runFirstPartyReview`): the plan is displayed in pi's
-> built-in `ctx.ui.editor` dialog (scrollable; Ctrl+G opens the user's external `$EDITOR`); a
-> non-blank human edit differing from the displayed plan is **written back to the draft via
-> `writePlanDraft` BEFORE the verdict** (reviewed bytes == artifact bytes == saved bytes — a
-> failed write-back **aborts the review fail-open** with a loud `unavailable` warning, nothing
-> saved); then a 3-option approve/deny/skip `ctx.ui.select` verdict, with optional deny feedback
-> via a second editor dialog. **Esc anywhere = fail-open skip** (`reason: "dismissed"`,
-> mirroring `ask_user_question`'s dismissal — deny is always explicit); `ctx.ui.editor` takes no
-> AbortSignal, so `signal?.aborted` is checked between dialogs (the aborted arm wins over an
-> in-flight dialog's result). An **APPROVED** decision (either backend) wires into the
-> **`approvalSave` seam** (auto-save → D1a gate exit on success → a **terminating** result; on
-> the first-party path the saved bytes carry any write-back edits and the result flags
-> `edited: true`; the objective node link is recovered from the `objective_node_claim` carrier
-> inside `savePlan`; a failed save is non-terminating, leaves the gate read-only, and directs
-> the human `/plan-save` failsafe). A human **DENY** is strict: feedback returned with a
-> directive to rewrite the working draft via `plan_draft` + re-review. **The objective-author
-> arm (#352 Node 2.2):** in an objective-author session the door routes to
-> `executeObjectiveReview` — the review subject is the **rendered objective draft** (§8.1's
-> `readObjectiveDraft` + `renderObjectiveDraft`; the `plan` param is decoded first — a mistyped
-> param still `bad_input` — but never a source), dispatched to the same backends; the
-> first-party editor runs **view-only** (edits are never written back — deny+feedback is the
-> change channel) with objective verdict labels. An **APPROVED** outcome (#352 Node 2.3) wires
-> into the **`objectiveApprovalSave` seam** (the structured artifact is re-read at save time —
-> never the rendered bytes → `saveObjective` → D1a gate exit on success): a successful save is a
-> **terminating** result (`details.subject: "objective"`, `saved: true`, `gateExited`,
-> `terminate: true`); a failed save is non-terminating, leaves the gate read-only, and directs
-> the human `/objective-save` failsafe.
-> **Fail-open semantics:** headless (`!ctx.hasUI`) / dismissed / handshake-timeout /
-> `unavailable` / `error` all **soft-skip** with a result instructing the model to present the
-> plan to the user directly — plan authoring never wedges. `plan_review` is in
-> `READ_ONLY_TOOLS` so review happens **inside** plan mode, before the gate ever comes off.
-> (3) The plannotator adapter shim is **injection-only again** (Node 2.5): it owns the hidden
-> `perk:plan-adapter-plannotator` context (gate-active AND selected; **two content flavors, one
-> customType** — the plan bridge context, or `OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT` in an
-> objective-author session, whose marker `[OBJECTIVE ADAPTER: PLANNOTATOR]` the strip handler
-> also covers)
-> plus the bridge core, and otherwise keeps the standard adapter hygiene: never
-> `setActiveTools`, never a `tool_call` handler, never restamps `cache.plan-ref.provider` (stays
-> `"github"`); the door composes the gate and the save **only** through the `approvalSave` seam
-> (never owns the gate, never writes GitHub itself). The catalog entry carries no
-> `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
->
 > **Interactive save discipline (as of Node 2.5 the present + `/plan-save` flow is
 > FALLBACK-ONLY on every interactive path — perk-plan included):** the prior
 > `PLAN_AUTHORING_CONTEXT` ending ("disable plan mode (/plan off), then call the plan_save
@@ -2122,89 +1962,6 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > **learn-docs and replan**; **objective-plan** is review-first as of #352 Node 3.1 — the
 > approval-driven save recovers the node link from the `objective_node_claim` carrier, with
 > `plan_save`-with-both-ids demoted to the manual failsafe.
->
-> **Status (askuser — the third seam, an INTERFACE seam):** a third seam, **`askuser`**, lets a repo
-> swap perk's first-party `ask_user_question` tool (`extension/doors/askUser.ts`) for the foreign
-> `@juicesharp/rpiv-ask-user-question` extension, which registers a tool with the **identical name**
-> `ask_user_question` (a richer multi-question dialog). (1) **Interface seam, not artifact seam:**
-> ask-user produces **no** durable state key or session-entry vocabulary (no `cache.plan-ref` /
-> `perk:checkpoint` analogue); its stable contract is the **tool name `ask_user_question` + its
-> non-terminating-answer semantics**. (2) **Vacate-only adapter** (`adapter: null` in
-> `providers.yaml`, **no shim module**, no injected context): the foreign tool self-documents via
-> its own `promptGuidelines`, so there is nothing to bridge. (3) **Registration-time vacating** in
-> `registerAskUser` (mirroring the plan seam's `registerPlanMode`): because the foreign tool shares
-> the **exact** name `ask_user_question` and tools — unlike commands — are **not** `:N`-suffixed
-> (they replace/warn by extension load order, non-deterministically), `registerAskUser` resolves the
-> provider id once at factory time (`resolvedAskUserProviderId(process.cwd())`, fail-safe to
-> `perk-ask-user`) and **early-returns before `pi.registerTool`** under any foreign selection,
-> leaving exactly one `ask_user_question` standing. The default/fail-safe path registers exactly as
-> before (zero behavior change). (4) The foreign package is **two-directionally** wired by
-> `_converge_provider_packages` (installed only when selected, removed on deselect), so under the
-> default the foreign package is never loaded and perk's tool is the sole registrant. (5) **No
-> `READ_ONLY_TOOLS` / `SDK_READ_ONLY_TOOLS` change:** `ask_user_question` is already in
-> `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`), so the foreign same-named tool is
-> allowlisted in read-only/plan mode automatically (the shared-name allowlist precedent); the
-> read-only notice interpolates `READ_ONLY_TOOLS` so it self-updates. `SDK_READ_ONLY_TOOLS`
-> (`extension/worker/readOnlySession.ts`) intentionally does **not** include `ask_user_question`
-> (headless children never prompt a human) — unchanged. Catalog entry carries no `package_filter`
-> (verified manifest `{"extensions": ["./index.ts"]}`). Validation record:
-> `docs/design/provider-smoke-juicesharp-ask-user.md`.
-
-> **Status (footer — the fourth seam, a SECOND INTERFACE seam):** a fourth seam, **`footer`**, lets a
-> repo swap perk's own footer (`installPerkFooter`, `extension/surfaces/surfaces.ts`) for a foreign
-> footer package — either `powerline-footer` (→ `npm:pi-powerline-footer`) or `pi-bar-footer`
-> (→ `npm:pi-bar`). (1) **Interface seam, not artifact seam** (mirrors askuser): the footer produces
-> **no** durable state key or session-entry vocabulary; its “contract” is purely the rendered footer
-> surface. (2) **Vacate-only adapter** (`adapter: null` for **both** foreign entries, **no shim
-> module**, no injected context): both foreign footers already **render extension statuses**, so
-> perk's composed `perk` `setStatus` slot (the objective + checkpoints segments, published
-> unconditionally by `createPerkStatus`/`checkpoints.ts` independent of footer ownership) appears in
-> the foreign footer automatically — the bridge is automatic, there is nothing to shim. (3)
-> **Install-site (runtime) vacating, NOT registration-time vacating** (the key divergence from
-> askuser/plan): perk installs its footer inside the `session_start` event handler (not at
-> factory-bind), so the natural mechanism is a **runtime guard at that single install site, keyed off
-> `ctx.cwd`** — `index.ts` calls `installPerkFooter` only when
-> `isPerkFooterReferenceSelected(ctx.cwd)` (`extension/surfaces/footerProvider.ts`,
-> `resolvedFooterProviderId` fail-safe to `perk-footer`). The easier tier: `ctx.cwd` flows through the
-> event, so tests need no `process.chdir`. (4) The foreign package is **two-directionally** wired by
-> `_converge_provider_packages` (installed only when selected, removed on deselect), so under the
-> default (`perk-footer`) the foreign package is never loaded and perk owns the footer exactly as
-> before (zero behavior change — the hard guarantee). (5) **No `surfaces.ts` change:** `perkFooter` /
-> `installPerkFooter` stay the reference footer; the only change is whether `index.ts` calls it.
-> Catalog entries carry no `package_filter` (each package ships a single footer extension).
-
-> **Status (web — the fifth seam, a THIRD INTERFACE seam with a NOVEL foreign default):** a fifth
-> seam, **`web`**, lets a repo swap its web-research provider among three packages: `pi-web-access`
-> (the **default** — zero-config Exa search + content fetch + the bundled `librarian` skill,
-> exactly today's behavior), `ollama-web-search` (→ `npm:@ollama/pi-web-search`, needs a local
-> Ollama daemon) and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`, needs an API key;
-> default provider Brave; registers a `/web-tools` command — no perk collision). (1) **Interface
-> seam, not artifact seam** (mirrors askuser/footer): web produces **no** durable state key or
-> session-entry vocabulary; its “contract” is the loose “web search + fetch capability is
-> available”. (2) **The NOVEL property — the first non-null-package default:** perk owns **no**
-> native web implementation, so the behavior-preserving reference (`pi-web-access`) is itself a
-> **foreign npm package** — its `default: true` entry carries a **non-null `package`** (every prior
-> seam's default was `package: null`). This needs **no** substrate change: `_converge_provider_packages`
-> already builds `desired` from every resolved provider's truthy `package` and the managed-identity
-> set from every non-null `package`, and `validate()` enforces only exactly-one-default-per-seam
-> (it never required a default to be `package: null`). (3) **Vacate-only adapter** (`adapter: null`
-> for **all three** entries, **no shim module**, no injected context) with **no surface to vacate**
-> at all: perk registers **no** web tools of its own, so unlike askuser (registration-time vacating)
-> or footer (install-site vacating) there is **nothing** to step aside — selection simply **swaps**
-> which web package `_converge_provider_packages` installs. The entire seam is Python convergence +
-> the census widening + the read-only allowlist. (4) **Static union allowlist, no normalization:**
-> the three packages expose **divergent** tool names (`web_search`/`code_search`/`fetch_content`/
-> `get_search_content` vs `ollama_web_search`/`ollama_web_fetch` vs `web_search`/`web_fetch`), and
-> perk does **not** normalize them — `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) carries
-> the **union** of all known web tool names, inert when a package is absent (the shared-name
-> allowlist precedent). `SDK_READ_ONLY_TOOLS` (`extension/worker/readOnlySession.ts`) intentionally
-> omits them (headless children) — unchanged. (5) The foreign package is **two-directionally** wired
-> by `_converge_provider_packages` (installed only when selected, removed on deselect); under the
-> default the committed `npm:pi-web-access` entry stays installed (now **provider-managed**, no
-> longer in `BORROWED_PACKAGES`). (6) **`librarian` is accepted as lost under a foreign web
-> selection** — it is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path),
-> documented and not re-homed. Catalog entries carry no `package_filter` (each package's sole
-> extension is its root `./index.ts`, verified via `npm view <pkg> pi`).
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 
@@ -3171,8 +2928,9 @@ there is no TS twin).
 
 A consolidation-by-reference of the file-first plan pipeline Phase 1–2 of Objective #339 built.
 The normative detail lives in §8.1 ("File-first plan save" + the `plan_draft` carve-out), §8.3
-(the `approvalSave` seam + the warm claim carrier), and §8.10 (the plannotator/Node 2.5/2.6 Status
-blocks + the interactive save discipline); this section is the one-stop current shape.
+(the `approvalSave` seam + the warm claim carrier), and §8.10 (the interactive save discipline) —
+with the plannotator/Node 2.5/2.6 Status blocks in contracts-history.md §8.10; this section is the
+one-stop current shape.
 
 - **The artifact.** The working plan lives in the session data dir as `plan-draft.md`
   (`PLAN_DRAFT_ARTIFACT`, `extension/factories/planDraft.ts`), written **only** by the `plan_draft` tool
