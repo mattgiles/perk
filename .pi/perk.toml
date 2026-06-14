@@ -66,3 +66,5 @@ over asking when a question is answerable from the code.
 
 [providers]
 plan = "plannotator-plan"
+askuser = "juicesharp-ask-user"
+todo = "juicesharp-todo"
