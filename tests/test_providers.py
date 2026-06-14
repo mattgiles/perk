@@ -38,11 +38,16 @@ providers:
     package: null
     adapter: null
     default: true
+  - id: perk-footer
+    seam: footer
+    package: null
+    adapter: null
+    default: true
 """
 
 
-def test_seams_tuple_includes_askuser():
-    assert SEAMS == ("plan", "todo", "askuser")
+def test_seams_tuple_includes_askuser_and_footer():
+    assert SEAMS == ("plan", "todo", "askuser", "footer")
 
 
 def _write(tmp_path, text):
@@ -67,11 +72,30 @@ def test_real_providers_load_the_entries():
         "perk-plan",
         "perk-checkpoints",
         "perk-ask-user",
+        "perk-footer",
         "tombell-plan",
         "plannotator-plan",
         "juicesharp-todo",
         "juicesharp-ask-user",
+        "powerline-footer",
+        "pi-bar-footer",
     }
+    # footer reference: perk's own footer (behavior-preserving default, no package/adapter).
+    foot = by_id["perk-footer"]
+    assert (foot.seam, foot.package, foot.adapter, foot.default) == ("footer", None, None, True)
+    # powerline-footer / pi-bar-footer: VACATE-ONLY interface seam (adapter null, no filter).
+    powerline = by_id["powerline-footer"]
+    assert powerline.seam == "footer"
+    assert powerline.package == "npm:pi-powerline-footer"
+    assert powerline.adapter is None
+    assert powerline.default is False
+    assert powerline.package_filter is None
+    pi_bar = by_id["pi-bar-footer"]
+    assert pi_bar.seam == "footer"
+    assert pi_bar.package == "npm:pi-bar"
+    assert pi_bar.adapter is None
+    assert pi_bar.default is False
+    assert pi_bar.package_filter is None
     # askuser reference: perk's own tool (behavior-preserving default, no package/adapter).
     ask = by_id["perk-ask-user"]
     assert (ask.seam, ask.package, ask.adapter, ask.default) == ("askuser", None, None, True)
@@ -120,9 +144,11 @@ def test_default_for_returns_the_seam_default():
     plan = providers.default_for("plan")
     todo = providers.default_for("todo")
     askuser = providers.default_for("askuser")
+    footer = providers.default_for("footer")
     assert plan is not None and plan.id == "perk-plan"
     assert todo is not None and todo.id == "perk-checkpoints"
     assert askuser is not None and askuser.id == "perk-ask-user"
+    assert footer is not None and footer.id == "perk-footer"
 
 
 def test_unsupported_schema_version_raises(tmp_path):
@@ -183,7 +209,23 @@ def test_resolve_absent_keys_fall_back_to_defaults_silently():
     assert resolved.plan.id == "perk-plan"
     assert resolved.todo.id == "perk-checkpoints"
     assert resolved.askuser.id == "perk-ask-user"
+    assert resolved.footer.id == "perk-footer"
     assert resolved.issues == []
+
+
+def test_resolve_footer_selection():
+    # default → perk-footer silently; foreign selected → resolves; wrong-seam → fallback + issue.
+    assert resolve_providers({"footer": "pi-bar-footer"}, _set()).footer.id == "pi-bar-footer"
+    assert resolve_providers({"footer": "powerline-footer"}, _set()).footer.id == (
+        "powerline-footer"
+    )
+    mismatch = resolve_providers({"footer": "perk-plan"}, _set())
+    assert mismatch.footer.id == "perk-footer"
+    assert len(mismatch.issues) == 1
+    assert "is a `plan` provider, not `footer`" in mismatch.issues[0].message
+    unknown = resolve_providers({"footer": "ghost"}, _set())
+    assert unknown.footer.id == "perk-footer"
+    assert len(unknown.issues) == 1
 
 
 def test_resolve_askuser_selection():

@@ -15,7 +15,7 @@
 # Vocabulary — each provider entry:
 #   id      — the stable provider id; for the `plan` seam it is exactly the
 #             cache.plan-ref `provider` string (provider-contract.md dimension 1).
-#   seam    — `plan` | `todo` | `askuser` (the three seams pluggability-taxonomy.md scope-fenced).
+#   seam    — `plan` | `todo` | `askuser` | `footer` (the four seams pluggability-taxonomy.md scope-fenced).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
 #             provider (nothing to add — perk produces the contract natively).
@@ -56,6 +56,17 @@
 # foreign askuser selection perk's `registerAskUser` registers NOTHING at REGISTRATION time,
 # leaving exactly one `ask_user_question` standing. Under the default (`perk-ask-user`) the foreign
 # package is never installed, so perk's tool is the sole registrant.
+#
+# The FOOTER seam is the SECOND INTERFACE seam (no durable artifact to bridge), mirroring askuser
+# but with INSTALL-SITE (runtime) vacating rather than registration-time vacating: perk installs
+# its own footer (`installPerkFooter`) inside the `session_start` event handler, so under a foreign
+# `[providers] footer` selection perk simply does NOT call `installPerkFooter` (a runtime guard at
+# that single install site, keyed off `ctx.cwd`), leaving the foreign footer (`pi-powerline-footer`
+# or `pi-bar`) as the sole footer surface. `adapter: null`, no shim: perk's objective/checkpoints
+# progress reaches the foreign footer automatically via the already-publishing composed `perk`
+# `setStatus` slot (both foreign footers render extension statuses), so the bridge is automatic.
+# Fail-safe: any config-read error resolves to the reference id → perk installs its footer (the
+# default path is the hard zero-change guarantee).
 
 schema_version: 1
 
@@ -118,3 +129,23 @@ providers:
     # No `package_filter`: the verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
     # filter ("load all of that type") loads exactly that one extension — the same reasoning as the
     # tombell-plan / juicesharp-todo entries.
+  - id: perk-footer          # perk's own footer (extension/surfaces/surfaces.ts installPerkFooter)
+    seam: footer
+    package: null
+    adapter: null
+    default: true            # the behavior-preserving no-config pick for the footer seam
+  - id: powerline-footer     # REAL footer provider — VACATE-ONLY (interface seam, no adapter)
+    seam: footer
+    package: "npm:pi-powerline-footer"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: the footer produces no durable artifact (interface seam),
+                             # and pi-powerline-footer already renders perk's `perk` setStatus slot in
+                             # its extension_statuses segment, so the bridge is automatic (no shim).
+    default: false
+    # No `package_filter`: load the package's sole footer extension ("load all of that type").
+  - id: pi-bar-footer        # REAL footer provider — VACATE-ONLY (interface seam, no adapter)
+    seam: footer
+    package: "npm:pi-bar"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: pi-bar replaces pi's footer and "keeps extension statuses
+                             # visible", so perk's `perk` setStatus slot appears automatically — no shim.
+    default: false
+    # No `package_filter`: load the package's sole footer extension ("load all of that type").

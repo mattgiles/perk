@@ -613,9 +613,12 @@ width-truncated via pi-tui's `truncateToWidth` (D9). `/checkpoints` notifies a *
 current). **Accepted RPC caveat:** pi drops component-factory widgets in RPC mode (only string
 arrays forward), so the checkpoints widget is invisible to RPC clients — the status (now arriving
 under the composed slot `perk`) and `/checkpoints` remain the RPC-visible surfaces. **Footer
-ownership (node 3.1, charter D2):** in TUI mode perk **owns the footer wholesale** via
+ownership (node 3.1, charter D2):** in TUI mode perk **owns the footer by default** via
 `ctx.ui.setFooter` (`surfaces.ts perkFooter`/`installPerkFooter` — installed once per session on
-`session_start`, headful only): one line composing, in charter order, perk identity
+`session_start`, headful only) — **unless** a foreign `[providers] footer` provider is selected, in
+which case perk **vacates `installPerkFooter`** (install-site runtime vacating keyed off `ctx.cwd`,
+fail-safe to install; see §8.10's footer interface-seam note) and the foreign footer is the sole
+footer surface. perk's default-owned footer composes one line, in charter order, perk identity
 (`perk v<version>`), the 🎯 objective segment, the 📋 checkpoints segment (left group), then git
 branch, model, context usage (`<pct>%/<window>`, warning >70 / error >90), and guest extension
 statuses (right-aligned), with the extended D9 drop order on overflow (guests → model → branch →
@@ -638,8 +641,10 @@ UI); `/checkpoints` lists progress (notify when UI, else stderr). State key: a t
 P2.T12 (removed from `init.py`'s `BORROWED_PACKAGES` and `.pi/settings.json`): perk now owns the
 implement-progress overlay via this perk-owned `perk:checkpoint` seam. `@tombell/pi-status` is
 likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single last-wins slot, and
-pi-status's `session_start` footer install replaced perk's footer — borrowed packages must not own
-the footer.
+pi-status's `session_start` footer install replaced perk's footer — a *borrowed* package must never
+own the footer. (Distinct from a *selected* `footer` provider, which legitimately does: the footer
+seam is the sanctioned way to hand the footer to a foreign package — perk vacates `installPerkFooter`
+so there is no last-wins clobber. See §8.10's footer interface-seam note.)
 
 **Rejected `@juicesharp/rpiv-todo` ideas (deliberate non-adoptions).** A survey of rpiv-todo's
 model-driven todo design against perk's passive, plan-derived, linear checkpoints (see
@@ -1950,14 +1955,14 @@ dangling-pointer warning, which stays a last-resort signal).
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
-and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser *providers* perk
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer *providers* perk
 knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
-(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, issues }`
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
@@ -1967,7 +1972,7 @@ default).
 
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
 stable provider id (for the `plan` seam, exactly the `cache.plan-ref` `provider` string); `seam ∈
-{plan, todo, askuser}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+{plan, todo, askuser, footer}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
 (`null` for perk's own bundled reference provider — nothing to add); `adapter` is the perk-owned
 shim module bridging a foreign surface to the artifact boundary (`null` for the reference
 provider); `default` is a bool — **exactly one `true` per seam**, the behavior-preserving no-config
@@ -1987,7 +1992,10 @@ see the Node 2.3 status note) and the **todo** seam (perk's `checkpoints` **defe
 a foreign `[providers] todo` selection — Node 3.1 — with **no** registration-time vacating, because
 the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
 progress discipline onto the foreign overlay — see the Node 3.2 status note). The **askuser** seam is an **interface seam** — see the askuser status
-note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
+note below. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
+`default: true`) plus two **real** foreign footer providers `powerline-footer` (→ `npm:pi-powerline-footer`)
+and `pi-bar-footer` (→ `npm:pi-bar`) make the **footer** seam a **second interface seam** (vacate-only,
+`adapter: null`) — see the footer status note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -2001,12 +2009,12 @@ untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
-`seam ∈ {plan, todo, askuser}`, and that **exactly one `default: true`** exists per seam. They do **not**
+`seam ∈ {plan, todo, askuser, footer}`, and that **exactly one `default: true`** exists per seam. They do **not**
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
 **The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
-one key per seam (`plan` / `todo` / `askuser`), values are **bare provider-id strings** (the TS narrow-TOML
+one key per seam (`plan` / `todo` / `askuser` / `footer`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
@@ -2014,7 +2022,7 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 `default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
-askuser, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+askuser, footer, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
@@ -2260,6 +2268,29 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > (headless children never prompt a human) — unchanged. Catalog entry carries no `package_filter`
 > (verified manifest `{"extensions": ["./index.ts"]}`). Validation record:
 > `docs/design/provider-smoke-juicesharp-ask-user.md`.
+
+> **Status (footer — the fourth seam, a SECOND INTERFACE seam):** a fourth seam, **`footer`**, lets a
+> repo swap perk's own footer (`installPerkFooter`, `extension/surfaces/surfaces.ts`) for a foreign
+> footer package — either `powerline-footer` (→ `npm:pi-powerline-footer`) or `pi-bar-footer`
+> (→ `npm:pi-bar`). (1) **Interface seam, not artifact seam** (mirrors askuser): the footer produces
+> **no** durable state key or session-entry vocabulary; its “contract” is purely the rendered footer
+> surface. (2) **Vacate-only adapter** (`adapter: null` for **both** foreign entries, **no shim
+> module**, no injected context): both foreign footers already **render extension statuses**, so
+> perk's composed `perk` `setStatus` slot (the objective + checkpoints segments, published
+> unconditionally by `createPerkStatus`/`checkpoints.ts` independent of footer ownership) appears in
+> the foreign footer automatically — the bridge is automatic, there is nothing to shim. (3)
+> **Install-site (runtime) vacating, NOT registration-time vacating** (the key divergence from
+> askuser/plan): perk installs its footer inside the `session_start` event handler (not at
+> factory-bind), so the natural mechanism is a **runtime guard at that single install site, keyed off
+> `ctx.cwd`** — `index.ts` calls `installPerkFooter` only when
+> `isPerkFooterReferenceSelected(ctx.cwd)` (`extension/surfaces/footerProvider.ts`,
+> `resolvedFooterProviderId` fail-safe to `perk-footer`). The easier tier: `ctx.cwd` flows through the
+> event, so tests need no `process.chdir`. (4) The foreign package is **two-directionally** wired by
+> `_converge_provider_packages` (installed only when selected, removed on deselect), so under the
+> default (`perk-footer`) the foreign package is never loaded and perk owns the footer exactly as
+> before (zero behavior change — the hard guarantee). (5) **No `surfaces.ts` change:** `perkFooter` /
+> `installPerkFooter` stay the reference footer; the only change is whether `index.ts` calls it.
+> Catalog entries carry no `package_filter` (each package ships a single footer extension).
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

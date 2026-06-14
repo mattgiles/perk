@@ -107,6 +107,7 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | `plan` | string | `perk-plan` | The plan-authoring provider. |
 | `todo` | string | `perk-checkpoints` | The checkpoint/todo provider. |
 | `askuser` | string | `perk-ask-user` | The `ask_user_question` tool provider (selectable: `juicesharp-ask-user`). |
+| `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`). |
 
 An absent key falls back to the behavior-preserving default. This is **config-key reference depth
 only**; the supported provider set, postures, and selection mechanics are in the
@@ -118,6 +119,7 @@ only**; the supported provider set, postures, and selection mechanics are in the
 plan = "perk-plan"
 todo = "perk-checkpoints"
 askuser = "perk-ask-user"
+footer = "perk-footer"
 ```
 
 ### `[issues]`

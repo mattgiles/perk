@@ -3,7 +3,7 @@
 // network). Each case has a pure-function twin in workflowState.test.ts; here we prove the wiring.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -31,6 +31,25 @@ test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () 
       readFileSync(join(workflowDir(cwd), "handoff", "01RID.json"), "utf8"),
     );
     assert.equal(handoff.consumed, true);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("footer seam: a foreign [providers] footer selection vacates installPerkFooter", async () => {
+  // Install-site (runtime) vacating: under `[providers] footer = "pi-bar-footer"` perk does NOT
+  // install its own footer (no factory captured), leaving the foreign footer as the sole surface.
+  // The default-repo case (factory installed) is proven by the `claim` test above.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[providers]\nfooter = "pi-bar-footer"\n', "utf8");
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.equal(
+      h.footerFactory(),
+      null,
+      "perk installed no footer under a foreign footer selection",
+    );
   } finally {
     h.dispose();
   }
