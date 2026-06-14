@@ -195,7 +195,10 @@ Run the project's configured CI checks and report pass/fail + failure output; ne
 
 Automated code review: spawn a fresh-context reviewer subagent that reviews the active PR and
 posts a verdict-driven outcome (actionable → an advisory COMMENT review; clean → a single 👍
-reaction). No paired tool.
+reaction). The reviewer reads adversarially and runs an explicit **plan-conformance pass** —
+verifying the diff implements what the plan called for and flagging forgotten items (and noting when
+no plan body was found) — so a clean verdict means *no actionable findings after a genuine hunt*,
+not a rubber stamp. No paired tool.
 
 ### `/learn-docs`
 
