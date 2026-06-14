@@ -1,8 +1,11 @@
-"""Sectioned root-group help (``SectionedGroup``).
+"""Sectioned help rendering for the canonical CLI taxonomy.
 
-The root ``perk --help`` renders curated sections (Stage Launchers / Command Groups /
-Setup & Health / Other / Hidden) while preserving the parenthetical alias display; subgroups
-stay flat. A drift guard walks the live root surface so the curated lists partition it cleanly.
+``SectionedGroup`` curates the root; ``SectionedAliasGroup`` sections a noun-group's folded
+launchers + workers. The root ``perk --help`` renders curated sections (Stage Launchers /
+Command Groups / Setup & Health / Other / Hidden) while preserving the parenthetical alias
+display; a noun-group with folded launchers + workers (e.g. ``objective``) sections them under
+Launchers: / Workers: / Commands: via ``SectionedAliasGroup``. A drift guard walks the live root
+surface so the curated lists partition it cleanly.
 """
 
 import click
@@ -186,7 +189,8 @@ def _kinded_group() -> SectionedAliasGroup:
 
 
 def test_sectioned_alias_group_renders_launchers_and_workers():
-    # Node 2.1 (SSOT §11.7-Q5): marked commands render under "Launchers" / "Workers".
+    # SSOT §11.7-Q5 (labels landed in node 2.1): marked commands render under "Launchers:" /
+    # "Workers:", with unmarked verbs under the catch-all "Commands:".
     result = CliRunner().invoke(_kinded_group(), ["--help"])
     assert result.exit_code == 0
     assert "Launchers:" in result.output
@@ -223,7 +227,7 @@ def test_sectioned_alias_group_omits_empty_sections():
 
 
 def test_objective_group_renders_launchers_and_workers():
-    # Node 3.1 (SSOT §11.7-Q5): the live `objective` group sections its folded launchers/workers.
+    # The live `objective` group sections its folded launchers/workers (SSOT §11.7-Q5; node 3.1).
     result = CliRunner().invoke(cli, ["objective", "--help"])
     assert result.exit_code == 0
     assert "Launchers:" in result.output

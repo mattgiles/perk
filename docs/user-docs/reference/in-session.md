@@ -8,8 +8,9 @@ in [how-to/](../how-to/index.md)) or argue a design (those belong in
 [explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
 quadrant fits the whole.
 
-The in-session surface is registered in the TypeScript extension, so — unlike the CLI reference's
-bi-directional pytest guard — these entries are **human-reviewed for accuracy** against the
+The in-session surface is registered in the TypeScript extension, so — unlike the CLI reference,
+whose shape is fenced by structural drift guards (`test_cli_parity_smoke.py` +
+`test_cli_help_sections.py`) — these entries are **human-reviewed for accuracy** against the
 extension's command and tool registrations. Accuracy is the governing virtue: each summary is a
 reference paraphrase of the registered description.
 
@@ -46,19 +47,19 @@ its model tool twin, and the cold CLI launcher.
 
 | Stage | Warm command | Model tool(s) | Cold CLI | Mode | Doors |
 | --- | --- | --- | --- | --- | --- |
-| objective-author | *(none)* | `objective_draft` | `perk objective-author` | read-only | cold-local |
-| objective-save | `/objective-save` | `objective_draft`, `objective_save` | `perk objective-save` | read-write | warm + cold-local |
-| objective-plan | `/objective-plan` | `objective_node` | `perk objective-plan` | read-only | warm + cold-local |
+| objective-author | *(none)* | `objective_draft` | `perk objective author` | read-only | cold-local |
+| objective-save | `/objective-save` | `objective_draft`, `objective_save` | `perk objective save` | read-write | warm + cold-local |
+| objective-plan | `/objective-plan` | `objective_node` | `perk objective plan` | read-only | warm + cold-local |
 | plan | `/plan` | `plan_draft`, `plan_review` | `perk plan` | read-only | warm + cold-local |
-| save | `/plan-save` | `plan_save` | `perk save` | read-write | warm + cold-local |
+| save | `/plan-save` | `plan_save` | `perk plan save` | read-write | warm + cold-local |
 | implement | *(none)* | *(none)* | `perk implement` | read-write | cold-local + **cold-remote** |
-| submit | `/submit` | `submit` | `perk submit` | read-write | warm + cold-local |
-| address | `/address` | `resolve_review_threads` | `perk address` | read-write | warm + cold-local + **cold-remote** |
-| land | `/land` | `land` | `perk land` | read-write | warm + cold-local |
+| submit | `/submit` | `submit` | `perk pr submit` | read-write | warm + cold-local |
+| address | `/address` | `resolve_review_threads` | `perk pr address` | read-write | warm + cold-local + **cold-remote** |
+| land | `/land` | `land` | `perk pr land` | read-write | warm + cold-local |
 | learn | `/learn` | `learn` | `perk learn` | read-write | warm + cold-local |
 
 Notable cells: `objective-author` has **no** warm slash command (it is reached cold via
-`perk objective-author`, or via plan-mode read-only authoring); `implement` is **cold-only**
+`perk objective author`, or via plan-mode read-only authoring); `implement` is **cold-only**
 (`warm: false`) and remote-runnable; `address` is also remote-runnable; every other stage is warm
 + cold-local only.
 
@@ -167,7 +168,7 @@ save flow). Paired tools:
   read-only write; not a save). *Non-terminating.*
 - **`objective_save`** — the canonical objective save tool. *Terminating.*
 
-The cold authoring door **`perk objective-author`** has **no** warm slash twin — objective
+The cold authoring door **`perk objective author`** has **no** warm slash twin — objective
 authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →
 `plan_review` / `objective_save`).
 

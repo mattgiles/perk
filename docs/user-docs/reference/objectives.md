@@ -30,9 +30,9 @@ A compact recap of the objective surface. Each row links to its authoritative en
 
 | Surface | What it does |
 | --- | --- |
-| [`perk objective-author`](./cli.md#perk-objective-author-alias-oauthor) (`oauthor`) | Draft a new objective + roadmap in a read-only session. |
-| [`perk objective-save`](./cli.md#perk-objective-save) | Persist the drafted objective to GitHub (read-only → read-write boundary). |
-| [`perk objective-plan`](./cli.md#perk-objective-plan-number-alias-oplan) (`oplan`) | Select the next node and author a bounded plan. |
+| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective + roadmap in a read-only session. |
+| [`perk objective save`](./cli.md#perk-objective-save) | Persist the drafted objective to GitHub (read-only → read-write boundary). |
+| [`perk objective plan`](./cli.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
 | [`perk objective show`](./cli.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
 | [`perk objective node`](./cli.md#perk-objective-node-number) | Update one node (explicit-status-only). |
 | [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite the Reconcilable prose region against the merged diff. |
@@ -43,7 +43,7 @@ A compact recap of the objective surface. Each row links to its authoritative en
 | [`/objective-reconcile`](./in-session.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
 | [`/objective-save`](./in-session.md#objective-save) + `objective_draft` / `objective_save` | Draft and save an objective in-session. |
 
-`perk objective-author` has **no** warm slash twin — objective authoring is reached cold, or via
+`perk objective author` has **no** warm slash twin — objective authoring is reached cold, or via
 plan-mode read-only authoring.
 
 ## The roadmap node schema

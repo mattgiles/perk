@@ -51,10 +51,10 @@ see it there for the detail. Run the rest of this tutorial from inside the
 Author the objective — the long-running goal perk will generate plans from:
 
 ```bash
-perk objective-author
+perk objective author
 ```
 
-(`oauthor` is the short alias.) This opens an interactive `pi` session in **read-only
+This opens an interactive `pi` session in **read-only
 authoring mode** — the objective mirror of `perk plan`. The agent can explore the repo but
 not edit it. Type one short request:
 
@@ -92,10 +92,10 @@ Objective #<N>: Build a small arithmetic module in calc.py
 Plan the first node of the objective:
 
 ```bash
-perk objective-plan <N>
+perk objective plan <N>
 ```
 
-(`oplan` is the short alias; `<N>` is the objective issue number from Step 2.) perk selects
+(`<N>` is the objective issue number from Step 2.) perk selects
 the next actionable node — `1.1` — and opens a **read-only plan session** scoped to just that
 node, not the whole objective. Type one short request:
 
@@ -190,7 +190,7 @@ You authored an **objective** with a 2-node roadmap, drove its first node throug
 plan to a merged PR, and watched perk **auto-mark the node done** and **reconcile the roadmap**
 against what was actually built — all without an explicit "advance" or "reconcile" command.
 
-The loop repeats: run `perk objective-plan <N>` again to plan node `1.2` (add `multiply()` and
+The loop repeats: run `perk objective plan <N>` again to plan node `1.2` (add `multiply()` and
 `divide()`), and the same spine — implement → submit → ready → land — carries it home. When
 the last node lands, perk closes the objective.
 

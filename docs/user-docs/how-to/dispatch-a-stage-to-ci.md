@@ -9,7 +9,7 @@ the canonical home for the `--remote` cold door.
    see [How to set up and verify the remote runner](./set-up-the-remote-runner.md).
 2. **Dispatch a stage.** Add `--remote` to a cold stage launch —
    [`perk implement … --remote`](../reference/cli.md#perk-implement-plan-alias-impl) — or to a resume —
-   [`perk resume 42 --remote`](../reference/cli.md#perk-resume-plan-alias-res). perk records the
+   [`perk plan resume 42 --remote`](../reference/cli.md#perk-plan-resume-plan). perk records the
    run-to-plan linkage in durable state and triggers the runner instead of opening a local session.
 3. **Know what is remotely runnable.** Only the unattended stages — `implement` and `address` — have
    a remote door. The interactive and deterministic stages (planning above all) stay local.

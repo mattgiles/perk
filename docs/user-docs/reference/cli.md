@@ -10,15 +10,29 @@ quadrant fits the whole.
 Following the reference quadrant's rule, every entry is written against the command's real
 `--help` output. Structural surface tests (`tests/test_cli_parity_smoke.py` and the
 `tests/test_cli_help_sections.py` drift guard) catch real surface regressions; this prose is kept
-current by hand as the taxonomy lands.
+current by hand against the canonical taxonomy (SSOT:
+[`python-cli-guidelines.md` §11](../../guiding-principles/python-cli-guidelines.md)).
 
 ## Orientation
 
-The sections below mirror `perk --help`: **Setup & Health**, **Stage launchers**, **Other**, and
-**Command groups**. Each stage launcher opens a primed `pi` session for one stage of the workflow
-— the read-only authoring stages (`plan`, `objective author`, `objective plan`) and the
-read-write boundaries (`save`, `objective save`) and the working stages (`implement`, `submit`,
-`address`, `land`, `learn`).
+The `perk` surface is organized as **noun-groups** — `plan`, `objective`, `pr`, `learn`,
+`worktree`, `state`, `registry`, `workflow` — each holding both **warm stage launchers** (a launch
+opens a primed `pi` session for one workflow stage) and **cold deterministic workers** (`--json`
+machine surfaces the warm in-session doors shell out to), separated by help sections. Three things
+escape a group:
+
+- **The one earned flat verb** `implement` (`impl`) — the heavy cold-only working stage, typed
+  constantly, reads as a bare imperative.
+- **The hot-path PR flat aliases** `submit` / `address` / `land` / `ready`, each aliasing its
+  canonical `perk pr <verb>` (the canonical `pr` entry is authoritative; the flat alias is the
+  ergonomic spelling).
+- **Setup & Health**: `init` and `doctor` (which is itself a group).
+
+**The launcher+worker merge.** Where a stage has *both* a real session-launcher half and a
+deterministic worker half, they merge into **one** command: a session by default, the worker under
+`--json` (the mode the warm door already shells). The genuinely merged commands are exactly
+`pr submit`, `pr land`, and `plan save`. `pr address` is launcher-only; `pr ready` is worker-only;
+each still gains its flat alias.
 
 The in-session, warm `/…` commands and the model-facing tools you use *inside* a `pi` session are
 a separate surface, documented in [In-session commands & tools](./in-session.md). This page covers
@@ -61,30 +75,11 @@ Dispatch a throwaway CI run (a smoke short-circuit) to prove the runner is live.
 the dispatched run to completion; `--verbose` shows every prereq check; `--json` emits a
 machine-readable report.
 
-## Stage launchers
+## Stage launchers (the earned flat names)
 
-Each command here opens a primed `pi` session for one workflow stage. All accept `--worktree`,
-`--dry-run`, and `--remote`; passthrough `pi_args` are forwarded to `pi`.
-
-### `perk plan`
-
-Explore the codebase and draft a plan in a read-only session (the `plan` stage).
-
-### `perk save`
-
-Persist the drafted plan to GitHub — the read-only → read-write boundary (the `save` stage).
-
-### `perk submit`
-
-Push the branch and open a draft PR (the `submit` stage).
-
-### `perk address`
-
-Classify PR review feedback (in an isolated child) and resolve the threads (the `address` stage).
-
-### `perk land`
-
-Merge the ready/approved PR and reconcile, setting the pending-learn marker (the `land` stage).
+The flat top-level launchers: the one earned working verb `implement`, plus the hot-path PR
+aliases. Each opens a primed `pi` session and accepts `--worktree`, `--dry-run`, and `--remote`;
+passthrough `pi_args` are forwarded to `pi`.
 
 ### `perk implement [PLAN]` (alias `impl`)
 
@@ -92,59 +87,153 @@ Do the work on a branch; requires fresh context (cold-only). `PLAN` is an option
 (`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. Adds
 `--base` to branch off a ref other than `origin/<trunk>` (e.g. to stack on an unlanded branch).
 
-### `perk learn`
+### `perk submit`
 
-Capture and consolidate learnings. The bare invocation launches the `learn` stage (a primed `pi`
-session); its `capture` and `docs` verbs (below, under Command groups) are the cold workers the
-warm doors delegate to.
+Flat alias for [`perk pr submit`](#perk-pr-submit) (the canonical entry). Push the branch and open
+a draft PR (the implement → submit boundary); a session by default, the worker under `--json`.
 
-## Other
+### `perk address`
 
-### `perk resume PLAN` (alias `res`)
+Flat alias for [`perk pr address`](#perk-pr-address) (the canonical entry). Classify PR review
+feedback in an isolated child and resolve the threads (launcher-only); `--preview` classifies the
+feedback and takes no action.
+
+### `perk land`
+
+Flat alias for [`perk pr land`](#perk-pr-land) (the canonical entry). Merge the ready/approved PR
+and reconcile, setting the pending-learn marker (submit → land); a session by default, the worker
+under `--json`.
+
+### `perk ready`
+
+Flat alias for [`perk pr ready`](#perk-pr-ready) (the canonical entry). Mark the active plan's
+draft PR ready for review (the deliberate review gate) — a worker-only command (`--dry-run` /
+`--json`).
+
+## Command groups
+
+### `perk plan`
+
+Author and revise plans. Bare `perk plan` launches the read-only `plan` stage (a primed `pi`
+session for exploration + plan authoring); the verbs below are the save boundary and the revision
+launchers. Help renders the launchers and the merged save together as the group's commands.
+
+### `perk plan save`
+
+Persist the plan to GitHub — the read-only → read-write boundary. The **merged** launcher+worker:
+bare `perk plan save` opens a primed `pi` session for the `save` stage; `--json` runs the
+deterministic save worker instead (the mode the warm `/plan-save` door shells). As a launcher it
+takes `--worktree`, `--dry-run`, and `--remote`. As the worker (`--json`) it keeps the full
+plan-write flag set: `--plan-file` (the plan markdown to save), `--run-id`, `--title`,
+`--objective-id`/`--node-id` (link to an objective and advance the node), `--consumed-learn` (the
+perk:learn ids a docs plan consumes), and `--dry-run` (compose + print, no GitHub).
+
+### `perk plan resume PLAN`
 
 Resume `PLAN` (a plan issue id) at its current lifecycle stage, relaunching it with fresh context.
 `--dry-run` resolves and prints the stage without launching; `--remote` dispatches to CI; `--json`
 emits a machine-readable report.
 
-### `perk replan PLAN` (alias `rp`)
+### `perk plan replan PLAN`
 
-Re-author the open plan `PLAN` against the current codebase, in place (read-only). Local-only;
-`--dry-run` materializes the prior plan and prints the seed without launching; `--worktree` and
-`--json` are also accepted.
+Re-author the open plan `PLAN` against the current codebase, in place (read-only). Local-only
+(`cold_remote:false`); `--dry-run` materializes the prior plan and prints the seed without
+launching; `--worktree` and `--json` are also accepted.
 
-### `perk plan-save` (alias `psave`)
+### `perk objective` (alias `obj`)
 
-Save a plan to GitHub as an issue (the queryable header plus the full body comment) — the save
-worker the warm `/plan-save` door delegates to. Reads the plan from `--plan-file`; `--title`,
-`--objective-id`/`--node-id` (link to an objective and advance the node), `--consumed-learn` (the
-perk:learn ids a docs plan consumes), `--run-id`, `--dry-run`, and `--json` tune the save.
+The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
+`save`, `plan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
+agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run`
+(`r`)). Bare `perk objective` shows this group help.
 
-## Command groups
+### `perk objective author`
+
+Draft a new objective and roadmap in a read-only authoring session. Local-only
+(`cold_remote:false`); adds `--json`.
+
+### `perk objective save`
+
+Persist the drafted objective to GitHub — the read-only → read-write objective boundary (the
+`objective-save` stage). Local-only; adds `--json`.
+
+### `perk objective plan [NUMBER]`
+
+Select the next objective node and author a bounded plan (read-only). `NUMBER` is the objective
+issue id (required — a cold session has no active objective); `--node` plans a specific node id
+instead of the next actionable one. Local-only; adds `--json`.
+
+### `perk objective create` (alias `new`)
+
+Mint a `run_id` and create the perk:objective issue from authored markdown. Reads the required
+`--body` file; `--title`, `--roadmap` (a JSON array of nodes, preferred over embedding YAML),
+`--run-id`, `--dry-run`, and `--json` tune the create.
+
+### `perk objective show NUMBER` (alias `s`)
+
+Show an objective's header, roadmap, summary, and next actionable node.
+
+### `perk objective node NUMBER`
+
+Update one roadmap node (explicit-status-only). `--node` selects the node id (required); `--status`
+sets its status (never inferred from `--pr`); `--pr` sets or clears the PR backlink;
+`--description` updates the node description; `--dry-run` validates without writing.
+
+### `perk objective reconcile NUMBER` (alias `rec`)
+
+Reconcile an objective's Reconcilable prose region against the merged diff — rewriting only the
+marker-bounded region, never the roadmap table or Immutable notes. Reads the required `--body`
+file; `--dry-run` composes without writing.
+
+### `perk objective next NUMBER` (alias `n`)
+
+Print the next plannable node (pending, or a resumable `planning` claim).
+
+### `perk objective run NUMBER` (alias `r`)
+
+Advance an objective's backlog one autonomously-safe step, then pause at the human gate.
+`--remote` sets the runner ref for remote dispatches; `--wait` polls an in-flight run to
+completion then re-evaluates; `--dry-run` resolves and reports the decision only.
 
 ### `perk pr`
 
-PR lifecycle workers (the cold doors) the warm PR commands delegate to: `submit`, `check`,
-`ready`, `land`, `feedback`, `resolve-threads`, `review-context`, `review-post`. Each runs from
-inside the plan's worktree (reading the local `cache.plan-ref`) and accepts `--json`.
+PR lifecycle group: the submit/land launchers, the address launcher, and the review workers.
+`submit` and `land` open a primed `pi` session by default and run the deterministic worker under
+`--json` (the merged commands); `address` is launcher-only; `ready` and the rest are cold-door
+workers the warm TS doors delegate to, each running from inside the plan's worktree (reading the
+local `cache.plan-ref`) and accepting `--json`.
 
 ### `perk pr submit`
 
-Open a draft PR for the active plan's branch (the implement → submit boundary). `--dry-run`
-composes the plan without pushing or hitting GitHub.
+Open a draft PR for the active plan's branch (the implement → submit boundary). The **merged**
+launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`.
+`--dry-run` follows the mode (print the launch plan, or compose without pushing/hitting GitHub).
+Flat alias: [`perk submit`](#perk-submit).
+
+### `perk pr address`
+
+Classify PR review feedback (in an isolated child) and resolve the threads — launcher-only (no
+merged `--json` worker; its mechanics are `pr feedback` + `pr resolve-threads`). `--preview`
+classifies the feedback only and takes no action (the warm `/address --preview` gesture; local-only,
+inert on `--remote`). Flat alias: [`perk address`](#perk-address).
+
+### `perk pr land`
+
+Merge the active plan's PR and set the pending-learn semaphore (submit → land). The **merged**
+launcher+worker: a primed `pi` session by default, the deterministic worker under `--json`.
+`--dry-run` follows the mode (print the launch plan, or compose without touching GitHub). Flat
+alias: [`perk land`](#perk-land).
+
+### `perk pr ready`
+
+Mark the active plan's draft PR ready for review (the deliberate review gate) — a **worker-only**
+command (not a merged L+W: `ready` is not a registry stage and has no launcher). `--dry-run`
+resolves the PR without marking it ready; `--json` emits a machine-readable report. Flat alias:
+[`perk ready`](#perk-ready).
 
 ### `perk pr check`
 
 Validate the active plan's PR checkout footer (the deterministic `pr check`).
-
-### `perk pr ready`
-
-Mark the active plan's draft PR ready for review (the deliberate review gate). `--dry-run`
-resolves the PR without marking it ready.
-
-### `perk pr land`
-
-Merge the active plan's PR and set the pending-learn semaphore (submit → land). `--dry-run`
-composes the plan without touching GitHub.
 
 ### `perk pr feedback`
 
@@ -167,10 +256,10 @@ Submit a `/pr-review` verdict to the active plan's PR. Reads the review from the
 COMMENT review, a `clean` verdict posts a single thumbs-up reaction. `--dry-run` validates without
 touching GitHub.
 
-### `perk learn` (group)
+### `perk learn`
 
-The `learn` group hosts the cold learn workers; its bare invocation launches the `learn` stage
-(see Stage launchers above).
+Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
+session); its `capture` and `docs` verbs are the cold workers the warm doors delegate to.
 
 ### `perk learn capture`
 
@@ -240,61 +329,6 @@ error. `--json` emits a machine-readable result.
 ### `perk registry show` (alias `s`)
 
 Print the stages and their transitions (a dev/doctor convenience).
-
-### `perk objective` (alias `obj`)
-
-The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
-`save`, `plan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
-agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run`
-(`r`)). Bare `perk objective` shows this group help.
-
-### `perk objective author`
-
-Draft a new objective and roadmap in a read-only authoring session. Local-only
-(`cold_remote:false`); adds `--json`.
-
-### `perk objective save`
-
-Persist the drafted objective to GitHub — the read-only → read-write objective boundary (the
-`objective-save` stage). Local-only; adds `--json`.
-
-### `perk objective plan [NUMBER]`
-
-Select the next objective node and author a bounded plan (read-only). `NUMBER` is the objective
-issue id (required — a cold session has no active objective); `--node` plans a specific node id
-instead of the next actionable one. Local-only; adds `--json`.
-
-### `perk objective create` (alias `new`)
-
-Mint a `run_id` and create the perk:objective issue from authored markdown. Reads the required
-`--body` file; `--title`, `--roadmap` (a JSON array of nodes, preferred over embedding YAML),
-`--run-id`, `--dry-run`, and `--json` tune the create.
-
-### `perk objective show NUMBER` (alias `s`)
-
-Show an objective's header, roadmap, summary, and next actionable node.
-
-### `perk objective node NUMBER`
-
-Update one roadmap node (explicit-status-only). `--node` selects the node id (required); `--status`
-sets its status (never inferred from `--pr`); `--pr` sets or clears the PR backlink;
-`--description` updates the node description; `--dry-run` validates without writing.
-
-### `perk objective reconcile NUMBER` (alias `rec`)
-
-Reconcile an objective's Reconcilable prose region against the merged diff — rewriting only the
-marker-bounded region, never the roadmap table or Immutable notes. Reads the required `--body`
-file; `--dry-run` composes without writing.
-
-### `perk objective next NUMBER` (alias `n`)
-
-Print the next plannable node (pending, or a resumable `planning` claim).
-
-### `perk objective run NUMBER` (alias `r`)
-
-Advance an objective's backlog one autonomously-safe step, then pause at the human gate.
-`--remote` sets the runner ref for remote dispatches; `--wait` polls an in-flight run to
-completion then re-evaluates; `--dry-run` resolves and reports the decision only.
 
 ### `perk workflow` (alias `wf`)
 
