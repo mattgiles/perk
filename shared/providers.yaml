@@ -15,10 +15,13 @@
 # Vocabulary — each provider entry:
 #   id      — the stable provider id; for the `plan` seam it is exactly the
 #             cache.plan-ref `provider` string (provider-contract.md dimension 1).
-#   seam    — `plan` | `todo` | `askuser` | `footer` (the four seams pluggability-taxonomy.md scope-fenced).
+#   seam    — `plan` | `todo` | `askuser` | `footer` | `web` (the five seams pluggability-taxonomy.md scope-fenced).
 #   package — the foreign Pi package spec added to .pi/settings.json `packages`
 #             (e.g. "npm:@tombell/pi-plan"); `null` for perk's own bundled reference
-#             provider (nothing to add — perk produces the contract natively).
+#             provider (nothing to add — perk produces the contract natively). NOT
+#             universal: the `web` seam's reference provider (`pi-web-access`) is itself
+#             a FOREIGN package because perk owns no native web implementation — its
+#             `default: true` entry carries a non-null `package` (the documented exception).
 #   adapter — the perk-owned shim module that bridges the foreign surface to the
 #             artifact boundary (cache.plan-ref / perk:checkpoint); `null` for the
 #             reference provider.
@@ -67,6 +70,18 @@
 # `setStatus` slot (both foreign footers render extension statuses), so the bridge is automatic.
 # Fail-safe: any config-read error resolves to the reference id → perk installs its footer (the
 # default path is the hard zero-change guarantee).
+#
+# The WEB seam is the THIRD INTERFACE seam (no durable artifact to bridge), but with a genuine
+# novelty: it is the FIRST seam whose `default: true` provider has a NON-NULL `package`. perk owns
+# no native web-research implementation, so the behavior-preserving reference (`pi-web-access`,
+# zero-config Exa search + content fetch + the bundled `librarian` skill) is itself a foreign npm
+# package. Selection simply SWAPS which web package the provider-convergence installs — `adapter:
+# null`, no shim, and there is NO perk surface to vacate at registration time because perk registers
+# NO web tools of its own. The read-only allowlist statically carries the UNION of all known web
+# tool names (inert when absent); perk does NOT normalize tool names across providers. `librarian`
+# is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path) and is accepted as
+# lost under a foreign web selection. Fail-safe: any config-read error resolves to `pi-web-access`,
+# keeping today's behavior exactly.
 
 schema_version: 1
 
@@ -149,3 +164,29 @@ providers:
                              # visible", so perk's `perk` setStatus slot appears automatically — no shim.
     default: false
     # No `package_filter`: load the package's sole footer extension ("load all of that type").
+  - id: pi-web-access        # web seam DEFAULT — the FOREIGN reference provider (perk owns no native web impl)
+    seam: web
+    package: "npm:pi-web-access"   # NON-NULL default package: the novelty — perk has no native web provider
+    adapter: null            # VACATE-ONLY interface seam: no durable artifact, and perk registers NO web
+                             # tools, so there is no perk surface to vacate. Selection just swaps the package.
+    default: true            # the behavior-preserving no-config pick (zero-config Exa search + `librarian`)
+    # No `package_filter`: `pi-web-access`'s sole extension is its root `./index.ts` (verified via
+    # `npm view pi-web-access pi`), so omitting the filter loads exactly that one extension.
+  - id: ollama-web-search    # REAL web provider — VACATE-ONLY (interface seam, no adapter)
+    seam: web
+    package: "npm:@ollama/pi-web-search"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: web is an interface seam (no artifact); perk registers no web
+                             # tools, so nothing to vacate. Tools: `ollama_web_search`/`ollama_web_fetch`
+                             # (needs a local Ollama daemon). Divergent names — perk allowlists the union.
+    default: false
+    # No `package_filter`: verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
+    # filter loads exactly that one extension.
+  - id: juicesharp-web-tools # REAL web provider — VACATE-ONLY (interface seam, no adapter)
+    seam: web
+    package: "npm:@juicesharp/rpiv-web-tools"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: interface seam, no artifact; perk registers no web tools.
+                             # Tools: `web_search`/`web_fetch` (needs an API key; default provider Brave;
+                             # registers a `/web-tools` command — no perk collision).
+    default: false
+    # No `package_filter`: verified manifest is `{"extensions": ["./index.ts"]}`, so omitting the
+    # filter loads exactly that one extension (the juicesharp single-extension convention).

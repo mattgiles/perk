@@ -184,15 +184,15 @@ def load_committed_issues_team(repo_root: Path) -> str | None:
 
 
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
-    """Read the flat `[providers]` table into a `{plan, todo, askuser, footer}` selection (strings).
+    """Read the flat `[providers]` table into a per-seam selection (string values).
 
-    A non-dict table (absent) yields ``{}``; only `plan`/`todo`/`askuser`/`footer` keys with
+    A non-dict table (absent) yields ``{}``; only `plan`/`todo`/`askuser`/`footer`/`web` keys with
     **string** values are kept (an absent/ill-typed key is simply omitted, so the resolver falls
     back to the seam default silently for it).
     """
     table = raw if isinstance(raw, dict) else {}
     return {
         seam: value
-        for seam in ("plan", "todo", "askuser", "footer")
+        for seam in ("plan", "todo", "askuser", "footer", "web")
         if isinstance(value := table.get(seam), str)
     }

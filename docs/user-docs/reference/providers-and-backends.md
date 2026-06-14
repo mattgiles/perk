@@ -20,13 +20,13 @@ Two related but distinct knobs live here:
 
 - **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
   *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
-  default. There are four seams: `plan`, `todo`, `askuser`, and `footer`.
+  default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`.
 - **Issue backend** — where canonical plan / learn / objective issues are stored: GitHub
   (the default) or Linear.
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
-`askuser` / `footer`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
+`askuser` / `footer` / `web`) and the `[issues]` table (`backend` / `team`). This page documents the **supported set** behind those keys
 and what selecting each option actually does. The **selection** is the per-repo pointer; the
 **supported set** is the catalog perk knows how to wire.
 
@@ -54,6 +54,9 @@ foreign providers are first-class selections, not experiments.
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
+| `pi-web-access` | `web` | ✅ | reference (foreign package) | `npm:pi-web-access` |
+| `ollama-web-search` | `web` | | REPLACE (vacate-only) | `npm:@ollama/pi-web-search` |
+| `juicesharp-web-tools` | `web` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-web-tools` |
 
 ### Postures
 
@@ -92,15 +95,30 @@ How perk yields its own surface to a selected foreign provider differs by provid
   progress still reaches the foreign footer automatically because both foreign footers render
   extension statuses, and perk's composed `perk` status slot keeps publishing those segments
   regardless of footer ownership.
+- **REPLACE / vacate-only (`ollama-web-search`, `juicesharp-web-tools`), with a foreign default.**
+  The `web` seam is the third **interface seam** — its providers share no durable artifact *and* no
+  common tool name, so there is nothing to bridge and **no adapter shim** (`adapter: null`).
+  Selection simply **swaps the installed web package**; perk registers **no** web tools of its own,
+  so there is **no perk surface to vacate** at all. The seam is **novel** in one way: its default
+  (`pi-web-access`) is itself a **foreign package** — perk owns no native web implementation, so
+  this is the one seam whose reference provider has a non-null package. The three providers expose
+  **divergent tool names** (`pi-web-access`: `web_search`/`code_search`/`fetch_content`/
+  `get_search_content`; `@ollama/pi-web-search`: `ollama_web_search`/`ollama_web_fetch`;
+  `@juicesharp/rpiv-web-tools`: `web_search`/`web_fetch`); perk does **not** normalize them — the
+  read-only allowlist carries the **union**. Only `pi-web-access` is zero-config; `@ollama/pi-web-search`
+  needs a **local Ollama daemon** and `@juicesharp/rpiv-web-tools` needs an **API key**. Selecting a
+  foreign web provider also **drops the bundled `librarian` skill** (it is pi-web-access-specific).
 
 ### What selection does
 
 - **`perk init` converges the package.** Selecting a foreign provider adds its npm package to
   `.pi/settings.json` `packages`; deselecting it removes the entry. The convergence is
   two-directional (`_converge_provider_packages` in `perk/convergence/init.py`). perk's own
-  reference providers have no package — nothing is added.
+  reference providers have no package — nothing is added. (The `web` default `pi-web-access` is the
+  exception: it *is* a foreign package, so a default repo still has `npm:pi-web-access` wired — now
+  via the provider path, not the borrowed set.)
 - **`perk doctor` reports the resolution.** The `providers` check resolves the selection and reports
-  `plan=…, todo=…, askuser=…, footer=…`. It **warns** on problems but is never fatal — the default path is the hard
+  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never fatal — the default path is the hard
   guarantee.
 
 ### Fallback semantics

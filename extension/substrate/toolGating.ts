@@ -33,14 +33,21 @@ export const READ_ONLY_TOOLS = [
   // working-objective artifact in the session data dir (fixed artifact name, seam-derived
   // path); the gate's edit/write/bash blocking is unchanged.
   "objective_draft",
-  // pi-web-access's research tools (borrowed package): none mutate the repo — fetch_content's
-  // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to
-  // the already-allowlisted curl. Allowlisting foreign tool names is safe when the package is
-  // absent (the plan_review precedent — setActiveTools simply has nothing to enable).
+  // The `web` seam providers' research tools (#529): the UNION of all known web-provider tool
+  // names, allowlisted statically and inert when the package is absent (the plan_review precedent
+  // — setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
+  // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to the
+  // already-allowlisted curl. perk does NOT normalize names, so all three providers' divergent
+  // names are listed: pi-web-access (default: web_search/code_search/fetch_content/
+  // get_search_content), @ollama/pi-web-search (ollama_web_search/ollama_web_fetch), and
+  // @juicesharp/rpiv-web-tools (web_search shared, web_fetch).
   "web_search",
   "code_search",
   "fetch_content",
   "get_search_content",
+  "ollama_web_search",
+  "ollama_web_fetch",
+  "web_fetch",
   // pi-mono-linear's read-only tools (Node 3.1 — the [issues] backend = "linear" selection):
   // none mutate Linear or the repo. Foreign names are inert when the package is absent (the
   // pi-web-access precedent above). The mutating/sensitive tools are deliberately excluded:

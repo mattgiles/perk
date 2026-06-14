@@ -24,7 +24,7 @@ export interface Provider {
   packageFilter?: Record<string, unknown>;
 }
 
-export const PROVIDER_SEAMS = ["plan", "todo", "askuser", "footer"] as const;
+export const PROVIDER_SEAMS = ["plan", "todo", "askuser", "footer", "web"] as const;
 
 /** The bundled reference provider ids (the behavior-preserving no-config defaults per seam). */
 export const PERK_PLAN_PROVIDER_ID = "perk-plan";
@@ -49,6 +49,15 @@ export const POWERLINE_FOOTER_PROVIDER_ID = "powerline-footer";
 
 /** The foreign `pi-bar` footer-provider id (vacate-only interface seam). */
 export const PI_BAR_FOOTER_PROVIDER_ID = "pi-bar-footer";
+
+/** The web seam DEFAULT id — the FOREIGN reference provider (`pi-web-access`; perk owns no native web impl). */
+export const PI_WEB_ACCESS_PROVIDER_ID = "pi-web-access";
+
+/** The foreign `@ollama/pi-web-search` web-provider id (vacate-only interface seam). */
+export const OLLAMA_WEB_PROVIDER_ID = "ollama-web-search";
+
+/** The foreign `@juicesharp/rpiv-web-tools` web-provider id (vacate-only interface seam). */
+export const JUICESHARP_WEB_PROVIDER_ID = "juicesharp-web-tools";
 
 /** Parse the bundled `providers.yaml`. Throws on a missing file or unexpected shape. */
 export function loadProviders(): Provider[] {
@@ -94,6 +103,7 @@ export interface ResolvedProviders {
   todo: Provider;
   askuser: Provider;
   footer: Provider;
+  web: Provider;
   issues: string[];
 }
 
@@ -120,7 +130,7 @@ function byId(set: Provider[]): Map<string, Provider> {
  * `set` loads the bundled `providers.yaml`.
  */
 export function resolveProviders(
-  selection: { plan?: string; todo?: string; askuser?: string; footer?: string },
+  selection: { plan?: string; todo?: string; askuser?: string; footer?: string; web?: string },
   set?: Provider[],
 ): ResolvedProviders {
   const providers = set ?? loadProviders();
@@ -135,7 +145,7 @@ export function resolveProviders(
     return def;
   };
 
-  const resolveSeam = (seam: "plan" | "todo" | "askuser" | "footer"): Provider => {
+  const resolveSeam = (seam: "plan" | "todo" | "askuser" | "footer" | "web"): Provider => {
     const selected = selection[seam];
     if (selected == null) return requireDefault(seam);
     const provider = ids.get(selected);
@@ -155,6 +165,7 @@ export function resolveProviders(
     todo: resolveSeam("todo"),
     askuser: resolveSeam("askuser"),
     footer: resolveSeam("footer"),
+    web: resolveSeam("web"),
     issues,
   };
 }

@@ -28,7 +28,9 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
     assert "npm:@juicesharp/rpiv-todo" not in packages  # P2.T12: perk owns checkpoints now
     assert "npm:pi-subagents" in packages  # P2.T6: borrowed spawned-delegation engine
-    assert "npm:pi-web-access" in packages  # borrowed web-research engine (#250)
+    # #529: pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
+    # via the provider path (object form on a fresh init), so it still lands in `packages`.
+    assert "npm:pi-web-access" in _identities(packages)
 
     assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
     # perk-owned agent-definitions home (committed `.gitkeep`).
@@ -65,15 +67,21 @@ def _identities(packages):
     return out
 
 
-def test_init_default_repo_wires_no_foreign_provider_package(tmp_path):
-    # The zero-config default: both seams resolve to the `package: null` reference providers, so
-    # no foreign package is added or removed — byte-identical to today's append-only output.
+def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):
+    # The zero-config default: the plan/todo/askuser/footer seams resolve to `package: null`
+    # reference providers, so no foreign package is added for them. The `web` seam is the novel
+    # exception (#529): its default `pi-web-access` carries a non-null package, so the default path
+    # DOES converge `npm:pi-web-access` via the provider path (object form on a fresh init).
     assert run_init(tmp_path, verify=False).ok
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert "npm:@tombell/pi-plan" not in _identities(packages)
     assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
-    # All entries are still plain strings (no object-form provider entries on the default path).
-    assert all(isinstance(p, str) for p in packages)
+    assert "npm:@ollama/pi-web-search" not in _identities(packages)
+    # The web default IS wired (provider-managed), in object form.
+    web_entry = next(
+        p for p in packages if isinstance(p, dict) and p.get("source") == "npm:pi-web-access"
+    )
+    assert web_entry == {"source": "npm:pi-web-access"}
 
 
 def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
@@ -255,6 +263,42 @@ def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_pat
     assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
+def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
+    # The web-seam two-directional swap (#529): selecting the foreign `ollama-web-search` provider
+    # REMOVES the default `npm:pi-web-access` (also provider-managed) and ADDS
+    # `npm:@ollama/pi-web-search` (object form, no filter); reverting swaps back.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    pi_dir.joinpath("settings.json").write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:pi-web-access"]}, indent=2) + "\n"
+    )
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nweb = "ollama-web-search"\n', encoding="utf-8"
+    )
+
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    entry = next(
+        p
+        for p in packages
+        if isinstance(p, dict) and p.get("source") == "npm:@ollama/pi-web-search"
+    )
+    assert entry == {"source": "npm:@ollama/pi-web-search"}
+    # The default web package is provider-managed too, so a foreign web selection removes it.
+    assert "npm:pi-web-access" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+
+    # Revert to the default `pi-web-access` → ollama removed, pi-web-access re-added.
+    pi_dir.joinpath("perk.toml").write_text(
+        '[providers]\nweb = "pi-web-access"\n', encoding="utf-8"
+    )
+    run_init(tmp_path, verify=False)
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "npm:@ollama/pi-web-search" not in _identities(packages)
+    assert "npm:pi-web-access" in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)
+
+
 def test_init_provider_wiring_is_idempotent(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
@@ -397,7 +441,8 @@ def test_init_migrates_legacy_npm_perk_entry(tmp_path):
     run_init(tmp_path, verify=False)
 
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    assert not any(p.startswith("npm:@perk/pi") for p in packages)  # legacy entry stripped
+    # legacy entry stripped (string entries only; the web default adds an object-form entry)
+    assert not any(isinstance(p, str) and p.startswith("npm:@perk/pi") for p in packages)
     assert f"git:github.com/mattgiles/perk@v{__version__}" in packages  # git entry added
     assert "npm:@me/custom" in packages  # user entry preserved
 
@@ -417,7 +462,9 @@ def test_init_self_mode_uses_local_path(tmp_path):
     run_init(tmp_path, verify=False)
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert ".." in packages
-    assert not any(p.startswith("git:github.com/mattgiles/perk") for p in packages)
+    assert not any(
+        isinstance(p, str) and p.startswith("git:github.com/mattgiles/perk") for p in packages
+    )
 
 
 def test_init_writes_skills_manifest_fragment(tmp_path):

@@ -51,15 +51,20 @@ GIT_PACKAGE = "git:github.com/mattgiles/perk"
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
 # `ctx.hasUI`-clean (children run `--mode json -p`).
-# `pi-web-access` is the borrowed *web-research engine* (zero-config Exa search + content
-# fetch, no API keys required); perk borrows it wholesale (extension + its `librarian` skill).
+# `pi-web-access` is NO LONGER borrowed: it became the `web` seam's `default: true` provider
+# (#529). It is now converged via the PROVIDER path (`_converge_provider_packages`), not this
+# static borrowed set — the novelty being that this is the first seam whose reference/default
+# provider has a NON-NULL `package` (perk owns no native web-research implementation, so the
+# behavior-preserving default is itself a foreign npm package). The committed `.pi/settings.json`
+# `npm:pi-web-access` entry is UNCHANGED but RECLASSIFIED from borrowed to provider-managed: a
+# default-config repo still installs it (via the provider path), and deselecting `web` away from
+# `pi-web-access` now REMOVES it like any other provider package (two-directional convergence).
 # `@tombell/pi-status` was retired post-node-3.1 — pi's `setFooter` is a single last-wins
 # slot, and pi-status's `session_start` footer replaced perk's charter-D2 footer (perk owns
 # the footer wholesale).
 BORROWED_PACKAGES = [
     "npm:@tombell/pi-diff",
     "npm:pi-subagents",
-    "npm:pi-web-access",
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
@@ -624,7 +629,7 @@ def _converge_provider_packages(
     resolved = resolve_providers(selection, provider_set)
 
     desired: dict[str, dict[str, object] | None] = {}  # spec -> filter (for object-form addition)
-    for provider in (resolved.plan, resolved.todo, resolved.askuser, resolved.footer):
+    for provider in (resolved.plan, resolved.todo, resolved.askuser, resolved.footer, resolved.web):
         if provider.package:
             desired[provider.package] = provider.package_filter
     desired_identities = {i for spec in desired if (i := _package_identity(spec))}
