@@ -30,6 +30,9 @@ set aside.
 - `perk worktree wipe` only ever removes **merged** `plan-<N>` worktrees. The `--force` flag bypasses
   the *dirty/pending-learn* safety guards; it does **not** relax the merged requirement, so an
   unmerged worktree is never wiped, even with `--force`.
+- `wipe` deletes each wiped worktree's local branch **and** its remote branch on `origin`
+  (best-effort — an already-deleted remote branch is tolerated, and an offline run just skips the
+  remote step). `perk worktree remove NAME` only removes the single worktree's checkout.
 
 ---
 

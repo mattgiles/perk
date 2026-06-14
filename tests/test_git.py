@@ -171,3 +171,72 @@ def test_run_disables_git_terminal_prompt(monkeypatch):
     env = captured["env"]
     assert env["GIT_TERMINAL_PROMPT"] == "0"
     assert env["PERK_TEST_AMBIENT"] == "yes"
+
+
+# --- batched / best-effort branch deletion helpers --------------------------------------
+
+
+def _make_branch(repo, name: str) -> None:
+    subprocess.run(["git", "branch", name], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def test_delete_branches_happy_path(git_repo):
+    _make_branch(git_repo, "scratch-a")
+    _make_branch(git_repo, "scratch-b")
+    deleted = git.delete_branches(git_repo, ["scratch-a", "scratch-b"], force=True)
+    assert set(deleted) == {"scratch-a", "scratch-b"}
+    remaining = subprocess.run(
+        ["git", "branch", "--format=%(refname:short)"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert "scratch-a" not in remaining and "scratch-b" not in remaining
+
+
+def test_delete_branches_empty_is_noop(git_repo):
+    assert git.delete_branches(git_repo, [], force=True) == []
+
+
+def test_delete_branches_missing_branch_absent_no_raise(git_repo):
+    _make_branch(git_repo, "scratch-a")
+    deleted = git.delete_branches(git_repo, ["scratch-a", "never-existed"], force=True)
+    assert deleted == ["scratch-a"]  # the missing branch is simply absent, no raise
+
+
+def test_has_remote(git_repo, git_repo_with_remote):
+    assert git.has_remote(git_repo) is False
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.has_remote(clone) is True
+
+
+def test_delete_remote_branches_happy_path(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    subprocess.run(
+        ["git", "push", "-q", "origin", "main:refs/heads/plan-X"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    deleted = git.delete_remote_branches(clone, ["plan-X"])
+    assert deleted == ["plan-X"]
+    heads = subprocess.run(
+        ["git", "ls-remote", "--heads", "origin"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "plan-X" not in heads
+
+
+def test_delete_remote_branches_already_absent_no_raise(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.delete_remote_branches(clone, ["never-pushed"]) == []
+
+
+def test_delete_remote_branches_empty_is_noop(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.delete_remote_branches(clone, []) == []

@@ -41,23 +41,60 @@ required so git itself doesn't refuse a dirty tree.
 The pure `_classify_worktree(...) -> WipeDecision` helper encodes all of this and is unit-testable with
 no I/O. **Push the decision into a pure classifier, keep I/O in the loop.**
 
-## Gather (parallel) → act (sequential) split
+## Gather (parallel) → act (parallel removal + batched deletes) split
 
-`_wipe_impl` runs in two phases. **Gather**: per-worktree facts (`backend.get_plan`, `git.is_dirty`,
+`_wipe_impl` runs in phases. **Gather**: per-worktree facts (`backend.get_plan`, `git.is_dirty`,
 `cache.has_marker`) are network/subprocess-bound, read-only, and thread-safe, so they run
 concurrently on a `ThreadPoolExecutor` (capped by `_MAX_GATHER_WORKERS`), each producing a frozen
 `_GatheredFacts`. The issue backend is resolved **once** before the pool; an `IssueBackendError`
 there marks every target skipped with `could not determine PR state (...)` — the offline no-op
-posture is preserved. **Act**: classification, all `user_output` reporting, and the
-`git.worktree_remove`/`delete_branch` mutations run sequentially on the main thread in original
-candidate order (git worktree mutations contend on `.git` locks; deterministic output is asserted
-by tests). **No output from worker threads, ever** — workers return facts; the main thread reports.
+posture is preserved.
 
-## Branch deletion is best-effort
+**Act** is no longer fully sequential. It runs:
 
-`git.delete_branch(repo, name, *, force=False)` uses `git branch -d` (safe; refuses unmerged) / `-D`
-via the shared `_run` wrapper, so failures raise `GitError`. In the wipe loop a kept branch is
-*reported*, never fatal.
+1. **Classify** on the main thread, in candidate order — record each skip reason / removable
+   `Worktree` (no output yet).
+2. **Parallel worktree removal** — one `git.worktree_remove` per removable worktree on a
+   `ThreadPoolExecutor` (capped by `_MAX_REMOVE_WORKERS`). This is safe to parallelize because the
+   dominant cost is the **filesystem `rm -rf`** of the checkout (perk worktrees carry large
+   gitignored trees, e.g. `.pi/npm/node_modules`), which is lock-free; git's per-worktree *admin*
+   teardown is independent. This is distinct from the ref/index/commit churn git actually
+   serializes (concurrent `commit`/`add`). **No output from worker threads** — results are keyed by
+   path; a `GitError` is captured, a non-`GitError` propagates (crash, as before).
+3. **Report** in one candidate-order pass — interleave skip lines and `✓ removed <name>` /
+   `git worktree remove failed` lines so the global ordering still holds (asserted by
+   `test_wipe_output_in_candidate_order`). Branch outcomes are *not* attached per-worktree anymore
+   (the deletes happen afterward in one call each).
+4. **Batched local branch delete** — one `git.delete_branches(repo, names, force=True)` call for
+   all removed worktrees' branches.
+5. **Batched remote branch delete** — one `git.delete_remote_branches(repo, names)` call, guarded
+   by `git.has_remote(repo)` so a remote-less repo emits nothing.
+
+Branch deletes (local + remote) run **after** all removals — git refuses to delete a branch checked
+out in a live worktree.
+
+## Branch deletion is best-effort, forced, and batched
+
+- **Local** — `git.delete_branches(repo, names, *, force=False) -> list[str]` runs one
+  `git branch -D|-d <names…>` via the lenient `_run_capture` (never raises per-branch), parsing the
+  `Deleted branch <name>` stdout lines for what actually deleted; a refused/missing branch is just
+  absent from the result. Wipe passes `force=True` (`-D`): wipe only ever touches worktrees whose PR
+  is provably `MERGED`, so `-d`'s "refuses when local trunk lags the merge" check is wrong here (it
+  was the old "branch survives wipe" bug). The single-branch `git.delete_branch(...)` (raises) stays
+  for its existing test/caller.
+- **Remote** — `git.delete_remote_branches(repo, names, *, remote="origin")` is default-on and
+  best-effort (no opt-in flag, no `require_github` gate — offline stays a clean no-op). **Gotcha:**
+  `git push --delete` aborts the **whole** batch client-side if *any* ref is missing
+  (`remote ref does not exist`) — and an already-gone ref is the *common* case (GitHub's
+  auto-delete-head-branch-on-merge). So the helper **probes `git ls-remote --heads` once** and
+  deletes only the survivors (already-gone refs count as success). This is a deliberate deviation
+  from the plan's "no pre-probe / blind batch" decision, which rested on a false premise about
+  `git push --delete` being non-atomic for missing refs. `has_remote` / `delete_remote_branches`
+  use `_run_capture` and never raise.
+
+`_run_capture(args, *, cwd, timeout)` is the sanctioned best-effort primitive: `check=False`,
+returns the `CompletedProcess` (callers parse stdout/stderr on partial failure), but still raises
+`GitError` on `TimeoutExpired`. `_run` (raises on non-zero) remains the default for single ops.
 
 ## Exterior-only — no `shared/` change
 
@@ -75,7 +112,7 @@ is the sole signal under test.
 
 ## Cross-references
 
-- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`
-- `perk/substrate/git.py` — `delete_branch`, `worktree_remove`, `worktree_list`
+- `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_MAX_REMOVE_WORKERS`
+- `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_list`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule

@@ -105,6 +105,8 @@ def test_wipe_happy_path(git_repo, monkeypatch):
     assert "wiped 1 worktree(s); 1 skipped" in result.output
     assert "plan-1" not in _branches(git_repo)
     assert "plan-2" in _branches(git_repo)
+    # No origin remote on git_repo: the remote step is a clean no-op (emits nothing).
+    assert "remote branch" not in result.output
 
 
 def test_wipe_dry_run(git_repo, monkeypatch):
@@ -115,6 +117,9 @@ def test_wipe_dry_run(git_repo, monkeypatch):
     assert (git_repo / ".worktrees" / "plan-1").exists()
     assert "would remove plan-1" in result.output
     assert "would wipe 1 worktree(s)" in result.output
+    # Dry-run mutates nothing: branch still present, no remote step.
+    assert "plan-1" in _branches(git_repo)
+    assert "deleted" not in result.output
 
 
 def test_wipe_dirty_guard(git_repo, monkeypatch):
@@ -223,6 +228,138 @@ def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
     assert (git_repo / ".worktrees" / "plan-2").exists()
     assert result.output.count("could not determine PR state") == 2
     assert "wiped 0 worktree(s); 2 skipped" in result.output
+
+
+def test_wipe_removes_worktrees_concurrently(git_repo, monkeypatch):
+    """Both worktree removals must be in flight simultaneously (parallel removal pool)."""
+    import threading
+
+    _add_plan_wt(git_repo, 1)
+    _add_plan_wt(git_repo, 2)
+    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+
+    barrier = threading.Barrier(2, timeout=10)
+    real_remove = git.worktree_remove
+
+    def gated_remove(repo, path, *, force):
+        barrier.wait()  # times out (BrokenBarrierError) if removal were sequential
+        return real_remove(repo, path, force=force)
+
+    from perk.cli.commands.worktree import wipe_cmd
+
+    monkeypatch.setattr(wipe_cmd.git, "worktree_remove", gated_remove)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not (git_repo / ".worktrees" / "plan-1").exists()
+    assert not (git_repo / ".worktrees" / "plan-2").exists()
+    assert "plan-1" not in _branches(git_repo)
+    assert "plan-2" not in _branches(git_repo)
+    assert "wiped 2 worktree(s); 0 skipped" in result.output
+
+
+def test_wipe_removal_failure_isolation(git_repo, monkeypatch):
+    """One worktree's removal failure is isolated: the other still wipes, its branch deletes."""
+    _add_plan_wt(git_repo, 1)
+    _add_plan_wt(git_repo, 2)
+    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+
+    real_remove = git.worktree_remove
+
+    def flaky_remove(repo, path, *, force):
+        if path.name == "plan-1":
+            raise git.GitError("boom")
+        return real_remove(repo, path, force=force)
+
+    from perk.cli.commands.worktree import wipe_cmd
+
+    monkeypatch.setattr(wipe_cmd.git, "worktree_remove", flaky_remove)
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert (git_repo / ".worktrees" / "plan-1").exists()
+    assert not (git_repo / ".worktrees" / "plan-2").exists()
+    assert "git worktree remove failed" in result.output
+    assert "plan-1" in _branches(git_repo)  # kept (removal failed)
+    assert "plan-2" not in _branches(git_repo)  # deleted
+    assert "wiped 1 worktree(s); 1 skipped" in result.output
+
+
+def test_wipe_force_deletes_branch_ahead_of_trunk(git_repo, monkeypatch):
+    """A merged plan branch with a commit not in local trunk must still be deleted (-D, not -d)."""
+    wt = _add_plan_wt(git_repo, 1)
+    import subprocess
+
+    (wt / "extra.txt").write_text("ahead\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=wt, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "ahead of trunk"], cwd=wt, check=True, capture_output=True
+    )
+    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not (git_repo / ".worktrees" / "plan-1").exists()
+    assert "plan-1" not in _branches(git_repo)  # -D forced through despite being ahead
+
+
+# --- remote-branch deletion (git_repo_with_remote) -------------------------
+
+
+def _ctx_remote(clone: Path) -> PerkContext:
+    return PerkContext.for_test(
+        cwd=clone, repo_root=clone, config=Config(worktree_root=clone / ".worktrees")
+    )
+
+
+def _push_plan_branch(clone: Path, n: int) -> None:
+    import subprocess
+
+    subprocess.run(
+        ["git", "push", "-q", "origin", f"plan-{n}"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _remote_heads(clone: Path) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "ls-remote", "--heads", "origin"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_wipe_deletes_remote_branches(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    _add_plan_wt(clone, 1)
+    _add_plan_wt(clone, 2)
+    _push_plan_branch(clone, 1)
+    _push_plan_branch(clone, 2)
+    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx_remote(clone))
+    assert result.exit_code == 0, result.output
+    heads = _remote_heads(clone)
+    assert "plan-1" not in heads and "plan-2" not in heads
+    assert "plan-1" not in _branches(clone) and "plan-2" not in _branches(clone)
+    assert "deleted 2 remote branch(es) on origin" in result.output
+
+
+def test_wipe_remote_blind_batch_tolerates_already_gone(git_repo_with_remote, monkeypatch):
+    """A branch never pushed to origin is harmlessly tolerated (blind batch)."""
+    clone, _remote, _advance = git_repo_with_remote
+    _add_plan_wt(clone, 1)
+    _add_plan_wt(clone, 2)
+    _push_plan_branch(clone, 1)  # plan-2 never pushed → already "gone" on origin
+    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx_remote(clone))
+    assert result.exit_code == 0, result.output
+    heads = _remote_heads(clone)
+    assert "plan-1" not in heads
+    assert "deleted 1 remote branch(es) on origin (1 already gone)" in result.output
 
 
 def test_wipe_empty(git_repo):

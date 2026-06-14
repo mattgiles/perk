@@ -7,6 +7,7 @@ returning ``None`` on failure (the operation is the authoritative test).
 """
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,11 @@ class PushRejectedError(GitError):
 
 _REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to push some refs")
 
+# `git branch -D|-d` writes `Deleted branch <name> (was <sha>).` per removed branch to stdout.
+_DELETED_BRANCH_RE = re.compile(r"^Deleted branch (\S+)", re.MULTILINE)
+# `git push <remote> --delete` writes ` - [deleted]         <branch>` per removed ref to stderr.
+_DELETED_REMOTE_RE = re.compile(r"\[deleted\]\s+(\S+)")
+
 
 def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
     # check=False: we inspect returncode ourselves to raise a domain GitError with stderr.
@@ -50,6 +56,30 @@ def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
     if proc.returncode != 0:
         raise GitError(proc.stderr.strip() or f"git {' '.join(args)} failed")
     return proc.stdout
+
+
+def _run_capture(
+    args: list[str], *, cwd: Path | None = None, timeout: int = 30
+) -> subprocess.CompletedProcess[str]:
+    """Run ``git <args>`` best-effort: returns the completed process **without raising** on a
+    non-zero exit so callers can parse stdout/stderr on partial failure.
+
+    The sanctioned primitive for best-effort batch ops (``delete_branches`` /
+    ``delete_remote_branches``); ``_run`` (which raises ``GitError``) remains the default for
+    single ops. A ``TimeoutExpired`` is still exceptional and raises ``GitError``.
+    """
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"git {' '.join(args)} timed out") from exc
 
 
 def repo_root(cwd: Path) -> Path | None:
@@ -189,6 +219,56 @@ def delete_branch(repo: Path, name: str, *, force: bool = False) -> None:
     """Delete local branch ``name``. ``-d`` (safe: refuses an unmerged branch) unless ``force``."""
     flag = "-D" if force else "-d"
     _run(["branch", flag, name], cwd=repo)
+
+
+def delete_branches(repo: Path, names: list[str], *, force: bool = False) -> list[str]:
+    """Batched local branch delete: ``git branch -D|-d <names…>`` (one subprocess).
+
+    Best-effort — never raises on a per-branch failure (a branch git refused or couldn't find
+    simply won't appear in the returned list). Returns the branch names git confirmed deleted,
+    parsed from the ``Deleted branch <name>`` stdout lines. Empty ``names`` is a no-op → ``[]``
+    (no subprocess).
+    """
+    if not names:
+        return []
+    flag = "-D" if force else "-d"
+    proc = _run_capture(["branch", flag, *names], cwd=repo)
+    return _DELETED_BRANCH_RE.findall(proc.stdout)
+
+
+def has_remote(repo: Path, name: str = "origin") -> bool:
+    """Whether ``name`` is a configured remote of ``repo`` (``git remote``). Local, never raises."""
+    proc = _run_capture(["remote"], cwd=repo)
+    return name in proc.stdout.split()
+
+
+def delete_remote_branches(
+    repo: Path, names: list[str], *, remote: str = "origin", timeout: int = 120
+) -> list[str]:
+    """Batched remote branch delete: ``git push <remote> --delete <survivors…>`` (best-effort).
+
+    ``git push --delete`` aborts the **whole** batch client-side if *any* ref is missing
+    (``remote ref does not exist``) — and an already-gone ref is the common case (GitHub's
+    auto-delete-on-merge). So we probe ``git ls-remote --heads`` once and delete only the refs
+    that still exist (the already-gone ones are silently treated as success). Never raises: a
+    total failure (offline / no perms / all refs already gone) yields ``[]``. Returns the branch
+    names confirmed deleted, parsed from the ``[deleted]`` lines git writes to stderr. Empty
+    ``names`` is a no-op → ``[]``. Callers should guard with ``has_remote`` so a remote-less repo
+    is a clean no-op (uses a network ``timeout`` like ``fetch``).
+    """
+    if not names:
+        return []
+    probe = _run_capture(["ls-remote", "--heads", remote, *names], cwd=repo, timeout=timeout)
+    existing = {
+        line.split("refs/heads/", 1)[1]
+        for line in probe.stdout.splitlines()
+        if "refs/heads/" in line
+    }
+    survivors = [n for n in names if n in existing]
+    if not survivors:
+        return []
+    proc = _run_capture(["push", remote, "--delete", *survivors], cwd=repo, timeout=timeout)
+    return _DELETED_REMOTE_RE.findall(proc.stderr)
 
 
 def worktree_list(repo: Path) -> list[Worktree]:
