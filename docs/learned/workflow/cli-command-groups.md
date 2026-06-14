@@ -71,9 +71,18 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
 
 ## Sectioned root help (`SectionedGroup`)
 
-- `SectionedGroup(AliasGroup)` in `perk/cli/alias.py` is **root-only**: extend-don't-replace keeps
-  existing `isinstance(cli, AliasGroup)` assertions green; subgroups stay plain `AliasGroup`. Cheap
-  lock: assert `isinstance(cli, SectionedGroup)` for root and the negative for subgroups.
+- `SectionedGroup(AliasGroup)` in `perk/cli/alias.py` is **root-only** (Launchers/Groups/Setup/
+  Other/Hidden): extend-don't-replace keeps existing `isinstance(cli, AliasGroup)` assertions green;
+  plain subgroups stay plain `AliasGroup`. Cheap lock: assert `isinstance(cli, SectionedGroup)` for
+  root and the negative for subgroups.
+- **`SectionedAliasGroup` is-an `AliasGroup`, is-NOT-a `SectionedGroup`.** The two sectioning classes
+  are **siblings off `AliasGroup`**, not parent/child. A *subgroup* that wants its own sections
+  (Launchers/Workers/Commands) is a `SectionedAliasGroup` (paired with `mark_kind` to tag each verb's
+  bucket; unmarked verbs fall into the catch-all Commands section, so an unmarked group renders
+  exactly like a bare `AliasGroup`, empty sections omitted). This is *why*
+  `test_root_and_subgroups_use_alias_group` (subgroups are `AliasGroup` but **not** `SectionedGroup`)
+  keeps passing for a now-sectioned subgroup — `SectionedAliasGroup` never inherits `SectionedGroup`.
+  Don't confuse the two.
 - The `Hidden` section is env-gated default-off — `PERK_SHOW_HIDDEN` with the same truthiness shape
   as `PERK_RUN_ID` (`not in (None, "", "0")`); the section is omitted entirely when empty or when
   the flag is off.
@@ -155,20 +164,155 @@ is only the `perk pr ready` worker plus the warm `/ready` door, and merely gains
 `perk ready`. A future implementer must **not** build a launcher for it (that would require an
 illegal `ready` registry stage). See §11.7 Correction 1.
 
-**Enactment is nodes 2.1–4.1**, not node 1.1 (which is docs-only): the merged-command factory, the
-flat-alias mechanism, and the sectioned help land in node 2.1; the three restructured groups
-(`objective`/`plan`/`pr`) in 3.1–3.3; doc/test reconciliation in 4.1. This playbook's
-realized-shape examples update as each node lands.
+## The enacted taxonomy arc (nodes 1.1–3.3, all landed)
 
-**Node 3.1 landed (`objective` group folded).** The three objective **launchers** (`author` /
-`save` / `plan`) now live inside `perk/cli/commands/objective/` as `{verb}_cmd.py` files beside the
-six workers; the flat `objective-author`/`objective-plan`/`objective-save` spellings and the
-`oauthor`/`oplan` aliases are gone. The group uses `SectionedAliasGroup` + `mark_kind` to render
-**Launchers** + **Workers** sections (SSOT §11.7-Q5). Objective is **pure relocation** — it has no
-launcher+worker *merge* (the launchers are launcher-only L, no worker half) and **no earned flat
-alias** (SSOT §11.7-Q4: bare `perk objective` stays group help, no hybrid bare-launch). Registry
-stage ids (`objective-author`/`objective-save`/`objective-plan`) stayed stable; only the cold CLI
-spelling and the informational registry `command:` fields changed.
+The taxonomy was enacted in four landed nodes: **1.1** wrote the SSOT (docs-only); **2.1** shipped
+the *dormant* substrate (merge factory + flat-alias + sectioned help, zero live commands); **3.1/
+3.2/3.3** folded the `objective`/`plan`/`pr` groups onto it. The merged (L+W) set is exactly
+**`pr submit`, `pr land`, `plan save`**. `PlanGroup` became the **3rd inline copy** of the hybrid
+default-dispatch pattern (after `LearnGroup`); a shared `HybridDispatchGroup` base stays a
+deliberate deferral (each group keeps its own copy). The `shared/registry.yaml` `command:` field
+stayed **informational** through every fold (`_check_shapes` only validates non-empty; launchers key
+off `stage.id`) — reaffirmed by all three folds. The cross-cutting recipe + gotchas:
+
+### The "dormant substrate" discipline (node 2.1)
+
+A capability-before-enactment node ships the mechanism + tests but wires **zero** live commands.
+Dormancy is proven by a **structural** parity-smoke fingerprint asserted against a *literal expected
+dict* (`tests/test_cli_parity_smoke.py`'s `EXPECTED_SURFACE`): verb-sets + sorted-alias-tuples + each
+root command's section bucket — **never raw `--help` text** (terminal-width-brittle). That literal
+dict is precisely the artifact a later enactment node *edits* — the diff is the review surface. Prove
+the merge factory itself via **one unregistered construction** over a real stage+worker pair
+(`make_merged_command(submit_stage, submit_pr)`), no live registration needed. Reusable for any
+dormant-substrate node.
+
+### `MergedCommand` mechanics (conceptually)
+
+`MergedCommand` (in `perk/cli/stages.py`, built by `make_merged_command`) is a `click.Command`
+subclass holding **two intact halves** — the launcher (`make_stage_launcher(stage)`) and an existing
+worker `Command`. It dispatches on the literal `--json` token *anywhere* in argv (the proven
+`LearnGroup` pattern), stashes the chosen half, and delegates the **full argv** to it — **neither
+half's options are unioned**. The `--help` guard fires `MergedCommand`'s own help **only** when
+`--help`/`-h` is present AND `--json` absent (so `--json --help` correctly renders the *worker's*
+help). Accepted edge (mirrors `LearnGroup`): you cannot pass `--json` *through to pi* as a launcher
+pi-arg via the merged command — use the explicit stage launcher.
+
+### Per-object marker state, never module globals
+
+Flat-alias bookkeeping is stashed on the **root group object**; the launcher/worker kind marker on
+the **command object** (mirroring the existing `ALIAS_ATTR` trick). Module-level sets would cause
+cross-test leakage. Note that `SectionedGroup.format_commands` routes flat-alias names into the
+launcher bucket **before** the `STAGE_LAUNCHERS` check, so an empty alias set renders
+byte-identically — a fold can swap a generated launcher for a `MergedCommand`/flat alias with the
+rendered rows unchanged (the diff is exactly the *added* rows, nothing moves).
+
+### Retiring a generated flat launcher takes TWO edits
+
+`register_stage_commands` auto-generates one flat `perk <stage>` launcher per registry stage **not**
+in `DEDICATED_STAGES`. Replacing it with a grouped/merged command requires BOTH: add the stage id to
+`DEDICATED_STAGES` (`perk/cli/stages.py`, stops generation) AND drop it from the curated
+`STAGE_LAUNCHERS` list (`perk/cli/alias.py`, honesty — `test_section_lists_drift_guard`'s "no stale
+entries" assertion). Step 2 is rarely load-bearing for *rendering* (the flat alias keeps the row
+live), but the list must stay honest.
+
+### Build merged/grouped commands defensively
+
+At group import time, wrap the registry read in `try/except (RegistryError, FileNotFoundError,
+KeyError)` and in the fallback register the **bare worker** under the verb name (mirroring
+`LearnGroup`'s registry-load guard). A broken registry must never brick the group's `--help` or the
+warm `perk <group> <verb> --json` worker doors — only the bare-launch half is lost.
+
+### Launcher-only (L) ≠ merged (L+W)
+
+A stage with a launcher + warm session-flow but **no deterministic worker** is launcher-only: build a
+plain `@click.command` mirroring the launcher's option set by hand (`--worktree`/`--dry-run`/
+`--remote`/`pi_args`), with the two-paragraph short/long help split (documented above). `pr address`
+is this shape. The genuinely merged set is exactly **`pr submit`, `pr land`, `plan save`**. Reaffirm:
+**`pr ready` is worker-only (W)** — not a registry stage, so a launcher would require an illegal
+`ready` stage; it only gains the flat alias `perk ready`.
+
+### Pure-relocation fold ≠ the launcher+worker merge model
+
+Recognizing "this is relocation, not merge" up front keeps the change small. The `objective` group
+fold (node 3.1) used **none** of the merge machinery (no `MergedCommand`, no flat alias; bare `perk
+objective` stays group help — SSOT §11.7-Q4). It was just: `git mv` the `{verb}_cmd.py` files into
+the group dir, switch `cls=AliasGroup` → `cls=SectionedAliasGroup`, wrap each registration as
+`register_with_aliases(group, mark_kind(cmd, "launcher"|"worker"))`, drop the flat registrations +
+aliases, update the informational registry `command:` fields. The **one** behavior delta was
+promoting `objective-save` from a generic-generated launcher to a dedicated `save_cmd.py` (which
+required adding it to `DEDICATED_STAGES`), gaining a `--json` failure surface. Generalize: don't
+reach for the merge factory just because a node is in the taxonomy objective.
+
+### Threading an optional kwarg through the launch chain is safe/mechanical
+
+Defaulting a new kwarg (e.g. `preview: bool = False`) through `launch_stage → _resolve_prompt →
+_initial_prompt → …` leaves every existing caller unaffected. Key semantic to document at the
+command: a **seed-prompt-shaping flag is a local-launch concept** and is therefore **inert on
+`--remote`** (the remote path builds no seed prompt).
+
+### The "update the warm doors' argv" clause is often a verified no-op
+
+Before implementing an "update X to match the cold rename" clause, **verify X is actually stale**.
+The warm submit/land/ready doors already shell `["pr", "<verb>", "--json"]` and `/address` shells no
+cold launcher — so the pr fold touched **zero** `extension/doors/*.ts`. The warm↔cold contract
+(`<group> <verb> --json`) may already satisfy the clause; `MergedCommand` routes `--json` straight to
+the worker.
+
+### Cold-door argv changes ripple PAST the factory's own test
+
+When changing any `runColdDoor`/`pi.exec` argv leading token, **grep ALL `extension/**/*.test.ts`
+for the literal token**, not just the obvious factory test. The plan fold's `["plan","save"]`
+respelling broke `planReview.test.ts`, which asserted `argv[0] === "plan-save"` via the approval→save
+(`approvalSave`) path — not just `planSave.test.ts`. Prefer asserting `argv.slice(0,2)` deepEqual
+over the bare leading token.
+
+### Merged-command worker tests must invoke the worker OBJECT directly
+
+After a `MergedCommand` fold the deterministic worker is reachable through the registered `cli`
+**only under `--json`**. Worker-behavior tests asserting human/JSON output must retarget from
+`runner.invoke(cli, ["<verb>", …])` to invoking the worker **command object** directly with an
+explicit `obj=PerkContext(...)` (the root callback's lazy default doesn't run), dropping the leading
+verb token. Add separate end-to-end merged-routing coverage through `cli` (launcher default vs
+`--json`→worker).
+
+### Parallel CLI-taxonomy nodes union-conflict on a predictable file set
+
+Nodes 3.1/3.2/3.3 edit the SAME files, so rebasing onto a merged sibling is **expected** conflict
+whose resolution is almost always a **union** of each node's deletions/additions, not a choice of
+sides. Hand-merge concentrates in `perk/cli/stages.py` (`DEDICATED_STAGES`) and the `perk/cli/cli.py`
+root import+registration block; the big structural fixtures (`STAGE_LAUNCHERS`, `EXPECTED_SURFACE`,
+`EXPECTED_ROOT_ALIASES`) usually auto-merge because nodes edit line-disjoint entries — but
+**re-verify the merged `EXPECTED_SURFACE` by eye** and run `just ci` (the authoritative union check).
+Incidental `package-lock.json` churn re-blocks `git rebase`; `git checkout package-lock.json` first
+(the known stale-SDK/package-lock trap — see `toolchain/worktree-node-modules.md`).
+
+### The bi-directional cli.md guard arc
+
+The exists↔documented `tests/test_user_docs_cli_reference.py` guard was recurring friction across the
+folds: it was worked around per-node (an accepted transient red called out in the PR body; a
+`xfail(strict=False)` on exactly the two guards a surface change breaks) while `cli.md`
+reconciliation was deferred, then **deleted outright** in node 3.1 in favor of the *structural*
+guards (`EXPECTED_SURFACE` fingerprint + the help-sections drift guard), which catch real surface
+regressions via structural diffs rather than brittle prose lockstep. Follow-through lesson: when you
+delete a guard, also fix any doc prose that **advertised** it (the cli.md intro claimed "guarded by a
+pytest existence check").
+
+### An SSOT node can disprove its parent objective — propagate to THREE surfaces
+
+The launcher/worker (L/W/L+W) annotations in an *aspirational* objective target tree are author-time
+guesses — verify each against `shared/registry.yaml` (does the stage id exist?) + `perk/cli/
+stages.py`, never the tree (a command has a launcher half only if it's a registry stage). The
+objective's tree annotated `pr ready` as L+W; verified, `ready` is **not** a registry stage, so it is
+worker-only. When a docs-SSOT node corrects its parent, the fix must reach **three** surfaces: (1)
+the SSOT itself, (2) the objective's **Reconcilable prose**, and (3) the downstream **node
+descriptions** — a future enactment agent reading only the roadmap table would otherwise re-introduce
+the error. This is the concrete reason `/objective-reconcile` must reach node descriptions, not just
+prose.
+
+**All of nodes 1.1–3.3 have landed.** The `objective`/`plan`/`pr` groups are folded; `objective` is
+pure relocation (`SectionedAliasGroup` + `mark_kind`, Launchers/Workers sections, no merge, no flat
+alias); `plan`/`pr` use the hybrid `PlanGroup`/`pr` shapes with `MergedCommand` for the merged verbs.
+Doc/test reconciliation (node 4.1) deleted the brittle cli.md guard for the structural guards.
 
 ## Warm-plane ids are decoupled from cold spellings
 

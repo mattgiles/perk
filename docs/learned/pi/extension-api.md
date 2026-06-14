@@ -1,6 +1,6 @@
 ---
 title: Pi 0.78.x extension API — getSystemPromptOptions, ctx.mode, injected-message persistence
-read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
+read_when: You need live system-prompt inputs in an extension, are choosing a command vs lifecycle-event handler, importing a Pi type, handling the `session_compact` event (a first-class SDK event; the type-only harness `emitLifecycle` union) or the stale-`ctx` compaction race (the silent-swallow catch arm), reasoning about whether an injected custom message persists, using `ctx.ui.editor` (no AbortSignal, title-borne key hints), testing `pi.events`-bridge logic / flag-shortcut non-registration from the harness, asserting a `pi.sendUserMessage` injection offline (the spy is mandatory for seed-turn `invokeCommand` tests), hitting the `headfulUIContext` select/input/editor gap, a harness test failing only locally/on main (registration-time cwd config reads), or unexplained run-id stderr in local node tests (the `PERK_RUN_ID` leak).
 ---
 
 # Pi extension API (0.78.x)
@@ -53,6 +53,36 @@ The `context` event (= SDK `transformContext`) runs on **every** provider call o
 message list** — not once per session. So an *unconditional* strip of an injected custom type would
 remove it even on its own injection turn (defeating delivery). Any strip of injected context must be
 **conditional** — see `pi/context-injection.md` for the inject-and-conditionally-strip pattern.
+
+## `session_compact` is a first-class pi SDK event — no harness fiction
+
+The `@earendil-works/pi-coding-agent` `ExtensionAPI.on` overloads already declare
+`on("session_compact", …)`, and `SessionCompactEvent` (`{ type, compactionEntry, fromExtension }`) is
+in the `SessionEvent` union — so `pi.on("session_compact", …)` typechecks natively in production. Only
+the **test** harness needed work: `extension/testing/harness.ts` `emitLifecycle`'s union is
+**type-only** (the runtime forwards any event via `emit(event as never)`), so adding
+`session_compact` to it is a pure TS-surface change, not new runtime plumbing.
+
+### The stale-`ctx` compaction race (why a compaction handler's catch arm diverges)
+
+During compaction pi may replace the running session out from under an in-flight handler,
+invalidating the extension runner's `ctx` proxy; the next read off it throws
+`/stale after session replacement/`. That is **benign** — the replacement session's `session_start`
+re-renders — so a `session_compact` handler may **swallow it silently** (an `isStaleCtxError` test on
+`String(e)`), **diverging** from the uniform log-not-throw catch every other lifecycle handler uses.
+Genuine replay bugs still log. Frame this as the general reason a compaction-time handler's error
+handling differs from a normal lifecycle handler. (The handler otherwise mirrors `session_tree`:
+rebuild + render, no re-seed.)
+
+- **Export-wins when a "private" helper has a named unit-test obligation.** A helper specced
+  module-private but separately required to be unit-tested ships **exported** — the test requirement
+  wins (here `isStaleCtxError`; the same resolution as the `plan-review-flow.md` extracted-core
+  recipe).
+- **Residual caution:** an error-to-string utility doing `String(e)` throws `TypeError` on a
+  null-prototype object (`String(Object.create(null))`) — not reachable when the arg is always
+  pi-core's proxy error, but a general caution for any such utility.
+- The checkpoints-specific charter survey is **not** duplicated here — it lives in
+  `docs/design/checkpoints-rpiv-todo-comparison.md`.
 
 ## `ctx.ui.editor` facts (pi 0.78.x)
 

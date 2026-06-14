@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -83,6 +83,26 @@ The pattern for any side-effecting step (e.g. shelling out to an external CLI): 
 and after, append only on difference.** `_sync_skills` snapshots the `.agents/skills/` symlink set
 (`_skill_link_state`: name → target) before and after running `skills sync`, and appends a change
 only when the set actually changed.
+
+## Committed-tracked managed delivery vs the cold-door symlink mirror
+
+When a managed convergence delivers content into a subdir, *how* linked worktrees inherit it depends
+on whether the delivery is **tracked content** or **symlinks**:
+
+- **Committed (tracked) managed subdir ⇒ no worktree mirror needed.** A convergence that writes
+  byte-stable content into a **committed, tracked** subdir (e.g. agent defs into `.pi/agents/perk/`)
+  is inherited by linked worktrees via plain `git checkout` — so it needs **no** cold-door worktree
+  symlink mirror. Contrast skills' `materialize_skills` `.agents/skills/` mirror, required **only**
+  because those are *symlinks* the cold door must repoint (see `cold-door-launch.md` /
+  `skill-bindings.md`). Choose committed-tracked delivery when worktree inheritance matters and the
+  content is byte-stable.
+- **Perk owns the WHOLE subdir: prune inside, never outside.** Such a convergence prunes stray files
+  *within* its owned subdir (e.g. stray `*.md` under `.pi/agents/perk/`) but **never** touches
+  sibling user files outside it (a user's `.pi/agents/mine.md`) — and, reaffirming the idempotency
+  rule above, computes the **same change-list for `apply=True`/`apply=False`**.
+
+See `docs/learned/pi/subagents.md` for the realized instance (the `PERK_AGENTS` /
+`_converge_subagent_agents` agent-def delivery).
 
 ## "doctor checks disk; selfcheck checks the prompt"
 

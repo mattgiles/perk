@@ -1,14 +1,14 @@
 ---
-title: perk's subagent orchestration — project vs builtin agents, and the two mutation shapes
-read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, or working on the `/pr-review` / `/address` orchestration.
+title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
+read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, working on the `/pr-review` / `/address` orchestration, or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
 ---
 
 # perk's subagent orchestration
 
 perk delegates fresh-context work (PR review, classification, objective exploration) to subagents
-via the `pi-subagents` package. The agent defs live in `.pi/agents/*.md` (hand-committed); the warm
-commands (`/pr-review`, `/address`) spawn them. This doc captures the non-obvious rules an agent
-can't derive from any single file.
+via the `pi-subagents` package. perk's three agent defs are **delivered into consumer repos by `perk
+init`** (a committed managed convergence — see below); the warm commands (`/pr-review`, `/address`)
+spawn them. This doc captures the non-obvious rules an agent can't derive from any single file.
 
 > **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
 > source (the one GitHub-API reference is flagged as such). Read the pointers.
@@ -88,12 +88,55 @@ comment (`POST .../issues/{n}/comments`) so a review *always* lands, recording w
 (`mode: "review" | "comment_fallback"`). `event=COMMENT` is **hardcoded** so the agent can never
 approve / request-changes. (This is an API-behavior reference — see `## Sources`.)
 
-## Agent-def delivery is a known gap
+## Agent-def delivery to consumer repos (the realized design)
 
-perk's `.pi/agents/*.md` are **hand-committed** and auto-enumerated by doctor's
-`subagent-engine` / `subagent-agents` checks — so a new hand-committed agent def needs **no** doctor
-edit. But the `@perk/pi` package ships only `extension/` + `shared/`, so delivering perk's agent defs
-to *consumer* repos is still **unbuilt**. Flag as a deferral.
+perk's three subagent defs (`pr-reviewer`, `review-classifier`, `objective-explorer`) reach consumer
+repos via the Python wheel + `perk init`. This closed the former "known gap."
+
+### How pi-subagents discovers project agents
+
+Discovery (`pi-subagents/src/agents/agents.ts`) is **recursive** over `<root>/.pi/agents` (+ legacy
+`.agents`), and the runtime name is derived from **frontmatter** (`name` + `package`), **NOT the file
+path** — so `.pi/agents/perk/<name>.md` with `package: perk` yields runtime name `perk.<name>`
+identically to a top-level file (subdir placement is free). **Installed npm packages are never
+scanned for agent defs** — shipping agents in the npm package would NOT make them discoverable. This
+is *why* the carrier is the Python wheel + `perk init` materialization, not the npm package.
+
+### The delivery design (mirror of skills / `shared/`)
+
+- **Sources live OUT of the discovered tree**: top-level `agents/<name>.md` (no leading dot) so pi
+  never double-loads them in perk's own repo — same trap/fix as skills.
+- **Bundling mirrors `shared/`→`perk/_shared`**: a `force-include` adds `agents` → `perk/_agents` to
+  the wheel + sdist; **npm `files` is unchanged** (Python-plane-only delivery; the packaging test
+  asserts `agents/` is absent from the npm tarball).
+- **The resolver mirrors `shared_dir()`**: package-data candidate `perk/_agents`, else editable repo
+  sibling `<repo>/agents`, else a `FileNotFoundError` naming both.
+
+### A committed managed convergence
+
+A `PERK_AGENTS` SSOT tuple drives a content convergence (`_converge_subagent_agents`) that delivers
+each def **byte-for-byte** into the perk-owned `.pi/agents/perk/` subdir and **prunes stray `*.md`
+inside that subdir** (perk owns the WHOLE subdir; it never touches anything outside it, e.g. a user's
+own `.pi/agents/mine.md`). It computes the **identical change-list for `apply=True`/`apply=False`**
+(the managed-convergence invariant) and is the auto-generated `subagent-agents` doctor check. There
+is **no `self_repo` param** (unlike the skills sibling): the resolver works in both install modes, so
+self-repo and consumers get byte-identical defs. Because `.pi/agents/perk/` is **committed
+(tracked)**, linked worktrees inherit the defs via `git checkout` — **no worktree symlink mirror**
+(contrast skills' `materialize_skills`; see `workflow/init-doctor.md` for the reusable contrast).
+
+### Doctor
+
+The `subagent-engine` enumeration moved from `.pi/agents/*.md` to `.pi/agents/perk/*.md` (still
+informational; the `subagent-agents` convergence owns drift). The `[subagents]` config stays
+**fixed-key** (perk's three agents only) — it does **not** configure user agents (those set `model:`
+in frontmatter; see `how-to/write-a-custom-subagent.md`).
+
+### Process note
+
+Running `perk init` in perk's own dev worktree also delivers the self-repo's `.pi/agents/perk/`
+(stage those committed defs). During that run the **skills sync may fail with a `conflict`** — a
+**pre-existing local-env condition, unrelated and non-blocking** (the `subagent-agents` convergence
+runs and reports its `created` lines BEFORE the skills step).
 
 ## Residual
 
@@ -110,9 +153,12 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 ## Cross-references
 
 - `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header
-- `.pi/agents/pr-reviewer.md`, `.pi/agents/review-classifier.md` — the hand-committed agent defs
+- `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`)
+- `perk/convergence/init.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
+- `docs/learned/workflow/init-doctor.md` — the committed-convergence-vs-symlink-mirror contrast
+- `docs/user-docs/how-to/write-a-custom-subagent.md` — user agents set `model:` in frontmatter (the fixed-key `[subagents]` boundary)
 - `perk/cli/commands/pr_review_post_cmd.py` — the canonical Python mutation (D1)
-- `shared/contracts.md` §8.3 — the corrected `agentOverrides` note + workflow-state schema
+- `shared/contracts.md` §8.3 — the corrected `agentOverrides` note, the agent-def delivery design, + workflow-state schema
 - `docs/learned/workflow/warm-door-commands.md` — the driving-command shape `/pr-review` departs from
 - `docs/learned/workflow/skill-bindings.md` — the `command:<id>` binding checklist (`/pr-review` is one)
 - the `pi-subagents` skill — single/chain/parallel/forked-context delegation

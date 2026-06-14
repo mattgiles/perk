@@ -1,6 +1,6 @@
 ---
 title: ruff check vs ruff format — CI vs pre-commit hook
-read_when: You are debugging a CI-green / commit-rejected discrepancy, or a commit appears to have not advanced after a pre-commit hook ran.
+read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit appears to have not advanced after a pre-commit hook ran, or you are writing a generic function and hit UP047 (PEP-695 inline generic vs the legacy `TypeVar(bound=...)`).
 ---
 
 # `ruff check` vs `ruff format`
@@ -61,6 +61,14 @@ Embedded multiline string templates (such as inline workflow YAML blocks defined
 are still subject to standard lint checks. If any line inside an embedded multiline string exceeds
 the 100-column limit, Ruff will raise an `E501` lint error. You must shorten or wrap lines within
 these multiline templates to stay under the column limit.
+
+## `UP047`: PEP-695 inline generic vs `TypeVar(bound=...)`
+
+`UP047` fires on the legacy `F = TypeVar(bound=...)` form when a generic function **returns the bound
+type** — use the PEP-695 inline form instead (`def mark_kind[C: click.Command](cmd: C) -> C`).
+Contrast: a helper returning a `Callable` (not the bound type itself) **escapes** UP047 — the rule
+keys on *returning the bound type*, so a pre-existing decorator factory returning `Callable` is
+untouched even though it also uses a bound `TypeVar`.
 
 ## `ruff SIM105`: replace `try/except: pass` with `contextlib.suppress`
 
