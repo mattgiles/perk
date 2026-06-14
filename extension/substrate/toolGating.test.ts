@@ -19,8 +19,18 @@ test("READ_ONLY_TOOLS: contains objective_draft (the #352 Node 2.1 twin of the c
   assert.ok(READ_ONLY_TOOLS.includes("objective_draft"));
 });
 
-test("READ_ONLY_TOOLS: contains the four pi-web-access research tools (web research during planning)", () => {
-  for (const tool of ["web_search", "code_search", "fetch_content", "get_search_content"]) {
+test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research tools (#529)", () => {
+  // perk does not normalize names — the allowlist carries every known web provider's tool names
+  // (pi-web-access + @ollama/pi-web-search + @juicesharp/rpiv-web-tools), inert when absent.
+  for (const tool of [
+    "web_search",
+    "code_search",
+    "fetch_content",
+    "get_search_content",
+    "ollama_web_search",
+    "ollama_web_fetch",
+    "web_fetch",
+  ]) {
     assert.ok(READ_ONLY_TOOLS.includes(tool), `missing ${tool}`);
   }
 });

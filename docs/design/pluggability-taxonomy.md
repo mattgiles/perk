@@ -56,6 +56,7 @@ symbol, contract §-refs) follow the table.
 | **plan** | ✅ authoring surface | ✅ `cache.plan-ref` (§8.4) | ✅ perk planMode/planSave | ✅ consumers read only the ref | **Candidate (primary)** |
 | **todo** | ✅ implement-progress overlay | ✅ `perk:checkpoint` + `## Steps`/`[DONE:n]` vocab | ✅ perk checkpoints | ✅ dedicated entry, inert-by-default | **Candidate (primary)** |
 | **askuser** | ✅ `ask_user_question` tool | ✅ **interface seam** — tool *name* + non-terminating-answer semantics (no durable artifact) | ✅ perk's own tool is the default | ✅ model just continues its turn with the answer | **Candidate (interface seam)** |
+| **web** | ✅ web-research surface (search + fetch) | ⚠️ **marginal** — no shared durable artifact *or* common tool name (the loose "web search + fetch capability is available") | ✅ `pi-web-access` default = zero behavior change | ✅ only the read-only allowlist (union of tool names) | **Candidate (interface seam, foreign default)** |
 | CI executor | ✅ Run→Report oracle | ⚠️ `CiReport` internal, loop-bound | ✅ exists | ❌ tightly bound to parent loop + handoff | **Not** — already config-pluggable via `[ci]`; no foreign-provider value |
 | address loop | ✅ classify-then-act | ❌ GitHub-API-shaped, not an internal artifact | ❌ no behavior-preserving foreign default | ❌ "act" = irreducible parent judgment | **Not** |
 | objectives | ✅ goal-as-plan-factory | ⚠️ GitHub-issue + DependencyGraph | ❌ it *is* perk's differentiator | ❌ threads through plan-ref + reconcile | **Not** (core, not seam) |
@@ -114,6 +115,23 @@ shim, no injected context — the foreign tool self-documents via its own `promp
 **extends** the original two-seam scope fence below (which remains the #115 historical record); it
 does not contradict it.
 
+**web — Candidate (interface seam, foreign default).** web owns one coherent surface: the
+web-research capability (search + content fetch) a model reaches for mid-turn. It is an **interface
+seam** like askuser/footer — no durable artifact — but with **two novelties**. (1) **Marginal C2:**
+unlike askuser (which has the shared tool *name* `ask_user_question`), the three web providers share
+neither a durable artifact nor a common tool name — `pi-web-access` exposes
+`web_search`/`code_search`/`fetch_content`/`get_search_content`, `@ollama/pi-web-search` exposes
+`ollama_web_search`/`ollama_web_fetch`, `@juicesharp/rpiv-web-tools` exposes `web_search`/`web_fetch`.
+The contract is only the loose "web search + fetch capability is available", so perk **does not
+normalize names** — it allowlists the **union** of all known web tool names in `READ_ONLY_TOOLS`
+(inert when a package is absent). (2) **Foreign default:** perk owns **no** native web provider, so
+the behavior-preserving default (`pi-web-access`, C3) is itself a **foreign package** — the first
+seam where the default carries a non-null `package`. The adapter is **vacate-only with nothing to
+vacate**: perk registers no web tools, so selection simply swaps the installed package (`adapter:
+null`, no shim). C4 holds — the only coupling is the read-only allowlist. The pi-web-access-specific
+`librarian` skill is accepted as lost under a foreign selection. This **extends** the scope fence
+below alongside askuser/footer.
+
 **objectives — Not (core, not seam).** A coherent surface (the goal-as-plan-factory:
 `extension/objective.ts`, `objectivePlan.ts`, `objectiveAuthor.ts`, `objectiveSave.ts` over the
 deterministic `perk/objective.py` `DependencyGraph`), but it is **deeply coupled** to GitHub-issue
@@ -158,6 +176,16 @@ own borrow-then-retire history**:
 > durable artifact), so it sits slightly outside the artifact-seam framing this fence was authored
 > around — see the **askuser** analysis above. This note records that the fence **grew** to three
 > seams; the two-seam framing below remains the #115 historical record.
+
+> **Post-#115 extension — the `web` interface seam.** A fifth seam, **`web`** (`pi-web-access` ↔
+> `@ollama/pi-web-search` ↔ `@juicesharp/rpiv-web-tools`), was added after #115 (#529). It records
+> **two novelties** the earlier seams did not have. (1) **Marginal C2:** the contract is the loose
+> "web search + fetch capability is available" — the providers share **no** durable artifact and
+> **no** common tool name (their tool names diverge), so perk allowlists the **union** of the names
+> and does **not** normalize. (2) **Foreign default:** perk has **no** native web provider, so the
+> behavior-preserving default (`pi-web-access`) is itself a **foreign npm package** — the first seam
+> where the C3 default carries a non-null `package`. The seam is vacate-only with **no surface to
+> vacate** (perk registers no web tools); selection just swaps the installed package.
 
 Those two foreign packages are real surfaces perk has already swapped against — the **empirical
 reason** plan and todo are the validatable seams: the provider machinery built for #115 can be

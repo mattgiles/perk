@@ -695,8 +695,10 @@ is never called anywhere (D5 rescinded). Enforced by the source-scan guard
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`):
 (1) restricts the active tool set to `READ_ONLY_TOOLS` (`read`/`grep`/`find`/`ls`/`bash` +
-`ask_user_question` + `plan_review` + the four borrowed `pi-web-access` research tools
-`web_search`/`code_search`/`fetch_content`/`get_search_content`; foreign tool names are inert
+`ask_user_question` + `plan_review` + the **`web` seam** providers' research tools — the **union**
+of all provider tool names: `web_search`/`code_search`/`fetch_content`/`get_search_content`
+(`pi-web-access`, the default), `ollama_web_search`/`ollama_web_fetch` (`@ollama/pi-web-search`),
+and `web_fetch` (`@juicesharp/rpiv-web-tools`); foreign tool names are inert
 when their package is absent) via `pi.setActiveTools`, **snapshot-then-restore** (snapshot `pi.getActiveTools()` on the off→on
 transition; restore it on on→off, falling back to the **full** configured tool set
 `pi.getAllTools()` if no snapshot exists — never a hardcoded list, so perk's custom tools survive);
@@ -1955,14 +1957,14 @@ dangling-pointer warning, which stays a last-resort signal).
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
-and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer *providers* perk
+and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer/web *providers* perk
 knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
 `.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
-(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, issues }`
+(`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, web, issues }`
 with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
@@ -1972,8 +1974,10 @@ default).
 
 **Provider entry shape — `{ id, seam, package, adapter, default, package_filter? }`:** `id` is the
 stable provider id (for the `plan` seam, exactly the `cache.plan-ref` `provider` string); `seam ∈
-{plan, todo, askuser, footer}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
-(`null` for perk's own bundled reference provider — nothing to add); `adapter` is the perk-owned
+{plan, todo, askuser, footer, web}`; `package` is the foreign Pi package spec added to `.pi/settings.json` `packages`
+(`null` for perk's own bundled reference provider — nothing to add; **not universal** — the `web`
+seam's reference provider `pi-web-access` carries a **non-null** `package` because perk owns no
+native web implementation, the documented exception); `adapter` is the perk-owned
 shim module bridging a foreign surface to the artifact boundary (`null` for the reference
 provider); `default` is a bool — **exactly one `true` per seam**, the behavior-preserving no-config
 pick; `package_filter` is an optional Pi object-form filter (`extensions`/`skills`/… arrays) merged
@@ -1995,7 +1999,11 @@ progress discipline onto the foreign overlay — see the Node 3.2 status note). 
 note below. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
 `default: true`) plus two **real** foreign footer providers `powerline-footer` (→ `npm:pi-powerline-footer`)
 and `pi-bar-footer` (→ `npm:pi-bar`) make the **footer** seam a **second interface seam** (vacate-only,
-`adapter: null`) — see the footer status note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
+`adapter: null`) — see the footer status note below. A fifth reference entry `pi-web-access` (seam
+`web`, **`package: "npm:pi-web-access"`** — the first non-null-package default — / `adapter: null` /
+`default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
+and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam a **third interface
+seam** (vacate-only, `adapter: null`) — see the web status note below. The **default** path (the reference providers) is unaffected and is the hard guarantee.
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
@@ -2009,12 +2017,12 @@ untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
 `schema_version == 1` (else a structural load error), each provider has a non-empty unique `id`, a
-`seam ∈ {plan, todo, askuser, footer}`, and that **exactly one `default: true`** exists per seam. They do **not**
+`seam ∈ {plan, todo, askuser, footer, web}`, and that **exactly one `default: true`** exists per seam. They do **not**
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
 **The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
-one key per seam (`plan` / `todo` / `askuser` / `footer`), values are **bare provider-id strings** (the TS narrow-TOML
+one key per seam (`plan` / `todo` / `askuser` / `footer` / `web`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
@@ -2022,13 +2030,15 @@ Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `ex
 `default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
-askuser, footer, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
+askuser, footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
 falls back to the default and records a **loud-but-non-fatal** `Issue`.
 
 **`perk init` two-directional settings wiring:** provider wiring composes on top of the static
 `_desired_packages` (perk + `BORROWED_PACKAGES`: `npm:@tombell/pi-diff`,
-`npm:pi-subagents`, `npm:pi-web-access` — the borrowed web-research engine, zero-config Exa
-search + content fetch) layer within the same `_converge_settings` body,
+`npm:pi-subagents`) layer within the same `_converge_settings` body — `npm:pi-web-access` is **no
+longer borrowed** (#529): it is the `web` seam's `default: true` provider, converged via the
+provider path (see the web status note), so a default repo still installs it but deselecting `web`
+removes it like any provider package —
 so it stays inside the `settings-wiring` `ManagedConvergence` (one desired-state SSOT — `doctor`
 dry-runs/fixes it for free). The **whole supported set** gives the *provider-managed identity set*
 (every non-null `package`'s npm/git identity) — the discriminator separating provider packages from
@@ -2291,6 +2301,39 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 > before (zero behavior change — the hard guarantee). (5) **No `surfaces.ts` change:** `perkFooter` /
 > `installPerkFooter` stay the reference footer; the only change is whether `index.ts` calls it.
 > Catalog entries carry no `package_filter` (each package ships a single footer extension).
+
+> **Status (web — the fifth seam, a THIRD INTERFACE seam with a NOVEL foreign default):** a fifth
+> seam, **`web`**, lets a repo swap its web-research provider among three packages: `pi-web-access`
+> (the **default** — zero-config Exa search + content fetch + the bundled `librarian` skill,
+> exactly today's behavior), `ollama-web-search` (→ `npm:@ollama/pi-web-search`, needs a local
+> Ollama daemon) and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`, needs an API key;
+> default provider Brave; registers a `/web-tools` command — no perk collision). (1) **Interface
+> seam, not artifact seam** (mirrors askuser/footer): web produces **no** durable state key or
+> session-entry vocabulary; its “contract” is the loose “web search + fetch capability is
+> available”. (2) **The NOVEL property — the first non-null-package default:** perk owns **no**
+> native web implementation, so the behavior-preserving reference (`pi-web-access`) is itself a
+> **foreign npm package** — its `default: true` entry carries a **non-null `package`** (every prior
+> seam's default was `package: null`). This needs **no** substrate change: `_converge_provider_packages`
+> already builds `desired` from every resolved provider's truthy `package` and the managed-identity
+> set from every non-null `package`, and `validate()` enforces only exactly-one-default-per-seam
+> (it never required a default to be `package: null`). (3) **Vacate-only adapter** (`adapter: null`
+> for **all three** entries, **no shim module**, no injected context) with **no surface to vacate**
+> at all: perk registers **no** web tools of its own, so unlike askuser (registration-time vacating)
+> or footer (install-site vacating) there is **nothing** to step aside — selection simply **swaps**
+> which web package `_converge_provider_packages` installs. The entire seam is Python convergence +
+> the census widening + the read-only allowlist. (4) **Static union allowlist, no normalization:**
+> the three packages expose **divergent** tool names (`web_search`/`code_search`/`fetch_content`/
+> `get_search_content` vs `ollama_web_search`/`ollama_web_fetch` vs `web_search`/`web_fetch`), and
+> perk does **not** normalize them — `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) carries
+> the **union** of all known web tool names, inert when a package is absent (the shared-name
+> allowlist precedent). `SDK_READ_ONLY_TOOLS` (`extension/worker/readOnlySession.ts`) intentionally
+> omits them (headless children) — unchanged. (5) The foreign package is **two-directionally** wired
+> by `_converge_provider_packages` (installed only when selected, removed on deselect); under the
+> default the committed `npm:pi-web-access` entry stays installed (now **provider-managed**, no
+> longer in `BORROWED_PACKAGES`). (6) **`librarian` is accepted as lost under a foreign web
+> selection** — it is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path),
+> documented and not re-homed. Catalog entries carry no `package_filter` (each package's sole
+> extension is its root `./index.ts`, verified via `npm view <pkg> pi`).
 
 ## §8.11 · The headless stage-drive worker contract (Node 1.2)
 

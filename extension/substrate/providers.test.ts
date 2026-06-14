@@ -8,20 +8,23 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   JUICESHARP_ASK_USER_PROVIDER_ID,
+  JUICESHARP_WEB_PROVIDER_ID,
   loadProviders,
+  OLLAMA_WEB_PROVIDER_ID,
   PERK_ASK_USER_PROVIDER_ID,
   PERK_CHECKPOINTS_PROVIDER_ID,
   PERK_FOOTER_PROVIDER_ID,
   PERK_PLAN_PROVIDER_ID,
   PI_BAR_FOOTER_PROVIDER_ID,
+  PI_WEB_ACCESS_PROVIDER_ID,
   PLANNOTATOR_PLAN_PROVIDER_ID,
   POWERLINE_FOOTER_PROVIDER_ID,
   PROVIDER_SEAMS,
   resolveProviders,
 } from "./providers.ts";
 
-test("PROVIDER_SEAMS includes the askuser and footer seams", () => {
-  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser", "footer"]);
+test("PROVIDER_SEAMS includes the askuser, footer and web seams", () => {
+  assert.deepEqual([...PROVIDER_SEAMS], ["plan", "todo", "askuser", "footer", "web"]);
 });
 
 test("loadProviders: returns the shipped supported-set entries", () => {
@@ -39,8 +42,34 @@ test("loadProviders: returns the shipped supported-set entries", () => {
       ["perk-footer", "footer", null, true],
       ["powerline-footer", "footer", "npm:pi-powerline-footer", false],
       ["pi-bar-footer", "footer", "npm:pi-bar", false],
+      ["pi-web-access", "web", "npm:pi-web-access", true],
+      ["ollama-web-search", "web", "npm:@ollama/pi-web-search", false],
+      ["juicesharp-web-tools", "web", "npm:@juicesharp/rpiv-web-tools", false],
     ],
   );
+});
+
+test("loadProviders: the web seam DEFAULT is the FOREIGN pi-web-access (non-null-package default)", () => {
+  // The novelty: the web seam's behavior-preserving default carries a non-null `package` because
+  // perk owns no native web implementation. The two foreign alts are VACATE-ONLY (null adapter).
+  const web = loadProviders().find((p) => p.id === PI_WEB_ACCESS_PROVIDER_ID);
+  assert.equal(web?.seam, "web");
+  assert.equal(web?.package, "npm:pi-web-access");
+  assert.equal(web?.adapter, null);
+  assert.equal(web?.default, true);
+  assert.equal(web?.packageFilter, undefined);
+  const ollama = loadProviders().find((p) => p.id === OLLAMA_WEB_PROVIDER_ID);
+  assert.equal(ollama?.adapter, null);
+  assert.equal(ollama?.package, "npm:@ollama/pi-web-search");
+  assert.equal(ollama?.seam, "web");
+  assert.equal(ollama?.default, false);
+  assert.equal(ollama?.packageFilter, undefined);
+  const rpivWeb = loadProviders().find((p) => p.id === JUICESHARP_WEB_PROVIDER_ID);
+  assert.equal(rpivWeb?.adapter, null);
+  assert.equal(rpivWeb?.package, "npm:@juicesharp/rpiv-web-tools");
+  assert.equal(rpivWeb?.seam, "web");
+  assert.equal(rpivWeb?.default, false);
+  assert.equal(rpivWeb?.packageFilter, undefined);
 });
 
 test("loadProviders: the foreign footer entries are VACATE-ONLY (null adapter, no filter)", () => {
@@ -125,6 +154,7 @@ test("resolveProviders: absent keys fall back to the seam defaults silently", ()
   assert.equal(resolved.todo.id, PERK_CHECKPOINTS_PROVIDER_ID);
   assert.equal(resolved.askuser.id, PERK_ASK_USER_PROVIDER_ID);
   assert.equal(resolved.footer.id, PERK_FOOTER_PROVIDER_ID);
+  assert.equal(resolved.web.id, PI_WEB_ACCESS_PROVIDER_ID);
   assert.deepEqual(resolved.issues, []);
 });
 
@@ -144,6 +174,24 @@ test("resolveProviders: the footer seam resolves selection / mismatch / unknown"
   assert.match(mismatch.issues[0] ?? "", /is a `plan` provider, not `footer`/);
   const unknown = resolveProviders({ footer: "ghost" }, set);
   assert.equal(unknown.footer.id, PERK_FOOTER_PROVIDER_ID);
+  assert.equal(unknown.issues.length, 1);
+});
+
+test("resolveProviders: the web seam resolves selection / mismatch / unknown", () => {
+  const set = loadProviders();
+  assert.equal(
+    resolveProviders({ web: OLLAMA_WEB_PROVIDER_ID }, set).web.id,
+    OLLAMA_WEB_PROVIDER_ID,
+  );
+  assert.equal(
+    resolveProviders({ web: JUICESHARP_WEB_PROVIDER_ID }, set).web.id,
+    JUICESHARP_WEB_PROVIDER_ID,
+  );
+  const mismatch = resolveProviders({ web: "perk-plan" }, set);
+  assert.equal(mismatch.web.id, PI_WEB_ACCESS_PROVIDER_ID);
+  assert.equal(mismatch.issues.length, 1);
+  const unknown = resolveProviders({ web: "ghost" }, set);
+  assert.equal(unknown.web.id, PI_WEB_ACCESS_PROVIDER_ID);
   assert.equal(unknown.issues.length, 1);
 });
 

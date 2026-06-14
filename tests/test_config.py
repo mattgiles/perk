@@ -89,13 +89,14 @@ def test_providers_selection_parsed(tmp_path):
         tmp_path,
         "perk.toml",
         '[providers]\nplan = "tombell-plan"\ntodo = "perk-checkpoints"\n'
-        'askuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\n',
+        'askuser = "juicesharp-ask-user"\nfooter = "pi-bar-footer"\nweb = "ollama-web-search"\n',
     )
     assert load_config(tmp_path).providers == {
         "plan": "tombell-plan",
         "todo": "perk-checkpoints",
         "askuser": "juicesharp-ask-user",
         "footer": "pi-bar-footer",
+        "web": "ollama-web-search",
     }
 
 

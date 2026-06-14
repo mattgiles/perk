@@ -43,11 +43,16 @@ providers:
     package: null
     adapter: null
     default: true
+  - id: pi-web-access
+    seam: web
+    package: "npm:pi-web-access"
+    adapter: null
+    default: true
 """
 
 
-def test_seams_tuple_includes_askuser_and_footer():
-    assert SEAMS == ("plan", "todo", "askuser", "footer")
+def test_seams_tuple_includes_askuser_footer_and_web():
+    assert SEAMS == ("plan", "todo", "askuser", "footer", "web")
 
 
 def _write(tmp_path, text):
@@ -79,7 +84,30 @@ def test_real_providers_load_the_entries():
         "juicesharp-ask-user",
         "powerline-footer",
         "pi-bar-footer",
+        "pi-web-access",
+        "ollama-web-search",
+        "juicesharp-web-tools",
     }
+    # web DEFAULT reference: the FOREIGN `pi-web-access` (the novelty — a non-null-package default).
+    web = by_id["pi-web-access"]
+    assert web.seam == "web"
+    assert web.package == "npm:pi-web-access"
+    assert web.adapter is None
+    assert web.default is True
+    assert web.package_filter is None
+    # ollama-web-search / juicesharp-web-tools: VACATE-ONLY interface seam (null adapter).
+    ollama = by_id["ollama-web-search"]
+    assert ollama.seam == "web"
+    assert ollama.package == "npm:@ollama/pi-web-search"
+    assert ollama.adapter is None
+    assert ollama.default is False
+    assert ollama.package_filter is None
+    rpiv_web = by_id["juicesharp-web-tools"]
+    assert rpiv_web.seam == "web"
+    assert rpiv_web.package == "npm:@juicesharp/rpiv-web-tools"
+    assert rpiv_web.adapter is None
+    assert rpiv_web.default is False
+    assert rpiv_web.package_filter is None
     # footer reference: perk's own footer (behavior-preserving default, no package/adapter).
     foot = by_id["perk-footer"]
     assert (foot.seam, foot.package, foot.adapter, foot.default) == ("footer", None, None, True)
@@ -145,10 +173,12 @@ def test_default_for_returns_the_seam_default():
     todo = providers.default_for("todo")
     askuser = providers.default_for("askuser")
     footer = providers.default_for("footer")
+    web = providers.default_for("web")
     assert plan is not None and plan.id == "perk-plan"
     assert todo is not None and todo.id == "perk-checkpoints"
     assert askuser is not None and askuser.id == "perk-ask-user"
     assert footer is not None and footer.id == "perk-footer"
+    assert web is not None and web.id == "pi-web-access"
 
 
 def test_unsupported_schema_version_raises(tmp_path):
@@ -210,7 +240,23 @@ def test_resolve_absent_keys_fall_back_to_defaults_silently():
     assert resolved.todo.id == "perk-checkpoints"
     assert resolved.askuser.id == "perk-ask-user"
     assert resolved.footer.id == "perk-footer"
+    assert resolved.web.id == "pi-web-access"
     assert resolved.issues == []
+
+
+def test_resolve_web_selection():
+    # default → pi-web-access silently; foreign selected → resolves; wrong-seam → fallback + issue.
+    assert resolve_providers({"web": "ollama-web-search"}, _set()).web.id == "ollama-web-search"
+    assert resolve_providers({"web": "juicesharp-web-tools"}, _set()).web.id == (
+        "juicesharp-web-tools"
+    )
+    mismatch = resolve_providers({"web": "perk-plan"}, _set())
+    assert mismatch.web.id == "pi-web-access"
+    assert len(mismatch.issues) == 1
+    assert "is a `plan` provider, not `web`" in mismatch.issues[0].message
+    unknown = resolve_providers({"web": "ghost"}, _set())
+    assert unknown.web.id == "pi-web-access"
+    assert len(unknown.issues) == 1
 
 
 def test_resolve_footer_selection():
