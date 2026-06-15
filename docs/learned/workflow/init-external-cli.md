@@ -85,11 +85,21 @@ reflected in the loaded `.agents/skills/` symlink until pushed and re-synced. Th
 
 ## Ref pinning mirrors `_desired_packages`
 
-The committed fragment pins a source `ref` the same way the Pi package entry does
-(`_desired_packages`): `main` for the self-repo, `v{__version__}` for consumers. `PERK_SKILLS` is
-the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` renders the YAML.
-Keep these two ref decisions in lockstep — a consumer pinned to `v{__version__}` should resolve
-skills and packages from the same tag.
+The committed fragment resolves its source `ref` the same way the Pi package entry does
+(`_desired_packages`): both the self-repo **and** consumers track `main`. `PERK_SKILLS` is
+the SSOT tuple of fragment skill names; `_desired_skills_manifest(self_repo)` renders the YAML
+(the `self_repo` param is retained for signature stability but no longer branches the ref).
+
+Why `main`, not a tag: perk has no release cadence. The lone `v0.0.1` tag went stale because
+`__version__` was never bumped and the tag never moved, so a consumer pinned to `v{__version__}`
+received a months-old skill set missing newer skills → `missing-skill` at `skills update --sync`.
+`main` is the only ref that reflects current state for this pre-1.0 rolling tool. Trade-off:
+consumer installs are no longer pinned/reproducible — accepted deliberately; a stale clone is
+refreshed by re-sync / `git pull`.
+
+The lockstep principle still holds, restated: the skills source, the Pi `git:` package, and the
+remote CI install (`workflow_artifacts._PERK_INSTALL_CONSUMER`) all resolve from the same `main`
+ref.
 
 ## Committed declaration vs. transient state — the gitignore boundary
 
