@@ -30,7 +30,7 @@ def _authed(monkeypatch) -> None:
     )
 
 
-_CLEAN_PROBE = git.MergeProbe(determined=True, conflicts=())
+_CLEAN_PROBE = git.MergeProbe(determined=True, mergeable=True, conflicts=())
 
 
 def _stub_gh(
@@ -150,7 +150,10 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
 
 def test_submit_surfaces_conflicts_but_succeeds(monkeypatch):
     _authed(monkeypatch)
-    _stub_gh(monkeypatch, probe=git.MergeProbe(determined=True, conflicts=("a.py", "b.py")))
+    _stub_gh(
+        monkeypatch,
+        probe=git.MergeProbe(determined=True, mergeable=False, conflicts=("a.py", "b.py")),
+    )
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     # The submit succeeded MECHANICALLY (exit 0); mergeability is reported separately.
     assert result.exit_code == 0
@@ -171,7 +174,7 @@ def test_submit_probe_failure_is_fail_open(monkeypatch):
 
 def test_submit_undetermined_probe_is_null(monkeypatch):
     _authed(monkeypatch)
-    _stub_gh(monkeypatch, probe=git.MergeProbe(determined=False, conflicts=()))
+    _stub_gh(monkeypatch, probe=git.MergeProbe(determined=False, mergeable=False, conflicts=()))
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 0
     assert json.loads(result.output)["mergeable"] is None

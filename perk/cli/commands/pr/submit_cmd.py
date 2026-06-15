@@ -214,10 +214,11 @@ def _probe_mergeability(
     """Map the local merge-conflict probe to submit's tri-state mergeability (fail-open).
 
     ``determined=False`` → ``(None, ())`` (probe skipped/undetermined); ``determined=True`` →
-    ``mergeable = conflicts is empty``, carrying the conflicted paths. A determined nonzero-exit
-    with empty paths still sets ``mergeable=False`` (conflicts present, paths unparsed). The
-    helper already swallows git failures, but the call is guarded too so nothing here can sink
-    the submit.
+    ``(probe.mergeable, probe.conflicts)``. The verdict is taken from the probe's authoritative
+    ``mergeable`` field (the exit code), NOT derived from ``conflicts`` being empty — a determined
+    conflict exit whose paths failed to parse still carries ``mergeable=False`` (conflicts present,
+    paths unparsed) and must not be mistaken for clean. The helper already swallows git failures,
+    but the call is guarded too so nothing here can sink the submit.
     """
     try:
         probe = git.detect_merge_conflicts(repo_root, base=base, branch_ref=branch)
@@ -225,7 +226,7 @@ def _probe_mergeability(
         return None, ()
     if not probe.determined:
         return None, ()
-    return len(probe.conflicts) == 0, probe.conflicts
+    return probe.mergeable, probe.conflicts
 
 
 def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:

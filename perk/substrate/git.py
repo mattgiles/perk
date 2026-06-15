@@ -29,10 +29,16 @@ class MergeProbe:
     ``determined`` is True only when the probe ran to a definitive verdict (clean OR conflicted);
     a fetch failure, an unresolvable base, or an unexpected ``git merge-tree`` exit leaves it
     False (fail-open — the caller treats an undetermined probe as "mergeability unknown").
-    ``conflicts`` is the (possibly empty) tuple of conflicted paths parsed from the probe output.
+    ``mergeable`` carries the definitive verdict from the probe's **exit code** (clean exit → True,
+    conflict exit → False) and is the authority — it must NOT be derived from ``conflicts`` being
+    empty, because a conflict exit whose paths failed to parse still yields ``conflicts=()`` yet is
+    genuinely unmergeable. ``mergeable`` is only meaningful when ``determined`` is True (False
+    otherwise, but the caller gates on ``determined`` first). ``conflicts`` is the (possibly empty)
+    tuple of conflicted paths parsed from the probe output.
     """
 
     determined: bool
+    mergeable: bool
     conflicts: tuple[str, ...]
 
 
@@ -236,16 +242,20 @@ def detect_merge_conflicts(repo: Path, *, base: str, branch_ref: str = "HEAD") -
     try:
         _run(["fetch", "origin", base], cwd=repo, timeout=120)
     except GitError:
-        return MergeProbe(determined=False, conflicts=())
+        return MergeProbe(determined=False, mergeable=False, conflicts=())
     if not remote_ref_exists(repo, remote_base):
-        return MergeProbe(determined=False, conflicts=())
+        return MergeProbe(determined=False, mergeable=False, conflicts=())
     proc = _run_capture(["merge-tree", "--write-tree", remote_base, branch_ref], cwd=repo)
     if proc.returncode == 0:
-        return MergeProbe(determined=True, conflicts=())
+        return MergeProbe(determined=True, mergeable=True, conflicts=())
     if proc.returncode == 1:
-        return MergeProbe(determined=True, conflicts=_parse_merge_conflicts(proc.stdout))
+        # Conflict exit: mergeable is False from the EXIT CODE, independent of whether the
+        # conflicted paths parsed (an unparseable nonzero exit still means conflicts present).
+        return MergeProbe(
+            determined=True, mergeable=False, conflicts=_parse_merge_conflicts(proc.stdout)
+        )
     # Old git (no --write-tree), bad ref, etc. — fail-open.
-    return MergeProbe(determined=False, conflicts=())
+    return MergeProbe(determined=False, mergeable=False, conflicts=())
 
 
 def _parse_merge_conflicts(stdout: str) -> tuple[str, ...]:
