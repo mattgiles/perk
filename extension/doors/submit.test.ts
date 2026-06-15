@@ -1,138 +1,259 @@
-// P1.T5a — live warm-door tests (turn-5 §10). Drive a REAL bound AgentSession via the T1 harness
-// and prove the `perk pr submit` delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
-// for the GitHub write, so no LLM / network / gh / Python is invoked.
+// #556 — tests for the warm `/submit` mergeability gate. The pure `conflictResolutionGuidance` is
+// pinned directly; `submitPr`'s advisory decode leniency is exercised against a faked cold door;
+// `driveConflictResolution` (decision + cap + increment + reset) runs against in-memory fakes (the
+// spy-pi + fake-branch recipe). OFFLINE — no LLM / network / gh / Python.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { rebuildWorkflowState } from "../substrate/workflowState.ts";
+import { scaffoldRepo } from "../testing/harness.ts";
+import {
+  CONFLICT_RESOLUTION_ATTEMPT_CAP,
+  conflictResolutionGuidance,
+  driveConflictResolution,
+  type SubmitDetails,
+  submitPr,
+} from "./submit.ts";
 
-const SUBMIT_JSON = JSON.stringify({
-  success: true,
-  error_type: null,
-  message: null,
-  pr: { number: 42, url: "https://gh/o/r/pull/42", is_draft: true, existed: false },
-  branch: "plan-7",
-  issue: 7,
-  plan_embedded: true,
-  dry_run: false,
-});
+// --- a shared in-memory world: fake `pi` (exec + appendEntry + sendUserMessage) + fake ctx -------
 
-test("tool: submit delegates, surfaces the PR, and terminates", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: SUBMIT_JSON });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("submit", {});
-    assert.equal(result.terminate, true, "submit terminates the turn");
-    const details = result.details as { ok: boolean; pr?: { number?: number }; branch?: string };
-    assert.equal(details.ok, true);
-    assert.equal(details.pr?.number, 42);
-    assert.equal(details.branch, "plan-7");
-    assert.match(result.content[0]?.text ?? "", /#42/);
-    assert.equal((details as { plan_embedded?: boolean }).plan_embedded, true);
-    assert.match(result.content[0]?.text ?? "", /plan embedded/);
-  } finally {
-    h.dispose();
+interface Entry {
+  type: string;
+  customType?: string;
+  data?: Record<string, unknown>;
+}
+
+function world(opts?: {
+  cwd?: string;
+  idle?: boolean;
+  stdout?: string;
+  code?: number;
+  attempts?: number;
+}) {
+  const entries: Entry[] = [];
+  if (opts?.attempts !== undefined) {
+    entries.push({
+      type: "custom",
+      customType: "perk:workflow-state",
+      data: { conflict_resolution_attempts: opts.attempts },
+    });
   }
-});
+  const messages: { content: string; options?: { deliverAs?: string } }[] = [];
+  const pi = {
+    exec: async () => ({
+      code: opts?.code ?? 0,
+      killed: false,
+      stdout: opts?.stdout ?? "",
+      stderr: "",
+    }),
+    appendEntry: (customType: string, data?: unknown) => {
+      entries.push({ type: "custom", customType, data: data as Record<string, unknown> });
+    },
+    sendUserMessage: (content: string, options?: { deliverAs?: string }) => {
+      messages.push({ content, options });
+    },
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd: opts?.cwd ?? ".",
+    hasUI: false,
+    isIdle: () => opts?.idle ?? true,
+    sessionManager: { getBranch: () => entries },
+  } as unknown as ExtensionContext;
+  return { pi, ctx, entries, messages };
+}
 
-test("tool: a missing/failing worker fails loud-but-soft (no terminate)", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: "", code: 1 });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("submit", {});
-    const details = result.details as { ok: boolean; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "exec_failed");
-    assert.notEqual(result.terminate, true, "a failed submit does not terminate");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("tool: garbage worker output fails soft with bad_output", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: "not json" });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("submit", {});
-    const details = result.details as { ok: boolean; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "bad_output");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("tool: a success:false envelope at non-zero exit surfaces the structured error", async () => {
-  // The envelope-aware regression (Node 2.1): the Python plane prints a structured failure
-  // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const envelope = JSON.stringify({
-    success: false,
-    error_type: "no_plan_ref",
-    message: "no active plan-ref on this branch",
-  });
-  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("submit", {});
-    const details = result.details as { ok: boolean; error?: string; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "no_plan_ref");
-    assert.equal(details.error, "no active plan-ref on this branch");
-  } finally {
-    h.dispose();
-  }
-});
-
-test("tool: success:true with a malformed pr fails as bad_output (unexpected payload)", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const malformed = JSON.stringify({
+function submitJson(over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
     success: true,
     error_type: null,
     message: null,
-    pr: { number: "42", url: "https://gh/o/r/pull/42", is_draft: true, existed: false },
+    pr: { number: 42, url: "u/pr/42", is_draft: true, existed: false },
+    branch: "plan-7",
+    issue: 7,
+    plan_embedded: false,
+    base: "main",
+    mergeable: true,
+    conflicts: [],
+    ...over,
   });
-  const bin = fakePerk(cwd, { stdout: malformed });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    const result = await h.invokeTool("submit", {});
-    const details = result.details as { ok: boolean; error?: string; error_type?: string };
-    assert.equal(details.ok, false);
-    assert.equal(details.error_type, "bad_output");
-    assert.match(details.error ?? "", /unexpected payload/);
-  } finally {
-    h.dispose();
-  }
+}
+
+// --- conflictResolutionGuidance (pure) -----------------------------------------------------------
+
+test("conflictResolutionGuidance spawns perk.conflict-resolver with a fresh context", () => {
+  const text = conflictResolutionGuidance("main", 1, 2);
+  assert.match(text, /perk\.conflict-resolver/);
+  assert.match(text, /context: "fresh"/);
 });
 
-test("/submit command: failure surfaces exactly ONE error notify (failFor's — no duplicate)", async () => {
-  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: "", code: 1 });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    await h.invokeCommand("submit");
-    const errors = h.notifyEvents.filter((e) => e.severity === "error");
-    assert.equal(errors.length, 1, `expected one error notify, got: ${JSON.stringify(errors)}`);
-    assert.match(errors[0]?.message ?? "", /^perk: submit — /);
-  } finally {
-    h.dispose();
-  }
+test("conflictResolutionGuidance states the base branch and the clean+correct instruction", () => {
+  const text = conflictResolutionGuidance("develop", 1, 2);
+  assert.match(text, /`develop`/);
+  assert.match(text, /\*\*clean\*\*/);
+  assert.match(text, /\*\*correct\*\*/);
 });
 
-test("/submit command: notifies success", async () => {
+test("conflictResolutionGuidance notes the child reads its own plan/PR context", () => {
+  const text = conflictResolutionGuidance("main", 1, 2);
+  assert.match(text, /perk pr review-context/);
+  assert.match(text, /intent/);
+});
+
+test("conflictResolutionGuidance renders the attempt-of-cap text", () => {
+  const text = conflictResolutionGuidance("main", 2, 3);
+  assert.match(text, /attempt 2 of 3/);
+});
+
+test("conflictResolutionGuidance tells the model to re-/submit afterward", () => {
+  const text = conflictResolutionGuidance("main", 1, 2);
+  assert.match(text, /`\/submit` again/);
+});
+
+test("conflictResolutionGuidance injects the configured model when set", () => {
+  const text = conflictResolutionGuidance("main", 1, 2, "anthropic/claude-opus-4");
+  assert.match(text, /model: "anthropic\/claude-opus-4"/);
+  assert.match(text, /\[subagents\] conflict-resolver model/);
+});
+
+test("conflictResolutionGuidance omits the model override when unset", () => {
+  const text = conflictResolutionGuidance("main", 1, 2);
+  assert.doesNotMatch(text, /model: "/);
+  assert.match(text, /default model/);
+});
+
+// --- submitPr advisory decode leniency -----------------------------------------------------------
+
+test("submitPr keeps a clean decode when mergeability fields are present", async () => {
+  const { pi, ctx } = world({ stdout: submitJson() });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.base, "main");
+  assert.equal(result.details.mergeable, true);
+  assert.deepEqual(result.details.conflicts, []);
+  assert.equal(result.terminate, true);
+});
+
+test("submitPr keeps a clean decode when mergeability fields are absent", async () => {
+  const { pi, ctx } = world({
+    stdout: JSON.stringify({
+      success: true,
+      error_type: null,
+      message: null,
+      pr: { number: 42, url: "u/pr/42", is_draft: true, existed: false },
+    }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.equal(result.details.mergeable, undefined);
+  assert.deepEqual(result.details.conflicts, []);
+});
+
+test("submitPr keeps a clean decode when mergeability fields are malformed", async () => {
+  const { pi, ctx } = world({
+    stdout: submitJson({ mergeable: "nope", conflicts: "oops", base: 5 }),
+  });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true, "malformed advisory fields never sink the decode");
+  assert.equal(result.details.mergeable, undefined);
+  assert.deepEqual(result.details.conflicts, []);
+  assert.equal(result.details.base, undefined);
+});
+
+test("submitPr reflects conflicts in the success message", async () => {
+  const { pi, ctx } = world({ stdout: submitJson({ mergeable: false, conflicts: ["a.py"] }) });
+  const result = await submitPr(pi, ctx);
+  assert.equal(result.details.ok, true);
+  assert.match(result.content[0]?.text ?? "", /merge conflicts detected; resolving/);
+});
+
+test("submitPr resets the conflict counter on a clean submit", async () => {
+  const { pi, ctx, entries } = world({ stdout: submitJson(), attempts: 1 });
+  await submitPr(pi, ctx);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 0);
+});
+
+test("submitPr does not reset on a conflicted submit", async () => {
+  const { pi, ctx, entries } = world({
+    stdout: submitJson({ mergeable: false, conflicts: ["a.py"] }),
+    attempts: 1,
+  });
+  await submitPr(pi, ctx);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
+});
+
+// --- driveConflictResolution: decision + cap + increment + delivery mode --------------------------
+
+const CONFLICT_DETAILS: SubmitDetails = {
+  ok: true,
+  pr: { number: 42, url: "u/pr/42", is_draft: true, existed: false },
+  base: "main",
+  mergeable: false,
+  conflicts: ["a.py"],
+};
+
+test("driveConflictResolution: clean submit → not driven", () => {
+  const { pi, ctx, messages } = world();
+  driveConflictResolution(pi, ctx, {
+    ok: true,
+    pr: { number: 42, url: "u", is_draft: true, existed: false },
+    mergeable: true,
+    conflicts: [],
+  });
+  assert.equal(messages.length, 0);
+});
+
+test("driveConflictResolution: undetermined (null) submit → not driven", () => {
+  const { pi, ctx, messages } = world();
+  driveConflictResolution(pi, ctx, {
+    ok: true,
+    pr: { number: 42, url: "u", is_draft: true, existed: false },
+    mergeable: null,
+    conflicts: [],
+  });
+  assert.equal(messages.length, 0);
+});
+
+test("driveConflictResolution: failed submit → not driven", () => {
+  const { pi, ctx, messages } = world();
+  driveConflictResolution(pi, ctx, { ok: false, error: "boom", error_type: "exec_failed" });
+  assert.equal(messages.length, 0);
+});
+
+test("driveConflictResolution: conflicts → drives + increments the counter", () => {
+  const { pi, ctx, messages, entries } = world();
+  driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0]?.content ?? "", /perk\.conflict-resolver/);
+  assert.equal(rebuildWorkflowState(entries).conflict_resolution_attempts, 1);
+});
+
+test("driveConflictResolution: idle (/submit command) → immediate turn", () => {
+  const { pi, ctx, messages } = world({ idle: true });
+  driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
+  assert.equal(messages[0]?.options, undefined);
+});
+
+test("driveConflictResolution: streaming (submit tool) → followUp", () => {
+  const { pi, ctx, messages } = world({ idle: false });
+  driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
+  assert.equal(messages[0]?.options?.deliverAs, "followUp");
+});
+
+test("driveConflictResolution: at the cap → no drive, loud report", () => {
+  const { pi, ctx, messages, entries } = world({ attempts: CONFLICT_RESOLUTION_ATTEMPT_CAP });
+  driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
+  assert.equal(messages.length, 0, "no further drive past the cap");
+  // The counter is not incremented past the cap.
+  assert.equal(
+    rebuildWorkflowState(entries).conflict_resolution_attempts,
+    CONFLICT_RESOLUTION_ATTEMPT_CAP,
+  );
+});
+
+test("scaffoldRepo cwd: drive reads config without throwing", () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  const bin = fakePerk(cwd, { stdout: SUBMIT_JSON });
-  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
-  try {
-    await h.invokeCommand("submit");
-    assert.ok(
-      h.notifies.some((n) => /#42/.test(n)),
-      "command notifies the opened PR",
-    );
-  } finally {
-    h.dispose();
-  }
+  const { pi, ctx, messages } = world({ cwd });
+  driveConflictResolution(pi, ctx, CONFLICT_DETAILS);
+  assert.equal(messages.length, 1);
 });

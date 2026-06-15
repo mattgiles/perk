@@ -101,6 +101,14 @@ tool:
 
 - **`submit`** — push the branch and open the draft PR. *Terminating.*
 
+After the PR opens, `/submit` checks that it is **mergeable** against the target branch (a local
+`git merge-tree` probe). If it finds merge conflicts, it spawns a fresh, write-capable
+`perk.conflict-resolver` subagent that reads the plan + PR diff, rebases onto the target branch,
+carefully resolves every conflict so the diff stays clean and correct, and force-pushes — then you
+re-run `/submit` to confirm. This re-drive is bounded (at most twice); if conflicts persist past
+that, `/submit` surfaces them loudly so you can resolve them manually. The probe is best-effort: if
+it can't run (offline, old git), `/submit` completes with a note that mergeability wasn't determined.
+
 ### `/ready`
 
 Mark the active plan's draft PR ready for review — the deliberate publish gate (`/submit` keeps

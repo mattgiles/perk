@@ -155,9 +155,10 @@ Per-agent model overrides for each perk-owned project agent.
 | `pr-reviewer` | string (model id) | _(agent frontmatter default)_ | Model for the PR-reviewer agent. |
 | `review-classifier` | string (model id) | _(agent frontmatter default)_ | Model for the review-classifier agent. |
 | `objective-explorer` | string (model id) | _(agent frontmatter default)_ | Model for the objective-explorer agent. |
+| `conflict-resolver` | string (model id) | _(agent frontmatter default)_ | Model for the conflict-resolver agent (spawned by `/submit` when it detects merge conflicts). |
 
 An absent key falls back to the agent's frontmatter default. The table is **fixed-key** — it
-configures only perk's own three agents (delivered into the perk-managed `.pi/agents/perk/` subdir
+configures only perk's own agents (delivered into the perk-managed `.pi/agents/perk/` subdir
 by `perk init`); it has no effect on your own custom subagents, which set their model in frontmatter.
 See [How to write a custom subagent](../how-to/write-a-custom-subagent.md).
 

@@ -129,16 +129,17 @@ test("loadPerkConfig: [subagents] absent -> empty object", () => {
   assert.deepEqual(loadPerkConfig(cwd).subagents, {});
 });
 
-test("loadPerkConfig: parses all three [subagents] agent keys", () => {
+test("loadPerkConfig: parses all [subagents] agent keys", () => {
   const cwd = repoWith({
     "perk.toml":
       '[subagents]\npr-reviewer = "a/sonnet"\nreview-classifier = "a/haiku"\n' +
-      'objective-explorer = "a/haiku2"\n',
+      'objective-explorer = "a/haiku2"\nconflict-resolver = "a/sonnet2"\n',
   });
   assert.deepEqual(loadPerkConfig(cwd).subagents, {
     "pr-reviewer": "a/sonnet",
     "review-classifier": "a/haiku",
     "objective-explorer": "a/haiku2",
+    "conflict-resolver": "a/sonnet2",
   });
 });
 

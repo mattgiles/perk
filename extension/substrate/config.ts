@@ -50,6 +50,7 @@ export interface PerkConfig {
     "pr-reviewer"?: string;
     "review-classifier"?: string;
     "objective-explorer"?: string;
+    "conflict-resolver"?: string;
   };
   /**
    * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
@@ -257,7 +258,12 @@ export function parseCiChecks(rows: Array<Record<string, string>>): CiCheck[] {
 }
 
 /** The perk-owned project agents configurable via the `[subagents]` table. */
-const SUBAGENT_KEYS = ["pr-reviewer", "review-classifier", "objective-explorer"] as const;
+const SUBAGENT_KEYS = [
+  "pr-reviewer",
+  "review-classifier",
+  "objective-explorer",
+  "conflict-resolver",
+] as const;
 
 /**
  * Read the agent-keyed `[subagents]` table into a selection (string values only). For each known

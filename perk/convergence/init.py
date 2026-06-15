@@ -93,6 +93,7 @@ PERK_SKILLS: tuple[str, ...] = (
 # SSOT for the delivered agent-def set; it is kept sorted — update it here when perk agents are
 # added/removed. perk owns and overwrites the whole `.pi/agents/perk/` subdir from these.
 PERK_AGENTS: tuple[str, ...] = (
+    "conflict-resolver",
     "objective-explorer",
     "pr-reviewer",
     "review-classifier",
@@ -186,6 +187,7 @@ root = ".worktrees"
 # pr-reviewer = "anthropic/claude-sonnet-4-5"
 # review-classifier = "anthropic/claude-haiku-4-5"
 # objective-explorer = "anthropic/claude-haiku-4-5"
+# conflict-resolver = "anthropic/claude-sonnet-4-5"
 
 # CI checks (optional) — named checks the `run_ci` tool / `/ci` command run and
 # REPORT pass/fail (they never edit or fix). Each [[ci]] row is name/command plus

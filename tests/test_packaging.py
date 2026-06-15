@@ -82,6 +82,7 @@ def test_wheel_bundles_agents(tmp_path):
         "perk/_agents/pr-reviewer.md",
         "perk/_agents/review-classifier.md",
         "perk/_agents/objective-explorer.md",
+        "perk/_agents/conflict-resolver.md",
     }
     assert expected <= names, expected - names
 

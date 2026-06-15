@@ -73,7 +73,7 @@ def load_config(repo_root: Path) -> Config:
 
 
 # The perk-owned project agents configurable via the `[subagents]` table.
-_SUBAGENT_KEYS = ("pr-reviewer", "review-classifier", "objective-explorer")
+_SUBAGENT_KEYS = ("pr-reviewer", "review-classifier", "objective-explorer", "conflict-resolver")
 
 
 def _parse_subagents_selection(raw: Any) -> dict[str, str]:

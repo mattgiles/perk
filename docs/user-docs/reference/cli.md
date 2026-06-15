@@ -210,6 +210,12 @@ launcher+worker: a primed `pi` session by default, the deterministic worker unde
 `--dry-run` follows the mode (print the launch plan, or compose without pushing/hitting GitHub).
 Flat alias: [`perk submit`](#perk-submit).
 
+After opening the PR, the worker probes mergeability against the target branch (a local
+`git merge-tree` probe) and adds three fields to the `--json` report: `base` (the target branch),
+`mergeable` (`true` clean / `false` conflicts present / `null` undetermined — the probe is
+fail-open and never changes the exit code), and `conflicts` (the conflicted paths). `--dry-run`
+stays fully offline (`base: ""`, `mergeable: null`).
+
 ### `perk pr address`
 
 Classify PR review feedback (in an isolated child) and resolve the threads — launcher-only (no

@@ -22,6 +22,20 @@ class Worktree:
     head: str | None
 
 
+@dataclass(frozen=True)
+class MergeProbe:
+    """The result of a best-effort local merge-conflict probe (`detect_merge_conflicts`).
+
+    ``determined`` is True only when the probe ran to a definitive verdict (clean OR conflicted);
+    a fetch failure, an unresolvable base, or an unexpected ``git merge-tree`` exit leaves it
+    False (fail-open — the caller treats an undetermined probe as "mergeability unknown").
+    ``conflicts`` is the (possibly empty) tuple of conflicted paths parsed from the probe output.
+    """
+
+    determined: bool
+    conflicts: tuple[str, ...]
+
+
 class GitError(Exception):
     """A git command exited non-zero (translated to ``UserFacingCliError`` at the boundary)."""
 
@@ -36,6 +50,12 @@ _REJECT_MARKERS = ("non-fast-forward", "[rejected]", "stale info", "failed to pu
 _DELETED_BRANCH_RE = re.compile(r"^Deleted branch (\S+)", re.MULTILINE)
 # `git push <remote> --delete` writes ` - [deleted]         <branch>` per removed ref to stderr.
 _DELETED_REMOTE_RE = re.compile(r"\[deleted\]\s+(\S+)")
+
+# `git merge-tree --write-tree` prints the merged tree OID on line 1, then (on conflict) a
+# "Conflicted file info" block of `<mode> <object> <stage>\t<path>` lines (stages 1/2/3 per file)
+# until a blank line, then informational "CONFLICT (...)" messages. We parse the conflicted paths
+# from the structured info block (one unique path per conflicted file).
+_MERGE_CONFLICT_INFO_RE = re.compile(r"^[0-7]{6} [0-9a-f]+ [123]\t(.+)$")
 
 
 def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
@@ -196,6 +216,59 @@ def remote_ref_exists(repo: Path, ref: str) -> bool:
     except GitError:
         return False
     return True
+
+
+def detect_merge_conflicts(repo: Path, *, base: str, branch_ref: str = "HEAD") -> MergeProbe:
+    """Best-effort probe: would merging ``branch_ref`` onto ``origin/<base>`` conflict?
+
+    A deterministic, local ``git merge-tree --write-tree`` probe (no GitHub round-trip, no reliance
+    on GitHub's eventually-consistent ``mergeable`` field). **Fail-open**: any step that can't run
+    cleanly (offline fetch, unresolvable base, old git lacking ``--write-tree``) yields
+    ``MergeProbe(determined=False, ())`` so the caller degrades rather than breaks. Never raises
+    (a fetch ``GitError`` is swallowed; ``merge-tree`` runs best-effort via ``_run_capture``).
+
+    1. Best-effort ``git fetch origin <base>`` — a failure means undetermined.
+    2. Resolve ``origin/<base>`` locally; an unresolvable ref means undetermined.
+    3. ``git merge-tree --write-tree origin/<base> <branch_ref>`` exits 0 (clean) or 1 (conflicts),
+       printing the conflicted paths in its structured info block. Other exit codes → undetermined.
+    """
+    remote_base = f"origin/{base}"
+    try:
+        _run(["fetch", "origin", base], cwd=repo, timeout=120)
+    except GitError:
+        return MergeProbe(determined=False, conflicts=())
+    if not remote_ref_exists(repo, remote_base):
+        return MergeProbe(determined=False, conflicts=())
+    proc = _run_capture(["merge-tree", "--write-tree", remote_base, branch_ref], cwd=repo)
+    if proc.returncode == 0:
+        return MergeProbe(determined=True, conflicts=())
+    if proc.returncode == 1:
+        return MergeProbe(determined=True, conflicts=_parse_merge_conflicts(proc.stdout))
+    # Old git (no --write-tree), bad ref, etc. — fail-open.
+    return MergeProbe(determined=False, conflicts=())
+
+
+def _parse_merge_conflicts(stdout: str) -> tuple[str, ...]:
+    """Parse unique conflicted paths from ``git merge-tree --write-tree`` stdout.
+
+    The conflicted-file-info block (after the line-1 tree OID, up to the first blank line) carries
+    one ``<mode> <object> <stage>\t<path>`` line per stage per conflicted file; we collect each
+    path once, preserving first-seen order. An unparseable-but-nonzero output yields ``()`` — the
+    caller still treats a determined nonzero exit as "conflicts present".
+    """
+    paths: list[str] = []
+    seen: set[str] = set()
+    for line in stdout.splitlines()[1:]:
+        if line == "":
+            break
+        match = _MERGE_CONFLICT_INFO_RE.match(line)
+        if match is None:
+            continue
+        path = match.group(1)
+        if path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return tuple(paths)
 
 
 def worktree_add(
