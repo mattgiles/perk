@@ -181,25 +181,38 @@ Linear issue ids are **strings** like `ENG-123` (vs GitHub's `#42`). The shape f
 
 ## Known caveats & maturity
 
-The Linear backend is **validated offline (against fakes), not yet proven against a live Linear
-workspace.** Its live-validation runbook is [`docs/linear-smoke-gate.md`](../../linear-smoke-gate.md),
-and that smoke is **currently unrun** — its "Recorded observations" table reads *none yet*. The
-offline regression twin is `tests/test_linear_lifecycle.py` (a stateful `FakeLinearWorkspace`
-driving the real backend through the real CLI commands). Every claim above is sourced from that
-offline suite and the audited API facts — **no live observations are recorded yet**, and this page
-does not fabricate any.
+The Linear backend is **validated offline (against fakes) and live-validated on 2026-06-15**
+against a real workspace. Its live-validation runbook is
+[`docs/linear-smoke-gate.md`](../../linear-smoke-gate.md); the **Mode 1** lifecycle
+(`plan → implement → submit → land → learn`) plus the issue-backed objective loop ran green
+end-to-end — string `PER-*` ids throughout, the `perk:plan`/`perk:learn` labels applied, the
+plan issue closed (Done) on land, and the node auto-marked done on the objective. See the
+runbook's "Recorded observations" table for the dated findings. The offline regression twin is
+`tests/test_linear_lifecycle.py` (a stateful `FakeLinearWorkspace` driving the real backend
+through the real CLI commands).
 
-The specific behaviors the offline fakes **cannot** prove, deferred to the live smoke:
+What the live smoke **proved** (no longer deferred):
 
-- **ProseMirror round-trip fidelity** — Linear re-encodes issue/comment bodies through ProseMirror;
-  the metadata-block round-trip is *mitigated* (the inline-code sentinel encoding) but not
-  *proven* live.
-- **The real "not found" error shape** — the exact GraphQL message and any `extensions.code` Linear
-  returns for a missing entity (feeds the `.codes` tightening of the substring tolerance).
+- **ProseMirror round-trip fidelity** — **proven (2026-06-15).** Linear re-encodes issue/comment
+  bodies through ProseMirror; the inline-code sentinel encoding round-tripped cleanly for the plan
+  header, the plan-body comment, and the objective-body re-render (roadmap table + reconcilable
+  splice) — every `find_metadata_block` parse succeeded after Linear's re-encode, with zero raw
+  `<!-- … -->` / `<details>` artifacts.
+- **The real "not found" error shape** — **observed (2026-06-15).** A missing entity returns GraphQL
+  `message: "Entity not found: Issue"` with `extensions.code: "INPUT_ERROR"` (`type: "invalid
+  input"`, `statusCode: 400`); perk's `"not found"` substring tolerance matches it correctly. The
+  `.codes` tightening (node 1.2) should pair `code == "INPUT_ERROR"` with the `"Entity not found:"`
+  message prefix — `INPUT_ERROR` alone is a generic input-error code.
+
+The specific behaviors the offline fakes **cannot** prove, **still deferred**:
+
 - **RATELIMITED behavior** — rate limits surface as HTTP 400 with `extensions.code == "RATELIMITED"`;
-  perk does **no retry/backoff by design**, and live behavior is unrecorded.
+  perk does **no retry/backoff by design**. **Not tripped** during the 2026-06-15 smoke (low request
+  volume), so live behavior remains unrecorded — the retry/backoff posture (node 1.2) stays deferred.
 - **Mutation identifier acceptance** — whether mutations accept the human `ENG-<n>` identifier
-  directly (which would let the internal id lookup simplify to a pass-through).
+  directly (which would let the internal id lookup simplify to a pass-through). **Not probed** in
+  the 2026-06-15 Mode 1 run (a Mode 2 / GitHub-integration probe); the `_uuid_for` simplification
+  stays deferred.
 - **Agent-session GraphQL signatures** — see below.
 - **GitHub Issues Sync interaction** — if a team has Linear's *GitHub Issues* two-way sync enabled,
   perk-created issues mirror into GitHub (and vice versa). perk does not cover sync interactions;
@@ -224,8 +237,8 @@ the validation script and deferral register.
   recipe.
 - [Configuration reference — `[providers]` / `[issues]`](./configuration.md#providers) — the raw
   config keys.
-- [The Linear live smoke gate](../../linear-smoke-gate.md) — the (currently unrun) live-validation
-  runbook.
+- [The Linear live smoke gate](../../linear-smoke-gate.md) — the live-validation runbook (Mode 1 +
+  the objective loop validated 2026-06-15).
 
 ---
 
