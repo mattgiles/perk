@@ -36,10 +36,16 @@ boundary — contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Live round-trip fidelity** + tightening the ``"not found"`` substring tolerance to
-  ``.codes`` — recorded at the live smoke gate (``docs/linear-smoke-gate.md``).
-- **Rate-limit retry/backoff** — unchanged from Node 2.1 (fail loud; smoke-gate observations
-  recorded in ``docs/linear-smoke-gate.md``).
+- **Live round-trip fidelity** — recorded at the live smoke gate (``docs/linear-smoke-gate.md``).
+- **Not-found discrimination** — *implemented* (Node 1.2, 2026-06-15 observation): the three
+  not-found sites pair ``INPUT_ERROR in exc.codes`` with the ``"Entity not found"`` message
+  prefix (``_is_entity_not_found``). The gate-8 row recorded ``INPUT_ERROR`` as a *generic*
+  input-error code, so a ``.codes``-only tightening would have been too broad — hence the
+  pairing.
+- **Rate-limit retry/backoff** — *decided fail-loud* (Node 1.2): no RATELIMITED tripped at the
+  smoke gate (gate-9, "not tripped at low volume"), so there is no observed behavior to justify
+  backoff. The client keeps raising the typed ``LinearGraphQLError``; retry/backoff stays
+  deferred until a live RATELIMITED is observed (``docs/linear-smoke-gate.md``).
 """
 
 import re
@@ -114,6 +120,17 @@ def _require_str(value: object, what: str) -> str:
 def _hex_color(color: str) -> str:
     """Map the GitHub bare-hex label colors into Linear's ``#``-prefixed form."""
     return color if color.startswith("#") else f"#{color}"
+
+
+_ENTITY_NOT_FOUND_CODE = "INPUT_ERROR"
+
+
+def _is_entity_not_found(exc: LinearGraphQLError) -> bool:
+    """A missing-entity error: Linear returns the generic ``INPUT_ERROR`` code with an
+    ``"Entity not found: <Entity>"`` message (observed at the live smoke gate, 2026-06-15 —
+    docs/linear-smoke-gate.md gate-8 row). ``INPUT_ERROR`` alone is too broad (a generic
+    input-error code), so pair it with the message prefix."""
+    return _ENTITY_NOT_FOUND_CODE in exc.codes and "entity not found" in str(exc).lower()
 
 
 class LinearIssueBackend:
@@ -218,11 +235,10 @@ class LinearIssueBackend:
         try:
             data = self._client.request(query, {"id": issue_id})
         except LinearGraphQLError as exc:
-            # Linear reports a missing issue as "Entity not found" — a message-substring
-            # dependence (no stable extensions.code observed yet); tightens to `.codes` if one
-            # is observed at the live smoke gate (docs/linear-smoke-gate.md). Every other error
-            # re-raises.
-            if "not found" in str(exc).lower():
+            # Missing-entity discriminator: the observed `INPUT_ERROR` code paired with the
+            # "Entity not found" message prefix (docs/linear-smoke-gate.md gate-8, 2026-06-15).
+            # INPUT_ERROR alone is too broad, so both must match. Every other error re-raises.
+            if _is_entity_not_found(exc):
                 return None
             raise
         issue = data.get("issue")
@@ -256,7 +272,8 @@ class LinearIssueBackend:
         try:
             data = self._client.request(query, {"id": issue_id})
         except LinearGraphQLError as exc:
-            if "not found" in str(exc).lower():
+            # Same observed `INPUT_ERROR` + "Entity not found" pairing as `_issue_or_none`.
+            if _is_entity_not_found(exc):
                 raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
             raise
         issue = data.get("issue")
@@ -439,13 +456,12 @@ class LinearIssueBackend:
 
     def _comment_body_or_none(self, comment_id: str) -> str | None:
         """Fetch one comment's body by id; ``None`` when Linear reports the entity missing
-        (mirrors ``_issue_or_none``'s documented "not found"-substring tolerance — tightens to
-        ``.codes`` if a stable code is observed at the Node 4.1 smoke gate)."""
+        (mirrors ``_issue_or_none``'s observed `INPUT_ERROR` + "Entity not found" pairing)."""
         query = "query($id: String!) { comment(id: $id) { body } }"
         try:
             data = self._client.request(query, {"id": comment_id})
         except LinearGraphQLError as exc:
-            if "not found" in str(exc).lower():
+            if _is_entity_not_found(exc):
                 return None
             raise
         comment = data.get("comment")

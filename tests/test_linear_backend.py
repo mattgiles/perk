@@ -576,7 +576,9 @@ class TestPlanUpserts:
 
 
 def _not_found_error() -> LinearGraphQLError:
-    return LinearGraphQLError("Linear GraphQL error: Entity not found", codes=())
+    return LinearGraphQLError(
+        "Linear GraphQL error: Entity not found: Issue", codes=("INPUT_ERROR",)
+    )
 
 
 class TestGetPlan:
@@ -1340,6 +1342,107 @@ class TestUuidResolution:
         )
         with pytest.raises(IssueBackendError, match="'ENG-404' not found"):
             backend.add_issue_comment(issue_id="ENG-404", body="x")
+
+
+def _generic_input_error() -> LinearGraphQLError:
+    # An INPUT_ERROR that is NOT a missing entity — e.g. argument validation. The code is
+    # present but the message lacks the "Entity not found" prefix, so the pairing predicate
+    # must NOT swallow it.
+    return LinearGraphQLError(
+        "Linear GraphQL error: Argument Validation Error", codes=("INPUT_ERROR",)
+    )
+
+
+def _not_found_message_wrong_code() -> LinearGraphQLError:
+    # A "not found"-shaped message under a different code — the regression the tightening buys:
+    # the old loose substring check would have swallowed this as a missing entity.
+    return LinearGraphQLError(
+        "Linear GraphQL error: Entity not found: Issue", codes=("RATELIMITED",)
+    )
+
+
+def _not_found_message_no_code() -> LinearGraphQLError:
+    # A "not found"-shaped message with no code at all — also must re-raise now.
+    return LinearGraphQLError("Linear GraphQL error: Entity not found: Issue", codes=())
+
+
+class TestEntityNotFoundDiscrimination:
+    """The not-found predicate pairs ``INPUT_ERROR in exc.codes`` with the ``"Entity not
+    found"`` message prefix (Node 1.2, docs/linear-smoke-gate.md gate-8). These prove the
+    tightening actually narrowed: a code-present/message-absent error and a
+    message-present/code-wrong error both re-raise at all three call sites, while the observed
+    shape is still swallowed."""
+
+    # --- _issue_or_none (via get_plan) ---
+
+    def test_read_observed_shape_is_none(self) -> None:
+        backend, _ = _make_backend({"issue(id": [_not_found_error()]})
+        assert backend.get_plan(issue_id="iss-gone") is None
+
+    def test_read_generic_input_error_reraises(self) -> None:
+        backend, _ = _make_backend({"issue(id": [_generic_input_error()]})
+        with pytest.raises(IssueBackendError, match="Argument Validation Error"):
+            backend.get_plan(issue_id="iss-1")
+
+    def test_read_not_found_message_wrong_code_reraises(self) -> None:
+        # The key regression: a "not found" message under RATELIMITED is no longer swallowed.
+        backend, _ = _make_backend({"issue(id": [_not_found_message_wrong_code()]})
+        with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
+            backend.get_plan(issue_id="iss-1")
+
+    def test_read_not_found_message_no_code_reraises(self) -> None:
+        backend, _ = _make_backend({"issue(id": [_not_found_message_no_code()]})
+        with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
+            backend.get_plan(issue_id="iss-1")
+
+    # --- _uuid_for (via add_issue_comment → UuidForIssue) ---
+
+    def test_uuid_for_observed_shape_raises_converted(self) -> None:
+        backend, _ = _make_backend({"UuidForIssue": [_not_found_error()]})
+        with pytest.raises(IssueBackendError, match="'ENG-404' not found"):
+            backend.add_issue_comment(issue_id="ENG-404", body="x")
+
+    def test_uuid_for_generic_input_error_reraises_raw(self) -> None:
+        backend, _ = _make_backend({"UuidForIssue": [_generic_input_error()]})
+        with pytest.raises(IssueBackendError, match="Argument Validation Error"):
+            backend.add_issue_comment(issue_id="ENG-404", body="x")
+
+    def test_uuid_for_not_found_message_wrong_code_reraises_raw(self) -> None:
+        # Re-raises the raw GraphQL error, NOT the converted "'ENG-404' not found" message.
+        backend, _ = _make_backend({"UuidForIssue": [_not_found_message_wrong_code()]})
+        with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
+            backend.add_issue_comment(issue_id="ENG-404", body="x")
+
+    # --- _comment_body_or_none (via update_objective_node) ---
+
+    def test_comment_observed_shape_degrades(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-gone")
+        backend, fake = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [_not_found_error()],
+            }
+        )
+        update = backend.update_objective_node(
+            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        )
+        assert update.comment_updated is False
+        assert not _queries(fake, "commentUpdate(")
+
+    def test_comment_not_found_message_wrong_code_reraises(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-gone")
+        backend, _ = _make_backend(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [_not_found_message_wrong_code()],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
+            backend.update_objective_node(
+                issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+            )
 
 
 class TestImportDirection:
