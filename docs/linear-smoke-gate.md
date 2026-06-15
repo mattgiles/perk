@@ -79,15 +79,30 @@ Drive a throwaway plan through the full lifecycle. At each step, verify both the
 Repeat the lifecycle on a team with Linear's GitHub integration (pull-request linking +
 workflow automations) and additionally verify:
 
+> **Setup caveat — "installed" ≠ "connected".** The GitHub App being installed on the org/workspace
+> is *not* sufficient: the specific repo must be connected to the integration **and mapped to the
+> team** (Linear → Settings → Integrations → GitHub), and the GitHub App must have that repo in its
+> `selected` repositories. Until that link exists, **zero** PR events reach Linear — no attachment,
+> no automation, no linkback — regardless of branch name. Confirm a PR actually attaches before
+> trusting a "not observed" result. (Node 1.3 burned ~40 min here: the org had the `linear` App
+> installed but the repo↔workspace connection was broken; linking began only after an operator-side
+> repair, and a control PR from Linear's own `username/identifier-title` branch format *also* failed
+> to link until then — proving it was the connection, not the branch name.)
+
 - **Branch-name auto-link.** Pushing `plan-ENG-<n>` attaches the PR to the Linear issue
   (PR + review state visible on the issue) — the D3 payoff of identifier-shaped worktree names.
-- **Automations coexist.** If the team automations move the issue In Progress on push and Done
+  The identifier-shaped `plan-<id>` form auto-links directly; it does **not** need to match
+  Linear's configured `username/identifier-title` branch template.
+- **Automations coexist.** If the team automations move the issue In Progress on PR open and Done
   on merge, perk's explicit on-land close must be an idempotent no-op beside them (no error, no
   state flapping).
-- **Linkback tolerance.** The integration posts linkback comments on linked issues; verify
-  perk's marker-keyed upserts (run-report notes, the objective body comment) still patch their
-  OWN comments and `get_plan_body` still resolves (the offline twin:
-  `test_foreign_linkback_comment_does_not_perturb_marker_scans`).
+- **Linkback tolerance.** The integration links a PR to the issue as an **attachment** (the issue
+  sidebar), **not** a comment, so perk's marker-keyed comment scans are inherently unperturbed —
+  the comments surface stays purely perk's own. Verify perk's marker-keyed upserts (run-report
+  notes, the objective body comment) still patch their OWN comments and `get_plan_body` still
+  resolves (the offline twin `test_foreign_linkback_comment_does_not_perturb_marker_scans` injects
+  a synthetic foreign *comment* — stricter than the live integration, which never touches the
+  comment stream).
 - **Mutation identifier acceptance.** Optionally probe whether mutations (`issueUpdate`,
   `commentCreate.issueId`) accept the human identifier directly — if they reliably do, record
   it: that would let `_uuid_for` simplify to a pass-through.
@@ -164,3 +179,24 @@ On a Linear-backed plan (the `[issues] backend = "linear"` setup above):
 | 2026-06-15 | 1 (gate 9, rate limits) | **No RATELIMITED tripped** at this (low) request volume across the full lifecycle + objective loop. No HTTP-400 `extensions.code == "RATELIMITED"` observed. | RATELIMITED retry/backoff posture — still **unobserved** |
 | 2026-06-15 | 1 (mutation identifier) | **Not probed** (Mode 2 / Node 1.3 — out of scope here). All mutations (`issueUpdate`, `commentCreate`, issue close) worked via the `_uuid_for` `PER-<n>` → UUID resolution; direct-identifier acceptance unverified. | `_uuid_for` pass-through simplification — still **deferred** |
 | 2026-06-15 | 1 (runbook drift) | Three command references in this runbook are stale against the current CLI: `perk init --verify` → no such flag (labels are ensured by `perk doctor --fix`); `perk plan-save` → `perk plan save` (no flat alias); `perk resume ENG-<n>` → `perk plan resume`. `perk pr submit`/`perk pr land` (and the `perk submit`/`perk land` flat aliases) are valid; `land` is idempotent on an already-merged PR. Corrected inline above (Prerequisites + Mode 1 steps). | runbook accuracy (this doc) |
+
+> **Second live run: 2026-06-15** (Objective #548, Node 1.3), workspace `Perk-testing` (team key
+> `PER`), **GitHub integration installed** (org `roivant-health`, repo `perk-testing`) with both
+> workflow automations enabled (`start → In Progress`, `merge → Done`; plus `review → In Review`)
+> and Linear's *GitHub Issues* two-way Sync **OFF**. Mode 2 ran **green**: all three coexistence
+> behaviors confirmed via perk's real CLI (`plan save` → `pr submit` → `pr land` → `learn capture`,
+> `--json` throughout, plan **PER-10** / PR #1 / branch `plan-PER-10`), and the `_uuid_for`
+> mutation-identifier probe came back **positive**. **No backend defect tripped** (no code change
+> this node — measurement only). **Setup note:** linking worked only after an operator-side repair
+> of the Linear↔GitHub *repository* connection — the App being installed on the org was not enough
+> (see the "installed ≠ connected" caveat in Mode 2 above); a control PR from Linear's own
+> `username/identifier-title` branch format *also* failed to link until the repair, proving it was
+> the connection, not perk's branch name.
+
+| Date | Mode | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-15 | 2 (branch auto-link) | After `pr submit` pushed **`plan-PER-10`**, Linear's GitHub integration attached PR #1 to **PER-10** as a `github` **attachment** (`linkKind: closes`, `targetBranch: main`, carrying the PR's review-state fields — empty here, no review occurred). perk's identifier-shaped **`plan-PER-<n>`** branch auto-links **directly** — it does **not** need to match Linear's configured `username/identifier-title` template (a control PR from that exact template format linked identically). The D3 payoff of identifier-shaped worktree names is **proven** live. | D3 branch auto-link (proven) |
+| 2026-06-15 | 2 (automation ↔ close idempotency) | The `start → In Progress` automation fired on PR open (Backlog → In Progress); perk's submit-time `plan-header` write (`branch`/`pr`/`lifecycle_stage`, at `pr submit`) did **not** flap the state. On `pr land`, PR #1 merged → the `merge → Done` automation completed the issue, and perk's explicit `close_issue` was a clean **idempotent no-op** beside it: envelope `plan_issue_closed: true`, **no error**, and the same-state Done write only refreshed `completedAt` — it created **no new state transition** (history = Backlog→In Progress→Done, monotonic, **no flap**). Final state **Done**. | automation coexistence (proven) |
+| 2026-06-15 | 2 (linkback tolerance) | The integration links PRs as **attachments** (issue sidebar), **not** comments. PER-10's comments surface stayed purely perk's own — the `plan-body` block + the `Learnings captured in #PER-12.` marker-keyed upsert — while both PR links (PR #1 merged, PR #2 closed) sat in the **attachments** surface. `get_plan_body` resolved throughout (`pr land` embedded the `Plan:` footer; `learn capture` read the plan-ref); the marker-keyed upsert patched perk's OWN comment cleanly. The live integration never touches the comment stream, so the offline twin (`test_foreign_linkback_comment_does_not_perturb_marker_scans`, a synthetic foreign *comment*) is **stricter** than reality — tolerance holds for a structurally stronger reason. | linkback tolerance (proven — attachment surface) |
+| 2026-06-15 | 2 (mutation identifier) | **Probed positive.** `issueUpdate(id: "PER-10", …)` and `commentCreate(input: {issueId: "PER-10", …})` both **succeed with the bare `PER-<n>` identifier** (no UUID resolution); a bogus `PER-99999` still errors `code: INPUT_ERROR` / `message: "Entity not found: Issue"` (same shape as Mode-1 gate 8). Linear accepts the human identifier everywhere the `_uuid_for` UUID is currently used, so `_uuid_for` could reliably simplify to a **pass-through**. Substantive (no roadmap node owns it) → recorded as a **deferred follow-up** ([#562](https://github.com/mattgiles/perk/issues/562)); `_uuid_for` is unchanged this node. | `_uuid_for` pass-through simplification — **feasible** (follow-up #562) |
+| 2026-06-15 | 2 (runbook drift) | The Mode 2 "Linkback tolerance" bullet's premise that the integration "posts linkback comments on linked issues" is **inaccurate** against the current Linear GitHub integration — PR links arrive as **attachments**, not comments. Corrected inline (Mode 2 section), the "In Progress on push" trigger phrasing aligned to the observed "on PR open", and an "installed ≠ connected" setup caveat added (the operator-side repository-connection gotcha this run hit). | runbook accuracy (this doc) |
