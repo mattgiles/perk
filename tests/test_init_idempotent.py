@@ -22,7 +22,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
 
     settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
     packages = settings["packages"]
-    assert f"git:github.com/mattgiles/perk@v{__version__}" in packages
+    assert "git:github.com/mattgiles/perk@main" in packages
     assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
     assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict with node 3.1
     assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
@@ -423,9 +423,7 @@ def test_init_preserves_user_settings(tmp_path):
     settings = json.loads((pi_dir / "settings.json").read_text())
     assert "npm:@me/custom" in settings["packages"]  # user entry preserved
     assert settings["theme"] == "nightowl"  # unknown key preserved
-    assert (
-        f"git:github.com/mattgiles/perk@v{__version__}" in settings["packages"]
-    )  # perk entry added
+    assert "git:github.com/mattgiles/perk@main" in settings["packages"]  # perk entry added
 
 
 def test_init_migrates_legacy_npm_perk_entry(tmp_path):
@@ -443,7 +441,7 @@ def test_init_migrates_legacy_npm_perk_entry(tmp_path):
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     # legacy entry stripped (string entries only; the web default adds an object-form entry)
     assert not any(isinstance(p, str) and p.startswith("npm:@perk/pi") for p in packages)
-    assert f"git:github.com/mattgiles/perk@v{__version__}" in packages  # git entry added
+    assert "git:github.com/mattgiles/perk@main" in packages  # git entry added
     assert "npm:@me/custom" in packages  # user entry preserved
 
 
@@ -468,14 +466,14 @@ def test_init_self_mode_uses_local_path(tmp_path):
 
 
 def test_init_writes_skills_manifest_fragment(tmp_path):
-    # Consumer mode: the fragment declares the perk source pinned to the release tag and lists
+    # Consumer mode: the fragment declares the perk source tracking main and lists
     # every perk skill. The fragment is a committed declaration, never gitignored.
     run_init(tmp_path, verify=False)
     fragment = tmp_path / ".agents" / "manifest.d" / "perk.yaml"
     assert fragment.is_file()
     text = fragment.read_text(encoding="utf-8")
     assert "url: https://github.com/mattgiles/perk" in text
-    assert f"ref: v{__version__}" in text
+    assert "ref: main" in text
     from perk.convergence.init import PERK_SKILLS
 
     for name in PERK_SKILLS:

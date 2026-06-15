@@ -476,7 +476,7 @@ def _package_identity(entry: object) -> str | None:
 
 
 def _desired_packages(self_repo: bool) -> list[str]:
-    own = ".." if self_repo else f"{GIT_PACKAGE}@v{__version__}"
+    own = ".." if self_repo else f"{GIT_PACKAGE}@main"
     return [own, *BORROWED_PACKAGES]
 
 
@@ -704,10 +704,12 @@ def _converge_linear_package(
 def _desired_skills_manifest(self_repo: bool) -> str:
     """The YAML content of the perk-managed manifest fragment.
 
-    The source ref pins to a tag (``v{__version__}``) for consumers and tracks ``main`` in
-    perk's own tree — mirroring how ``_desired_packages`` pins the git package entry.
+    Both perk's own tree and consumers track ``main``. perk has no release cadence (a
+    single, long-stale ``v0.0.1`` tag), so ``main`` is the only ref that reflects current
+    state; a stale clone is refreshed by re-sync / ``git pull``. Mirrors how
+    ``_desired_packages`` resolves the git package entry from ``main`` for consumers.
     """
-    ref = "main" if self_repo else f"v{__version__}"
+    ref = "main"
     skills_block = "\n".join(f"  - source: perk\n    name: {name}" for name in PERK_SKILLS)
     return (
         "# Managed by perk init — do not edit by hand.\n"

@@ -4,7 +4,6 @@ from pathlib import Path
 
 import yaml
 
-from perk import __version__
 from perk.run import workflow_artifacts as wa
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
@@ -73,7 +72,7 @@ def test_composite_action_install_is_self_vs_consumer_aware():
     # The self-repo dogfoods the code under test; a consumer installs the version-pinned git build.
     assert "uv tool install --from . perk" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
-    assert f"git+https://github.com/mattgiles/perk@v{__version__}" in consumer
+    assert "git+https://github.com/mattgiles/perk@main" in consumer
     assert "--from ." not in consumer
     # The fictional bare `uv tool install perk` is gone (B3).
     assert "run: uv tool install perk" not in consumer

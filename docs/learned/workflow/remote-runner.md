@@ -144,7 +144,7 @@ Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the 
 Consumer remote drive genuinely can't run end-to-end in CI yet (`.pi/git` + `.pi/npm` are gitignored
 and nothing in the composite runs `pi` to trigger pi's git-package `npm install`). Per "don't author
 fiction": land the cheap/correct/unit-testable pieces now (the resolver candidate; the version-pinned
-`git+https@v{__version__}` install mirroring `init._desired_skills_manifest`) but make the
+`git+https@main` install mirroring `init._desired_skills_manifest`) but make the
 genuinely-unbuildable consumer worker-deps step a **loud `::error::` + `exit 1` deferral**, not a
 silently-broken `npm ci`. Self-repo keeps `npm ci`.
 

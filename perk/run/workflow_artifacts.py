@@ -20,7 +20,6 @@ inputs ``run_id``/``stage``/``plan``/``base``; a per-plan ``concurrency`` group.
 
 from pathlib import Path
 
-from perk import __version__
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
 # The two managed files (repo-relative). The composite action lives at a fixed local path the
@@ -146,7 +145,7 @@ jobs:
 # (`--from .`); a consumer installs the published distribution by name. The consumer install + its
 # version pinning is Node 2.4's prereq concern (named here so the artifact is honest, not fiction).
 _PERK_INSTALL_SELF = "uv tool install --from . perk"
-_PERK_INSTALL_CONSUMER = f"uv tool install git+https://github.com/mattgiles/perk@v{__version__}"
+_PERK_INSTALL_CONSUMER = "uv tool install git+https://github.com/mattgiles/perk@main"
 
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout has no
