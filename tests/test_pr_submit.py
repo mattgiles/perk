@@ -30,15 +30,27 @@ def _authed(monkeypatch) -> None:
     )
 
 
+_CLEAN_PROBE = git.MergeProbe(determined=True, mergeable=True, conflicts=())
+
+
 def _stub_gh(
-    monkeypatch, *, existed: bool = False, plan_body: str | None = None
+    monkeypatch,
+    *,
+    existed: bool = False,
+    plan_body: str | None = None,
+    probe: git.MergeProbe | None = _CLEAN_PROBE,
 ) -> dict[str, object]:
-    """Stub the whole submit gateway path; record what the worker did."""
+    """Stub the whole submit gateway path; record what the worker did.
+
+    ``probe`` stubs the local merge-conflict probe (#556): a ``MergeProbe`` is returned verbatim;
+    ``None`` makes the probe raise ``GitError`` (the fail-open path). The probe call is recorded.
+    """
     calls: dict[str, object] = {
         "pushed": False,
         "push_kwargs": None,
         "header": None,
         "pr_body": None,
+        "probed": False,
     }
     monkeypatch.setattr(
         github,
@@ -67,10 +79,17 @@ def _stub_gh(
         calls["pushed"] = True
         calls["push_kwargs"] = k
 
+    def _probe(*_a, **_k):
+        calls["probed"] = True
+        if probe is None:
+            raise git.GitError("probe boom")
+        return probe
+
     monkeypatch.setattr(github, "update_plan_header", _update)
     monkeypatch.setattr(github, "update_pr_body", _update_body)
     monkeypatch.setattr(git, "push", _push)
     monkeypatch.setattr(git, "is_dirty", lambda root: False)
+    monkeypatch.setattr(git, "detect_merge_conflicts", _probe)
     return calls
 
 
@@ -92,6 +111,8 @@ def test_dry_run_is_offline_and_well_formed(monkeypatch):
     assert data["branch"] == "plan-7" and data["issue"] == "7"
     assert data["pr"]["number"] == 0  # stub (no PR opened on a dry run)
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
+    # Dry run stays fully offline: no probe, mergeability unknown (#556).
+    assert data["base"] == "" and data["mergeable"] is None and data["conflicts"] == []
 
 
 def test_no_plan_ref_exits_1(monkeypatch):
@@ -121,6 +142,42 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
     assert "`gh pr checkout 42`" in str(calls["pr_body"])
     assert "`gh pr checkout 7`" not in str(calls["pr_body"])
     assert data["pr_checked"] is True and data["plan_embedded"] is False
+    # Mergeability surfaced (#556): clean probe -> base/mergeable/conflicts present.
+    assert data["base"] == "main"
+    assert data["mergeable"] is True and data["conflicts"] == []
+    assert calls["probed"] is True
+
+
+def test_submit_surfaces_conflicts_but_succeeds(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(
+        monkeypatch,
+        probe=git.MergeProbe(determined=True, mergeable=False, conflicts=("a.py", "b.py")),
+    )
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    # The submit succeeded MECHANICALLY (exit 0); mergeability is reported separately.
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["success"] is True
+    assert data["mergeable"] is False and data["conflicts"] == ["a.py", "b.py"]
+    assert data["base"] == "main"
+
+
+def test_submit_probe_failure_is_fail_open(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch, probe=None)  # probe raises -> fail-open
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["mergeable"] is None and data["conflicts"] == []
+
+
+def test_submit_undetermined_probe_is_null(monkeypatch):
+    _authed(monkeypatch)
+    _stub_gh(monkeypatch, probe=git.MergeProbe(determined=False, mergeable=False, conflicts=()))
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.output)["mergeable"] is None
 
 
 def test_real_submit_embeds_plan_when_available(monkeypatch):

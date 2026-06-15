@@ -267,6 +267,7 @@ The single namespaced session entry holding transient (tier-3) workflow state.
 | `last_review_batch` | object \| null | the last processed review batch (P2.T7): `{ pr, counts:{actionable,informational,praise,question}, resolved_thread_ids:[…], at:ISO }` |
 | `session_artifacts` | object \| null | per-name session-artifact provenance pointers `{run_id, name, path, digest, at}` (Node 1.3, §8.1); appends carry the **whole merged map** (per-field LWW); strict-append tier |
 | `objective_node_claim` | object \| null | the objective node this session has claimed `planning` (`{ objective, node }`, Node 2.3 of #339); written by the warm `objective_node` tool on a successful `planning` transition, cleared on a successful non-planning transition for the same node and after a successful node-linked plan save; best-effort tier (cheaply reconstructable; loud-but-non-fatal) |
+| `conflict_resolution_attempts` | number | the bounded conflict-resolution re-drive counter (#556): incremented each time `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR, reset to 0 on a clean submit; best-effort tier (cheaply reconstructable) |
 
 **Persistence channel:** `pi.appendEntry("perk:workflow-state", data)`. (The *other* Pi
 channel — tool-result `details` — is for state that *is* a tool's output; this is not that.)
@@ -931,12 +932,14 @@ session's history never biases the review.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
   agent's model is configurable through one flat `[subagents]` table in `.pi/perk.toml` (overlaid by
   `.pi/perk.local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
-  `objective-explorer` (matching each def's `name:` frontmatter and the `perk.<name>` invocation).
+  `objective-explorer`, `conflict-resolver` (matching each def's `name:` frontmatter and the
+  `perk.<name>` invocation).
   Each configured value is injected as a **per-call inline `model` override** on that agent's
   `subagent` spawn (the agent's frontmatter `model` stays the default when the key is unset). This
-  is wired at **all six** authored spawn sites: the warm TS doors (`prReviewGuidance`,
-  `addressGuidance`, `factoryGuidance`), the cold Python prompts (`_address_prompt`, `_seed_prompt`),
-  and the headless worker (`initialPromptFor`). The earlier `[pr-review] model` key is removed
+  is wired at the authored spawn sites: the warm TS doors (`prReviewGuidance`,
+  `addressGuidance`, `factoryGuidance`, `conflictResolutionGuidance`), the cold Python prompts
+  (`_address_prompt`, `_seed_prompt`), and the headless worker (`initialPromptFor`). The earlier
+  `[pr-review] model` key is removed
   outright (clean break, no alias — perk `0.0.1` pre-release, init converges forward). Unknown/typo'd
   agent keys are silently ignored (mirrors `_parse_providers_selection`); no doctor validation.
   **Correction to the T7 note above:** `subagents.agentOverrides` does **not** reach project agents
@@ -956,8 +959,26 @@ session's history never biases the review.
   edits. perk owns ONLY the `.pi/agents/perk/` subdir — **custom user agents** live at
   `.pi/agents/<name>.md` (top-level or any non-`perk/` subdir), set their model/tools in frontmatter,
   and are invoked via pi's native `subagent` tool (the fixed-key `[subagents]` table configures only
-  perk's own three agents). Linked worktrees inherit the delivered defs via git checkout (no worktree
+  perk's own agents). Linked worktrees inherit the delivered defs via git checkout (no worktree
   mirror).
+
+**Conflict resolution (`/submit`, #556).** After `/submit` opens the draft PR, the Python
+`perk pr submit` cold door probes the PR's mergeability against the base branch with a deterministic
+local `git merge-tree` probe and surfaces `base` / `mergeable` (bool \| null) / `conflicts[]` in its
+`--json` (see §8.4). When the probe is a definitive `mergeable: false` with conflicts, the warm
+`submit` door (shared by the `/submit` command and the headless worker — both route through the same
+`submit` tool) drives the perk-owned **`perk.conflict-resolver`** agent via the borrowed
+`pi-subagents` engine with **`context: "fresh"`** (not a fork). Unlike the read-only
+classifier/reviewer, the conflict-resolver is **write-capable** and **inherits project context +
+skills** (resolving conflicts correctly requires understanding the code and running the repo's
+checks); like the reviewer it **fetches its own plan + PR context** read-only via
+`perk pr review-context` (the verbatim `plan_body` + `diff` are what let it resolve *correctly*, not
+merely cleanly), then rebases onto `base_ref`, resolves every conflict, verifies, and force-pushes —
+the parent then re-runs `/submit` to confirm. The re-drive is **bounded** by
+`CONFLICT_RESOLUTION_ATTEMPT_CAP = 2` via the `conflict_resolution_attempts` workflow-state field
+(§8.3; reset to 0 on a clean submit); past the cap the unresolved conflict is surfaced loudly
+instead of looping. The probe is **fail-open**: an undetermined probe (`mergeable: null`) never
+blocks submit. Configurable model via `[subagents] conflict-resolver`.
 
 - **Filing note (deferral).** This §8.3 cluster (T1/T2a/T2b/T2c/T4/T5/T6/T7) has outgrown "the
   workflow-state schema"; promoting the context-isolation/handoff paragraphs (T4/T5/T6) into a
@@ -1219,6 +1240,17 @@ validate_pr_body(body, *, pr_number)                -> string[]   (empty == vali
   verbatim plan (via `get_plan_body`; `None` → no embed, no raise) + the checkout footer — goes
   **only** into the GitHub PR body (`update_pr_body`). The squash **commit message** is the OTHER
   target: plain text, set at land (T8b) so HTML never leaks into `git log`.
+- **Mergeability probe (#556).** **After** the PR is created + the body validated, `perk pr submit`
+  runs a deterministic **local** `git merge-tree --write-tree origin/<base> <branch>` probe (no
+  GitHub round-trip, no reliance on GitHub's eventually-consistent `mergeable` field) and surfaces
+  three new `--json` fields: `base` (the target branch), `mergeable` (`true` clean / `false`
+  conflicts present / `null` undetermined), and `conflicts[]` (the conflicted paths). The probe is
+  **fail-open**: a best-effort `git fetch origin <base>`, an unresolvable base, or any `merge-tree`
+  exit other than 0/1 (e.g. old git lacking `--write-tree`) yields `mergeable: null` and never
+  changes submit's exit code — the gate (the warm-door conflict-resolver drive, §8.3) fires only on
+  a **definitive** `mergeable: false`. `--dry-run` stays fully offline (`base: ""`, `mergeable:
+  null`, no probe). The submit still **succeeds mechanically** (exit 0) when conflicts are present —
+  mergeability is reported separately, not an op failure.
 - **`pr check` (D5).** `perk pr submit` runs `validate_pr_body` as a **post-write self-check** and
   **raises** (`error_type: pr_check_failed`) on failure. A thin `perk pr check --json` (active
   plan-ref → find PR → `get_pr_body` → `validate_pr_body`) is the supervisor surface (exit 0 valid /
@@ -2016,8 +2048,12 @@ The drive terminates on the **first** of:
 
 1. **Terminating-tool success** (the primary signal), observed via the `tool_execution_end`
    `result.details` captured by the subscribe listener: for `implement`, a successful `submit`
-   carrying a `pr` → `completed`/`submit_tool`; for `address`, `resolve_review_threads` ok **and**
-   `perk:workflow-state.last_review_batch` appended → `completed`/`address_resolved`.
+   carrying a `pr` **AND `mergeable !== false`** (#556 — a definitively-unmergeable PR with
+   unresolved merge conflicts is NOT complete; `mergeable: true`/`null`/absent all allow completion,
+   fail-open) → `completed`/`submit_tool`; for `address`, `resolve_review_threads` ok **and**
+   `perk:workflow-state.last_review_batch` appended → `completed`/`address_resolved`. The resolver
+   re-drive (§8.3) runs as follow-up turns inside the same `prompt()` drive; the final clean
+   re-`submit` overwrites the captured details with `mergeable: true`, so natural-idle then passes.
 2. **Driving `prompt()` resolved (agent idle), verified against the success predicate.** Idle is
    **not** itself success — if the predicate does not hold, → `failed`/`agent_idle_incomplete`.
 3. **Budget / timeout / external abort** → `session.abort()` (hard; propagates into the in-flight

@@ -87,6 +87,34 @@ test("evaluateTerminal: implement with a successful submit → completed/submit_
   assert.equal(v.errorMessage, null);
 });
 
+test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_incomplete (#556)", () => {
+  const v = evaluateTerminal({
+    stage: "implement",
+    submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false },
+    resolveSucceeded: false,
+    lastReviewBatchPresent: false,
+    modelError: null,
+  });
+  assert.equal(v.status, "failed");
+  assert.equal(v.terminal_signal, "agent_idle_incomplete");
+  assert.equal(v.pr, null);
+  assert.match(v.errorMessage ?? "", /unmergeable PR \(merge conflicts unresolved\)/);
+});
+
+test("evaluateTerminal: implement with mergeable true/null/absent → completed (#556)", () => {
+  for (const mergeable of [true, null, undefined]) {
+    const v = evaluateTerminal({
+      stage: "implement",
+      submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable },
+      resolveSucceeded: false,
+      lastReviewBatchPresent: false,
+      modelError: null,
+    });
+    assert.equal(v.status, "completed", `mergeable=${mergeable} → completed`);
+    assert.equal(v.terminal_signal, "submit_tool");
+  }
+});
+
 test("evaluateTerminal: implement idle without a PR → failed/agent_idle_incomplete", () => {
   const v = evaluateTerminal({
     stage: "implement",

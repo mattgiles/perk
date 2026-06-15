@@ -37,6 +37,11 @@ class PrSubmitResult:
     plan_embedded: bool
     pr_checked: bool
     dry_run: bool
+    base: str
+    # Tri-state mergeability from the local `git merge-tree` probe: True (clean), False
+    # (conflicts present), None (probe undetermined / skipped — fail-open).
+    mergeable: bool | None
+    conflicts: tuple[str, ...]
 
 
 @click.command("submit")
@@ -131,6 +136,9 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             plan_embedded=False,
             pr_checked=False,
             dry_run=True,
+            base="",
+            mergeable=None,
+            conflicts=(),
         )
 
     backend = issues.resolve_issue_backend(repo_root)
@@ -182,6 +190,10 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     linear_agent.emit_pr_opened(
         repo_root, pr_number=pr.number, pr_url=pr.url, branch=branch, environ=os.environ
     )
+    # Mergeability gate (#556): a deterministic local probe AFTER the PR exists. Fail-open —
+    # `detect_merge_conflicts` swallows git failures and the call site is guarded so a probe
+    # failure NEVER changes submit's exit code; only a definitive verdict sets mergeable.
+    mergeable, conflicts = _probe_mergeability(repo_root, base=base, branch=branch)
     return PrSubmitResult(
         pr=pr,
         branch=branch,
@@ -190,7 +202,31 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
         plan_embedded=plan_body is not None,
         pr_checked=True,
         dry_run=False,
+        base=base,
+        mergeable=mergeable,
+        conflicts=conflicts,
     )
+
+
+def _probe_mergeability(
+    repo_root: Path, *, base: str, branch: str
+) -> tuple[bool | None, tuple[str, ...]]:
+    """Map the local merge-conflict probe to submit's tri-state mergeability (fail-open).
+
+    ``determined=False`` → ``(None, ())`` (probe skipped/undetermined); ``determined=True`` →
+    ``(probe.mergeable, probe.conflicts)``. The verdict is taken from the probe's authoritative
+    ``mergeable`` field (the exit code), NOT derived from ``conflicts`` being empty — a determined
+    conflict exit whose paths failed to parse still carries ``mergeable=False`` (conflicts present,
+    paths unparsed) and must not be mistaken for clean. The helper already swallows git failures,
+    but the call is guarded too so nothing here can sink the submit.
+    """
+    try:
+        probe = git.detect_merge_conflicts(repo_root, base=base, branch_ref=branch)
+    except git.GitError:
+        return None, ()
+    if not probe.determined:
+        return None, ()
+    return probe.mergeable, probe.conflicts
 
 
 def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
@@ -241,6 +277,10 @@ def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
         "plan_embedded": result.plan_embedded,
         "pr_checked": result.pr_checked,
         "dry_run": result.dry_run,
+        "base": result.base,
+        # Tri-state: bool when the probe is definitive, null when undetermined (#556).
+        "mergeable": result.mergeable,
+        "conflicts": list(result.conflicts),
     }
 
 
@@ -258,3 +298,14 @@ def _render_human(result: PrSubmitResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + f" → {result.pr.url} ({embed}; footer checked)"
     )
+    if result.mergeable is False:
+        listing = ", ".join(result.conflicts) if result.conflicts else "(paths unavailable)"
+        user_output(
+            click.style(
+                f"⚠ merge conflicts against {result.base}: {listing}\n"
+                "  run /submit again after the conflict-resolver rebases onto the target branch",
+                fg="yellow",
+            )
+        )
+    elif result.mergeable is None:
+        user_output(click.style("  mergeability not determined (probe skipped)", dim=True))

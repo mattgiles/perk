@@ -46,6 +46,13 @@ export interface WorkflowState {
    * node and after a successful node-linked plan save. Best-effort tier.
    */
   objective_node_claim?: { objective: string; node: string } | null;
+  /**
+   * The bounded conflict-resolution re-drive counter (#556, §8.3). Incremented each time
+   * `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR;
+   * reset to 0 on a clean submit. Best-effort tier (cheaply reconstructable). Per-field LWW in
+   * `rebuildWorkflowState` handles it with no rebuild change.
+   */
+  conflict_resolution_attempts?: number;
 }
 
 /** The structural slice of a session entry that the rebuild cares about. */

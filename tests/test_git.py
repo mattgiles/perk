@@ -240,3 +240,77 @@ def test_delete_remote_branches_already_absent_no_raise(git_repo_with_remote):
 def test_delete_remote_branches_empty_is_noop(git_repo_with_remote):
     clone, _remote, _advance = git_repo_with_remote
     assert git.delete_remote_branches(clone, []) == []
+
+
+# --- detect_merge_conflicts (local git merge-tree probe) --------------------------------
+
+
+def test_detect_merge_conflicts_clean(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    # A branch that adds a NEW file; origin/main advances an UNRELATED file -> no conflict.
+    _git(clone, "checkout", "-q", "-b", "feat")
+    (clone / "new.txt").write_text("added\n", encoding="utf-8")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "feat add")
+    advance()  # origin/main now touches f.txt only
+    probe = git.detect_merge_conflicts(clone, base="main", branch_ref="feat")
+    assert probe.determined is True
+    assert probe.mergeable is True
+    assert probe.conflicts == ()
+
+
+def test_detect_merge_conflicts_conflicting(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    # The branch and origin/main edit the SAME file divergently -> a genuine conflict.
+    _git(clone, "checkout", "-q", "-b", "feat")
+    (clone / "f.txt").write_text("feat-side\n", encoding="utf-8")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "feat edit")
+    advance()  # origin/main writes f.txt = "advanced\n"
+    probe = git.detect_merge_conflicts(clone, base="main", branch_ref="feat")
+    assert probe.determined is True
+    assert probe.mergeable is False
+    assert probe.conflicts == ("f.txt",)
+
+
+def test_detect_merge_conflicts_missing_base_is_undetermined(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    # A base ref that does not exist on origin: fetch fails -> fail-open undetermined.
+    probe = git.detect_merge_conflicts(clone, base="no-such-base", branch_ref="HEAD")
+    assert probe.determined is False
+    assert probe.mergeable is False
+    assert probe.conflicts == ()
+
+
+def test_detect_merge_conflicts_no_remote_is_undetermined(git_repo):
+    # No `origin` at all: the best-effort fetch fails -> undetermined (never raises).
+    probe = git.detect_merge_conflicts(git_repo, base="main", branch_ref="HEAD")
+    assert probe.determined is False
+    assert probe.mergeable is False
+    assert probe.conflicts == ()
+
+
+def test_parse_merge_conflicts_unparseable_nonzero_yields_empty():
+    # A determined nonzero exit whose stdout we can't parse still yields () (caller treats
+    # determined+nonzero as conflicts-present).
+    from perk.substrate.git import _parse_merge_conflicts
+
+    assert _parse_merge_conflicts("treeoid\n\nCONFLICT (content): unparsed\n") == ()
+
+
+def test_detect_merge_conflicts_unparseable_conflict_is_still_unmergeable(
+    git_repo_with_remote, monkeypatch
+):
+    # Regression (#559 review): a conflict EXIT (returncode 1) whose conflicted paths fail to parse
+    # must still report `mergeable=False` from the exit code — never falsely clean because the
+    # path tuple came back empty. mergeable is taken from the exit code, NOT len(conflicts) == 0.
+    clone, _remote, _advance = git_repo_with_remote
+
+    def fake_capture(args, **_kwargs):
+        return subprocess.CompletedProcess(args, returncode=1, stdout="treeoid\n\n", stderr="")
+
+    monkeypatch.setattr(git, "_run_capture", fake_capture)
+    probe = git.detect_merge_conflicts(clone, base="main", branch_ref="HEAD")
+    assert probe.determined is True
+    assert probe.mergeable is False  # the bug would have made this True
+    assert probe.conflicts == ()

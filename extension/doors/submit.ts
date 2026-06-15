@@ -3,8 +3,16 @@
 // they do NOT reimplement it (D1: GitHub mutations are canonical in the Python gateway). Mirrors
 // `planSave.ts`: write nothing, delegate to `perk pr submit --json` via `pi.exec`, surface the
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
+//
+// #556 — mergeability gate: `perk pr submit` probes the PR's mergeability against the base branch
+// (a deterministic local `git merge-tree` probe). When it reports a definitively-unmergeable PR
+// (`mergeable === false` + conflicts), the warm door drives a fresh-context, write-capable
+// `perk.conflict-resolver` subagent (mirroring `/pr-review`'s dispatch and `/land`'s reconcile
+// drive) to rebase + resolve + push, then asks the model to re-`/submit` to confirm. Bounded by
+// `CONFLICT_RESOLUTION_ATTEMPT_CAP` via the `conflict_resolution_attempts` workflow-state field.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import {
   booleanField,
   type ColdJson,
@@ -13,8 +21,13 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
-import { failFor, ok, type Result } from "../substrate/result.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
+import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
+import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
+
+/** The bounded conflict-resolution re-drive cap (#556): drive the resolver at most this many times. */
+export const CONFLICT_RESOLUTION_ATTEMPT_CAP = 2;
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */
 export interface SubmitOk {
@@ -22,12 +35,40 @@ export interface SubmitOk {
   branch?: string;
   issue?: number;
   plan_embedded?: boolean;
+  /** The target branch the PR merges into (the conflict-resolver rebases onto it). */
+  base?: string;
+  /** Tri-state mergeability from the Python `git merge-tree` probe: true/false/null/absent. */
+  mergeable?: boolean | null;
+  /** The conflicted paths when `mergeable === false`; `[]` otherwise (advisory). */
+  conflicts?: string[];
 }
 
 export type SubmitResult = Result<SubmitOk>;
 export type SubmitDetails = SubmitResult["details"];
 
-/** Narrow the `perk pr submit --json` success payload; strict on `pr`, lenient on the rest. */
+/**
+ * A tri-state read of the advisory `mergeable` field: `true`/`false`/`null` pass through;
+ * anything else (absent, mistyped) → `undefined`. Kept lenient so a malformed value never sinks
+ * an otherwise-successful submit decode.
+ */
+function mergeableField(payload: ColdJson): boolean | null | undefined {
+  const value = payload.mergeable;
+  if (value === true || value === false || value === null) return value;
+  return undefined;
+}
+
+/** A lenient string-array read for the advisory `conflicts` field; malformed → `[]`. */
+function conflictsField(payload: ColdJson): string[] {
+  const value = payload.conflicts;
+  if (Array.isArray(value) && value.every((p) => typeof p === "string")) return value as string[];
+  return [];
+}
+
+/**
+ * Narrow the `perk pr submit --json` success payload; strict on `pr`, lenient on the rest. The
+ * `base`/`mergeable`/`conflicts` mergeability fields are advisory (mirror land.ts's lenient
+ * sub-fields): a malformed value must NOT make a successful submit decode to `null`.
+ */
 function decodeSubmit(payload: ColdJson): SubmitOk | null {
   const pr = objectField(payload, "pr");
   if (pr === undefined) return null;
@@ -43,12 +84,22 @@ function decodeSubmit(payload: ColdJson): SubmitOk | null {
     branch: stringField(payload, "branch"),
     issue: numberField(payload, "issue"),
     plan_embedded: booleanField(payload, "plan_embedded"),
+    base: stringField(payload, "base"),
+    mergeable: mergeableField(payload),
+    conflicts: conflictsField(payload),
   };
+}
+
+/** A definitively-unmergeable submit: the gate fires only on a *definitive* `false` + conflicts. */
+function isUnmergeable(details: SubmitDetails): details is OkDetails<SubmitOk> {
+  return details.ok && details.mergeable === false && (details.conflicts?.length ?? 0) > 0;
 }
 
 /**
  * The single submit implementation both surfaces call. Delegates to the Python cold door; returns a
- * soft result (never throws) — failures set `details.ok = false`.
+ * soft result (never throws) — failures set `details.ok = false`. On a clean submit
+ * (`mergeable !== false`) it resets the bounded conflict-resolution counter so a later independent
+ * conflict starts fresh; on conflicts the success message reflects the in-flight resolution.
  */
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
   const fail = failFor(ctx, "submit");
@@ -60,10 +111,108 @@ export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise
   if (!r.ok) return fail(r.message, r.errorType);
 
   const verb = r.data.pr.existed ? "Found existing" : "Opened draft";
-  const embed = r.data.plan_embedded ? "plan embedded" : "no plan embed";
-  return ok(`${verb} PR #${r.data.pr.number} → ${r.data.pr.url} (${embed})`, r.data, {
-    terminate: true,
+  const conflicted = r.data.mergeable === false && (r.data.conflicts?.length ?? 0) > 0;
+  // Reset the counter on every clean (or undetermined) submit — idempotent; keeps a later
+  // independent conflict bounded fresh.
+  if (r.data.mergeable !== false) resetConflictAttempts(pi, ctx);
+  const message = conflicted
+    ? `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} — merge conflicts detected; resolving`
+    : `${verb} PR #${r.data.pr.number} → ${r.data.pr.url} (${
+        r.data.plan_embedded ? "plan embedded" : "no plan embed"
+      })`;
+  return ok(message, r.data, { terminate: true });
+}
+
+/** Reset `conflict_resolution_attempts` to 0 (idempotent: a no-op when already 0/absent). */
+function resetConflictAttempts(pi: ExtensionAPI, ctx: ExtensionContext): void {
+  const attempts = rebuildWorkflowState(branchOf(ctx)).conflict_resolution_attempts ?? 0;
+  if (attempts === 0) return;
+  appendWorkflowState(pi, ctx, {
+    data: { conflict_resolution_attempts: 0 },
+    field: "conflict_resolution_attempts",
+    expected: 0,
+    scope: "submit",
+    failure: "conflict_resolution_attempts reset read-back failed (expected 0)",
   });
+}
+
+/**
+ * The follow-up guidance the warm `/submit` injects to spawn the conflict-resolver (modeled on
+ * `prReviewGuidance`). Pure + exported for offline tests. When `model` is set, the spawn carries an
+ * inline `model` override; otherwise the agent's default model is used.
+ */
+export function conflictResolutionGuidance(
+  base: string,
+  attempt: number,
+  cap: number,
+  model?: string,
+): string {
+  const modelClause = model
+    ? `, and pass \`model: "${model}"\` on that call (the configured [subagents] conflict-resolver model)`
+    : " (no model override — the agent's default model is used)";
+  return [
+    `perk /submit — your PR has merge conflicts against \`${base}\`; resolve them before the work ` +
+      "is submitted for review. This is attempt " +
+      `${attempt} of ${cap}.`,
+    `1. Spawn the \`perk.conflict-resolver\` agent via the \`subagent\` tool with \`context: "fresh"\`${modelClause}. ` +
+      "A fresh context keeps this implementation session's history from biasing the resolution.",
+    `2. Tell it: rebase the PR branch onto \`${base}\` and **carefully** resolve all merge ` +
+      "conflicts so the resulting diff is **clean** (no stray markers, no unrelated churn) and " +
+      "**correct** (preserve the change's intent on both sides). The child reads its own plan + PR " +
+      "diff context first (it runs `perk pr review-context`) so it resolves with the change's " +
+      "intent in hand, verifies, and force-pushes — the raw diff never enters this session.",
+    "3. After the child reports success, call `/submit` again to re-verify mergeability. Do NOT " +
+      "edit or resolve conflicts yourself here — the child owns the rebase/resolve/push.",
+  ].join("\n");
+}
+
+/**
+ * After a submit that opened a PR with detected merge conflicts, drive the session into the
+ * conflict-resolution pass by injecting `conflictResolutionGuidance` (warm-door driving pattern,
+ * modeled on `driveReconcileAfterLand`). The terminating `submit` tool stays terminating — a
+ * `followUp` user message is a separate deliberate new turn. Short-circuits (sends nothing) unless
+ * the submit succeeded with a definitively-unmergeable PR. Bounded by
+ * `CONFLICT_RESOLUTION_ATTEMPT_CAP` via the `conflict_resolution_attempts` field: past the cap it
+ * surfaces the unresolved conflict loudly instead of looping.
+ */
+export function driveConflictResolution(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  details: SubmitDetails,
+): void {
+  if (!isUnmergeable(details)) return;
+  const base = details.base ?? "";
+  const attempts = rebuildWorkflowState(branchOf(ctx)).conflict_resolution_attempts ?? 0;
+  if (attempts >= CONFLICT_RESOLUTION_ATTEMPT_CAP) {
+    report(
+      ctx,
+      "submit",
+      "error",
+      `merge conflicts persist after ${attempts} resolution attempt(s) — resolve manually ` +
+        `(rebase onto \`${base}\` and push), then re-run /submit.`,
+      { alsoLog: true },
+    );
+    return;
+  }
+  const next = attempts + 1;
+  appendWorkflowState(pi, ctx, {
+    data: { conflict_resolution_attempts: next },
+    field: "conflict_resolution_attempts",
+    expected: next,
+    scope: "submit",
+    failure: `conflict_resolution_attempts read-back failed (expected ${next})`,
+  });
+  const model = loadPerkConfig(ctx.cwd).subagents["conflict-resolver"];
+  const message =
+    conflictResolutionGuidance(base, next, CONFLICT_RESOLUTION_ATTEMPT_CAP, model) +
+    bindingSuffix(ctx.cwd, "command:submit");
+  if (ctx.isIdle()) {
+    // The `/submit` command path (idle): inject an immediate turn.
+    pi.sendUserMessage(message);
+  } else {
+    // The `submit` tool path (streaming): deliver after the terminating submit batch.
+    pi.sendUserMessage(message, { deliverAs: "followUp" });
+  }
 }
 
 const TOOL_GUIDELINES = [
@@ -84,7 +233,9 @@ export function registerSubmit(pi: ExtensionAPI): void {
     executionMode: "sequential",
     parameters: { type: "object", additionalProperties: false, properties: {} },
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      return submitPr(pi, ctx);
+      const result = await submitPr(pi, ctx);
+      driveConflictResolution(pi, ctx, result.details);
+      return result;
     },
   });
 
@@ -96,6 +247,7 @@ export function registerSubmit(pi: ExtensionAPI): void {
       if (result.details.ok) {
         report(ctx, "submit", "info", result.content[0]?.text ?? "submit done");
       }
+      driveConflictResolution(pi, ctx, result.details);
     },
   });
 }

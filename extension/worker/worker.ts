@@ -262,6 +262,21 @@ export function evaluateTerminal(args: {
   if (args.stage === "implement") {
     const pr = extractPr(args.submitDetails);
     if (args.submitDetails?.ok === true && pr !== null) {
+      // #556 — completion additionally requires the submit to be mergeable: a definitively-
+      // unmergeable PR (merge conflicts unresolved) is NOT done. `mergeable === true`/`null`/
+      // absent all allow completion (fail-open); only a definitive `false` blocks it. On the
+      // happy path the resolver follow-up turns re-submit, overwriting submitDetails with a
+      // mergeable result, so the natural-idle classification then passes.
+      if (args.submitDetails.mergeable === false) {
+        return {
+          status: "failed",
+          terminal_signal: "agent_idle_incomplete",
+          pr: null,
+          errorType: "incomplete",
+          errorMessage:
+            "implement drive went idle with an unmergeable PR (merge conflicts unresolved).",
+        };
+      }
       return {
         status: "completed",
         terminal_signal: "submit_tool",
