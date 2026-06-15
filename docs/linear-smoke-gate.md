@@ -107,6 +107,51 @@ workflow automations) and additionally verify:
   `commentCreate.issueId`) accept the human identifier directly — if they reliably do, record
   it: that would let `_uuid_for` simplify to a pass-through.
 
+## Mode 3 — Projects API spike (Objective #548, Node 1.4)
+
+A **measurement** layer (not part of the issue lifecycle): prove the exact Linear **Project**
+GraphQL operations the future project-backed `ObjectiveStore` (Phase 3) will depend on, and record
+their fidelity, error shapes, and the decisive overview-vs-document storage decision. No production
+code — the proven GraphQL documents + observations are the whole deliverable (node 3.1 copies the
+documents verbatim; node 3.2 consumes the storage decision; node 3.3 the blocking-relation
+symmetry).
+
+**Firing mechanism = inline `LinearClient.request` snippets, no committed script.** Each snippet is
+`client = client_from_env(); data = client.request(QUERY, VARS)`; the inline-code markers come from
+`perk.plan.render_metadata_block(key, payload, style="inline-code")` and are parsed back with
+`perk.plan.find_metadata_block(content, key)` (the same ProseMirror fidelity check Modes 1/2 run for
+issue bodies, extended to the Project `content` surface). Resolve the `PER` team UUID via
+`teams(filter:{ key:{ eq:"PER" } }){ nodes { id } }` (mirrors `LinearIssueBackend._team_id`). Project
+ids are opaque UUIDs — use the UUIDs returned by `projectCreate`/`issueCreate` for all follow-ups.
+
+1. **Project create + overview round-trip (decisive).** `projectCreate(input:{ teamIds, name,
+   content })`; record whether `content` is accepted at create (the historical 2024 wrinkle). Build
+   an objective-header marker block via `render_metadata_block("perk:objective-header", {…},
+   style="inline-code")`, write it through `projectUpdate(id, input:{ content })`, read back via
+   `project(id){ content }`, and assert `find_metadata_block(content, "perk:objective-header")`
+   returns the original dict. Record **CLEAN** or **MANGLED** (exactly how).
+2. **Project document round-trip (unconditional fallback proof).** `documentCreate(input:{
+   projectId, title, content })`, read back via `document(id){ content }`, run `find_metadata_block`.
+   Record CLEAN/MANGLED identically, then record the recommended storage decision for node 3.2
+   (overview if its round-trip is clean; Project document otherwise).
+3. **Milestones.** `projectMilestoneCreate(input:{ projectId, name })` twice; list via
+   `project(id){ projectMilestones { nodes { id name } } }` (node 4.3 maps phases → milestones).
+4. **Issue↔project attachment.** `issueUpdate(id, input:{ projectId })` to attach an existing issue,
+   `issueCreate(input:{ teamId, title, projectId })` to create directly in the project; read back via
+   `issue(id){ project { id } }` and `project(id){ issues { nodes { id identifier } } }`.
+5. **Issue blocking relation.** `issueRelationCreate(input:{ issueId, relatedIssueId, type:
+   "blocks" })`; read back via `issue(id){ relations { nodes { type relatedIssue { identifier } } } }`
+   (A **blocks** B) and `issue(id){ inverseRelations { nodes { type issue { identifier } } } }`
+   (B **blockedBy** A) — the symmetry node 3.3 reconstructs `depends_on` from.
+6. **Error-shape capture.** Fire one bogus-id call per operation class (bad `project(id)`,
+   `projectMilestoneCreate` with a bad `projectId`, `issueRelationCreate` with a nonexistent
+   `relatedIssueId`, bad `document(id)`); record the exact `message` + `extensions.code` and whether
+   it matches the issue not-found shape (`INPUT_ERROR` + `"Entity not found:"`) `_is_entity_not_found`
+   keys on, or differs. Record any RATELIMITED context if tripped.
+
+Append a dated **Recorded observations** block with one row per operation; record the proven working
+GraphQL documents verbatim, and the decisive overview-vs-document storage decision with its evidence.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
@@ -200,3 +245,98 @@ On a Linear-backed plan (the `[issues] backend = "linear"` setup above):
 | 2026-06-15 | 2 (linkback tolerance) | The integration links PRs as **attachments** (issue sidebar), **not** comments. PER-10's comments surface stayed purely perk's own — the `plan-body` block + the `Learnings captured in #PER-12.` marker-keyed upsert — while both PR links (PR #1 merged, PR #2 closed) sat in the **attachments** surface. `get_plan_body` resolved throughout (`pr land` embedded the `Plan:` footer; `learn capture` read the plan-ref); the marker-keyed upsert patched perk's OWN comment cleanly. The live integration never touches the comment stream, so the offline twin (`test_foreign_linkback_comment_does_not_perturb_marker_scans`, a synthetic foreign *comment*) is **stricter** than reality — tolerance holds for a structurally stronger reason. | linkback tolerance (proven — attachment surface) |
 | 2026-06-15 | 2 (mutation identifier) | **Probed positive.** `issueUpdate(id: "PER-10", …)` and `commentCreate(input: {issueId: "PER-10", …})` both **succeed with the bare `PER-<n>` identifier** (no UUID resolution); a bogus `PER-99999` still errors `code: INPUT_ERROR` / `message: "Entity not found: Issue"` (same shape as Mode-1 gate 8). Linear accepts the human identifier everywhere the `_uuid_for` UUID is currently used, so `_uuid_for` could reliably simplify to a **pass-through**. Substantive (no roadmap node owns it) → recorded as a **deferred follow-up** ([#562](https://github.com/mattgiles/perk/issues/562)); `_uuid_for` is unchanged this node. | `_uuid_for` pass-through simplification — **feasible** (follow-up #562) |
 | 2026-06-15 | 2 (runbook drift) | The Mode 2 "Linkback tolerance" bullet's premise that the integration "posts linkback comments on linked issues" is **inaccurate** against the current Linear GitHub integration — PR links arrive as **attachments**, not comments. Corrected inline (Mode 2 section), the "In Progress on push" trigger phrasing aligned to the observed "on PR open", and an "installed ≠ connected" setup caveat added (the operator-side repository-connection gotcha this run hit). | runbook accuracy (this doc) |
+
+> **Third live run: 2026-06-15** (Objective #548, Node 1.4 — **Mode 3, Projects API spike**),
+> workspace `Perk-testing` (team key `PER`, UUID `2f933a7e-0d05-4424-bea2-0bc79a4c54c9`), bare run
+> (Projects are not PR-linked, so the GitHub integration is irrelevant here). All five Project
+> operation classes fired **green** against the live API via inline `LinearClient.request` snippets
+> (no committed script). **Project `content` IS accepted directly at `projectCreate`** — the
+> historical 2024 create-time limitation no longer applies, so no create-then-`projectUpdate`
+> adaptation is needed. The **overview round-trip is CLEAN** (and the Project-document round-trip is
+> CLEAN too), so the decisive storage decision lands on the **overview**. No production code,
+> contract, or user-doc surface changed (measurement node). No `LinearClient` substrate defect was
+> tripped. Spike project: `https://linear.app/perk-testing/project/perk-spike-2026-06-15-676e664a8497`
+> (project UUID `a2ab46dc-e6e2-4787-97e0-959873209e85`).
+>
+> **Decisive overview-vs-document storage decision (for node 3.2): store the objective machine
+> markers in the Project _overview_ (`content`).** Evidence: the inline-code marker block
+> (`render_metadata_block(..., style="inline-code")`) round-tripped **byte-faithfully** through the
+> overview — written via `projectCreate(input:{content})` and patched via `projectUpdate` — and
+> `find_metadata_block` recovered the exact original dict. A `documentCreate` content round-trip was
+> _also_ CLEAN (it remains a viable fallback), but the overview is the simpler single-surface home
+> (no second entity to create/track, shown in the main detail panel), so node 3.2 should use the
+> overview unless a future constraint forces the document branch.
+
+| Date | Operation | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-15 | project create | `projectCreate(input:{ teamIds, name, content })` → `success: true`; returned `project.id` (UUID `a2ab46dc-…`), `url`. **`content` accepted at create** (the returned `project.content` carried the full inline-code marker block) — the 2024 create-time wrinkle does **not** apply; no create-then-`projectUpdate` needed. `description` defaulted to `''`. | node 3.1 (LinearClient `projectCreate`) |
+| 2026-06-15 | overview round-trip (decisive) | Wrote the `perk:objective-header` inline-code block + Reconcilable prose via `projectUpdate(id, input:{ content })`; read back `project(id){ content }`. `find_metadata_block(content, "perk:objective-header")` returned the **exact** original dict (`{run_id, status, node, objective}`). **CLEAN** — byte-faithful (backticks, ```` ```yaml ```` fence, sentinel all preserved; ProseMirror did not reflow the inline-code block). | node 3.2 (**storage decision = overview**) |
+| 2026-06-15 | document round-trip (fallback) | `documentCreate(input:{ projectId, title, content })` → `success: true`, doc UUID `d133dafa-…`; read back `document(id){ content }`. `find_metadata_block` returned the **exact** original dict. **CLEAN** — the Project-document surface is an equally faithful fallback, recorded for node 3.2's alternate branch. | node 3.2 (overview fallback) |
+| 2026-06-15 | milestone create + list | `projectMilestoneCreate(input:{ projectId, name })` ×2 (`Phase 1`, `Phase 2`) → `success: true`, ids `81457502-…` / `5a0e928a-…`. `project(id){ projectMilestones { nodes { id name } } }` listed **both** with stable ids + names (order was reverse-insertion: `Phase 2`, `Phase 1` — **name** is the deterministic key, not list position). | node 4.3 (phase → milestone map) |
+| 2026-06-15 | issue↔project attachment | Created `PER-13` (`issueCreate{teamId,title}`) then attached via `issueUpdate(id, input:{ projectId })` → `issue.project.id` set. Direct `issueCreate(input:{ teamId, title, projectId })` created `PER-14` already in the project. Visible **both** directions: `issue(id){ project { id } }` and `project(id){ issues { nodes { id identifier } } }` (listed `PER-14`, `PER-13`). | node 3.2 (one node-issue per roadmap node in the project) |
+| 2026-06-15 | blocking relation create + read | `issueRelationCreate(input:{ issueId: PER-13.uuid, relatedIssueId: PER-14.uuid, type: "blocks" })` → `success: true`, relation id `800fe05d-…`, `type: "blocks"`. **Forward:** `issue(PER-13){ relations { nodes { type relatedIssue { identifier } } } }` → `{type:"blocks", relatedIssue:"PER-14"}`. **Inverse:** `issue(PER-14){ inverseRelations { nodes { type issue { identifier } } } }` → `{type:"blocks", issue:"PER-13"}` (the `type` enum stays `"blocks"` on the inverse; the **direction** is carried by `relations` vs `inverseRelations`, not by a `"blockedBy"` enum value). Both directions readable. | node 3.3 (reconstruct `depends_on` from inverseRelations) |
+| 2026-06-15 | error shapes (bogus id) | `project(id:"00000000-…")` → `message: "Entity not found: Project"`, `extensions.code: "INPUT_ERROR"`. `projectMilestoneCreate(input:{projectId: bad})` → `"Entity not found: Project"` / `INPUT_ERROR`. `document(id: bad)` → `"Entity not found: Document"` / `INPUT_ERROR`. **All three MATCH the issue not-found shape** (`INPUT_ERROR` + `"Entity not found:"` prefix that `_is_entity_not_found` keys on). **`issueRelationCreate` with a nonexistent `relatedIssueId` DIFFERS:** `message: "Argument Validation Error"`, `extensions.code: "INVALID_INPUT"` (argument validation fails *before* entity lookup — neither the `INPUT_ERROR` code nor the `"Entity not found:"` prefix). | node 3.1 (GraphQLClient fake) / Project not-found handling |
+| 2026-06-15 | rate limits | **No RATELIMITED tripped** across the full spike (project + overview/document + 2 milestones + 2 issues + relation + 4 error probes). No HTTP-400 `extensions.code == "RATELIMITED"` observed. | RATELIMITED retry/backoff posture — still **unobserved** |
+
+### Proven GraphQL documents (Mode 3 — copy verbatim into node 3.1's `LinearClient`)
+
+The working variants, exactly as fired (all green; `content` accepted at create so **no**
+create-then-`projectUpdate` adaptation was required):
+
+```graphql
+# projectCreate — content accepted at create (overview written directly)
+mutation($input: ProjectCreateInput!) {
+  projectCreate(input: $input) { success project { id url name content description } }
+}
+# variables: { input: { teamIds: ["<TEAM_UUID>"], name: "<name>", content: "<overview markdown>" } }
+
+# projectUpdate — patch the overview content (used for later writes)
+mutation($id: String!, $input: ProjectUpdateInput!) {
+  projectUpdate(id: $id, input: $input) { success project { id content } }
+}
+# variables: { id: "<PROJECT_UUID>", input: { content: "<overview markdown>" } }
+
+# project read — overview + milestones + issues
+query($id: String!) {
+  project(id: $id) {
+    id content
+    projectMilestones { nodes { id name } }
+    issues { nodes { id identifier } }
+  }
+}
+
+# documentCreate — overview fallback surface
+mutation($input: DocumentCreateInput!) {
+  documentCreate(input: $input) { success document { id title content } }
+}
+# variables: { input: { projectId: "<PROJECT_UUID>", title: "<title>", content: "<markdown>" } }
+# read back: query($id: String!) { document(id: $id) { id content } }
+
+# projectMilestoneCreate
+mutation($input: ProjectMilestoneCreateInput!) {
+  projectMilestoneCreate(input: $input) { success projectMilestone { id name } }
+}
+# variables: { input: { projectId: "<PROJECT_UUID>", name: "<phase name>" } }
+
+# issue↔project attachment (existing issue) + direct create-in-project
+mutation($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success issue { id identifier project { id } } }
+}
+# variables: { id: "<ISSUE_UUID>", input: { projectId: "<PROJECT_UUID>" } }
+mutation($input: IssueCreateInput!) {
+  issueCreate(input: $input) { success issue { id identifier project { id } } }
+}
+# variables: { input: { teamId: "<TEAM_UUID>", title: "<title>", projectId: "<PROJECT_UUID>" } }
+
+# issueRelationCreate (blocks) + read back both directions
+mutation($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) { success issueRelation { id type } }
+}
+# variables: { input: { issueId: "<A_UUID>", relatedIssueId: "<B_UUID>", type: "blocks" } }
+query($id: String!) {  # A blocks B
+  issue(id: $id) { identifier relations { nodes { type relatedIssue { identifier } } } }
+}
+query($id: String!) {  # B blockedBy A (carried by inverseRelations, type stays "blocks")
+  issue(id: $id) { identifier inverseRelations { nodes { type issue { identifier } } } }
+}
+```
