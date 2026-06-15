@@ -10,10 +10,12 @@ branch/footer naming for everyone working in the repo.
 labels, identifiers, doctor groups, maturity) is the
 [providers & issue backends reference](../reference/providers-and-backends.md#issue-backend--linear-reference).
 
-> **Maturity:** the Linear backend is validated offline against fakes; its live smoke is currently
-> **unrun**. Read the
+> **Maturity:** the Linear backend is validated offline against fakes **and** was **live-validated
+> on 2026-06-15** — the Mode 1 lifecycle (`plan → implement → submit → land → learn`) plus the
+> issue-backed objective loop ran green against a real workspace, with a clean ProseMirror
+> round-trip. Read the
 > [Known caveats & maturity](../reference/providers-and-backends.md#known-caveats--maturity) section
-> before relying on it in anger.
+> for what remains deferred (Mode 2 / agent-session emission / the node-1.2 hardenings).
 
 ## Steps
 
@@ -64,7 +66,7 @@ two-directional, so the `npm:pi-mono-linear` package is removed when Linear is d
   — auth, labels, identifiers, doctor groups, and the maturity register.
 - [Configuration reference — `[issues]`](../reference/configuration.md#issues) — the config keys and
   committed-only semantics.
-- [The Linear live smoke gate](../../linear-smoke-gate.md) — the (currently unrun) live-validation
+- [The Linear live smoke gate](../../linear-smoke-gate.md) — the live-validation
   runbook.
 
 ---
