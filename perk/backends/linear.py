@@ -21,9 +21,11 @@ config, init/doctor readiness, and contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Retry/backoff on RATELIMITED** — fail loud now (a typed ``LinearGraphQLError``); live
-  encounters are recorded at the smoke gate (``docs/linear-smoke-gate.md``) and feed any
-  future backoff decision.
+- **Retry/backoff on RATELIMITED** — *decided fail-loud* (Node 1.2). No RATELIMITED tripped at
+  the live smoke gate (``docs/linear-smoke-gate.md`` gate-9, "not tripped at low volume"), so
+  there is no observed behavior to justify backoff. ``LinearClient.request`` keeps raising the
+  typed ``LinearGraphQLError`` on ``RATELIMITED_CODE``; retry/backoff stays deferred until a
+  live RATELIMITED is observed at the gate.
 """
 
 import os

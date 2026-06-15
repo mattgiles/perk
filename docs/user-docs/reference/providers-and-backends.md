@@ -198,21 +198,24 @@ What the live smoke **proved** (no longer deferred):
   header, the plan-body comment, and the objective-body re-render (roadmap table + reconcilable
   splice) — every `find_metadata_block` parse succeeded after Linear's re-encode, with zero raw
   `<!-- … -->` / `<details>` artifacts.
-- **The real "not found" error shape** — **observed (2026-06-15).** A missing entity returns GraphQL
-  `message: "Entity not found: Issue"` with `extensions.code: "INPUT_ERROR"` (`type: "invalid
-  input"`, `statusCode: 400`); perk's `"not found"` substring tolerance matches it correctly. The
-  `.codes` tightening (node 1.2) should pair `code == "INPUT_ERROR"` with the `"Entity not found:"`
-  message prefix — `INPUT_ERROR` alone is a generic input-error code.
+- **The real "not found" error shape** — **observed (2026-06-15), tightening implemented (node 1.2).**
+  A missing entity returns GraphQL `message: "Entity not found: Issue"` with
+  `extensions.code: "INPUT_ERROR"` (`type: "invalid input"`, `statusCode: 400`). The three
+  not-found sites now **pair** `code == "INPUT_ERROR"` with the `"Entity not found"` message prefix
+  (`INPUT_ERROR` alone is a generic input-error code, so the pairing is the discriminator); the old
+  loose `"not found"` substring tolerance is gone.
 
 The specific behaviors the offline fakes **cannot** prove, **still deferred**:
 
 - **RATELIMITED behavior** — rate limits surface as HTTP 400 with `extensions.code == "RATELIMITED"`;
-  perk does **no retry/backoff by design**. **Not tripped** during the 2026-06-15 smoke (low request
-  volume), so live behavior remains unrecorded — the retry/backoff posture (node 1.2) stays deferred.
+  perk **fails loud by design** — a typed `LinearGraphQLError`, **no retry/backoff**. **Decided
+  fail-loud (node 1.2):** none tripped during the 2026-06-15 smoke (low request volume), so there is
+  no observed behavior to justify backoff; the retry/backoff posture stays deferred until a live
+  RATELIMITED is observed at the gate.
 - **Mutation identifier acceptance** — whether mutations accept the human `ENG-<n>` identifier
   directly (which would let the internal id lookup simplify to a pass-through). **Not probed** in
   the 2026-06-15 Mode 1 run (a Mode 2 / GitHub-integration probe); the `_uuid_for` simplification
-  stays deferred.
+  stays **deferred pending Mode 2 (node 1.3)**.
 - **Agent-session GraphQL signatures** — see below.
 - **GitHub Issues Sync interaction** — if a team has Linear's *GitHub Issues* two-way sync enabled,
   perk-created issues mirror into GitHub (and vice versa). perk does not cover sync interactions;

@@ -46,7 +46,9 @@ _STATES: list[dict[str, object]] = [
 
 
 def _not_found() -> LinearGraphQLError:
-    return LinearGraphQLError("Linear GraphQL error: Entity not found", codes=())
+    return LinearGraphQLError(
+        "Linear GraphQL error: Entity not found: Issue", codes=("INPUT_ERROR",)
+    )
 
 
 class FakeLinearWorkspace:
