@@ -341,3 +341,100 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
     result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"
+
+
+# --- Node 4.3: fail-open Project Updates on the Linear project-backed path -------------------
+
+from perk.backends import objective_store, objective_stores  # noqa: E402
+
+
+class _FakeStore:
+    """A minimal objective store stand-in for the create/reconcile transition sites: records the
+    posted status-update body, or raises when `post_raises` is set (the fail-open probe)."""
+
+    backend_id = "linear"
+
+    def __init__(self, *, existed=False, updated=True, post_raises=False):
+        self._existed = existed
+        self._updated = updated
+        self._post_raises = post_raises
+        self.posts: list[dict] = []
+
+    def create_objective(self, **k):
+        return objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=self._existed)
+
+    def update_objective_body(self, **k):
+        return objective_store.ObjectiveBodyUpdate(
+            objective_id=str(k["objective_id"]),
+            comment_id=None,
+            updated=self._updated and not k.get("dry_run"),
+            dry_run=bool(k.get("dry_run")),
+        )
+
+    def post_status_update(self, *, objective_id, body, dry_run=False):
+        if self._post_raises:
+            raise objective_store.ObjectiveStoreError("linear update boom")
+        self.posts.append({"objective_id": objective_id, "body": body})
+        return True
+
+
+def test_create_posts_status_update_on_linear_path(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore()
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}, {"id": "2.1", "description": "y"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
+    assert result.exit_code == 0
+    assert len(store.posts) == 1
+    assert store.posts[0]["objective_id"] == "proj-1"
+    assert store.posts[0]["body"] == ("**Objective created** — Ship it\n\n2 nodes across 2 phases.")
+
+
+def test_create_does_not_post_on_found_existing(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(existed=True)
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
+    assert result.exit_code == 0
+    assert store.posts == []  # idempotent found-existing path posts nothing
+
+
+def test_create_status_update_failure_is_fail_open(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(post_raises=True)
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
+    # The create still succeeds; the failure is logged loud-but-non-fatal to stderr.
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["success"] is True
+    assert "project update skipped (non-fatal)" in result.stderr
+
+
+def test_reconcile_posts_status_update_on_linear_path(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(updated=True)
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    result = _invoke(["objective", "reconcile", "proj-1", "--json"], body="New prose.")
+    assert result.exit_code == 0
+    assert len(store.posts) == 1
+    assert store.posts[0]["body"] == (
+        "**Roadmap reconciled** — the objective prose was updated against the merged diff."
+    )
+
+
+def test_reconcile_status_update_failure_is_fail_open(monkeypatch):
+    _authed(monkeypatch)
+    store = _FakeStore(updated=True, post_raises=True)
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    result = _invoke(["objective", "reconcile", "proj-1", "--json"], body="New prose.")
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["success"] is True
+    assert "project update skipped (non-fatal)" in result.stderr

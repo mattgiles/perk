@@ -1,10 +1,12 @@
 """`perk objective reconcile` — rewrite the Reconcilable prose region."""
 
 import json
+import sys
 from pathlib import Path
 
 import click
 
+from perk import objective
 from perk.backends import objective_stores
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
@@ -42,9 +44,8 @@ def reconcile_objective(
         if not dry_run:
             require_github(ctx)
         prose = body_path.read_text(encoding="utf-8")
-        result = objective_stores.resolve_objective_store(repo_root).update_objective_body(
-            objective_id=number, prose=prose, dry_run=dry_run
-        )
+        store = objective_stores.resolve_objective_store(repo_root)
+        result = store.update_objective_body(objective_id=number, prose=prose, dry_run=dry_run)
     except ObjectiveStoreError as exc:
         message = str(exc)
         error_type = (
@@ -62,6 +63,18 @@ def reconcile_objective(
             message=exc.format_message(),
         )
         return
+
+    # Fail-open Project Update (Node 4.3): post on a real (non-dry-run) update only. Linear project
+    # store posts; GitHub + the issue-backed Linear store no-op. A failure is logged
+    # loud-but-non-fatal and NEVER changes the reconcile result.
+    if not dry_run and result.updated:
+        try:
+            store.post_status_update(objective_id=number, body=objective.reconciled_update_body())
+        except Exception as exc:  # fail-open: the status update is bookkeeping, never load-bearing
+            print(
+                f"perk objective reconcile: project update skipped (non-fatal): {exc}",
+                file=sys.stderr,
+            )
 
     payload = {
         "success": True,

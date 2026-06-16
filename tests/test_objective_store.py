@@ -126,6 +126,10 @@ class _FakeObjectiveStore:
             self._objectives[objective_id] = dataclasses.replace(obj, state="CLOSED")
         return True
 
+    def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
+        # The minimal fake has no status-update surface (Node 4.3).
+        return False
+
 
 def _make_store() -> objective_store.ObjectiveStore:
     """The static conformance check: ty verifies ``_FakeObjectiveStore`` satisfies the protocol."""

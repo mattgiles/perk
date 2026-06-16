@@ -4,22 +4,22 @@ perk's objective storage is, today, fused into the issue-tracking tier: an objec
 issue, and the ``IssueBackend`` `Protocol` carries the objective methods alongside the plan/learn
 issue methods. Objective #548 splits the **objective-storage tier** back out into its own
 backend-neutral contract so a later node can make a Linear **Project** a canonical objective (not
-just an issue) — the issue tier and the objective tier are conceptually distinct populations even
+just an issue) - the issue tier and the objective tier are conceptually distinct populations even
 when one backend happens to store both as issues.
 
 This module is that tier's contract: the ``ObjectiveStore`` `Protocol`, its backend-neutral result
-dataclasses, and the one backend-neutral error type. It is deliberately **dormant** in Node 2.1 —
-no extraction, no consumers — mirroring exactly how ``issue_backend.py`` shipped the
+dataclasses, and the one backend-neutral error type. It is deliberately **dormant** in Node 2.1 -
+no extraction, no consumers - mirroring exactly how ``issue_backend.py`` shipped the
 ``IssueBackend`` contract dormant in Objective #252, Node 1.1 (Node 1.2 then extracted the GitHub
 backend behind it).
 Node 2.2 will extract ``GitHubObjectiveStore`` + ``resolve_objective_store``, remove the objective
-methods from ``IssueBackend``, and rewire every consumer — atomically, the only point at which that
+methods from ``IssueBackend``, and rewire every consumer - atomically, the only point at which that
 removal is CI-green.
 
 Contract disciplines (every concrete store MUST honor these):
 
 - **Constructor-bound repo context.** Methods take no ``repo_root``; a store instance is constructed
-  for exactly one repo (GitHub carries ``repo_root`` as the ``gh`` cwd; Linear — workspace-scoped —
+  for exactly one repo (GitHub carries ``repo_root`` as the ``gh`` cwd; Linear - workspace-scoped -
   carries team/API-key config bound at construction).
 - **String ids at the boundary.** Every objective/comment id crossing this boundary is a ``str``
   (GitHub's issue numbers stringified; a Linear Project id is natively a string).
@@ -27,13 +27,13 @@ Contract disciplines (every concrete store MUST honor these):
   header-embedded values (e.g. the objective-body comment id) are backend-owned and a caller must
   never interpret them.
 - **Error discipline.** Mutations raise ``ObjectiveStoreError``; lookups return ``... | None`` for
-  not-found and **raise** on an infra failure — never mask an error as None. Concrete stores map
+  not-found and **raise** on an infra failure - never mask an error as None. Concrete stores map
   their native errors (``GitHubError``, Linear HTTP errors) into ``ObjectiveStoreError`` at their
   boundary.
 
 Backend-neutral naming: the methods drop the issue-tier's ``_issue`` suffix
 (``find_objective``/``create_objective``) and use ``objective_id`` everywhere (vs the issue tier's
-``issue_id``), because the stored thing is an objective — a GitHub issue **or** a Linear Project.
+``issue_id``), because the stored thing is an objective - a GitHub issue **or** a Linear Project.
 """
 
 from dataclasses import dataclass
@@ -113,7 +113,7 @@ class ObjectiveStore(Protocol):
 
     All parameters are keyword-only. Mutations raise ``ObjectiveStoreError``; lookups return
     ``... | None`` for not-found and raise on an infra failure. ``dry_run`` mutations validate +
-    compose only — no backend writes.
+    compose only - no backend writes.
     """
 
     # The store's id in the objective-backend vocabulary (e.g. "github"). Contract discipline:
@@ -196,17 +196,17 @@ class ObjectiveStore(Protocol):
         For a store whose model fuses the roadmap node and the plan into a single entity (the
         Linear **Project** store: a roadmap node already *is* a Linear issue), an objective-linked
         ``plan-save`` writes the plan **into that node-issue** rather than minting a second
-        ``perk:plan`` issue — the ``plan-header`` block is merged into the node-issue description
+        ``perk:plan`` issue - the ``plan-header`` block is merged into the node-issue description
         (Linear-safe inline-code), the plan body is upserted as a single node-issue comment, and the
         node-issue's title/``objective-node`` block/prose are untouched (node-issues are discovered
         by project membership + the ``objective-node`` block, never by a ``perk:plan`` label).
-        Returns the **node-issue** ``ObjectiveRef`` (``existed=True`` — an in-place write into an
+        Returns the **node-issue** ``ObjectiveRef`` (``existed=True`` - an in-place write into an
         existing issue).
 
         ``header_fields`` is the already-composed ``plan.PlanHeader(...).to_data()`` dict (the store
         is handed data, not asked to know ``plan-save``'s schema beyond rendering it).
 
-        **Returns ``None`` for a store that does NOT unify node + plan** — the single, unambiguous
+        **Returns ``None`` for a store that does NOT unify node + plan** - the single, unambiguous
         "doesn't unify" signal (no separate capability flag). ``GitHubObjectiveStore`` and the
         issue-backed ``LinearObjectiveStore`` ``return None`` unconditionally; the caller then falls
         back to the standalone plan-issue path. ``None`` is unambiguous: a unifying store **raises**
@@ -223,8 +223,20 @@ class ObjectiveStore(Protocol):
         Each store closes the thing it actually stores: ``GitHubObjectiveStore`` **closes** the
         GitHub objective issue; the issue-backed ``LinearObjectiveStore`` moves the objective issue
         to its Done state; ``LinearProjectObjectiveStore`` **marks the Linear Project complete**
-        (a Project is not an issue — it cannot be "closed" through the issue tier). Returns ``True``
+        (a Project is not an issue - it cannot be "closed" through the issue tier). Returns ``True``
         on a real close; ``dry_run`` returns ``False`` without a write. Raises
         ``ObjectiveStoreError`` on an infra failure.
+        """
+        ...
+
+    def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
+        """Post a human-readable status update to the objective's native update surface (Node 4.3).
+
+        Returns ``True`` when an update was posted, ``False`` for a store with no update surface
+        (``GitHubObjectiveStore`` and the issue-backed ``LinearObjectiveStore`` always return
+        ``False``) or a ``dry_run``. Only ``LinearProjectObjectiveStore`` posts (a Linear Project
+        **Update** via ``projectUpdateCreate``). The method MAY raise ``ObjectiveStoreError`` on an
+        infra failure — every call site wraps it **fail-open** (the update is bookkeeping, never
+        load-bearing: a Linear failure must never break a merge or a node transition).
         """
         ...

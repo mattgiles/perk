@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -84,7 +85,8 @@ def create_objective(
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
         resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()
-        issue = objective_stores.resolve_objective_store(repo_root).create_objective(
+        store = objective_stores.resolve_objective_store(repo_root)
+        issue = store.create_objective(
             title=resolved_title,
             body=body_text,
             run_id=resolved_run_id,
@@ -107,6 +109,26 @@ def create_objective(
             message=exc.format_message(),
         )
         return
+
+    # Fail-open Project Update (Node 4.3): post a status update on a fresh create only (skip the
+    # idempotent found-existing path and any dry run). Linear project store posts; GitHub + the
+    # issue-backed Linear store no-op (return False). A failure is logged loud-but-non-fatal and
+    # NEVER changes the create result.
+    if not dry_run and not issue.existed:
+        try:
+            store.post_status_update(
+                objective_id=issue.id,
+                body=objective.objective_created_update_body(
+                    resolved_title,
+                    node_count=len(effective_nodes),
+                    phase_count=len(objective.group_nodes_by_phase(effective_nodes)),
+                ),
+            )
+        except Exception as exc:  # fail-open: the status update is bookkeeping, never load-bearing
+            print(
+                f"perk objective create: project update skipped (non-fatal): {exc}",
+                file=sys.stderr,
+            )
 
     payload = {
         "success": True,

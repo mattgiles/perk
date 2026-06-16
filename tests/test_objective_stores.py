@@ -260,6 +260,12 @@ class TestGitHubDelegation:
         assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": True}
         assert result is False
 
+    def test_post_status_update_is_noop_false(self, tmp_path: Path) -> None:
+        # GitHub has no Project Updates surface (Node 4.3) — always False, never raises, no `gh`.
+        store = GitHubObjectiveStore(tmp_path)
+        assert store.post_status_update(objective_id="252", body="x") is False
+        assert store.post_status_update(objective_id="252", body="x", dry_run=True) is False
+
 
 class TestErrorTranslation:
     def test_github_error_wrapped_message_verbatim_cause_chained(

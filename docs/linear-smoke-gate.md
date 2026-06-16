@@ -340,3 +340,22 @@ query($id: String!) {  # B blockedBy A (carried by inverseRelations, type stays 
   issue(id: $id) { identifier inverseRelations { nodes { type issue { identifier } } } }
 }
 ```
+
+### Not-yet-live-proven Project ops (verify at Node 5.1)
+
+These Project ops are **offline-covered** (scripted-fake tests) but were **not** exercised by the
+Mode 3 spike, so they are flagged not-live-proven in `_LinearProjectOps` and must be verified at the
+Node 5.1 live smoke gate:
+
+- `set_project_state` — `projectUpdate(id, input:{ state })` (mark the Project complete on land).
+- `list_projects` — `team(id){ projects { nodes { id url content } } }` (the find-by-run-id scan).
+- `create_project_update` (Node 4.3) — the **Project Update** status feed, posted fail-open on
+  objective-created / plan-landed / reconciled transitions:
+
+```graphql
+# projectUpdateCreate — post a Project Update (the status-report feed); `health` omitted (D3)
+mutation($input: ProjectUpdateCreateInput!) {
+  projectUpdateCreate(input: $input) { success projectUpdate { id } }
+}
+# variables: { input: { projectId: "<PROJECT_UUID>", body: "<markdown>" } }
+```

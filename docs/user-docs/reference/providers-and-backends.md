@@ -192,6 +192,18 @@ Linear issue ids are **strings** like `ENG-123` (vs GitHub's `#42`). The shape f
   workflow states the node-status board mirror needs. Run only after `linear-auth` + `linear-team`
   succeed; report-only (no `--fix` — scopes and states are user/workspace-owned).
 
+### Linear project-backed objectives — milestones & Project Updates
+
+Under Linear, an **objective** is a Linear **Project** (not an issue): each roadmap node is a
+node-issue attached to the project, and **phases are grouped under Project Milestones** — one
+milestone per phase, keyed by the phase name (the objective prose's `### Phase N: …` headers).
+The project also posts a fail-open **Project Update** (the status-report feed) on three
+transitions: when the objective is **created**, when **a plan lands** (marking node(s) done), and
+when **reconciliation** rewrites the objective prose. Both behaviors are **additive and
+non-fatal** — a Linear bookkeeping failure is logged but never breaks a merge or a node
+transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write is
+offline-covered today and live-verified at the Node 5.1 smoke gate.)
+
 ## Known caveats & maturity
 
 The Linear backend is **validated offline (against fakes) and live-validated on 2026-06-15**

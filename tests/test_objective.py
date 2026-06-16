@@ -435,3 +435,30 @@ def test_node_issue_title_slug_vs_truncated_description():
     assert o.node_issue_title(short) == "2.2: short desc"
     longish = o.ObjectiveNode(id="2.3", description="x" * 50, status=N.PENDING)
     assert o.node_issue_title(longish, max_len=10) == "2.3: " + "x" * 10 + "…"
+
+
+# --- Node 4.3: project-update body composers -------------------------------------------------
+
+
+def test_objective_created_update_body():
+    body = o.objective_created_update_body("Big Objective", node_count=7, phase_count=3)
+    assert body == "**Objective created** — Big Objective\n\n7 nodes across 3 phases."
+
+
+def test_plan_landed_update_body_incomplete():
+    body = o.plan_landed_update_body(["1.1", "1.2"], pr="7", complete=False)
+    assert body == "**Plan landed** — node(s) 1.1, 1.2 (PR #7) marked done."
+    assert "Objective complete." not in body
+
+
+def test_plan_landed_update_body_complete_and_pr_normalization():
+    # `pr` is normalized through canonical_pr: "#7" / 7 / "7" all render as "#7".
+    for pr in ("#7", 7, "7"):
+        body = o.plan_landed_update_body(["1.3"], pr=pr, complete=True)
+        assert body == "**Plan landed** — node(s) 1.3 (PR #7) marked done.\n\nObjective complete."
+
+
+def test_reconciled_update_body():
+    assert o.reconciled_update_body() == (
+        "**Roadmap reconciled** — the objective prose was updated against the merged diff."
+    )

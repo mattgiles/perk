@@ -25,6 +25,7 @@ infer-from-PR model.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
@@ -472,6 +473,33 @@ def nodes_for_pr(nodes: list[ObjectiveNode], pr_number: str | int) -> list[Objec
     """
     target = canonical_pr(pr_number)
     return [node for node in nodes if node.pr is not None and canonical_pr(node.pr) == target]
+
+
+# --------------------------------------------------- project-update body composers (Node 4.3)
+# Backend-neutral, offline-testable, no I/O: the concise factual markdown a Linear project-backed
+# objective posts as a Project Update on the three key transitions (created / plan-landed /
+# reconciled). The `health` field is deliberately omitted (D3). Call sites compute the counts they
+# already have in hand — no extra network reads on these fail-open paths.
+
+
+def objective_created_update_body(title: str, *, node_count: int, phase_count: int) -> str:
+    """The Project Update body posted when a project-backed objective is created."""
+    return f"**Objective created** — {title}\n\n{node_count} nodes across {phase_count} phases."
+
+
+def plan_landed_update_body(node_ids: Sequence[str], *, pr: str | int, complete: bool) -> str:
+    """The Project Update body posted when a plan lands and marks node(s) done. ``pr`` is
+    normalized through :func:`canonical_pr` (displayed as ``#N``)."""
+    ids = ", ".join(node_ids)
+    body = f"**Plan landed** — node(s) {ids} (PR {canonical_pr(pr)}) marked done."
+    if complete:
+        body += "\n\nObjective complete."
+    return body
+
+
+def reconciled_update_body() -> str:
+    """The Project Update body posted when the objective prose is reconciled against a merge."""
+    return "**Roadmap reconciled** — the objective prose was updated against the merged diff."
 
 
 def add_node(
