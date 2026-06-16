@@ -2334,13 +2334,14 @@ class LinearProjectObjectiveStore:
         cond: objective_drift.DriftCondition,
         created_uuid: dict[str, str],
     ) -> None:
-        """Dispatch one repairable condition to its writer (manifest non-None by short-circuit)."""
-        manifest = snapshot.manifest
-        assert manifest is not None
+        """Dispatch one repairable condition to its writer (backfill is the no-manifest case)."""
         code = cond.code
         if code is objective_drift.DriftCode.MANIFEST_ABSENT:
             self._backfill_manifest(objective_id, snapshot)
-        elif code is objective_drift.DriftCode.DELETED_PHASE_MILESTONE:
+            return
+        manifest = snapshot.manifest
+        assert manifest is not None  # every non-backfill repair has a parsed manifest baseline
+        if code is objective_drift.DriftCode.DELETED_PHASE_MILESTONE:
             self._repair_deleted_milestone(objective_id, snapshot, manifest, cond)
         elif code is objective_drift.DriftCode.MISSING_NODE_ISSUE:
             self._repair_missing_node(objective_id, manifest, cond, created_uuid)
