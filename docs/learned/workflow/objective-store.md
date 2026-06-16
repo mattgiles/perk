@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, or the node↔plan unification protocol on the objective-linked `plan-save` path.
+read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
 ---
 
 # The ObjectiveStore seam
@@ -174,6 +174,52 @@ H1 — so an objective-linked land's commit reads `"1.1: Node one\n\n…"`, not 
 touching title rendering should know **node-issue title ≠ plan title**. (The TS plane needed no
 change — `objective_id` was already an opaque string, and the resolver flip just makes it a Project
 UUID.)
+
+## Phase-4 protocol growth: three implementers, `add_objective_node`, the no-op-return family
+
+### Adding a Protocol method now means THREE implementers
+
+The `ObjectiveStore` Protocol grew **6 → 9 → 10** methods across Phase 3/4: Phase 3 added
+`save_node_plan` / `close_objective` / `post_status_update`; Phase 4 (#614) added
+`add_objective_node`. There are now **three** concrete implementers — GitHub, the dormant
+issue-backed `LinearObjectiveStore`, and the **live** project-backed `LinearProjectObjectiveStore`
+(`linear-backend.md`). **Durable rule: adding any Protocol method now means writing THREE
+implementers**, all enforced by ty static conformance — the `_make_store` / `_make_project_store`
+typed-annotation bindings plus `_FakeObjectiveStore` in `tests/test_objective_store.py`. A
+Phase-2-era plan authored against a 2-backend world **under-counts** this after a rebase pulls in the
+third store (the #614 plan predated `LinearProjectObjectiveStore` and hit exactly this expansion); the
+Protocol-append rebase conflict is purely additive (both parties append after `update_objective_body`
+→ keep both).
+
+### `add_objective_node`: the re-render-vs-materialize split
+
+`ObjectiveNodeAdd` is the **sixth** frozen result dataclass. The implementers split on *where a node
+lives*:
+
+- **GitHub + issue-backed Linear re-render the stored `objective-roadmap` block** — mirror
+  `update_objective_node` verbatim, swapping the mutation to `objective.add_node`.
+- **The project store has no stored roadmap block, so an added node IS a new Linear issue.** Its flow:
+  compute the live roadmap → compute the `<phase>.<n>` id → enrich the phase name → ensure the phase
+  milestone → create the node-issue → create one blocking relation per `depends_on`. `comment_updated`
+  is therefore **always `False`** (no body-comment table to patch). The Linear-side mechanics live in
+  `linear-backend.md`.
+
+### The "no-surface, no-op" return-value pattern is a family
+
+`save_node_plan → None`, `post_status_update → False`, and the design-doc'd
+`detect/repair_objective_drift` no-ops on GitHub + issue-backed Linear all share one shape: **a no-op
+return lets every call site invoke the method UNCONDITIONALLY — no `if backend_id == "linear"`
+branch** (mirrors `None`-means-doesn't-unify on the unify path). The fail-open isolation matters: a
+`post_status_update` failure lives in its own helper (`_post_landed_update`) so it can't discard an
+already-marked node set — the same posture as the existing close fail-open.
+
+### The manifest unifies both backends (the #609 design decision)
+
+GitHub's `objective-roadmap` YAML block **already IS its manifest** (atomically edited → trivially-empty
+drift report), so the prospective `detect/repair_objective_drift` methods carry real behavior **only**
+on the project store (which derives its roadmap live from node-issues — no baseline to diff) and no-op
+everywhere else — the same precedent as the no-op family above. Cross-ref `linear-backend.md` for the
+manifest's storage shape (a visible inline-code block in the project overview).
 
 ## Deferred-doc staleness is intentional, tracked
 

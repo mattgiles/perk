@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, or the live-spike firing mechanism.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -183,6 +183,33 @@ every request the emitters compose without touching emitter code or the real cli
 - **PR-side guidance is backend-universal** (`gh pr` only) under any issue backend — `/submit`,
   `/land`, the address prompts, learn's `gh pr list --head plan-<pr_id> --state merged`
   derivation all stay untouched.
+
+### The third backend-aware seam: `objective_read_instruction` (Node 4.1, #600)
+
+Objective seed prompts gained their own backend-aware read clause, mirroring the plan-read precedent:
+one parity-pinned helper per plane — `objective_read_instruction` (Python,
+`perk/cli/commands/objective/shared.py`) ↔ byte-identical `objectiveReadInstruction` (TS,
+`extension/factories/objectivePlan.ts`) — appended as a **supplemental clause** to the existing
+`perk objective show <id>` step in the three objective seed prompts (cold `_seed_prompt`, warm
+`factoryGuidance` + `reconcileGuidance`). Byte-parity is pinned by a paired `OBJECTIVE_LINEAR_SUBSTRINGS`
+lockstep substring list in `tests/test_objective_prompt_parity.py` ↔
+`extension/factories/objectivePlan.test.ts` — the **same `LINEAR_READ_SUBSTRINGS` discipline**
+documented above (a third instance; see `shared-contracts.md`).
+
+- **The supplemental-clause pattern beats replacement.** The helper returns `""` for github (and any
+  non-linear) so the existing prompt is **byte-unchanged** (no churn) — achieved by injecting the
+  clause *around* the existing punctuation (the clause carries a **leading space**), NOT by rewording
+  the line. A naive `; mark` → `. Mark` rewrite churns the github arm; the guard is to **verify the
+  github-arm output is literally byte-identical** after the change (caught by re-reading the diff
+  intent, not a test).
+- **Cold-vs-warm backend-source asymmetry is the load-bearing design call.** Cold has
+  `store.backend_id` + `state.url` already in hand (free). Warm must resolve the backend from
+  `resolveIssueBackendId(ctx.cwd)` (committed `.pi/perk.toml`, **NOT** `loadPerkConfig`'s overlay) and
+  fetch the url via a `runColdDoor(["objective","show",id,"--json"])` round-trip **only when
+  `backend === "linear"`** (github needs no clause → no fetch), and **fail-open** to the indirect
+  `run \`perk objective show <id>\` for its URL` form. Config is authoritative for the warm plane
+  because cross-backend objectives are unsupported by policy (no store-vs-config skew to guard). This
+  consumed the previously-**dormant** `resolveIssueBackendId` — its first real consumer.
 - **Skills `references:` frontmatter + `backends/{github,linear}.md` subdirectory routing** works
   with zero init/doctor changes — delivery is whole-directory sync; the launch prompt naming the
   backend is the routing signal the model uses to pick `backends/<backend>.md` (see
@@ -405,6 +432,96 @@ returns related/duplicate/blocks); direction is carried by the field (`relations
 - **`list_projects` query shape live-status:** offline-covered only at landing (the #567 spike
   covered create/overview/milestone/attach/relation, not list-projects). If a later live run covers
   it, reconcile this line; do NOT invent a result. No RATELIMITED at spike volume.
+
+## Project-backed objective ops (Phase 4: Nodes 4.1–4.4)
+
+Objective #548 Phase 4 layered four additive enrichments onto `LinearProjectObjectiveStore` (the
+backend-aware seed prompts are in the Backend-aware-prompts section above; GitHub stays unchanged
+throughout). Built across Nodes 4.1–4.4 (PRs #599, #602, #605, #608) plus the `add_objective_node`
+surface (PR #613).
+
+### `add_objective_node` project-store flow (#614)
+
+The project store materializes a node-**issue**, not a roadmap-block re-render (the
+re-render-vs-materialize split lives in `objective-store.md`). The live pipeline:
+`get_objective` (compute the live roadmap) → `objective.add_node` (compute `<phase>.<n>`) →
+`project_or_none(content)` for phase-name enrichment → `ensure_phase_milestone(known=None)` →
+`_create_issue(project_id, milestone_id)` → one `create_issue_relation` per `depends_on`.
+
+- **Crucial reuse:** the `known=None` branch of `ensure_phase_milestone` was pre-built by Node 4.3
+  *explicitly for a future add-node-to-an-existing-objective path* (its docstring says so) — this is
+  that caller. Load-bearing seam, not fiction.
+- Phase-name enrichment reads `### Phase N: name` from the overview prose (`enrich_phase_names`) and
+  falls back to `Phase N` (`phase_label`) when no header exists.
+
+### The id-collision `None` branch is genuinely UNREACHABLE via real inputs (#614)
+
+`add_node`'s id-collision `None` return is a defensive guard with no realistic trigger: any node
+already occupying the computed `<phase>.<n>` would carry a numeric suffix → be counted in `max_num`
+→ contradiction (new id = max+1). **Don't write a unit test forcing the impossible branch** —
+instead test the *gateway error mapping*: monkeypatch `objective.add_node` to return `None` and
+assert the `GitHubError`/`ObjectiveStoreError` "collision" message maps to the CLI `invalid_input`
+arm.
+
+### `FakeLinear` add-node fixture gotchas (#614)
+
+- A single `add_objective_node` path issues **two** `project_or_none` reads (get_objective's + the
+  content-enrichment one) → supply a **2-element list** under the `project(id` key.
+- `_create_issue` triggers a team-id lookup → the fixture needs a `teams(filter` entry even for an
+  add-node test.
+- Reaffirms the substring-insertion-order footgun (register the more-specific needle first) — see
+  the `_FakeLinear` section above; don't re-explain.
+
+### The phase→milestone seam: route an existing caller through a future seam without behavior change (#606)
+
+`ensure_phase_milestone(*, project_id, name, known=None)` is a load-bearing seam a *future* caller
+(add-node) reuses. To route the *current* (create-objective) caller through it **today without a
+behavior change**, seed that caller's `known` map **empty**: the lookup branch then never fires
+(every name a guaranteed miss → identical `create_project_milestone` sequence as the old blind loop,
+**no extra `projectMilestones` read**); the reusable value lives entirely in the `known is None`
+branch for the future caller. **Prove byte-equivalence with a *negative* assertion**
+(`assert not _queries(fake, "projectMilestones(")`), not output equality. **Name is the dedup key**
+(no phase-key→id registry); the phase-header-text-drift duplicate-milestone edge is deferred to the
+drift-repair node.
+
+### Fail-open Project Updates (#606)
+
+`projectUpdateCreate` bodies come from **pure backend-neutral composers** (`perk/objective.py`)
+computed from counts the call site already holds → **no extra network reads**. Each call site wraps
+in `try/except`, logs a non-fatal stderr line (`... skipped (non-fatal): {exc}`), and **never
+changes the command result**; in `_reconcile_objective_on_land` the post lives in its own helper
+(`_post_landed_update`) so a failure can't discard already-marked node ids (same isolation as the
+existing close fail-open). `projectUpdateCreate(` does **not** substring-collide with `projectUpdate(`
+(next char `C`), but place the more-specific needle first defensively. `projectUpdateCreate` is
+offline-covered only — it joins the still-deferred Node-5.1 smoke-gate register (`set_project_state` /
+`list_projects` / `_workflow_state_id`).
+
+### The manifest-drift architecture (#609) — for the follow-up implementer
+
+The canonical spec is `docs/planning/objective-repair.md` (read it, don't re-derive). The
+load-bearing decisions:
+
+- **Drift is only tractable against a persisted manifest.** `LinearProjectObjectiveStore.get_objective`
+  derives the roadmap **live** from node-issues (no stored roadmap table — Node 3.2), so there is no
+  baseline to diff; baseline-free heuristics (sequence-gap, empty-milestone) can't *repair* a deleted
+  node's slug/description and were rejected as more complex long-term.
+- **Linear has no invisible project-level metadata field** — ProseMirror drops HTML comments (the
+  reason markers are transcoded to inline code), and attachment `metadata` is issue-scoped. So the
+  manifest lands as a **visible-but-unobtrusive inline-code block in the project overview**, beside
+  `objective-header`, written through the existing idempotent `update_project_content` path.
+- **The manifest owns structural identity; status stays observed-only** (live state owned by each
+  node-issue's `objective-node` block) — the split is what makes recreate repairs safe (restore
+  structure without inventing status).
+- **The observed snapshot needs a new sibling op:** `_LinearProjectOps.project_issues` carries no
+  milestone membership, so don't perturb `get_objective`'s byte-stable query — add a sibling.
+
+### `check_project_readiness` (#603) — a separate function
+
+`check_project_readiness(client, *, team_key) -> LinearProjectReadiness` is a **separate** function
+beside `check_readiness` (keeps the issue tier byte-stable), wired into `doctor`'s linear checks (two
+new checks) and `init`'s linear readiness (a nullable `LinearReport.project` sub-report). The test
+census + the non-fatal-sub-report discipline live in `init-doctor.md` — keep the detail there to
+avoid duplication.
 
 ## Measurement-node / live-spike process facts
 
