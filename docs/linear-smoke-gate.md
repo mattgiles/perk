@@ -209,9 +209,13 @@ in the Linear UI + the `--json` envelope.
 2. **Deterministic node ordering.** `perk objective show <PROJECT_UUID> --json`. Verify the `nodes`
    array is in **`node_sort_key` order** (`1.1, 1.2, 2.1, 2.2`) — **NOT** Linear's
    connection/reverse-insertion order — even though the roadmap was authored scrambled. Each node's
-   `status`, `depends_on` (reconstructed from the blocking relations), and `description`
-   round-trip. `perk objective next <PROJECT_UUID> --json` returns the expected next plannable node
-   (`1.1`, the only node with no unmet dependency).
+   `status` and `description` round-trip; `perk objective next <PROJECT_UUID> --json` returns the
+   expected next plannable node (`1.1`, the only node with no unmet dependency). **Note:**
+   `objective show --json` does **not** serialize `depends_on` (node keys are
+   `id`/`description`/`status`/`pr`/`phase`, and `phase` is **derived from the node id**, not read
+   from the milestone) — `depends_on` **is** reconstructed from the blocking relations at the store
+   level (`get_objective`), so verify the dependency graph via the store or via `next`'s selection
+   behavior, not the show envelope.
 3. **`list_projects` find-scan (idempotency).** Re-run the **same**
    `perk objective create --body obj.md --roadmap '…' --run-id <RID> --json`. Verify
    `objective.existed == true` and the **same** Project UUID — proving the `list_projects`
@@ -262,8 +266,10 @@ in the Linear UI + the `--json` envelope.
    - (b) **Add a spurious `blocks` relation** from an unrelated / cross-project issue → the unknown
      blocker target is **silently dropped** from `depends_on` (only in-objective node identifiers
      reconstruct).
-   - (c) **Rename a phase milestone** → the milestone name is read **live**, so the renamed value
-     surfaces (milestone identity is name-keyed, not position-keyed).
+   - (c) **Rename a phase milestone** → **invisible** to `get_objective` — the roadmap
+     reconstruction is milestone-name-independent (node `phase` derives from the node id via
+     `derive_phase`; `get_objective` never reads milestone names), so the renamed value surfaces
+     only in the Linear UI grouping, not in `objective show`.
    State explicitly that these are the **empirical baseline** the future drift-detection node will
    formalize — there is no doctor to flag the drift today.
 10. **Rate limits / error shapes.** Note any RATELIMITED context (still unobserved at low volume)
@@ -485,3 +491,57 @@ mutation($input: ProjectUpdateCreateInput!) {
 }
 # variables: { input: { projectId: "<PROJECT_UUID>", body: "<markdown>" } }
 ```
+
+> **Fourth live run: 2026-06-16** (Objective #548, Node 5.1 — **Mode 4, project-backed objective
+> lifecycle**), workspace `Perk-testing` (team key `PER`, UUID
+> `2f933a7e-0d05-4424-bea2-0bc79a4c54c9`), bare run (Projects are not PR-linked, so the GitHub
+> integration is irrelevant). The **project-backed objective lifecycle ran green** end-to-end
+> against the live Linear API, and **all four not-yet-live-proven Project ops are now proven live**:
+> `list_projects` (find-by-run-id idempotency), `create_project_update` (3 updates across
+> created/landed/reconciled), `set_project_state` (Project → `completed` on close), and
+> `_workflow_state_id` (node workflow-state mirror, both `in_progress → started` and
+> `done → completed`). The headline ProseMirror `find_metadata_block` round-trip was **CLEAN** for
+> the overview `objective-header` through create → reconcile (zero HTML artifacts). The node↔plan
+> unification created **no** new `perk:plan` issue (the plan-header merged into the node-issue
+> description + the plan body landed as a single node-issue comment). **No production code,
+> contract, or user-doc surface changed** (measurement node); **no backend defect was tripped**.
+> Project: `https://linear.app/perk-testing/project/mode-4-smoke-objective-project-backed-lifecycle-node-51-eccec242e70e`
+> (UUID `54143ab9-bb04-4885-96ca-0dc7651185bf`, run_id `01SMOKE5A180030`); node-issues **PER-15**
+> (1.1) / **PER-16** (1.2) / **PER-17** (2.1) / **PER-18** (2.2); milestones `Foundations` (1.x) /
+> `Extensions` (2.x); blocking relations `PER-15 blocks PER-16`, `PER-16 blocks PER-17`.
+>
+> **Scoped deferral — the git+GitHub `pr submit` / `pr land` orchestration (gates 5–6) was NOT run
+> in this session.** This smoke was driven from perk's own dev repo, whose git remote is the real
+> `mattgiles/perk` (no separate scratch GitHub repo wired to Linear was available, unlike Mode 1/2's
+> `perk-testing` repo). Running `pr submit` / `pr land` here would push branches to `mattgiles/perk`
+> and **squash-merge a throwaway change into perk's `main`** — unacceptable. The git orchestration
+> is unchanged this node and is already offline-covered + Mode-1/2-proven for the GitHub backend;
+> Node 5.1's actual targets are the **Linear Project ops** those land/submit paths call, which were
+> live-proven by exercising `LinearProjectObjectiveStore.update_objective_node` /
+> `close_objective` / `post_status_update` **directly** against the live Project (the exact calls
+> `_reconcile_objective_on_land` makes), faithfully reproducing the land-side Linear effects.
+
+| Date | Gate | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-16 | 4.1 (create) | `perk objective create --body … --roadmap '<scrambled 2.1,1.1,2.2,1.2>' --run-id … --json` → `objective.id` an **opaque Project UUID** (`54143ab9-…`, NOT `PER-*`), `existed: false`. Overview carried the `objective-header` inline-code block + the `` `perk:objective-reconcilable` `` region, **no** roadmap table, **zero** `<!-- … -->` / `<details>` artifacts. **One milestone per phase** (`Foundations`/`Extensions`, enriched `### Phase N:` names); **one node-issue per node** (PER-15..18) each attached to its phase milestone; **blocking relations** materialized for every explicit `depends_on` (`PER-15 blocks PER-16`, `PER-16 blocks PER-17` — dep blocks node). A fresh-create **Project Update** posted (`**Objective created** — … 4 nodes across 2 phases.`). | `create_project_update` (**proven live**); project-backed composition |
+| 2026-06-16 | 4.2 (ordering) | `perk objective show <UUID> --json` returned `nodes` in **`node_sort_key` order** (`1.1, 1.2, 2.1, 2.2`) despite the **scrambled** authoring order and despite Linear's reverse-insertion connection order (`PER-18,17,16,15`). `objective next` → `1.1`. `depends_on` **reconstructs at the store level** (`get_objective`: `1.2←(1.1)`, `2.1←(1.2)`), but **`objective show --json` does not serialize `depends_on`** (node keys = `id/description/status/pr/phase`; `phase` is **derived from the node id** via `derive_phase`, not read from the milestone) — verify the dep graph via the store or `next` selection, not the show envelope. | deterministic ordering (**proven**); runbook accuracy (show omits `depends_on`) |
+| 2026-06-16 | 4.3 (idempotency) | Re-running the **same** `objective create … --run-id …` → `existed: true` and the **same** Project UUID; milestone count stayed **2**, issue count stayed **4** (no duplicates). The `list_projects` find-by-run-id scan resolved the existing Project. | `list_projects` (**proven live**) |
+| 2026-06-16 | 4.4 (node↔plan unification) | `perk plan save --objective-id <UUID> --node-id 1.1 --plan-file … --json` → `issue.id == PER-15` (the **node-issue's own** ref), `plan_ref.pr_id == PER-15` + `objective_id` set, `objective_node.linked/status == in_progress`. **No new `perk:plan` issue** (team `perk:plan` count unchanged at 5). PER-15's **description** gained the `plan-header` inline-code block (beside its `objective-node` block); the plan **body** landed as a **single** node-issue comment (`plan-body` block). The node-issue's Linear workflow state mirrored to **In Progress (started)**. | node↔plan unification (**proven**); `_workflow_state_id` in_progress→started (**proven live**) |
+| 2026-06-16 | 4.5 (implement+submit) | **Deferred — git orchestration not run here** (see the scoped-deferral note above). The submit-time `plan-header` `branch`/`pr`/`lifecycle_stage` write to the node-issue is the same Linear write path proven in Mode 1 gate 4; only the GitHub PR open differs, and that requires a Linear-wired scratch repo. | git orchestration (offline + Mode-1/2 covered) |
+| 2026-06-16 | 4.6 (land: node-done + close + update) | Reproduced the land-side Linear effects directly (the calls `_reconcile_objective_on_land` makes): marking node 1.1 `done` mirrored PER-15 to **Done (completed)** and posted `**Plan landed** — node(s) 1.1 (PR #PER-15) marked done.`; driving the remaining nodes done → `close_objective` set the **Project state to `completed`** (`projectUpdate(state:"completed")`) and posted `**Plan landed** — node(s) 2.2 (PR #PER-18) marked done.\n\nObjective complete.`. The backlink `pr` is the **node-issue's own identifier** (self-referential, stable). | `set_project_state` (**proven live**); `create_project_update`/`post_status_update` (**proven live**) |
+| 2026-06-16 | 4.7 (workflow-state mirror) | The `_workflow_state_id` mirror **fired** both directions: `in_progress → started` (gate 4, node 1.1 → In Progress) and `done → completed` (gate 6, **all four** node-issues → Done). No fail-open fallback was needed — team `PER` has both a `started` and a `completed` workflow state (the `linear-workflow-states` doctor probe is green). | `_workflow_state_id` (**proven live, both directions**) |
+| 2026-06-16 | 4.8 (reconcile splice) | `perk objective reconcile <UUID> --body … --json` → `updated: true`; the overview's Reconcilable region was **spliced in place** (form-preserving), the `objective-header` block stayed **parseable** after Linear's re-encode (`find_metadata_block` **CLEAN**, exact dict recovered), the reconcilable sentinels survived (2), **zero** HTML artifacts, and a reconciled **Project Update** posted (`**Roadmap reconciled** — …`). The headline fidelity check passes. | ProseMirror round-trip fidelity (**proven** — overview reconcile) |
+| 2026-06-16 | 4.9 (perturbation baseline) | Deliberate live perturbations + re-read of `get_objective` (the **drift-doctor proxy** — `perk objective doctor` is **not built**; Node 4.4 delivered the design only, see `docs/planning/objective-repair.md`): (a) **un-assigning PER-18 (2.2) from the project** → the node **silently disappeared** from the reconstructed roadmap (4→3 nodes, no error/flag — `get_objective` rebuilds from surviving node-issues only); (b) adding a **spurious cross-project `blocks`** (`PER-5 blocks PER-15`) → the raw `inverseRelations` carried it (`project: null`), but `get_objective`'s `1.1.depends_on` stayed **`None`** — the unknown blocker target was **silently dropped** (only in-objective identifiers reconstruct); (c) **renaming milestone `Foundations` → `Foundations RENAMED`** → **invisible** to `get_objective` (node `phase` derives from the node id, not the milestone name; the roadmap reconstruction is milestone-name-independent). These are the **empirical baseline** the future drift-detection node will formalize. | drift-surface baseline (empirical — Node 4.4 design only) |
+| 2026-06-16 | 4.10 (rate limits / error shapes) | **No RATELIMITED tripped** across the full Mode 4 run (create ×2, show ×3, plan-save, 4 node updates, close, 2 status updates, reconcile, perturbations). No HTTP-400 `extensions.code == "RATELIMITED"`. No unexpected error shape from the Project ops; the only error encountered was operator-side (an inline `issueRelationCreate` with a quoted `type:"blocks"` enum → `GRAPHQL_VALIDATION_FAILED`, a curl-quoting mistake, not a perk/Project-op shape — the store passes the enum via typed variables). | RATELIMITED posture — still **unobserved**; no Project-op defect |
+
+**Summary — GREEN.** The project-backed objective lifecycle and all four previously-not-live-proven
+Project ops (`list_projects`, `create_project_update`, `set_project_state`, `_workflow_state_id`)
+work against the real Linear API; the overview ProseMirror round-trip is CLEAN through
+create → reconcile; node↔plan unification creates no new issue and patches the body comment in
+place; and the deliberate-perturbation pass records the empirical baseline the unbuilt
+`perk objective doctor` drift surface will formalize. The only non-code findings are runbook-accuracy
+nuances (`objective show --json` omits `depends_on`; milestone rename is invisible to the roadmap
+reconstruction because `phase` derives from the node id) — recorded above, no follow-up issue
+warranted. The git+GitHub `pr submit`/`pr land` orchestration (gates 5–6) was deferred (not run in
+perk's own repo to avoid a throwaway merge into `main`); its Linear-side Project-op targets were
+live-proven directly.
