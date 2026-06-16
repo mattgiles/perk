@@ -50,7 +50,7 @@ jobs:
       - name: Typecheck
         run: just typecheck
 
-      # Test: `uv run pytest` + `node --test "extension/**/*.test.ts"`.
+      # Test: `uv run pytest` + `node --test --test-reporter=dot "extension/**/*.test.ts"`.
       # Both uv and npm are on PATH so the cross-plane packaging tests in
       # tests/test_packaging.py actually run instead of skipping.
       - name: Test
