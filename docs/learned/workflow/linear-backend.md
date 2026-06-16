@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the forward-looking Linear Projects substrate for the unbuilt Phase-3 ObjectiveStore, or the live-spike firing mechanism.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -280,27 +280,131 @@ A name silently fails team resolution and surfaces only at **land** as a *non-fa
 `plan issue close skipped (non-fatal): Linear team '<x>' not found` (`plan_issue_closed: false`); the
 GitHub squash-merge still succeeds.
 
-## Linear Projects substrate (the ObjectiveStore spike, #567)
+## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
 
-Forward-looking facts for the **not-yet-built** Phase-3 ObjectiveStore (recorded as proven substrate,
-explicitly **not yet consumed by any built code** — no fiction about the store itself):
+Objective #548 Phase 3 built the project-backed objective store on top of the #567 spike substrate.
+The tier contract (dormant-contract → atomic-removal recipe, resolver, translate-CM) lives in
+`objective-store.md`; the Linear-specific mechanics are here. Built across Nodes 3.1–3.4 (PRs #579,
+#584/#585, #588, #594).
 
-- **`projectCreate(input:{teamIds,name,content})` accepts `content` at create.** The historical 2024
-  create-then-`projectUpdate` workaround no longer applies — write the overview in one call.
-- **The overview round-trip is CLEAN**, so machine state can live in the **Project overview** (a
-  single surface). A `documentCreate` round-trip is kept as a **proven fallback in reserve**.
-- **Blocking-relation direction is carried by the field, not the enum.**
-  `issueRelationCreate(type:"blocks")` — read forward via `relations`, inverse via `inverseRelations`;
-  the `type` enum stays `"blocks"` on **both** sides. Reconstruct `depends_on` from `inverseRelations`,
-  **never a `"blockedBy"` enum** (there isn't one).
+### The substrate-home principle (the load-bearing #582/#586 lesson)
+
+**The only thing that should encapsulate Linear GraphQL client logic is `LinearClient`.** The op
+classes (`_LinearIssueOps`, `_LinearProjectOps`) must each register **only the client**, never one
+another. Shared machinery — team-id/uuid resolution + caches, pagination, the `_require_*`
+narrowing helpers, the not-found discriminator — belongs **on the client**.
+
+#582 landed the **opposite** (`_LinearProjectOps` composing `_LinearIssueOps`) as a **defect**, and
+the *why* it landed is the durable lesson: the plan's "Confirmed with the user" was manufactured by
+a leading confirm-this question asked *after* the user had given standing architectural guidance to
+the contrary. An implementer faithfully following a saved plan still ships the defect, so the error
+must be caught at **planning** time. **Durable: treat prior standing architectural guidance as
+load-bearing; don't re-litigate it with leading questions.** #586 corrected it (acknowledge-don't-
+revert: the node stayed `done`, its description rewritten to name the defect, the correction
+overloaded onto the next node via a `PREREQUISITE CORRECTION` block + a referenced
+`docs/planning/` context file).
+
+### The re-homing recipe (#586)
+
+When client machinery moves onto `LinearClient`, a **request-only structural seam can no longer
+carry behavior** — retype every seam to `LinearClient` and have **both fakes** (scripted +
+stateful) **SUBCLASS it** (no `super().__init__`; just init the two caches directly), so they
+inherit the real machinery routed through their overridden `request` and every existing GraphQL-
+document assertion stays byte-green. This is the general recipe for promoting machinery off a
+delegated collaborator onto its client tier.
+
+- The `_require_*` helpers + the not-found discriminator moved **DOWN** to `linear.py` (the lower
+  layer, re-imported by `linear_backend.py`) to avoid an import cycle. The `INPUT_ERROR`-in-`.codes`
+  AND `"entity not found"`-message pairing stayed intact (do not loosen to `.codes`-only).
+- The **team-id cache is keyed by `team_key`** (the client stays team-agnostic at construction; op
+  classes pass their bound team_key). A single shared cache via the client beats op-class
+  composition — it de-dupes when only one op class is in play.
+- **Decoupling over DRY:** symmetric client-only op classes inline a tiny mutation (e.g.
+  attach-issue-to-project) rather than reach a sibling; a public `cache_uuid(identifier, uuid)` seam
+  lets read paths seed the shared cache without touching a private attr.
+
+### `_create_issue` made label-optional
+
+Build `labelIds` into the input **only when non-None** — node-issues carry no perk label (they are
+discovered by project membership + the node block), and the change is byte-identical for every
+existing label-passing caller. Same conditional-key shape as the `project_id` / `milestone_id`
+additions (omit the key, never an explicit `null`).
+
+### Project-backed `create_objective` shape (#586)
+
+- **Overview = inline-code `objective-header` block + a Reconcilable prose region, NO roadmap
+  table.** Compose the header + markers in HTML form, then pass the WHOLE overview through the
+  Linear-markdown transcoder so markers become inline-code sentinels. **The roadmap is derived LIVE
+  from node-issues — never stored as a YAML block on the Linear side.**
+- **`find_objective` dedup** scans projects and parses each overview's header block
+  (dual-encoding-tolerant), matching the header `run_id`; the project id is opaque. Infra failures
+  propagate (mapped to `ObjectiveStoreError`), never masked as `None`.
+- **Natural node ordering** uses a sort key with a numeric/lexical **discriminator slot** (so a
+  numeric trailing segment sorts ahead of a non-numeric one AND `int`/`str` never mix in one
+  comparison slot) — this makes `3.2 < 3.10`. Shared by the create-order (3.2) and read-order (3.3)
+  paths.
+- **Explicit-`depends_on`-only blocking relations** (skip both `None`-inferred and `()`-explicit-
+  none); direction is dep-BLOCKS-node. The node block excludes `pr` (plan-header authority) and
+  `depends_on` (derived from relations).
+
+### Read + mutation surface (#589)
+
+- **`get_objective` reconstructs `depends_on` from blocking relations** — lossy: an explicit `()`
+  reads back as `None` (sequential inference then applies downstream). A passed node-issue UUID
+  still **re-resolves through the uuid lookup** because project-issue reads don't seed the uuid
+  cache (unlike create/find) — script that lookup in tests.
+- **The node-status workflow-state mirror keeps a SEPARATE states cache** from the learn-close path
+  (byte-stable), and **fails open** by swallowing the backend error (`LinearGraphQLError` is a
+  subclass, so both a `success:false` payload AND a raised error are caught); a `None` state id is
+  skipped silently before any write.
+
+### The `_FakeLinear` substring-keyed fake — insertion ORDER is load-bearing (the sharpest footgun)
+
+The scripted fake matches responses by query-**SUBSTRING** in insertion order, so when one query's
+needle is a substring of another's, register the **more-specific needle FIRST**. The canonical trap
+(#589): `get_objective` is the first method calling BOTH `project_or_none` (key `"project(id"`) and
+`project_issues` (whose query contains both `"project(id"` and `"issues(first"`). If `"project(id"`
+is registered first, the project-issues call wrongly resolves to the project response and pagination
+blows up. **General rule: when two scripted queries share a prefix, order the dict so the
+longer/more-specific needle wins.**
+
+### `FakeLinearWorkspace` Projects routing arm-ORDER (#595)
+
+Adding Projects to the stateful lifecycle fake exposes the same collision tax: the list-projects,
+project-issues, and relation reads must be **arm-ordered before** their substring-superset queries
+(`"projects(first"` before `"team(id"`; `"project(id"` before `"issues(first"`/`"issue(id"`;
+`"inverseRelations("`/`"relations("` before `"issue(id"`). Project mutations (`projectUpdate(`,
+`projectCreate(`) don't contain `"project(id"`, so they don't collide. Mis-ordered arms mis-route
+**silently**. (Reinforces the existing "named GraphQL operations make substring fakes routable"
+note.)
+
+### Adding a `_require_*`-parsed field to a selection = sweep every raw-row fixture (#595)
+
+When a parsed GraphQL selection grows a required field (e.g. `project_issues` gaining `url`), every
+offline fixture that hand-builds raw rows — both the scripted `_FakeLinear` tests and the stateful
+workspace's node builder — must add it, or they raise the **wrong (masking)** error. Offline-fixture-
+sweep discipline applies to any new required field on a parsed selection.
+
+### `issueRelationCreate` not-found DIVERGES
+
+Bogus `project(id)` / `projectMilestoneCreate` / `document(id)` match the issue `INPUT_ERROR` +
+`"Entity not found: <Type>"` shape — **BUT `issueRelationCreate` with a bad `relatedIssueId`
+returns `INVALID_INPUT` / "Argument Validation Error"** (argument validation fires *before* entity
+lookup). So relation-create must **NOT** route through the not-found discriminator and fails loud
+(the store passes already-resolved UUIDs). Relation *reads* filter `type == "blocks"` (Linear
+returns related/duplicate/blocks); direction is carried by the field (`relations` vs
+`inverseRelations`), the enum stays `"blocks"` — there is no `"blockedBy"` enum.
+
+### Milestone + create facts (retained from the spike)
+
+- `projectCreate(input:{teamIds,name,content})` accepts `content` at create (the 2024 create-then-
+  `projectUpdate` workaround no longer applies); a `documentCreate` round-trip is kept as a proven
+  fallback in reserve.
 - **Milestone list order is NOT insertion order** — key phases by milestone **name**, never list
   position.
-- **Not-found error shapes diverge.** Bogus `project(id)` / `projectMilestoneCreate` / `document(id)`
-  match the issue `INPUT_ERROR` + `"Entity not found: <Type>"` shape — **BUT `issueRelationCreate`
-  with a bad `relatedIssueId` returns `INVALID_INPUT` / "Argument Validation Error"** (argument
-  validation fires *before* entity lookup, so neither code nor prefix matches). A Projects not-found
-  path must **special-case the relation-create error**.
-- No RATELIMITED at spike volume.
+- **`list_projects` query shape live-status:** offline-covered only at landing (the #567 spike
+  covered create/overview/milestone/attach/relation, not list-projects). If a later live run covers
+  it, reconcile this line; do NOT invent a result. No RATELIMITED at spike volume.
 
 ## Measurement-node / live-spike process facts
 
@@ -353,10 +457,14 @@ unobserved:
 - Issues #347, #356, #361, #370, #376, #389, #400 (PRs #344, #354, #359, #368, #375, #387, #399)
 - Live-smoke results: #554 (PR #553), #558 (PR #557), #564 (PRs #561/#563), #567 (PRs #565/#566),
   and follow-up #562 (the deferred `_uuid_for` collapse)
+- Projects substrate + `LinearProjectObjectiveStore` (Objective #548 Phase 3): #571 (PR #569),
+  #575 (PR #574), #582 (PR #579), #586 (PRs #584/#585), #589 (PR #588), #595 (PR #594)
 
 ## Cross-references
 
 - `docs/learned/workflow/issue-backend.md` — the backend-agnostic protocol seam
+- `docs/learned/workflow/objective-store.md` — the objective-storage tier contract the
+  project-backed store implements (the facade refactor, resolver, translate-CM, node↔plan unification)
 - `docs/learned/workflow/init-doctor.md` — verify-gated network repairs, the readiness shape
 - `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table shape
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment pattern

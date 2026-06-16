@@ -34,6 +34,20 @@ ty narrows bare / `object` values pessimistically. When a value originated as un
 an explicit `cast` (for member access) or a truthiness guard (for overloaded calls) over
 `isinstance`.
 
+## Heterogeneous list/dict literal → annotate the local explicitly
+
+ty infers a heterogeneous list/dict literal with its **narrowest union element type** and then
+fails to pass it to a `list[dict[str, object]]` / `dict[str, object]` param
+(`invalid-argument-type`). For example a `nodes = [{"type": "blocks", "relatedIssue": {...}}, ...]`
+literal infers as `list[dict[str, str | dict[str, str]]]` and won't pass to a
+`list[dict[str, object]]` param.
+
+**Fix: annotate the local explicitly** (`nodes: list[dict[str, object]] = [...]`,
+`existing: dict[str, object] = {...}`). Do **not** reach for `# type: ignore` — that's mypy syntax
+and does NOT suppress ty anyway (reaffirms the suppression note below). This is caught by
+`run_ci` / `just ci`'s typecheck-py even when a bare local `pytest` was green — `just ci` ≠ a bare
+`pytest` run.
+
 ## The narrowing-helper family for deep untyped payloads
 
 When navigating deep untyped payloads (GraphQL responses as `dict[str, object]`), per-site casts

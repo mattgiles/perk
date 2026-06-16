@@ -55,6 +55,13 @@ etc.) draws **RUF043** unless it's a raw/escaped regex (`match=r"\.\.\."` or `re
 Recurred twice in quick succession — expect it whenever an error message under test contains a
 dot.
 
+## `RUF002`: ambiguous unicode in docstrings
+
+An en-dash (`–`) inside a docstring — e.g. a numeric range like "Nodes 3.2–3.4" — trips
+**RUF002** (ambiguous-unicode-character-docstring). Use a plain hyphen (`-`) in docstring ranges;
+the **em-dash** (`—`) is fine. (Sibling to the RUF043 note above — both bite prose under test/source
+that looks innocuous.)
+
 ## Template string E501 (line length) rule
 
 Embedded multiline string templates (such as inline workflow YAML blocks defined inside Python files)
