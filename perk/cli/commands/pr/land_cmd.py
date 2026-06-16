@@ -239,7 +239,6 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
     objective_id = str(raw).lstrip("#").strip()
     if not objective_id:
         return ObjectiveLandUpdate(None, (), "bad_objective_id")
-    backend = issues.resolve_issue_backend(repo_root)
     store = objective_stores.resolve_objective_store(repo_root)
     try:
         state = store.get_objective(objective_id=objective_id)
@@ -272,9 +271,11 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
             return ObjectiveLandUpdate(objective_id, tuple(marked), None)
         try:
             # Isolated fail-open: a close failure must NOT fall into the outer handler (which
-            # would discard the already-marked node ids). No closing comment — symmetric with the
-            # supervisor's completion close (§8.20).
-            backend.close_issue(issue_id=objective_id)
+            # would discard the already-marked node ids). Close through the OBJECTIVE STORE (each
+            # backend retires its own entity: GitHub closes the issue, Linear marks the Project
+            # complete) — not the issue tier (a Project is not an issue). No closing comment —
+            # symmetric with the supervisor's completion close (§8.20).
+            store.close_objective(objective_id=objective_id)
         except Exception as exc:
             print(
                 f"perk pr land: objective close skipped (non-fatal): {exc}",

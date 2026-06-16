@@ -6,7 +6,7 @@ from typing import cast
 from click.testing import CliRunner
 
 from perk import github
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, issues, objective_store, objective_stores
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.context import PerkContext
 
@@ -536,3 +536,108 @@ def test_plan_save_fresh_create_reports_not_updated(monkeypatch):
     payload = json.loads(result.stdout)
     assert payload["updated"] is False
     assert payload["cached"] is True
+
+
+def test_plan_save_unified_node_issue_path(monkeypatch):
+    # Node 3.4: an objective-linked save into a UNIFYING store (save_node_plan returns a node-issue
+    # ref) writes the plan INTO the node-issue — NO create_plan_issue/ensure_label — and stamps
+    # cache.plan-ref at that node-issue id (no perk:plan label), reporting updated=True +
+    # objective_node.linked=True.
+    _authed(monkeypatch)
+    node_calls: dict[str, object] = {}
+
+    class _UnifyingStore:
+        backend_id = "linear"
+
+        def save_node_plan(
+            self, *, objective_id, node_id, header_fields, plan_markdown, dry_run=False
+        ):
+            node_calls["save"] = {"objective_id": objective_id, "node_id": node_id}
+            node_calls["header_fields"] = header_fields
+            return objective_store.ObjectiveRef(id="ENG-7", url="https://lin/i/ENG-7", existed=True)
+
+        def update_objective_node(self, **k):
+            node_calls["link"] = k
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=str(k["objective_id"]),
+                node_id=k["node_id"],
+                comment_updated=False,
+                dry_run=False,
+            )
+
+    class _Backend:
+        backend_id = "linear"
+
+        def ensure_label(self, *a, **k):
+            raise AssertionError("ensure_label must not run on the unified path")
+
+        def create_plan_issue(self, **k):
+            raise AssertionError("create_plan_issue must not run on the unified path")
+
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _UnifyingStore())
+    monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _Backend())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(
+            plan_save,
+            [
+                "--plan-file",
+                "plan.md",
+                "--objective-id",
+                "proj-1",
+                "--node-id",
+                "1.1",
+                "--json",
+            ],
+            obj=PerkContext(cwd=Path(d)),
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+    assert payload["issue"]["id"] == "ENG-7"
+    assert payload["issue"]["existed"] is True
+    assert payload["updated"] is True
+    assert payload["objective_node"]["linked"] is True
+    assert ref["pr_id"] == "ENG-7"
+    assert ref["provider"] == "linear"
+    assert ref["labels"] == []  # the node-issue carries no perk:plan label
+    # the unification write got the composed PlanHeader data + the link-commit ran uniformly
+    assert node_calls["save"] == {"objective_id": "proj-1", "node_id": "1.1"}
+    assert "lifecycle_stage" in cast("dict", node_calls["header_fields"])
+    assert cast("dict", node_calls["link"])["pr"] == "#ENG-7"
+
+
+def test_plan_save_dry_run_keeps_offline_preview_for_unifying_store(monkeypatch):
+    # --dry-run never calls save_node_plan (offline compose-preview); the standalone preview path
+    # is taken even with an objective link.
+    _authed(monkeypatch)
+
+    class _Store:
+        backend_id = "github"
+
+        def save_node_plan(self, **k):
+            raise AssertionError("save_node_plan must not run on --dry-run")
+
+        def update_objective_node(self, **k):
+            raise AssertionError("no link-commit on --dry-run")
+
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    result = _run(
+        monkeypatch,
+        [
+            "--plan-file",
+            "plan.md",
+            "--objective-id",
+            "7",
+            "--node-id",
+            "1.1",
+            "--dry-run",
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["dry_run"] is True
+    assert payload["cached"] is False

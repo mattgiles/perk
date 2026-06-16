@@ -181,3 +181,50 @@ class ObjectiveStore(Protocol):
         Mechanical table block and any Immutable notes are untouched). Raises when the objective has
         no body comment or the comment lacks the Reconcilable region. A dry run composes only."""
         ...
+
+    def save_node_plan(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        """Write a plan **into** the objective's node-issue (the node-issue↔plan unification).
+
+        For a store whose model fuses the roadmap node and the plan into a single entity (the
+        Linear **Project** store: a roadmap node already *is* a Linear issue), an objective-linked
+        ``plan-save`` writes the plan **into that node-issue** rather than minting a second
+        ``perk:plan`` issue — the ``plan-header`` block is merged into the node-issue description
+        (Linear-safe inline-code), the plan body is upserted as a single node-issue comment, and the
+        node-issue's title/``objective-node`` block/prose are untouched (node-issues are discovered
+        by project membership + the ``objective-node`` block, never by a ``perk:plan`` label).
+        Returns the **node-issue** ``ObjectiveRef`` (``existed=True`` — an in-place write into an
+        existing issue).
+
+        ``header_fields`` is the already-composed ``plan.PlanHeader(...).to_data()`` dict (the store
+        is handed data, not asked to know ``plan-save``'s schema beyond rendering it).
+
+        **Returns ``None`` for a store that does NOT unify node + plan** — the single, unambiguous
+        "doesn't unify" signal (no separate capability flag). ``GitHubObjectiveStore`` and the
+        issue-backed ``LinearObjectiveStore`` ``return None`` unconditionally; the caller then falls
+        back to the standalone plan-issue path. ``None`` is unambiguous: a unifying store **raises**
+        ``ObjectiveStoreError`` when the node is not found (never returns ``None`` for not-found).
+
+        A ``dry_run`` returns ``None`` (resolving the node-issue requires a network read;
+        ``plan-save --dry-run`` is offline, so the caller falls back to the offline compose path).
+        """
+        ...
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Retire the objective's own entity on completion (removes the issue-tier leak).
+
+        Each store closes the thing it actually stores: ``GitHubObjectiveStore`` **closes** the
+        GitHub objective issue; the issue-backed ``LinearObjectiveStore`` moves the objective issue
+        to its Done state; ``LinearProjectObjectiveStore`` **marks the Linear Project complete**
+        (a Project is not an issue — it cannot be "closed" through the issue tier). Returns ``True``
+        on a real close; ``dry_run`` returns ``False`` without a write. Raises
+        ``ObjectiveStoreError`` on an infra failure.
+        """
+        ...

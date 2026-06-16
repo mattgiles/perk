@@ -18,7 +18,7 @@ import perk
 from perk import github, objective
 from perk.backends import issues, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear_backend import LinearObjectiveStore
+from perk.backends.linear_backend import LinearObjectiveStore, LinearProjectObjectiveStore
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.backends.objective_stores import (
     GitHubObjectiveStore,
@@ -68,16 +68,19 @@ class TestResolver:
     def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
         assert resolve_objective_store_id(tmp_path) == issues.GITHUB_BACKEND_ID
 
-    def test_linear_selection_returns_linear_store(
+    def test_linear_selection_returns_project_store(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # Node 3.4: the linear arm is project-backed (LinearProjectObjectiveStore), not the
+        # dormant issue-backed LinearObjectiveStore.
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
         store = resolve_objective_store(tmp_path)
-        assert isinstance(store, LinearObjectiveStore)
+        assert isinstance(store, LinearProjectObjectiveStore)
         assert store.backend_id == "linear"
         # Construction is lazy — the team key is bound on the shared ops, no network call issued.
-        assert store._ops._team_key == "ENG"
+        assert store._issue_ops._team_key == "ENG"
+        assert store._projects._team_key == "ENG"
 
     def test_linear_selection_missing_team_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -231,6 +234,31 @@ class TestGitHubDelegation:
             objective_id="252", prose="p", dry_run=True
         )
         assert result.comment_id is None
+
+    def test_save_node_plan_returns_none(self, tmp_path: Path) -> None:
+        # GitHub does not unify node + plan: always None so the caller takes the standalone path.
+        result = GitHubObjectiveStore(tmp_path).save_node_plan(
+            objective_id="252", node_id="1.1", header_fields={"run_id": "R"}, plan_markdown="# p"
+        )
+        assert result is None
+
+    def test_close_objective_closes_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(True)
+        monkeypatch.setattr(github, "close_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).close_objective(objective_id="252")
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": False}
+        assert result is True
+
+    def test_close_objective_dry_run_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(False)
+        monkeypatch.setattr(github, "close_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).close_objective(objective_id="252", dry_run=True)
+        assert rec.kwargs == {"number": 252, "repo_root": tmp_path, "dry_run": True}
+        assert result is False
 
 
 class TestErrorTranslation:

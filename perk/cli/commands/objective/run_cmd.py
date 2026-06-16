@@ -278,7 +278,6 @@ def _run_impl(
     config = require_config(ctx)
     if not dry_run:
         require_github(ctx)
-    backend = issues.resolve_issue_backend(repo_root)
     store = objective_stores.resolve_objective_store(repo_root)
     state = store.get_objective(objective_id=number)
     if state is None:
@@ -324,7 +323,10 @@ def _run_impl(
 
     selection = graph.classify_for_planning()
     if selection.kind == "complete":
-        closed = backend.close_issue(issue_id=number, dry_run=dry_run)
+        # Close through the OBJECTIVE STORE (each backend retires its own entity: GitHub closes
+        # the issue, Linear marks the Project complete) — not the issue tier (a Project is not an
+        # issue).
+        closed = store.close_objective(objective_id=number, dry_run=dry_run)
         payload.update(
             action="completed",
             closed=closed,

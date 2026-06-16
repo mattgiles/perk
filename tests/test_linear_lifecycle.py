@@ -67,6 +67,9 @@ class FakeLinearWorkspace(LinearClient):
     def __init__(self) -> None:
         self.issues: dict[str, dict[str, object]] = {}  # uuid -> issue
         self.labels: dict[str, str] = {}  # name -> uuid
+        self.projects: dict[str, dict[str, object]] = {}  # uuid -> project
+        self.milestones: dict[str, dict[str, object]] = {}  # uuid -> {id, name, project_id}
+        self.relations: list[tuple[str, str]] = []  # (blocker_uuid, blocked_uuid)
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
@@ -131,10 +134,30 @@ class FakeLinearWorkspace(LinearClient):
             "description": payload.get("description", ""),
             "state_id": "st-todo",
             "label_ids": list(cast("list[str]", payload.get("labelIds", []))),
+            # node-issues (project-backed objectives) carry a projectId; plan/learn issues None.
+            "project_id": payload.get("projectId"),
             "comments": [],
         }
         self.issues[str(issue["id"])] = issue
         return issue
+
+    # ------------------------------------------------------------------ project helpers
+
+    def project_by_id(self, project_id: str) -> dict[str, object]:
+        found = self.projects.get(project_id)
+        assert found is not None, f"no workspace project {project_id!r}"
+        return found
+
+    def project_state(self, project_id: str) -> str:
+        return str(self.project_by_id(project_id)["state"])
+
+    def _project_issue_node(self, issue: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": issue["id"],
+            "identifier": issue["identifier"],
+            "url": issue["url"],
+            "description": issue["description"],
+        }
 
     # ------------------------------------------------------------------ wire shapes
 
@@ -170,9 +193,42 @@ class FakeLinearWorkspace(LinearClient):
             if v.get("key") == _TEAM_KEY:
                 return {"teams": {"nodes": [{"id": _TEAM_UUID}]}}
             return {"teams": {"nodes": []}}
+        if "projects(first" in query:  # team's project list (find_objective scan) — before team(id
+            assert v.get("teamId") == _TEAM_UUID
+            nodes = [
+                {"id": p["id"], "url": p["url"], "content": p["content"]}
+                for p in self.projects.values()
+            ]
+            return {"team": {"projects": self._page_of(nodes, v.get("cursor"))}}
         if "team(id" in query:
             assert v.get("teamId") == _TEAM_UUID
             return {"team": {"states": {"nodes": list(_STATES)}}}
+        if "project(id" in query:  # project reads — before the generic issues(first/issue(id arms
+            project = self.projects.get(str(v.get("id", "")))
+            if project is None:
+                raise _not_found()
+            if "issues(first" in query:
+                nodes = [
+                    self._project_issue_node(issue)
+                    for issue in self.issues.values()
+                    if issue.get("project_id") == project["id"]
+                ]
+                return {"project": {"issues": self._page_of(nodes, v.get("cursor"))}}
+            if "projectMilestones" in query:
+                nodes = [
+                    {"id": m["id"], "name": m["name"]}
+                    for m in self.milestones.values()
+                    if m["project_id"] == project["id"]
+                ]
+                return {"project": {"projectMilestones": self._page_of(nodes, v.get("cursor"))}}
+            return {
+                "project": {
+                    "id": project["id"],
+                    "url": project["url"],
+                    "name": project["name"],
+                    "content": project["content"],
+                }
+            }
         if "issueLabels(filter" in query:
             label_id = self.labels.get(str(v.get("name")))
             return {"issueLabels": {"nodes": [{"id": label_id}] if label_id else []}}
@@ -206,6 +262,26 @@ class FakeLinearWorkspace(LinearClient):
                     if comment["id"] == v.get("id"):
                         return {"comment": {"body": comment["body"]}}
             raise _not_found()
+        if "inverseRelations(" in query:  # blockers of this issue (depends_on sources)
+            issue = self._issue_by_any_id(str(v.get("id", "")))
+            if issue is None:
+                raise _not_found()
+            blockers: list[dict[str, object]] = [
+                {"type": "blocks", "issue": {"identifier": self.issues[bk]["identifier"]}}
+                for bk, bl in self.relations
+                if bl == issue["id"]
+            ]
+            return {"issue": {"inverseRelations": self._page_of(blockers, v.get("cursor"))}}
+        if "relations(" in query:  # issues this one blocks
+            issue = self._issue_by_any_id(str(v.get("id", "")))
+            if issue is None:
+                raise _not_found()
+            blocked: list[dict[str, object]] = [
+                {"type": "blocks", "relatedIssue": {"identifier": self.issues[bl]["identifier"]}}
+                for bk, bl in self.relations
+                if bk == issue["id"]
+            ]
+            return {"issue": {"relations": self._page_of(blocked, v.get("cursor"))}}
         if "UuidForIssue" in query or "issue(id" in query:
             issue = self._issue_by_any_id(str(v.get("id", "")))
             if issue is None:
@@ -255,6 +331,60 @@ class FakeLinearWorkspace(LinearClient):
                         comment["body"] = payload["body"]
                         return {"commentUpdate": {"success": True}}
             raise _not_found()
+        if "projectCreate(" in query:
+            payload = cast("dict[str, object]", v["input"])
+            assert payload.get("teamIds") == [_TEAM_UUID]
+            pid = f"proj-{uuid.uuid4().hex[:8]}"
+            project: dict[str, object] = {
+                "id": pid,
+                "url": f"https://linear.app/test/project/{pid}",
+                "name": payload.get("name", ""),
+                "content": payload.get("content", ""),
+                "state": "started",
+            }
+            self.projects[pid] = project
+            return {
+                "projectCreate": {
+                    "success": True,
+                    "project": {"id": pid, "url": project["url"]},
+                }
+            }
+        if "projectUpdate(" in query:
+            project = self.project_by_id(str(v.get("id", "")))
+            payload = cast("dict[str, object]", v["input"])
+            if "content" in payload:
+                project["content"] = payload["content"]
+            if "state" in payload:
+                project["state"] = payload["state"]
+            return {"projectUpdate": {"success": True}}
+        if "projectMilestoneCreate(" in query:
+            payload = cast("dict[str, object]", v["input"])
+            mid = f"ms-{uuid.uuid4().hex[:8]}"
+            self.milestones[mid] = {
+                "id": mid,
+                "name": payload.get("name", ""),
+                "project_id": payload.get("projectId"),
+            }
+            return {
+                "projectMilestoneCreate": {
+                    "success": True,
+                    "projectMilestone": {"id": mid, "name": payload.get("name", "")},
+                }
+            }
+        if "issueRelationCreate(" in query:
+            payload = cast("dict[str, object]", v["input"])
+            blocker = str(payload["issueId"])
+            blocked = str(payload["relatedIssueId"])
+            # ids are resolved UUIDs (the store resolves before calling)
+            assert blocker in self.issues and blocked in self.issues
+            rid = f"rel-{uuid.uuid4().hex[:8]}"
+            self.relations.append((blocker, blocked))
+            return {
+                "issueRelationCreate": {
+                    "success": True,
+                    "issueRelation": {"id": rid, "type": "blocks"},
+                }
+            }
         raise AssertionError(f"unrouted Linear query: {query}")
 
 
@@ -366,16 +496,21 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         objective_payload = cast("dict[str, object]", payload["objective"])
         obj_id = str(objective_payload["id"])
-        assert obj_id == "ENG-1"  # the human identifier IS the boundary id (D3)
-        obj_issue = ws.issue_by_identifier(obj_id)
-        # Linear-safe storage: no HTML comments / <details> in the stored description.
-        description = str(obj_issue["description"])
-        assert "<!--" not in description and "<details>" not in description
-        header = plan.find_metadata_block(description, "objective-header")
+        # Node 3.4: the objective is a Linear PROJECT — its id is the opaque Project UUID, never an
+        # ENG-* issue identifier; the roadmap is materialized as node-issues (1.1 → ENG-1).
+        assert obj_id in ws.projects
+        project = ws.project_by_id(obj_id)
+        # Linear-safe storage: no HTML comments / <details> in the overview content.
+        overview = str(project["content"])
+        assert "<!--" not in overview and "<details>" not in overview
+        header = plan.find_metadata_block(overview, "objective-header")
         assert header is not None and header["run_id"] == "01OBJRUN"
-        # the comment-id backfill landed (the two-step create)
-        assert isinstance(header["objective_comment_id"], str)
-        assert ws.label_names(obj_issue) == {"perk:objective"}
+        assert "roadmap-table" not in overview  # roadmap is node-issues, not an overview table
+        node_issue = ws.issue_by_identifier("ENG-1")  # the single node 1.1 → node-issue ENG-1
+        assert ws.label_names(node_issue) == set()  # node-issues carry no perk label
+        assert (
+            plan.find_metadata_block(str(node_issue["description"]), "objective-node") is not None
+        )
 
         # --- plan-save: create + node link ---------------------------------------------------
         (root / "plan.md").write_text(_PLAN_MD, encoding="utf-8")
@@ -396,21 +531,26 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
             ],
         )
         issue_payload = cast("dict[str, object]", payload["issue"])
-        assert issue_payload["id"] == "ENG-2"  # string identifier in the envelope (D2)
+        # Node 3.4 unification: the plan is written INTO the node-issue — no second perk:plan issue.
+        assert issue_payload["id"] == "ENG-1"
         ref = cast("dict[str, object]", payload["plan_ref"])
-        assert ref["provider"] == "linear" and ref["pr_id"] == "ENG-2"
+        assert ref["provider"] == "linear" and ref["pr_id"] == "ENG-1"
+        assert ref["labels"] == []  # the node-issue carries no perk:plan label
         node_link = cast("dict[str, object]", payload["objective_node"])
         assert node_link["linked"] is True and node_link["status"] == "in_progress"
-        plan_issue = ws.issue_by_identifier("ENG-2")
-        assert "<!--" not in str(plan_issue["description"])
-        assert ws.label_names(plan_issue) == {"perk:plan"}
-        # the plan body rides the first comment, transcoded
-        [body_comment] = ws.comments_of(plan_issue)
+        # exactly one issue exists — the original node-issue (no second plan issue minted)
+        assert [str(i["identifier"]) for i in ws.issues.values()] == ["ENG-1"]
+        node_issue = ws.issue_by_identifier("ENG-1")
+        assert ws.label_names(node_issue) == set()
+        desc = str(node_issue["description"])
+        assert "<!--" not in desc
+        # the plan-header merged into the node-issue description; the objective-node block intact
+        assert plan.find_metadata_block(desc, "plan-header") is not None
+        assert plan.find_metadata_block(desc, "objective-node") is not None
+        # the plan body rides a node-issue comment, transcoded
+        [body_comment] = ws.comments_of(node_issue)
         assert "`perk:metadata-block:plan-body`" in str(body_comment["body"])
         assert "<details>" not in str(body_comment["body"])
-        # the node→plan backlink uses the identifier
-        obj_description = str(ws.issue_by_identifier(obj_id)["description"])
-        assert "#ENG-2" in obj_description
 
         # --- re-save (same run_id): existed + comment patched + header merged ---------------
         (root / "plan.md").write_text(_PLAN_MD.replace("Some prose.", "Edited prose."))
@@ -431,71 +571,75 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
             ],
         )
         issue_payload = cast("dict[str, object]", payload["issue"])
-        assert issue_payload["id"] == "ENG-2" and issue_payload["existed"] is True
+        assert issue_payload["id"] == "ENG-1" and issue_payload["existed"] is True
         assert payload["updated"] is True
-        plan_issue = ws.issue_by_identifier("ENG-2")
-        [body_comment] = ws.comments_of(plan_issue)  # patched in place, never duplicated
+        node_issue = ws.issue_by_identifier("ENG-1")
+        [body_comment] = ws.comments_of(node_issue)  # patched in place, never duplicated
         assert "Edited prose." in str(body_comment["body"])
-        plan_header = plan.find_metadata_block(str(plan_issue["description"]), "plan-header")
+        plan_header = plan.find_metadata_block(str(node_issue["description"]), "plan-header")
         assert plan_header is not None and plan_header["objective_id"] == obj_id
 
         # --- implement (dry-run): worktree name derives from the identifier -----------------
-        result = runner.invoke(cli, ["implement", "ENG-2", "--dry-run"])
+        result = runner.invoke(cli, ["implement", "ENG-1", "--dry-run"])
         assert result.exit_code == 0, result.output
         dry = json.loads(result.stdout)
-        assert dry["worktree"] == "plan-ENG-2"
-        assert dry["plan_ref"]["pr_id"] == "ENG-2"
+        assert dry["worktree"] == "plan-ENG-1"
+        assert dry["plan_ref"]["pr_id"] == "ENG-1"
 
-        # --- submit: header fields merged into the Linear description -----------------------
+        # --- submit: header fields merged into the node-issue description -------------------
         submit_calls = _patch_pr_tier_for_submit(monkeypatch)
         payload = _invoke(runner, ["pr", "submit", "--json"])
-        assert payload["issue"] == "ENG-2"  # string id at the machine boundary (D2)
-        assert submit_calls["pushed"] == "plan-ENG-2"  # the branch-name auto-link shape (D3)
+        assert payload["issue"] == "ENG-1"  # the node-issue IS the plan issue (D2)
+        assert submit_calls["pushed"] == "plan-ENG-1"  # the branch-name auto-link shape (D3)
         plan_header = plan.find_metadata_block(
-            str(ws.issue_by_identifier("ENG-2")["description"]), "plan-header"
+            str(ws.issue_by_identifier("ENG-1")["description"]), "plan-header"
         )
         assert plan_header is not None
-        assert plan_header["branch"] == "plan-ENG-2"
+        assert plan_header["branch"] == "plan-ENG-1"
         assert plan_header["pr"] == "51"
         assert plan_header["lifecycle_stage"] == "impl"
 
         # --- land: explicit close + node done + objective close-on-complete -----------------
         land_calls = _patch_pr_tier_for_land(monkeypatch, draft=True)
         payload = _invoke(runner, ["pr", "land", "--json"])
-        assert payload["issue"] == "ENG-2"
-        # the squash footer branches: non-github → `Plan: <id> — <url>` (NO `Closes #N`)
-        plan_url = str(ws.issue_by_identifier("ENG-2")["url"])
-        assert land_calls["commit_message"] == f"My linear plan\n\nPlan: ENG-2 — {plan_url}"
-        # the plan issue was explicitly closed in the workspace (no GitHub autoclose here)
+        assert payload["issue"] == "ENG-1"
+        # the squash footer branches: non-github → `Plan: <id> — <url>` (NO `Closes #N`). The
+        # title is the node-issue's own title (its roadmap identity “1.1: …”), since under the
+        # unification model the plan rides the node-issue (whose title is NOT the plan H1).
+        plan_url = str(ws.issue_by_identifier("ENG-1")["url"])
+        assert land_calls["commit_message"] == f"1.1: Node one\n\nPlan: ENG-1 — {plan_url}"
+        # the node-issue was explicitly closed in the workspace (no GitHub autoclose here)
         assert payload["plan_issue_closed"] is True
-        assert ws.state_type(ws.issue_by_identifier("ENG-2")) == "completed"
+        assert ws.state_type(ws.issue_by_identifier("ENG-1")) == "completed"
         assert cache.has_marker(root, cache.PENDING_LEARN)
         objective_update = cast("dict[str, object]", payload["objective"])
         assert objective_update["id"] == obj_id
         assert objective_update["nodes_marked"] == ["1.1"]
         assert objective_update["closed"] is True  # single-node roadmap → close-on-complete
-        assert ws.state_type(ws.issue_by_identifier(obj_id)) == "completed"
+        # the objective is a PROJECT: completion marks the Project complete (not an issue close)
+        assert ws.project_state(obj_id) == "completed"
 
         # --- learn capture: learn issue + plan-issue backlink comment -----------------------
         (root / "learn.md").write_text("What we learned.\n", encoding="utf-8")
         payload = _invoke(runner, ["learn", "capture", "--json", "--body", "learn.md"])
         learn_payload = cast("dict[str, object]", payload["learn_issue"])
-        assert learn_payload["id"] == "ENG-3"
-        assert payload["plan_issue"] == "ENG-2"
+        # the node-issue absorbed the plan, so learn is ENG-2 (plan_issue is the node ENG-1)
+        assert learn_payload["id"] == "ENG-2"
+        assert payload["plan_issue"] == "ENG-1"
         assert payload["commented"] is True
-        learn_issue = ws.issue_by_identifier("ENG-3")
+        learn_issue = ws.issue_by_identifier("ENG-2")
         assert ws.label_names(learn_issue) == {"perk:learn"}
         learn_header = plan.find_metadata_block(str(learn_issue["description"]), "learn-header")
-        assert learn_header is not None and learn_header["plan"] == "ENG-2"
+        assert learn_header is not None and learn_header["plan"] == "ENG-1"
         backlinks = [
-            c for c in ws.comments_of(ws.issue_by_identifier("ENG-2")) if "ENG-3" in str(c["body"])
+            c for c in ws.comments_of(ws.issue_by_identifier("ENG-1")) if "ENG-2" in str(c["body"])
         ]
         assert len(backlinks) == 1
         assert not cache.has_marker(root, cache.PENDING_LEARN)
 
         # --- learn docs --gather: string ids in the envelope ---------------------------------
         payload = _invoke(runner, ["learn", "docs", "--gather", "--json"])
-        assert payload["learn_numbers"] == ["ENG-3"]
+        assert payload["learn_numbers"] == ["ENG-2"]
         inbox = Path(str(payload["inbox_path"])).read_text(encoding="utf-8")
         assert "What we learned." in inbox
 
@@ -511,22 +655,24 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
                 "--run-id",
                 "01DOCSRUN",
                 "--consumed-learn",
-                "ENG-3",
+                "ENG-2",
                 "--json",
             ],
         )
         issue_payload = cast("dict[str, object]", payload["issue"])
-        assert issue_payload["id"] == "ENG-4"
+        # a STANDALONE (non-objective) plan-save still mints a fresh perk:plan issue — ENG-3.
+        assert issue_payload["id"] == "ENG-3"
         ref = cast("dict[str, object]", payload["plan_ref"])
-        assert ref["consumed_learn"] == ["ENG-3"]
+        assert ref["consumed_learn"] == ["ENG-2"]
+        assert ws.label_names(ws.issue_by_identifier("ENG-3")) == {"perk:plan"}
         _patch_pr_tier_for_land(monkeypatch, merged=True)  # already merged → idempotent land
         payload = _invoke(runner, ["pr", "land", "--json"])
         learn_update = cast("dict[str, object]", payload["learn"])
-        assert learn_update["closed"] == ["ENG-3"] and learn_update["skipped_reason"] is None
-        learn_issue = ws.issue_by_identifier("ENG-3")
+        assert learn_update["closed"] == ["ENG-2"] and learn_update["skipped_reason"] is None
+        learn_issue = ws.issue_by_identifier("ENG-2")
         assert ws.state_type(learn_issue) == "completed"
         assert ws.label_names(learn_issue) == {"perk:learn", "perk:consolidated"}
-        assert ws.state_type(ws.issue_by_identifier("ENG-4")) == "completed"  # explicit close
+        assert ws.state_type(ws.issue_by_identifier("ENG-3")) == "completed"  # explicit close
 
 
 # --------------------------------------------------------------------------- objective verbs
@@ -574,29 +720,30 @@ def test_objective_verbs_over_linear(monkeypatch: pytest.MonkeyPatch) -> None:
         payload = _invoke(runner, ["objective", "next", obj_id, "--json"])
         assert cast("dict[str, object]", payload["next_node"])["id"] == "1.1"
 
-        # node: status update over the identifier (accepts the `#`-prefixed form too)
+        # node: status update over the Project id (accepts the `#`-prefixed form too); the status
+        # lands on the NODE-ISSUE's objective-node block (ENG-1), not the Project overview.
         payload = _invoke(
             runner,
             ["objective", "node", f"#{obj_id}", "--node", "1.1", "--status", "planning", "--json"],
         )
         assert payload["objective"] == obj_id and payload["node"] == "1.1"
-        assert "status: planning" in str(ws.issue_by_identifier(obj_id)["description"])
+        assert "status: planning" in str(ws.issue_by_identifier("ENG-1")["description"])
 
-        # reconcile: the body-comment splice; string ids in the envelope
+        # reconcile: the project-OVERVIEW splice (no body comment in the project model)
         (root / "prose.md").write_text("Reconciled prose.\n", encoding="utf-8")
         payload = _invoke(
             runner, ["objective", "reconcile", obj_id, "--json", "--body", "prose.md"]
         )
         assert payload["objective"] == obj_id and payload["updated"] is True
-        assert isinstance(payload["comment_id"], str)  # comment ids stay UUIDs
-        [obj_comment] = ws.comments_of(ws.issue_by_identifier(obj_id))
-        assert "Reconciled prose." in str(obj_comment["body"])
+        assert payload["comment_id"] is None  # the overview is project content, not a comment
+        assert "Reconciled prose." in str(ws.project_by_id(obj_id)["content"])
 
 
 def test_objective_run_resolves_in_flight_over_an_eng_backlink(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Step-3 supervisor fix: a non-numeric `pr` backlink (`#ENG-2`) IS the plan id."""
+    """The Step-3 supervisor fix: a non-numeric `pr` backlink (the node-issue `#ENG-1`) IS the
+    plan id — now self-referential under the Node 3.4 node↔plan unification."""
     ws = FakeLinearWorkspace()
     _patch_linear(monkeypatch, ws)
     monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [])

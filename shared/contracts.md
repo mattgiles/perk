@@ -3035,9 +3035,14 @@ GitHub issue **or** a Linear Project.
 `issue_backend.py` dormant-then-extract precedent: the contract ships dormant, a later node extracts
 the concrete backend behind it):
 
-- The `ObjectiveStore` `Protocol`: `backend_id: str` plus six keyword-only methods —
+- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **eight** keyword-only methods —
   `find_objective` / `create_objective` / `get_objective` / `update_objective_header` /
-  `update_objective_node` / `update_objective_body` (`objective_id` everywhere).
+  `update_objective_node` / `update_objective_body` / `save_node_plan` / `close_objective`
+  (`objective_id` everywhere). The last two were added at Node 3.4 (see the Node 3.4 amendment
+  below): `save_node_plan` is the node↔plan **unification** write (returns the node-issue ref for a
+  unifying store, **`None`** for a store that does not unify — the single "doesn't unify" signal),
+  and `close_objective` retires the objective's **own** entity on completion (each backend closes
+  the thing it actually stores).
 - Five frozen result dataclasses: `ObjectiveRef` (`id`/`url`/`existed`), `ObjectiveState`
   (`id`/`url`/`title`/`header`/`nodes`), `ObjectiveHeaderUpdate`, `ObjectiveNodeUpdate`,
   `ObjectiveBodyUpdate`.
@@ -3068,17 +3073,57 @@ the concrete backend behind it):
   substrate (client + caches + issue helpers); `LinearIssueBackend` as a thin facade over its
   `_ops`; and `LinearObjectiveStore` with its own `_LinearIssueOps`, the six objective methods, and
   `IssueBackendError → ObjectiveStoreError` per-method message-verbatim. Both carry
-  `backend_id = "linear"`. `LinearObjectiveStore` is **issue-backed today** (behaviorally
-  equivalent to the prior fused path) — the project-backed `LinearProjectObjectiveStore` is Phase 3
-  and does **not** exist yet.
+  `backend_id = "linear"`. The issue-backed `LinearObjectiveStore` is **kept dormant since Node
+  3.4** (directly-constructable, still unit-tested) — the resolver's Linear arm now constructs the
+  project-backed `LinearProjectObjectiveStore` (see the Node 3.4 amendment below).
 
 **The resolver.** `resolve_objective_store(repo_root)` (`perk/backends/objective_stores.py`)
-dispatches on the **`[issues]` selection** (§8.21) to `GitHubObjectiveStore` / `LinearObjectiveStore`
-— single-sourced: `resolve_objective_store_id` re-exports `resolve_issue_backend_id` rather than
-reading a separate config key, because an objective and its plan/learn issues share **one** tracker.
-Every objective consumer routes through `resolve_objective_store(repo_root)`.
+dispatches on the **`[issues]` selection** (§8.21): `github → GitHubObjectiveStore`; `linear →
+LinearProjectObjectiveStore` (project-backed, since Node 3.4). Single-sourced:
+`resolve_objective_store_id` re-exports `resolve_issue_backend_id` rather than reading a separate
+config key, because an objective and its plan/learn issues share **one** tracker; project-vs-issue
+is **not** separately selectable — it is simply what "linear" now means for objectives. Every
+objective consumer routes through `resolve_objective_store(repo_root)`.
 
 **The `backend_id` stamping rule.** `ObjectiveStore.backend_id` is stamped **verbatim** into
 `cache.plan-ref.provider` — mirroring `IssueBackend.backend_id` (§8.21): "the backend that wrote the
 objective is the backend that gets stamped." The objective tier and the issue tier share the stamp
 vocabulary because (today) they share the backend.
+
+**Node 3.4 amendment — the project-backed Linear objective is live; node↔plan unification; close
+through the store.** The resolver's Linear arm is flipped to `LinearProjectObjectiveStore`, so
+**every** Linear objective is now a Linear **Project** (overview = `objective-header` +
+Reconcilable prose; the roadmap is materialized as one **node-issue** per node, each carrying an
+`objective-node` block; phases = milestones; explicit `depends_on` = blocking relations). GitHub is
+unchanged.
+
+- **Node↔plan unification (`save_node_plan`).** In the project model a roadmap node already *is* a
+  Linear issue, so an **objective-linked** `plan-save` writes the plan **into that node-issue**
+  rather than minting a second `perk:plan` issue: the `plan-header` block is merged into the
+  node-issue description (Linear-safe inline-code), the plan body is upserted as a single node-issue
+  comment, and the node-issue's **title** (its roadmap identity `"{id}: …"`), `objective-node`
+  block, and prose are untouched (node-issues carry **no** `perk:plan` label — discovered by project
+  membership + the node block). `cache.plan-ref.pr_id` then points at the **node-issue**, and the
+  implement→submit→land loop runs against it. `save_node_plan` returns the node-issue ref for a
+  unifying store and **`None`** otherwise (`GitHubObjectiveStore` + issue-backed
+  `LinearObjectiveStore` always return `None`; the caller falls back to the standalone path). A
+  `dry_run` returns `None` (resolving the node-issue needs a network read). **Standalone
+  (non-objective) `plan-save` is byte-unchanged.**
+- **The node→plan backlink is the node-issue's own identifier.** `get_objective` derives a node's
+  `pr` as `canonical_pr(identifier)` whenever the node-issue carries a `plan-header` block (a plan
+  was saved into it), else `None` — self-referential (the plan *is* the node-issue) and stable
+  across `pr submit` overwriting `plan-header.pr` with the GitHub PR number, so the land-path match
+  (`nodes_for_pr(nodes, plan_ref.pr_id == identifier)`) holds with no change to `nodes_for_pr` /
+  `pr submit` / `pr land`.
+- **`close_objective` removes the issue-tier leak.** Objective completion (the `pr land`
+  close-on-complete and the `perk objective run` `complete` branch) now closes through
+  `store.close_objective`, never `IssueBackend.close_issue`: `GitHubObjectiveStore` **closes** the
+  GitHub objective issue (byte-identical to the prior close); the issue-backed `LinearObjectiveStore`
+  moves the objective issue to its Done state; `LinearProjectObjectiveStore` **marks the Linear
+  Project complete** (`projectUpdate(state:"completed")`) — a Project is not an issue. Fail-open is
+  preserved (a close failure never changes the land result).
+- The objective id is the opaque **Project UUID** across `active_objective` / `--objective-id` /
+  the handoff / `cache.plan-ref.objective_id` — no numeric/`ENG-`-shape assumption anywhere.
+- **Deferred:** the `projectUpdate(state)` mark-complete is offline-covered here, live-verified at
+  the Node 5.1 smoke gate; the **docs/user-docs** operator narrative for the project-backed
+  objective lifecycle is Node 5.2.
