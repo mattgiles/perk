@@ -141,6 +141,22 @@ non-driving land tests stay on the harness because their fixtures short-circuit 
 fresh-context subagent that posts its own review. See `docs/learned/pi/subagents.md` for that
 orchestration (project-vs-builtin agents, child-posts-own-mutation vs read-only-child-parent-mutates).
 
+### Gating the drive on a structured sub-result (and bounding it)
+
+`/submit`'s `driveConflictResolution` reuses the `driveReconcileAfterLand` shape but adds two twists
+that generalize to any **self-healing** drive:
+
+- **Gated on a sub-result, not fired unconditionally.** The drive only fires when the cold door's
+  structured result says there is something to heal — `ok && mergeable === false &&
+  conflicts.length > 0` — rather than firing whenever the op succeeded. A clean submit drives nothing.
+- **Bounded by a re-drive cap.** A `WorkflowState` counter (incremented per attempt, **reset on every
+  clean outcome**) caps the self-healing loop so a drive that keeps re-firing can **never loop** —
+  past the cap it reports loudly and stops. Use this whenever a drive's own follow-up turn can
+  re-trigger the same condition.
+
+Keep the probe + full mechanism in `mergeability-and-conflict-resolution.md`; this is just the
+driving-shape generalization.
+
 ## A warm door must render EVERY cold-door outcome, not just the success case
 
 When a warm TS surface wraps a cold Python door that returns a **structured non-fatal sub-result**,
@@ -208,3 +224,4 @@ chain.
 - `docs/learned/pi/context-injection.md` — the conditional inject-and-strip lifecycle
 - `docs/learned/pi/subagents.md` — the spawn-fresh-context driving shape `/pr-review` uses
 - `extension/doors/land.ts` — `landPr` (drive-free) + the separate drive helper; the terminating-drive case
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — `/submit`'s `driveConflictResolution` (the sub-result-gated + capped reactive drive)

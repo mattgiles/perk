@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, or planning the live smoke gate.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering, agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the forward-looking Linear Projects substrate for the unbuilt Phase-3 ObjectiveStore, or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -203,31 +203,156 @@ every request the emitters compose without touching emitter code or the real cli
   `_input_payload()` cast helper beats per-site `assert isinstance` (which ty doesn't narrow
   through `__getitem__`). See `toolchain/ty.md`.
 
-## Node 4.1 deferral register (carried, flagged)
+## Live smoke gate — RAN green (Modes 1 & 2 + the Projects spike)
 
-- **The live smoke gate (`docs/linear-smoke-gate.md`) is still UNRUN** — a runbook with an empty
-  observations table. ProseMirror round-trip fidelity, the real "Entity not found"
-  `extensions.code`, RATELIMITED behavior, mutation identifier-acceptance, and the exact
-  agent-session GraphQL field signatures are all unverified live; the runbook's observations table
-  is the landing pad for whatever live runs discover.
-- Live round-trip / ProseMirror fidelity is **mitigated-not-proven** (documented-supported
-  constructs only); the live smoke gate proves it.
-- `"not found"` *message-substring* tolerance in `_issue_or_none`/`_comment_body_or_none` (no
-  stable `extensions.code` observed yet) — tighten to `.codes` when 4.1 observes one (flagged in
-  both docstrings).
-- GraphQL **type strings in queries are unverified live** (`$teamId: ID!` vs `String!` etc.) —
-  offline fakes only check substrings.
-- RATELIMITED retry/backoff (deferred until live call patterns exist).
-- `LINEAR_API_KEY` as a GHA secret for headless/remote runs.
-- Agent-session deferrals: `perk address` emission, the `agentSessionUpdate.plan` checklist
+The gate that `docs/linear-smoke-gate.md` once held UNRUN has now **run**: Mode 1 (issue lifecycle,
+#554), Mode 2 (GitHub-integration coexistence, #564), and the Linear Projects spike (#567) all fired
+**green — no backend defect, docs-only PRs.** The facts below resolve what the runbook reserved; the
+residual register at the bottom carries only the items the live runs did *not* answer.
+
+### Proven-live fidelity facts
+
+- **ProseMirror round-trip is CLEAN.** `find_metadata_block` survives a real Linear round-trip for
+  the plan-header (issue description), the plan-body (first comment), and the objective body comment
+  sentinels — **no raw HTML / `<details>` artifacts**. A re-save **patches the body comment in
+  place** (comment count stays 1), confirming the form-preserving `replace_metadata_block` path live.
+- **Missing-entity shape**: `issue(id:"PER-9999")` → `message: "Entity not found: Issue"` with
+  `extensions.code: "INPUT_ERROR"` — a **generic** input-error code, *not* a dedicated `NOT_FOUND`
+  (see the discriminator below).
+- **String `PER-*` identifiers flow through every `--json` envelope** end-to-end; the squash footer is
+  `Plan: PER-<n> — <url>` (no `Closes #N`, no Linear magic words — closure is the explicit
+  `close_issue` call, not a merge-message side effect).
+
+### Not-found discrimination tightened (#558)
+
+The reserved deferral "tighten `"not found"` to `.codes` when 4.1 observes one" is **RESOLVED — but
+NOT in the `.codes`-only direction the roadmap reserved.** Because `INPUT_ERROR` is **generic** (it
+also fires on argument-validation errors), the correct discriminator is the **pairing** of
+`INPUT_ERROR` present in `exc.codes` **AND** the `"entity not found"` message prefix. One
+module-level helper `_is_entity_not_found(exc)` now backs the three sites (`_issue_or_none`,
+`_uuid_for`, `_comment_body_or_none`). The cross-cutting lessons:
+
+- **Before tightening an error predicate to a GraphQL `extensions.code`, confirm the code is
+  *specific*.** Linear reuses generic codes across unrelated failure classes; a code alone can
+  over-match.
+- **Folding a live observation into a predicate means re-shaping the offline twins to the observed
+  reality in the same change.** The fakes emitted `codes=()`; a naive predicate tightening silently
+  re-raised the *whole* not-found suite until the twins gained the observed code.
+- **Discrimination tests must prove the tightening NARROWED** — the valuable cases are the *negative*
+  ones: a not-found message under `RATELIMITED` (or with no code) now **re-raises**; a generic
+  `INPUT_ERROR` carrying a non-not-found message **re-raises**. Only the paired shape is swallowed.
+
+Two reserved hardenings deliberately shipped as **documented deferrals, not edits** — RATELIMITED
+fail-loud (kept) and `_uuid_for` (kept, see below) — the honest outcome of a gating observation that
+did not fire.
+
+### Mutation identifier acceptance (#564)
+
+`issueUpdate(id:"PER-n")` and `commentCreate(input:{issueId:"PER-n"})` both succeed with the **bare
+identifier** (a bogus `PER-99999` still errors `INPUT_ERROR` / "Entity not found"), so `_uuid_for`
+*could* collapse to a pass-through. That is **substantive but deferred to follow-up #562** — not
+done here. The existing `_uuid_for` discipline note (UUIDs-only-on-mutations in the
+`FakeLinearWorkspace` section) still stands as the offline pin until the collapse lands.
+
+### GitHub-integration coexistence (#564)
+
+- **The Linear GitHub integration links PRs as attachments (issue sidebar), NOT comments.** So the
+  "linkback tolerance" concern (foreign comments perturbing marker-keyed scans) is **structurally
+  moot** — the offline twin `test_foreign_linkback_comment_does_not_perturb_marker_scans` is
+  *stricter* than reality.
+- **perk's `plan-PER-<n>` branch auto-links directly** — it does **not** need Linear's
+  `username/identifier-title` branch template (a control PR in that exact format linked identically).
+- **On-land `close_issue` beside a Done-on-merge automation is a same-state write** — it refreshes
+  `completedAt` but produces **no new state-history transition** (history stays monotonic
+  Backlog → In Progress → Done).
+- **"Installed ≠ connected" (the big operational lesson).** The Linear GitHub App installed on the
+  org but **not wired to the run repo** means **zero** PR events reach Linear regardless of branch
+  name. The decisive isolation test is a **control PR from `issue.branchName`'s canonical format**:
+  if even that doesn't link, it's the *connection*, not perk's branch name. You **cannot** introspect
+  the App installation from a normal `gh` token (a "count 0" is a 404, not an empty list);
+  `team.gitAutomationStates { event, state, branchPattern }` confirms automation *config* even when
+  the repo mapping itself is uncheckable.
+
+### Config gotcha (#554)
+
+`[issues] team` resolves by Linear team **KEY** (e.g. `PER`), **not** the workspace / display name.
+A name silently fails team resolution and surfaces only at **land** as a *non-fatal*
+`plan issue close skipped (non-fatal): Linear team '<x>' not found` (`plan_issue_closed: false`); the
+GitHub squash-merge still succeeds.
+
+## Linear Projects substrate (the ObjectiveStore spike, #567)
+
+Forward-looking facts for the **not-yet-built** Phase-3 ObjectiveStore (recorded as proven substrate,
+explicitly **not yet consumed by any built code** — no fiction about the store itself):
+
+- **`projectCreate(input:{teamIds,name,content})` accepts `content` at create.** The historical 2024
+  create-then-`projectUpdate` workaround no longer applies — write the overview in one call.
+- **The overview round-trip is CLEAN**, so machine state can live in the **Project overview** (a
+  single surface). A `documentCreate` round-trip is kept as a **proven fallback in reserve**.
+- **Blocking-relation direction is carried by the field, not the enum.**
+  `issueRelationCreate(type:"blocks")` — read forward via `relations`, inverse via `inverseRelations`;
+  the `type` enum stays `"blocks"` on **both** sides. Reconstruct `depends_on` from `inverseRelations`,
+  **never a `"blockedBy"` enum** (there isn't one).
+- **Milestone list order is NOT insertion order** — key phases by milestone **name**, never list
+  position.
+- **Not-found error shapes diverge.** Bogus `project(id)` / `projectMilestoneCreate` / `document(id)`
+  match the issue `INPUT_ERROR` + `"Entity not found: <Type>"` shape — **BUT `issueRelationCreate`
+  with a bad `relatedIssueId` returns `INVALID_INPUT` / "Argument Validation Error"** (argument
+  validation fires *before* entity lookup, so neither code nor prefix matches). A Projects not-found
+  path must **special-case the relation-create error**.
+- No RATELIMITED at spike volume.
+
+## Measurement-node / live-spike process facts
+
+- **The firing mechanism**: import `perk.backends.linear.client_from_env()` +
+  `LinearClient.request(QUERY, VARS)`, resolving the team UUID via
+  `teams(filter:{key:{eq:"PER"}})`. The throwaway runner lives in `/tmp` (no committed `scripts/`
+  file) — honors the "no bespoke scripts" discipline while still capturing machine GraphQL documents
+  + error shapes.
+- **Check `LINEAR_API_KEY` in the session env before assuming a live node must be deferred** to an
+  operator — a live spike may be fireable in-session.
+- **Driving session-stages from a non-interactive harness**: the `--json` cold workers
+  (`perk plan save --plan-file … --json`, `perk pr submit/land --json`, `perk learn capture … --json`,
+  `perk objective … --json`) exercise the deterministic mutation paths **without a session**.
+  **`perk implement` is the only stage with no `--json` worker** (the work *is* the session) — to
+  position its worktree manually, `perk worktree create plan-<id>` then **copy
+  `.pi/workflow/plan-ref.json` into the new worktree** (the PR-workers read the worktree-local
+  plan-ref).
+- **Gotcha — probe side-effects clobber idempotency**: overwriting an issue *description* while
+  probing destroys its `plan-header` sentinel, so a later `perk plan save` creates a **new** issue
+  (idempotency keys off that sentinel). Use a throwaway field or restore immediately.
+- **Gotcha — Python `urllib` SSL fails in this env** (`CERTIFICATE_VERIFY_FAILED`); use `curl` for
+  ad-hoc Linear GraphQL probes.
+- **Runbook drift corrected** in `docs/linear-smoke-gate.md`: `perk init --verify` is **not** a flag
+  (labels are created by `perk doctor --fix`); `perk plan-save` is `perk plan save`; `perk resume` is
+  `perk plan resume`; the `perk submit` / `perk land` flat aliases *do* work; `perk pr land` is
+  idempotent on an already-merged PR.
+
+### Reconciliation pattern (cross-cutting)
+
+When a measurement node **resolves a decision the prose framed as open** (overview-vs-document →
+overview; not-found `.codes` tightening → paired predicate), that conditional is the prime stale spot
+for `/objective-reconcile` to flip. (Terse by design; the full reconciliation pattern lives in
+`doc-reconciliation.md`.)
+
+## Still-deferred register (trimmed)
+
+The live smoke resolved the fidelity / not-found / mutation-acceptance items above; what remains
+unobserved:
+
+- **RATELIMITED retry/backoff** — still unobserved at low CLI volume; the typed loud failure stands.
+- **`LINEAR_API_KEY` as a GHA secret** for headless/remote runs.
+- **Agent-session deferrals**: `perk address` emission, the `agentSessionUpdate.plan` checklist
   (technology preview), elicitation, retry/backoff, a webhook receiver (emission is one-way).
-- **Residual**: a remote-created agent session is invisible to a later *local* land
-  (`agent-session.json` lives in the runner's checkout, so the local land skips its emission with a
-  stderr note) — accepted; a durable issue-tier session pointer would fix it.
+- **Remote-vs-local agent-session pointer residual**: a remote-created agent session is invisible to
+  a later *local* land (`agent-session.json` lives in the runner's checkout, so the local land skips
+  its emission with a stderr note) — accepted; a durable issue-tier session pointer would fix it.
 
 ## Sources
 
 - Issues #347, #356, #361, #370, #376, #389, #400 (PRs #344, #354, #359, #368, #375, #387, #399)
+- Live-smoke results: #554 (PR #553), #558 (PR #557), #564 (PRs #561/#563), #567 (PRs #565/#566),
+  and follow-up #562 (the deferred `_uuid_for` collapse)
 
 ## Cross-references
 
@@ -236,4 +361,8 @@ every request the emitters compose without touching emitter code or the real cli
 - `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table shape
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment pattern
 - `docs/learned/workflow/skill-bindings.md` — skills `references:` subdirectory routing
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` mergeability gate
+  (the live-smoke mergeability gotchas in #554 live there)
+- `docs/learned/workflow/doc-reconciliation.md` — the measurement-node-resolves-an-open-conditional
+  reconciliation pattern
 - `docs/learned/toolchain/ty.md` — the narrowing-helper family for deep untyped payloads

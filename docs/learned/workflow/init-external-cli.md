@@ -101,6 +101,14 @@ The lockstep principle still holds, restated: the skills source, the Pi `git:` p
 remote CI install (`workflow_artifacts._PERK_INSTALL_CONSUMER`) all resolve from the same `main`
 ref.
 
+**`__version__`'s remaining role after the collapse (#552).** Once the three consumer-ref sites
+collapsed `v{__version__}` → `main` — `init._desired_skills_manifest`, `init._desired_packages` (the
+Pi `git:` package), and `workflow_artifacts._PERK_INSTALL_CONSUMER` (the remote CI install) —
+`__version__` is now **only** a `perk --version` value + the AGENTS managed-block `perk version:`
+stamp, **never again a ref pin**. The import was therefore **removed from `workflow_artifacts.py`**
+(and its test) once the last ref reference left, while `init.py` keeps it for the managed-block stamp
+and `test_init_idempotent.py` keeps it for the self-mode negative assertion.
+
 ## Committed declaration vs. transient state — the gitignore boundary
 
 The manifest fragment is a **committed declaration** and is *never* gitignored (it is desired
