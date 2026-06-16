@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from perk import github, objective
+from perk import github
 from perk.backends import issue_backend
 
 
@@ -182,64 +182,6 @@ class _FakeBackend:
             return issue_backend.CommentResult(posted=True)
         return self.add_issue_comment(issue_id=issue_id, body=body)
 
-    # --- objective issues ---
-
-    def find_objective_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._find_by_run_id(run_id)
-
-    def create_objective_issue(
-        self,
-        *,
-        title: str,
-        body: str,
-        run_id: str,
-        status: str = "active",
-        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
-        dry_run: bool = False,
-    ) -> issue_backend.IssueRef:
-        if dry_run:
-            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
-        existing = self.find_objective_issue(run_id=run_id)
-        if existing is not None:
-            return existing
-        if not roadmap_nodes:
-            raise issue_backend.IssueBackendError("objective roadmap is empty")
-        return self._mint(title=title, body=body, run_id=run_id)
-
-    def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
-        issue = self._issues.get(issue_id)
-        if issue is None:
-            return None
-        return issue_backend.ObjectiveState(
-            id=issue_id, url=f"fake://issue/{issue_id}", title=issue.title, header={}, nodes=()
-        )
-
-    def update_objective_header(
-        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
-    ) -> issue_backend.ObjectiveHeaderUpdate:
-        return issue_backend.ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=dry_run)
-
-    def update_objective_node(
-        self,
-        *,
-        issue_id: str,
-        node_id: str,
-        status: objective.NodeStatus | None = None,
-        pr: str | None = None,
-        description: str | None = None,
-        dry_run: bool = False,
-    ) -> issue_backend.ObjectiveNodeUpdate:
-        return issue_backend.ObjectiveNodeUpdate(
-            issue_id=issue_id, node_id=node_id, comment_updated=False, dry_run=dry_run
-        )
-
-    def update_objective_body(
-        self, *, issue_id: str, prose: str, dry_run: bool = False
-    ) -> issue_backend.ObjectiveBodyUpdate:
-        return issue_backend.ObjectiveBodyUpdate(
-            issue_id=issue_id, comment_id=None, updated=not dry_run, dry_run=dry_run
-        )
-
 
 def _make_backend() -> issue_backend.IssueBackend:
     """The static conformance check: ty verifies ``_FakeBackend`` satisfies the protocol."""
@@ -303,15 +245,6 @@ class TestValueTypes:
         assert state.id == "7"
         with pytest.raises(dataclasses.FrozenInstanceError):
             state.state = "CLOSED"  # ty: ignore[invalid-assignment]
-
-    def test_objective_body_update_string_comment_id(self) -> None:
-        update = issue_backend.ObjectiveBodyUpdate(
-            issue_id="9", comment_id="123", updated=True, dry_run=False
-        )
-        assert update.issue_id == "9"
-        assert update.comment_id == "123"
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            update.updated = False  # ty: ignore[invalid-assignment]
 
 
 class TestErrorType:

@@ -16,7 +16,7 @@ from pathlib import Path
 import click
 
 from perk import objective, plan
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, issues, objective_stores
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -255,6 +255,7 @@ def _plan_save_impl(
     body_comment = plan.render_plan_body(plan_markdown)
 
     backend = issues.resolve_issue_backend(repo_root)
+    store = objective_stores.resolve_objective_store(repo_root)
     backend.ensure_label(
         plan.PLAN_LABEL,
         color=plan.PLAN_LABEL_COLOR,
@@ -318,8 +319,8 @@ def _plan_save_impl(
     objective_node_result: dict[str, object] | None = None
     if not dry_run and objective_id and node_id:
         try:
-            backend.update_objective_node(
-                issue_id=str(objective_id).lstrip("#"),
+            store.update_objective_node(
+                objective_id=str(objective_id).lstrip("#"),
                 node_id=node_id,
                 status=objective.NodeStatus.IN_PROGRESS,
                 pr=f"#{issue.id}",

@@ -17,7 +17,7 @@ from pathlib import Path
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, issues, linear_agent
+from perk.backends import issue_backend, issues, linear_agent, objective_stores
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
@@ -240,8 +240,9 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
     if not objective_id:
         return ObjectiveLandUpdate(None, (), "bad_objective_id")
     backend = issues.resolve_issue_backend(repo_root)
+    store = objective_stores.resolve_objective_store(repo_root)
     try:
-        state = backend.get_objective(issue_id=objective_id)
+        state = store.get_objective(objective_id=objective_id)
         if state is None:
             return ObjectiveLandUpdate(objective_id, (), "objective_not_found")
         targets = objective.nodes_for_pr(list(state.nodes), str(plan_ref["pr_id"]))
@@ -251,8 +252,8 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         for node in targets:
             if node.status in objective.TERMINAL:
                 continue
-            backend.update_objective_node(
-                issue_id=objective_id,
+            store.update_objective_node(
+                objective_id=objective_id,
                 node_id=node.id,
                 status=objective.NodeStatus.DONE,
             )

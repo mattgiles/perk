@@ -5,8 +5,8 @@ from pathlib import Path
 
 import click
 
-from perk.backends import issues
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends import objective_stores
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -42,10 +42,10 @@ def reconcile_objective(
         if not dry_run:
             require_github(ctx)
         prose = body_path.read_text(encoding="utf-8")
-        result = issues.resolve_issue_backend(repo_root).update_objective_body(
-            issue_id=number, prose=prose, dry_run=dry_run
+        result = objective_stores.resolve_objective_store(repo_root).update_objective_body(
+            objective_id=number, prose=prose, dry_run=dry_run
         )
-    except IssueBackendError as exc:
+    except ObjectiveStoreError as exc:
         message = str(exc)
         error_type = (
             "reconcile_target_missing"
@@ -67,7 +67,7 @@ def reconcile_objective(
         "success": True,
         "error_type": None,
         # Opaque string ids at every machine boundary (contracts §8.21; Node 4.1).
-        "objective": result.issue_id,
+        "objective": result.objective_id,
         "comment_id": result.comment_id,
         "updated": result.updated,
         "dry_run": result.dry_run,

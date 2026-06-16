@@ -5,8 +5,8 @@ import json
 import click
 
 from perk import objective
-from perk.backends import issues
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends import objective_stores
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, node_to_dict, parse_objective_id
 from perk.cli.context import require_repo
@@ -24,12 +24,14 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        state = issues.resolve_issue_backend(repo_root).get_objective(issue_id=number)
+        state = objective_stores.resolve_objective_store(repo_root).get_objective(
+            objective_id=number
+        )
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
             )
-    except IssueBackendError as exc:
+    except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

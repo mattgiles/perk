@@ -7,8 +7,8 @@ from pathlib import Path
 import click
 
 from perk import objective, plan
-from perk.backends import issues
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends import objective_stores
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
@@ -84,14 +84,14 @@ def create_objective(
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
         resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()
-        issue = issues.resolve_issue_backend(repo_root).create_objective_issue(
+        issue = objective_stores.resolve_objective_store(repo_root).create_objective(
             title=resolved_title,
             body=body_text,
             run_id=resolved_run_id,
             roadmap_nodes=roadmap_nodes,
             dry_run=dry_run,
         )
-    except IssueBackendError as exc:
+    except ObjectiveStoreError as exc:
         fail(
             ctx,
             as_json=as_json,

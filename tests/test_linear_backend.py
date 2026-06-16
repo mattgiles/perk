@@ -13,10 +13,15 @@ from typing import cast
 import pytest
 
 from perk import github, objective, plan
-from perk.backends import issue_backend, linear_backend
+from perk.backends import issue_backend, linear_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import LinearGraphQLError
-from perk.backends.linear_backend import LinearIssueBackend, to_linear_markdown
+from perk.backends.linear_backend import (
+    LinearIssueBackend,
+    LinearObjectiveStore,
+    to_linear_markdown,
+)
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 from perk.run import run_report
 
@@ -74,6 +79,18 @@ def _make_backend(
         fake, team_key="ENG", repo_root=Path("/repo")
     )
     return backend, fake
+
+
+def _make_store(
+    responses: dict[str, list[object]] | None = None,
+) -> tuple[objective_store.ObjectiveStore, _FakeLinear]:
+    """The objective-tier twin of ``_make_backend``: ty verifies ``LinearObjectiveStore`` satisfies
+    the ``ObjectiveStore`` protocol."""
+    fake = _FakeLinear(responses)
+    store: objective_store.ObjectiveStore = LinearObjectiveStore(
+        fake, team_key="ENG", repo_root=Path("/repo")
+    )
+    return store, fake
 
 
 def _queries(fake: _FakeLinear, needle: str) -> list[tuple[str, dict[str, object]]]:
@@ -911,7 +928,7 @@ _COMMENT_CREATED: dict[str, object] = {
 class TestFindObjectiveIssue:
     def test_matches_inline_encoded_objective_header(self) -> None:
         description = _inline_objective_description("01OBJ")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [
@@ -930,43 +947,43 @@ class TestFindObjectiveIssue:
                 ],
             }
         )
-        found = backend.find_objective_issue(run_id="01OBJ")
-        assert found == issue_backend.IssueRef(id="ENG-9", url="u", existed=True)
+        found = store.find_objective(run_id="01OBJ")
+        assert found == objective_store.ObjectiveRef(id="ENG-9", url="u", existed=True)
         [(_, variables)] = _queries(fake, "issues(first")
         assert variables["label"] == "perk:objective"
 
     def test_no_match_is_none_after_exhausting_pages(self) -> None:
         page1 = {"issues": _page([], has_next=True, cursor="C1")}
         page2 = {"issues": _page([])}
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {"teams(filter": [_TEAM_RESPONSE], "issues(first": [page1, page2]}
         )
-        assert backend.find_objective_issue(run_id="01NOPE") is None
+        assert store.find_objective(run_id="01NOPE") is None
         assert len(_queries(fake, "issues(first")) == 2
 
     def test_infra_errors_propagate(self) -> None:
-        backend, _ = _make_backend(
+        store, _ = _make_store(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [LinearGraphQLError("Linear GraphQL error: boom", codes=())],
             }
         )
-        with pytest.raises(IssueBackendError, match="boom"):
-            backend.find_objective_issue(run_id="01NOPE")
+        with pytest.raises(ObjectiveStoreError, match="boom"):
+            store.find_objective(run_id="01NOPE")
 
 
 class TestCreateObjectiveIssue:
     def test_dry_run_shape(self) -> None:
-        backend, fake = _make_backend()
-        ref = backend.create_objective_issue(
+        store, fake = _make_store()
+        ref = store.create_objective(
             title="t", body="b", run_id="01DRY", roadmap_nodes=_objective_nodes(), dry_run=True
         )
-        assert ref == issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
+        assert ref == objective_store.ObjectiveRef(id="0", url="(dry-run)", existed=False)
         assert fake.requests == []
 
     def test_idempotent_find_then_return(self) -> None:
         description = _inline_objective_description("01DUP")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [
@@ -985,31 +1002,27 @@ class TestCreateObjectiveIssue:
                 ],
             }
         )
-        ref = backend.create_objective_issue(
+        ref = store.create_objective(
             title="t", body="b", run_id="01DUP", roadmap_nodes=_objective_nodes()
         )
-        assert ref == issue_backend.IssueRef(id="ENG-9", url="u", existed=True)
+        assert ref == objective_store.ObjectiveRef(id="ENG-9", url="u", existed=True)
         assert not _queries(fake, "issueCreate(")
 
     def test_empty_roadmap_raises(self) -> None:
-        backend, _ = _make_backend(
-            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
-        )
-        with pytest.raises(IssueBackendError, match="objective roadmap is empty"):
-            backend.create_objective_issue(title="t", body="prose only", run_id="01EMPTY")
+        store, _ = _make_store({"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]})
+        with pytest.raises(ObjectiveStoreError, match="objective roadmap is empty"):
+            store.create_objective(title="t", body="prose only", run_id="01EMPTY")
 
     def test_invalid_embedded_roadmap_raises(self) -> None:
         bad = plan.render_metadata_block(
             objective.OBJECTIVE_ROADMAP_KEY, {"schema_version": "99", "nodes": []}
         )
-        backend, _ = _make_backend(
-            {"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]}
-        )
-        with pytest.raises(IssueBackendError, match="invalid objective roadmap"):
-            backend.create_objective_issue(title="t", body=bad, run_id="01BAD")
+        store, _ = _make_store({"teams(filter": [_TEAM_RESPONSE], "issues(first": [_no_issues()]})
+        with pytest.raises(ObjectiveStoreError, match="invalid objective roadmap"):
+            store.create_objective(title="t", body=bad, run_id="01BAD")
 
     def test_full_two_step_create_with_comment_id_backfill(self) -> None:
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issues(first": [_no_issues()],
@@ -1028,13 +1041,13 @@ class TestCreateObjectiveIssue:
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
-        ref = backend.create_objective_issue(
+        ref = store.create_objective(
             title="t",
             body="The objective prose.",
             run_id="01NEW",
             roadmap_nodes=_objective_nodes(),
         )
-        assert ref == issue_backend.IssueRef(id="ENG-9", url="u-obj", existed=False)
+        assert ref == objective_store.ObjectiveRef(id="ENG-9", url="u-obj", existed=False)
 
         # 1) the issue description is composed directly inline-code-encoded
         [(_, create_vars)] = _queries(fake, "issueCreate(")
@@ -1071,8 +1084,8 @@ class TestCreateObjectiveIssue:
 class TestGetObjective:
     def test_happy_path(self) -> None:
         description = _inline_objective_description("01OBJ", comment_id="cmt-1")
-        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        state = backend.get_objective(issue_id="ENG-9")
+        store, _ = _make_store({"issue(id": [_objective_issue_response(description)]})
+        state = store.get_objective(objective_id="ENG-9")
         assert state is not None
         assert state.id == "ENG-9" and state.url == "u-obj" and state.title == "Obj"
         assert state.header["run_id"] == "01OBJ"
@@ -1080,44 +1093,44 @@ class TestGetObjective:
         assert [n.id for n in state.nodes] == ["1.1", "1.2"]
 
     def test_missing_issue_is_none(self) -> None:
-        backend, _ = _make_backend({"issue(id": [_not_found_error()]})
-        assert backend.get_objective(issue_id="obj-gone") is None
+        store, _ = _make_store({"issue(id": [_not_found_error()]})
+        assert store.get_objective(objective_id="obj-gone") is None
 
     def test_invalid_roadmap_raises(self) -> None:
         broken = "`perk:metadata-block:objective-roadmap`\n\n```yaml\nnodes: [\n```"
-        backend, _ = _make_backend({"issue(id": [_objective_issue_response(broken)]})
-        with pytest.raises(IssueBackendError, match="invalid objective roadmap on 'obj-1'"):
-            backend.get_objective(issue_id="obj-1")
+        store, _ = _make_store({"issue(id": [_objective_issue_response(broken)]})
+        with pytest.raises(ObjectiveStoreError, match="invalid objective roadmap on 'obj-1'"):
+            store.get_objective(objective_id="obj-1")
 
 
 class TestUpdateObjectiveHeader:
     def test_unknown_fields_rejected_lbyl(self) -> None:
-        backend, fake = _make_backend()
-        with pytest.raises(IssueBackendError, match="unknown objective-header field"):
-            backend.update_objective_header(issue_id="obj-1", fields={"nope": 1})
+        store, fake = _make_store()
+        with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
+            store.update_objective_header(objective_id="obj-1", fields={"nope": 1})
         assert fake.requests == []
 
     def test_dry_run_composes_only(self) -> None:
         description = _inline_objective_description("01HDR")
-        backend, fake = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        update = backend.update_objective_header(
-            issue_id="obj-1", fields={"status": "complete"}, dry_run=True
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        update = store.update_objective_header(
+            objective_id="obj-1", fields={"status": "complete"}, dry_run=True
         )
-        assert update == issue_backend.ObjectiveHeaderUpdate(
+        assert update == objective_store.ObjectiveHeaderUpdate(
             fields_updated=("status",), dry_run=True
         )
         assert not _queries(fake, "issueUpdate(")
 
     def test_write_path_preserves_inline_code_form(self) -> None:
         description = _inline_objective_description("01HDR")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
-        update = backend.update_objective_header(issue_id="obj-1", fields={"status": "complete"})
-        assert update == issue_backend.ObjectiveHeaderUpdate(
+        update = store.update_objective_header(objective_id="obj-1", fields={"status": "complete"})
+        assert update == objective_store.ObjectiveHeaderUpdate(
             fields_updated=("status",), dry_run=False
         )
         [(_, variables)] = _queries(fake, "issueUpdate(")
@@ -1132,20 +1145,22 @@ class TestUpdateObjectiveHeader:
 class TestUpdateObjectiveNode:
     def test_node_not_found_raises(self) -> None:
         description = _inline_objective_description("01N")
-        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        with pytest.raises(IssueBackendError, match=r"objective node '9\.9' not found on 'obj-1'"):
-            backend.update_objective_node(
-                issue_id="obj-1", node_id="9.9", status=objective.NodeStatus.DONE
+        store, _ = _make_store({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(
+            ObjectiveStoreError, match=r"objective node '9\.9' not found on 'obj-1'"
+        ):
+            store.update_objective_node(
+                objective_id="obj-1", node_id="9.9", status=objective.NodeStatus.DONE
             )
 
     def test_dry_run_shape(self) -> None:
         description = _inline_objective_description("01N")
-        backend, fake = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE, dry_run=True
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE, dry_run=True
         )
-        assert update == issue_backend.ObjectiveNodeUpdate(
-            issue_id="obj-1", node_id="1.2", comment_updated=False, dry_run=True
+        assert update == objective_store.ObjectiveNodeUpdate(
+            objective_id="obj-1", node_id="1.2", comment_updated=False, dry_run=True
         )
         assert not _queries(fake, "issueUpdate(")
 
@@ -1154,7 +1169,7 @@ class TestUpdateObjectiveNode:
         comment_body = to_linear_markdown(
             objective.render_body_comment(_objective_nodes(), prose="Prose.")
         )
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
@@ -1162,11 +1177,11 @@ class TestUpdateObjectiveNode:
                 "commentUpdate(": [{"commentUpdate": {"success": True}}],
             }
         )
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
         )
-        assert update == issue_backend.ObjectiveNodeUpdate(
-            issue_id="obj-1", node_id="1.2", comment_updated=True, dry_run=False
+        assert update == objective_store.ObjectiveNodeUpdate(
+            objective_id="obj-1", node_id="1.2", comment_updated=True, dry_run=False
         )
         # the authoritative roadmap write (form-preserving inline-code)
         [(_, body_vars)] = _queries(fake, "issueUpdate(")
@@ -1187,44 +1202,44 @@ class TestUpdateObjectiveNode:
 
     def test_missing_comment_id_degrades_to_comment_not_updated(self) -> None:
         description = _inline_objective_description("01N", comment_id=None)
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
         )
         assert update.comment_updated is False
         assert len(_queries(fake, "issueUpdate(")) == 1  # roadmap still written
 
     def test_comment_not_found_degrades(self) -> None:
         description = _inline_objective_description("01N", comment_id="cmt-gone")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
                 "comment(id": [_not_found_error()],
             }
         )
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
         )
         assert update.comment_updated is False
         assert not _queries(fake, "commentUpdate(")
 
     def test_markerless_comment_degrades(self) -> None:
         description = _inline_objective_description("01N", comment_id="cmt-1")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
                 "comment(id": [{"comment": {"body": "no table markers here"}}],
             }
         )
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
         )
         assert update.comment_updated is False
         assert not _queries(fake, "commentUpdate(")
@@ -1233,46 +1248,46 @@ class TestUpdateObjectiveNode:
 class TestUpdateObjectiveBody:
     def test_missing_comment_id_raises(self) -> None:
         description = _inline_objective_description("01B", comment_id=None)
-        backend, _ = _make_backend({"issue(id": [_objective_issue_response(description)]})
-        with pytest.raises(IssueBackendError, match="objective 'obj-1' has no body comment"):
-            backend.update_objective_body(issue_id="obj-1", prose="p")
+        store, _ = _make_store({"issue(id": [_objective_issue_response(description)]})
+        with pytest.raises(ObjectiveStoreError, match="objective 'obj-1' has no body comment"):
+            store.update_objective_body(objective_id="obj-1", prose="p")
 
     def test_comment_not_found_raises(self) -> None:
         description = _inline_objective_description("01B", comment_id="cmt-gone")
-        backend, _ = _make_backend(
+        store, _ = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "comment(id": [_not_found_error()],
             }
         )
-        with pytest.raises(IssueBackendError, match="has no body comment"):
-            backend.update_objective_body(issue_id="obj-1", prose="p")
+        with pytest.raises(ObjectiveStoreError, match="has no body comment"):
+            store.update_objective_body(objective_id="obj-1", prose="p")
 
     def test_no_reconcilable_region_raises(self) -> None:
         description = _inline_objective_description("01B", comment_id="cmt-1")
-        backend, _ = _make_backend(
+        store, _ = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "comment(id": [{"comment": {"body": "no markers"}}],
             }
         )
-        with pytest.raises(IssueBackendError, match="no reconcilable region"):
-            backend.update_objective_body(issue_id="obj-1", prose="p")
+        with pytest.raises(ObjectiveStoreError, match="no reconcilable region"):
+            store.update_objective_body(objective_id="obj-1", prose="p")
 
     def test_dry_run_composes_only(self) -> None:
         description = _inline_objective_description("01B", comment_id="cmt-1")
         comment_body = to_linear_markdown(
             objective.render_body_comment(_objective_nodes(), prose="Old.")
         )
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "comment(id": [{"comment": {"body": comment_body}}],
             }
         )
-        update = backend.update_objective_body(issue_id="obj-1", prose="New.", dry_run=True)
-        assert update == issue_backend.ObjectiveBodyUpdate(
-            issue_id="obj-1", comment_id="cmt-1", updated=False, dry_run=True
+        update = store.update_objective_body(objective_id="obj-1", prose="New.", dry_run=True)
+        assert update == objective_store.ObjectiveBodyUpdate(
+            objective_id="obj-1", comment_id="cmt-1", updated=False, dry_run=True
         )
         assert not _queries(fake, "commentUpdate(")
 
@@ -1282,16 +1297,16 @@ class TestUpdateObjectiveBody:
             to_linear_markdown(objective.render_body_comment(_objective_nodes(), prose="Old."))
             + "\n## Immutable history\nnever touch this\n"
         )
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "comment(id": [{"comment": {"body": comment_body}}],
                 "commentUpdate(": [{"commentUpdate": {"success": True}}],
             }
         )
-        update = backend.update_objective_body(issue_id="obj-1", prose="New prose.")
-        assert update == issue_backend.ObjectiveBodyUpdate(
-            issue_id="obj-1", comment_id="cmt-1", updated=True, dry_run=False
+        update = store.update_objective_body(objective_id="obj-1", prose="New prose.")
+        assert update == objective_store.ObjectiveBodyUpdate(
+            objective_id="obj-1", comment_id="cmt-1", updated=True, dry_run=False
         )
         [(_, patch_vars)] = _queries(fake, "commentUpdate(")
         assert patch_vars["id"] == "cmt-1"
@@ -1417,31 +1432,31 @@ class TestEntityNotFoundDiscrimination:
 
     def test_comment_observed_shape_degrades(self) -> None:
         description = _inline_objective_description("01N", comment_id="cmt-gone")
-        backend, fake = _make_backend(
+        store, fake = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
                 "comment(id": [_not_found_error()],
             }
         )
-        update = backend.update_objective_node(
-            issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        update = store.update_objective_node(
+            objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
         )
         assert update.comment_updated is False
         assert not _queries(fake, "commentUpdate(")
 
     def test_comment_not_found_message_wrong_code_reraises(self) -> None:
         description = _inline_objective_description("01N", comment_id="cmt-gone")
-        backend, _ = _make_backend(
+        store, _ = _make_store(
             {
                 "issue(id": [_objective_issue_response(description)],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
                 "comment(id": [_not_found_message_wrong_code()],
             }
         )
-        with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
-            backend.update_objective_node(
-                issue_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
+        with pytest.raises(ObjectiveStoreError, match="Linear GraphQL error: Entity not found"):
+            store.update_objective_node(
+                objective_id="obj-1", node_id="1.2", status=objective.NodeStatus.DONE
             )
 
 
