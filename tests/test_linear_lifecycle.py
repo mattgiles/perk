@@ -1,7 +1,7 @@
 """Objective #252 Node 4.1 — the end-to-end offline Linear lifecycle suite.
 
-A stateful in-memory Linear workspace (``FakeLinearWorkspace``) satisfies the GraphQL client seam
-(``linear_backend.GraphQLClient``) and is injected via a late-bound
+A stateful in-memory Linear workspace (``FakeLinearWorkspace``) subclasses the GraphQL client
+(``linear.LinearClient``) and is injected via a late-bound
 ``monkeypatch.setattr(linear, "client_from_env", …)`` — ``resolve_issue_backend`` resolves the
 client at call time, so the REAL ``LinearIssueBackend`` (identifier boundary ids, transcoded
 bodies, ``_uuid_for`` mutation resolution) is exercised by the REAL CLI commands. Only the
@@ -29,7 +29,7 @@ from click.testing import CliRunner
 
 from perk import github, plan
 from perk.backends import issues, linear
-from perk.backends.linear import LinearGraphQLError
+from perk.backends.linear import LinearClient, LinearGraphQLError
 from perk.cli.cli import cli
 from perk.run import run_report
 from perk.state import cache
@@ -51,8 +51,8 @@ def _not_found() -> LinearGraphQLError:
     )
 
 
-class FakeLinearWorkspace:
-    """A stateful in-memory Linear workspace satisfying ``linear_backend.GraphQLClient``.
+class FakeLinearWorkspace(LinearClient):
+    """A stateful in-memory Linear workspace subclassing ``linear.LinearClient``.
 
     Routes requests by the same query-substring conventions the scripted ``_FakeLinear`` uses,
     but executes against state: create/update/comment/label mutations mutate it; reads paginate
@@ -70,6 +70,10 @@ class FakeLinearWorkspace:
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
+        # Subclasses LinearClient (no super().__init__) to inherit the shared team_id/uuid_for/
+        # paginate machinery driven by this scripted request; init the two caches directly.
+        self._team_id_cache: dict[str, str] = {}
+        self._uuid_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------ state helpers
 

@@ -395,3 +395,43 @@ def test_objective_header_string_comment_id_round_trips():
     )
     data = header.to_data()
     assert data["objective_comment_id"] == "comment-uuid-1"
+
+
+def test_node_sort_key_orders_naturally():
+    ids = ["3.10", "1.1", "2A.1", "3.2", "2.1", "1.2"]
+    assert sorted(ids, key=o.node_sort_key) == ["1.1", "1.2", "2.1", "2A.1", "3.2", "3.10"]
+
+
+def test_node_sort_key_numeric_before_lexical_trailing():
+    # an all-digit trailing segment sorts before a non-numeric one within the same phase
+    assert o.node_sort_key("3.2") < o.node_sort_key("3.x")
+    assert o.node_sort_key("3") == (1, "", 0, 3, "")
+
+
+def test_render_node_block_required_and_optional_fields():
+    node = o.ObjectiveNode(
+        id="1.1", description="Alpha", status=N.PENDING, pr="#9", depends_on=("1.0",)
+    )
+    # pr and depends_on are excluded; slug/comment omitted when None
+    assert o.render_node_block(node) == {
+        "id": "1.1",
+        "status": "pending",
+        "description": "Alpha",
+    }
+    rich = o.ObjectiveNode(id="1.2", description="Beta", status=N.DONE, slug="beta", comment="note")
+    assert o.render_node_block(rich) == {
+        "id": "1.2",
+        "status": "done",
+        "description": "Beta",
+        "slug": "beta",
+        "comment": "note",
+    }
+
+
+def test_node_issue_title_slug_vs_truncated_description():
+    slugged = o.ObjectiveNode(id="2.1", description="Gamma", status=N.PENDING, slug="gamma")
+    assert o.node_issue_title(slugged) == "2.1: gamma"
+    short = o.ObjectiveNode(id="2.2", description="short desc", status=N.PENDING)
+    assert o.node_issue_title(short) == "2.2: short desc"
+    longish = o.ObjectiveNode(id="2.3", description="x" * 50, status=N.PENDING)
+    assert o.node_issue_title(longish, max_len=10) == "2.3: " + "x" * 10 + "…"

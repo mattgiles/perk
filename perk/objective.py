@@ -38,6 +38,10 @@ OBJECTIVE_LABEL_DESCRIPTION = "perk objective issue"
 OBJECTIVE_HEADER_KEY = "objective-header"
 OBJECTIVE_ROADMAP_KEY = "objective-roadmap"
 OBJECTIVE_BODY_KEY = "objective-body"
+# The per-node-issue metadata block key (Node 3.2 project-backed store): each node-issue carries an
+# `objective-node` block (the node's id/status/description) so a project-backed objective derives
+# its roadmap live from node-issue membership, not from a stored roadmap table.
+OBJECTIVE_NODE_KEY = "objective-node"
 
 # perk starts its OWN objective schema at 1 — it does not inherit erk's "2"/"3"/"4".
 OBJECTIVE_SCHEMA_VERSION = "1"
@@ -366,6 +370,48 @@ def enrich_phase_names(body: str, keys: list[tuple[int, str]]) -> dict[tuple[int
     for match in pattern.finditer(body):
         found[(int(match.group(1)), match.group(2))] = match.group(3).strip()
     return {key: found.get(key, phase_label(key)) for key in keys}
+
+
+def node_sort_key(node_id: str) -> tuple[int, str, int, int, str]:
+    """A deterministic natural-ordering key for a node id (shared by 3.2 create order and 3.3
+    read order). Built from :func:`derive_phase` plus the trailing id segment parsed numerically
+    when it is all digits (so ``3.2`` sorts before ``3.10``), else lexically. The numeric/lexical
+    discriminator (``0`` vs ``1``) keeps numeric segments ahead of non-numeric ones and avoids
+    mixing ``int``/``str`` in a single comparison slot.
+    """
+    phase_num, phase_suffix = derive_phase(node_id)
+    trailing = node_id.rsplit(".", 1)[-1]
+    if trailing.isdigit():
+        return (phase_num, phase_suffix, 0, int(trailing), "")
+    return (phase_num, phase_suffix, 1, 0, trailing)
+
+
+def render_node_block(node: ObjectiveNode) -> dict[str, object]:
+    """The data for ``plan.render_metadata_block(OBJECTIVE_NODE_KEY, …, style="inline-code")`` on a
+    node-issue. Always includes ``id``/``status``/``description``; includes ``slug``/``comment``
+    only when non-None. Excludes ``pr`` (plan-header authority) and ``depends_on`` (derived from
+    blocking relations)."""
+    data: dict[str, object] = {
+        "id": node.id,
+        "status": node.status.value,
+        "description": node.description,
+    }
+    if node.slug is not None:
+        data["slug"] = node.slug
+    if node.comment is not None:
+        data["comment"] = node.comment
+    return data
+
+
+def node_issue_title(node: ObjectiveNode, *, max_len: int = 120) -> str:
+    """The node-issue title: ``"{id}: {slug}"`` when the node has a slug, else ``"{id}: "`` + the
+    description truncated to ``max_len`` characters (with a ``"…"`` ellipsis when it was longer)."""
+    if node.slug:
+        return f"{node.id}: {node.slug}"
+    description = node.description
+    if len(description) > max_len:
+        description = description[:max_len] + "…"
+    return f"{node.id}: {description}"
 
 
 # --------------------------------------------------------------- mutation (explicit-status-only)
