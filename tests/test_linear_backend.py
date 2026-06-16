@@ -1718,14 +1718,20 @@ class TestLinearProjectOps:
     def test_project_issues_paginates(self) -> None:
         page1 = {
             "project": {
-                "issues": _page([{"id": "i-1", "identifier": "ENG-1"}], has_next=True, cursor="C")
+                "issues": _page(
+                    [{"id": "i-1", "identifier": "ENG-1", "description": "body-1"}],
+                    has_next=True,
+                    cursor="C",
+                )
             }
         }
-        page2 = {"project": {"issues": _page([{"id": "i-2", "identifier": "ENG-2"}])}}
+        page2 = {
+            "project": {"issues": _page([{"id": "i-2", "identifier": "ENG-2", "description": ""}])}
+        }
         ops, _ = _make_project_ops({"issues(first": [page1, page2]})
         assert ops.project_issues("p-1") == [
-            {"id": "i-1", "identifier": "ENG-1"},
-            {"id": "i-2", "identifier": "ENG-2"},
+            {"id": "i-1", "identifier": "ENG-1", "description": "body-1"},
+            {"id": "i-2", "identifier": "ENG-2", "description": ""},
         ]
 
     def test_create_project_milestone_returns_id(self) -> None:
@@ -1915,10 +1921,13 @@ class TestLinearProjectOps:
 
 def _make_project_store(
     responses: dict[str, list[object]] | None = None,
-) -> tuple[linear_backend.LinearProjectObjectiveStore, _FakeLinear]:
-    """Construct the dormant project-backed objective store over a fake `LinearClient`."""
+) -> tuple[objective_store.ObjectiveStore, _FakeLinear]:
+    """Construct the project-backed objective store over a fake `LinearClient`. The explicit
+    ``ObjectiveStore`` annotation is the static conformance binding (Node 3.3): ty fails the suite
+    if ``LinearProjectObjectiveStore`` drifts from the protocol — the twin of ``_make_store`` for
+    the issue-backed ``LinearObjectiveStore``."""
     fake = _FakeLinear(responses)
-    store = linear_backend.LinearProjectObjectiveStore(
+    store: objective_store.ObjectiveStore = linear_backend.LinearProjectObjectiveStore(
         fake, team_key="ENG", repo_root=Path("/repo")
     )
     return store, fake
@@ -1976,6 +1985,73 @@ def _store_nodes() -> list[objective.ObjectiveNode]:
 
 
 _STORE_BODY = "Objective prose here.\n\n### Phase 1: Foundations\n\n### Phase 2: Build\n"
+
+# A team-states response that includes a `started` state (the workflow-state mirror target). The
+# module-level `_STATES_RESPONSE` deliberately has none, so node 3.3 needs its own fixture.
+_STATES_WITH_STARTED: dict[str, object] = {
+    "team": {
+        "states": {
+            "nodes": [
+                {"id": "state-todo", "name": "Todo", "type": "unstarted", "position": 1},
+                {"id": "state-doing", "name": "In Progress", "type": "started", "position": 2},
+                {"id": "state-done", "name": "Done", "type": "completed", "position": 3},
+            ]
+        }
+    }
+}
+
+
+def _node_block_desc(node: objective.ObjectiveNode, *, pr: str | None = None) -> str:
+    """A node-issue description: the inline-code ``objective-node`` block, optionally a
+    ``plan-header`` block carrying ``pr`` (the Node 3.4 backlink), then the prose description."""
+    parts = [
+        plan.render_metadata_block(
+            objective.OBJECTIVE_NODE_KEY,
+            objective.render_node_block(node),
+            style="inline-code",
+        )
+    ]
+    if pr is not None:
+        parts.append(
+            plan.render_metadata_block(plan.PLAN_HEADER_KEY, {"pr": pr}, style="inline-code")
+        )
+    parts.append(node.description)
+    return "\n\n".join(parts)
+
+
+def _node_issue(
+    node: objective.ObjectiveNode, *, uuid: str, identifier: str, pr: str | None = None
+) -> dict[str, object]:
+    """A ``project_issues`` node-issue row (id/identifier/description)."""
+    return {"id": uuid, "identifier": identifier, "description": _node_block_desc(node, pr=pr)}
+
+
+def _blocked_by(*identifiers: str) -> dict[str, object]:
+    """An ``issue_blocked_by`` (``inverseRelations``) response listing blocker identifiers."""
+    return {
+        "issue": {
+            "inverseRelations": _page(
+                [{"type": "blocks", "issue": {"identifier": i}} for i in identifiers]
+            )
+        }
+    }
+
+
+def _overview_with_region(run_id: str, prose: str) -> str:
+    """A project overview carrying the inline-code header + a Reconcilable region (the create-path
+    encoding: HTML markers transcoded to inline-code sentinels)."""
+    header = objective.ObjectiveHeader(
+        run_id=run_id, created="t", objective_comment_id=None, status="active"
+    )
+    header_block = plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+    )
+    reconcilable = (
+        f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
+        f"{prose}\n"
+        f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
+    )
+    return to_linear_markdown(f"{header_block}\n\n{reconcilable}\n")
 
 
 class TestLinearProjectObjectiveStore:
@@ -2157,3 +2233,317 @@ class TestLinearProjectObjectiveStore:
             id="proj-2", url="p/2", existed=True
         )
         assert len(_queries(fake, "projects(first")) == 2
+
+    # ----------------------------------------------------------------- get_objective
+
+    def test_get_objective_happy_path(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="Alpha", status=N.PENDING, slug="a")
+        n12 = objective.ObjectiveNode(id="1.2", description="Beta", status=N.PLANNING, slug="b")
+        n21 = objective.ObjectiveNode(id="2.1", description="Gamma", status=N.DONE, slug="g")
+        # Scrambled connection order: 2.1, 1.1, 1.2 (never returned in this order).
+        issues_page = _page(
+            [
+                _node_issue(n21, uuid="i-21", identifier="ENG-21"),
+                _node_issue(n11, uuid="i-11", identifier="ENG-11"),
+                _node_issue(n12, uuid="i-12", identifier="ENG-12"),
+            ]
+        )
+        # `issues(first` is registered BEFORE `project(id`: the project_issues query contains both
+        # substrings, and the fake matches the first-inserted needle.
+        store, _ = _make_project_store(
+            {
+                "issues(first": [{"project": {"issues": issues_page}}],
+                # inverseRelations pops in parsed (== connection) order: 2.1, 1.1, 1.2.
+                "inverseRelations(": [
+                    _blocked_by("ENG-12"),  # 2.1 blocked by 1.2
+                    _blocked_by(),  # 1.1 blocked by nothing
+                    _blocked_by("ENG-11"),  # 1.2 blocked by 1.1
+                ],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "p/url",
+                            "name": "Big Objective",
+                            "content": _overview_for("01RUN"),
+                        }
+                    }
+                ],
+            }
+        )
+        state = store.get_objective(objective_id="proj-1")
+        assert state is not None
+        assert state.id == "proj-1"
+        assert state.url == "p/url"
+        assert state.title == "Big Objective"
+        assert state.header.get("run_id") == "01RUN"
+        # Sorted by node_sort_key (never the scrambled connection order).
+        assert [n.id for n in state.nodes] == ["1.1", "1.2", "2.1"]
+        assert [n.status for n in state.nodes] == [N.PENDING, N.PLANNING, N.DONE]
+        assert [n.depends_on for n in state.nodes] == [None, ("1.1",), ("1.2",)]
+
+    def test_get_objective_pr_from_plan_header(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="Alpha", status=N.IN_PROGRESS)
+        n12 = objective.ObjectiveNode(id="1.2", description="Beta", status=N.PENDING)
+        store, _ = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    _node_issue(n11, uuid="i-11", identifier="ENG-11", pr="#42"),
+                                    _node_issue(n12, uuid="i-12", identifier="ENG-12"),
+                                ]
+                            )
+                        }
+                    }
+                ],
+                "inverseRelations(": [_blocked_by(), _blocked_by()],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
+                ],
+            }
+        )
+        state = store.get_objective(objective_id="proj-1")
+        assert state is not None
+        by_id = {n.id: n for n in state.nodes}
+        assert by_id["1.1"].pr == "#42"
+        assert by_id["1.2"].pr is None
+
+    def test_get_objective_skips_foreign_issues(self) -> None:
+        N = objective.NodeStatus
+        n11 = objective.ObjectiveNode(id="1.1", description="Alpha", status=N.PENDING)
+        store, fake = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    _node_issue(n11, uuid="i-11", identifier="ENG-11"),
+                                    # a foreign/human-added project issue (no objective-node block)
+                                    {
+                                        "id": "i-99",
+                                        "identifier": "ENG-99",
+                                        "description": "just a normal issue",
+                                    },
+                                ]
+                            )
+                        }
+                    }
+                ],
+                "inverseRelations(": [_blocked_by()],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
+                ],
+            }
+        )
+        state = store.get_objective(objective_id="proj-1")
+        assert state is not None
+        assert [n.id for n in state.nodes] == ["1.1"]
+        # The foreign issue's blockers are never queried (only one inverseRelations call).
+        assert len(_queries(fake, "inverseRelations(")) == 1
+
+    def test_get_objective_absent_project_is_none(self) -> None:
+        store, _ = _make_project_store({"project(id": [_project_not_found()]})
+        assert store.get_objective(objective_id="p-gone") is None
+
+    def test_get_objective_malformed_node_raises(self) -> None:
+        # An objective-node block missing `status` (rendered by hand to dodge the typed builder).
+        bad_block = plan.render_metadata_block(
+            objective.OBJECTIVE_NODE_KEY, {"id": "1.1", "description": "x"}, style="inline-code"
+        )
+        store, _ = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [{"id": "i-1", "identifier": "ENG-1", "description": bad_block}]
+                            )
+                        }
+                    }
+                ],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": ""}}
+                ],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="invalid objective node"):
+            store.get_objective(objective_id="proj-1")
+
+    # ----------------------------------------------------------------- update_objective_node
+
+    def _node_issue_responses(
+        self, node: objective.ObjectiveNode, *, uuid: str = "i-1", identifier: str = "ENG-1"
+    ) -> dict[str, list[object]]:
+        issue = _node_issue(node, uuid=uuid, identifier=identifier)
+        return {
+            "issues(first": [{"project": {"issues": _page([issue])}}],
+            "UuidForIssue": [{"issue": {"id": uuid}}],
+        }
+
+    def test_update_objective_node_status_and_mirror(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="a"
+        )
+        responses = self._node_issue_responses(node)
+        responses["issueUpdate("] = [
+            {"issueUpdate": {"success": True}},
+            {"issueUpdate": {"success": True}},
+        ]
+        responses["teams(filter"] = [_TEAM_RESPONSE]
+        responses["team(id"] = [_STATES_WITH_STARTED]
+        store, fake = _make_project_store(responses)
+        result = store.update_objective_node(
+            objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
+        )
+        assert result == objective_store.ObjectiveNodeUpdate(
+            objective_id="proj-1", node_id="1.1", comment_updated=False, dry_run=False
+        )
+        updates = [_input_payload(v) for _, v in _queries(fake, "issueUpdate(")]
+        # (1) the authoritative description write re-renders the node block with the new status
+        desc = cast("str", updates[0]["description"])
+        block = plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY)
+        assert block is not None
+        assert block["status"] == "in_progress"
+        assert "<!--" not in desc  # form preserved: inline-code, no HTML markers
+        # (2) the best-effort workflow-state mirror sets the mapped `started` state
+        assert updates[1] == {"stateId": "state-doing"}
+
+    def test_update_objective_node_mirror_fail_open(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        responses = self._node_issue_responses(node)
+        # The description write succeeds; the stateId mirror write fails — swallowed.
+        responses["issueUpdate("] = [
+            {"issueUpdate": {"success": True}},
+            {"issueUpdate": {"success": False}},
+        ]
+        responses["teams(filter"] = [_TEAM_RESPONSE]
+        responses["team(id"] = [_STATES_WITH_STARTED]
+        store, fake = _make_project_store(responses)
+        result = store.update_objective_node(
+            objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
+        )
+        # No raise; the description write is committed.
+        assert result.dry_run is False
+        assert len(_queries(fake, "issueUpdate(")) == 2
+
+    def test_update_objective_node_pr_not_written_to_block(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        responses = self._node_issue_responses(node)
+        responses["issueUpdate("] = [{"issueUpdate": {"success": True}}]
+        store, fake = _make_project_store(responses)
+        store.update_objective_node(objective_id="proj-1", node_id="1.1", pr="#7")
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        desc = cast("str", _input_payload(variables)["description"])
+        block = plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY)
+        assert block is not None
+        assert "pr" not in block  # render_node_block excludes pr; the backlink lives in plan-header
+
+    def test_update_objective_node_not_found_raises(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        issue = _node_issue(node, uuid="i-1", identifier="ENG-1")
+        store, _ = _make_project_store({"issues(first": [{"project": {"issues": _page([issue])}}]})
+        with pytest.raises(ObjectiveStoreError, match=r"objective node '9.9' not found"):
+            store.update_objective_node(objective_id="proj-1", node_id="9.9")
+
+    def test_update_objective_node_dry_run_writes_nothing(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        issue = _node_issue(node, uuid="i-1", identifier="ENG-1")
+        store, fake = _make_project_store(
+            {"issues(first": [{"project": {"issues": _page([issue])}}]}
+        )
+        result = store.update_objective_node(
+            objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.DONE, dry_run=True
+        )
+        assert result.dry_run is True
+        assert not _queries(fake, "issueUpdate(")
+
+    # ----------------------------------------------------------------- update_objective_body
+
+    def test_update_objective_body_splices_overview(self) -> None:
+        overview = _overview_with_region("01RUN", "old prose")
+        store, fake = _make_project_store(
+            {
+                "project(id": [{"project": {"content": overview}}],
+                "projectUpdate(": [{"projectUpdate": {"success": True}}],
+            }
+        )
+        result = store.update_objective_body(objective_id="proj-1", prose="new prose")
+        assert result == objective_store.ObjectiveBodyUpdate(
+            objective_id="proj-1", comment_id=None, updated=True, dry_run=False
+        )
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        content = cast("str", _input_payload(variables)["content"])
+        assert "new prose" in content
+        assert "old prose" not in content
+        assert "perk:objective-reconcilable" in content  # region markers preserved (inline-code)
+        assert "<!--" not in content
+
+    def test_update_objective_body_no_region_raises(self) -> None:
+        store, _ = _make_project_store(
+            {"project(id": [{"project": {"content": _overview_for("01RUN")}}]}
+        )
+        with pytest.raises(ObjectiveStoreError, match="no reconcilable region"):
+            store.update_objective_body(objective_id="proj-1", prose="x")
+
+    def test_update_objective_body_absent_project_raises(self) -> None:
+        store, _ = _make_project_store({"project(id": [_project_not_found()]})
+        with pytest.raises(ObjectiveStoreError, match="not found"):
+            store.update_objective_body(objective_id="p-gone", prose="x")
+
+    def test_update_objective_body_dry_run_writes_nothing(self) -> None:
+        overview = _overview_with_region("01RUN", "old prose")
+        store, fake = _make_project_store({"project(id": [{"project": {"content": overview}}]})
+        result = store.update_objective_body(objective_id="proj-1", prose="new prose", dry_run=True)
+        assert result.dry_run is True
+        assert not _queries(fake, "projectUpdate(")
+
+    # ----------------------------------------------------------------- update_objective_header
+
+    def test_update_objective_header_merges_field(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "project(id": [{"project": {"content": _overview_for("01RUN")}}],
+                "projectUpdate(": [{"projectUpdate": {"success": True}}],
+            }
+        )
+        result = store.update_objective_header(objective_id="proj-1", fields={"status": "done"})
+        assert result == objective_store.ObjectiveHeaderUpdate(
+            fields_updated=("status",), dry_run=False
+        )
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        content = cast("str", _input_payload(variables)["content"])
+        header = plan.find_metadata_block(content, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None
+        assert header["status"] == "done"
+        assert header["run_id"] == "01RUN"  # existing fields preserved
+
+    def test_update_objective_header_unknown_field_raises(self) -> None:
+        store, _ = _make_project_store(
+            {"project(id": [{"project": {"content": _overview_for("01RUN")}}]}
+        )
+        with pytest.raises(ObjectiveStoreError, match="unknown objective-header field"):
+            store.update_objective_header(objective_id="proj-1", fields={"bogus": 1})
+
+    def test_update_objective_header_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_project_store(
+            {"project(id": [{"project": {"content": _overview_for("01RUN")}}]}
+        )
+        result = store.update_objective_header(
+            objective_id="proj-1", fields={"status": "done"}, dry_run=True
+        )
+        assert result.dry_run is True
+        assert not _queries(fake, "projectUpdate(")

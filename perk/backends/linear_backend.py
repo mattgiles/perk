@@ -51,7 +51,7 @@ Explicit deferrals (flagged, not silently omitted):
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -78,6 +78,19 @@ _PERK_MARKER_RE = re.compile(r"<!--\s*(/?perk:[^>]+?)\s*-->")
 # The exact perk-rendered `<details>` wrapper shapes (perk.plan's html-style renderers).
 _DETAILS_OPEN_RE = re.compile(r"^<details><summary><code>[^<]*</code></summary>$")
 _DETAILS_CLOSE = "</details>"
+
+# The best-effort node-status → Linear workflow-state `type` mirror (Node 3.3). The status block
+# is the source of truth; this mirror only nudges the node-issue's workflow state to match (so the
+# project board reflects the roadmap). `blocked` has no Linear equivalent — mapped to `started`
+# (it is in-flight work, just stuck).
+_NODE_STATUS_STATE_TYPE: dict[str, str] = {
+    "pending": "unstarted",
+    "planning": "started",
+    "in_progress": "started",
+    "done": "completed",
+    "blocked": "started",
+    "skipped": "canceled",
+}
 
 
 def to_linear_markdown(text: str) -> str:
@@ -120,6 +133,8 @@ class _LinearIssueOps:
         # Public: the PR-tier ``github.get_pr`` call in ``LinearIssueBackend.get_plan`` reads it.
         self.repo_root = repo_root
         self._done_state_id_cache: str | None = None
+        # type -> lowest-position state id of that type (the Node 3.3 workflow-state mirror).
+        self._states_by_type: dict[str, str] | None = None
         self._label_ids: dict[str, str] = {}
 
     # ------------------------------------------------------------------ internal helpers
@@ -153,6 +168,43 @@ class _LinearIssueOps:
             )
         self._done_state_id_cache = min(completed)[1]
         return self._done_state_id_cache
+
+    def _workflow_state_id(self, state_type: str) -> str | None:
+        """The team's lowest-position workflow state of ``state_type`` (e.g. ``"started"``), or
+        ``None`` when the team has no state of that type. Fetches every team state once (the same
+        ``team { states { nodes { id name type position } } }`` query as :meth:`_done_state_id`)
+        and caches a type → lowest-position-id map. Kept independent of ``_done_state_id`` (its own
+        cache) to leave the learn-close path byte-stable.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** the workflow-state mirror is not yet
+        live-proven — covered offline here.
+        """
+        if self._states_by_type is None:
+            query = (
+                "query($teamId: String!) { team(id: $teamId) "
+                "{ states { nodes { id name type position } } } }"
+            )
+            data = self._client.request(query, {"teamId": self._client.team_id(self._team_key)})
+            team = _require_dict(data.get("team"), "team")
+            states = _require_dict(team.get("states"), "team.states")
+            nodes = _require_list(states.get("nodes"), "team.states.nodes")
+            lowest: dict[str, tuple[float, str]] = {}
+            for raw in nodes:
+                node = _require_dict(raw, "workflow state")
+                node_type = node.get("type")
+                if not isinstance(node_type, str):
+                    continue
+                position = node.get("position")
+                if not isinstance(position, int | float):
+                    raise IssueBackendError(
+                        f"unexpected Linear payload shape (state position): {position!r}"
+                    )
+                state_id = _require_str(node.get("id"), "state id")
+                current = lowest.get(node_type)
+                if current is None or float(position) < current[0]:
+                    lowest[node_type] = (float(position), state_id)
+            self._states_by_type = {key: value[1] for key, value in lowest.items()}
+        return self._states_by_type.get(state_type)
 
     def _issue_or_none(self, issue_id: str, selection: str) -> dict[str, object] | None:
         """Fetch one issue by id; ``None`` when Linear reports the entity missing.
@@ -498,20 +550,26 @@ class _LinearProjectOps:
         ]
 
     def project_issues(self, project_id: str) -> list[dict[str, object]]:
-        """All issues attached to a project, as ``[{id, identifier}, …]`` (paginated)."""
+        """All issues attached to a project, as ``[{id, identifier, description}, …]`` (paginated).
+        ``description`` may be ``""`` — one query then yields every node-issue body for the read
+        path (``get_objective``)."""
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id identifier } pageInfo { hasNextPage endCursor } } } }"
+            "{ nodes { id identifier description } pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
-        return [
-            {
-                "id": _require_str(node.get("id"), "issue id"),
-                "identifier": _require_str(node.get("identifier"), "issue identifier"),
-            }
-            for node in nodes
-        ]
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            description = node.get("description")
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "description": description if isinstance(description, str) else "",
+                }
+            )
+        return result
 
     def list_projects(self) -> list[dict[str, object]]:
         """All of the team's projects, as ``[{id, url, content}, …]`` (``content`` may be
@@ -1191,18 +1249,25 @@ class LinearObjectiveStore:
 # and explicit `depends_on` edges as blocking relations. The roadmap is derived live from the
 # node-issues — it is NOT stored in the overview.
 #
-# This node implements ONLY `find_objective` + `create_objective`; `get_objective`/`update_*` are
-# deferred to Node 3.3, so the class is intentionally NOT annotated as an `ObjectiveStore` yet and
-# is NOT resolver-wired (dormant — no production caller). One shared `client` gives both owned op
-# classes a single shared `_team_id_cache`/`_uuid_cache` (the single-shared-cache property, now via
-# the client). Every method body wraps in `_translate_objective()` (IssueBackendError →
-# ObjectiveStoreError, verbatim).
+# Node 3.2 implemented `find_objective` + `create_objective`; Node 3.3 completes the contract with
+# `get_objective` + the three `update_*` methods, so the store now satisfies the full
+# `ObjectiveStore` protocol (conformance binding in the tests). Still dormant — NOT resolver-wired
+# (that is Node 3.4). One shared `client` gives both owned op classes a single shared
+# `_team_id_cache`/`_uuid_cache` (the single-shared-cache property, now via the client). Every
+# method body wraps in `_translate_objective()` (IssueBackendError → ObjectiveStoreError, verbatim).
+#
+# Read model (`get_objective`): the roadmap is derived live from the project's node-issues — each
+# carries an `objective-node` block (id/status/description + optional slug/comment; NO
+# pr/depends_on) and, once Node 3.4 writes it, a `plan-header` block whose `pr` field is the plan
+# backlink. `depends_on` is reconstructed from blocking relations (`issue_blocked_by`). The
+# overview holds the `objective-header` block + the Reconcilable prose region.
 # ===========================================================================
 
 
 class LinearProjectObjectiveStore:
-    """A project-backed ``ObjectiveStore`` over Linear Projects (Node 3.2 — ``find`` + ``create``
-    only; reads/updates deferred to Node 3.3). Dormant: not resolver-wired."""
+    """A project-backed ``ObjectiveStore`` over Linear Projects — the full contract (Node 3.2
+    ``find`` + ``create``; Node 3.3 ``get`` + the three ``update_*`` methods). Dormant: not
+    resolver-wired (Node 3.4)."""
 
     backend_id = "linear"
 
@@ -1332,6 +1397,236 @@ class LinearProjectObjectiveStore:
                     )
 
             return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
+
+    def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
+        """Reconstruct the objective state from the project + its node-issues. ``None`` when the
+        project is absent. The roadmap is derived live from the node-issues (never stored as a
+        block): each ``objective-node`` block gives id/status/description/slug/comment; ``pr`` is
+        read from the same node-issue's ``plan-header`` block (``None`` until Node 3.4 writes it);
+        ``depends_on`` is reconstructed from blocking relations. Nodes are returned sorted by
+        :func:`objective.node_sort_key` — never Linear's connection order.
+
+        Lossy round-trip (documented): an explicit ``depends_on=()`` is indistinguishable from
+        "no relation" and reads back as ``None`` (sequential inference then applies downstream).
+        """
+        with _translate_objective():
+            project = self._projects.project_or_none(objective_id, "id url name content")
+            if project is None:
+                return None
+            overview = project.get("content")
+            overview = overview if isinstance(overview, str) else ""
+            header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
+            issues = self._projects.project_issues(objective_id)
+
+            # First pass: build the (identifier, uuid, node) triples + the identifier->node-id map.
+            # Issues with no `objective-node` block are foreign (human/cross-project) and are never
+            # reinterpreted as roadmap nodes.
+            parsed: list[tuple[str, objective.ObjectiveNode]] = []
+            uuid_by_identifier: dict[str, str] = {}
+            identifier_to_node: dict[str, str] = {}
+            for issue in issues:
+                identifier = _require_str(issue.get("identifier"), "issue identifier")
+                description = issue.get("description")
+                body = description if isinstance(description, str) else ""
+                block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
+                if block is None:
+                    continue
+                node = self._node_from_block(block, identifier, body)
+                parsed.append((identifier, node))
+                uuid_by_identifier[identifier] = _require_str(issue.get("id"), "issue id")
+                identifier_to_node[identifier] = node.id
+
+            # Second pass: depends_on from blocking relations. Each blocker identifier maps back to
+            # its node id (foreign/cross-project blockers are dropped — they are not roadmap deps).
+            # An empty result reads back as `None` (sequential inference applies downstream).
+            resolved: list[objective.ObjectiveNode] = []
+            for identifier, node in parsed:
+                blockers = self._projects.issue_blocked_by(uuid_by_identifier[identifier])
+                dep_ids = [identifier_to_node[b] for b in blockers if b in identifier_to_node]
+                resolved.append(replace(node, depends_on=tuple(dep_ids) if dep_ids else None))
+
+            sorted_nodes = sorted(resolved, key=lambda n: objective.node_sort_key(n.id))
+            return objective_store.ObjectiveState(
+                id=objective_id,
+                url=_require_str(project.get("url"), "project url"),
+                title=_require_str(project.get("name"), "project name"),
+                header=header,
+                nodes=tuple(sorted_nodes),
+            )
+
+    @staticmethod
+    def _node_from_block(
+        block: dict[str, object], identifier: str, body: str
+    ) -> objective.ObjectiveNode:
+        """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` block. ``pr`` comes from the
+        same node-issue's ``plan-header`` block (``None`` until Node 3.4 writes it). A malformed
+        block (missing/invalid ``id``/``status``) raises ``IssueBackendError``."""
+        node_id = block.get("id")
+        status_raw = block.get("status")
+        if not isinstance(node_id, str) or not node_id:
+            raise IssueBackendError(f"invalid objective node on {identifier}: missing id")
+        if not isinstance(status_raw, str):
+            raise IssueBackendError(f"invalid objective node on {identifier}: missing status")
+        try:
+            status = objective.NodeStatus(status_raw)
+        except ValueError as exc:
+            raise IssueBackendError(
+                f"invalid objective node on {identifier}: bad status {status_raw!r}"
+            ) from exc
+        description = block.get("description")
+        slug = block.get("slug")
+        comment = block.get("comment")
+        # The plan backlink: the node-issue's own plan-header `pr` (Node 3.4 unification).
+        ph = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY)
+        pr_raw = ph.get("pr") if ph else None
+        pr = pr_raw if isinstance(pr_raw, str) and pr_raw else None
+        return objective.ObjectiveNode(
+            id=node_id,
+            description=description if isinstance(description, str) else "",
+            status=status,
+            pr=pr,
+            slug=slug if isinstance(slug, str) else None,
+            comment=comment if isinstance(comment, str) else None,
+        )
+
+    def update_objective_node(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        status: objective.NodeStatus | None = None,
+        pr: str | None = None,
+        description: str | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveNodeUpdate:
+        """Update one roadmap node-issue: re-render its ``objective-node`` block (authoritative,
+        form-preserving) and best-effort mirror the node status onto the issue's Linear workflow
+        state.
+
+        ``pr`` is intentionally NOT persisted to the node block — ``render_node_block`` excludes
+        ``pr``, and the backlink's single home is the node-issue's own ``plan-header`` (Node 3.4),
+        read back by :meth:`get_objective`. Passing ``pr`` here is a no-op on the stored block.
+
+        ``comment_updated`` is always ``False`` — the project model has no objective-body comment
+        table (the roadmap is derived from node-issues, not a rendered comment).
+        """
+        with _translate_objective():
+            issue_uuid: str | None = None
+            node_body = ""
+            block: dict[str, object] | None = None
+            for issue in self._projects.project_issues(objective_id):
+                description_raw = issue.get("description")
+                body = description_raw if isinstance(description_raw, str) else ""
+                candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
+                if candidate is not None and candidate.get("id") == node_id:
+                    issue_uuid = _require_str(issue.get("id"), "issue id")
+                    node_body = body
+                    block = candidate
+                    break
+            if issue_uuid is None or block is None:
+                raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
+
+            node = self._node_from_block(block, node_id, node_body)
+            updated = objective.update_node(
+                [node], node_id, status=status, pr=pr, description=description
+            )
+            assert updated is not None  # the match above guarantees the node exists
+            new_node = updated[0]
+
+            if dry_run:
+                return objective_store.ObjectiveNodeUpdate(
+                    objective_id=objective_id,
+                    node_id=node_id,
+                    comment_updated=False,
+                    dry_run=True,
+                )
+
+            # Authoritative write: re-render the `objective-node` block (form-preserving
+            # inline-code; `render_node_block` excludes `pr`, so a passed `pr` never lands).
+            new_body = plan.replace_metadata_block(
+                node_body, objective.OBJECTIVE_NODE_KEY, objective.render_node_block(new_node)
+            )
+            self._issue_ops._update_issue(
+                issue_uuid, {"description": new_body}, what="update objective node"
+            )
+
+            # Best-effort workflow-state mirror: nudge the issue's Linear state to match the new
+            # status. The status block is the source of truth — a missing state type or a Linear
+            # hiccup must never fail the node update (fail-open).
+            if status is not None:
+                try:
+                    state_type = _NODE_STATUS_STATE_TYPE.get(status.value)
+                    state_id = (
+                        self._issue_ops._workflow_state_id(state_type)
+                        if state_type is not None
+                        else None
+                    )
+                    if state_id is not None:
+                        self._issue_ops._update_issue(
+                            issue_uuid, {"stateId": state_id}, what="mirror node status"
+                        )
+                except IssueBackendError:
+                    pass
+
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=objective_id,
+                node_id=node_id,
+                comment_updated=False,
+                dry_run=False,
+            )
+
+    def update_objective_body(
+        self, *, objective_id: str, prose: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveBodyUpdate:
+        """Splice ``prose`` into the Reconcilable region of the project **overview** (form-
+        preserving). ``comment_id`` is always ``None`` — the overview is project ``content``, not a
+        comment."""
+        with _translate_objective():
+            project = self._projects.project_or_none(objective_id, "content")
+            if project is None:
+                raise IssueBackendError(f"objective {objective_id!r} not found")
+            overview = project.get("content")
+            overview = overview if isinstance(overview, str) else ""
+            spliced = objective.replace_reconcilable_section(overview, to_linear_markdown(prose))
+            if spliced is None:
+                raise IssueBackendError(
+                    f"objective {objective_id!r} overview has no reconcilable region"
+                )
+            if dry_run:
+                return objective_store.ObjectiveBodyUpdate(
+                    objective_id=objective_id, comment_id=None, updated=False, dry_run=True
+                )
+            self._projects.update_project_content(objective_id, spliced)
+            return objective_store.ObjectiveBodyUpdate(
+                objective_id=objective_id, comment_id=None, updated=True, dry_run=False
+            )
+
+    def update_objective_header(
+        self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> objective_store.ObjectiveHeaderUpdate:
+        """Merge ``fields`` into the overview's ``objective-header`` block (form-preserving).
+        Rejects keys outside ``objective.OBJECTIVE_HEADER_FIELDS`` (LBYL)."""
+        with _translate_objective():
+            unknown = set(fields) - objective.OBJECTIVE_HEADER_FIELDS
+            if unknown:
+                raise IssueBackendError(f"unknown objective-header field(s): {sorted(unknown)}")
+            project = self._projects.project_or_none(objective_id, "content")
+            if project is None:
+                raise IssueBackendError(f"objective {objective_id!r} not found")
+            overview = project.get("content")
+            overview = overview if isinstance(overview, str) else ""
+            header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
+            new_overview = plan.replace_metadata_block(
+                overview, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
+            )
+            if dry_run:
+                return objective_store.ObjectiveHeaderUpdate(
+                    fields_updated=tuple(fields), dry_run=True
+                )
+            self._projects.update_project_content(objective_id, new_overview)
+            return objective_store.ObjectiveHeaderUpdate(
+                fields_updated=tuple(fields), dry_run=False
+            )
 
 
 # ===========================================================================
