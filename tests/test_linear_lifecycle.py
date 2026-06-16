@@ -1121,3 +1121,96 @@ def test_doctor_fix_dry_run_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> N
         applied = [a["code"] for a in cast("list[dict[str, object]]", fix["applied"])]
         assert DriftCode.DELETED_PHASE_MILESTONE.value in applied
         assert ws.milestones == {}  # nothing written
+
+
+def test_repair_recreates_both_missing_nodes_and_their_edge_in_one_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Both endpoints of a manifest dependency edge are missing — detection raises no separate
+    # DEPENDENCY_MISSING action for them, so the recreate path owns the edge. The deferred edge
+    # sweep must restore it in a SINGLE --fix pass (no remaining drift).
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        for node in ("1.1", "1.2"):
+            victim = next(
+                iid
+                for iid, iss in ws.issues.items()
+                if (
+                    block := plan.find_metadata_block(
+                        str(iss["description"]), objective.OBJECTIVE_NODE_KEY
+                    )
+                )
+                is not None
+                and block.get("id") == node
+            )
+            del ws.issues[victim]
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        # one pass fully converges — both node-issues AND the 1.1→1.2 relation are restored
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_add_node_uses_manifest_pin_not_externally_edited_prose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The manifest is the phase-name authority for an EXISTING phase: an external overview edit
+    # must not make node-add attach to a different/new milestone.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)  # phase 1 pinned to the default "Phase 1"
+        # an external editor rewrites the phase header in the overview prose (manifest unchanged)
+        project = ws.project_by_id(obj_id)
+        project["content"] = str(project["content"]).replace(
+            "Prose.", "### Phase 1: Externally Renamed\n\nProse."
+        )
+        milestones_before = {m["name"] for m in ws.milestones.values()}
+
+        add_args = ["objective", "node-add", obj_id, "--phase", "1"]
+        _invoke(runner, [*add_args, "--description", "Node two", "--json"])
+        # no "Externally Renamed" milestone was minted — the node attached to the pinned one
+        assert "Externally Renamed" not in {m["name"] for m in ws.milestones.values()}
+        assert {m["name"] for m in ws.milestones.values()} == milestones_before
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None and manifest.phase_names["1"] == "Phase 1"
+
+
+def test_reconcile_reverts_pin_to_default_when_header_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The overview is the authority on a reconcile — removing a custom header reverts the pin to
+    # the default (never preserving a now-stale custom name).
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        store.update_objective_body(
+            objective_id=obj_id, prose="### Phase 1: Foundations\n\nReconciled."
+        )
+        custom = _manifest_of(ws, obj_id)
+        assert custom is not None and custom.phase_names["1"] == "Foundations"
+        # a later reconcile drops the header — the pin reverts to the default
+        store.update_objective_body(objective_id=obj_id, prose="Reconciled again, no header.")
+        reverted = _manifest_of(ws, obj_id)
+        assert reverted is not None and reverted.phase_names["1"] == "Phase 1"

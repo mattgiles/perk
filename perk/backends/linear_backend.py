@@ -2031,15 +2031,24 @@ class LinearProjectObjectiveStore:
                     objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=True
                 )
 
-            # Resolve (or mint) the phase milestone by its enriched name (`known=None` lists the
-            # project's milestones once — the seam's add-node branch).
+            # Resolve (or mint) the phase milestone by name (`known=None` lists the project's
+            # milestones once — the seam's add-node branch). Once a manifest exists,
+            # `manifest.phase_names` is the phase-name AUTHORITY for an existing phase (a node-add
+            # must never re-derive a different name from externally-edited overview prose, which
+            # would attach the node to a wrong/new milestone while the manifest stays pinned to the
+            # old one); `enrich_phase_names` only SEEDS the name for a brand-new phase.
             project = self._projects.project_or_none(objective_id, "content")
             overview = project.get("content") if project is not None else ""
             overview = overview if isinstance(overview, str) else ""
             phase_key = objective.derive_phase(new_id)
-            names = objective.enrich_phase_names(overview, [phase_key])
+            manifest, _manifest_errors = objective.parse_manifest(overview)
+            phase_key_str = objective.phase_key_str(new_id)
+            if manifest is not None and phase_key_str in manifest.phase_names:
+                milestone_name = manifest.phase_names[phase_key_str]
+            else:
+                milestone_name = objective.enrich_phase_names(overview, [phase_key])[phase_key]
             milestone_id = self._projects.ensure_phase_milestone(
-                project_id=objective_id, name=names[phase_key], known=None
+                project_id=objective_id, name=milestone_name, known=None
             )
 
             # Materialize the single node-issue (objective-node block + prose), inline-code.
@@ -2146,9 +2155,12 @@ class LinearProjectObjectiveStore:
         self._projects.update_project_content(objective_id, new_overview)
 
     def _refresh_manifest_phase_pins(self, overview: str) -> str:
-        """Refresh the manifest's `phases` pins from the overview's `### Phase N:` headers, only
-        overriding a pin when a header actually supplied a name (never clobbering with the default).
-        Returns the (possibly-rewritten) overview; a no-op when no manifest block exists."""
+        """Refresh the manifest's `phases` pins to MATCH the spliced overview's `### Phase N:`
+        headers — the overview is the authority on a reconcile, so a pin tracks exactly what
+        `enrich_phase_names` derives, including **reverting to the `Phase N` default** when a
+        reconcile removed (or defaulted) a phase header (never preserving a now-stale custom name).
+        Returns the (possibly-rewritten) overview; a no-op when no manifest block exists or nothing
+        changed."""
         manifest, _errors = objective.parse_manifest(overview)
         if manifest is None:
             return overview
@@ -2156,8 +2168,7 @@ class LinearProjectObjectiveStore:
         found = objective.enrich_phase_names(overview, keys)
         new_phase_names = dict(manifest.phase_names)
         for key in keys:
-            if found[key] != objective.phase_label(key):
-                new_phase_names[f"{key[0]}{key[1]}"] = found[key]
+            new_phase_names[f"{key[0]}{key[1]}"] = found[key]
         if new_phase_names == manifest.phase_names:
             return overview
         data = objective.render_manifest_block(list(manifest.nodes), new_phase_names)
@@ -2308,14 +2319,30 @@ class LinearProjectObjectiveStore:
             failed: objective_store.RepairAction | None = None
             aborted = False
             created_uuid: dict[str, str] = {}
+            # A recreated node's OWN manifest depends_on edges are DEFERRED to a second sweep so
+            # that every missing node-issue exists before any edge is restored (the manifest may
+            # declare an edge between two simultaneously-missing nodes in either id direction;
+            # detection never raises a separate DEPENDENCY_MISSING action for those, so the
+            # recreate path owns the edge). Endpoints are resolvable by the drain, never skipped.
+            deferred_edges: list[tuple[str, str]] = []
             for cond in ordered:
                 try:
-                    self._apply_repair(objective_id, snapshot, cond, created_uuid)
+                    self._apply_repair(objective_id, snapshot, cond, created_uuid, deferred_edges)
                 except IssueBackendError as exc:
                     failed = objective_store.RepairAction(cond.code, cond.node_id, str(exc))
                     aborted = True
                     break
                 applied.append(objective_store.RepairAction(cond.code, cond.node_id))
+            if not aborted:
+                for node_id, dep in deferred_edges:
+                    try:
+                        self._restore_manifest_edge(objective_id, node_id, dep, created_uuid)
+                    except IssueBackendError as exc:
+                        failed = objective_store.RepairAction(
+                            objective_drift.DriftCode.MISSING_NODE_ISSUE, node_id, str(exc)
+                        )
+                        aborted = True
+                        break
             remaining = objective_drift.detect_drift(
                 self._build_observed_snapshot(objective_id)
             ).conditions
@@ -2333,6 +2360,7 @@ class LinearProjectObjectiveStore:
         snapshot: objective_drift.ObservedSnapshot,
         cond: objective_drift.DriftCondition,
         created_uuid: dict[str, str],
+        deferred_edges: list[tuple[str, str]],
     ) -> None:
         """Dispatch one repairable condition to its writer (backfill is the no-manifest case)."""
         code = cond.code
@@ -2344,7 +2372,7 @@ class LinearProjectObjectiveStore:
         if code is objective_drift.DriftCode.DELETED_PHASE_MILESTONE:
             self._repair_deleted_milestone(objective_id, snapshot, manifest, cond)
         elif code is objective_drift.DriftCode.MISSING_NODE_ISSUE:
-            self._repair_missing_node(objective_id, manifest, cond, created_uuid)
+            self._repair_missing_node(objective_id, manifest, cond, created_uuid, deferred_edges)
         elif code is objective_drift.DriftCode.DEPENDENCY_MISSING_IN_LINEAR:
             self._repair_missing_dependency(objective_id, cond, created_uuid)
 
@@ -2382,15 +2410,30 @@ class LinearProjectObjectiveStore:
                         issue_id=obs.identifier, milestone_id=milestone_id
                     )
 
+    def _restore_manifest_edge(
+        self, objective_id: str, node_id: str, dep: str, created_uuid: dict[str, str]
+    ) -> None:
+        """Create a recreated node's manifest blocking relation (dep BLOCKS node), failing loud if
+        either endpoint is still unresolvable (every endpoint exists by the time the drain runs)."""
+        node_uuid = self._resolve_node_uuid(objective_id, node_id, created_uuid)
+        dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
+        if node_uuid is None or dep_uuid is None:
+            raise IssueBackendError(
+                f"cannot restore manifest edge {dep}→{node_id}: node-issue not found"
+            )
+        self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=node_uuid)
+
     def _repair_missing_node(
         self,
         objective_id: str,
         manifest: objective.Manifest,
         cond: objective_drift.DriftCondition,
         created_uuid: dict[str, str],
+        deferred_edges: list[tuple[str, str]],
     ) -> None:
         """Recreate a missing node-issue from its manifest entry (block + prose, under its phase
-        milestone) and re-add its manifest ``depends_on`` blocking relations."""
+        milestone); DEFER its manifest ``depends_on`` blocking relations to the post-loop edge
+        sweep (so a dep that is itself a missing node is created before its edge is restored)."""
         node_id = cond.node_id
         entry = next((n for n in manifest.nodes if n.id == node_id), None)
         if entry is None or node_id is None:
@@ -2420,9 +2463,7 @@ class LinearProjectObjectiveStore:
         )
         created_uuid[node_id] = uuid
         for dep in entry.depends_on or ():
-            dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
-            if dep_uuid is not None:
-                self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=uuid)
+            deferred_edges.append((node_id, dep))
 
     def _repair_missing_dependency(
         self,

@@ -3254,7 +3254,11 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   issue → dependency (parents before edges), then by node id — and **fail loud**: the first failed
   Linear write stops the batch (`aborted=True`, the failing condition in `failed`); `applied` records
   what landed before the abort (durable + idempotent on re-run). A `dry_run` plans the would-apply
-  set without any write.
+  set without any write. A recreated node's **own** manifest `depends_on` edges are **deferred** to a
+  post-loop sweep so that *every* missing node-issue exists before any edge is restored (the manifest
+  may declare an edge between two simultaneously-missing nodes in either id direction, for which
+  detection raises no separate dependency action) — the recreate path owns those edges and the drain
+  fails loud on a genuinely unresolvable endpoint, never silently skips.
 - **Two new project ops** (`_LinearProjectOps`, **flagged not-live-proven** — verify at the Node 5.1
   gate): `project_issues_with_milestones` (a `project_issues` sibling joining each node-issue's
   `projectMilestone`) and `attach_issue_to_milestone` (the deleted-milestone reattach — bare
@@ -3262,12 +3266,17 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   **no `uuid_for`**, deleted in #622). A recreated missing node-issue uses `_create_issue_raw` to
   capture the UUID for the UUID-only `issueRelationCreate`.
 - **Manifest sync on the live write paths.** `create_objective` writes the manifest at create;
-  `add_objective_node` appends the new node's entry (pinning a brand-new phase's name);
+  `add_objective_node` appends the new node's entry (pinning a brand-new phase's name) and — because
+  **the manifest is the phase-name authority for an existing phase** — attaches the node to the
+  manifest-pinned milestone for an already-pinned phase (`enrich_phase_names` only seeds the name for
+  a brand-new phase, so an external overview edit can't divert the node to a wrong/new milestone);
   `update_objective_node` syncs a node's manifest **description** on a description change (a
   status/pr-only change does **not** touch it); `update_objective_body` (reconcile) refreshes the
-  `phases` pins from the spliced overview in the **same** write (only when a `### Phase N:` header
-  actually supplied a name — never clobbering a pin with the default). Every sync is a clean no-op on
-  a pre-manifest objective (no manifest block); `doctor --fix` backfill is the path that adopts one.
+  `phases` pins to **match** the spliced overview in the **same** write — the overview is the
+  authority on a reconcile, so a pin tracks exactly what `enrich_phase_names` derives, **including
+  reverting to the `Phase N` default** when a reconcile removed/defaulted a header (never preserving
+  a now-stale custom name). Every sync is a clean no-op on a pre-manifest objective (no manifest
+  block); `doctor --fix` backfill is the path that adopts one.
 - **The worker.** `perk objective doctor <id> [--fix] [--dry-run] [--json]` — detect-only by
   default; `--fix` applies the repairable repairs; `--dry-run` (with `--fix`) plans them. `--json`
   emits `{success, error_type, objective, drift: [condition…], fix: null | {applied, failed,
