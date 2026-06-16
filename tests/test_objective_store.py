@@ -177,6 +177,17 @@ class TestValueTypes:
         with pytest.raises(dataclasses.FrozenInstanceError):
             update.updated = False  # ty: ignore[invalid-assignment]
 
+    def test_objective_body_update_string_comment_id(self) -> None:
+        # Moved from tests/test_issue_backend.py with the objective tier's extraction (Node 2.2):
+        # the comment id is a string at the boundary (backend-owned opaque value).
+        update = objective_store.ObjectiveBodyUpdate(
+            objective_id="9", comment_id="123", updated=True, dry_run=False
+        )
+        assert update.objective_id == "9"
+        assert update.comment_id == "123"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            update.updated = False  # ty: ignore[invalid-assignment]
+
 
 class TestErrorType:
     def test_objective_store_error_is_raisable_exception(self) -> None:

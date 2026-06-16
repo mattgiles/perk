@@ -40,7 +40,6 @@ interface to one tier, not a 40-method monolith) shaped this surface.
 from dataclasses import dataclass
 from typing import Protocol
 
-from perk import objective
 from perk.github import PullRequest
 
 
@@ -123,49 +122,6 @@ class LearnIssueSummary:
     title: str
     url: str
     body: str
-
-
-@dataclass(frozen=True)
-class ObjectiveState:
-    """An objective's observable state: header + roadmap nodes (``perk objective show``)."""
-
-    id: str
-    url: str
-    title: str
-    header: dict[str, object]
-    nodes: tuple[objective.ObjectiveNode, ...]
-
-
-@dataclass(frozen=True)
-class ObjectiveHeaderUpdate:
-    """The result of a staged ``objective-header`` field write."""
-
-    fields_updated: tuple[str, ...]
-    dry_run: bool
-
-
-@dataclass(frozen=True)
-class ObjectiveNodeUpdate:
-    """The result of an ``update_objective_node`` write (roadmap + body comment re-rendered)."""
-
-    issue_id: str
-    node_id: str
-    comment_updated: bool
-    dry_run: bool
-
-
-@dataclass(frozen=True)
-class ObjectiveBodyUpdate:
-    """The result of an ``update_objective_body`` write (the Reconcilable prose splice).
-
-    ``comment_id`` is the backend-owned id of the objective-body comment (string at the
-    boundary), or None on a path that never resolved one.
-    """
-
-    issue_id: str
-    comment_id: str | None
-    updated: bool
-    dry_run: bool
 
 
 class IssueBackend(Protocol):
@@ -291,67 +247,4 @@ class IssueBackend(Protocol):
         ``marker`` (the caller's responsibility) so the next upsert can find it — lets a single
         comment evolve in place rather than spamming the issue. ``posted=False`` on a dry run;
         raises on an infra failure."""
-        ...
-
-    # --- objective issues ---
-
-    def find_objective_issue(self, *, run_id: str) -> IssueRef | None:
-        """Find the **open** objective issue whose objective-header ``run_id`` matches. None for
-        no match; raises on an infra failure."""
-        ...
-
-    def create_objective_issue(
-        self,
-        *,
-        title: str,
-        body: str,
-        run_id: str,
-        status: str = "active",
-        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
-        dry_run: bool = False,
-    ) -> IssueRef:
-        """Create the objective issue (the two-step create): compose + post the issue (header +
-        roadmap blocks), post the objective-body comment (rendered table + prose), then backfill
-        the comment id into the header. ``body`` is the authored objective prose; the roadmap
-        comes from ``roadmap_nodes`` when given (the structured path), else is parsed from
-        ``body``. Idempotent on ``run_id``. An empty roadmap raises (the storage backstop: no
-        surface may store a node-less objective)."""
-        ...
-
-    def get_objective(self, *, issue_id: str) -> ObjectiveState | None:
-        """Read an objective issue's state (header + roadmap nodes). None when absent; raises on
-        an infra failure."""
-        ...
-
-    def update_objective_header(
-        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
-    ) -> ObjectiveHeaderUpdate:
-        """Merge ``fields`` into the objective-header block and write it back. Rejects keys
-        outside ``objective.OBJECTIVE_HEADER_FIELDS`` (LBYL). A dry run validates + composes
-        only."""
-        ...
-
-    def update_objective_node(
-        self,
-        *,
-        issue_id: str,
-        node_id: str,
-        status: objective.NodeStatus | None = None,
-        pr: str | None = None,
-        description: str | None = None,
-        dry_run: bool = False,
-    ) -> ObjectiveNodeUpdate:
-        """Update one roadmap node (explicit-status-only): re-render the roadmap block
-        (authoritative) AND best-effort re-render the table in the objective-body comment (the
-        roadmap block is the source of truth). Raises when the node is not found or the roadmap
-        is invalid."""
-        ...
-
-    def update_objective_body(
-        self, *, issue_id: str, prose: str, dry_run: bool = False
-    ) -> ObjectiveBodyUpdate:
-        """Splice ``prose`` into the Reconcilable region of the objective-body comment (the
-        Mechanical table block and any Immutable notes are untouched). Raises when the objective
-        has no body comment or the comment lacks the Reconcilable region. A dry run composes
-        only."""
         ...

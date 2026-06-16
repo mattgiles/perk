@@ -17,8 +17,9 @@ from typing import Any
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, issues, objective_stores
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
@@ -278,7 +279,8 @@ def _run_impl(
     if not dry_run:
         require_github(ctx)
     backend = issues.resolve_issue_backend(repo_root)
-    state = backend.get_objective(issue_id=number)
+    store = objective_stores.resolve_objective_store(repo_root)
+    state = store.get_objective(objective_id=number)
     if state is None:
         raise UserFacingCliError(f"Objective #{number} not found", error_type="objective_not_found")
     graph = objective.build_graph(list(state.nodes))
@@ -313,7 +315,7 @@ def _run_impl(
             # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the
             # graph rather than classifying on the pre-poll snapshot.
             payload["budget"] = _cumulative_budget(repo_root, number)
-            state = backend.get_objective(issue_id=number)
+            state = store.get_objective(objective_id=number)
             if state is None:
                 raise UserFacingCliError(
                     f"Objective #{number} not found", error_type="objective_not_found"
@@ -417,7 +419,7 @@ def run_objective(
         payload = _run_impl(
             ctx, number=parse_objective_id(number), remote=remote, wait=wait, dry_run=dry_run
         )
-    except (GitHubError, IssueBackendError) as exc:
+    except (GitHubError, IssueBackendError, ObjectiveStoreError) as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

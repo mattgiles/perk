@@ -22,8 +22,8 @@ import json
 import click
 
 from perk import objective
-from perk.backends import issues
-from perk.backends.issue_backend import IssueBackendError
+from perk.backends import objective_stores
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -158,8 +158,8 @@ def plan_objective(
         if not dry_run:
             require_github(ctx)
 
-        backend = issues.resolve_issue_backend(repo_root)
-        state = backend.get_objective(issue_id=number)
+        store = objective_stores.resolve_objective_store(repo_root)
+        state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"
@@ -217,12 +217,12 @@ def plan_objective(
                 )
             )
         if not dry_run:
-            backend.update_objective_node(
-                issue_id=number,
+            store.update_objective_node(
+                objective_id=number,
                 node_id=node.id,
                 status=marked_status,
             )
-    except IssueBackendError as exc:
+    except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
     except UserFacingCliError as exc:

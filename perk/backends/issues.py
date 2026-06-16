@@ -32,7 +32,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import github, objective
+from perk import github
 from perk.backends import issue_backend, linear, linear_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.github import GitHubError
@@ -63,7 +63,7 @@ def _number(issue_id: str) -> int:
         raise IssueBackendError(f"GitHub issue ids are numeric; got {issue_id!r}") from exc
 
 
-def _issue_ref(found: github.PlanIssue | github.ObjectiveIssue) -> issue_backend.IssueRef:
+def _issue_ref(found: github.PlanIssue) -> issue_backend.IssueRef:
     return issue_backend.IssueRef(id=str(found.number), url=found.url, existed=found.existed)
 
 
@@ -230,104 +230,6 @@ class GitHubIssueBackend:
                 issue=number, marker=marker, body=body, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.CommentResult(posted=result.posted)
-
-    # --- objective issues ---
-
-    def find_objective_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        with _translate():
-            found = github.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
-        return None if found is None else _issue_ref(found)
-
-    def create_objective_issue(
-        self,
-        *,
-        title: str,
-        body: str,
-        run_id: str,
-        status: str = "active",
-        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
-        dry_run: bool = False,
-    ) -> issue_backend.IssueRef:
-        with _translate():
-            created = github.create_objective_issue(
-                title=title,
-                body=body,
-                repo_root=self._repo_root,
-                run_id=run_id,
-                status=status,
-                roadmap_nodes=roadmap_nodes,
-                dry_run=dry_run,
-            )
-        return _issue_ref(created)
-
-    def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
-        number = _number(issue_id)
-        with _translate():
-            state = github.get_objective(number=number, repo_root=self._repo_root)
-        if state is None:
-            return None
-        return issue_backend.ObjectiveState(
-            id=str(state.number),
-            url=state.url,
-            title=state.title,
-            header=state.header,
-            nodes=state.nodes,
-        )
-
-    def update_objective_header(
-        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
-    ) -> issue_backend.ObjectiveHeaderUpdate:
-        number = _number(issue_id)
-        with _translate():
-            updated = github.update_objective_header(
-                number=number, fields=fields, repo_root=self._repo_root, dry_run=dry_run
-            )
-        return issue_backend.ObjectiveHeaderUpdate(
-            fields_updated=updated.fields_updated, dry_run=updated.dry_run
-        )
-
-    def update_objective_node(
-        self,
-        *,
-        issue_id: str,
-        node_id: str,
-        status: objective.NodeStatus | None = None,
-        pr: str | None = None,
-        description: str | None = None,
-        dry_run: bool = False,
-    ) -> issue_backend.ObjectiveNodeUpdate:
-        number = _number(issue_id)
-        with _translate():
-            updated = github.update_objective_node(
-                number=number,
-                node_id=node_id,
-                status=status,
-                pr=pr,
-                description=description,
-                repo_root=self._repo_root,
-                dry_run=dry_run,
-            )
-        return issue_backend.ObjectiveNodeUpdate(
-            issue_id=str(updated.number),
-            node_id=updated.node_id,
-            comment_updated=updated.comment_updated,
-            dry_run=updated.dry_run,
-        )
-
-    def update_objective_body(
-        self, *, issue_id: str, prose: str, dry_run: bool = False
-    ) -> issue_backend.ObjectiveBodyUpdate:
-        number = _number(issue_id)
-        with _translate():
-            updated = github.update_objective_body(
-                number=number, prose=prose, repo_root=self._repo_root, dry_run=dry_run
-            )
-        return issue_backend.ObjectiveBodyUpdate(
-            issue_id=str(updated.number),
-            comment_id=None if updated.comment_id is None else str(updated.comment_id),
-            updated=updated.updated,
-            dry_run=updated.dry_run,
-        )
 
 
 def resolve_issue_backend_id(repo_root: Path) -> str:

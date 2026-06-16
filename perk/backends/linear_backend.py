@@ -49,14 +49,17 @@ Explicit deferrals (flagged, not silently omitted):
 """
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
 from perk import github, objective, plan
-from perk.backends import issue_backend
+from perk.backends import issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import LinearGraphQLError
+from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 
 _PAGE_SIZE = 50
@@ -133,22 +136,17 @@ def _is_entity_not_found(exc: LinearGraphQLError) -> bool:
     return _ENTITY_NOT_FOUND_CODE in exc.codes and "entity not found" in str(exc).lower()
 
 
-class LinearIssueBackend:
-    """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
-    human **identifiers** (``ENG-123``) as boundary issue ids (mutations resolve them to UUIDs
-    via the cached :meth:`_uuid_for`; comment ids stay UUIDs), Linear-safe-encoded bodies, and
-    the GitHub-twin behavior shapes for every plan/learn/label/comment op."""
-
-    # The `[issues] backend` vocabulary id — a module-level literal (never imported from the
-    # resolver module, which will import us at wiring time).
-    backend_id = "linear"
+class _LinearIssueOps:
+    """The shared Linear substrate (Node 2.2 facade refactor): the GraphQL client, the
+    constructor-bound team key, the caches, and every private issue-op helper. Both
+    ``LinearIssueBackend`` (the issue tier) and ``LinearObjectiveStore`` (the objective tier) own
+    one and delegate through it — a registered collaborator, not an inheritance base."""
 
     def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
-        # `repo_root` exists solely for the PR-tier `github.get_pr` call in `get_plan` —
-        # the PR tier is GitHub-universal for every backend (the protocol docstring).
         self._client = client
         self._team_key = team_key
-        self._repo_root = repo_root
+        # Public: the PR-tier ``github.get_pr`` call in ``LinearIssueBackend.get_plan`` reads it.
+        self.repo_root = repo_root
         self._team_id_cache: str | None = None
         self._done_state_id_cache: str | None = None
         self._label_ids: dict[str, str] = {}
@@ -481,6 +479,25 @@ class LinearIssueBackend:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
 
+
+class LinearIssueBackend:
+    """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
+    human **identifiers** (``ENG-123``) as boundary issue ids (mutations resolve them to UUIDs
+    via the cached :meth:`_LinearIssueOps._uuid_for`; comment ids stay UUIDs), Linear-safe-encoded
+    bodies, and the GitHub-twin behavior shapes for every plan/learn/label/comment op. A thin
+    facade over the shared :class:`_LinearIssueOps` substrate."""
+
+    # The `[issues] backend` vocabulary id — a module-level literal (never imported from the
+    # resolver module, which will import us at wiring time).
+    backend_id = "linear"
+
+    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+        # The shared substrate (caches + every issue-op helper), also owned by
+        # ``LinearObjectiveStore``. `repo_root` lives on `_ops` (the PR-tier `_get_pr` reads it).
+        self._ops = _LinearIssueOps(client, team_key=team_key, repo_root=repo_root)
+        # Re-exposed for the resolver tests that assert the bound team key.
+        self._team_key = team_key
+
     # ------------------------------------------------------------------ labels
 
     def ensure_label(
@@ -488,13 +505,13 @@ class LinearIssueBackend:
     ) -> issue_backend.Label:
         if dry_run:
             return issue_backend.Label(name=name, created=False)
-        _, created = self._ensure_label_id(name, color=color, description=description)
+        _, created = self._ops._ensure_label_id(name, color=color, description=description)
         return issue_backend.Label(name=name, created=created)
 
     # ------------------------------------------------------------------ plan issues
 
     def find_plan_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._find_issue_by_run_id(
+        return self._ops._find_issue_by_run_id(
             label=plan.PLAN_LABEL, header_key=plan.PLAN_HEADER_KEY, run_id=run_id
         )
 
@@ -507,12 +524,12 @@ class LinearIssueBackend:
             existing = self.find_plan_issue(run_id=run_id)
             if existing is not None:
                 return existing
-        label_id, _ = self._ensure_label_id(
+        label_id, _ = self._ops._ensure_label_id(
             plan.PLAN_LABEL,
             color=plan.PLAN_LABEL_COLOR,
             description=plan.PLAN_LABEL_DESCRIPTION,
         )
-        return self._create_issue(
+        return self._ops._create_issue(
             title=title, description=to_linear_markdown(body), label_id=label_id
         )
 
@@ -525,18 +542,18 @@ class LinearIssueBackend:
             )
         transcoded = to_linear_markdown(body_comment)
         comment_id: str | None = None
-        for comment in self._comments(issue_id):
+        for comment in self._ops._comments(issue_id):
             comment_body = comment.get("body")
             if isinstance(comment_body, str) and plan.extract_plan_body(comment_body) is not None:
                 comment_id = _require_str(comment.get("id"), "comment id")
                 break
         if comment_id is not None:
-            self._update_comment(comment_id, transcoded)
+            self._ops._update_comment(comment_id, transcoded)
             body_updated = True
         else:
-            self._create_comment(issue_id, transcoded)
+            self._ops._create_comment(issue_id, transcoded)
             body_updated = False
-        self._update_issue(issue_id, {"title": title}, what="update title")
+        self._ops._update_issue(issue_id, {"title": title}, what="update title")
         return issue_backend.PlanUpdate(
             issue_id=issue_id, body_updated=body_updated, title_updated=True, dry_run=False
         )
@@ -547,18 +564,20 @@ class LinearIssueBackend:
         unknown = set(fields) - plan.PLAN_HEADER_FIELDS
         if unknown:
             raise IssueBackendError(f"unknown plan-header field(s): {sorted(unknown)}")
-        issue = self._get_issue(issue_id, "id description")
+        issue = self._ops._get_issue(issue_id, "id description")
         description = issue.get("description")
         body = description if isinstance(description, str) else ""
         header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
         new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
         if dry_run:
             return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
-        self._update_issue(issue_id, {"description": new_body}, what="update plan-header")
+        self._ops._update_issue(issue_id, {"description": new_body}, what="update plan-header")
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
-        issue = self._issue_or_none(issue_id, "id identifier url title description state { type }")
+        issue = self._ops._issue_or_none(
+            issue_id, "id identifier url title description state { type }"
+        )
         if issue is None:
             return None
         description = issue.get("description")
@@ -585,19 +604,19 @@ class LinearIssueBackend:
         """The PR tier is GitHub-universal for every backend (the protocol docstring). Late-bound
         module-attribute access (the adapter discipline) so test monkeypatches keep working."""
         try:
-            return github.get_pr(number=number, repo_root=self._repo_root)
+            return github.get_pr(number=number, repo_root=self._ops.repo_root)
         except GitHubError as exc:
             raise IssueBackendError(str(exc)) from exc
 
     def get_plan_body(self, *, issue_id: str) -> str | None:
-        issue = self._issue_or_none(issue_id, "id description")
+        issue = self._ops._issue_or_none(issue_id, "id description")
         if issue is None:
             return None
         description = issue.get("description")
         candidates = [description if isinstance(description, str) else ""]
         candidates.extend(
             comment_body
-            for comment in self._comments(issue_id)
+            for comment in self._ops._comments(issue_id)
             if isinstance(comment_body := comment.get("body"), str)
         )
         for text in candidates:
@@ -609,7 +628,7 @@ class LinearIssueBackend:
     # ------------------------------------------------------------------ learn issues
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._find_issue_by_run_id(
+        return self._ops._find_issue_by_run_id(
             label=plan.LEARN_LABEL, header_key=plan.LEARN_HEADER_KEY, run_id=run_id
         )
 
@@ -622,7 +641,7 @@ class LinearIssueBackend:
             existing = self.find_learn_issue(run_id=run_id)
             if existing is not None:
                 return existing
-        label_id, _ = self._ensure_label_id(
+        label_id, _ = self._ops._ensure_label_id(
             plan.LEARN_LABEL,
             color=plan.LEARN_LABEL_COLOR,
             description=plan.LEARN_LABEL_DESCRIPTION,
@@ -636,15 +655,15 @@ class LinearIssueBackend:
             style="inline-code",
         )
         full_body = f"{header}\n\n{to_linear_markdown(body.strip())}\n"
-        return self._create_issue(title=title, description=full_body, label_id=label_id)
+        return self._ops._create_issue(title=title, description=full_body, label_id=label_id)
 
     def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
         summaries: list[issue_backend.LearnIssueSummary] = []
         selection = "id identifier title url description"
-        for node in self._list_label_issues(plan.LEARN_LABEL, selection):
+        for node in self._ops._list_label_issues(plan.LEARN_LABEL, selection):
             description = node.get("description")
             identifier = _require_str(node.get("identifier"), "issue identifier")
-            self._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
+            self._ops._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
             summaries.append(
                 issue_backend.LearnIssueSummary(
                     id=identifier,
@@ -658,22 +677,22 @@ class LinearIssueBackend:
     def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
         if dry_run:
             return True
-        label_id, _ = self._ensure_label_id(
+        label_id, _ = self._ops._ensure_label_id(
             plan.CONSOLIDATED_LABEL,
             color=plan.CONSOLIDATED_LABEL_COLOR,
             description=plan.CONSOLIDATED_LABEL_DESCRIPTION,
         )
         # Additive labelling: read the existing label ids, union in the consolidated label
         # (issueUpdate's labelIds REPLACES the set — never write it without the existing ids).
-        issue = self._get_issue(issue_id, "id labels { nodes { id } }")
+        issue = self._ops._get_issue(issue_id, "id labels { nodes { id } }")
         labels = _require_dict(issue.get("labels"), "issue.labels")
         existing = [
             _require_str(_require_dict(raw, "label").get("id"), "label id")
             for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
         ]
         label_ids = existing if label_id in existing else [*existing, label_id]
-        self._update_issue(issue_id, {"labelIds": label_ids}, what="label consolidated")
-        self._update_issue(issue_id, {"stateId": self._done_state_id()}, what="close")
+        self._ops._update_issue(issue_id, {"labelIds": label_ids}, what="label consolidated")
+        self._ops._update_issue(issue_id, {"stateId": self._ops._done_state_id()}, what="close")
         return True
 
     # ------------------------------------------------------------------ generic issue ops
@@ -681,7 +700,7 @@ class LinearIssueBackend:
     def close_issue(self, *, issue_id: str, dry_run: bool = False) -> bool:
         if dry_run:
             return False
-        self._update_issue(issue_id, {"stateId": self._done_state_id()}, what="close")
+        self._ops._update_issue(issue_id, {"stateId": self._ops._done_state_id()}, what="close")
         return True
 
     def add_issue_comment(
@@ -689,14 +708,14 @@ class LinearIssueBackend:
     ) -> issue_backend.CommentResult:
         if dry_run:
             return issue_backend.CommentResult(posted=False)
-        self._create_comment(issue_id, to_linear_markdown(body))
+        self._ops._create_comment(issue_id, to_linear_markdown(body))
         return issue_backend.CommentResult(posted=True)
 
     def find_comment_id_by_marker(self, *, issue_id: str, marker: str) -> str | None:
         # The incoming marker is GitHub-encoded (e.g. the run-report HTML comment); transcode it
         # so it matches the transcoded comment this backend previously wrote.
         needle = to_linear_markdown(marker)
-        for comment in self._comments(issue_id):
+        for comment in self._ops._comments(issue_id):
             comment_body = comment.get("body")
             if isinstance(comment_body, str) and needle in comment_body:
                 return _require_str(comment.get("id"), "comment id")
@@ -710,25 +729,59 @@ class LinearIssueBackend:
         transcoded = to_linear_markdown(body)
         comment_id = self.find_comment_id_by_marker(issue_id=issue_id, marker=marker)
         if comment_id is not None:
-            self._update_comment(comment_id, transcoded)
+            self._ops._update_comment(comment_id, transcoded)
         else:
-            self._create_comment(issue_id, transcoded)
+            self._ops._create_comment(issue_id, transcoded)
         return issue_backend.CommentResult(posted=True)
 
-    # ------------------------------------------------------------------ objective issues
-    # The GitHub-twin objective tier (Node 2.3): two-step create + comment-id backfill, header
-    # LBYL, authoritative roadmap writes with best-effort comment re-renders, the Reconcilable
-    # splice. Issue descriptions are composed directly in the inline-code style; comment bodies
-    # are transcoded (the rendered markers come from `objective.py`'s HTML constants).
 
-    def find_objective_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
-        return self._find_issue_by_run_id(
-            label=objective.OBJECTIVE_LABEL,
-            header_key=objective.OBJECTIVE_HEADER_KEY,
-            run_id=run_id,
-        )
+# ===========================================================================
+# The objective-storage tier (Objective #548, Node 2.2): `LinearObjectiveStore`.
+# The GitHub-twin objective behavior, lifted off `LinearIssueBackend` onto its own store behind
+# the Node 2.1 `ObjectiveStore` contract. Owns its own `_LinearIssueOps` substrate (the registered
+# collaborator) and maps `IssueBackendError` → `ObjectiveStoreError` at every method boundary
+# (message preserved verbatim). `objective_id` is the human Linear identifier at the boundary.
+# ===========================================================================
 
-    def create_objective_issue(
+
+@contextmanager
+def _translate_objective() -> Iterator[None]:
+    """Map the issue substrate's native error into the objective-tier neutral one (verbatim)."""
+    try:
+        yield
+    except IssueBackendError as exc:
+        raise ObjectiveStoreError(str(exc)) from exc
+
+
+def _objective_ref(ref: issue_backend.IssueRef) -> objective_store.ObjectiveRef:
+    """Convert a substrate `IssueRef` into the objective-tier `ObjectiveRef` (same fields)."""
+    return objective_store.ObjectiveRef(id=ref.id, url=ref.url, existed=ref.existed)
+
+
+class LinearObjectiveStore:
+    """``ObjectiveStore`` over Linear issues — the GitHub-twin objective tier (two-step create +
+    comment-id backfill, header LBYL, authoritative roadmap writes with best-effort comment
+    re-renders, the Reconcilable splice) behind the Node 2.1 contract. Owns its own
+    :class:`_LinearIssueOps` substrate; maps ``IssueBackendError`` → ``ObjectiveStoreError`` at
+    every boundary (message verbatim)."""
+
+    # The objective-backend vocabulary id — a module-level literal (never imported from the
+    # resolver module, which imports us at wiring time). Mirrors `LinearIssueBackend.backend_id`.
+    backend_id = "linear"
+
+    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+        self._ops = _LinearIssueOps(client, team_key=team_key, repo_root=repo_root)
+
+    def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
+        with _translate_objective():
+            found = self._ops._find_issue_by_run_id(
+                label=objective.OBJECTIVE_LABEL,
+                header_key=objective.OBJECTIVE_HEADER_KEY,
+                run_id=run_id,
+            )
+        return None if found is None else _objective_ref(found)
+
+    def create_objective(
         self,
         *,
         title: str,
@@ -737,177 +790,199 @@ class LinearIssueBackend:
         status: str = "active",
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
-    ) -> issue_backend.IssueRef:
+    ) -> objective_store.ObjectiveRef:
         if dry_run:
-            return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
-        existing = self.find_objective_issue(run_id=run_id)
-        if existing is not None:
-            return existing
+            return objective_store.ObjectiveRef(id="0", url="(dry-run)", existed=False)
+        with _translate_objective():
+            existing = self.find_objective(run_id=run_id)
+            if existing is not None:
+                return existing
 
-        if roadmap_nodes is None:
+            if roadmap_nodes is None:
+                nodes, errors = objective.parse_roadmap_nodes(body)
+                if errors:
+                    raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
+            else:
+                nodes = list(roadmap_nodes)
+
+            # Storage backstop: no surface may store a node-less objective. Placed after the dedup
+            # short-circuit and the dry-run early-return, before any label/issue write.
+            if not nodes:
+                raise IssueBackendError(
+                    "objective roadmap is empty: an objective needs at least one node"
+                )
+
+            label_id, _ = self._ops._ensure_label_id(
+                objective.OBJECTIVE_LABEL,
+                color=objective.OBJECTIVE_LABEL_COLOR,
+                description=objective.OBJECTIVE_LABEL_DESCRIPTION,
+            )
+
+            # Composed directly in the inline-code style (no transcoding needed — the
+            # `create_learn_issue` precedent).
+            header = objective.ObjectiveHeader(
+                run_id=run_id, created=plan.now_iso(), objective_comment_id=None, status=status
+            )
+            header_block = plan.render_metadata_block(
+                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+            )
+            roadmap_block = plan.render_metadata_block(
+                objective.OBJECTIVE_ROADMAP_KEY,
+                objective.render_roadmap_block(nodes),
+                style="inline-code",
+            )
+            issue_body = f"{header_block}\n\n{roadmap_block}\n"
+
+            created = self._ops._create_issue(
+                title=title, description=issue_body, label_id=label_id
+            )
+
+            # The body comment: rendered with the HTML markers (objective.py's constants), then
+            # transcoded to the inline-code sentinels.
+            comment_body = to_linear_markdown(
+                objective.render_body_comment(nodes, prose=body.strip())
+            )
+            comment_id = self._ops._create_comment_with_id(created.id, comment_body)
+            self.update_objective_header(
+                objective_id=created.id, fields={"objective_comment_id": comment_id}
+            )
+            return _objective_ref(created)
+
+    def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
+        with _translate_objective():
+            issue = self._ops._issue_or_none(objective_id, "id identifier url title description")
+            if issue is None:
+                return None
+            description = issue.get("description")
+            body = description if isinstance(description, str) else ""
+            header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
             nodes, errors = objective.parse_roadmap_nodes(body)
             if errors:
-                raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
-        else:
-            nodes = list(roadmap_nodes)
-
-        # Storage backstop: no surface may store a node-less objective. Placed after the dedup
-        # short-circuit and the dry-run early-return, before any label/issue write.
-        if not nodes:
-            raise IssueBackendError(
-                "objective roadmap is empty: an objective needs at least one node"
+                raise IssueBackendError(
+                    f"invalid objective roadmap on {objective_id!r}: " + "; ".join(errors)
+                )
+            return objective_store.ObjectiveState(
+                id=_require_str(issue.get("identifier"), "issue identifier"),
+                url=_require_str(issue.get("url"), "issue url"),
+                title=_require_str(issue.get("title"), "issue title"),
+                header=header,
+                nodes=tuple(nodes),
             )
-
-        label_id, _ = self._ensure_label_id(
-            objective.OBJECTIVE_LABEL,
-            color=objective.OBJECTIVE_LABEL_COLOR,
-            description=objective.OBJECTIVE_LABEL_DESCRIPTION,
-        )
-
-        # Composed directly in the inline-code style (no transcoding needed — the
-        # `create_learn_issue` precedent).
-        header = objective.ObjectiveHeader(
-            run_id=run_id, created=plan.now_iso(), objective_comment_id=None, status=status
-        )
-        header_block = plan.render_metadata_block(
-            objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
-        )
-        roadmap_block = plan.render_metadata_block(
-            objective.OBJECTIVE_ROADMAP_KEY,
-            objective.render_roadmap_block(nodes),
-            style="inline-code",
-        )
-        issue_body = f"{header_block}\n\n{roadmap_block}\n"
-
-        created = self._create_issue(title=title, description=issue_body, label_id=label_id)
-
-        # The body comment: rendered with the HTML markers (objective.py's constants), then
-        # transcoded to the inline-code sentinels.
-        comment_body = to_linear_markdown(objective.render_body_comment(nodes, prose=body.strip()))
-        comment_id = self._create_comment_with_id(created.id, comment_body)
-        self.update_objective_header(
-            issue_id=created.id, fields={"objective_comment_id": comment_id}
-        )
-        return created
-
-    def get_objective(self, *, issue_id: str) -> issue_backend.ObjectiveState | None:
-        issue = self._issue_or_none(issue_id, "id identifier url title description")
-        if issue is None:
-            return None
-        description = issue.get("description")
-        body = description if isinstance(description, str) else ""
-        header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-        nodes, errors = objective.parse_roadmap_nodes(body)
-        if errors:
-            raise IssueBackendError(
-                f"invalid objective roadmap on {issue_id!r}: " + "; ".join(errors)
-            )
-        return issue_backend.ObjectiveState(
-            id=_require_str(issue.get("identifier"), "issue identifier"),
-            url=_require_str(issue.get("url"), "issue url"),
-            title=_require_str(issue.get("title"), "issue title"),
-            header=header,
-            nodes=tuple(nodes),
-        )
 
     def update_objective_header(
-        self, *, issue_id: str, fields: dict[str, object], dry_run: bool = False
-    ) -> issue_backend.ObjectiveHeaderUpdate:
-        unknown = set(fields) - objective.OBJECTIVE_HEADER_FIELDS
-        if unknown:
-            raise IssueBackendError(f"unknown objective-header field(s): {sorted(unknown)}")
-        issue = self._get_issue(issue_id, "id description")
-        description = issue.get("description")
-        body = description if isinstance(description, str) else ""
-        header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-        # Form-preserving merge: replace_metadata_block keeps the inline-code form on Linear
-        # bodies.
-        new_body = plan.replace_metadata_block(
-            body, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
-        )
-        if dry_run:
-            return issue_backend.ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
-        self._update_issue(issue_id, {"description": new_body}, what="update objective-header")
-        return issue_backend.ObjectiveHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+        self, *, objective_id: str, fields: dict[str, object], dry_run: bool = False
+    ) -> objective_store.ObjectiveHeaderUpdate:
+        with _translate_objective():
+            unknown = set(fields) - objective.OBJECTIVE_HEADER_FIELDS
+            if unknown:
+                raise IssueBackendError(f"unknown objective-header field(s): {sorted(unknown)}")
+            issue = self._ops._get_issue(objective_id, "id description")
+            description = issue.get("description")
+            body = description if isinstance(description, str) else ""
+            header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+            # Form-preserving merge: replace_metadata_block keeps the inline-code form on Linear
+            # bodies.
+            new_body = plan.replace_metadata_block(
+                body, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
+            )
+            if dry_run:
+                return objective_store.ObjectiveHeaderUpdate(
+                    fields_updated=tuple(fields), dry_run=True
+                )
+            self._ops._update_issue(
+                objective_id, {"description": new_body}, what="update objective-header"
+            )
+            return objective_store.ObjectiveHeaderUpdate(
+                fields_updated=tuple(fields), dry_run=False
+            )
 
     def update_objective_node(
         self,
         *,
-        issue_id: str,
+        objective_id: str,
         node_id: str,
         status: objective.NodeStatus | None = None,
         pr: str | None = None,
         description: str | None = None,
         dry_run: bool = False,
-    ) -> issue_backend.ObjectiveNodeUpdate:
-        issue = self._get_issue(issue_id, "id description")
-        raw_description = issue.get("description")
-        body = raw_description if isinstance(raw_description, str) else ""
-        nodes, errors = objective.parse_roadmap_nodes(body)
-        if errors:
-            raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
-        updated = objective.update_node(
-            nodes, node_id, status=status, pr=pr, description=description
-        )
-        if updated is None:
-            raise IssueBackendError(f"objective node {node_id!r} not found on {issue_id!r}")
-        if dry_run:
-            return issue_backend.ObjectiveNodeUpdate(
-                issue_id=issue_id, node_id=node_id, comment_updated=False, dry_run=True
+    ) -> objective_store.ObjectiveNodeUpdate:
+        with _translate_objective():
+            issue = self._ops._get_issue(objective_id, "id description")
+            raw_description = issue.get("description")
+            body = raw_description if isinstance(raw_description, str) else ""
+            nodes, errors = objective.parse_roadmap_nodes(body)
+            if errors:
+                raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
+            updated = objective.update_node(
+                nodes, node_id, status=status, pr=pr, description=description
+            )
+            if updated is None:
+                raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
+            if dry_run:
+                return objective_store.ObjectiveNodeUpdate(
+                    objective_id=objective_id, node_id=node_id, comment_updated=False, dry_run=True
+                )
+
+            # Authoritative write: the roadmap block in the issue description (form-preserving).
+            new_body = plan.replace_metadata_block(
+                body, objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(updated)
+            )
+            self._ops._update_issue(
+                objective_id, {"description": new_body}, what="update objective roadmap"
             )
 
-        # Authoritative write: the roadmap block in the issue description (form-preserving).
-        new_body = plan.replace_metadata_block(
-            body, objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(updated)
-        )
-        self._update_issue(issue_id, {"description": new_body}, what="update objective roadmap")
-
-        # Best-effort comment table re-render (the frontmatter is the source of truth): any
-        # miss along the chain leaves comment_updated=False.
-        comment_updated = False
-        header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY) or {}
-        comment_id = header.get("objective_comment_id")
-        # Linear stores its string UUID; tolerate an int for symmetry with GitHub's numeric id.
-        if isinstance(comment_id, str | int) and str(comment_id).strip():
-            comment_body = self._comment_body_or_none(str(comment_id))
-            if comment_body is not None:
-                rerendered = objective.rerender_body_table(comment_body, updated)
-                if rerendered is not None:
-                    self._update_comment(str(comment_id), rerendered)
-                    comment_updated = True
-        return issue_backend.ObjectiveNodeUpdate(
-            issue_id=issue_id, node_id=node_id, comment_updated=comment_updated, dry_run=False
-        )
+            # Best-effort comment table re-render (the frontmatter is the source of truth): any
+            # miss along the chain leaves comment_updated=False.
+            comment_updated = False
+            header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY) or {}
+            comment_id = header.get("objective_comment_id")
+            # Linear stores its string UUID; tolerate an int for symmetry with GitHub's numeric id.
+            if isinstance(comment_id, str | int) and str(comment_id).strip():
+                comment_body = self._ops._comment_body_or_none(str(comment_id))
+                if comment_body is not None:
+                    rerendered = objective.rerender_body_table(comment_body, updated)
+                    if rerendered is not None:
+                        self._ops._update_comment(str(comment_id), rerendered)
+                        comment_updated = True
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=objective_id,
+                node_id=node_id,
+                comment_updated=comment_updated,
+                dry_run=False,
+            )
 
     def update_objective_body(
-        self, *, issue_id: str, prose: str, dry_run: bool = False
-    ) -> issue_backend.ObjectiveBodyUpdate:
-        issue = self._get_issue(issue_id, "id description")
-        raw_description = issue.get("description")
-        body = raw_description if isinstance(raw_description, str) else ""
-        header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
-        comment_id = header.get("objective_comment_id")
-        if not isinstance(comment_id, str | int) or not str(comment_id).strip():
-            raise IssueBackendError(f"objective {issue_id!r} has no body comment")
-        comment_key = str(comment_id)
-        comment_body = self._comment_body_or_none(comment_key)
-        if comment_body is None:
-            raise IssueBackendError(f"objective {issue_id!r} has no body comment")
-        # Transcode the prose on the way in — reconciled prose is caller-authored markdown and
-        # may legitimately carry perk markers (identity for plain text).
-        spliced = objective.replace_reconcilable_section(comment_body, to_linear_markdown(prose))
-        if spliced is None:
-            raise IssueBackendError(
-                f"objective {issue_id!r} body comment has no reconcilable region"
+        self, *, objective_id: str, prose: str, dry_run: bool = False
+    ) -> objective_store.ObjectiveBodyUpdate:
+        with _translate_objective():
+            issue = self._ops._get_issue(objective_id, "id description")
+            raw_description = issue.get("description")
+            body = raw_description if isinstance(raw_description, str) else ""
+            header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
+            comment_id = header.get("objective_comment_id")
+            if not isinstance(comment_id, str | int) or not str(comment_id).strip():
+                raise IssueBackendError(f"objective {objective_id!r} has no body comment")
+            comment_key = str(comment_id)
+            comment_body = self._ops._comment_body_or_none(comment_key)
+            if comment_body is None:
+                raise IssueBackendError(f"objective {objective_id!r} has no body comment")
+            # Transcode the prose on the way in — reconciled prose is caller-authored markdown and
+            # may legitimately carry perk markers (identity for plain text).
+            spliced = objective.replace_reconcilable_section(
+                comment_body, to_linear_markdown(prose)
             )
-        if dry_run:
-            return issue_backend.ObjectiveBodyUpdate(
-                issue_id=issue_id, comment_id=comment_key, updated=False, dry_run=True
+            if spliced is None:
+                raise IssueBackendError(
+                    f"objective {objective_id!r} body comment has no reconcilable region"
+                )
+            if dry_run:
+                return objective_store.ObjectiveBodyUpdate(
+                    objective_id=objective_id, comment_id=comment_key, updated=False, dry_run=True
+                )
+            self._ops._update_comment(comment_key, spliced)
+            return objective_store.ObjectiveBodyUpdate(
+                objective_id=objective_id, comment_id=comment_key, updated=True, dry_run=False
             )
-        self._update_comment(comment_key, spliced)
-        return issue_backend.ObjectiveBodyUpdate(
-            issue_id=issue_id, comment_id=comment_key, updated=True, dry_run=False
-        )
 
 
 # ===========================================================================
@@ -972,7 +1047,7 @@ def check_readiness(
     # --- team: resolve the team UUID (reuses the backend's `_team_id`) ---
     backend = LinearIssueBackend(client, team_key=team_key, repo_root=Path())
     try:
-        backend._team_id()
+        backend._ops._team_id()
     except IssueBackendError as exc:
         return LinearReadiness(auth_ok=True, user=user, team_ok=False, error=str(exc))
 
@@ -982,12 +1057,12 @@ def check_readiness(
     try:
         for name, color, description in _PERK_LABELS:
             if ensure_labels:
-                _, was_created = backend._ensure_label_id(
+                _, was_created = backend._ops._ensure_label_id(
                     name, color=color, description=description
                 )
                 if was_created:
                     created.append(name)
-            elif backend._lookup_label_id(name) is None:
+            elif backend._ops._lookup_label_id(name) is None:
                 missing.append(name)
     except IssueBackendError as exc:
         return LinearReadiness(

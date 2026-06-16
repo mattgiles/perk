@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 import perk
-from perk import github, objective
+from perk import github
 from perk.backends import issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
@@ -305,118 +305,6 @@ class TestDelegation:
         }
         assert result == issue_backend.CommentResult(posted=False)
 
-    def test_find_objective_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.ObjectiveIssue(number=252, url="u252", existed=True))
-        monkeypatch.setattr(github, "find_objective_issue", rec)
-        result = GitHubIssueBackend(tmp_path).find_objective_issue(run_id="RUN1")
-        assert rec.kwargs == {"run_id": "RUN1", "repo_root": tmp_path}
-        assert result == issue_backend.IssueRef(id="252", url="u252", existed=True)
-
-    def test_create_objective_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.ObjectiveIssue(number=252, url="u252", existed=False))
-        monkeypatch.setattr(github, "create_objective_issue", rec)
-        result = GitHubIssueBackend(tmp_path).create_objective_issue(
-            title="t", body="b", run_id="RUN1", status="active", roadmap_nodes=None
-        )
-        assert rec.kwargs == {
-            "title": "t",
-            "body": "b",
-            "repo_root": tmp_path,
-            "run_id": "RUN1",
-            "status": "active",
-            "roadmap_nodes": None,
-            "dry_run": False,
-        }
-        assert result == issue_backend.IssueRef(id="252", url="u252", existed=False)
-
-    def test_get_objective(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(
-            github.ObjectiveState(number=252, url="u252", title="t", header={}, nodes=())
-        )
-        monkeypatch.setattr(github, "get_objective", rec)
-        result = GitHubIssueBackend(tmp_path).get_objective(issue_id="252")
-        assert rec.kwargs == {"number": 252, "repo_root": tmp_path}
-        assert result == issue_backend.ObjectiveState(
-            id="252", url="u252", title="t", header={}, nodes=()
-        )
-
-    def test_get_objective_none_passthrough(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(github, "get_objective", _Recorder(None))
-        assert GitHubIssueBackend(tmp_path).get_objective(issue_id="252") is None
-
-    def test_update_objective_header(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.ObjectiveHeaderUpdate(fields_updated=("status",), dry_run=False))
-        monkeypatch.setattr(github, "update_objective_header", rec)
-        result = GitHubIssueBackend(tmp_path).update_objective_header(
-            issue_id="252", fields={"status": "done"}
-        )
-        assert rec.kwargs == {
-            "number": 252,
-            "fields": {"status": "done"},
-            "repo_root": tmp_path,
-            "dry_run": False,
-        }
-        assert result == issue_backend.ObjectiveHeaderUpdate(
-            fields_updated=("status",), dry_run=False
-        )
-
-    def test_update_objective_node(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(
-            github.ObjectiveNodeUpdate(
-                number=252, node_id="1.2", comment_updated=True, dry_run=False
-            )
-        )
-        monkeypatch.setattr(github, "update_objective_node", rec)
-        result = GitHubIssueBackend(tmp_path).update_objective_node(
-            issue_id="252",
-            node_id="1.2",
-            status=objective.NodeStatus.DONE,
-            pr="#325",
-            description=None,
-        )
-        assert rec.kwargs == {
-            "number": 252,
-            "node_id": "1.2",
-            "status": objective.NodeStatus.DONE,
-            "pr": "#325",
-            "description": None,
-            "repo_root": tmp_path,
-            "dry_run": False,
-        }
-        assert result == issue_backend.ObjectiveNodeUpdate(
-            issue_id="252", node_id="1.2", comment_updated=True, dry_run=False
-        )
-
-    def test_update_objective_body(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(
-            github.ObjectiveBodyUpdate(number=252, comment_id=777, updated=True, dry_run=False)
-        )
-        monkeypatch.setattr(github, "update_objective_body", rec)
-        result = GitHubIssueBackend(tmp_path).update_objective_body(issue_id="252", prose="p")
-        assert rec.kwargs == {
-            "number": 252,
-            "prose": "p",
-            "repo_root": tmp_path,
-            "dry_run": False,
-        }
-        assert result == issue_backend.ObjectiveBodyUpdate(
-            issue_id="252", comment_id="777", updated=True, dry_run=False
-        )
-
-    def test_update_objective_body_none_comment_id(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        rec = _Recorder(
-            github.ObjectiveBodyUpdate(number=252, comment_id=None, updated=False, dry_run=True)
-        )
-        monkeypatch.setattr(github, "update_objective_body", rec)
-        result = GitHubIssueBackend(tmp_path).update_objective_body(
-            issue_id="252", prose="p", dry_run=True
-        )
-        assert result.comment_id is None
-
 
 class TestErrorTranslation:
     def test_github_error_wrapped_message_verbatim_cause_chained(
@@ -459,9 +347,9 @@ class TestLateBinding:
         assert rec.kwargs == {"number": 1, "repo_root": tmp_path}
 
 
-# The 21 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
+# The 15 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
 # Production code must reach them through perk.backends.issues.resolve_issue_backend, never
-# directly.
+# directly. The objective-tier functions have their own scan in tests/test_objective_stores.py.
 ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
     "create_label",
     "find_plan_issue",
@@ -478,12 +366,6 @@ ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
     "add_issue_comment",
     "find_comment_id_by_marker",
     "upsert_marked_comment",
-    "find_objective_issue",
-    "create_objective_issue",
-    "get_objective",
-    "update_objective_header",
-    "update_objective_node",
-    "update_objective_body",
 )
 
 
