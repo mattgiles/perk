@@ -53,6 +53,26 @@ def test_exit_code_not_repo_is_two():
     assert report.exit_code == 2 and report.error_type == "not_a_repo" and not report.healthy
 
 
+def test_optional_env_tool_maps_to_warn(monkeypatch):
+    # A missing optional tool (ast-grep) renders as `warn`, not `fail` — so a report whose only
+    # non-ok environment check is optional stays healthy with exit code 0.
+    from perk.convergence.env import EnvCheck
+
+    monkeypatch.setattr(
+        doctor_mod.env,
+        "check_environment",
+        lambda: [
+            EnvCheck("git", True, "/usr/bin/git", ""),
+            EnvCheck("ast-grep", False, "not found", "install it", optional=True),
+        ],
+    )
+    checks = doctor_mod._env_checks()
+    ast_grep = next(c for c in checks if c.name == "ast-grep")
+    assert ast_grep.status == "warn" and ast_grep.remediation == "install it"
+    report = DoctorReport(checks=checks, fixed=[], self_repo=False)
+    assert report.healthy and report.exit_code == 0
+
+
 def test_report_to_dict_shape():
     report = DoctorReport(
         checks=[_check(status="ok"), _check(status="warn"), _check(status="fail")],

@@ -50,14 +50,17 @@ Aliases are noted inline next to each command. Common flags: launcher commands a
 Scaffold or converge the current repo for perk (idempotent; safe to re-run). Wires
 `.pi/settings.json` and the borrowed package set, creates the `.pi/workflow/` cache, scaffolds
 config, manages `.gitignore` and the `AGENTS.md` managed block, and verifies GitHub access
-without mutating it. `--force` re-seeds the user-editable config to defaults; `--no-interactive`
+without mutating it. It also checks for the optional `ast-grep` CLI (structural code search) —
+non-fatal: a missing `ast-grep` is a `⚠️` warning, never a blocking failure. `--force` re-seeds
+the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
 
 ### `perk doctor`
 
 Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-converges drifted
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
-edits; `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
+edits. The `environment` group reports required tools as `fail` when missing and optional tools
+(e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 
 ### `perk doctor workflow`

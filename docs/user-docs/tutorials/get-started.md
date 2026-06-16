@@ -20,6 +20,9 @@ environment `perk init` checks for:
 - **`node` ≥ 22** — `node --version`
 - **`pi`** — the agent harness perk drives; confirm it is on your PATH: `pi --version`
 - **`uv`** — `uv --version`; used to install perk in Step 1.
+- **`ast-grep`** *(optional)* — `ast-grep --version`. perk sessions prefer it for structural
+  (AST) code search; `init`/`doctor` only **warn** when it is absent, never block. Install it
+  with `brew install ast-grep` / `cargo install ast-grep` (see https://ast-grep.github.io).
 
 perk reaches GitHub only through `gh`, so a GitHub account with an authenticated `gh` is
 mandatory for this tutorial.

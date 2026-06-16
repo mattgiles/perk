@@ -20,6 +20,9 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   read-only sessions.
 - **State tiers:** GitHub (canonical) / `.pi/workflow/` (cache) / session entries
   (transient). Cross-plane contracts live in `shared/`.
+- **Prefer ast-grep for code search.** Use `ast-grep` (structural/AST search) over plain
+  `grep` when searching for code structures or language constructs; see the `ast-grep` skill.
+  Plain `grep` remains fine for literal text.
 
 perk version: 0.0.1
 <!-- END perk managed -->

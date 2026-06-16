@@ -77,6 +77,7 @@ LINEAR_PACKAGE = "npm:pi-mono-linear"
 # The canonical perk skill names (directory names under `skills/`). This list is the SSOT
 # for the skills-CLI manifest fragment; update it here when perk skills are added/removed.
 PERK_SKILLS: tuple[str, ...] = (
+    "ast-grep",
     "perk-address",
     "perk-implement",
     "perk-learn",
@@ -438,6 +439,9 @@ This repo is wired for the **perk** plan-oriented workflow on Pi.
   read-only sessions.
 - **State tiers:** GitHub (canonical) / `.pi/workflow/` (cache) / session entries
   (transient). Cross-plane contracts live in `shared/`.
+- **Prefer ast-grep for code search.** Use `ast-grep` (structural/AST search) over plain
+  `grep` when searching for code structures or language constructs; see the `ast-grep` skill.
+  Plain `grep` remains fine for literal text.
 
 perk version: {__version__}"""
 

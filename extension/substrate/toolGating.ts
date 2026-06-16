@@ -182,6 +182,7 @@ const SAFE_PATTERNS = [
   /^\s*awk\b/,
   /^\s*rg\b/,
   /^\s*fd\b/,
+  /^\s*ast-grep\b/,
   /^\s*bat\b/,
   /^\s*eza\b/,
   // perk's own read-only objective queries (show/next + their s/n aliases). The trailing \b keeps

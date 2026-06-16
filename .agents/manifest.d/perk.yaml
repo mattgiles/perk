@@ -5,6 +5,8 @@ sources:
     ref: main
 skills:
   - source: perk
+    name: ast-grep
+  - source: perk
     name: perk-address
   - source: perk
     name: perk-implement

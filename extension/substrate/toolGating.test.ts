@@ -71,6 +71,9 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "git log --oneline -5",
     "git diff HEAD",
     "rg pattern src",
+    "ast-grep run --pattern 'console.log($A)' --lang js .", // structural code search
+    "ast-grep run --pattern 'print($A)' --lang python .", // language-agnostic: the allowlist gates the `ast-grep` command, not its --lang
+    "ast-grep scan --inline-rules 'id: x\nlanguage: ts\nrule: {pattern: $A}'",
     "find . -name '*.ts'",
     "wc -l file",
     "sed -n '1,10p' file",

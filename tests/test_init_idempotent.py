@@ -48,6 +48,13 @@ def test_init_converges_and_is_idempotent(tmp_path):
     assert "perk conventions" in agents_md
     # The managed block carries the ambient gh guidance (#416).
     assert "GitHub access goes through the `gh` CLI" in agents_md
+    # ...and the ambient ast-grep code-search steer (#611).
+    assert "Prefer ast-grep for code search" in agents_md
+
+    # ast-grep is a registered perk skill (SSOT for the manifest + delivery).
+    from perk.convergence.init import PERK_SKILLS
+
+    assert "ast-grep" in PERK_SKILLS
 
     # Idempotency: a second run changes nothing on disk.
     before = _snapshot(tmp_path)
