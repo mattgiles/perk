@@ -2953,8 +2953,10 @@ failure / missing url → the indirect form). The cold plane reads `store.backen
 
 **Opaque string issue ids at every machine boundary (Node 4.1).** Issue ids (plan / learn /
 objective) are **opaque strings** end-to-end — GitHub's are numeric strings (`"42"`), Linear's
-are the human identifier (`"ENG-123"`; the backend resolves identifier→UUID internally for
-mutations — `LinearIssueBackend._uuid_for`). **PR numbers stay `int`** under `pr.number`
+are the human identifier (`"ENG-123"`; the verified mutations — `issueUpdate`/`commentCreate` —
+accept the identifier directly, live-verified at the Mode 2 smoke gate, so no identifier→UUID
+resolution layer remains; `issueRelationCreate` receives issue UUIDs captured at issue-create
+time, as it is not verified for identifiers). **PR numbers stay `int`** under `pr.number`
 everywhere — PRs are GitHub-universal. Concretely:
 
 - Every `--json` envelope emits string issue ids, with the id fields renamed for honesty:

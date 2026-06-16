@@ -124,7 +124,6 @@ class LinearClient:
         # cache automatically — without the op classes composing each other. The client stays
         # team-agnostic at construction, so `_team_id_cache` is keyed by team key.
         self._team_id_cache: dict[str, str] = {}
-        self._uuid_cache: dict[str, str] = {}
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         """POST one GraphQL request; return the ``data`` dict or raise ``IssueBackendError``.
@@ -202,36 +201,6 @@ class LinearClient:
         team_id = _require_str(node.get("id"), "team id")
         self._team_id_cache[team_key] = team_id
         return team_id
-
-    def uuid_for(self, issue_id: str) -> str:
-        """Resolve a boundary id (identifier-or-UUID) to the issue UUID — the mutation path.
-
-        ``issue(id:)`` *reads* accept the human identifier interchangeably with the UUID;
-        mutation ``id``/``issueId`` args are not documented to, so every mutation routes its
-        target id through here. Cached; issue reads seed the cache (via :meth:`cache_uuid`), so
-        the common mutate-after-read path issues no extra query.
-        """
-        cached = self._uuid_cache.get(issue_id)
-        if cached is not None:
-            return cached
-        query = "query UuidForIssue($id: String!) { issue(id: $id) { id } }"
-        try:
-            data = self.request(query, {"id": issue_id})
-        except LinearGraphQLError as exc:
-            if _is_entity_not_found(exc):
-                raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
-            raise
-        issue = data.get("issue")
-        if issue is None:
-            raise IssueBackendError(f"Linear issue {issue_id!r} not found")
-        uuid = _require_str(_require_dict(issue, "issue").get("id"), "issue id")
-        self._uuid_cache[issue_id] = uuid
-        return uuid
-
-    def cache_uuid(self, identifier: str, uuid: str) -> None:
-        """Seed the shared boundary-id → UUID cache (issue read paths call this so a later
-        mutation on the same id issues no extra resolution query)."""
-        self._uuid_cache[identifier] = uuid
 
     def paginate(
         self, query: str, variables: dict[str, object], *path: str

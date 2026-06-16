@@ -238,9 +238,11 @@ The specific behaviors the offline fakes **cannot** prove, **still deferred**:
   no observed behavior to justify backoff; the retry/backoff posture stays deferred until a live
   RATELIMITED is observed at the gate.
 - **Mutation identifier acceptance** — whether mutations accept the human `ENG-<n>` identifier
-  directly (which would let the internal id lookup simplify to a pass-through). **Not probed** in
-  the 2026-06-15 Mode 1 run (a Mode 2 / GitHub-integration probe); the `_uuid_for` simplification
-  stays **deferred pending Mode 2 (node 1.3)**.
+  directly. **Resolved (2026-06-16):** the Mode 2 probe confirmed `issueUpdate`/`commentCreate`
+  take the bare identifier, so the internal identifier→UUID lookup was **removed** outright — the
+  verified mutations pass the identifier directly, and the objective blocking relations
+  (`issueRelationCreate`, not verified for identifiers) use the issue UUID captured at
+  issue-create time.
 - **Agent-session GraphQL signatures** — see below.
 - **GitHub Issues Sync interaction** — if a team has Linear's *GitHub Issues* two-way sync enabled,
   perk-created issues mirror into GitHub (and vice versa). perk does not cover sync interactions;
