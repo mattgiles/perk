@@ -1578,7 +1578,9 @@ already happened before the sync); `skills_conflict` short-circuits before any c
 **`--json` object.**
 ```
 { success: bool, mode: "self"|"consumer"|"unknown", error_type: string|null, message: string|null,
-  env:     [ { name, ok, detail, remediation } ],          # required-tooling checks
+  env:     [ { name, ok, detail, remediation, optional } ], # tooling checks; `optional:true` entries
+                                                          #   (e.g. ast-grep) are non-fatal — present-or-
+                                                          #   absent, never a `missing_tool` exit-2
   github:  { auth: { ok, user, scopes[], error },          # null when env-not-ready / verify skipped
              repo: { ok, repo, can_push, error } },
   linear:  { ok, team, error,                              # null unless verify ran AND the committed
@@ -1635,7 +1637,8 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
                                          # failing check, so the exit code stays honest)
 ```
 
-**Groups.** `environment` (tools; missing = `fail`) · `github` (auth/access; non-fatal `warn`) ·
+**Groups.** `environment` (tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
+missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the four perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·

@@ -18,6 +18,7 @@ class EnvCheck:
     ok: bool
     detail: str
     remediation: str
+    optional: bool = False
 
 
 def _node_version() -> str | None:
@@ -60,6 +61,18 @@ def _check_tool(name: str, remediation: str) -> EnvCheck:
     return EnvCheck(name, True, path, "")
 
 
+def _check_optional_tool(name: str, remediation: str) -> EnvCheck:
+    """Presence check for an *optional* tool — stamps ``optional=True`` either way.
+
+    A missing optional tool is non-fatal: it never flips ``required_tools_ok`` and renders
+    as a ``warn`` (doctor) / ``⚠️`` (init), never a ``missing_tool`` exit-2.
+    """
+    path = shutil.which(name)
+    if path is None:
+        return EnvCheck(name, False, "not found", remediation, optional=True)
+    return EnvCheck(name, True, path, "", optional=True)
+
+
 def check_environment() -> list[EnvCheck]:
     """All required-tooling checks (presence + node version)."""
     return [
@@ -68,9 +81,17 @@ def check_environment() -> list[EnvCheck]:
         _check_node(),
         _check_tool("pi", "Install Pi (the coding agent perk drives)."),
         _check_tool("skills", "Install the skills CLI (https://github.com/mattgiles/skills)."),
+        _check_optional_tool(
+            "ast-grep",
+            "Optional: install ast-grep for structural code search "
+            "(brew install ast-grep / cargo install ast-grep / https://ast-grep.github.io).",
+        ),
     ]
 
 
 def required_tools_ok(checks: list[EnvCheck]) -> bool:
-    """True iff every required tool is present (and node meets the version gate)."""
-    return all(check.ok for check in checks)
+    """True iff every *required* tool is present (and node meets the version gate).
+
+    Optional checks (e.g. ast-grep) are ignored — a missing optional tool is non-fatal.
+    """
+    return all(check.ok for check in checks if not check.optional)

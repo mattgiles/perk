@@ -101,11 +101,12 @@ class DoctorReport:
 def _env_checks() -> list[Check]:
     checks: list[Check] = []
     for c in env.check_environment():
+        status: Status = "ok" if c.ok else ("warn" if c.optional else "fail")
         checks.append(
             Check(
                 name=c.name,
                 group="environment",
-                status="ok" if c.ok else "fail",
+                status=status,
                 message=f"{c.name} {'ok' if c.ok else 'missing/outdated'}",
                 detail=c.detail,
                 remediation="" if c.ok else c.remediation,

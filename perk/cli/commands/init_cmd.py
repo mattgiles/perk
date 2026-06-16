@@ -30,7 +30,12 @@ def _render_human(report: InitReport) -> None:
 
     user_output(click.style("✓", fg="green") + f" perk init ({report.mode})")
     for check in report.env:
-        mark = click.style("✓", fg="green") if check.ok else click.style("✗", fg="red")
+        if check.ok:
+            mark = click.style("✓", fg="green")
+        elif check.optional:
+            mark = click.style("⚠️", fg="yellow")
+        else:
+            mark = click.style("✗", fg="red")
         user_output(f"  {mark} {check.name} {check.detail}")
 
     if report.changes:

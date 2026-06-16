@@ -3,7 +3,25 @@ from perk.convergence.env import EnvCheck, check_environment, required_tools_ok
 
 
 def test_check_environment_covers_required_tools():
-    assert {c.name for c in check_environment()} == {"git", "gh", "node", "pi", "skills"}
+    checks = check_environment()
+    required = {c.name for c in checks if not c.optional}
+    assert required == {"git", "gh", "node", "pi", "skills"}
+    ast_grep = next(c for c in checks if c.name == "ast-grep")
+    assert ast_grep.optional is True
+
+
+def test_optional_tool_non_fatal():
+    # An optional check that is not ok does not flip required_tools_ok.
+    assert required_tools_ok(
+        [EnvCheck("git", True, "", ""), EnvCheck("ast-grep", False, "not found", "", optional=True)]
+    )
+    # A required check that is not ok still fails.
+    assert not required_tools_ok(
+        [
+            EnvCheck("git", False, "not found", ""),
+            EnvCheck("ast-grep", True, "/x", "", optional=True),
+        ]
+    )
 
 
 def test_required_tools_ok():
