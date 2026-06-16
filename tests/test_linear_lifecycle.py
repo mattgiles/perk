@@ -4,7 +4,7 @@ A stateful in-memory Linear workspace (``FakeLinearWorkspace``) subclasses the G
 (``linear.LinearClient``) and is injected via a late-bound
 ``monkeypatch.setattr(linear, "client_from_env", …)`` — ``resolve_issue_backend`` resolves the
 client at call time, so the REAL ``LinearIssueBackend`` (identifier boundary ids, transcoded
-bodies, ``_uuid_for`` mutation resolution) is exercised by the REAL CLI commands. Only the
+bodies, identifier-direct mutations) is exercised by the REAL CLI commands. Only the
 GitHub **PR tier** (which is GitHub-universal for every backend) is monkeypatched, following
 ``test_pr_land.py``'s pattern.
 
@@ -58,10 +58,10 @@ class FakeLinearWorkspace(LinearClient):
     but executes against state: create/update/comment/label mutations mutate it; reads paginate
     (page size ``_PAGE`` so the cursor loop runs). Unknown entity ids raise
     ``LinearGraphQLError("… Entity not found", codes=())`` — exercising the backend's documented
-    ``"not found"``-substring tolerance. **Mutation ids must be UUIDs** (reads accept the human
-    identifier interchangeably, mirroring the documented ``issue(id:)`` behavior; mutations are
-    not documented to — passing an identifier here raises, pinning the ``_uuid_for``
-    discipline).
+    ``"not found"``-substring tolerance. **Mutations accept the identifier OR the UUID** (the
+    Mode 2 live finding, 2026-06-15: ``issueUpdate``/``commentCreate`` take the bare ``PER-<n>``
+    identifier interchangeably with the UUID, same as the read path), so there is no
+    identifier→UUID resolution layer to pin.
     """
 
     def __init__(self) -> None:
@@ -73,10 +73,9 @@ class FakeLinearWorkspace(LinearClient):
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
-        # Subclasses LinearClient (no super().__init__) to inherit the shared team_id/uuid_for/
-        # paginate machinery driven by this scripted request; init the two caches directly.
+        # Subclasses LinearClient (no super().__init__) to inherit the shared team_id/paginate
+        # machinery driven by this scripted request; init the team cache directly.
         self._team_id_cache: dict[str, str] = {}
-        self._uuid_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------ state helpers
 
@@ -90,9 +89,10 @@ class FakeLinearWorkspace(LinearClient):
                 return issue
         return None
 
-    def _issue_by_uuid(self, value: str) -> dict[str, object]:
-        """Mutations accept ONLY the UUID — an identifier (or junk) is an unknown entity."""
-        found = self.issues.get(value)
+    def _issue_for_mutation(self, value: str) -> dict[str, object]:
+        """Mutations accept the identifier OR the UUID (the Mode 2 live finding) — junk is an
+        unknown entity."""
+        found = self._issue_by_any_id(value)
         if found is None:
             raise _not_found()
         return found
@@ -282,7 +282,7 @@ class FakeLinearWorkspace(LinearClient):
                 if bk == issue["id"]
             ]
             return {"issue": {"relations": self._page_of(blocked, v.get("cursor"))}}
-        if "UuidForIssue" in query or "issue(id" in query:
+        if "issue(id" in query:
             issue = self._issue_by_any_id(str(v.get("id", "")))
             if issue is None:
                 raise _not_found()
@@ -302,7 +302,7 @@ class FakeLinearWorkspace(LinearClient):
                 }
             }
         if "issueUpdate(" in query:
-            issue = self._issue_by_uuid(str(v.get("id", "")))
+            issue = self._issue_for_mutation(str(v.get("id", "")))
             payload = cast("dict[str, object]", v["input"])
             if "title" in payload:
                 issue["title"] = payload["title"]
@@ -315,7 +315,7 @@ class FakeLinearWorkspace(LinearClient):
             return {"issueUpdate": {"success": True}}
         if "commentCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
-            issue = self._issue_by_uuid(str(payload.get("issueId", "")))
+            issue = self._issue_for_mutation(str(payload.get("issueId", "")))
             comment = {
                 "id": f"cmt-{uuid.uuid4().hex[:8]}",
                 "body": payload["body"],
@@ -375,7 +375,7 @@ class FakeLinearWorkspace(LinearClient):
             payload = cast("dict[str, object]", v["input"])
             blocker = str(payload["issueId"])
             blocked = str(payload["relatedIssueId"])
-            # ids are resolved UUIDs (the store resolves before calling)
+            # ids are issue UUIDs captured at issue-create time (issueRelationCreate is UUID-only)
             assert blocker in self.issues and blocked in self.issues
             rid = f"rel-{uuid.uuid4().hex[:8]}"
             self.relations.append((blocker, blocked))

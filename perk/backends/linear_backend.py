@@ -28,9 +28,12 @@ live at Node 4.1's smoke gate (flagged deferral — mitigated here, not proven).
 (``ENG-123``), not the UUID: plan worktrees become ``plan-ENG-123`` (exploiting Linear's
 branch-name auto-link when the GitHub integration is installed), and every envelope/prompt
 renders readably. Reads pass identifiers natively (``issue(id:)`` accepts the identifier
-interchangeably with the UUID); **mutations** resolve identifier→UUID through the cached
-:meth:`LinearIssueBackend._uuid_for` lookup (mutation ``id`` args are not documented to accept
-identifiers). Comment ids remain UUIDs (comments have no identifier). The envelope id re-shaping
+interchangeably with the UUID); the verified **mutations** (``issueUpdate``/``commentCreate``)
+also take the boundary identifier directly (live-verified at the Mode 2 smoke gate, 2026-06-15 —
+no identifier→UUID resolution layer remains). ``issueRelationCreate`` (objective blocking
+relations) is UUID-only — it receives the issue UUID captured from the ``issueCreate`` response at
+issue-create time. Comment ids remain UUIDs (comments have no identifier). The envelope id
+re-shaping
 formerly deferred here landed with Node 4.1 (always-string issue ids at every ``--json``
 boundary — contracts §8.21).
 
@@ -119,11 +122,34 @@ def _hex_color(color: str) -> str:
     return color if color.startswith("#") else f"#{color}"
 
 
+def _request_issue_mutation(
+    client: LinearClient,
+    mutation: str,
+    variables: dict[str, object],
+    *,
+    issue_id: str,
+) -> dict[str, object]:
+    """Run an issue-targeted mutation, preserving the not-found error mapping.
+
+    The verified issue mutations (``issueUpdate``/``commentCreate``) take the boundary
+    **identifier** directly (live-verified at the Mode 2 smoke gate). A missing entity surfaces
+    as a ``LinearGraphQLError`` matching :func:`_is_entity_not_found`; re-raise it as the
+    byte-identical ``IssueBackendError("Linear issue <id> not found")`` the old ``uuid_for``
+    resolution emitted. Every other error propagates unchanged.
+    """
+    try:
+        return client.request(mutation, variables)
+    except LinearGraphQLError as exc:
+        if _is_entity_not_found(exc):
+            raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
+        raise
+
+
 class _LinearIssueOps:
     """The shared Linear issue substrate (correction §3b): the GraphQL client, the
     constructor-bound team key, the issue-tier caches (done-state + labels), and every private
     issue-op helper. **Client-only** — it registers the :class:`LinearClient` and reaches all
-    GraphQL machinery (``team_id``/``uuid_for``/``paginate``) through ``self._client``; it does
+    GraphQL machinery (``team_id``/``paginate``) through ``self._client``; it does
     NOT own that machinery. Both ``LinearIssueBackend`` (the issue tier) and the objective stores
     own one and delegate through it."""
 
@@ -210,7 +236,7 @@ class _LinearIssueOps:
         """Fetch one issue by id; ``None`` when Linear reports the entity missing.
 
         ``issue_id`` may be the human identifier (``ENG-123``) or the UUID — ``issue(id:)``
-        accepts both. A successful read seeds the ``_uuid_for`` cache.
+        accepts both — reads need no identifier→UUID resolution.
         """
         query = f"query($id: String!) {{ issue(id: $id) {{ {selection} }} }}"
         try:
@@ -225,11 +251,7 @@ class _LinearIssueOps:
         issue = data.get("issue")
         if issue is None:
             return None
-        payload = _require_dict(issue, "issue")
-        uuid = payload.get("id")
-        if isinstance(uuid, str) and uuid:
-            self._client.cache_uuid(issue_id, uuid)
-        return payload
+        return _require_dict(issue, "issue")
 
     def _get_issue(self, issue_id: str, selection: str) -> dict[str, object]:
         """Fetch one issue by id; a missing issue raises (the mutation-path read)."""
@@ -334,7 +356,6 @@ class _LinearIssueOps:
                 and plan.extract_run_id(description, header_key=header_key) == run_id
             ):
                 identifier = _require_str(node.get("identifier"), "issue identifier")
-                self._client.cache_uuid(identifier, _require_str(node.get("id"), "issue id"))
                 return issue_backend.IssueRef(
                     id=identifier,
                     url=_require_str(node.get("url"), "issue url"),
@@ -351,6 +372,28 @@ class _LinearIssueOps:
         project_id: str | None = None,
         milestone_id: str | None = None,
     ) -> issue_backend.IssueRef:
+        """Create an issue, returning just the ``IssueRef`` (the common path)."""
+        ref, _uuid = self._create_issue_raw(
+            title=title,
+            description=description,
+            label_id=label_id,
+            project_id=project_id,
+            milestone_id=milestone_id,
+        )
+        return ref
+
+    def _create_issue_raw(
+        self,
+        *,
+        title: str,
+        description: str,
+        label_id: str | None = None,
+        project_id: str | None = None,
+        milestone_id: str | None = None,
+    ) -> tuple[issue_backend.IssueRef, str]:
+        """Create an issue, returning ``(IssueRef, uuid)``. The ``issueCreate`` response already
+        carries the new issue's UUID, so the objective relation paths capture it here (for
+        ``issueRelationCreate``, which is only verified for UUIDs) with no extra query."""
         mutation = (
             "mutation($input: IssueCreateInput!) { issueCreate(input: $input) "
             "{ success issue { id identifier url } } }"
@@ -377,20 +420,21 @@ class _LinearIssueOps:
             raise IssueBackendError(f"failed to create Linear issue {title!r}")
         issue = _require_dict(payload.get("issue"), "issueCreate.issue")
         identifier = _require_str(issue.get("identifier"), "issue identifier")
-        self._client.cache_uuid(identifier, _require_str(issue.get("id"), "issue id"))
-        return issue_backend.IssueRef(
+        uuid = _require_str(issue.get("id"), "issue id")
+        ref = issue_backend.IssueRef(
             id=identifier,
             url=_require_str(issue.get("url"), "issue url"),
             existed=False,
         )
+        return ref, uuid
 
     def _update_issue(self, issue_id: str, fields: dict[str, object], *, what: str) -> None:
         mutation = (
             "mutation($id: String!, $input: IssueUpdateInput!) "
             "{ issueUpdate(id: $id, input: $input) { success } }"
         )
-        data = self._client.request(
-            mutation, {"id": self._client.uuid_for(issue_id), "input": fields}
+        data = _request_issue_mutation(
+            self._client, mutation, {"id": issue_id, "input": fields}, issue_id=issue_id
         )
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
@@ -401,10 +445,8 @@ class _LinearIssueOps:
         mutation = (
             "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
         )
-        variables: dict[str, object] = {
-            "input": {"issueId": self._client.uuid_for(issue_id), "body": body}
-        }
-        data = self._client.request(mutation, variables)
+        variables: dict[str, object] = {"input": {"issueId": issue_id, "body": body}}
+        data = _request_issue_mutation(self._client, mutation, variables, issue_id=issue_id)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to comment on Linear issue {issue_id!r}")
@@ -417,10 +459,8 @@ class _LinearIssueOps:
             "mutation($input: CommentCreateInput!) { commentCreate(input: $input) "
             "{ success comment { id } } }"
         )
-        variables: dict[str, object] = {
-            "input": {"issueId": self._client.uuid_for(issue_id), "body": body}
-        }
-        data = self._client.request(mutation, variables)
+        variables: dict[str, object] = {"input": {"issueId": issue_id, "body": body}}
+        data = _request_issue_mutation(self._client, mutation, variables, issue_id=issue_id)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to comment on Linear issue {issue_id!r}")
@@ -461,9 +501,9 @@ class _LinearProjectOps:
     proven live at the Node 1.4 spike (``docs/linear-smoke-gate.md``, "Mode 3").
 
     **Client-only** (correction §3b): it registers the :class:`LinearClient` and reaches all
-    GraphQL machinery (``team_id``/``uuid_for``/``paginate``) through ``self._client`` — it does
-    NOT compose an ``_LinearIssueOps``. The single shared cache (one ``_team_id_cache``, one
-    ``_uuid_cache``) is the client's: a consuming store owns one client and constructs both op
+    GraphQL machinery (``team_id``/``paginate``) through ``self._client`` — it does
+    NOT compose an ``_LinearIssueOps``. The single shared ``_team_id_cache`` is the client's: a
+    consuming store owns one client and constructs both op
     classes over it, so the cache is shared automatically.
 
     Methods return parsed primitives/dicts — the ``ObjectiveRef``/``ObjectiveState`` mapping lives
@@ -505,8 +545,8 @@ class _LinearProjectOps:
         }
 
     def update_project_content(self, project_id: str, content: str) -> None:
-        """Patch a project's overview ``content``. Project ids are opaque UUIDs — no ``_uuid_for``
-        resolution (there is no human identifier for a project)."""
+        """Patch a project's overview ``content``. Project ids are opaque UUIDs — there is no
+        human identifier for a project."""
         mutation = (
             "mutation($id: String!, $input: ProjectUpdateInput!) "
             "{ projectUpdate(id: $id, input: $input) { success project { id content } } }"
@@ -518,7 +558,7 @@ class _LinearProjectOps:
 
     def set_project_state(self, project_id: str, state: str) -> None:
         """Set a project's ``state`` (e.g. ``"completed"`` to mark the objective complete on land).
-        Project ids are opaque UUIDs — no ``_uuid_for`` resolution.
+        Project ids are opaque UUIDs (no human identifier).
 
         **Flagged (Phase-5 / Node 5.1 live gate):** ``projectUpdate(input:{state})`` is NOT yet
         live-proven — the 1.4 spike covered create/overview/milestone/attach/relation, not project
@@ -694,18 +734,21 @@ class _LinearProjectOps:
         return _require_str(update.get("id"), "project update id")
 
     def attach_issue_to_project(self, *, issue_id: str, project_id: str) -> None:
-        """Attach an existing issue to a project. Inlines the ``issueUpdate`` mutation (resolve
-        the issue id via ``self._client.uuid_for``, send ``issueUpdate(id:$id, input:{projectId})``,
-        check ``success``) — decoupling over DRY: a 2-line mutation duplication is the accepted
-        cost of not borrowing ``_LinearIssueOps._update_issue``. The GraphQL document stays
-        byte-faithful to the issue-tier update."""
+        """Attach an existing issue to a project. Inlines the ``issueUpdate`` mutation (send
+        ``issueUpdate(id:$id, input:{projectId})`` with the boundary identifier directly, check
+        ``success``) — decoupling over DRY: a 2-line mutation duplication is the accepted cost of
+        not borrowing ``_LinearIssueOps._update_issue``. The GraphQL document stays byte-faithful
+        to the issue-tier update, and routes through :func:`_request_issue_mutation` for the same
+        not-found mapping."""
         mutation = (
             "mutation($id: String!, $input: IssueUpdateInput!) "
             "{ issueUpdate(id: $id, input: $input) { success } }"
         )
-        data = self._client.request(
+        data = _request_issue_mutation(
+            self._client,
             mutation,
-            {"id": self._client.uuid_for(issue_id), "input": {"projectId": project_id}},
+            {"id": issue_id, "input": {"projectId": project_id}},
+            issue_id=issue_id,
         )
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
@@ -815,8 +858,8 @@ class _LinearProjectOps:
 
 class LinearIssueBackend:
     """``IssueBackend`` over Linear — constructor-bound ``team_key`` (lazily resolved + cached),
-    human **identifiers** (``ENG-123``) as boundary issue ids (mutations resolve them to UUIDs
-    via the cached :meth:`_LinearIssueOps._uuid_for`; comment ids stay UUIDs), Linear-safe-encoded
+    human **identifiers** (``ENG-123``) as boundary issue ids (the verified mutations take the
+    identifier directly; comment ids stay UUIDs), Linear-safe-encoded
     bodies, and the GitHub-twin behavior shapes for every plan/learn/label/comment op. A thin
     facade over the shared :class:`_LinearIssueOps` substrate."""
 
@@ -996,7 +1039,6 @@ class LinearIssueBackend:
         for node in self._ops._list_label_issues(plan.LEARN_LABEL, selection):
             description = node.get("description")
             identifier = _require_str(node.get("identifier"), "issue identifier")
-            self._ops._client.cache_uuid(identifier, _require_str(node.get("id"), "issue id"))
             summaries.append(
                 issue_backend.LearnIssueSummary(
                     id=identifier,
@@ -1432,7 +1474,7 @@ class LinearObjectiveStore:
 # `get_objective` + the three `update_*` methods, so the store now satisfies the full
 # `ObjectiveStore` protocol (conformance binding in the tests). Still dormant — NOT resolver-wired
 # (that is Node 3.4). One shared `client` gives both owned op classes a single shared
-# `_team_id_cache`/`_uuid_cache` (the single-shared-cache property, now via the client). Every
+# `_team_id_cache` (the single-shared-cache property, now via the client). Every
 # method body wraps in `_translate_objective()` (IssueBackendError → ObjectiveStoreError, verbatim).
 #
 # Read model (`get_objective`): the roadmap is derived live from the project's node-issues — each
@@ -1559,15 +1601,16 @@ class LinearProjectObjectiveStore:
                     + "\n\n"
                     + node.description
                 )
-                ref = self._issue_ops._create_issue(
+                _ref, uuid = self._issue_ops._create_issue_raw(
                     title=objective.node_issue_title(node),
                     description=description,
                     label_id=None,
                     project_id=project_id,
                     milestone_id=phase_milestone[objective.derive_phase(node.id)],
                 )
-                # Cache hit: `_create_issue` seeded the cache, so this is no extra query.
-                node_uuid[node.id] = self._client.uuid_for(ref.id)
+                # The issue UUID comes straight from the `issueCreate` response — no extra query.
+                # `issueRelationCreate` is only verified for UUIDs, so relations keep them.
+                node_uuid[node.id] = uuid
 
             # --- blocking relations for EXPLICIT depends_on only (dep BLOCKS node) ---
             for node in nodes:
@@ -1910,7 +1953,7 @@ class LinearProjectObjectiveStore:
                 + "\n\n"
                 + new_node.description
             )
-            ref = self._issue_ops._create_issue(
+            _ref, new_uuid = self._issue_ops._create_issue_raw(
                 title=objective.node_issue_title(new_node),
                 description=node_description,
                 label_id=None,
@@ -1919,8 +1962,8 @@ class LinearProjectObjectiveStore:
             )
 
             # Blocking relations for EXPLICIT depends_on only (dep BLOCKS the new node).
+            # `new_uuid` is the create-time UUID (issueRelationCreate is UUID-only).
             if new_node.depends_on:
-                new_uuid = self._client.uuid_for(ref.id)
                 for dep in new_node.depends_on:
                     found = self._find_node_issue(objective_id, dep)
                     if found is None:

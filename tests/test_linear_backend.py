@@ -53,14 +53,13 @@ class _FakeLinear(LinearClient):
     """A scripted ``LinearClient`` subclass: records every ``(query, variables)`` pair; responses
     keyed by query-substring match in insertion order. A queue with >1 entries pops per call (the
     last entry is then reused); an ``Exception`` entry is raised. Subclasses ``LinearClient`` (no
-    ``super().__init__``) so it INHERITS the real ``team_id``/``uuid_for``/``paginate`` machinery
-    driven by this scripted ``request`` — the two caches are initialized directly."""
+    ``super().__init__``) so it INHERITS the real ``team_id``/``paginate`` machinery driven by this
+    scripted ``request`` — the team cache is initialized directly."""
 
     def __init__(self, responses: dict[str, list[object]] | None = None) -> None:
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._responses = {key: list(queue) for key, queue in (responses or {}).items()}
         self._team_id_cache: dict[str, str] = {}
-        self._uuid_cache: dict[str, str] = {}
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         self.requests.append((query, variables or {}))
@@ -166,7 +165,6 @@ class TestTeamStateLabelCaching:
     def test_done_state_picks_lowest_position_completed(self) -> None:
         backend, fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-1"}}, {"issue": {"id": "uuid-2"}}],
                 "teams(filter": [_TEAM_RESPONSE],
                 "team(id": [_STATES_RESPONSE],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
@@ -175,8 +173,9 @@ class TestTeamStateLabelCaching:
         assert backend.close_issue(issue_id="ENG-1") is True
         [(_, variables)] = _queries(fake, "issueUpdate(")
         assert variables["input"] == {"stateId": "state-done"}
-        # the mutation id is the resolved UUID, never the boundary identifier
-        assert variables["id"] == "uuid-1"
+        # the mutation carries the boundary identifier directly — no UUID resolution round-trip
+        assert variables["id"] == "ENG-1"
+        assert not _queries(fake, "UuidForIssue")
         # cached: a second close re-uses both team and state ids
         backend.close_issue(issue_id="ENG-2")
         assert len(_queries(fake, "team(id")) == 1
@@ -508,7 +507,6 @@ class TestPlanUpserts:
         existing = to_linear_markdown(plan.render_plan_body("# Old plan"))
         backend, fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [
                     _comments_response(
                         [
@@ -534,12 +532,12 @@ class TestPlanUpserts:
         assert isinstance(body, str) and "<!--" not in body and "# New plan" in body
         [(_, title_vars)] = _queries(fake, "issueUpdate(")
         assert title_vars["input"] == {"title": "t2"}
-        assert title_vars["id"] == "uuid-iss-1"  # mutation id resolved to the UUID
+        assert title_vars["id"] == "iss-1"  # the boundary identifier is sent directly
+        assert not _queries(fake, "UuidForIssue")
 
     def test_update_plan_issue_posts_fresh_on_a_legacy_issue(self) -> None:
         backend, fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [_comments_response([])],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
@@ -778,7 +776,6 @@ class TestCommentOps:
         marker = run_report.RUN_REPORT_MARKER.format(run_id="01R")
         posted, post_fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "comments(first": [_comments_response([])],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
             }
@@ -830,7 +827,6 @@ class TestCommentOps:
     def test_add_issue_comment_transcodes(self) -> None:
         backend, fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-iss-1"}}],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
             }
         )
@@ -839,7 +835,8 @@ class TestCommentOps:
         [(_, variables)] = _queries(fake, "commentCreate(")
         create_input = _input_payload(variables)
         assert create_input["body"] == "`perk:run-report:X`\nhi"
-        assert create_input["issueId"] == "uuid-iss-1"  # issueId resolved to the UUID
+        assert create_input["issueId"] == "ENG-1"  # the boundary identifier is sent directly
+        assert not _queries(fake, "UuidForIssue")
 
 
 class TestCloseOps:
@@ -851,7 +848,6 @@ class TestCloseOps:
     def test_close_issue_is_fail_loud(self) -> None:
         backend, _ = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
                 "teams(filter": [_TEAM_RESPONSE],
                 "team(id": [_STATES_RESPONSE],
                 "issueUpdate(": [{"issueUpdate": {"success": False}}],
@@ -1067,7 +1063,7 @@ class TestCreateObjectiveIssue:
         # 2) the body comment is posted transcoded (table + reconcilable sentinels)
         [(_, comment_vars)] = _queries(fake, "commentCreate(")
         comment_input = _input_payload(comment_vars)
-        assert comment_input["issueId"] == "obj-1"
+        assert comment_input["issueId"] == "ENG-9"  # boundary identifier sent directly
         comment_body = comment_input["body"]
         assert isinstance(comment_body, str)
         assert "`perk:roadmap-table`" in comment_body
@@ -1376,7 +1372,6 @@ class TestIssueBackedStoreNode34Methods:
     def test_close_objective_moves_issue_to_done(self) -> None:
         store, fake = _make_store(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
                 "teams(filter": [_TEAM_RESPONSE],
                 "team(id": [_STATES_RESPONSE],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
@@ -1384,7 +1379,8 @@ class TestIssueBackedStoreNode34Methods:
         )
         assert store.close_objective(objective_id="obj-1") is True
         [(_, variables)] = _queries(fake, "issueUpdate(")
-        assert variables["id"] == "uuid-1"
+        assert variables["id"] == "obj-1"  # boundary identifier sent directly
+        assert not _queries(fake, "UuidForIssue")
         assert _input_payload(variables) == {"stateId": "state-done"}
 
     def test_close_objective_dry_run_writes_nothing(self) -> None:
@@ -1401,25 +1397,26 @@ class TestIssueBackedStoreNode34Methods:
         assert fake.requests == []
 
 
-class TestUuidResolution:
-    """The D3 mutation-path identifier→UUID resolution (`_uuid_for`): cached, read-seeded."""
+class TestMutationIdentifiers:
+    """The verified mutations (``issueUpdate``/``commentCreate``) take the boundary identifier
+    directly — no identifier→UUID resolution round-trip, no ``UuidForIssue`` query (live-verified
+    at the Mode 2 smoke gate, 2026-06-15)."""
 
-    def test_uuid_for_resolves_once_and_caches(self) -> None:
+    def test_mutations_carry_the_identifier_directly(self) -> None:
         backend, fake = _make_backend(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
                 "commentCreate(": [{"commentCreate": {"success": True}}],
             }
         )
         backend.add_issue_comment(issue_id="ENG-1", body="a")
         backend.add_issue_comment(issue_id="ENG-1", body="b")
-        assert len(_queries(fake, "UuidForIssue")) == 1  # second mutation hits the cache
+        assert not _queries(fake, "UuidForIssue")  # no resolution layer remains
         for _, variables in _queries(fake, "commentCreate("):
-            assert _input_payload(variables)["issueId"] == "uuid-1"
+            assert _input_payload(variables)["issueId"] == "ENG-1"
 
-    def test_issue_reads_seed_the_uuid_cache(self) -> None:
-        # update_plan_header reads the issue first; the follow-up mutation must not issue a
-        # separate UuidForIssue lookup (the read seeded the cache).
+    def test_update_plan_header_sends_the_identifier(self) -> None:
+        # update_plan_header reads the issue first, then patches it — the mutation carries the
+        # boundary identifier, never a resolved UUID, and fires no UuidForIssue query.
         description = _inline_plan_description("01HDR")
         backend, fake = _make_backend(
             {
@@ -1430,16 +1427,7 @@ class TestUuidResolution:
         backend.update_plan_header(issue_id="ENG-1", fields={"pr": "12"})
         assert not _queries(fake, "UuidForIssue")
         [(_, variables)] = _queries(fake, "issueUpdate(")
-        assert variables["id"] == "uuid-1"
-
-    def test_uuid_for_missing_entity_raises_not_found(self) -> None:
-        backend, _ = _make_backend(
-            {
-                "UuidForIssue": [_not_found_error()],
-            }
-        )
-        with pytest.raises(IssueBackendError, match="'ENG-404' not found"):
-            backend.add_issue_comment(issue_id="ENG-404", body="x")
+        assert variables["id"] == "ENG-1"
 
 
 def _generic_input_error() -> LinearGraphQLError:
@@ -1493,21 +1481,24 @@ class TestEntityNotFoundDiscrimination:
         with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
             backend.get_plan(issue_id="iss-1")
 
-    # --- _uuid_for (via add_issue_comment → UuidForIssue) ---
+    # --- verified mutations (commentCreate/issueUpdate via _request_issue_mutation) ---
+    # The not-found mapping the old `uuid_for` resolution emitted is now preserved on the
+    # mutation itself: a missing entity becomes the byte-identical "Linear issue '<id>' not
+    # found", every other error re-raises raw.
 
-    def test_uuid_for_observed_shape_raises_converted(self) -> None:
-        backend, _ = _make_backend({"UuidForIssue": [_not_found_error()]})
+    def test_mutation_observed_shape_raises_converted(self) -> None:
+        backend, _ = _make_backend({"commentCreate(": [_not_found_error()]})
         with pytest.raises(IssueBackendError, match="'ENG-404' not found"):
             backend.add_issue_comment(issue_id="ENG-404", body="x")
 
-    def test_uuid_for_generic_input_error_reraises_raw(self) -> None:
-        backend, _ = _make_backend({"UuidForIssue": [_generic_input_error()]})
+    def test_mutation_generic_input_error_reraises_raw(self) -> None:
+        backend, _ = _make_backend({"commentCreate(": [_generic_input_error()]})
         with pytest.raises(IssueBackendError, match="Argument Validation Error"):
             backend.add_issue_comment(issue_id="ENG-404", body="x")
 
-    def test_uuid_for_not_found_message_wrong_code_reraises_raw(self) -> None:
+    def test_mutation_not_found_message_wrong_code_reraises_raw(self) -> None:
         # Re-raises the raw GraphQL error, NOT the converted "'ENG-404' not found" message.
-        backend, _ = _make_backend({"UuidForIssue": [_not_found_message_wrong_code()]})
+        backend, _ = _make_backend({"commentCreate(": [_not_found_message_wrong_code()]})
         with pytest.raises(IssueBackendError, match="Linear GraphQL error: Entity not found"):
             backend.add_issue_comment(issue_id="ENG-404", body="x")
 
@@ -2018,16 +2009,16 @@ class TestLinearProjectOps:
         with pytest.raises(IssueBackendError, match="failed to create Linear project update"):
             ops.create_project_update(project_id="p-1", body="x")
 
-    def test_attach_issue_to_project_resolves_issue_uuid(self) -> None:
+    def test_attach_issue_to_project_sends_the_identifier(self) -> None:
         ops, fake = _make_project_ops(
             {
-                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
         ops.attach_issue_to_project(issue_id="ENG-1", project_id="p-1")
         [(_, variables)] = _queries(fake, "issueUpdate(")
-        assert variables["id"] == "uuid-1"  # resolved via _uuid_for
+        assert variables["id"] == "ENG-1"  # boundary identifier sent directly
+        assert not _queries(fake, "UuidForIssue")
         assert _input_payload(variables)["projectId"] == "p-1"
 
     def test_create_document_returns_id(self) -> None:
@@ -2381,13 +2372,16 @@ class TestLinearProjectObjectiveStore:
         assert "`perk:metadata-block:objective-node`" in cast("str", ivars[0]["description"])
         assert "Alpha" in cast("str", ivars[0]["description"])
 
-        # (d) a blocking relation per explicit depends_on edge (dep -> node), none for empty
+        # (d) a blocking relation per explicit depends_on edge (dep -> node), none for empty.
+        # The relation args are the issue UUIDs captured from the `issueCreate` response (not the
+        # identifiers) and no identifier->UUID resolution query fires.
         rels = [_input_payload(v) for _, v in _queries(fake, "issueRelationCreate(")]
         assert {(r["issueId"], r["relatedIssueId"]) for r in rels} == {
             ("i-1", "i-2"),  # 1.1 blocks 1.2
             ("i-2", "i-3"),  # 1.2 blocks 2.1
         }
         assert all(r["type"] == "blocks" for r in rels)
+        assert not _queries(fake, "UuidForIssue")
 
     def test_create_objective_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store()
@@ -2669,7 +2663,6 @@ class TestLinearProjectObjectiveStore:
         issue = _node_issue(node, uuid=uuid, identifier=identifier)
         return {
             "issues(first": [{"project": {"issues": _page([issue])}}],
-            "UuidForIssue": [{"issue": {"id": uuid}}],
         }
 
     def test_update_objective_node_status_and_mirror(self) -> None:
@@ -2809,6 +2802,51 @@ class TestLinearProjectObjectiveStore:
         # no depends_on -> no blocking relations
         assert not _queries(fake, "issueRelationCreate(")
 
+    def test_add_objective_node_relation_uses_create_time_uuids(self) -> None:
+        # An explicit depends_on edge: the relation is created with the issue UUIDs (the new
+        # node's UUID from its `issueCreate` response, the dep's UUID from `_find_node_issue`) —
+        # never the identifier — and no UuidForIssue resolution query fires.
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="alpha"
+        )
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
+                        }
+                    }
+                ],
+                "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
+                "inverseRelations(": [_blocked_by()],
+                "projectMilestoneCreate(": [_milestone_create("m-2")],
+                "issueCreate(": [_issue_create("ENG-22", "i-22")],
+                "issueRelationCreate(": [_relation_create_ok()],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "u",
+                            "name": "O",
+                            "content": _STORE_BODY,
+                        }
+                    },
+                    {"project": {"content": _STORE_BODY}},
+                ],
+            }
+        )
+        added = store.add_objective_node(
+            objective_id="proj-1", phase=2, description="Beta work", depends_on=("1.1",)
+        )
+        assert added.node_id == "2.1"
+        [(_, rvars)] = _queries(fake, "issueRelationCreate(")
+        relation = _input_payload(rvars)
+        assert relation["issueId"] == "i-11"  # dep UUID (from _find_node_issue)
+        assert relation["relatedIssueId"] == "i-22"  # new node's create-time UUID
+        assert not _queries(fake, "UuidForIssue")
+
     def test_add_objective_node_dry_run_writes_nothing(self) -> None:
         n11 = objective.ObjectiveNode(
             id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
@@ -2932,7 +2970,6 @@ class TestLinearProjectObjectiveStore:
                     }
                 }
             ],
-            "UuidForIssue": [{"issue": {"id": uuid}}],
             "issueUpdate(": [{"issueUpdate": {"success": True}}],
             "comments(first": [{"issue": {"comments": _page(comments or [])}}],
             "commentCreate(": [{"commentCreate": {"success": True}}],
