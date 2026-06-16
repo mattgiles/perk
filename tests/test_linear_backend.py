@@ -1322,6 +1322,38 @@ class TestUpdateObjectiveBody:
         assert "<!--" not in patched
 
 
+class TestIssueBackedStoreNode34Methods:
+    """The dormant issue-backed `LinearObjectiveStore`'s Node 3.4 methods: it does NOT unify node +
+    plan (`save_node_plan` → None) and `close_objective` moves the objective issue to Done."""
+
+    def test_save_node_plan_returns_none(self) -> None:
+        store, fake = _make_store()
+        result = store.save_node_plan(
+            objective_id="obj-1", node_id="1.1", header_fields={"run_id": "R"}, plan_markdown="# p"
+        )
+        assert result is None
+        assert fake.requests == []
+
+    def test_close_objective_moves_issue_to_done(self) -> None:
+        store, fake = _make_store(
+            {
+                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
+                "teams(filter": [_TEAM_RESPONSE],
+                "team(id": [_STATES_RESPONSE],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        assert store.close_objective(objective_id="obj-1") is True
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        assert variables["id"] == "uuid-1"
+        assert _input_payload(variables) == {"stateId": "state-done"}
+
+    def test_close_objective_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_store()
+        assert store.close_objective(objective_id="obj-1", dry_run=True) is False
+        assert fake.requests == []
+
+
 class TestUuidResolution:
     """The D3 mutation-path identifier→UUID resolution (`_uuid_for`): cached, read-seeded."""
 
@@ -1715,24 +1747,41 @@ class TestLinearProjectOps:
             {"id": "m-2", "name": "Phase 2"},
         ]
 
-    def test_project_issues_paginates(self) -> None:
+    def test_project_issues_paginates_and_carries_url(self) -> None:
         page1 = {
             "project": {
                 "issues": _page(
-                    [{"id": "i-1", "identifier": "ENG-1", "description": "body-1"}],
+                    [{"id": "i-1", "identifier": "ENG-1", "url": "u/1", "description": "body-1"}],
                     has_next=True,
                     cursor="C",
                 )
             }
         }
         page2 = {
-            "project": {"issues": _page([{"id": "i-2", "identifier": "ENG-2", "description": ""}])}
+            "project": {
+                "issues": _page(
+                    [{"id": "i-2", "identifier": "ENG-2", "url": "u/2", "description": ""}]
+                )
+            }
         }
         ops, _ = _make_project_ops({"issues(first": [page1, page2]})
+        # `url` is selected + returned (Node 3.4: save_node_plan returns the node-issue ref).
         assert ops.project_issues("p-1") == [
-            {"id": "i-1", "identifier": "ENG-1", "description": "body-1"},
-            {"id": "i-2", "identifier": "ENG-2", "description": ""},
+            {"id": "i-1", "identifier": "ENG-1", "url": "u/1", "description": "body-1"},
+            {"id": "i-2", "identifier": "ENG-2", "url": "u/2", "description": ""},
         ]
+
+    def test_set_project_state_marks_completed(self) -> None:
+        ops, fake = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": True}}]})
+        ops.set_project_state("p-1", "completed")
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        assert variables["id"] == "p-1"
+        assert _input_payload(variables) == {"state": "completed"}
+
+    def test_set_project_state_failure_raises(self) -> None:
+        ops, _ = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": False}}]})
+        with pytest.raises(IssueBackendError, match="failed to set state"):
+            ops.set_project_state("p-1", "completed")
 
     def test_create_project_milestone_returns_id(self) -> None:
         ops, fake = _make_project_ops(
@@ -2022,8 +2071,13 @@ def _node_block_desc(node: objective.ObjectiveNode, *, pr: str | None = None) ->
 def _node_issue(
     node: objective.ObjectiveNode, *, uuid: str, identifier: str, pr: str | None = None
 ) -> dict[str, object]:
-    """A ``project_issues`` node-issue row (id/identifier/description)."""
-    return {"id": uuid, "identifier": identifier, "description": _node_block_desc(node, pr=pr)}
+    """A ``project_issues`` node-issue row (id/identifier/url/description)."""
+    return {
+        "id": uuid,
+        "identifier": identifier,
+        "url": f"u/{identifier}",
+        "description": _node_block_desc(node, pr=pr),
+    }
 
 
 def _blocked_by(*identifiers: str) -> dict[str, object]:
@@ -2283,7 +2337,11 @@ class TestLinearProjectObjectiveStore:
         assert [n.status for n in state.nodes] == [N.PENDING, N.PLANNING, N.DONE]
         assert [n.depends_on for n in state.nodes] == [None, ("1.1",), ("1.2",)]
 
-    def test_get_objective_pr_from_plan_header(self) -> None:
+    def test_get_objective_pr_is_node_issue_identifier(self) -> None:
+        # Node 3.4 (D4): the backlink is the node-issue's OWN identifier whenever it carries a
+        # plan-header block (a plan was saved into it) — self-referential by the unification model,
+        # and stable across submit clobbering plan-header.pr with the GitHub PR number. The value
+        # stored in plan-header.pr (here "#42") is intentionally NOT used.
         N = objective.NodeStatus
         n11 = objective.ObjectiveNode(id="1.1", description="Alpha", status=N.IN_PROGRESS)
         n12 = objective.ObjectiveNode(id="1.2", description="Beta", status=N.PENDING)
@@ -2310,8 +2368,8 @@ class TestLinearProjectObjectiveStore:
         state = store.get_objective(objective_id="proj-1")
         assert state is not None
         by_id = {n.id: n for n in state.nodes}
-        assert by_id["1.1"].pr == "#42"
-        assert by_id["1.2"].pr is None
+        assert by_id["1.1"].pr == "#ENG-11"  # identifier-derived, not the plan-header.pr value
+        assert by_id["1.2"].pr is None  # no plan-header block → no backlink
 
     def test_get_objective_skips_foreign_issues(self) -> None:
         N = objective.NodeStatus
@@ -2328,6 +2386,7 @@ class TestLinearProjectObjectiveStore:
                                     {
                                         "id": "i-99",
                                         "identifier": "ENG-99",
+                                        "url": "u/ENG-99",
                                         "description": "just a normal issue",
                                     },
                                 ]
@@ -2362,7 +2421,14 @@ class TestLinearProjectObjectiveStore:
                     {
                         "project": {
                             "issues": _page(
-                                [{"id": "i-1", "identifier": "ENG-1", "description": bad_block}]
+                                [
+                                    {
+                                        "id": "i-1",
+                                        "identifier": "ENG-1",
+                                        "url": "u/ENG-1",
+                                        "description": bad_block,
+                                    }
+                                ]
                             )
                         }
                     }
@@ -2547,3 +2613,136 @@ class TestLinearProjectObjectiveStore:
         )
         assert result.dry_run is True
         assert not _queries(fake, "projectUpdate(")
+
+    # ----------------------------------------------------------------- save_node_plan (Node 3.4)
+
+    def _save_node_responses(
+        self,
+        *,
+        node: objective.ObjectiveNode,
+        uuid: str = "i-1",
+        identifier: str = "ENG-1",
+        comments: list[dict[str, object]] | None = None,
+    ) -> dict[str, list[object]]:
+        return {
+            "issues(first": [
+                {
+                    "project": {
+                        "issues": _page([_node_issue(node, uuid=uuid, identifier=identifier)])
+                    }
+                }
+            ],
+            "UuidForIssue": [{"issue": {"id": uuid}}],
+            "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            "comments(first": [{"issue": {"comments": _page(comments or [])}}],
+            "commentCreate(": [{"commentCreate": {"success": True}}],
+            "commentUpdate(": [{"commentUpdate": {"success": True}}],
+        }
+
+    def test_save_node_plan_writes_into_node_issue(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.IN_PROGRESS, slug="a"
+        )
+        store, fake = _make_project_store(self._save_node_responses(node=node))
+        header_fields = plan.PlanHeader(run_id="01RUN", created="t").to_data()
+        ref = store.save_node_plan(
+            objective_id="proj-1",
+            node_id="1.1",
+            header_fields=header_fields,
+            plan_markdown="# My Plan\n\nbody text\n",
+        )
+        # Returns the node-issue ref (existed=True): the node-issue IS the plan issue.
+        assert ref == objective_store.ObjectiveRef(id="ENG-1", url="u/ENG-1", existed=True)
+        # (1) the description write merges an inline-code plan-header WITHOUT disturbing the
+        # objective-node block or the prose, and stays inline-code (no HTML).
+        [(_, uvars)] = _queries(fake, "issueUpdate(")
+        desc = cast("str", _input_payload(uvars)["description"])
+        assert plan.find_metadata_block(desc, plan.PLAN_HEADER_KEY) is not None
+        assert plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY) is not None
+        assert "Alpha" in desc
+        assert "<!--" not in desc
+        # (2) the plan body is upserted as a single inline-code comment (create path here).
+        [(_, cvars)] = _queries(fake, "commentCreate(")
+        body = cast("str", _input_payload(cvars)["body"])
+        assert plan.extract_plan_body(body) == "# My Plan\n\nbody text"
+        assert "<details>" not in body  # inline-code, never the lossy HTML form
+        assert not _queries(fake, "commentUpdate(")
+
+    def test_save_node_plan_upserts_existing_body_comment(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.IN_PROGRESS
+        )
+        existing: dict[str, object] = {
+            "id": "c-1",
+            "body": plan.render_plan_body("# Old\n\nold body\n", style="inline-code"),
+            "createdAt": "2026-01-01T00:00:00Z",
+        }
+        store, fake = _make_project_store(self._save_node_responses(node=node, comments=[existing]))
+        store.save_node_plan(
+            objective_id="proj-1",
+            node_id="1.1",
+            header_fields=plan.PlanHeader(run_id="01RUN", created="t").to_data(),
+            plan_markdown="# New\n\nnew body\n",
+        )
+        # Idempotent: the existing plan-body comment is PATCHed, never a duplicate create.
+        [(_, uvars)] = _queries(fake, "commentUpdate(")
+        assert uvars["id"] == "c-1"
+        body = cast("str", _input_payload(uvars)["body"])
+        assert plan.extract_plan_body(body) == "# New\n\nnew body"
+        assert not _queries(fake, "commentCreate(")
+
+    def test_save_node_plan_node_not_found_raises(self) -> None:
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        store, _ = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page([_node_issue(node, uuid="i-1", identifier="ENG-1")])
+                        }
+                    }
+                ]
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match=r"objective node '9.9' not found"):
+            store.save_node_plan(
+                objective_id="proj-1",
+                node_id="9.9",
+                header_fields={"run_id": "01RUN"},
+                plan_markdown="# p",
+            )
+
+    def test_save_node_plan_dry_run_returns_none(self) -> None:
+        store, fake = _make_project_store()
+        ref = store.save_node_plan(
+            objective_id="proj-1",
+            node_id="1.1",
+            header_fields={"run_id": "01RUN"},
+            plan_markdown="# p",
+            dry_run=True,
+        )
+        assert ref is None
+        assert fake.requests == []
+
+    # ----------------------------------------------------------------- close_objective (Node 3.4)
+
+    def test_close_objective_marks_project_complete(self) -> None:
+        store, fake = _make_project_store(
+            {"projectUpdate(": [{"projectUpdate": {"success": True}}]}
+        )
+        assert store.close_objective(objective_id="proj-1") is True
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        assert variables["id"] == "proj-1"
+        assert _input_payload(variables) == {"state": "completed"}
+
+    def test_close_objective_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_project_store()
+        assert store.close_objective(objective_id="proj-1", dry_run=True) is False
+        assert fake.requests == []
+
+    def test_close_objective_failure_raises(self) -> None:
+        store, _ = _make_project_store({"projectUpdate(": [{"projectUpdate": {"success": False}}]})
+        with pytest.raises(ObjectiveStoreError, match="failed to set state"):
+            store.close_objective(objective_id="proj-1")

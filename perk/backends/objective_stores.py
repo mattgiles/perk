@@ -4,9 +4,14 @@ Node 2.1 (``perk/backends/objective_store.py``) shipped the objective-tier **con
 ``ObjectiveStore`` ``Protocol``, the result dataclasses, and ``ObjectiveStoreError``.
 This module makes it live: ``GitHubObjectiveStore`` is a thin delegation adapter over
 ``perk.github``'s objective-tier module functions (the same functions ``GitHubIssueBackend`` used to
-delegate to — the equivalence lock for the move), ``LinearObjectiveStore`` (in
-``perk.backends.linear_backend``) is its Linear twin, and ``resolve_objective_store`` is the
-resolver every objective-tier consumer goes through.
+delegate to — the equivalence lock for the move) and ``resolve_objective_store`` is the resolver
+every objective-tier consumer goes through.
+
+**The Linear arm is project-backed** (Objective #548, Node 3.4): ``resolve_objective_store``
+constructs ``LinearProjectObjectiveStore`` (a Linear **Project** is the objective; the roadmap is
+materialised as one node-issue per node), so every Linear objective consumer is project-backed. The
+issue-backed ``LinearObjectiveStore`` is kept dormant (directly-constructable, still unit-tested);
+retiring it is a later cleanup.
 
 The ``[issues]`` selection is single-sourced: ``resolve_objective_store_id`` re-exports
 ``perk.backends.issues.resolve_issue_backend_id`` (an objective and its plan/learn issues share one
@@ -172,6 +177,25 @@ class GitHubObjectiveStore:
             dry_run=updated.dry_run,
         )
 
+    def save_node_plan(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """GitHub does NOT unify node + plan (the roadmap lives in one objective issue's body, not
+        in per-node issues) — always ``None`` so the caller takes the standalone plan-issue path."""
+        return None
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Close the GitHub objective issue (byte-identical to the issue tier's prior close)."""
+        number = _number(objective_id)
+        with _translate():
+            return github.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
+
 
 def resolve_objective_store_id(repo_root: Path) -> str:
     """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.
@@ -203,5 +227,7 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
                 "set the Linear team key in .pi/perk.toml"
             )
         client = linear.client_from_env()
-        return linear_backend.LinearObjectiveStore(client, team_key=team, repo_root=repo_root)
+        return linear_backend.LinearProjectObjectiveStore(
+            client, team_key=team, repo_root=repo_root
+        )
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

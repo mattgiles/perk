@@ -371,6 +371,51 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
     assert "objective close skipped (non-fatal)" in capsys.readouterr().err
 
 
+def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
+    # Node 3.4: completion closes through the OBJECTIVE STORE (store.close_objective), not the issue
+    # tier (backend.close_issue). Inject a fake store and assert it owns the close.
+    from perk.backends import objective_store, objective_stores
+
+    calls: dict[str, object] = {}
+    marked: list[str] = []
+
+    class _Store:
+        backend_id = "linear"
+
+        def get_objective(self, *, objective_id):
+            return objective_store.ObjectiveState(
+                id=objective_id,
+                url="u",
+                title="O",
+                header={},
+                nodes=(_node("1.1", pr="#ENG-7"),),
+            )
+
+        def update_objective_node(self, **k):
+            marked.append(k["node_id"])
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=str(k["objective_id"]),
+                node_id=k["node_id"],
+                comment_updated=False,
+                dry_run=False,
+            )
+
+        def close_objective(self, *, objective_id, dry_run=False):
+            calls["closed"] = objective_id
+            return True
+
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    # If the close reached the issue tier, this would fire — it must NOT.
+    monkeypatch.setattr(
+        github, "close_issue", lambda **k: (_ for _ in ()).throw(AssertionError("issue-tier close"))
+    )
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
+    )
+    assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None, closed=True)
+    assert calls["closed"] == "proj-1"
+
+
 def test_reconcile_on_land_is_fail_open(monkeypatch):
     def _boom(**k):
         raise github.GitHubError("gh exploded")

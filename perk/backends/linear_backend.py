@@ -516,6 +516,23 @@ class _LinearProjectOps:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to update Linear project {project_id!r}")
 
+    def set_project_state(self, project_id: str, state: str) -> None:
+        """Set a project's ``state`` (e.g. ``"completed"`` to mark the objective complete on land).
+        Project ids are opaque UUIDs — no ``_uuid_for`` resolution.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** ``projectUpdate(input:{state})`` is NOT yet
+        live-proven — the 1.4 spike covered create/overview/milestone/attach/relation, not project
+        state. Covered offline here; verify live before relying on it.
+        """
+        mutation = (
+            "mutation($id: String!, $input: ProjectUpdateInput!) "
+            "{ projectUpdate(id: $id, input: $input) { success } }"
+        )
+        data = self._client.request(mutation, {"id": project_id, "input": {"state": state}})
+        payload = _require_dict(data.get("projectUpdate"), "projectUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to set state on Linear project {project_id!r}")
+
     def project_or_none(self, project_id: str, selection: str) -> dict[str, object] | None:
         """Fetch one project by id; ``None`` when Linear reports the entity missing (a bogus
         ``project(id)`` matches the issue not-found shape — ``INPUT_ERROR`` + "Entity not found:
@@ -550,13 +567,14 @@ class _LinearProjectOps:
         ]
 
     def project_issues(self, project_id: str) -> list[dict[str, object]]:
-        """All issues attached to a project, as ``[{id, identifier, description}, …]`` (paginated).
-        ``description`` may be ``""`` — one query then yields every node-issue body for the read
-        path (``get_objective``)."""
+        """All issues attached to a project, as ``[{id, identifier, url, description}, …]``
+        (paginated). ``description`` may be ``""`` — one query then yields every node-issue body for
+        the read path (``get_objective``) and the node-issue ``url`` for the unification write
+        (``save_node_plan`` returns the node-issue ref)."""
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
-            "{ nodes { id identifier description } pageInfo { hasNextPage endCursor } } } }"
+            "{ nodes { id identifier url description } pageInfo { hasNextPage endCursor } } } }"
         )
         nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
         result: list[dict[str, object]] = []
@@ -566,6 +584,7 @@ class _LinearProjectOps:
                 {
                     "id": _require_str(node.get("id"), "issue id"),
                     "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
                     "description": description if isinstance(description, str) else "",
                 }
             )
@@ -1019,7 +1038,12 @@ class LinearObjectiveStore:
     comment-id backfill, header LBYL, authoritative roadmap writes with best-effort comment
     re-renders, the Reconcilable splice) behind the Node 2.1 contract. Owns its own
     :class:`_LinearIssueOps` substrate; maps ``IssueBackendError`` → ``ObjectiveStoreError`` at
-    every boundary (message verbatim)."""
+    every boundary (message verbatim).
+
+    **Dormant since Node 3.4:** the resolver's ``linear`` arm now constructs
+    :class:`LinearProjectObjectiveStore` (project-backed), so this issue-backed store is never
+    resolver-wired in production. It is kept as a directly-constructable class with its own unit
+    tests; retiring it is a later cleanup."""
 
     # The objective-backend vocabulary id — a module-level literal (never imported from the
     # resolver module, which imports us at wiring time). Mirrors `LinearIssueBackend.backend_id`.
@@ -1240,6 +1264,31 @@ class LinearObjectiveStore:
                 objective_id=objective_id, comment_id=comment_key, updated=True, dry_run=False
             )
 
+    def save_node_plan(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """The issue-backed store does NOT unify node + plan (the roadmap is a table in one
+        objective issue's body, not per-node issues) — always ``None`` so the caller takes the
+        standalone plan-issue path."""
+        return None
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Move the Linear objective issue to its Done state (equivalent to
+        ``LinearIssueBackend.close_issue``). ``dry_run`` returns ``False`` without a write."""
+        if dry_run:
+            return False
+        with _translate_objective():
+            self._ops._update_issue(
+                objective_id, {"stateId": self._ops._done_state_id()}, what="close"
+            )
+        return True
+
 
 # ===========================================================================
 # The project-backed objective-storage tier (Objective #548, Node 3.2):
@@ -1454,13 +1503,45 @@ class LinearProjectObjectiveStore:
                 nodes=tuple(sorted_nodes),
             )
 
+    def _find_node_issue(
+        self, objective_id: str, node_id: str
+    ) -> tuple[str, str, str, str, dict[str, object]] | None:
+        """Locate the project's node-issue carrying the ``objective-node`` block for ``node_id``.
+
+        Returns ``(uuid, identifier, url, body, block)`` — the node-issue's UUID, its human
+        identifier, its url, its description body, and the parsed ``objective-node`` block — or
+        ``None`` when no node-issue matches. Shared by :meth:`update_objective_node` and
+        :meth:`save_node_plan`.
+        """
+        for issue in self._projects.project_issues(objective_id):
+            description_raw = issue.get("description")
+            body = description_raw if isinstance(description_raw, str) else ""
+            candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
+            if candidate is not None and candidate.get("id") == node_id:
+                return (
+                    _require_str(issue.get("id"), "issue id"),
+                    _require_str(issue.get("identifier"), "issue identifier"),
+                    _require_str(issue.get("url"), "issue url"),
+                    body,
+                    candidate,
+                )
+        return None
+
     @staticmethod
     def _node_from_block(
         block: dict[str, object], identifier: str, body: str
     ) -> objective.ObjectiveNode:
-        """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` block. ``pr`` comes from the
-        same node-issue's ``plan-header`` block (``None`` until Node 3.4 writes it). A malformed
-        block (missing/invalid ``id``/``status``) raises ``IssueBackendError``."""
+        """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` block. A malformed block
+        (missing/invalid ``id``/``status``) raises ``IssueBackendError``.
+
+        **The plan backlink is the node-issue's own identifier** (Node 3.4 unification, refining
+        Node 3.3): in the project model the plan *is* the node-issue, so the backlink is
+        self-referential. It is derived as ``canonical_pr(identifier)`` whenever the node-issue
+        carries a ``plan-header`` block (i.e. a plan has been saved into it), else ``None``. This is
+        stable across ``pr submit`` overwriting ``plan-header.pr`` with the GitHub PR number, so
+        the land-path match (``nodes_for_pr(nodes, plan_ref.pr_id == identifier)``) holds after
+        submit without changing ``nodes_for_pr`` / ``pr submit`` / ``pr land``.
+        """
         node_id = block.get("id")
         status_raw = block.get("status")
         if not isinstance(node_id, str) or not node_id:
@@ -1476,10 +1557,14 @@ class LinearProjectObjectiveStore:
         description = block.get("description")
         slug = block.get("slug")
         comment = block.get("comment")
-        # The plan backlink: the node-issue's own plan-header `pr` (Node 3.4 unification).
-        ph = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY)
-        pr_raw = ph.get("pr") if ph else None
-        pr = pr_raw if isinstance(pr_raw, str) and pr_raw else None
+        # The plan backlink: the node-issue's own identifier whenever a plan has been saved into it
+        # (a `plan-header` block is present), else None. Self-referential by the unification model;
+        # stable across submit clobbering `plan-header.pr` with the GitHub PR number.
+        pr = (
+            objective.canonical_pr(identifier)
+            if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY)
+            else None
+        )
         return objective.ObjectiveNode(
             id=node_id,
             description=description if isinstance(description, str) else "",
@@ -1511,22 +1596,12 @@ class LinearProjectObjectiveStore:
         table (the roadmap is derived from node-issues, not a rendered comment).
         """
         with _translate_objective():
-            issue_uuid: str | None = None
-            node_body = ""
-            block: dict[str, object] | None = None
-            for issue in self._projects.project_issues(objective_id):
-                description_raw = issue.get("description")
-                body = description_raw if isinstance(description_raw, str) else ""
-                candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
-                if candidate is not None and candidate.get("id") == node_id:
-                    issue_uuid = _require_str(issue.get("id"), "issue id")
-                    node_body = body
-                    block = candidate
-                    break
-            if issue_uuid is None or block is None:
+            found = self._find_node_issue(objective_id, node_id)
+            if found is None:
                 raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
+            issue_uuid, identifier, _url, node_body, block = found
 
-            node = self._node_from_block(block, node_id, node_body)
+            node = self._node_from_block(block, identifier, node_body)
             updated = objective.update_node(
                 [node], node_id, status=status, pr=pr, description=description
             )
@@ -1627,6 +1702,77 @@ class LinearProjectObjectiveStore:
             return objective_store.ObjectiveHeaderUpdate(
                 fields_updated=tuple(fields), dry_run=False
             )
+
+    def save_node_plan(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Write the plan **into** the objective's node-issue (the node↔plan unification).
+
+        Merges the ``plan-header`` block into the node-issue description (Linear-safe inline-code)
+        and upserts the plan body as a single node-issue comment; the title, the ``objective-node``
+        block, and the node prose are untouched. Returns the **node-issue** ref
+        (``existed=True``). Raises ``ObjectiveStoreError`` when the node is not found.
+
+        ``dry_run`` returns ``None`` (resolving the node-issue requires a network read; the caller
+        falls back to the offline compose-preview).
+        """
+        if dry_run:
+            return None
+        with _translate_objective():
+            found = self._find_node_issue(objective_id, node_id)
+            if found is None:
+                raise IssueBackendError(f"objective node {node_id!r} not found on {objective_id!r}")
+            uuid, identifier, url, body, _block = found
+
+            # Merge the plan-header block into the node-issue description, Linear-safe
+            # (inline-code). Form-preserving replace when present; else compose+append inline-code
+            # (NEVER the bare replace_metadata_block append path — it appends in lossy HTML form).
+            if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
+                new_desc = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, header_fields)
+            else:
+                header_block = plan.render_metadata_block(
+                    plan.PLAN_HEADER_KEY, header_fields, style="inline-code"
+                )
+                new_desc = f"{body.rstrip()}\n\n{header_block}\n"
+            self._issue_ops._update_issue(
+                uuid, {"description": new_desc}, what="write node plan-header"
+            )
+
+            # Upsert the plan body as a single inline-code comment (title untouched). Find an
+            # existing plan-body comment via the comment list; patch it if found, else create it.
+            body_comment = plan.render_plan_body(plan_markdown, style="inline-code")
+            existing_comment_id: str | None = None
+            for comment in self._issue_ops._comments(uuid):
+                comment_body = comment.get("body")
+                if isinstance(comment_body, str) and plan.extract_plan_body(comment_body):
+                    existing_comment_id = _require_str(comment.get("id"), "comment id")
+                    break
+            if existing_comment_id is not None:
+                self._issue_ops._update_comment(existing_comment_id, body_comment)
+            else:
+                self._issue_ops._create_comment(uuid, body_comment)
+
+            return objective_store.ObjectiveRef(id=identifier, url=url, existed=True)
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        """Mark the Linear **Project** complete (``projectUpdate(state:"completed")``) — a Project
+        is not an issue, so completion retires the Project, not an issue. ``dry_run`` returns
+        ``False`` without a write.
+
+        **Flagged not-live-proven** (the 1.4 spike did not cover project state) — verify at the
+        Node 5.1 smoke gate alongside ``list_projects`` / ``_workflow_state_id``.
+        """
+        if dry_run:
+            return False
+        with _translate_objective():
+            self._projects.set_project_state(objective_id, "completed")
+        return True
 
 
 # ===========================================================================

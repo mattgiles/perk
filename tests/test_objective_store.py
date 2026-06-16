@@ -106,6 +106,26 @@ class _FakeObjectiveStore:
             objective_id=objective_id, comment_id=None, updated=not dry_run, dry_run=dry_run
         )
 
+    def save_node_plan(
+        self,
+        *,
+        objective_id: str,
+        node_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        # The minimal fake does not unify node + plan (the single "doesn't unify" signal).
+        return None
+
+    def close_objective(self, *, objective_id: str, dry_run: bool = False) -> bool:
+        if dry_run:
+            return False
+        obj = self._objectives.get(objective_id)
+        if obj is not None:
+            self._objectives[objective_id] = dataclasses.replace(obj, state="CLOSED")
+        return True
+
 
 def _make_store() -> objective_store.ObjectiveStore:
     """The static conformance check: ty verifies ``_FakeObjectiveStore`` satisfies the protocol."""

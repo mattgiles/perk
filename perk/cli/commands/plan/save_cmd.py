@@ -256,55 +256,80 @@ def _plan_save_impl(
 
     backend = issues.resolve_issue_backend(repo_root)
     store = objective_stores.resolve_objective_store(repo_root)
-    backend.ensure_label(
-        plan.PLAN_LABEL,
-        color=plan.PLAN_LABEL_COLOR,
-        description=plan.PLAN_LABEL_DESCRIPTION,
-        dry_run=dry_run,
-    )
-    issue = backend.create_plan_issue(
-        title=resolved_title,
-        body=issue_body,
-        run_id=run_id,
-        dry_run=dry_run,
-    )
-    # `create_plan_issue` is idempotent on run_id: a fresh create returns existed=False, a re-save
-    # returns the existing issue. On a fresh create we post the plan-body comment; on a re-save we
-    # upsert the existing issue in place (PATCH the plan-body comment + the title). A dry run shells
-    # nothing. The anti-duplicate guarantee is preserved — never a second issue per run_id.
-    updated = False
-    if not dry_run:
-        if issue.existed:
-            backend.update_plan_issue(
-                issue_id=issue.id,
-                title=resolved_title,
-                body_comment=body_comment,
-            )
-            # `update_plan_issue` rewrites only the plan-body comment + the issue title; it never
-            # touches the `plan-header` block. So the planning-time header fields (`objective_id`,
-            # `consumed_learn`) that are only written on a fresh create would be silently dropped on
-            # any re-save — leaving the canonical header (which `reconstruct_plan_ref` / on-land
-            # consume read from) stale. Merge them back via the `update_plan_header` gateway, which
-            # is additive (omitted fields are left intact, never clobbering an existing link or
-            # the submit-populated branch/pr/lifecycle_stage). A failure surfaces (raises
-            # IssueBackendError → `github_error`) — this is the canonical save, where a silent
-            # drop is the bug.
-            header_fields: dict[str, object] = {}
-            if objective_id is not None:
-                header_fields["objective_id"] = objective_id
-            if consumed_learn:
-                header_fields["consumed_learn"] = list(consumed_learn)
-            if header_fields:
-                backend.update_plan_header(issue_id=issue.id, fields=header_fields)
-            updated = True
-        else:
-            backend.add_issue_comment(issue_id=issue.id, body=body_comment, dry_run=dry_run)
+
+    # Node 3.4 unification: an objective-linked REAL save writes the plan INTO the existing
+    # node-issue (project-backed stores) instead of minting a second perk:plan issue. The store's
+    # `save_node_plan` returns the node-issue ref for a unifying store, and `None` otherwise (and
+    # on a dry run — resolving the node-issue needs a network read). `None` means "take the
+    # standalone path, UNCHANGED below".
+    unified_ref = None
+    if not dry_run and objective_id and node_id:
+        unified_ref = store.save_node_plan(
+            objective_id=str(objective_id).lstrip("#"),
+            node_id=node_id,
+            header_fields=header.to_data(),
+            plan_markdown=plan_markdown,
+        )
+
+    if unified_ref is not None:
+        # Project-backed: the node-issue IS the plan issue (an in-place write into an existing
+        # issue, so `updated=True`); it carries no perk:plan label (discovered by project
+        # membership + the objective-node block).
+        issue = issue_backend.IssueRef(id=unified_ref.id, url=unified_ref.url, existed=True)
+        updated = True
+        labels: tuple[str, ...] = ()
+    else:
+        backend.ensure_label(
+            plan.PLAN_LABEL,
+            color=plan.PLAN_LABEL_COLOR,
+            description=plan.PLAN_LABEL_DESCRIPTION,
+            dry_run=dry_run,
+        )
+        issue = backend.create_plan_issue(
+            title=resolved_title,
+            body=issue_body,
+            run_id=run_id,
+            dry_run=dry_run,
+        )
+        # `create_plan_issue` is idempotent on run_id: a fresh create returns existed=False, a
+        # re-save returns the existing issue. On a fresh create we post the plan-body comment; on a
+        # re-save we upsert the existing issue in place (PATCH the plan-body comment + the title). A
+        # dry run shells nothing. The anti-duplicate guarantee is preserved — never a second issue
+        # per run_id.
+        updated = False
+        if not dry_run:
+            if issue.existed:
+                backend.update_plan_issue(
+                    issue_id=issue.id,
+                    title=resolved_title,
+                    body_comment=body_comment,
+                )
+                # `update_plan_issue` rewrites only the plan-body comment + the issue title; it
+                # never touches the `plan-header` block. So the planning-time header fields
+                # (`objective_id`, `consumed_learn`) that are only written on a fresh create would
+                # be silently dropped on any re-save — leaving the canonical header (which
+                # `reconstruct_plan_ref` / on-land consume read from) stale. Merge them back via the
+                # `update_plan_header` gateway, which is additive (omitted fields are left intact,
+                # never clobbering an existing link or the submit-populated branch/pr/
+                # lifecycle_stage). A failure surfaces (raises IssueBackendError → `github_error`)
+                # — this is the canonical save, where a silent drop is the bug.
+                header_fields: dict[str, object] = {}
+                if objective_id is not None:
+                    header_fields["objective_id"] = objective_id
+                if consumed_learn:
+                    header_fields["consumed_learn"] = list(consumed_learn)
+                if header_fields:
+                    backend.update_plan_header(issue_id=issue.id, fields=header_fields)
+                updated = True
+            else:
+                backend.add_issue_comment(issue_id=issue.id, body=body_comment, dry_run=dry_run)
+        labels = (plan.PLAN_LABEL,)
 
     plan_ref = plan.PlanRef(
         provider=backend.backend_id,
         pr_id=issue.id,
         url=issue.url,
-        labels=(plan.PLAN_LABEL,),
+        labels=labels,
         objective_id=objective_id,
         consumed_learn=consumed_learn,
     )

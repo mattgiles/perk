@@ -372,9 +372,18 @@ ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
 class TestConsumerBoundary:
     def test_no_production_module_calls_issue_tier_directly(self) -> None:
         """Source scan: outside perk/backends/issues.py (the adapter) and the perk/github/
-        package itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call."""
+        package itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call.
+
+        `objective_stores.py` is also allowed: `GitHubObjectiveStore.close_objective` (Node 3.4)
+        deliberately reaches the issue-tier close primitive (`github.close_issue`) to retire a
+        GitHub objective issue — a GitHub objective IS an issue, so its close is byte-identical to
+        the issue close, and routing it through the objective adapter (not the issue backend) is the
+        point of moving the close onto the `ObjectiveStore`."""
         perk_dir = Path(perk.__file__).parent
-        allowed = {perk_dir / "backends" / "issues.py"}
+        allowed = {
+            perk_dir / "backends" / "issues.py",
+            perk_dir / "backends" / "objective_stores.py",
+        }
         github_pkg_dir = perk_dir / "github"
         pattern = re.compile(
             r"github\.(" + "|".join(re.escape(fn) for fn in ISSUE_TIER_FUNCTIONS) + r")\("
