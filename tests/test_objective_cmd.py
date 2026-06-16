@@ -263,6 +263,88 @@ def test_node_not_found_maps_error(monkeypatch):
     assert payload["error_type"] == "node_not_found"
 
 
+def test_node_add_json(monkeypatch):
+    _authed(monkeypatch)
+    captured = {}
+
+    def _add(**k):
+        captured.update(k)
+        return github.ObjectiveNodeAdd(
+            number=k["number"], node_id="2.3", comment_updated=True, dry_run=False
+        )
+
+    monkeypatch.setattr(github, "add_objective_node", _add)
+    result = _invoke(
+        [
+            "objective",
+            "node-add",
+            "42",
+            "--phase",
+            "2",
+            "--description",
+            "Newly emerged work",
+            "--depends-on",
+            "1.1",
+            "--depends-on",
+            "2.1",
+            "--json",
+        ]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["success"] is True and payload["node"] == "2.3"
+    assert payload["comment_updated"] is True and payload["dry_run"] is False
+    assert captured["phase"] == 2
+    assert captured["depends_on"] == ("1.1", "2.1")
+    assert captured["status"] is N.PENDING  # default
+
+
+def test_node_add_dry_run_does_not_require_github(monkeypatch):
+    # No _authed(): a dry run must not call require_github.
+    captured = {}
+
+    def _add(**k):
+        captured.update(k)
+        return github.ObjectiveNodeAdd(
+            number=k["number"], node_id="1.3", comment_updated=False, dry_run=True
+        )
+
+    monkeypatch.setattr(github, "add_objective_node", _add)
+    result = _invoke(
+        ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--dry-run", "--json"]
+    )
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["dry_run"] is True and payload["node"] == "1.3"
+    assert captured["dry_run"] is True
+
+
+def test_node_add_collision_maps_to_invalid_input(monkeypatch):
+    _authed(monkeypatch)
+
+    def _add(**k):
+        raise github.GitHubError("could not add node to phase 1 on #42 (id collision)")
+
+    monkeypatch.setattr(github, "add_objective_node", _add)
+    result = _invoke(
+        ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--json"]
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_input"
+
+
+def test_node_add_not_a_repo_exit_2():
+    runner = CliRunner()
+    with runner.isolated_filesystem():  # no git init -> not a repo
+        result = runner.invoke(
+            cli, ["objective", "node-add", "1", "--phase", "1", "--description", "X", "--json"]
+        )
+    assert result.exit_code == 2
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "not_a_repo"
+
+
 def test_next_json(monkeypatch):
     monkeypatch.setattr(
         github,

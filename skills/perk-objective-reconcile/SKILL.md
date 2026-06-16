@@ -53,6 +53,11 @@ Route each by section type:
 - If a **non-terminal node was actually completed** by this PR (and the mechanical step did not
   already handle it — it only marks the backlinked node), set it `done` via `objective_node` with a
   completion `audit`.
+- A **newly-discovered node** — a real new unit of work the PR revealed that isn't in the roadmap
+  — → `add_objective_node` `{ objective, phase, description, depends_on? }`, **used sparingly**.
+
+Adding nodes is **rare** — prefer reconciling prose and node descriptions; only add a node when the
+work is genuinely new and unplanned (never to restate, rename, or re-scope an existing node).
 
 ## Skip if nothing is stale
 
@@ -63,4 +68,5 @@ divergence in the diff.
 ## Never-delegate boundaries
 
 - **Judgment** — what diverged, whether anything is actually stale — is yours.
-- **Durable writes** — `reconcile_objective` and `objective_node` — are yours, never a child's.
+- **Durable writes** — `reconcile_objective`, `objective_node`, and `add_objective_node` — are
+  yours, never a child's.

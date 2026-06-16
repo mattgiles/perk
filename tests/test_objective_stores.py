@@ -207,6 +207,32 @@ class TestGitHubDelegation:
             objective_id="252", node_id="1.2", comment_updated=True, dry_run=False
         )
 
+    def test_add_objective_node(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(
+            github.ObjectiveNodeAdd(number=252, node_id="1.3", comment_updated=True, dry_run=False)
+        )
+        monkeypatch.setattr(github, "add_objective_node", rec)
+        result = GitHubObjectiveStore(tmp_path).add_objective_node(
+            objective_id="252",
+            phase=1,
+            description="Gamma",
+            depends_on=("1.1",),
+        )
+        assert rec.kwargs == {
+            "number": 252,
+            "phase": 1,
+            "description": "Gamma",
+            "status": objective.NodeStatus.PENDING,
+            "slug": None,
+            "depends_on": ("1.1",),
+            "comment": None,
+            "repo_root": tmp_path,
+            "dry_run": False,
+        }
+        assert result == objective_store.ObjectiveNodeAdd(
+            objective_id="252", node_id="1.3", comment_updated=True, dry_run=False
+        )
+
     def test_update_objective_body(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
             github.ObjectiveBodyUpdate(number=252, comment_id=777, updated=True, dry_run=False)
@@ -315,6 +341,7 @@ OBJECTIVE_TIER_FUNCTIONS: tuple[str, ...] = (
     "update_objective_header",
     "update_objective_node",
     "update_objective_body",
+    "add_objective_node",
 )
 
 

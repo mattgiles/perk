@@ -30,7 +30,13 @@ import {
 import { loadPerkConfig, resolveIssueBackendId } from "../substrate/config.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
-import { idParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
+import {
+  idParam,
+  numberParam,
+  paramsOf,
+  stringArrayParam,
+  stringParam,
+} from "../substrate/toolParams.ts";
 import {
   appendWorkflowState,
   type BranchSource,
@@ -337,6 +343,134 @@ export async function reconcileObjective(
   });
 }
 
+interface AddObjectiveNodeParams {
+  /** Opaque string objective id (§8.21). */
+  objective: string;
+  phase: number;
+  description: string;
+  status?: NodeStatus;
+  slug?: string;
+  depends_on?: string[];
+  comment?: string;
+}
+
+/** The ok-arm fields. */
+export interface AddObjectiveNodeOk {
+  objective: string;
+  node: string;
+  comment_updated: boolean;
+}
+
+export type AddObjectiveNodeResult = Result<AddObjectiveNodeOk>;
+
+/** The fields `addObjectiveNode` consumes off the success envelope. */
+interface AddObjectiveNodePayload {
+  node_id: string;
+  comment_updated: boolean;
+}
+
+/** Lenient decode — both fields are advisory display detail; never returns null. */
+function decodeAddObjectiveNode(payload: ColdJson): AddObjectiveNodePayload {
+  return {
+    node_id: stringField(payload, "node") ?? "",
+    comment_updated: booleanField(payload, "comment_updated") ?? false,
+  };
+}
+
+/**
+ * Decode unknown tool-call params into `AddObjectiveNodeParams` (the tool-boundary seam):
+ * `objective` required opaque id (bare numbers coerce), `phase` a required positive integer,
+ * `description` a required non-empty string; `status` narrowed against `NODE_STATUSES`
+ * (present-but-unknown → null); `slug`/`comment` optional strings; `depends_on` an optional
+ * `string[]`. Null on any miss (strict-fail).
+ */
+export function decodeAddObjectiveNodeParams(params: unknown): AddObjectiveNodeParams | null {
+  const p = paramsOf(params);
+  if (p === null) return null;
+  const objective = idParam(p, "objective");
+  if (typeof objective !== "string" || !objective) return null;
+  const phase = numberParam(p, "phase");
+  if (typeof phase !== "number" || !Number.isInteger(phase) || phase <= 0) return null;
+  const description = stringParam(p, "description");
+  if (typeof description !== "string" || !description) return null;
+  const rawStatus = stringParam(p, "status");
+  if (rawStatus === null) return null;
+  let status: NodeStatus | undefined;
+  if (rawStatus !== undefined) {
+    const known = NODE_STATUSES.find((s) => s === rawStatus);
+    if (known === undefined) return null;
+    status = known;
+  }
+  const slug = stringParam(p, "slug");
+  const comment = stringParam(p, "comment");
+  const dependsOn = stringArrayParam(p, "depends_on");
+  if (slug === null || comment === null || dependsOn === null) return null;
+  if (dependsOn?.some((d) => !d)) return null;
+  return { objective, phase, description, status, slug, depends_on: dependsOn, comment };
+}
+
+/**
+ * Build the `perk objective node-add` argv from the tool params: the required `--phase`/
+ * `--description`, then a conditional `--status`/`--slug`/`--comment`, one `--depends-on <id>`
+ * per dependency, ending `--json`.
+ */
+export function buildAddObjectiveNodeArgs(params: AddObjectiveNodeParams): string[] {
+  const { objective, phase, description, status, slug, depends_on, comment } = params;
+  const args = [
+    "objective",
+    "node-add",
+    objective,
+    "--phase",
+    String(phase),
+    "--description",
+    description,
+  ];
+  if (status !== undefined) args.push("--status", status);
+  if (slug !== undefined && slug !== null) args.push("--slug", slug);
+  for (const dep of depends_on ?? []) args.push("--depends-on", dep);
+  if (comment !== undefined && comment !== null) args.push("--comment", comment);
+  args.push("--json");
+  return args;
+}
+
+/**
+ * The `add_objective_node` transition: insert a NEW roadmap node (auto-assigned `<phase>.<n>`).
+ * Delegates the write to the Python cold door and never throws (soft `details.ok`, mirrors
+ * `objectiveNode`).
+ */
+export async function addObjectiveNode(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  params: AddObjectiveNodeParams,
+): Promise<AddObjectiveNodeResult> {
+  const fail = failFor(ctx, "objective-reconcile", "add_objective_node");
+
+  if (
+    typeof params?.objective !== "string" ||
+    !params.objective ||
+    typeof params?.phase !== "number" ||
+    typeof params?.description !== "string" ||
+    !params.description
+  ) {
+    return fail(
+      "add_objective_node needs { objective: <id>, phase: <int>, description: <string> }",
+      "bad_input",
+    );
+  }
+
+  const r = await runColdDoor<AddObjectiveNodePayload>(pi, ctx, buildAddObjectiveNodeArgs(params), {
+    label: "perk objective node-add",
+    decode: decodeAddObjectiveNode,
+  });
+  if (!r.ok) return fail(r.message, r.errorType);
+
+  return ok(`Added node ${r.data.node_id} to objective #${params.objective}.`, {
+    objective: params.objective,
+    node: r.data.node_id,
+    comment_updated: r.data.comment_updated,
+  });
+}
+
 /** Resolve the active objective number from the rebuilt workflow-state (for the warm command). */
 function activeObjective(ctx: ExtensionContext): string | null {
   try {
@@ -482,6 +616,9 @@ export function reconcileGuidance(objective: string, backend = "github", url = "
       "node scope/naming via the `objective_node` tool's `description`.",
     "4. Skip if nothing is stale — do not churn. Treat uncertainty conservatively; do not invent " +
       "reconciliations. Judgment + durable writes stay with you.",
+    "5. If a genuinely new unit of work emerged that the roadmap is missing, add a node SPARINGLY " +
+      `via the \`add_objective_node\` tool \`{ objective: ${objective}, phase: <n>, description: "…" }\` ` +
+      "— never to restate existing nodes.",
   ].join("\n");
 }
 
@@ -489,6 +626,12 @@ const RECONCILE_TOOL_GUIDELINES = [
   "Call reconcile_objective only to rewrite the objective's Reconcilable prose region after a PR merged — the roadmap table and Immutable notes are never touched.",
   "Pass the FULL replacement prose; it overwrites the marker-bounded Reconcilable region wholesale.",
   "Judgment + durable writes stay with you; skip reconciliation when nothing is stale (do not churn).",
+];
+
+const ADD_NODE_TOOL_GUIDELINES = [
+  "Add a NEW node to an objective roadmap SPARINGLY — only during reconciliation, when a genuine new unit of work emerged that wasn't planned.",
+  "Only for genuinely-new, unplanned work — never to restate, rename, or re-scope an existing node (use objective_node's `description` for that).",
+  "Judgment + durable writes stay with you; this tool delegates the write to the canonical Python plane.",
 ];
 
 const TOOL_GUIDELINES = [
@@ -589,6 +732,57 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
         )("reconcile_objective needs { objective: <id>, prose: <string> }", "bad_input");
       }
       return reconcileObjective(pi, ctx, decoded);
+    },
+  });
+
+  pi.registerTool({
+    name: "add_objective_node",
+    label: "Add objective node",
+    description:
+      "Add a NEW node to an objective roadmap. Use SPARINGLY — only during reconciliation, when a " +
+      "genuine new unit of work emerged that wasn't planned. Auto-assigns the next `<phase>.<n>` " +
+      "id. Delegates the write to the perk cold door.",
+    promptSnippet: "Add a genuinely-new node to an objective roadmap (sparingly, during reconcile)",
+    promptGuidelines: ADD_NODE_TOOL_GUIDELINES,
+    executionMode: "sequential",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["objective", "phase", "description"],
+      properties: {
+        objective: { type: ["string", "number"], description: "The objective issue id." },
+        phase: { type: "number", description: "The phase number to insert the node into." },
+        description: { type: "string", description: "What the new node delivers." },
+        status: {
+          type: "string",
+          enum: [...NODE_STATUSES],
+          description: "Optional initial status (defaults to pending).",
+        },
+        slug: {
+          type: "string",
+          description: "Optional short slug (auto-derived from the description if omitted).",
+        },
+        depends_on: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional node ids this node depends on.",
+        },
+        comment: { type: "string", description: "Optional note attached to the node." },
+      },
+    },
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const decoded = decodeAddObjectiveNodeParams(params);
+      if (decoded === null) {
+        return failFor(
+          ctx,
+          "objective-reconcile",
+          "add_objective_node",
+        )(
+          "add_objective_node needs { objective: <id>, phase: <int>, description: <string> }",
+          "bad_input",
+        );
+      }
+      return addObjectiveNode(pi, ctx, decoded);
     },
   });
 

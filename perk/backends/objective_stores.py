@@ -177,6 +177,38 @@ class GitHubObjectiveStore:
             dry_run=updated.dry_run,
         )
 
+    def add_objective_node(
+        self,
+        *,
+        objective_id: str,
+        phase: int,
+        description: str,
+        status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        slug: str | None = None,
+        depends_on: tuple[str, ...] | None = None,
+        comment: str | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveNodeAdd:
+        number = _number(objective_id)
+        with _translate():
+            added = github.add_objective_node(
+                number=number,
+                phase=phase,
+                description=description,
+                status=status,
+                slug=slug,
+                depends_on=depends_on,
+                comment=comment,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+        return objective_store.ObjectiveNodeAdd(
+            objective_id=str(added.number),
+            node_id=added.node_id,
+            comment_updated=added.comment_updated,
+            dry_run=added.dry_run,
+        )
+
     def save_node_plan(
         self,
         *,

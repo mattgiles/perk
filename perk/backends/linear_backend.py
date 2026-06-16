@@ -1322,6 +1322,73 @@ class LinearObjectiveStore:
                 objective_id=objective_id, comment_id=comment_key, updated=True, dry_run=False
             )
 
+    def add_objective_node(
+        self,
+        *,
+        objective_id: str,
+        phase: int,
+        description: str,
+        status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        slug: str | None = None,
+        depends_on: tuple[str, ...] | None = None,
+        comment: str | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveNodeAdd:
+        """Insert a new node into ``phase`` (auto-assigned ``<phase>.<n>``): re-render the
+        authoritative roadmap block in the objective issue description (form-preserving) AND
+        best-effort re-render the body-comment table. Mirrors :meth:`update_objective_node`."""
+        with _translate_objective():
+            issue = self._ops._get_issue(objective_id, "id description")
+            raw_description = issue.get("description")
+            body = raw_description if isinstance(raw_description, str) else ""
+            nodes, errors = objective.parse_roadmap_nodes(body)
+            if errors:
+                raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
+            result = objective.add_node(
+                nodes,
+                phase=phase,
+                description=description,
+                status=status,
+                slug=slug,
+                depends_on=depends_on,
+                comment=comment,
+            )
+            if result is None:
+                raise IssueBackendError(
+                    f"could not add node to phase {phase} on {objective_id!r} (id collision)"
+                )
+            updated, new_id = result
+            if dry_run:
+                return objective_store.ObjectiveNodeAdd(
+                    objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=True
+                )
+
+            # Authoritative write: the roadmap block in the issue description (form-preserving).
+            new_body = plan.replace_metadata_block(
+                body, objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(updated)
+            )
+            self._ops._update_issue(
+                objective_id, {"description": new_body}, what="add objective roadmap node"
+            )
+
+            # Best-effort comment table re-render (the frontmatter is the source of truth).
+            comment_updated = False
+            header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY) or {}
+            comment_id = header.get("objective_comment_id")
+            if isinstance(comment_id, str | int) and str(comment_id).strip():
+                comment_body = self._ops._comment_body_or_none(str(comment_id))
+                if comment_body is not None:
+                    rerendered = objective.rerender_body_table(comment_body, updated)
+                    if rerendered is not None:
+                        self._ops._update_comment(str(comment_id), rerendered)
+                        comment_updated = True
+            return objective_store.ObjectiveNodeAdd(
+                objective_id=objective_id,
+                node_id=new_id,
+                comment_updated=comment_updated,
+                dry_run=False,
+            )
+
     def save_node_plan(
         self,
         *,
@@ -1771,6 +1838,101 @@ class LinearProjectObjectiveStore:
             self._projects.update_project_content(objective_id, new_overview)
             return objective_store.ObjectiveHeaderUpdate(
                 fields_updated=tuple(fields), dry_run=False
+            )
+
+    def add_objective_node(
+        self,
+        *,
+        objective_id: str,
+        phase: int,
+        description: str,
+        status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        slug: str | None = None,
+        depends_on: tuple[str, ...] | None = None,
+        comment: str | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveNodeAdd:
+        """Insert a new node-**issue** into the project: compute the next ``<phase>.<n>`` id from
+        the live roadmap (read back from the node-issues), then materialize ONE node-issue (the
+        ``objective-node`` block + prose) under the phase's milestone (reused when the phase exists,
+        minted for a brand-new phase via the name-keyed :meth:`ensure_phase_milestone` seam) and add
+        a blocking relation per EXPLICIT ``depends_on`` edge (the dep BLOCKS the new node).
+
+        ``comment_updated`` is always ``False`` — the project model has no objective-body comment
+        table (the roadmap is derived from node-issues). A ``dry_run`` reads the roadmap + computes
+        the new id, then returns without any write.
+
+        **Flagged not-live-proven** (mirrors the other project-store mutations) — verify at the Node
+        5.1 smoke gate.
+        """
+        with _translate_objective():
+            state = self.get_objective(objective_id=objective_id)
+            if state is None:
+                raise IssueBackendError(f"objective {objective_id!r} not found")
+            result = objective.add_node(
+                list(state.nodes),
+                phase=phase,
+                description=description,
+                status=status,
+                slug=slug,
+                depends_on=depends_on,
+                comment=comment,
+            )
+            if result is None:
+                raise IssueBackendError(
+                    f"could not add node to phase {phase} on {objective_id!r} (id collision)"
+                )
+            updated, new_id = result
+            new_node = next(n for n in updated if n.id == new_id)
+            if dry_run:
+                return objective_store.ObjectiveNodeAdd(
+                    objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=True
+                )
+
+            # Resolve (or mint) the phase milestone by its enriched name (`known=None` lists the
+            # project's milestones once — the seam's add-node branch).
+            project = self._projects.project_or_none(objective_id, "content")
+            overview = project.get("content") if project is not None else ""
+            overview = overview if isinstance(overview, str) else ""
+            phase_key = objective.derive_phase(new_id)
+            names = objective.enrich_phase_names(overview, [phase_key])
+            milestone_id = self._projects.ensure_phase_milestone(
+                project_id=objective_id, name=names[phase_key], known=None
+            )
+
+            # Materialize the single node-issue (objective-node block + prose), inline-code.
+            node_description = to_linear_markdown(
+                plan.render_metadata_block(
+                    objective.OBJECTIVE_NODE_KEY,
+                    objective.render_node_block(new_node),
+                    style="inline-code",
+                )
+                + "\n\n"
+                + new_node.description
+            )
+            ref = self._issue_ops._create_issue(
+                title=objective.node_issue_title(new_node),
+                description=node_description,
+                label_id=None,
+                project_id=objective_id,
+                milestone_id=milestone_id,
+            )
+
+            # Blocking relations for EXPLICIT depends_on only (dep BLOCKS the new node).
+            if new_node.depends_on:
+                new_uuid = self._client.uuid_for(ref.id)
+                for dep in new_node.depends_on:
+                    found = self._find_node_issue(objective_id, dep)
+                    if found is None:
+                        raise IssueBackendError(
+                            f"objective node {new_id!r} depends on unknown node {dep!r}"
+                        )
+                    self._projects.create_issue_relation(
+                        issue_id=found[0], related_issue_id=new_uuid
+                    )
+
+            return objective_store.ObjectiveNodeAdd(
+                objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=False
             )
 
     def save_node_plan(

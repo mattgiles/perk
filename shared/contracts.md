@@ -1364,12 +1364,18 @@ column** — `update_node` takes `status` verbatim or preserves it; setting `pr`
   dry_run=False) -> ObjectiveNodeUpdate` — re-render the authoritative `objective-roadmap` block in
   the issue body **and** the rendered table in the `objective-body` comment (best-effort); raises if
   the node is not found.
+- `add_objective_node(*, number, phase, description, status=PENDING, slug=None, depends_on=None,
+  comment=None, repo_root, dry_run=False) -> ObjectiveNodeAdd` — insert a new node into `phase`
+  (auto-assigned `<phase>.<n>`, appended after that phase's last node) with the same re-render
+  discipline; raises on an id collision. The rare node-insertion surface for reconciliation
+  (prose-guarded, no audit gate — like the other workers).
 - `update_objective_header(*, number, fields, repo_root, dry_run=False) -> ObjectiveHeaderUpdate` —
   the `update_plan_header` twin (read-merge-PATCH), rejecting unknown keys (LBYL on
   `OBJECTIVE_HEADER_FIELDS`).
 
 **Cold-door workers (`perk objective …` — a dev/CI/T10 surface, not an agent affordance):**
 `create --body @FILE [--title]`, `show NUMBER`, `node NUMBER --node ID [--status][--pr][--description]`,
+`node-add NUMBER --phase N --description STR [--status][--slug][--depends-on …][--comment]`,
 `next NUMBER` (the dependency-graph `build_graph(nodes).next_plannable()` selection T10's
 `/objective-plan` consumes). All supervisor surfaces (`--json` → stdout, human → stderr, exit
 `0`/`1`/`2`). The objective issues are pure REST (issues + comments), no GraphQL.
@@ -3077,10 +3083,15 @@ GitHub issue **or** a Linear Project.
 `issue_backend.py` dormant-then-extract precedent: the contract ships dormant, a later node extracts
 the concrete backend behind it):
 
-- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **nine** keyword-only methods —
+- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **ten** keyword-only methods —
   `find_objective` / `create_objective` / `get_objective` / `update_objective_header` /
-  `update_objective_node` / `update_objective_body` / `save_node_plan` / `close_objective` /
-  `post_status_update` (`objective_id` everywhere). `save_node_plan` + `close_objective` were added
+  `update_objective_node` / `update_objective_body` / `add_objective_node` / `save_node_plan` /
+  `close_objective` / `post_status_update` (`objective_id` everywhere). `add_objective_node` inserts
+  a new roadmap node (auto-assigned `<phase>.<n>`, appended within the phase) — the rare
+  node-insertion surface used sparingly during reconciliation (prose-guarded, no audit gate).
+  Each concrete store inserts into the thing it stores: the GitHub + issue-backed Linear stores
+  re-render the roadmap block; the project-backed store materializes a new node-**issue** under the
+  phase milestone. `save_node_plan` + `close_objective` were added
   at Node 3.4 (see the Node 3.4 amendment): `save_node_plan` is the node↔plan **unification** write
   (returns the node-issue ref for a unifying store, **`None`** for a store that does not unify — the
   single "doesn't unify" signal), and `close_objective` retires the objective's **own** entity on
@@ -3088,9 +3099,9 @@ the concrete backend behind it):
   Node 4.3 (see the Node 4.3 amendment): it posts a human-readable status update to the objective's
   native update surface, returning `True` when posted and `False` for a store with no such surface
   (GitHub, issue-backed Linear) or a `dry_run`.
-- Five frozen result dataclasses: `ObjectiveRef` (`id`/`url`/`existed`), `ObjectiveState`
+- Six frozen result dataclasses: `ObjectiveRef` (`id`/`url`/`existed`), `ObjectiveState`
   (`id`/`url`/`title`/`header`/`nodes`), `ObjectiveHeaderUpdate`, `ObjectiveNodeUpdate`,
-  `ObjectiveBodyUpdate`.
+  `ObjectiveBodyUpdate`, `ObjectiveNodeAdd` (`objective_id`/`node_id`/`comment_updated`/`dry_run`).
 - One backend-neutral error type: `ObjectiveStoreError`.
 
 **The state-ownership invariants** (the four contract disciplines every concrete store MUST honor):
