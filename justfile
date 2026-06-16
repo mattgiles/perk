@@ -60,14 +60,15 @@ typecheck: typecheck-py typecheck-js
 test-py *args:
     uv run pytest {{args}}
 
-# run the typescript test suite (node:test)
+# run the typescript test suite (node:test). Mild 2x core oversubscription: session
+# construction is I/O-bound, so more in-flight files overlap their I/O waits.
 test-js:
-    node --test --test-reporter=dot "extension/**/*.test.ts"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts"
 
 # run the test suite (python: pytest, typescript: node:test)
 test *args:
     uv run pytest {{args}}
-    node --test --test-reporter=dot "extension/**/*.test.ts"
+    node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts"
 
 # build the python wheel + sdist
 build:
