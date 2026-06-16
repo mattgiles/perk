@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile), or debugging a node stuck in planning.
 ---
 
 # Objective lifecycle
@@ -98,6 +98,26 @@ it. Mitigated by a loud stderr warning + idempotent re-save; the real fix (deter
 via an `active_objective_node` workflow-state field) is deliberately out of scope. The cold
 `objective-plan` door does **not** set `active_objective` in session today, which is why `node_id`
 stays model-passed (symmetric with `objective_id`) rather than session-state-derived.
+
+## The "design-only node" pattern (#609)
+
+A roadmap node can be **reframed** from "build X" to "author the design doc for X" — typically because
+a prerequisite was omitted (Objective #548 Node 4.4: the manifest was an unbuilt prerequisite of the
+drift+repair surface, so operator direction reframed the node to *authoring the design doc*). What a
+future agent should expect when a node is reframed this way:
+
+- **The deliverable is a `docs/planning/` design doc** (genus of the node-outcomes docs —
+  `node-4.3-outcomes.md` etc.), **not executed / imported / tested.** Its only CI surface is
+  markdown/prose linting — and **this repo has no markdown linter** in pre-commit or `just ci`
+  (ruff/biome/tsc/tests only), so a docs-only node **skips all hooks** ("no files to check"). *Prove*
+  it by checking the `just` recipes, don't assume a prose gate exists.
+- **Post-merge reconciliation is mandatory — the plan should pre-flag it.** The roadmap prose + node
+  description still describe *building* the surface, so `/objective-reconcile` must update **both**:
+  the Reconcilable prose (a landed note in the established per-node style) **and** the node
+  description via `objective_node` (rewrite "build the surface" → "delivered the design doc;
+  implementation is follow-up").
+- **The node status is correctly left `done`** — a design-only node *did* deliver its (reframed)
+  deliverable; the mechanical land-mark is right, only the prose/description are stale.
 
 ## The objective authoring loop mirrors plan → save
 

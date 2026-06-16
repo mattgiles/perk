@@ -1,6 +1,6 @@
 ---
 title: init/doctor division, managed-convergence SSOT, and gitignore untrack pattern
-read_when: You are adding a managed piece (so a doctor check), choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), or changing a monkeypatched seam's signature.
+read_when: You are adding a managed piece (so a doctor check), choosing committed-tracked delivery vs a cold-door worktree symlink mirror (the agent-def-delivery contrast), adding a new transient file, fixing a tracked-but-should-be-ignored file, writing a doctor migration, extending perk init's managed gitignore block, adding a doctor check group / fail-level check / report field, adding a network-touching repair (the verify-gated gesture), adding a NEW gated probe beside an existing gated check (the monkeypatch-census rule + the non-fatal-assertion gotcha), or changing a monkeypatched seam's signature.
 ---
 
 # `init` / `doctor` division
@@ -184,6 +184,35 @@ lookup-only path from init/`--fix`'s converge path. Probe results carry only wha
 *discovered*; an input value a render needs goes on the wrapping report, not the probe result. And
 a verify-gated group that can't run must say *why it stopped* (a single warn check), never
 silently pass.
+
+## Adding a NEW gated probe beside an existing gated check (#603)
+
+The project-backed objective readiness probe (`check_project_readiness`, a SEPARATE function beside
+`check_readiness` — see `linear-backend.md`) wired two new doctor checks + a nullable init sub-report,
+and surfaced three reusable disciplines:
+
+- **A new gated probe beside an existing gated check ⇒ census ALL its monkeypatches.** When a new
+  probe fires inside a `team_ok` branch, **every** existing test that monkeypatches the *sibling*
+  readiness function to return `auth_ok && team_ok` AND drives a path that now reaches the new probe
+  must ALSO monkeypatch the new probe — else it falls through to the **real network probe** (an auth
+  error). This bit **four** pre-existing tests: the two ok/warn doctor tests *and* both `--fix` tests
+  (`run_doctor(fix=True, verify=True)` runs the checks under verify, so the probe fires there too).
+  The auth/team-FAILURE tests are unaffected (the probe is gated behind early-return) and are the
+  natural place to assert the new checks are **ABSENT** (monkeypatch the probe to `raise` to prove
+  it's never called).
+- **`report.healthy` is the WRONG assertion for "this check stays non-fatal."** A freshly-scaffolded
+  synthetic repo's doctor report is **not** globally healthy (unrelated fail-level checks exist), so
+  `report.healthy` can never prove a single warn-level check didn't fail the run. Assert
+  `all(c.status != "fail" for c in <the relevant group>)` instead — no `fail`-status check *within
+  the relevant group*.
+- **Two-phase independent probe + honest-scope-proxy.** Projects-read and states-coverage are
+  **separate** `try/except` with **no early return between them** (a projects error must not
+  short-circuit the states phase — test it explicitly: the states query still issues and its result
+  populates). Write/create scope isn't probeable without a mutation, so a **non-mutating read is the
+  honest proxy** and the message says "read-access", not "scope verified". The new probe field is
+  **nullable and must NOT flip the report's `ok`** — project readiness runs only when
+  `auth_ok && team_ok` (the same gate as doctor; both planes early-return on auth/team failure, so a
+  degraded repo reports `project: None`).
 
 ## Managed template reconvergence
 
