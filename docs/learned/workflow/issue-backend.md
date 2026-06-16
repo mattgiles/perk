@@ -50,6 +50,11 @@ neutral-state helper).
 - **Source-scan boundary test** (`tests/test_issues.py`): no module under `perk/` except
   `perk/backends/issues.py` and the `perk/github/` package may call the 21 issue-tier gateway functions. New
   production code reaches the issue tier via the resolver in `perk/backends/issues.py`.
+  - **The allowed-set now includes `objective_stores.py`** because `GitHubObjectiveStore.close_objective`
+    legitimately calls the issue-close primitive directly (a GitHub objective IS an issue). Note the
+    asymmetry: the *objective*-tier guard owns a **different** function set and does NOT include the
+    issue-close primitive, so a cross-tier call like this fires the issue-tier guard, not the
+    objective-tier one — know which guard owns which set (see `objective-store.md`).
 - **The import-direction guards are *substring* assertions over file text**, so they bite
   docstrings and comments too: `perk/github/` prose cannot even *mention* the resolver's name or
   the protocol module's name. Phrase around it ("the resolver in the issues module") or loosen the
@@ -173,4 +178,6 @@ checks/capabilities).
 - `docs/learned/workflow/github-gateway.md` — the gateway the substrate lives in
 - `docs/learned/workflow/linear-backend.md` — the Linear backend's client, dual-encoding markers,
   readiness wiring, and prompt rendering
+- `docs/learned/workflow/objective-store.md` — the parallel objective-storage tier split off the
+  same monolith
 - `docs/learned/toolchain/ty.md` — ty suppression syntax + enum strictness hit during this work
