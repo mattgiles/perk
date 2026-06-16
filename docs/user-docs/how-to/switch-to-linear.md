@@ -44,8 +44,11 @@ labels, identifiers, doctor groups, maturity) is the
    `perk:objective`.
 
 4. **Run `perk doctor` and verify green.** Check the offline `issues-backend` check (selection +
-   `team`) and the verify-gated `linear` group: `linear-auth`, `linear-team`, `linear-labels`. These
-   network probes are always non-fatal `warn`, so read them to confirm auth and labels resolved.
+   `team`) and the verify-gated `linear` group: `linear-auth`, `linear-team`, `linear-labels`,
+   `linear-project-scopes`, `linear-workflow-states`. These network probes are always non-fatal
+   `warn`, so read them to confirm auth and labels resolved. The last two confirm Project
+   read-access and the workflow states the node-status board mirror needs for project-backed
+   objectives.
 
 ## What changes
 

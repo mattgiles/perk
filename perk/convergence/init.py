@@ -290,9 +290,12 @@ class LinearReport:
     readiness: linear_backend.LinearReadiness | None
     team: str | None = None
     error: str | None = None
+    project: linear_backend.LinearProjectReadiness | None = None
 
     @property
     def ok(self) -> bool:
+        # Project readiness is non-fatal — it deliberately does NOT participate here (file
+        # convergence already succeeded; mirrors the issue-tier non-fatal posture).
         r = self.readiness
         return self.error is None and r is not None and r.auth_ok and r.team_ok and r.error is None
 
@@ -385,6 +388,7 @@ def _linear_to_dict(report: LinearReport | None) -> dict[str, object] | None:
     if report is None:
         return None
     r = report.readiness
+    p = report.project
     return {
         "ok": report.ok,
         "team": report.team,
@@ -398,6 +402,14 @@ def _linear_to_dict(report: LinearReport | None) -> dict[str, object] | None:
             "missing_labels": list(r.missing_labels),
             "created_labels": list(r.created_labels),
             "error": r.error,
+        },
+        "project": None
+        if p is None
+        else {
+            "projects_ok": p.projects_ok,
+            "projects_error": p.projects_error,
+            "missing_state_types": list(p.missing_state_types),
+            "states_error": p.states_error,
         },
     }
 
@@ -1187,4 +1199,7 @@ def _linear_readiness(root: Path) -> LinearReport | None:
     except IssueBackendError as exc:
         return LinearReport(readiness=None, error=str(exc))
     readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)
-    return LinearReport(readiness=readiness, team=team)
+    project = None
+    if readiness.auth_ok and readiness.team_ok:
+        project = linear_backend.check_project_readiness(client, team_key=team)
+    return LinearReport(readiness=readiness, team=team, project=project)

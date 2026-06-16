@@ -1868,3 +1868,91 @@ def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool)
         missing_labels=tuple(missing),
         created_labels=tuple(created),
     )
+
+
+# The workflow-state `type`s the node-status mirror (`_NODE_STATUS_STATE_TYPE`) needs. Derived from
+# the map (never hand-listed) so the two stay in lockstep (= {unstarted, started, completed,
+# canceled}).
+_REQUIRED_STATE_TYPES: frozenset[str] = frozenset(_NODE_STATUS_STATE_TYPE.values())
+
+
+@dataclass(frozen=True)
+class LinearProjectReadiness:
+    """Project-backed objective readiness snapshot (report-shaped; never raises).
+
+    Probed only after `check_readiness` reports auth_ok && team_ok. `projects_ok` reflects a
+    non-mutating Project read probe (the find-scan's prerequisite); `missing_state_types` are
+    the node-status-mirror state types the team lacks. Both are warn-level / non-fatal.
+    """
+
+    projects_ok: bool
+    projects_error: str | None = None
+    missing_state_types: tuple[str, ...] = ()
+    states_error: str | None = None
+
+
+def _present_state_types(data: dict[str, object]) -> frozenset[str]:
+    """Lenient parse of the present workflow-state `type` strings from a team-states payload.
+
+    Skips malformed nodes rather than raising (this probe never raises): a non-dict ``team`` /
+    ``states`` / node, or a non-str ``type``, is simply dropped.
+    """
+    team = data.get("team")
+    if not isinstance(team, dict):
+        return frozenset()
+    states = cast("dict[str, object]", team).get("states")
+    if not isinstance(states, dict):
+        return frozenset()
+    nodes = cast("dict[str, object]", states).get("nodes")
+    if not isinstance(nodes, list):
+        return frozenset()
+    present: set[str] = set()
+    for raw in cast("list[object]", nodes):
+        if not isinstance(raw, dict):
+            continue
+        node_type = cast("dict[str, object]", raw).get("type")
+        if isinstance(node_type, str):
+            present.add(node_type)
+    return frozenset(present)
+
+
+def check_project_readiness(client: LinearClient, *, team_key: str) -> LinearProjectReadiness:
+    """Probe project-backed objective readiness: Project read-access + the workflow-state types
+    the node-status mirror needs. Report-shaped (never raises). The CALLER gates on auth_ok &&
+    team_ok — this reuses the client's cached ``team_id`` (a cache hit after ``check_readiness``),
+    so no auth/team re-probe.
+    """
+    team_id = client.team_id(team_key)
+
+    # --- projects: a non-mutating Project read (the find-scan's prerequisite). Independent of the
+    # states phase — does NOT short-circuit it. ---
+    projects_ok = False
+    projects_error: str | None = None
+    try:
+        client.request(
+            "query($teamId: String!) { team(id: $teamId) { projects(first: 1) { nodes { id } } } }",
+            {"teamId": team_id},
+        )
+        projects_ok = True
+    except IssueBackendError as exc:
+        projects_error = str(exc)
+
+    # --- states: the workflow-state types the node-status mirror needs. ---
+    missing_state_types: tuple[str, ...] = ()
+    states_error: str | None = None
+    try:
+        data = client.request(
+            "query($teamId: String!) { team(id: $teamId) { states { nodes { type } } } }",
+            {"teamId": team_id},
+        )
+        present = _present_state_types(data)
+        missing_state_types = tuple(sorted(_REQUIRED_STATE_TYPES - present))
+    except IssueBackendError as exc:
+        states_error = str(exc)
+
+    return LinearProjectReadiness(
+        projects_ok=projects_ok,
+        projects_error=projects_error,
+        missing_state_types=missing_state_types,
+        states_error=states_error,
+    )

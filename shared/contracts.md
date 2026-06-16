@@ -1577,7 +1577,9 @@ already happened before the sync); `skills_conflict` short-circuits before any c
              repo: { ok, repo, can_push, error } },
   linear:  { ok, team, error,                              # null unless verify ran AND the committed
              readiness: { auth_ok, user, team_ok,          #   [issues] backend is "linear" (§8.21);
-                          missing_labels[], created_labels[], error } | null },  # non-fatal like github
+                          missing_labels[], created_labels[], error } | null,  # non-fatal like github
+             project: { projects_ok, projects_error,       # project-backed objective readiness (Node 4.2);
+                        missing_state_types[], states_error } | null },  # null unless auth_ok && team_ok; non-fatal
   capabilities: string[],                                  # the managed inventory (perk/convergence/capabilities.py)
   changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
   handoff: string|null }                                   # path to the post-init markdown on-ramp
@@ -2859,6 +2861,20 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
 - `linear-labels` — all four perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
   `perk:objective`): ok; otherwise warn listing the missing names, remediation "run `perk init`
   or `perk doctor --fix`".
+- `linear-project-scopes` — ok: `Linear Projects accessible`; warn: `Linear Projects not
+  accessible` (a non-mutating read probe of `team { projects(first:1) }` — read-access is the
+  honest proxy; write/create scope is not probeable without a mutation).
+- `linear-workflow-states` — ok: `workflow states cover the node-status mirror`; warn when the
+  team lacks a state of a required `type` (the distinct values of `_NODE_STATUS_STATE_TYPE` =
+  `unstarted/started/completed/canceled`, derived in lockstep); warn `workflow states not
+  verified` on a probe error.
+
+The last two are the **project-backed objective readiness** probe (Node 4.2): both run **only
+after** `linear-auth` + `linear-team` succeed, via a separate
+`linear_backend.check_project_readiness(client, team_key)` call (report-shaped, never raises;
+reuses the client's cached team id — no auth/team re-probe). Non-fatal like the rest of the group.
+**No `--fix` arm** — workflow states and API-token scopes are user/workspace-owned (perk cannot
+safely auto-create them).
 
 **The `--fix` label repair gesture** (`_fix_linear_labels`, verify-gated like the skills sync —
 network I/O, so never a `ManagedConvergence`): when `fix` AND `verify` AND linear is selected AND
@@ -2873,6 +2889,11 @@ runs with `ensure_labels=True` (init converges the four perk labels upfront; the
 `ensure_label` calls remain the safety net). Created labels are reported through the
 `LinearReport` (the `--json` `linear` key, §8.5; the human `✓ Linear: <user>, team <key>` line) —
 **never** appended to `InitReport.changes`, which stays a pure filesystem-delta list.
+`LinearReport` also carries a nullable `project` readiness sub-report
+(`LinearProjectReadiness` — the same `check_project_readiness` probe as the doctor group, run only
+when `auth_ok && team_ok`): non-fatal — it does **not** flip `LinearReport.ok`. The init human
+render adds a `⚠️` sub-line per gap (Projects read-access / missing workflow state types); a
+fully-ready project readiness prints nothing extra.
 
 **The `npm:pi-mono-linear` settings convergence** (`perk/convergence/init.py::_converge_linear_package`,
 composed inside `_converge_settings` — it rides the `settings-wiring` managed convergence, so

@@ -186,6 +186,11 @@ Linear issue ids are **strings** like `ENG-123` (vs GitHub's `#42`). The shape f
 - **`linear-auth` / `linear-team` / `linear-labels`** (group `linear`, verify-gated) — the network
   probes; always non-fatal `warn`, run only under `perk init --verify` / `perk doctor` with
   verification.
+- **`linear-project-scopes` / `linear-workflow-states`** (group `linear`, verify-gated, non-fatal)
+  — the project-backed objective readiness probe: that the API token can read the team's Projects
+  (the substrate every project-backed objective op depends on) and that the team exposes the
+  workflow states the node-status board mirror needs. Run only after `linear-auth` + `linear-team`
+  succeed; report-only (no `--fix` — scopes and states are user/workspace-owned).
 
 ## Known caveats & maturity
 
