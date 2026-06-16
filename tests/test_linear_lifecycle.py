@@ -1063,3 +1063,61 @@ def test_dry_run_repair_plans_without_writing(monkeypatch: pytest.MonkeyPatch) -
         assert DriftCode.DELETED_PHASE_MILESTONE in [
             c.code for c in store.detect_objective_drift(objective_id=obj_id).conditions
         ]
+
+
+def test_doctor_reports_clean_objective(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        assert payload["success"] is True
+        assert payload["drift"] == []
+        assert payload["fix"] is None
+
+
+def test_doctor_detects_and_fixes_deleted_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        ws.milestones.clear()  # drift: the phase milestone vanished
+
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        codes = [c["code"] for c in cast("list[dict[str, object]]", payload["drift"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in codes
+        assert payload["fix"] is None
+
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--fix", "--json"])
+        fix = cast("dict[str, object]", payload["fix"])
+        assert fix["aborted"] is False and fix["failed"] is None
+        applied = [a["code"] for a in cast("list[dict[str, object]]", fix["applied"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in applied
+        assert fix["remaining"] == []
+
+        # idempotent: a re-run is clean
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        assert payload["drift"] == []
+
+
+def test_doctor_fix_dry_run_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        ws.milestones.clear()
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--fix", "--dry-run", "--json"])
+        fix = cast("dict[str, object]", payload["fix"])
+        assert fix["dry_run"] is True
+        applied = [a["code"] for a in cast("list[dict[str, object]]", fix["applied"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in applied
+        assert ws.milestones == {}  # nothing written

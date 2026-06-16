@@ -116,6 +116,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         "objective": [
             ("author", ()),
             ("create", ("new",)),
+            ("doctor", ("doc",)),
             ("next", ("n",)),
             ("node", ()),
             ("node-add", ()),
