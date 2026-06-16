@@ -13,10 +13,14 @@ blocks), like the [in-session reference](./in-session.md).
 
 ## Orientation
 
-An **objective** is a multi-plan goal stored as a **GitHub issue + its first comment**. The issue
-body carries the compact header and the canonical roadmap (as collapsible `perk:`-namespaced
-metadata blocks); the first comment carries the human-readable rendered roadmap **table** plus
-reconcilable **prose**. As the roadmap advances, the objective emits bounded plans — one per node.
+An **objective** is a multi-plan goal whose storage is **backend-selectable** through the `[issues]`
+selection (see [Providers & issue backends](./providers-and-backends.md)). Objectives live in their
+own `ObjectiveStore` tier — distinct from the plan/learn issue tier but sharing the same `[issues]`
+selection — and are **issue-backed under both GitHub and Linear today**. Under the default GitHub
+backend, an objective is stored as a **GitHub issue + its first comment**: the issue body carries the
+compact header and the canonical roadmap (as collapsible `perk:`-namespaced metadata blocks); the
+first comment carries the human-readable rendered roadmap **table** plus reconcilable **prose**. As
+the roadmap advances, the objective emits bounded plans — one per node.
 
 For the *why* of objectives — how a roadmap emits bounded plans as it advances — read
 [How perk thinks](../explanation/how-perk-thinks.md). For a guided, end-to-end walkthrough, see

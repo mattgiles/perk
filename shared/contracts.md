@@ -1321,6 +1321,13 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 
 ### Authored (P2.T9 — objective storage + mechanics)
 
+> **Forward pointer (Objective #548).** The objective methods described here as living on
+> `IssueBackend` have since been **extracted into the objective-storage tier** (`ObjectiveStore`,
+> §8.24) — the issue tier and the objective tier are now distinct seams sharing the `[issues]`
+> selection. The `perk/github/objectives.py` gateway ops listed below are unchanged: they remain
+> `GitHubObjectiveStore`'s delegation target (the equivalence lock). The historical record below is
+> left intact per the keep-and-annotate discipline.
+
 The **objective layer's deterministic foundation** — a long-running goal that *generates* bounded
 plans (PRIOR_ART §3). The pure mechanics live in `perk/objective.py` (the `plan.py` twin, reusing
 its block engine); the GitHub writes live in `perk/github/objectives.py`; the cold-door workers are the
@@ -2772,6 +2779,13 @@ contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/backend
 the `LinearIssueBackend` over the `perk/backends/linear.py` GraphQL client, Nodes 2.1–2.3, wired live in
 Node 2.4) is **backend-selectable** via one committed config table:
 
+> **Note (Objective #548).** Objective storage is now its **own seam** — the objective-storage tier
+> (`ObjectiveStore`, §8.24), distinct from the issue-tracking tier described here. It shares this
+> `[issues]` selection (`resolve_objective_store_id` re-exports `resolve_issue_backend_id` — an
+> objective and its plan/learn issues share one tracker), so the "plan/learn/objective issues" and
+> objective-id language throughout this section still resolves the same backend; the two tiers are
+> just no longer one Protocol.
+
 ```toml
 [issues]
 backend = "linear"   # "github" is the default when unset
@@ -3002,3 +3016,69 @@ one-stop current shape.
 
 §8.10's per-node Status blocks remain the historical record of how each piece landed; this section
 is the consolidated **current** contract.
+
+## §8.24 · The objective-storage tier (the `ObjectiveStore` seam; Objective #548)
+
+perk's durable state lives in two conceptually distinct populations: the **issue-tracking tier**
+(plan/learn issues — the `IssueBackend` contract, §8.21) and the **objective-storage tier**
+(objectives — the `ObjectiveStore` contract, this section). Today a single backend stores **both**
+as issues, so the tiers are behaviorally fused; the split exists so a Phase 3 store can make a
+Linear **Project** a canonical objective (not just an issue). Objective #548 Node 2.1 shipped the
+dormant contract; Node 2.2 made it live; Node 2.3 (this section) amends the contract + user-docs.
+
+The two tiers are **named distinctly** at the boundary: the objective tier drops the issue tier's
+`_issue` method suffix (`find_objective`/`create_objective`, not `find_objective_issue`) and renames
+the id field `issue_id → objective_id` everywhere, because the stored thing is an objective — a
+GitHub issue **or** a Linear Project.
+
+**The contract module** (`perk/backends/objective_store.py`, Node 2.1, dormant — mirrors the
+`issue_backend.py` dormant-then-extract precedent: the contract ships dormant, a later node extracts
+the concrete backend behind it):
+
+- The `ObjectiveStore` `Protocol`: `backend_id: str` plus six keyword-only methods —
+  `find_objective` / `create_objective` / `get_objective` / `update_objective_header` /
+  `update_objective_node` / `update_objective_body` (`objective_id` everywhere).
+- Five frozen result dataclasses: `ObjectiveRef` (`id`/`url`/`existed`), `ObjectiveState`
+  (`id`/`url`/`title`/`header`/`nodes`), `ObjectiveHeaderUpdate`, `ObjectiveNodeUpdate`,
+  `ObjectiveBodyUpdate`.
+- One backend-neutral error type: `ObjectiveStoreError`.
+
+**The state-ownership invariants** (the four contract disciplines every concrete store MUST honor):
+
+- **Constructor-bound repo context.** Methods take no `repo_root`; a store instance is constructed
+  for exactly one repo (GitHub binds `repo_root` as the `gh` cwd; Linear binds team/API-key config
+  at construction).
+- **String ids at the boundary.** Every objective/comment id crossing the boundary is a `str`
+  (GitHub's issue numbers stringified; a Linear Project id is natively a string).
+- **Backend-owned opaque header values.** The `header` dict is opaque `dict[str, object]`;
+  header-embedded values (e.g. the objective-body comment id) are backend-owned — a caller must
+  never interpret them.
+- **Error discipline.** Mutations raise `ObjectiveStoreError`; lookups return `… | None` for
+  not-found and **raise** on infra failure — never mask an error as `None`. Concrete stores map
+  their native errors into `ObjectiveStoreError` at their boundary.
+
+**The concrete stores + the facade refactor** (Node 2.2):
+
+- `GitHubObjectiveStore` (`perk/backends/objective_stores.py`) — **late-bound delegation** to the
+  same `perk.github` objective functions the fused `IssueBackend` used (the equivalence lock: the
+  GitHub writes are byte-for-byte the prior behavior); `repo_root` constructor-bound; string-id
+  boundary with an `int()` edge conversion; `GitHubError → ObjectiveStoreError` verbatim via
+  `_translate`. Carries `backend_id = "github"`.
+- The **Linear facade refactor** (`perk/backends/linear_backend.py`): a shared `_LinearIssueOps`
+  substrate (client + caches + issue helpers); `LinearIssueBackend` as a thin facade over its
+  `_ops`; and `LinearObjectiveStore` with its own `_LinearIssueOps`, the six objective methods, and
+  `IssueBackendError → ObjectiveStoreError` per-method message-verbatim. Both carry
+  `backend_id = "linear"`. `LinearObjectiveStore` is **issue-backed today** (behaviorally
+  equivalent to the prior fused path) — the project-backed `LinearProjectObjectiveStore` is Phase 3
+  and does **not** exist yet.
+
+**The resolver.** `resolve_objective_store(repo_root)` (`perk/backends/objective_stores.py`)
+dispatches on the **`[issues]` selection** (§8.21) to `GitHubObjectiveStore` / `LinearObjectiveStore`
+— single-sourced: `resolve_objective_store_id` re-exports `resolve_issue_backend_id` rather than
+reading a separate config key, because an objective and its plan/learn issues share **one** tracker.
+Every objective consumer routes through `resolve_objective_store(repo_root)`.
+
+**The `backend_id` stamping rule.** `ObjectiveStore.backend_id` is stamped **verbatim** into
+`cache.plan-ref.provider` — mirroring `IssueBackend.backend_id` (§8.21): "the backend that wrote the
+objective is the backend that gets stamped." The objective tier and the issue tier share the stamp
+vocabulary because (today) they share the backend.

@@ -21,8 +21,10 @@ Two related but distinct knobs live here:
 - **Provider seams** — the *plan-authoring* surface, the *todo/checkpoint* surface, and the
   *ask-user* tool are each a **seam** that a foreign Pi package can fill in place of perk's bundled
   default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`.
-- **Issue backend** — where canonical plan / learn / objective issues are stored: GitHub
-  (the default) or Linear.
+- **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
+  The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
+  issues) and the *objective-storage tier* (objectives) — both stored as issues under either backend
+  today.
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
@@ -136,6 +138,12 @@ The `[issues] backend` vocabulary is `"github"` (default) or `"linear"`
 (`perk/backends/issues.py`), read **committed-only** from `.pi/perk.toml` — a
 `.pi/perk.local.toml` value is silently ignored (this keeps the canonical issue store
 deterministic). Switching to Linear changes where canonical plan / learn / objective issues live.
+
+The one `[issues]` selection governs **two storage tiers**: the issue-tracking tier (plan / learn
+issues) and the objective-storage tier (objectives). Objectives go through a distinct
+`ObjectiveStore` seam rather than the issue backend directly, but it shares this selection — an
+objective and its plan/learn issues always live on the same tracker. Both tiers are **issue-backed**
+under GitHub and Linear today.
 
 ### Auth
 
