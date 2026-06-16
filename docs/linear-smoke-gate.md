@@ -152,6 +152,128 @@ ids are opaque UUIDs — use the UUIDs returned by `projectCreate`/`issueCreate`
 Append a dated **Recorded observations** block with one row per operation; record the proven working
 GraphQL documents verbatim, and the decisive overview-vs-document storage decision with its evidence.
 
+## Mode 4 — project-backed objective lifecycle (Objective #548, Node 5.1)
+
+A **measurement** layer that drives a real objective **Project** end-to-end against the live Linear
+API and proves the project-backed `ObjectiveStore` (`LinearProjectObjectiveStore`, Nodes 3.2–4.3)
+**plus** the four Project ops the Mode 3 spike left **not-live-proven** (`set_project_state`,
+`list_projects`, `create_project_update`, `_workflow_state_id`). No production code change is
+expected — the runbook section + the dated observation block are the whole deliverable (the #562
+precedent: a substantive defect is recorded + deferred to a follow-up issue, **not** fixed in-node).
+
+**Prerequisites** are Mode 1's, plus the project readiness probes added in Node 4.2:
+
+- `export LINEAR_API_KEY=…` (environment-only).
+- Committed `.pi/perk.toml`: `[issues] backend = "linear"`, `team = "PER"` (the team **key**, never
+  the display name).
+- `perk init` green, `perk doctor` green — **including** the project readiness probes
+  `linear-project-scopes` and `linear-workflow-states` (Node 4.2). If either fails, the project ops
+  below will not work (the API key lacks Project scopes, or the team has no started/completed
+  workflow states for the `_workflow_state_id` mirror).
+- Scratch workspace `Perk-testing`, team key **`PER`**, team UUID
+  `2f933a7e-0d05-4424-bea2-0bc79a4c54c9`.
+
+**Smoke roadmap shape** (specify it so the run is reproducible): a **2-phase** roadmap with **≥4
+nodes**, including (i) at least one **explicit `depends_on`** edge (to materialize a blocking
+relation) and (ii) node ids authored into the `--roadmap` JSON in an order that **differs** from
+`node_sort_key` order (so gate 2's deterministic-ordering check is observable). Use this node set,
+authored in **scrambled** order (`2.1, 1.1, 2.2, 1.2`):
+
+```json
+[
+  {"id": "2.1", "description": "Phase 2 first node", "depends_on": ["1.2"]},
+  {"id": "1.1", "description": "Phase 1 first node"},
+  {"id": "2.2", "description": "Phase 2 second node"},
+  {"id": "1.2", "description": "Phase 1 second node", "depends_on": ["1.1"]}
+]
+```
+
+The throwaway objective markdown (`obj.md`) only needs a `### Phase 1:` / `### Phase 2:` heading
+pair so the milestone names enrich, plus a short Reconcilable prose paragraph. Pick a fresh
+`--run-id` (`RID`) per full run so idempotency (gate 3) and find-by-run-id are exercised cleanly.
+
+Drive these numbered gates in order. Each gate states the command **and** the exact thing to verify
+in the Linear UI + the `--json` envelope.
+
+1. **Create the objective Project.**
+   `perk objective create --body obj.md --roadmap '<json above>' --run-id <RID> --json`.
+   Verify: `objective.id` is an **opaque Project UUID** (not `PER-*`); `objective.existed == false`.
+   In Linear a **Project** is created whose **overview** carries the `objective-header` inline-code
+   block + the Reconcilable prose region (`` `perk:objective-reconcilable` `` sentinels), **no**
+   roadmap table, and **zero** raw `<!-- … -->` / `<details>` artifacts. There is **one Milestone
+   per phase** (enriched `### Phase N:` names), **one node-issue per roadmap node** (each carrying
+   an `objective-node` block, attached to its phase milestone), and a **blocking relation** for
+   every explicit `depends_on` (dep **blocks** node — check `relations` / `inverseRelations` in the
+   UI: `1.1 blocks 1.2`, `1.2 blocks 2.1`). Note the fresh-create **Project Update** posted to the
+   project's Updates feed (**live-proves `create_project_update`**).
+2. **Deterministic node ordering.** `perk objective show <PROJECT_UUID> --json`. Verify the `nodes`
+   array is in **`node_sort_key` order** (`1.1, 1.2, 2.1, 2.2`) — **NOT** Linear's
+   connection/reverse-insertion order — even though the roadmap was authored scrambled. Each node's
+   `status`, `depends_on` (reconstructed from the blocking relations), and `description`
+   round-trip. `perk objective next <PROJECT_UUID> --json` returns the expected next plannable node
+   (`1.1`, the only node with no unmet dependency).
+3. **`list_projects` find-scan (idempotency).** Re-run the **same**
+   `perk objective create --body obj.md --roadmap '…' --run-id <RID> --json`. Verify
+   `objective.existed == true` and the **same** Project UUID — proving the `list_projects`
+   find-by-run-id scan resolves the existing Project (**live-proves `list_projects`**). No second
+   Project, no duplicate milestones/node-issues.
+4. **Node↔plan unification (the `objective-plan` step).** Pick node `1.1`. Write a trivial
+   `plan.md` and run
+   `perk plan save --objective-id <PROJECT_UUID> --node-id 1.1 --plan-file plan.md --run-id <RID> --json`.
+   Verify: **no new `perk:plan` issue is created** (the node-issue count is unchanged); the
+   **node-issue's own description** gains the `plan-header` inline-code block; the plan body lands
+   as a **single node-issue comment** (inline-code, **patched in place** on re-save, not
+   duplicated); `cache.plan-ref` is stamped at the node-issue; `perk objective show` reports the
+   node advanced **`planning → in_progress`**. (The warm `/objective-plan` factory wraps this exact
+   save.)
+5. **Implement + submit.** `perk implement <node-issue-identifier>` (worktree/branch
+   `plan-<identifier>`); make a trivial committed change; `perk pr submit --json`. Verify the draft
+   PR opens and the node-issue `plan-header` gains `branch` / `pr` / `lifecycle_stage` (the
+   inline-code sentinel intact after the ProseMirror re-encode).
+6. **Land (node-done + Project Update + close).** `perk pr land --json`. Verify: the node
+   **auto-marks `done`** (`nodes_marked` includes the node id; the backlink `pr` is the
+   **node-issue's own identifier**, the self-referential land-time backlink, stable); a **"plan
+   landed" Project Update** posts to the feed (**`post_status_update`**); and — when this was the
+   **last** open node — `close_objective` marks the **Project `completed`** via
+   `projectUpdate(state:"completed")` (**live-proves `set_project_state`**; confirm "Objective
+   complete." in the landed update body). The squash footer carries `Plan: <identifier> — <url>`.
+   (With the smoke roadmap, other nodes remain open, so `close_objective` will **not** fire on this
+   land — to observe the close, either drive every node to land or note that the close path is
+   exercised only when the final node lands; record which.)
+7. **`update_objective_node` workflow-state mirror.** Confirm (when the node moved to
+   `in_progress` at gate 4 / `done` at gate 6) that the **Linear node-issue's workflow state**
+   best-effort mirrors the perk status (`_workflow_state_id` map: `in_progress → started`,
+   `done → completed`). Record whether the mirror **fired** or **fell open** — a missing state type
+   or a Linear hiccup is **non-fatal by design**, so record either outcome
+   (**exercises `_workflow_state_id`**).
+8. **Reconcile (Reconcilable splice ProseMirror round-trip — the headline fidelity check).**
+   `perk objective reconcile <PROJECT_UUID> --json` with edited Reconcilable prose. Verify the
+   overview's Reconcilable region is **spliced in place** (form-preserving), the `objective-header`
+   block stays parseable after Linear's re-encode (`find_metadata_block` round-trip **CLEAN**),
+   **zero** HTML artifacts, and a reconciled **Project Update** posts.
+9. **Deliberate-perturbation observation (drift-doctor proxy).** *(Replaces the unrunnable "run the
+   4.4 drift doctor" clause — the `perk objective doctor` drift surface is **not yet built**; Node
+   4.4 delivered the design only, see `docs/planning/objective-repair.md`.)* In the Linear UI,
+   deliberately perturb the live Project, and after **each** perturbation run
+   `perk objective show <PROJECT_UUID> --json` and record **how `get_objective` behaves today**:
+   - (a) **Remove a node-issue from the Project** (un-assign its project) → the removed node
+     **silently disappears** from the reconstructed roadmap (`get_objective` rebuilds from
+     surviving node-issues only).
+   - (b) **Add a spurious `blocks` relation** from an unrelated / cross-project issue → the unknown
+     blocker target is **silently dropped** from `depends_on` (only in-objective node identifiers
+     reconstruct).
+   - (c) **Rename a phase milestone** → the milestone name is read **live**, so the renamed value
+     surfaces (milestone identity is name-keyed, not position-keyed).
+   State explicitly that these are the **empirical baseline** the future drift-detection node will
+   formalize — there is no doctor to flag the drift today.
+10. **Rate limits / error shapes.** Note any RATELIMITED context (still unobserved at low volume)
+    and any unexpected error shape from the Project ops.
+
+Append the run's findings to the **Recorded observations** section (a new dated **Fourth live run**
+block, one row per gate). If a gate trips a backend defect, record it as a dated observation **and
+open a follow-up issue** (the #562 precedent) — do **not** fix substantive code in this node;
+correct only stale command references / runbook drift inline.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
@@ -341,16 +463,20 @@ query($id: String!) {  # B blockedBy A (carried by inverseRelations, type stays 
 }
 ```
 
-### Not-yet-live-proven Project ops (verify at Node 5.1)
+### Not-yet-live-proven Project ops (verified at Node 5.1 — Mode 4)
 
 These Project ops are **offline-covered** (scripted-fake tests) but were **not** exercised by the
-Mode 3 spike, so they are flagged not-live-proven in `_LinearProjectOps` and must be verified at the
-Node 5.1 live smoke gate:
+Mode 3 spike, so they were flagged not-live-proven in `_LinearProjectOps` and are exercised by
+**Mode 4** above — see the **Fourth live run** observation block for each op's live result:
 
-- `set_project_state` — `projectUpdate(id, input:{ state })` (mark the Project complete on land).
-- `list_projects` — `team(id){ projects { nodes { id url content } } }` (the find-by-run-id scan).
+- `set_project_state` — `projectUpdate(id, input:{ state })` (mark the Project complete on land) —
+  **Mode 4 gate 6** (the `close_objective` close path).
+- `list_projects` — `team(id){ projects { nodes { id url content } } }` (the find-by-run-id scan) —
+  **Mode 4 gate 3** (idempotent re-create).
+- `_workflow_state_id` — `update_objective_node`'s best-effort Linear workflow-state mirror
+  (`in_progress → started`, `done → completed`; fail-open) — **Mode 4 gate 7**.
 - `create_project_update` (Node 4.3) — the **Project Update** status feed, posted fail-open on
-  objective-created / plan-landed / reconciled transitions:
+  objective-created / plan-landed / reconciled transitions (**Mode 4 gates 1 / 6 / 8**):
 
 ```graphql
 # projectUpdateCreate — post a Project Update (the status-report feed); `health` omitted (D3)
