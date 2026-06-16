@@ -62,12 +62,12 @@ test-py *args:
 
 # run the typescript test suite (node:test)
 test-js:
-    node --test "extension/**/*.test.ts"
+    node --test --test-reporter=dot "extension/**/*.test.ts"
 
 # run the test suite (python: pytest, typescript: node:test)
 test *args:
     uv run pytest {{args}}
-    node --test "extension/**/*.test.ts"
+    node --test --test-reporter=dot "extension/**/*.test.ts"
 
 # build the python wheel + sdist
 build:
