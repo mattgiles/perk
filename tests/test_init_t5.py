@@ -300,16 +300,71 @@ def test_linear_readiness_runs_when_selected(git_repo, stub_env, monkeypatch):
         return ready
 
     monkeypatch.setattr(init_mod.linear_backend, "check_readiness", fake_readiness)
+    project = init_mod.linear_backend.LinearProjectReadiness(projects_ok=True)
+    monkeypatch.setattr(
+        init_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: project,
+    )
     report = run_init(git_repo, verify=True)
     assert report.ok and report.linear is not None
     assert report.linear.ok and report.linear.readiness == ready
     assert report.linear.team == "ENG"
+    assert report.linear.project == project  # probed when auth_ok && team_ok
     assert calls == [("ENG", True)]  # init ensures the labels upfront
     # Created labels are reported through LinearReport, never the filesystem-delta changes.
     assert not any("linear" in c.lower() for c in report.changes if "pi-mono-linear" not in c)
     data = report_to_dict(report)
     linear_dict = cast("dict[str, object]", data["linear"])
     assert isinstance(linear_dict, dict) and linear_dict["ok"] is True
+    project_dict = cast("dict[str, object]", linear_dict["project"])
+    assert isinstance(project_dict, dict) and project_dict["projects_ok"] is True
+
+
+def test_linear_project_readiness_gap_non_fatal(git_repo, stub_env, monkeypatch):
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        init_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: init_mod.linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True
+        ),
+    )
+    gap = init_mod.linear_backend.LinearProjectReadiness(
+        projects_ok=False, projects_error="no access", missing_state_types=("canceled",)
+    )
+    monkeypatch.setattr(
+        init_mod.linear_backend, "check_project_readiness", lambda client, *, team_key: gap
+    )
+    report = run_init(git_repo, verify=True)
+    # Project readiness is non-fatal: it does NOT flip LinearReport.ok.
+    assert report.ok and report.linear is not None and report.linear.ok
+    assert report.linear.project == gap
+    data = report_to_dict(report)
+    linear_dict = cast("dict[str, object]", data["linear"])
+    project_dict = cast("dict[str, object]", linear_dict["project"])
+    assert project_dict["projects_ok"] is False
+    assert project_dict["missing_state_types"] == ["canceled"]
+
+
+def test_linear_project_readiness_skipped_on_auth_degrade(git_repo, stub_env, monkeypatch):
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        init_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: init_mod.linear_backend.LinearReadiness(
+            auth_ok=False, user=None, team_ok=False, error="bad key"
+        ),
+    )
+
+    def _boom(client, *, team_key):
+        raise AssertionError("check_project_readiness must not run when auth/team failed")
+
+    monkeypatch.setattr(init_mod.linear_backend, "check_project_readiness", _boom)
+    report = run_init(git_repo, verify=True)
+    assert report.linear is not None and report.linear.project is None
 
 
 def test_linear_readiness_degrades_on_missing_api_key(git_repo, stub_env, monkeypatch):

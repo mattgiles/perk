@@ -64,6 +64,20 @@ def _render_human(report: InitReport) -> None:
                 "  Export LINEAR_API_KEY and set [issues] team in .pi/perk.toml"
                 "  (perk did not mutate Linear)"
             )
+        project = report.linear.project
+        if project is not None:
+            if not project.projects_ok:
+                user_output(
+                    click.style("⚠️", fg="yellow") + " Linear Projects: read-access not verified"
+                )
+            if project.states_error:
+                user_output(click.style("⚠️", fg="yellow") + " Linear: workflow states not verified")
+            elif project.missing_state_types:
+                user_output(
+                    click.style("⚠️", fg="yellow")
+                    + " Linear: team missing workflow state type(s): "
+                    + ", ".join(project.missing_state_types)
+                )
 
     if report.handoff is not None:
         user_output("")

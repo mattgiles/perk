@@ -1633,6 +1633,101 @@ class TestCheckReadiness:
         assert readiness.error is not None and "rate limited" in readiness.error
 
 
+def _states_payload(types: list[str]) -> dict[str, object]:
+    return {"team": {"states": {"nodes": [{"type": t} for t in types]}}}
+
+
+_ALL_STATE_TYPES: list[str] = ["unstarted", "started", "completed", "canceled"]
+_PROJECTS_OK: dict[str, object] = {"team": {"projects": {"nodes": [{"id": "proj-1"}]}}}
+
+
+class TestCheckProjectReadiness:
+    def test_derivation_guard_in_lockstep_with_map(self) -> None:
+        assert frozenset(linear_backend._NODE_STATUS_STATE_TYPE.values()) == (
+            linear_backend._REQUIRED_STATE_TYPES
+        )
+
+    def test_all_ready(self) -> None:
+        fake = _FakeLinear(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 1": [_PROJECTS_OK],
+                "states { nodes { type }": [_states_payload(_ALL_STATE_TYPES)],
+            }
+        )
+        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        assert result == linear_backend.LinearProjectReadiness(
+            projects_ok=True,
+            projects_error=None,
+            missing_state_types=(),
+            states_error=None,
+        )
+
+    def test_projects_error_does_not_short_circuit_states(self) -> None:
+        fake = _FakeLinear(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 1": [IssueBackendError("no project access")],
+                "states { nodes { type }": [_states_payload(_ALL_STATE_TYPES)],
+            }
+        )
+        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        assert result.projects_ok is False
+        assert result.projects_error is not None and "no project access" in result.projects_error
+        # The states phase still ran (projects error does not short-circuit it).
+        assert _queries(fake, "states { nodes { type }")
+        assert result.missing_state_types == ()
+        assert result.states_error is None
+
+    def test_missing_state_type_reported_sorted(self) -> None:
+        fake = _FakeLinear(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 1": [_PROJECTS_OK],
+                "states { nodes { type }": [_states_payload(["unstarted", "started", "completed"])],
+            }
+        )
+        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        assert result.projects_ok is True
+        assert result.missing_state_types == ("canceled",)
+
+    def test_states_probe_error(self) -> None:
+        fake = _FakeLinear(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 1": [_PROJECTS_OK],
+                "states { nodes { type }": [IssueBackendError("states boom")],
+            }
+        )
+        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        assert result.states_error is not None and "states boom" in result.states_error
+        assert result.missing_state_types == ()
+
+    def test_malformed_state_nodes_skipped_not_raised(self) -> None:
+        fake = _FakeLinear(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first: 1": [_PROJECTS_OK],
+                "states { nodes { type }": [
+                    {
+                        "team": {
+                            "states": {
+                                "nodes": [
+                                    "junk",
+                                    {"type": 7},
+                                    *[{"type": t} for t in _ALL_STATE_TYPES],
+                                ]
+                            }
+                        }
+                    }
+                ],
+            }
+        )
+        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        assert result.missing_state_types == ()
+        assert result.states_error is None
+
+
 # ---------------------------------------------------------------------- project ops (Node 3.1)
 
 

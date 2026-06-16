@@ -231,11 +231,18 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
             auth_ok=True, user="Mat", team_ok=True
         ),
     )
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+    )
     report = run_doctor(git_repo, verify=True)
     group = {c.name: c for c in _linear_group(report)}
     assert group["linear-auth"].status == "ok" and "Mat" in group["linear-auth"].message
     assert group["linear-team"].status == "ok" and "ENG" in group["linear-team"].message
     assert group["linear-labels"].status == "ok"
+    assert group["linear-project-scopes"].status == "ok"
+    assert group["linear-workflow-states"].status == "ok"
 
 
 def test_linear_checks_warn_on_missing_api_key(git_repo, stub_env, monkeypatch):
@@ -296,11 +303,133 @@ def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
             auth_ok=True, user="Mat", team_ok=True, missing_labels=("perk:plan",)
         ),
     )
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+    )
     report = run_doctor(git_repo, verify=True)
     labels = next(c for c in _linear_group(report) if c.name == "linear-labels")
     assert labels.status == "warn"
     assert "perk:plan" in labels.message
     assert "doctor --fix" in labels.remediation
+
+
+def _patch_ready(monkeypatch):
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True
+        ),
+    )
+
+
+def test_linear_project_checks_warn_on_no_project_access(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    _patch_ready(monkeypatch)
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+            projects_ok=False, projects_error="no access"
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = {c.name: c for c in _linear_group(report)}
+    scopes = group["linear-project-scopes"]
+    assert scopes.status == "warn"
+    assert scopes.detail == "no access"
+    assert "Projects" in scopes.remediation
+    # Non-fatal: warn-level, never fail (exit code keys off fail only).
+    assert all(c.status != "fail" for c in _linear_group(report))
+
+
+def test_linear_project_checks_warn_on_missing_state_types(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    _patch_ready(monkeypatch)
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+            projects_ok=True, missing_state_types=("canceled",)
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = {c.name: c for c in _linear_group(report)}
+    states = group["linear-workflow-states"]
+    assert states.status == "warn"
+    assert "canceled" in states.message
+    assert "canceled" in states.remediation
+    assert all(c.status != "fail" for c in _linear_group(report))
+
+
+def test_linear_project_checks_warn_on_states_probe_error(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    _patch_ready(monkeypatch)
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+            projects_ok=True, states_error="states boom"
+        ),
+    )
+    report = run_doctor(git_repo, verify=True)
+    states = {c.name: c for c in _linear_group(report)}["linear-workflow-states"]
+    assert states.status == "warn"
+    assert "not verified" in states.message
+    assert states.detail == "states boom"
+
+
+def test_linear_project_checks_absent_on_auth_failure(git_repo, stub_env, monkeypatch):
+    # The project probe is gated behind auth+team success — it is not even called.
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=False, user=None, team_ok=False, error="bad key"
+        ),
+    )
+
+    def _boom(client, *, team_key):
+        raise AssertionError("check_project_readiness must not run when auth failed")
+
+    monkeypatch.setattr(doctor_mod.linear_backend, "check_project_readiness", _boom)
+    report = run_doctor(git_repo, verify=True)
+    names = {c.name for c in _linear_group(report)}
+    assert "linear-project-scopes" not in names
+    assert "linear-workflow-states" not in names
+
+
+def test_linear_project_checks_absent_on_team_failure(git_repo, stub_env, monkeypatch):
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=False, error="Linear team 'ENG' not found"
+        ),
+    )
+
+    def _boom(client, *, team_key):
+        raise AssertionError("check_project_readiness must not run when team failed")
+
+    monkeypatch.setattr(doctor_mod.linear_backend, "check_project_readiness", _boom)
+    report = run_doctor(git_repo, verify=True)
+    names = {c.name for c in _linear_group(report)}
+    assert "linear-project-scopes" not in names
+    assert "linear-workflow-states" not in names
 
 
 def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
@@ -319,6 +448,11 @@ def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
         return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
 
     monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+    )
     report = run_doctor(git_repo, fix=True, verify=True)
     assert "Linear: created label perk:plan" in report.fixed
     assert "Linear: created label perk:learn" in report.fixed
@@ -338,6 +472,11 @@ def test_fix_linear_label_failure_lands_on_fix_errors(git_repo, stub_env, monkey
         return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
 
     monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+    )
     report = run_doctor(git_repo, fix=True, verify=True)
     assert any("rate limited" in e for e in report.fix_errors)
 

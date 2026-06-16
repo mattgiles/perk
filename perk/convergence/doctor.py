@@ -753,6 +753,57 @@ def _linear_checks(root: Path) -> list[Check]:
         )
     else:
         checks.append(Check("linear-labels", "linear", "ok", "perk labels present"))
+
+    # Project-backed objective readiness (verify-gated, non-fatal). Runs only here in the
+    # team_ok path — auth/team failures already returned above and never reach this probe. Reuses
+    # the client's cached team id (a cache hit after `check_readiness`).
+    project = linear_backend.check_project_readiness(client, team_key=team)
+    if project.projects_ok:
+        checks.append(Check("linear-project-scopes", "linear", "ok", "Linear Projects accessible"))
+    else:
+        checks.append(
+            Check(
+                "linear-project-scopes",
+                "linear",
+                "warn",
+                "Linear Projects not accessible",
+                project.projects_error or "",
+                "Grant the Linear API token access to Projects (a personal API key at "
+                "linear.app Settings → Security & access has full access).",
+            )
+        )
+    if project.states_error:
+        checks.append(
+            Check(
+                "linear-workflow-states",
+                "linear",
+                "warn",
+                "workflow states not verified",
+                project.states_error,
+            )
+        )
+    elif project.missing_state_types:
+        checks.append(
+            Check(
+                "linear-workflow-states",
+                "linear",
+                "warn",
+                f"missing workflow state type(s): {', '.join(project.missing_state_types)}",
+                "",
+                f"Add Linear workflow state(s) of type "
+                f"{', '.join(project.missing_state_types)} to team {team} "
+                "(the node-status board mirror needs them).",
+            )
+        )
+    else:
+        checks.append(
+            Check(
+                "linear-workflow-states",
+                "linear",
+                "ok",
+                "workflow states cover the node-status mirror",
+            )
+        )
     return checks
 
 
