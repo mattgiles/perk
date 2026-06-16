@@ -35,7 +35,8 @@ page names them only as a pointer.
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
-`objective_node`, `reconcile_objective`, `resolve_review_threads`, `run_ci`, `ask_user_question`).
+`objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`, `run_ci`,
+`ask_user_question`).
 Each entry marks this property.
 
 ## The stage/door model
@@ -162,9 +163,11 @@ objective number (else the active objective) and an optional `--node`. Paired to
 ### `/objective-reconcile`
 
 Reconcile an objective's Reconcilable prose region against a merged PR (post-land); the roadmap
-table and Immutable notes are never touched. Paired tool:
+table and Immutable notes are never touched. Paired tools:
 
 - **`reconcile_objective`** — rewrite the Reconcilable prose region wholesale. *Non-terminating.*
+- **`add_objective_node`** — add a genuinely-new roadmap node (auto-assigned `<phase>.<n>`). Used
+  **sparingly**, only when a real new unit of work emerged. *Non-terminating.*
 
 ### `/objective-save`
 
@@ -228,7 +231,7 @@ Tools available across stages, independent of a single command.
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
 `resolve_review_threads`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
-`objective_node`, `reconcile_objective`.
+`objective_node`, `reconcile_objective`, `add_objective_node`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
 structurally limited to read/search/builtin tools plus the sanctioned write tools

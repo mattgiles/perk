@@ -179,6 +179,15 @@ Update one roadmap node (explicit-status-only). `--node` selects the node id (re
 sets its status (never inferred from `--pr`); `--pr` sets or clears the PR backlink;
 `--description` updates the node description; `--dry-run` validates without writing.
 
+### `perk objective node-add NUMBER`
+
+Insert a **new** roadmap node into a phase (auto-assigned `<phase>.<n>`, appended after that phase's
+last node). `--phase` (int, required) and `--description` (required) define the node; `--status`
+sets its initial status (default `pending`); `--slug` overrides the auto-derived slug;
+`--depends-on` (repeatable) adds a dependency edge; `--comment` attaches a note; `--dry-run`
+validates without writing. Used **sparingly** during reconciliation, when a genuinely-new unit of
+work emerged.
+
 ### `perk objective reconcile NUMBER` (alias `rec`)
 
 Reconcile an objective's Reconcilable prose region against the merged diff — rewriting only the

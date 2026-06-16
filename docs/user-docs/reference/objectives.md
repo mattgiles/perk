@@ -65,6 +65,10 @@ required; the rest are optional.
 | `slug` | string | no | Optional short slug. |
 | `comment` | string | no | Optional note. |
 
+Nodes can also be **inserted post-hoc** during reconciliation — `add_objective_node` (warm tool) /
+[`perk objective node-add`](./cli.md#perk-objective-node-add-number) (cold) auto-assigns the next
+`<phase>.<n>` id and appends the node within its phase. Used sparingly, only for genuinely-new work.
+
 ## Node statuses
 
 A node's `status` is one of six values (`NodeStatus`):

@@ -14,6 +14,11 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
    (alias `perk objective rec`), supplying the replacement prose in a file; `--dry-run` composes
    without writing.
 
+> **A genuinely-new node** can also be added during reconcile — via the `add_objective_node` tool
+> (warm) or [`perk objective node-add`](../reference/cli.md#perk-objective-node-add-number) (cold).
+> Use it **sparingly**: only when the PR revealed a real new unit of work that the roadmap is
+> missing, never to restate or re-scope an existing node.
+
 > **Only the prose moves.** Reconcile rewrites the marker-bounded **Reconcilable** region wholesale.
 > The roadmap **table** and any **Immutable** notes are structurally never touched. See
 > [Objectives — the roadmap model](../reference/objectives.md) for which region is reconcilable.
