@@ -28,6 +28,23 @@ def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) ->
     ctx.exit(EXIT_FOR_TYPE.get(error_type, 1))
 
 
+def objective_read_instruction(backend: str, objective_id: str, url: str) -> str:
+    """Backend-aware supplemental clause for the objective-read step of the factory prompts
+    (Node 4.1). Byte-identical to extension/factories/objectivePlan.ts::objectiveReadInstruction
+    (the TS twin); drift in either plane fails the paired parity suites. github (and any non-linear)
+    → "" (the `perk objective show` step already covers it); linear → the Project URL + the
+    linear_get_issue/linear_list_comments tools (an `open <url>` fallback when the url is known)."""
+    if backend != "linear":
+        return ""
+    where = f"({url})" if url else f"(run `perk objective show {objective_id}` for its URL)"
+    fallback = f"; if the linear tools are unavailable, open {url}" if url else ""
+    return (
+        f"This objective is a Linear Project {where}. Its roadmap nodes are Linear issues in that "
+        "Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and "
+        f"`linear_list_comments` tools{fallback}."
+    )
+
+
 def node_to_dict(node: objective.ObjectiveNode) -> dict[str, object]:
     return {
         "id": node.id,

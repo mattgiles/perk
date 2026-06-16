@@ -5,11 +5,63 @@
 // unit-tested separately below.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { buildObjectiveNodeArgs, factoryGuidance } from "./objectivePlan.ts";
+import {
+  buildObjectiveNodeArgs,
+  factoryGuidance,
+  objectiveReadInstruction,
+  reconcileGuidance,
+} from "./objectivePlan.ts";
+
+// Keep in lockstep with OBJECTIVE_LINEAR_SUBSTRINGS in tests/test_objective_prompt_parity.py —
+// the literal fragments of the shared linear arm (Node 4.1 cross-plane parity invariant).
+const OBJECTIVE_LINEAR_SUBSTRINGS = [
+  "Linear Project",
+  "linear_get_issue",
+  "linear_list_comments",
+  "inspect a node-issue",
+  "if the linear tools are unavailable, open ",
+];
+const LINEAR_URL = "https://linear.app/acme/project/objective-7";
+
+test("objectiveReadInstruction: linear arm carries the shared substrings + the url", () => {
+  const clause = objectiveReadInstruction("linear", "7", LINEAR_URL);
+  for (const needle of OBJECTIVE_LINEAR_SUBSTRINGS) {
+    assert.ok(clause.includes(needle), `linear objective-read instruction missing: ${needle}`);
+  }
+  assert.ok(clause.includes(LINEAR_URL));
+});
+
+test("objectiveReadInstruction: linear without a url uses the indirect form, drops the open fallback", () => {
+  const clause = objectiveReadInstruction("linear", "7", "");
+  assert.ok(clause.includes("run `perk objective show 7` for its URL"));
+  assert.ok(!clause.includes("if the linear tools are unavailable, open "));
+  assert.ok(clause.includes("linear_get_issue") && clause.includes("linear_list_comments"));
+});
+
+test("objectiveReadInstruction: github (and any non-linear) arm is empty", () => {
+  assert.equal(objectiveReadInstruction("github", "7", LINEAR_URL), "");
+  assert.equal(objectiveReadInstruction("gitlab", "7", LINEAR_URL), "");
+});
+
+test("factoryGuidance + reconcileGuidance: linear arm injects the read clause; github is unchanged", () => {
+  const planLinear = factoryGuidance("7", "1.2", undefined, "linear", LINEAR_URL);
+  const reconcileLinear = reconcileGuidance("7", "linear", LINEAR_URL);
+  for (const needle of OBJECTIVE_LINEAR_SUBSTRINGS) {
+    assert.ok(planLinear.includes(needle), `factoryGuidance(linear) missing: ${needle}`);
+    assert.ok(reconcileLinear.includes(needle), `reconcileGuidance(linear) missing: ${needle}`);
+  }
+  // The github arm (default) carries no linear fragment.
+  const planGithub = factoryGuidance("7", "1.2");
+  const reconcileGithub = reconcileGuidance("7");
+  for (const needle of OBJECTIVE_LINEAR_SUBSTRINGS) {
+    assert.ok(!planGithub.includes(needle), `factoryGuidance(github) leaked: ${needle}`);
+    assert.ok(!reconcileGithub.includes(needle), `reconcileGuidance(github) leaked: ${needle}`);
+  }
+});
 
 test("factoryGuidance injects the configured objective-explorer model when set", () => {
   const text = factoryGuidance("42", "1.2", "x/y");
@@ -234,6 +286,95 @@ test("tool: objective_node — a success:false envelope at non-zero exit surface
     assert.equal(details.ok, false);
     assert.equal(details.error_type, "node_not_found");
     assert.equal(details.error, "no node 9.9 in the roadmap");
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- Node 4.1: the warm handlers fetch the url only for linear, fail-open to the indirect form ---
+
+/** Write a committed `.pi/perk.toml` selecting the issue backend (resolveIssueBackendId reads it). */
+function writeBackend(cwd: string, backend: string): void {
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), `[issues]\nbackend = "${backend}"\n`, "utf8");
+}
+
+/** Replace the live `sendUserMessage` with a capturing spy; returns the recorded messages. */
+function captureInjections(h: Awaited<ReturnType<typeof loadPerkSession>>): string[] {
+  const seen: string[] = [];
+  (h.session as unknown as { sendUserMessage: (c: unknown) => Promise<void> }).sendUserMessage =
+    async (c: unknown) => {
+      seen.push(String(c));
+    };
+  return seen;
+}
+
+test("/objective-plan (linear) fetches the Project URL and seeds the backend-aware clause", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writeBackend(cwd, "linear");
+  const url = "https://linear.app/acme/project/objective-7";
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: true, error_type: null, objective: { id: "7", url } }),
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const seen = captureInjections(h);
+  try {
+    await h.invokeCommand("objective-plan", "7");
+    const msg = seen.join("\n");
+    assert.ok(msg.includes("This objective is a Linear Project"), "linear clause injected");
+    assert.ok(msg.includes(url), "the fetched Project URL is referenced");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan (linear) fails open to the indirect form when the fetch fails", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writeBackend(cwd, "linear");
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const seen = captureInjections(h);
+  try {
+    await h.invokeCommand("objective-plan", "7");
+    const msg = seen.join("\n");
+    assert.ok(msg.includes("This objective is a Linear Project"), "linear clause still injected");
+    assert.ok(msg.includes("run `perk objective show 7` for its URL"), "indirect form used");
+    assert.ok(!msg.includes("if the linear tools are unavailable, open "), "no open fallback");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-plan (github) injects no linear clause and runs no fetch", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writeBackend(cwd, "github");
+  // A throwing PERK_BIN proves no fetch happens for the github arm (no objective show call).
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const seen = captureInjections(h);
+  try {
+    await h.invokeCommand("objective-plan", "7");
+    const msg = seen.join("\n");
+    assert.ok(!msg.includes("Linear Project"), "no linear clause on the github arm");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/objective-reconcile (linear) fetches the Project URL and seeds the backend-aware clause", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  writeBackend(cwd, "linear");
+  const url = "https://linear.app/acme/project/objective-7";
+  const bin = fakePerk(cwd, {
+    stdout: JSON.stringify({ success: true, error_type: null, objective: { id: "7", url } }),
+  });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  const seen = captureInjections(h);
+  try {
+    await h.invokeCommand("objective-reconcile", "7");
+    const msg = seen.join("\n");
+    assert.ok(msg.includes("This objective is a Linear Project"), "linear clause injected");
+    assert.ok(msg.includes(url), "the fetched Project URL is referenced");
   } finally {
     h.dispose();
   }

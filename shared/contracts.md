@@ -2900,6 +2900,27 @@ perk-learn skills carry per-backend `backends/` reference directories (`github`,
 delivered by the whole-directory skills sync. Historical Status notes elsewhere quoting
 `gh issue view` (e.g. P1.T4c) are records — left untouched.
 
+The **objective seed prompts** are backend-aware the same way (Node 4.1). The objective-plan cold
+seed (`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the warm guidance
+(`extension/factories/objectivePlan.ts::factoryGuidance` / `reconcileGuidance`) branch on the
+objective backend via the parity-pinned `objective_read_instruction` /
+`objectiveReadInstruction` helpers (byte-parity asserted by
+`tests/test_objective_prompt_parity.py` + `extension/factories/objectivePlan.test.ts` — the
+`OBJECTIVE_LINEAR_SUBSTRINGS` set). The helper returns a **supplemental** clause appended to the
+existing `perk objective show <id>` step (never a replacement): the `linear` arm references the
+Linear **Project URL** + the read-only `linear_get_issue` / `linear_list_comments` tools (an
+`open <url>` fallback when the url is known; the indirect `run \`perk objective show <id>\` for its
+URL` form when it is not); `github` (and any non-linear) → `""` (the `perk objective show` step
+already covers GitHub — no churn). The warm plane resolves the backend from
+`resolveIssueBackendId(ctx.cwd)` (committed `.pi/perk.toml` — authoritative since cross-backend
+objectives are unsupported by policy) and fetches the Project URL via `perk objective show <id>
+--json` **only for `linear`** (github needs no clause → no fetch), **fail-open** (any fetch
+failure / missing url → the indirect form). The cold plane reads `store.backend_id` + `state.url`
+(both already in hand). New helper/handler params default to the github/empty arm
+(`backend="github"`, `url=""`) — backward-compatible. PRs stay on `gh` (`reconcileGuidance`'s
+`gh pr diff`/`gh pr view` is unchanged — PRs are GitHub-universal). `objective author` is excluded
+(no objective/Project exists at author time).
+
 **Opaque string issue ids at every machine boundary (Node 4.1).** Issue ids (plan / learn /
 objective) are **opaque strings** end-to-end — GitHub's are numeric strings (`"42"`), Linear's
 are the human identifier (`"ENG-123"`; the backend resolves identifier→UUID internally for
