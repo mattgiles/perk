@@ -163,6 +163,17 @@ class _FakeObjectiveStore:
         # The minimal fake has no status-update surface (Node 4.3).
         return False
 
+    def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
+        # The minimal fake has no divergence surface (Node 4.4).
+        return objective_store.DriftReport()
+
+    def repair_objective_drift(
+        self, *, objective_id: str, dry_run: bool = False
+    ) -> objective_store.RepairResult:
+        return objective_store.RepairResult(
+            applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
+        )
+
 
 def _make_store() -> objective_store.ObjectiveStore:
     """The static conformance check: ty verifies ``_FakeObjectiveStore`` satisfies the protocol."""

@@ -3088,10 +3088,11 @@ GitHub issue **or** a Linear Project.
 `issue_backend.py` dormant-then-extract precedent: the contract ships dormant, a later node extracts
 the concrete backend behind it):
 
-- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **ten** keyword-only methods —
+- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **twelve** keyword-only methods —
   `find_objective` / `create_objective` / `get_objective` / `update_objective_header` /
   `update_objective_node` / `update_objective_body` / `add_objective_node` / `save_node_plan` /
-  `close_objective` / `post_status_update` (`objective_id` everywhere). `add_objective_node` inserts
+  `close_objective` / `post_status_update` / `detect_objective_drift` / `repair_objective_drift`
+  (`objective_id` everywhere; the last two added at Node 4.4 — see the amendment). `add_objective_node` inserts
   a new roadmap node (auto-assigned `<phase>.<n>`, appended within the phase) — the rare
   node-insertion surface used sparingly during reconciliation (prose-guarded, no audit gate).
   Each concrete store inserts into the thing it stores: the GitHub + issue-backed Linear stores
@@ -3219,3 +3220,59 @@ failure never breaks a merge or a node transition).
   Project Update (out of this node's scope).
 - **Deferred:** `projectUpdateCreate` is offline-covered here, **live-verified at the Node 5.1
   smoke gate** (alongside `set_project_state` / `list_projects`).
+
+**Node 4.4 amendment — the objective manifest + drift detection/repair (`perk objective doctor`).**
+A Linear Project's roadmap is *observed* state (node-issues, blocking relations, milestones) that a
+human can edit out from under perk. To detect that divergence, the project overview now persists an
+authoritative **`objective-manifest`** block (inline-code, between the `objective-header` block and
+the Reconcilable region) — the intended roadmap's **structural identity**: per node `id` / `slug` /
+`description` + the explicit `depends_on` edge set (always a list), plus a `phases` map pinning the
+canonical milestone name per `phase_key_str` (`"2A.1" → "2A"`). `status`/`pr` are **excluded** (they
+are live/observed state, not identity). Drift is `diff(manifest, observed)`; repair makes the
+observed state match the manifest for **safe, unambiguous** cases only (perk never *invents*
+information it has no authority to invent). GitHub + the issue-backed Linear store edit their
+roadmap atomically with the body — **no divergence surface** — so both new methods are empty no-ops
+there (the `save_node_plan → None` / `post_status_update → False` precedent).
+
+- **The pure drift engine** (`perk/objective_drift.py`, fully offline — no network/clock/Click): the
+  store builds an `ObservedSnapshot` (the one network step) and `detect_drift(snapshot)` returns a
+  `DriftReport` of `DriftCondition`s, each carrying a stable machine `code` (`DriftCode`), a
+  `severity` (error/warning/info), `node_id`/`target`, a `message`, and a **`repairable`** flag. A
+  malformed manifest (`MANIFEST_MALFORMED`) or an absent one (`MANIFEST_ABSENT`) short-circuits — no
+  baseline to diff. The catalog of codes: `MANIFEST_ABSENT` (repairable: backfill) ·
+  `MANIFEST_MALFORMED` · `MISSING_NODE_ISSUE` (repairable: recreate) · `DUPLICATE_NODE_IDS` ·
+  `MISSING_NODE_STATUS_BLOCK` · `BLOCKING_RELATION_CYCLE` (manifest-enriched: names the human-added
+  edges) · `UNKNOWN_BLOCKER_REFERENCE` · `DEPENDENCY_MISSING_IN_LINEAR` (repairable: create
+  relation) · `DEPENDENCY_EXTRA_IN_LINEAR` · `DELETED_PHASE_MILESTONE` (repairable: recreate +
+  reattach) · `RENAMED_PHASE_MILESTONE` · `OVERVIEW_MARKER_DAMAGE`.
+- **Two new `ObjectiveStore` methods + two result dataclasses.** `detect_objective_drift(*,
+  objective_id) → DriftReport` and `repair_objective_drift(*, objective_id, dry_run=False) →
+  RepairResult`. `RepairResult` = `applied: tuple[RepairAction,…]` / `failed: RepairAction | None` /
+  `remaining: tuple[DriftCondition,…]` / `aborted: bool` / `dry_run: bool`; `RepairAction` =
+  `code` / `node_id` / `error` (the write-failure message on the failed action only). Repairs apply
+  in a deterministic order — a manifest backfill short-circuits everything, else milestone → node-
+  issue → dependency (parents before edges), then by node id — and **fail loud**: the first failed
+  Linear write stops the batch (`aborted=True`, the failing condition in `failed`); `applied` records
+  what landed before the abort (durable + idempotent on re-run). A `dry_run` plans the would-apply
+  set without any write.
+- **Two new project ops** (`_LinearProjectOps`, **flagged not-live-proven** — verify at the Node 5.1
+  gate): `project_issues_with_milestones` (a `project_issues` sibling joining each node-issue's
+  `projectMilestone`) and `attach_issue_to_milestone` (the deleted-milestone reattach — bare
+  boundary identifier through `_request_issue_mutation`, mirroring post-#622 `attach_issue_to_project`;
+  **no `uuid_for`**, deleted in #622). A recreated missing node-issue uses `_create_issue_raw` to
+  capture the UUID for the UUID-only `issueRelationCreate`.
+- **Manifest sync on the live write paths.** `create_objective` writes the manifest at create;
+  `add_objective_node` appends the new node's entry (pinning a brand-new phase's name);
+  `update_objective_node` syncs a node's manifest **description** on a description change (a
+  status/pr-only change does **not** touch it); `update_objective_body` (reconcile) refreshes the
+  `phases` pins from the spliced overview in the **same** write (only when a `### Phase N:` header
+  actually supplied a name — never clobbering a pin with the default). Every sync is a clean no-op on
+  a pre-manifest objective (no manifest block); `doctor --fix` backfill is the path that adopts one.
+- **The worker.** `perk objective doctor <id> [--fix] [--dry-run] [--json]` — detect-only by
+  default; `--fix` applies the repairable repairs; `--dry-run` (with `--fix`) plans them. `--json`
+  emits `{success, error_type, objective, drift: [condition…], fix: null | {applied, failed,
+  remaining, aborted, dry_run}}` to stdout; human text to stderr. Exit `0` ran (drift, even
+  ERROR-severity report-only drift, is a clean report) · `1` op-failure or an **aborted** repair ·
+  `2` not-a-repo.
+- **Deferred:** the two new project ops are offline-covered here, **live-verified at the Node 5.1
+  smoke gate** (the manifest-drift design lives in `docs/planning/objective-repair.md`).

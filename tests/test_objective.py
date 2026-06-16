@@ -1,5 +1,7 @@
 """Pure-mechanics tests for perk/objective.py (no network, no Click)."""
 
+from typing import cast
+
 from perk import objective as o
 from perk.plan import render_metadata_block
 
@@ -492,7 +494,7 @@ def test_render_manifest_block_excludes_status_and_pr():
     nodes = _manifest_nodes()
     data = o.render_manifest_block(nodes, {"1": "Phase 1: Foundations", "2A": "Phase 2A: Extra"})
     assert data["schema_version"] == "1"
-    node_dicts = data["nodes"]
+    node_dicts = cast("list[dict[str, object]]", data["nodes"])
     assert node_dicts == [
         {"id": "1.1", "slug": "alpha", "description": "Alpha", "depends_on": []},
         {"id": "1.2", "slug": "beta", "description": "Beta", "depends_on": ["1.1"]},
