@@ -3077,14 +3077,17 @@ GitHub issue **or** a Linear Project.
 `issue_backend.py` dormant-then-extract precedent: the contract ships dormant, a later node extracts
 the concrete backend behind it):
 
-- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **eight** keyword-only methods —
+- The `ObjectiveStore` `Protocol`: `backend_id: str` plus **nine** keyword-only methods —
   `find_objective` / `create_objective` / `get_objective` / `update_objective_header` /
-  `update_objective_node` / `update_objective_body` / `save_node_plan` / `close_objective`
-  (`objective_id` everywhere). The last two were added at Node 3.4 (see the Node 3.4 amendment
-  below): `save_node_plan` is the node↔plan **unification** write (returns the node-issue ref for a
-  unifying store, **`None`** for a store that does not unify — the single "doesn't unify" signal),
-  and `close_objective` retires the objective's **own** entity on completion (each backend closes
-  the thing it actually stores).
+  `update_objective_node` / `update_objective_body` / `save_node_plan` / `close_objective` /
+  `post_status_update` (`objective_id` everywhere). `save_node_plan` + `close_objective` were added
+  at Node 3.4 (see the Node 3.4 amendment): `save_node_plan` is the node↔plan **unification** write
+  (returns the node-issue ref for a unifying store, **`None`** for a store that does not unify — the
+  single "doesn't unify" signal), and `close_objective` retires the objective's **own** entity on
+  completion (each backend closes the thing it actually stores). `post_status_update` was added at
+  Node 4.3 (see the Node 4.3 amendment): it posts a human-readable status update to the objective's
+  native update surface, returning `True` when posted and `False` for a store with no such surface
+  (GitHub, issue-backed Linear) or a `dry_run`.
 - Five frozen result dataclasses: `ObjectiveRef` (`id`/`url`/`existed`), `ObjectiveState`
   (`id`/`url`/`title`/`header`/`nodes`), `ObjectiveHeaderUpdate`, `ObjectiveNodeUpdate`,
   `ObjectiveBodyUpdate`.
@@ -3169,3 +3172,34 @@ unchanged.
 - **Deferred:** the `projectUpdate(state)` mark-complete is offline-covered here, live-verified at
   the Node 5.1 smoke gate; the **docs/user-docs** operator narrative for the project-backed
   objective lifecycle is Node 5.2.
+
+**Node 4.3 amendment — phase→milestone sync seam + fail-open Project Updates.** Two additive,
+**non-fatal** enrichments to the Linear project-backed objective (GitHub unchanged: no Project
+Updates, no milestone seam). Every Linear write added here is best-effort — a failure is logged
+loud-but-non-fatal to stderr and **never** changes the command's result (a Linear bookkeeping
+failure never breaks a merge or a node transition).
+
+- **phases → milestones is a name-keyed lookup-or-create seam.** `_LinearProjectOps.ensure_phase_milestone(*, project_id, name, known=None)`
+  reuses an existing milestone for `name` or creates one. **Name is the deterministic key** —
+  milestone order is NOT insertion order (the 1.4 finding) — and the canonical name source is
+  `objective.enrich_phase_names(prose, [key])` (the overview's `### Phase N: …` headers, falling
+  back to `phase_label` → `"Phase N"`). `create_objective` routes its create-time milestone loop
+  through the seam with a **seeded-empty `known`**, so its network calls stay byte-identical to the
+  prior blind-create loop (no extra `project_milestones` read). The seam is the **"kept in sync on
+  node add"** primitive a future `add_node`-to-an-existing-objective will reuse (with `known=None`)
+  — load-bearing, not fiction; `objective.add_node` stays caller-less in this node. **No
+  phase-key→id registry** — name is the dedup key. The phase-header-text-drift duplicate-milestone
+  edge (reconciliation rewrites a `### Phase N:` header → the stored milestone name no longer
+  matches the re-derived name → a duplicate) is **Node 4.4's** drift-detection + repair concern.
+- **fail-open Project Updates** (`post_status_update` → `_LinearProjectOps.create_project_update`,
+  the `projectUpdateCreate` mutation; `input = {projectId, body}` only — the `health` field is
+  deliberately **omitted**) are posted on three transitions: **objective created** (`perk objective
+  create`, fresh-create only — skipped on the idempotent found-existing path), **a plan lands**
+  (`_reconcile_objective_on_land` in `pr land`, posted once when ≥1 node was marked, isolated like
+  the existing close fail-open), and **reconciliation runs** (`perk objective reconcile`, on a real
+  non-dry-run update). Bodies come from pure backend-neutral composers in `perk/objective.py`
+  (`objective_created_update_body` / `plan_landed_update_body` / `reconciled_update_body`) computed
+  from counts the call site already holds — **no extra network reads**. There is **no** plan-save
+  Project Update (out of this node's scope).
+- **Deferred:** `projectUpdateCreate` is offline-covered here, **live-verified at the Node 5.1
+  smoke gate** (alongside `set_project_state` / `list_projects`).
