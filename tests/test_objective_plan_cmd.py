@@ -84,6 +84,66 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.2"}
 
 
+def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
+    """Node 4.1: the github call site forwards `store.backend_id`/`state.url` into `_seed_prompt`
+    but the github arm is empty — the seed has no linear-read fragment (no churn)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    assert "Linear Project" not in (launched["prompt"] or "")
+    assert "linear_get_issue" not in (launched["prompt"] or "")
+
+
+def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
+    """Node 4.1: the call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
+    project-backed (linear) objective seeds the backend-aware Project-URL/tools clause."""
+    from perk.backends import objective_stores
+
+    url = "https://linear.app/acme/project/objective-7"
+
+    class _FakeLinearStore:
+        backend_id = "linear"
+
+        def get_objective(self, *, objective_id):
+            return github.ObjectiveState(
+                number=7, url=url, title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
+            )
+
+        def update_objective_node(self, **k):
+            return github.ObjectiveNodeUpdate(
+                number=7, node_id=k["node_id"], comment_updated=True, dry_run=False
+            )
+
+    _authed(monkeypatch)
+    monkeypatch.setattr(
+        objective_stores, "resolve_objective_store", lambda root: _FakeLinearStore()
+    )
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
+        assert result.exit_code == 0, result.output
+    prompt = launched["prompt"] or ""
+    assert "This objective is a Linear Project" in prompt
+    assert url in prompt
+    assert "linear_get_issue" in prompt and "linear_list_comments" in prompt
+
+
 def test_explicit_node_selects_it(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "get_objective", lambda **k: _state())
