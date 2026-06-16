@@ -95,6 +95,16 @@ class ObjectiveNodeUpdate:
 
 
 @dataclass(frozen=True)
+class ObjectiveNodeAdd:
+    """The result of an ``add_objective_node`` write (a new roadmap node inserted)."""
+
+    objective_id: str
+    node_id: str  # the auto-assigned <phase>.<n>
+    comment_updated: bool
+    dry_run: bool
+
+
+@dataclass(frozen=True)
 class ObjectiveBodyUpdate:
     """The result of an ``update_objective_body`` write (the Reconcilable prose splice).
 
@@ -239,4 +249,22 @@ class ObjectiveStore(Protocol):
         infra failure — every call site wraps it **fail-open** (the update is bookkeeping, never
         load-bearing: a Linear failure must never break a merge or a node transition).
         """
+        ...
+
+    def add_objective_node(
+        self,
+        *,
+        objective_id: str,
+        phase: int,
+        description: str,
+        status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        slug: str | None = None,
+        depends_on: tuple[str, ...] | None = None,
+        comment: str | None = None,
+        dry_run: bool = False,
+    ) -> ObjectiveNodeAdd:
+        """Insert a new node into ``phase`` (auto-assigned ``<phase>.<n>``, appended after that
+        phase's last node): re-render the authoritative objective-roadmap block AND best-effort
+        re-render the objective-body comment table. Raises ``ObjectiveStoreError`` on an id
+        collision / invalid roadmap. A dry run validates + composes only."""
         ...

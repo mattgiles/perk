@@ -63,6 +63,16 @@ class ObjectiveBodyUpdate:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class ObjectiveNodeAdd:
+    """The result of an ``add_objective_node`` write (a new roadmap node inserted)."""
+
+    number: int
+    node_id: str
+    comment_updated: bool
+    dry_run: bool
+
+
 def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | None:
     """Find an open ``perk:objective`` issue whose ``objective-header`` ``run_id`` matches.
 
@@ -267,6 +277,73 @@ def update_objective_node(
                 comment_updated = True
     return ObjectiveNodeUpdate(
         number=number, node_id=node_id, comment_updated=comment_updated, dry_run=False
+    )
+
+
+def add_objective_node(
+    *,
+    number: int,
+    phase: int,
+    description: str,
+    status: objective.NodeStatus = objective.NodeStatus.PENDING,
+    slug: str | None = None,
+    depends_on: tuple[str, ...] | None = None,
+    comment: str | None = None,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> ObjectiveNodeAdd:
+    """Insert a new node into ``phase`` (auto-assigned ``<phase>.<n>``, appended after that phase's
+    last node): re-render the ``objective-roadmap`` block in the issue body (authoritative) AND the
+    rendered table in the ``objective-body`` comment.
+
+    Raises ``GitHubError`` if the roadmap is invalid or the auto-assigned id collides; the comment
+    re-render is best-effort (the frontmatter is the source of truth).
+    """
+    body = plans._get_issue_body(number, repo_root)
+    nodes, errors = objective.parse_roadmap_nodes(body)
+    if errors:
+        raise _exec.GitHubError("invalid objective roadmap: " + "; ".join(errors))
+    result = objective.add_node(
+        nodes,
+        phase=phase,
+        description=description,
+        status=status,
+        slug=slug,
+        depends_on=depends_on,
+        comment=comment,
+    )
+    if result is None:
+        raise _exec.GitHubError(f"could not add node to phase {phase} on #{number} (id collision)")
+    updated, new_id = result
+    if dry_run:
+        return ObjectiveNodeAdd(number=number, node_id=new_id, comment_updated=False, dry_run=True)
+
+    new_body = plan.replace_metadata_block(
+        body, objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(updated)
+    )
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to add objective roadmap node on #{number}")
+
+    comment_updated = False
+    header = plan.find_metadata_block(new_body, objective.OBJECTIVE_HEADER_KEY) or {}
+    comment_id = header.get("objective_comment_id")
+    if isinstance(comment_id, int):
+        comment_body = plans._get_comment_body(comment_id, repo_root)
+        if comment_body is not None:
+            rerendered = objective.rerender_body_table(comment_body, updated)
+            if rerendered is not None:
+                plans._patch_comment_body(comment_id, rerendered, repo_root)
+                comment_updated = True
+    return ObjectiveNodeAdd(
+        number=number, node_id=new_id, comment_updated=comment_updated, dry_run=False
     )
 
 
