@@ -1911,3 +1911,249 @@ class TestLinearProjectOps:
         ops._create_issue(title="T", description="D", label_id="lbl-1")
         [(_, variables)] = _queries(fake, "issueCreate(")
         assert _input_payload(variables)["labelIds"] == ["lbl-1"]
+
+
+def _make_project_store(
+    responses: dict[str, list[object]] | None = None,
+) -> tuple[linear_backend.LinearProjectObjectiveStore, _FakeLinear]:
+    """Construct the dormant project-backed objective store over a fake `LinearClient`."""
+    fake = _FakeLinear(responses)
+    store = linear_backend.LinearProjectObjectiveStore(
+        fake, team_key="ENG", repo_root=Path("/repo")
+    )
+    return store, fake
+
+
+def _overview_for(run_id: str) -> str:
+    """A project overview content carrying the inline-code objective-header for ``run_id``."""
+    header = objective.ObjectiveHeader(
+        run_id=run_id, created="t", objective_comment_id=None, status="active"
+    )
+    return plan.render_metadata_block(
+        objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+    )
+
+
+def _project_create_ok() -> dict[str, object]:
+    return {"projectCreate": {"success": True, "project": {"id": "proj-1", "url": "p/url"}}}
+
+
+def _issue_create(identifier: str, uuid: str) -> dict[str, object]:
+    return {
+        "issueCreate": {
+            "success": True,
+            "issue": {"id": uuid, "identifier": identifier, "url": f"u/{identifier}"},
+        }
+    }
+
+
+def _milestone_create(mid: str) -> dict[str, object]:
+    return {
+        "projectMilestoneCreate": {
+            "success": True,
+            "projectMilestone": {"id": mid, "name": "Phase"},
+        }
+    }
+
+
+def _relation_create_ok() -> dict[str, object]:
+    return {
+        "issueRelationCreate": {"success": True, "issueRelation": {"id": "rel", "type": "blocks"}}
+    }
+
+
+def _store_nodes() -> list[objective.ObjectiveNode]:
+    N = objective.NodeStatus
+    return [
+        objective.ObjectiveNode(id="1.1", description="Alpha", status=N.PENDING, slug="alpha"),
+        objective.ObjectiveNode(
+            id="1.2", description="Beta", status=N.PENDING, slug="beta", depends_on=("1.1",)
+        ),
+        objective.ObjectiveNode(
+            id="2.1", description="Gamma", status=N.PENDING, slug="gamma", depends_on=("1.2",)
+        ),
+    ]
+
+
+_STORE_BODY = "Objective prose here.\n\n### Phase 1: Foundations\n\n### Phase 2: Build\n"
+
+
+class TestLinearProjectObjectiveStore:
+    """The dormant project-backed objective store (Node 3.2): `find_objective` + `create_objective`,
+    all offline through the `_FakeLinear` `LinearClient` subclass."""
+
+    def _create_responses(self) -> dict[str, list[object]]:
+        return {
+            "teams(filter": [_TEAM_RESPONSE],
+            "projects(first": [{"team": {"projects": _page([])}}],  # find_objective dedup miss
+            "projectCreate(": [_project_create_ok()],
+            "projectMilestoneCreate(": [_milestone_create("m-1"), _milestone_create("m-2")],
+            "issueCreate(": [
+                _issue_create("ENG-1", "i-1"),
+                _issue_create("ENG-2", "i-2"),
+                _issue_create("ENG-3", "i-3"),
+            ],
+            "issueRelationCreate(": [_relation_create_ok()],
+        }
+
+    def test_create_objective_happy_path(self) -> None:
+        store, fake = _make_project_store(self._create_responses())
+        ref = store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+        )
+        # (e) returns the project id, url, existed=False
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
+
+        # (a) overview: inline-code header + reconcilable markers + prose, NO roadmap table
+        [(_, pvars)] = _queries(fake, "projectCreate(")
+        content = cast("str", _input_payload(pvars)["content"])
+        assert "`perk:metadata-block:objective-header`" in content
+        assert "`perk:objective-reconcilable`" in content
+        assert "Objective prose here." in content
+        assert "roadmap-table" not in content
+        assert "<!--" not in content  # fully transcoded to inline-code sentinels
+
+        # (b) one milestone per phase, enriched names from the body headers
+        mvars = [_input_payload(v) for _, v in _queries(fake, "projectMilestoneCreate(")]
+        assert [m["name"] for m in mvars] == ["Foundations", "Build"]
+        assert all(m["projectId"] == "proj-1" for m in mvars)
+
+        # (c) one issue per node, in node_sort_key order, projectId + milestone, no labelIds
+        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
+        assert [v["title"] for v in ivars] == ["1.1: alpha", "1.2: beta", "2.1: gamma"]
+        assert [v.get("projectMilestoneId") for v in ivars] == ["m-1", "m-1", "m-2"]
+        assert all(v["projectId"] == "proj-1" for v in ivars)
+        assert all("labelIds" not in v for v in ivars)
+        # node block + description embedded in the issue description
+        assert "`perk:metadata-block:objective-node`" in cast("str", ivars[0]["description"])
+        assert "Alpha" in cast("str", ivars[0]["description"])
+
+        # (d) a blocking relation per explicit depends_on edge (dep -> node), none for empty
+        rels = [_input_payload(v) for _, v in _queries(fake, "issueRelationCreate(")]
+        assert {(r["issueId"], r["relatedIssueId"]) for r in rels} == {
+            ("i-1", "i-2"),  # 1.1 blocks 1.2
+            ("i-2", "i-3"),  # 1.2 blocks 2.1
+        }
+        assert all(r["type"] == "blocks" for r in rels)
+
+    def test_create_objective_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_project_store()
+        ref = store.create_objective(
+            title="X", body=_STORE_BODY, run_id="01RUN", roadmap_nodes=_store_nodes(), dry_run=True
+        )
+        assert ref == objective_store.ObjectiveRef(id="0", url="(dry-run)", existed=False)
+        assert fake.requests == []
+
+    def test_create_objective_empty_roadmap_raises(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "projects(first": [{"team": {"projects": _page([])}}],
+                "teams(filter": [_TEAM_RESPONSE],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="roadmap is empty"):
+            store.create_objective(title="X", body="prose", run_id="01RUN", roadmap_nodes=[])
+
+    def test_create_objective_unknown_dependency_raises(self) -> None:
+        bad = [
+            objective.ObjectiveNode(
+                id="1.1",
+                description="A",
+                status=objective.NodeStatus.PENDING,
+                depends_on=("9.9",),
+            )
+        ]
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([])}}],
+                "projectCreate(": [_project_create_ok()],
+                "projectMilestoneCreate(": [_milestone_create("m-1")],
+                "issueCreate(": [_issue_create("ENG-1", "i-1")],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="unknown node"):
+            store.create_objective(title="X", body="prose", run_id="01RUN", roadmap_nodes=bad)
+
+    def test_create_objective_idempotent_short_circuits(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [
+                    {
+                        "team": {
+                            "projects": _page(
+                                [{"id": "proj-9", "url": "p/9", "content": _overview_for("01RUN")}]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        ref = store.create_objective(
+            title="X", body=_STORE_BODY, run_id="01RUN", roadmap_nodes=_store_nodes()
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-9", url="p/9", existed=True)
+        assert not _queries(fake, "projectCreate(")
+
+    def test_find_objective_hit(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [
+                    {
+                        "team": {
+                            "projects": _page(
+                                [{"id": "proj-1", "url": "p/1", "content": _overview_for("01RUN")}]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        assert store.find_objective(run_id="01RUN") == objective_store.ObjectiveRef(
+            id="proj-1", url="p/1", existed=True
+        )
+
+    def test_find_objective_miss_returns_none(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [
+                    {
+                        "team": {
+                            "projects": _page(
+                                [{"id": "proj-1", "url": "p/1", "content": _overview_for("OTHER")}]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        assert store.find_objective(run_id="01RUN") is None
+
+    def test_find_objective_paginates_project_list(self) -> None:
+        page1 = {
+            "team": {
+                "projects": _page(
+                    [{"id": "proj-1", "url": "p/1", "content": None}], has_next=True, cursor="C"
+                )
+            }
+        }
+        page2 = {
+            "team": {
+                "projects": _page(
+                    [{"id": "proj-2", "url": "p/2", "content": _overview_for("01RUN")}]
+                )
+            }
+        }
+        store, fake = _make_project_store(
+            {"teams(filter": [_TEAM_RESPONSE], "projects(first": [page1, page2]}
+        )
+        assert store.find_objective(run_id="01RUN") == objective_store.ObjectiveRef(
+            id="proj-2", url="p/2", existed=True
+        )
+        assert len(_queries(fake, "projects(first")) == 2

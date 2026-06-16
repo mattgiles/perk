@@ -513,6 +513,35 @@ class _LinearProjectOps:
             for node in nodes
         ]
 
+    def list_projects(self) -> list[dict[str, object]]:
+        """All of the team's projects, as ``[{id, url, content}, …]`` (``content`` may be
+        ``None``) — the find-by-run-id scan source for the project-backed objective store. Team-
+        scoped + paginated over ``("team", "projects")``.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** this projects-list query shape is NOT yet
+        live-proven — the 1.4 spike covered create/overview/milestone/attach/relation, not
+        list-projects. Covered offline here; verify live before relying on it.
+        """
+        query = (
+            "query($teamId: String!, $cursor: String) { team(id: $teamId) "
+            f"{{ projects(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id url content } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(
+            query, {"teamId": self._client.team_id(self._team_key)}, "team", "projects"
+        )
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            content = node.get("content")
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "project id"),
+                    "url": _require_str(node.get("url"), "project url"),
+                    "content": content if isinstance(content, str) else None,
+                }
+            )
+        return result
+
     def create_project_milestone(self, *, project_id: str, name: str) -> str:
         """Create a milestone (phase) on a project; returns the milestone id."""
         mutation = (
@@ -1152,6 +1181,157 @@ class LinearObjectiveStore:
             return objective_store.ObjectiveBodyUpdate(
                 objective_id=objective_id, comment_id=comment_key, updated=True, dry_run=False
             )
+
+
+# ===========================================================================
+# The project-backed objective-storage tier (Objective #548, Node 3.2):
+# `LinearProjectObjectiveStore`. A Linear **Project** is the objective (overview content =
+# header + Reconcilable prose, no roadmap table); the roadmap is materialized as node-**issues**
+# attached to the project (each carrying an `objective-node` block), phases as project milestones,
+# and explicit `depends_on` edges as blocking relations. The roadmap is derived live from the
+# node-issues — it is NOT stored in the overview.
+#
+# This node implements ONLY `find_objective` + `create_objective`; `get_objective`/`update_*` are
+# deferred to Node 3.3, so the class is intentionally NOT annotated as an `ObjectiveStore` yet and
+# is NOT resolver-wired (dormant — no production caller). One shared `client` gives both owned op
+# classes a single shared `_team_id_cache`/`_uuid_cache` (the single-shared-cache property, now via
+# the client). Every method body wraps in `_translate_objective()` (IssueBackendError →
+# ObjectiveStoreError, verbatim).
+# ===========================================================================
+
+
+class LinearProjectObjectiveStore:
+    """A project-backed ``ObjectiveStore`` over Linear Projects (Node 3.2 — ``find`` + ``create``
+    only; reads/updates deferred to Node 3.3). Dormant: not resolver-wired."""
+
+    backend_id = "linear"
+
+    def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
+        self._client = client
+        self._issue_ops = _LinearIssueOps(client, team_key=team_key, repo_root=repo_root)
+        self._projects = _LinearProjectOps(client, team_key=team_key, repo_root=repo_root)
+
+    def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
+        """Find the project whose overview ``objective-header`` block carries ``run_id``. Scans
+        the team's projects (dual-encoding-tolerant header parse); ``None`` after the full scan.
+        Infra failures propagate (mapped to ``ObjectiveStoreError``), never masked as ``None``."""
+        with _translate_objective():
+            for proj in self._projects.list_projects():
+                content = proj.get("content")
+                header = plan.find_metadata_block(
+                    content if isinstance(content, str) else "", objective.OBJECTIVE_HEADER_KEY
+                )
+                if header is not None and header.get("run_id") == run_id:
+                    return objective_store.ObjectiveRef(
+                        id=_require_str(proj.get("id"), "project id"),
+                        url=_require_str(proj.get("url"), "project url"),
+                        existed=True,
+                    )
+            return None
+
+    def create_objective(
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str,
+        status: str = "active",
+        roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef:
+        """Create the project-backed objective: a project (overview = header + Reconcilable prose),
+        one milestone per phase, one node-issue per roadmap node (in ``node_sort_key`` order),
+        and a blocking relation per EXPLICIT ``depends_on`` edge. Idempotent on ``run_id``."""
+        if dry_run:
+            return objective_store.ObjectiveRef(id="0", url="(dry-run)", existed=False)
+        with _translate_objective():
+            existing = self.find_objective(run_id=run_id)
+            if existing is not None:
+                return existing
+
+            if roadmap_nodes is None:
+                nodes, errors = objective.parse_roadmap_nodes(body)
+                if errors:
+                    raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
+            else:
+                nodes = list(roadmap_nodes)
+
+            # Storage backstop: no surface may store a node-less objective (mirrors the
+            # issue-backed store's message). After dedup + dry-run, before any backend write.
+            if not nodes:
+                raise IssueBackendError(
+                    "objective roadmap is empty: an objective needs at least one node"
+                )
+
+            # --- compose the overview: header block + Reconcilable(prose); NO roadmap table ---
+            header = objective.ObjectiveHeader(
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+            )
+            header_block = plan.render_metadata_block(
+                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+            )
+            reconcilable = (
+                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
+                f"{body.strip()}\n"
+                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
+            )
+            # Transcode the whole overview so the HTML Reconcilable markers become inline-code
+            # sentinels (the 4.1 reconcile splice is dual-encoding and finds them either way).
+            overview = to_linear_markdown(f"{header_block}\n\n{reconcilable}\n")
+            created = self._projects.create_project(name=title, content=overview)
+            project_id = created["id"]
+            assert isinstance(project_id, str)
+            url = created["url"]
+            assert isinstance(url, str)
+
+            # --- one milestone per phase (enriched names), in grouped order ---
+            grouped = objective.group_nodes_by_phase(nodes)
+            names = objective.enrich_phase_names(body, [key for key, _ in grouped])
+            phase_milestone: dict[tuple[int, str], str] = {}
+            for key, _phase_nodes in grouped:
+                phase_milestone[key] = self._projects.create_project_milestone(
+                    project_id=project_id, name=names[key]
+                )
+
+            # --- one node-issue per node (node-block + description), in node_sort_key order ---
+            node_uuid: dict[str, str] = {}
+            for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
+                description = to_linear_markdown(
+                    plan.render_metadata_block(
+                        objective.OBJECTIVE_NODE_KEY,
+                        objective.render_node_block(node),
+                        style="inline-code",
+                    )
+                    + "\n\n"
+                    + node.description
+                )
+                ref = self._issue_ops._create_issue(
+                    title=objective.node_issue_title(node),
+                    description=description,
+                    label_id=None,
+                    project_id=project_id,
+                    milestone_id=phase_milestone[objective.derive_phase(node.id)],
+                )
+                # Cache hit: `_create_issue` seeded the cache, so this is no extra query.
+                node_uuid[node.id] = self._client.uuid_for(ref.id)
+
+            # --- blocking relations for EXPLICIT depends_on only (dep BLOCKS node) ---
+            for node in nodes:
+                if not node.depends_on:
+                    continue
+                for dep in node.depends_on:
+                    if dep not in node_uuid:
+                        raise IssueBackendError(
+                            f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
+                        )
+                    self._projects.create_issue_relation(
+                        issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
+                    )
+
+            return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
 
 
 # ===========================================================================
