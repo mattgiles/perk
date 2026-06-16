@@ -37,19 +37,33 @@ def test_version_lockstep():
     assert _package_json()["version"] == __version__
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
-def test_wheel_bundles_shared(tmp_path):
+@pytest.fixture(scope="session")
+def built_wheel(tmp_path_factory):
+    """Build the wheel exactly once per session and share it across the wheel-bundle tests.
+
+    The two `test_wheel_bundles_*` tests share an `@pytest.mark.xdist_group("wheel_build")`,
+    so under `-n auto --dist loadgroup` they land on a single worker and reuse this one build
+    instead of each running their own `uv build --wheel`.
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv not on PATH")
+    out_dir = tmp_path_factory.mktemp("wheel_build")
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
+        ["uv", "build", "--wheel", "--out-dir", str(out_dir)],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
         text=True,
         timeout=180,
     )
-    wheels = list(tmp_path.glob("*.whl"))
+    wheels = list(out_dir.glob("*.whl"))
     assert len(wheels) == 1, wheels
-    with zipfile.ZipFile(wheels[0]) as zf:
+    return wheels[0]
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_wheel_bundles_shared(built_wheel):
+    with zipfile.ZipFile(built_wheel) as zf:
         names = set(zf.namelist())
     expected = {
         "perk/_shared/README.md",
@@ -62,21 +76,11 @@ def test_wheel_bundles_shared(tmp_path):
     assert expected <= names, expected - names
 
 
-@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
-def test_wheel_bundles_agents(tmp_path):
+@pytest.mark.xdist_group("wheel_build")
+def test_wheel_bundles_agents(built_wheel):
     # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
     # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs.
-    subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(tmp_path)],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    wheels = list(tmp_path.glob("*.whl"))
-    assert len(wheels) == 1, wheels
-    with zipfile.ZipFile(wheels[0]) as zf:
+    with zipfile.ZipFile(built_wheel) as zf:
         names = set(zf.namelist())
     expected = {
         "perk/_agents/pr-reviewer.md",
