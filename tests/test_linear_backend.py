@@ -1249,6 +1249,45 @@ class TestUpdateObjectiveNode:
         assert not _queries(fake, "commentUpdate(")
 
 
+class TestAddObjectiveNode:
+    def test_authoritative_write_plus_comment_rerender(self) -> None:
+        description = _inline_objective_description("01N", comment_id="cmt-uuid-1")
+        comment_body = to_linear_markdown(
+            objective.render_body_comment(_objective_nodes(), prose="Prose.")
+        )
+        store, fake = _make_store(
+            {
+                "issue(id": [_objective_issue_response(description)],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "comment(id": [{"comment": {"body": comment_body}}],
+                "commentUpdate(": [{"commentUpdate": {"success": True}}],
+            }
+        )
+        added = store.add_objective_node(objective_id="obj-1", phase=1, description="Gamma")
+        assert added == objective_store.ObjectiveNodeAdd(
+            objective_id="obj-1", node_id="1.3", comment_updated=True, dry_run=False
+        )
+        # the authoritative roadmap write inserts the new node (form-preserving inline-code)
+        [(_, body_vars)] = _queries(fake, "issueUpdate(")
+        new_description = _input_payload(body_vars)["description"]
+        assert isinstance(new_description, str) and "<!--" not in new_description
+        nodes, errors = objective.parse_roadmap_nodes(new_description)
+        assert errors == []
+        assert [n.id for n in nodes] == ["1.1", "1.2", "1.3"]
+        assert next(n for n in nodes if n.id == "1.3").description == "Gamma"
+
+    def test_dry_run_shape(self) -> None:
+        description = _inline_objective_description("01N")
+        store, fake = _make_store({"issue(id": [_objective_issue_response(description)]})
+        added = store.add_objective_node(
+            objective_id="obj-1", phase=1, description="Gamma", dry_run=True
+        )
+        assert added == objective_store.ObjectiveNodeAdd(
+            objective_id="obj-1", node_id="1.3", comment_updated=False, dry_run=True
+        )
+        assert not _queries(fake, "issueUpdate(")
+
+
 class TestUpdateObjectiveBody:
     def test_missing_comment_id_raises(self) -> None:
         description = _inline_objective_description("01B", comment_id=None)
@@ -2717,6 +2756,86 @@ class TestLinearProjectObjectiveStore:
         )
         assert result.dry_run is True
         assert not _queries(fake, "issueUpdate(")
+
+    # ----------------------------------------------------------------- add_objective_node
+
+    def test_add_objective_node_materializes_node_issue(self) -> None:
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING, slug="alpha"
+        )
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
+                        }
+                    }
+                ],
+                "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
+                "inverseRelations(": [_blocked_by()],
+                "projectMilestoneCreate(": [_milestone_create("m-2")],
+                "issueCreate(": [_issue_create("ENG-22", "i-22")],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "u",
+                            "name": "O",
+                            "content": _STORE_BODY,
+                        }
+                    },
+                    {"project": {"content": _STORE_BODY}},
+                ],
+            }
+        )
+        added = store.add_objective_node(objective_id="proj-1", phase=2, description="Beta work")
+        assert added == objective_store.ObjectiveNodeAdd(
+            objective_id="proj-1", node_id="2.1", comment_updated=False, dry_run=False
+        )
+        # the phase-2 milestone is minted by its enriched name (`### Phase 2: Build`)
+        [(_, mvars)] = _queries(fake, "projectMilestoneCreate(")
+        assert _input_payload(mvars)["name"] == "Build"
+        # the new node-issue carries the objective-node block + prose, attached to the milestone
+        [(_, ivars)] = _queries(fake, "issueCreate(")
+        payload = _input_payload(ivars)
+        assert payload["projectId"] == "proj-1"
+        assert payload["projectMilestoneId"] == "m-2"
+        description = cast("str", payload["description"])
+        assert "`perk:metadata-block:objective-node`" in description
+        assert "Beta work" in description
+        assert "<!--" not in description  # inline-code form
+        # no depends_on -> no blocking relations
+        assert not _queries(fake, "issueRelationCreate(")
+
+    def test_add_objective_node_dry_run_writes_nothing(self) -> None:
+        n11 = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        store, fake = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page([_node_issue(n11, uuid="i-11", identifier="ENG-11")])
+                        }
+                    }
+                ],
+                "inverseRelations(": [_blocked_by()],
+                "project(id": [
+                    {"project": {"id": "proj-1", "url": "u", "name": "O", "content": _STORE_BODY}}
+                ],
+            }
+        )
+        added = store.add_objective_node(
+            objective_id="proj-1", phase=1, description="Beta work", dry_run=True
+        )
+        assert added == objective_store.ObjectiveNodeAdd(
+            objective_id="proj-1", node_id="1.2", comment_updated=False, dry_run=True
+        )
+        assert not _queries(fake, "issueCreate(")
+        assert not _queries(fake, "projectMilestoneCreate(")
 
     # ----------------------------------------------------------------- update_objective_body
 

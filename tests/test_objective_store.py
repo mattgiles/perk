@@ -106,6 +106,39 @@ class _FakeObjectiveStore:
             objective_id=objective_id, comment_id=None, updated=not dry_run, dry_run=dry_run
         )
 
+    def add_objective_node(
+        self,
+        *,
+        objective_id: str,
+        phase: int,
+        description: str,
+        status: objective.NodeStatus = objective.NodeStatus.PENDING,
+        slug: str | None = None,
+        depends_on: tuple[str, ...] | None = None,
+        comment: str | None = None,
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveNodeAdd:
+        obj = self._objectives.get(objective_id)
+        if obj is None:
+            raise objective_store.ObjectiveStoreError(f"objective {objective_id!r} not found")
+        result = objective.add_node(
+            list(obj.nodes),
+            phase=phase,
+            description=description,
+            status=status,
+            slug=slug,
+            depends_on=depends_on,
+            comment=comment,
+        )
+        if result is None:
+            raise objective_store.ObjectiveStoreError("id collision")
+        updated, new_id = result
+        if not dry_run:
+            self._objectives[objective_id] = dataclasses.replace(obj, nodes=tuple(updated))
+        return objective_store.ObjectiveNodeAdd(
+            objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=dry_run
+        )
+
     def save_node_plan(
         self,
         *,
@@ -176,6 +209,28 @@ class TestFakeStoreConformance:
         assert isinstance(update.objective_id, str)
         assert update.objective_id == ref.id
 
+    def test_add_objective_node_assigns_next_id(self) -> None:
+        store = _make_store()
+        ref = store.create_objective(title="t", body="b", run_id="RUN3", roadmap_nodes=[_node()])
+        added = store.add_objective_node(objective_id=ref.id, phase=1, description="Delta")
+        assert added.node_id == "1.2"
+        assert added.dry_run is False
+        state = store.get_objective(objective_id=ref.id)
+        assert state is not None
+        assert [n.id for n in state.nodes] == ["1.1", "1.2"]
+
+    def test_add_objective_node_dry_run_does_not_persist(self) -> None:
+        store = _make_store()
+        ref = store.create_objective(title="t", body="b", run_id="RUN4", roadmap_nodes=[_node()])
+        added = store.add_objective_node(
+            objective_id=ref.id, phase=1, description="Delta", dry_run=True
+        )
+        assert added.node_id == "1.2"
+        assert added.dry_run is True
+        state = store.get_objective(objective_id=ref.id)
+        assert state is not None
+        assert [n.id for n in state.nodes] == ["1.1"]
+
 
 class TestValueTypes:
     def test_objective_ref_is_frozen_with_string_id(self) -> None:
@@ -191,6 +246,15 @@ class TestValueTypes:
         assert update.objective_id == "9"
         with pytest.raises(dataclasses.FrozenInstanceError):
             update.comment_updated = False  # ty: ignore[invalid-assignment]
+
+    def test_objective_node_add_exposes_fields(self) -> None:
+        added = objective_store.ObjectiveNodeAdd(
+            objective_id="9", node_id="2.3", comment_updated=True, dry_run=False
+        )
+        assert added.objective_id == "9"
+        assert added.node_id == "2.3"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            added.node_id = "2.4"  # ty: ignore[invalid-assignment]
 
     def test_objective_body_update_exposes_objective_id(self) -> None:
         update = objective_store.ObjectiveBodyUpdate(

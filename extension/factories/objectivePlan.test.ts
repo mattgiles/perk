@@ -10,7 +10,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
+  buildAddObjectiveNodeArgs,
   buildObjectiveNodeArgs,
+  decodeAddObjectiveNodeParams,
   factoryGuidance,
   objectiveReadInstruction,
   reconcileGuidance,
@@ -61,6 +63,13 @@ test("factoryGuidance + reconcileGuidance: linear arm injects the read clause; g
     assert.ok(!planGithub.includes(needle), `factoryGuidance(github) leaked: ${needle}`);
     assert.ok(!reconcileGithub.includes(needle), `reconcileGuidance(github) leaked: ${needle}`);
   }
+});
+
+test("reconcileGuidance names both reconcile_objective and add_objective_node", () => {
+  const text = reconcileGuidance("7");
+  assert.ok(text.includes("reconcile_objective"), "still names reconcile_objective");
+  assert.ok(text.includes("add_objective_node"), "now names add_objective_node");
+  assert.ok(text.includes("SPARINGLY"), "frames node insertion as sparing");
 });
 
 test("factoryGuidance injects the configured objective-explorer model when set", () => {
@@ -264,6 +273,98 @@ test("tool: a failing worker fails loud-but-soft (no throw)", async () => {
   try {
     const result = await h.invokeTool("objective_node", { objective: 7, node: "1.2", pr: "#9" });
     assert.equal((result.details as { ok: boolean }).ok, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: add_objective_node delegates the node-add argv (with optionals)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("add_objective_node", {
+      objective: 7,
+      phase: 2,
+      description: "Newly emerged work",
+      depends_on: ["1.1", "2.1"],
+    });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    assert.deepEqual(readArgv(argvFile), [
+      "objective",
+      "node-add",
+      "7",
+      "--phase",
+      "2",
+      "--description",
+      "Newly emerged work",
+      "--depends-on",
+      "1.1",
+      "--depends-on",
+      "2.1",
+      "--json",
+    ]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: add_objective_node — a failing worker fails loud-but-soft (no throw)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("add_objective_node", {
+      objective: 7,
+      phase: 2,
+      description: "x",
+    });
+    assert.equal((result.details as { ok: boolean }).ok, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: add_objective_node — a success:false envelope surfaces the structured error", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const envelope = JSON.stringify({
+    success: false,
+    error_type: "invalid_input",
+    message: "could not add node to phase 9 on #7 (id collision)",
+  });
+  const bin = fakePerk(cwd, { stdout: envelope, code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("add_objective_node", {
+      objective: 7,
+      phase: 9,
+      description: "x",
+    });
+    const details = result.details as { ok: boolean; error_type?: string; error?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "invalid_input");
+    assert.equal(details.error, "could not add node to phase 9 on #7 (id collision)");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: add_objective_node with a non-integer phase → bad_input, no exec", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: OK_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("add_objective_node", {
+      objective: 7,
+      phase: 1.5,
+      description: "x",
+    });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.throws(() => readFileSync(argvFile, "utf8"));
   } finally {
     h.dispose();
   }
@@ -532,5 +633,102 @@ test("buildObjectiveNodeArgs: description alone is valid (P2.T11)", () => {
       "d",
       "--json",
     ],
+  );
+});
+
+test("buildAddObjectiveNodeArgs: required-only shape", () => {
+  assert.deepEqual(
+    buildAddObjectiveNodeArgs({ objective: "7", phase: 2, description: "New work" }),
+    ["objective", "node-add", "7", "--phase", "2", "--description", "New work", "--json"],
+  );
+});
+
+test("buildAddObjectiveNodeArgs: all optionals, one --depends-on per dep, --phase stringified", () => {
+  assert.deepEqual(
+    buildAddObjectiveNodeArgs({
+      objective: "7",
+      phase: 3,
+      description: "New work",
+      status: "planning",
+      slug: "new-work",
+      depends_on: ["1.1", "2.1"],
+      comment: "emerged during reconcile",
+    }),
+    [
+      "objective",
+      "node-add",
+      "7",
+      "--phase",
+      "3",
+      "--description",
+      "New work",
+      "--status",
+      "planning",
+      "--slug",
+      "new-work",
+      "--depends-on",
+      "1.1",
+      "--depends-on",
+      "2.1",
+      "--comment",
+      "emerged during reconcile",
+      "--json",
+    ],
+  );
+});
+
+test("decodeAddObjectiveNodeParams: happy decode (bare-number objective coerces)", () => {
+  assert.deepEqual(
+    decodeAddObjectiveNodeParams({ objective: 7, phase: 2, description: "New work" }),
+    {
+      objective: "7",
+      phase: 2,
+      description: "New work",
+      status: undefined,
+      slug: undefined,
+      depends_on: undefined,
+      comment: undefined,
+    },
+  );
+});
+
+test("decodeAddObjectiveNodeParams: strict-fail cases", () => {
+  // absent phase
+  assert.equal(decodeAddObjectiveNodeParams({ objective: "7", description: "x" }), null);
+  // non-integer phase
+  assert.equal(
+    decodeAddObjectiveNodeParams({ objective: "7", phase: 1.5, description: "x" }),
+    null,
+  );
+  // zero / negative phase
+  assert.equal(decodeAddObjectiveNodeParams({ objective: "7", phase: 0, description: "x" }), null);
+  // missing description
+  assert.equal(decodeAddObjectiveNodeParams({ objective: "7", phase: 2 }), null);
+  // empty description
+  assert.equal(decodeAddObjectiveNodeParams({ objective: "7", phase: 2, description: "" }), null);
+  // unknown status
+  assert.equal(
+    decodeAddObjectiveNodeParams({ objective: "7", phase: 2, description: "x", status: "nope" }),
+    null,
+  );
+  // non-string depends_on item
+  assert.equal(
+    decodeAddObjectiveNodeParams({
+      objective: "7",
+      phase: 2,
+      description: "x",
+      depends_on: ["1.1", 2],
+    }),
+    null,
+  );
+  // empty-string depends_on item
+  assert.equal(
+    decodeAddObjectiveNodeParams({
+      objective: "7",
+      phase: 2,
+      description: "x",
+      depends_on: [""],
+    }),
+    null,
   );
 });

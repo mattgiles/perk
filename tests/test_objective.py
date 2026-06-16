@@ -124,6 +124,47 @@ def test_add_node_assigns_next_id_in_phase():
     assert next(n for n in updated if n.id == "1.3").slug == "delta"
 
 
+def test_add_node_new_phase_appends_at_end():
+    # A phase with no existing nodes appends at the end (supports a brand-new trailing phase).
+    result = o.add_node(_nodes(), phase=3, description="Omega")
+    assert result is not None
+    updated, new_id = result
+    assert new_id == "3.1"
+    assert [n.id for n in updated] == ["1.1", "1.2", "2.1", "3.1"]
+
+
+def test_add_node_optional_fields_round_trip_through_render_parse():
+    result = o.add_node(
+        _nodes(),
+        phase=2,
+        description="Delta work",
+        depends_on=("1.1", "2.1"),
+        slug="delta-work",
+        comment="emerged during reconcile",
+    )
+    assert result is not None
+    updated, new_id = result
+    assert new_id == "2.2"
+    parsed, errors = o.parse_roadmap_nodes(_block(updated))
+    assert errors == []
+    node = next(n for n in parsed if n.id == "2.2")
+    assert node.depends_on == ("1.1", "2.1")
+    assert node.slug == "delta-work"
+    assert node.comment == "emerged during reconcile"
+
+
+def test_add_node_non_numeric_suffix_ignored_for_max():
+    # Non-numeric suffixes in the phase don't bump the max (the new id is the next integer).
+    nodes = [
+        o.ObjectiveNode(id="1.1", description="Alpha", status=N.DONE),
+        o.ObjectiveNode(id="1.x", description="NonNumeric", status=N.PENDING),
+    ]
+    result = o.add_node(nodes, phase=1, description="Delta")
+    assert result is not None
+    _updated, new_id = result
+    assert new_id == "1.2"
+
+
 def test_build_graph_sequential_inference():
     nodes = _nodes()  # no explicit depends_on
     graph = o.build_graph(nodes)

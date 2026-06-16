@@ -1255,6 +1255,69 @@ def test_update_objective_node_dry_run_does_not_patch(monkeypatch):
     assert result.dry_run is True and rec.method_calls("PATCH") == 0
 
 
+def test_add_objective_node_inserts_and_rerenders(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING),
+        objective.ObjectiveNode(id="1.2", description="B", status=objective.NodeStatus.PENDING),
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    comment_body = objective.render_body_comment(nodes, prose="prose here")
+    rec = _GhDispatch(
+        [
+            (_has("issues/comments/555", ".body"), _Proc(0, comment_body)),
+            (_has("issues/comments/555", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", "PATCH"), _Proc(0, "{}")),
+            (_has("issues/123", ".body"), _Proc(0, issue_body)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.add_objective_node(number=123, phase=1, description="Gamma", repo_root=ROOT)
+    assert result.node_id == "1.3"
+    assert result.comment_updated is True and result.dry_run is False
+    body_patch = rec.body_files[0]
+    parsed, _ = objective.parse_roadmap_nodes(body_patch)
+    assert [n.id for n in parsed] == ["1.1", "1.2", "1.3"]
+    assert next(n for n in parsed if n.id == "1.3").description == "Gamma"
+
+
+def test_add_objective_node_dry_run_does_not_patch(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    rec = _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    result = github.add_objective_node(
+        number=123, phase=1, description="Gamma", repo_root=ROOT, dry_run=True
+    )
+    assert result.node_id == "1.2"
+    assert result.dry_run is True and rec.method_calls("PATCH") == 0
+
+
+def test_add_objective_node_collision_raises(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    issue_body = _obj_body("01RID", nodes, comment_id=555)
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123", ".body"), _Proc(0, issue_body))])
+    )
+    # Force the defensive id-collision branch.
+    monkeypatch.setattr(objective, "add_node", lambda *a, **k: None)
+    with pytest.raises(github.GitHubError, match="collision"):
+        github.add_objective_node(number=123, phase=1, description="Gamma", repo_root=ROOT)
+
+
+def test_add_objective_node_bad_roadmap_raises(monkeypatch):
+    # A body whose roadmap block is present but fails to parse.
+    broken = "<!-- perk:metadata-block:objective-roadmap -->\n```yaml\nnodes: [oops\n```\n"
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("issues/123", ".body"), _Proc(0, broken))])
+    )
+    with pytest.raises(github.GitHubError, match="invalid objective roadmap"):
+        github.add_objective_node(number=123, phase=1, description="Gamma", repo_root=ROOT)
+
+
 def test_update_objective_body_splices_reconcilable_region(monkeypatch):
     nodes = [objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE)]
     issue_body = _obj_body("01RID", nodes, comment_id=777)

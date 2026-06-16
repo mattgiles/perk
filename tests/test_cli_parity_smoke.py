@@ -118,6 +118,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("create", ("new",)),
             ("next", ("n",)),
             ("node", ()),
+            ("node-add", ()),
             ("plan", ()),
             ("reconcile", ("rec",)),
             ("run", ("r",)),
