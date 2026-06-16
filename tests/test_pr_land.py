@@ -378,6 +378,7 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
 
     calls: dict[str, object] = {}
     marked: list[str] = []
+    posts: list[dict] = []
 
     class _Store:
         backend_id = "linear"
@@ -404,6 +405,10 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
             calls["closed"] = objective_id
             return True
 
+        def post_status_update(self, *, objective_id, body, dry_run=False):
+            posts.append({"objective_id": objective_id, "body": body})
+            return True
+
     monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
     # If the close reached the issue tier, this would fire — it must NOT.
     monkeypatch.setattr(
@@ -414,6 +419,49 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
     )
     assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None, closed=True)
     assert calls["closed"] == "proj-1"
+    # Node 4.3: a "plan landed" Project Update is posted once on completion (complete branch).
+    assert len(posts) == 1
+    assert posts[0]["objective_id"] == "proj-1"
+    assert posts[0]["body"] == (
+        "**Plan landed** — node(s) 1.1 (PR #ENG-7) marked done.\n\nObjective complete."
+    )
+
+
+def test_reconcile_on_land_posts_update_incomplete_and_fail_open(monkeypatch, capsys):
+    # The incomplete branch posts a "plan landed" update (no "Objective complete."), and a post
+    # failure is fail-open: the land result is byte-unchanged and a non-fatal line hits stderr.
+    from perk.backends import objective_store, objective_stores
+
+    class _Store:
+        backend_id = "linear"
+
+        def get_objective(self, *, objective_id):
+            return objective_store.ObjectiveState(
+                id=objective_id,
+                url="u",
+                title="O",
+                header={},
+                nodes=(_node("1.1", pr="#ENG-7"), _node("1.2", pr="#ENG-9")),
+            )
+
+        def update_objective_node(self, **k):
+            return objective_store.ObjectiveNodeUpdate(
+                objective_id=str(k["objective_id"]),
+                node_id=k["node_id"],
+                comment_updated=False,
+                dry_run=False,
+            )
+
+        def post_status_update(self, *, objective_id, body, dry_run=False):
+            raise objective_store.ObjectiveStoreError("linear update boom")
+
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    out = _reconcile_objective_on_land(
+        plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
+    )
+    # 1.2 stays non-terminal → incomplete → no close; the post failure never changes the result.
+    assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None)
+    assert "project update skipped (non-fatal)" in capsys.readouterr().err
 
 
 def test_reconcile_on_land_is_fail_open(monkeypatch):

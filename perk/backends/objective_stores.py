@@ -196,6 +196,10 @@ class GitHubObjectiveStore:
         with _translate():
             return github.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
 
+    def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
+        """GitHub has no Project Updates surface — always ``False`` (no-op; Node 4.3)."""
+        return False
+
 
 def resolve_objective_store_id(repo_root: Path) -> str:
     """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.

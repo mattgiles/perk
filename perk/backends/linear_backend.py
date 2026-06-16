@@ -635,6 +635,64 @@ class _LinearProjectOps:
         )
         return _require_str(milestone.get("id"), "milestone id")
 
+    def ensure_phase_milestone(
+        self, *, project_id: str, name: str, known: dict[str, str] | None = None
+    ) -> str:
+        """Name-keyed lookup-or-create for a phase milestone; returns its id (Node 4.3).
+
+        **Name is the deterministic key** — milestone order is NOT insertion order (the 1.4
+        smoke-gate finding), so a phase is matched by its enriched ``### Phase N: …`` name, never
+        list position. When ``known`` (a prefetched ``{name: id}`` map) is supplied it is used as
+        the lookup table (and updated in place with any freshly-created id), amortizing the
+        :meth:`project_milestones` read across a batch; when ``known`` is ``None`` the project's
+        milestones are listed once to build the table. The existing id for ``name`` is reused; a
+        miss creates a new milestone via :meth:`create_project_milestone`.
+
+        This is the **\"kept in sync on node add\"** seam: ``create_objective`` routes its
+        create-time milestone loop through it (with a seeded-empty ``known`` so its network calls
+        stay byte-identical to the blind-create predecessor), and a future ``add_node``-to-an-
+        existing-objective reuses the same primitive with ``known=None`` to reuse a phase's
+        milestone or mint one for a brand-new phase. The phase-header-text-drift duplicate-milestone
+        edge is Node 4.4's repair concern.
+        """
+        table: dict[str, str] = (
+            {
+                _require_str(m["name"], "milestone name"): _require_str(m["id"], "milestone id")
+                for m in self.project_milestones(project_id)
+            }
+            if known is None
+            else known
+        )
+        existing = table.get(name)
+        if existing is not None:
+            return existing
+        created = self.create_project_milestone(project_id=project_id, name=name)
+        table[name] = created
+        return created
+
+    def create_project_update(self, *, project_id: str, body: str) -> str:
+        """Post a Project **Update** (the status-report feed) and return its id (Node 4.3).
+
+        ``input = {projectId, body}`` only — the optional ``health`` field is deliberately omitted
+        (D3). Raises ``IssueBackendError`` on ``success != True``.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** ``projectUpdateCreate`` is NOT yet live-proven
+        \u2014 the 1.4 spike covered create/overview/milestone/attach/relation, not project updates.
+        Covered offline here; verify live before relying on it (mirrors ``set_project_state`` /
+        ``list_projects``).
+        """
+        mutation = (
+            "mutation($input: ProjectUpdateCreateInput!) "
+            "{ projectUpdateCreate(input: $input) { success projectUpdate { id } } }"
+        )
+        variables: dict[str, object] = {"input": {"projectId": project_id, "body": body}}
+        data = self._client.request(mutation, variables)
+        payload = _require_dict(data.get("projectUpdateCreate"), "projectUpdateCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear project update on {project_id!r}")
+        update = _require_dict(payload.get("projectUpdate"), "projectUpdateCreate.projectUpdate")
+        return _require_str(update.get("id"), "project update id")
+
     def attach_issue_to_project(self, *, issue_id: str, project_id: str) -> None:
         """Attach an existing issue to a project. Inlines the ``issueUpdate`` mutation (resolve
         the issue id via ``self._client.uuid_for``, send ``issueUpdate(id:$id, input:{projectId})``,
@@ -1289,6 +1347,11 @@ class LinearObjectiveStore:
             )
         return True
 
+    def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
+        """The issue-backed store has no project status-update surface \u2014 always ``False``
+        (no-op; Node 4.3)."""
+        return False
+
 
 # ===========================================================================
 # The project-backed objective-storage tier (Objective #548, Node 3.2):
@@ -1402,12 +1465,19 @@ class LinearProjectObjectiveStore:
             assert isinstance(url, str)
 
             # --- one milestone per phase (enriched names), in grouped order ---
+            # Routed through the name-keyed `ensure_phase_milestone` seam (Node 4.3). The project
+            # is brand-new, so `known` is seeded EMPTY: every phase name is a guaranteed miss and
+            # creates a milestone, keeping this path's network calls byte-identical to the prior
+            # blind-create loop (no extra `project_milestones` read; same `create_project_milestone`
+            # sequence). The seam's reusable value is its `known is None` branch for a future
+            # `add_node`-to-an-existing-objective path.
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(body, [key for key, _ in grouped])
+            known_milestones: dict[str, str] = {}
             phase_milestone: dict[tuple[int, str], str] = {}
             for key, _phase_nodes in grouped:
-                phase_milestone[key] = self._projects.create_project_milestone(
-                    project_id=project_id, name=names[key]
+                phase_milestone[key] = self._projects.ensure_phase_milestone(
+                    project_id=project_id, name=names[key], known=known_milestones
                 )
 
             # --- one node-issue per node (node-block + description), in node_sort_key order ---
@@ -1772,6 +1842,19 @@ class LinearProjectObjectiveStore:
             return False
         with _translate_objective():
             self._projects.set_project_state(objective_id, "completed")
+        return True
+
+    def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
+        """Post a Project **Update** to the Linear Project (the status-report feed; Node 4.3).
+
+        ``dry_run`` returns ``False`` without a write; else posts ``projectUpdateCreate`` and
+        returns ``True``. Call sites wrap this fail-open (the update is bookkeeping, never
+        load-bearing). Flagged not-live-proven \u2014 verify at the Node 5.1 smoke gate.
+        """
+        if dry_run:
+            return False
+        with _translate_objective():
+            self._projects.create_project_update(project_id=objective_id, body=body)
         return True
 
 

@@ -1353,6 +1353,14 @@ class TestIssueBackedStoreNode34Methods:
         assert store.close_objective(objective_id="obj-1", dry_run=True) is False
         assert fake.requests == []
 
+    def test_post_status_update_is_noop_false(self) -> None:
+        # The issue-backed store has no project status-update surface (Node 4.3) — always False,
+        # never raises, no request.
+        store, fake = _make_store()
+        assert store.post_status_update(objective_id="obj-1", body="x") is False
+        assert store.post_status_update(objective_id="obj-1", body="x", dry_run=True) is False
+        assert fake.requests == []
+
 
 class TestUuidResolution:
     """The D3 mutation-path identifier→UUID resolution (`_uuid_for`): cached, read-seeded."""
@@ -1896,6 +1904,81 @@ class TestLinearProjectOps:
         payload = _input_payload(variables)
         assert payload == {"projectId": "p-1", "name": "Phase 1"}
 
+    # --- ensure_phase_milestone: name-keyed lookup-or-create (Node 4.3) ---
+
+    def test_ensure_phase_milestone_known_hit_reuses_id_no_network(self) -> None:
+        ops, fake = _make_project_ops()
+        known = {"Phase 1": "m-1"}
+        assert ops.ensure_phase_milestone(project_id="p-1", name="Phase 1", known=known) == "m-1"
+        # A `known` hit lists nothing and creates nothing.
+        assert fake.requests == []
+
+    def test_ensure_phase_milestone_known_miss_creates_and_updates_map(self) -> None:
+        ops, fake = _make_project_ops({"projectMilestoneCreate(": [_milestone_create("m-new")]})
+        known: dict[str, str] = {"Phase 1": "m-1"}
+        assert ops.ensure_phase_milestone(project_id="p-1", name="Phase 2", known=known) == "m-new"
+        # The new id is written back into the caller's map (amortizes a batch).
+        assert known == {"Phase 1": "m-1", "Phase 2": "m-new"}
+        assert not _queries(fake, "projectMilestones(")  # `known` supplied → no list read
+
+    def test_ensure_phase_milestone_matches_by_name_not_list_position(self) -> None:
+        # Milestone order is NOT insertion order: a `known` map built from a list whose order
+        # differs from the phase order still resolves by NAME.
+        page = {
+            "project": {
+                "projectMilestones": _page(
+                    [{"id": "m-2", "name": "Phase 2"}, {"id": "m-1", "name": "Phase 1"}]
+                )
+            }
+        }
+        ops, fake = _make_project_ops({"projectMilestones(": [page]})
+        assert ops.ensure_phase_milestone(project_id="p-1", name="Phase 1") == "m-1"
+        # `known=None` → lists once.
+        assert len(_queries(fake, "projectMilestones(")) == 1
+
+    def test_ensure_phase_milestone_known_none_lists_once_then_creates_on_miss(self) -> None:
+        page = {"project": {"projectMilestones": _page([{"id": "m-1", "name": "Phase 1"}])}}
+        ops, fake = _make_project_ops(
+            {
+                "projectMilestones(": [page],
+                "projectMilestoneCreate(": [_milestone_create("m-2")],
+            }
+        )
+        assert ops.ensure_phase_milestone(project_id="p-1", name="Phase 2") == "m-2"
+        assert len(_queries(fake, "projectMilestones(")) == 1
+        [(_, variables)] = _queries(fake, "projectMilestoneCreate(")
+        assert _input_payload(variables) == {"projectId": "p-1", "name": "Phase 2"}
+
+    # --- create_project_update: projectUpdateCreate (Node 4.3) ---
+
+    def test_create_project_update_returns_id(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "projectUpdateCreate(": [
+                    {
+                        "projectUpdateCreate": {
+                            "success": True,
+                            "projectUpdate": {"id": "u-1"},
+                        }
+                    }
+                ]
+            }
+        )
+        assert ops.create_project_update(project_id="p-1", body="**Hi**") == "u-1"
+        [(query, variables)] = _queries(fake, "projectUpdateCreate(")
+        assert "projectUpdateCreate(input: $input)" in query
+        payload = _input_payload(variables)
+        # Only projectId + body — `health` is deliberately omitted (D3).
+        assert payload == {"projectId": "p-1", "body": "**Hi**"}
+        assert "health" not in payload
+
+    def test_create_project_update_failure_raises(self) -> None:
+        ops, _ = _make_project_ops(
+            {"projectUpdateCreate(": [{"projectUpdateCreate": {"success": False}}]}
+        )
+        with pytest.raises(IssueBackendError, match="failed to create Linear project update"):
+            ops.create_project_update(project_id="p-1", body="x")
+
     def test_attach_issue_to_project_resolves_issue_uuid(self) -> None:
         ops, fake = _make_project_ops(
             {
@@ -2245,6 +2328,9 @@ class TestLinearProjectObjectiveStore:
         mvars = [_input_payload(v) for _, v in _queries(fake, "projectMilestoneCreate(")]
         assert [m["name"] for m in mvars] == ["Foundations", "Build"]
         assert all(m["projectId"] == "proj-1" for m in mvars)
+        # Node 4.3: routing through `ensure_phase_milestone` with a seeded-empty `known` keeps the
+        # create path's network calls byte-identical — NO extra `project_milestones` read.
+        assert not _queries(fake, "projectMilestones(")
 
         # (c) one issue per node, in node_sort_key order, projectId + milestone, no labelIds
         ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
@@ -2841,3 +2927,29 @@ class TestLinearProjectObjectiveStore:
         store, _ = _make_project_store({"projectUpdate(": [{"projectUpdate": {"success": False}}]})
         with pytest.raises(ObjectiveStoreError, match="failed to set state"):
             store.close_objective(objective_id="proj-1")
+
+    # ----------------------------------------------------------------- post_status_update (4.3)
+
+    def test_post_status_update_posts_project_update(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "projectUpdateCreate(": [
+                    {"projectUpdateCreate": {"success": True, "projectUpdate": {"id": "u-1"}}}
+                ]
+            }
+        )
+        assert store.post_status_update(objective_id="proj-1", body="**Plan landed**") is True
+        [(_, variables)] = _queries(fake, "projectUpdateCreate(")
+        assert _input_payload(variables) == {"projectId": "proj-1", "body": "**Plan landed**"}
+
+    def test_post_status_update_dry_run_writes_nothing(self) -> None:
+        store, fake = _make_project_store()
+        assert store.post_status_update(objective_id="proj-1", body="x", dry_run=True) is False
+        assert fake.requests == []
+
+    def test_post_status_update_failure_raises(self) -> None:
+        store, _ = _make_project_store(
+            {"projectUpdateCreate(": [{"projectUpdateCreate": {"success": False}}]}
+        )
+        with pytest.raises(ObjectiveStoreError, match="failed to create Linear project update"):
+            store.post_status_update(objective_id="proj-1", body="x")

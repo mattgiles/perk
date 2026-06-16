@@ -13,11 +13,12 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, issues, linear_agent, objective_stores
+from perk.backends import issue_backend, issues, linear_agent, objective_store, objective_stores
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
@@ -257,6 +258,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
                 status=objective.NodeStatus.DONE,
             )
             marked.append(node.id)
+        pr_id = plan_ref["pr_id"]
         # Completeness is computed LOCALLY over the post-mark node list (no re-fetch — this path
         # just wrote those statuses itself): every target is terminal after the loop (already-
         # terminal targets were skipped but are terminal either way), other nodes as fetched. The
@@ -268,6 +270,10 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
             node.id in target_ids or node.status in objective.TERMINAL for node in state.nodes
         )
         if not complete:
+            if marked:
+                _post_landed_update(
+                    store, objective_id=objective_id, node_ids=marked, pr=pr_id, complete=False
+                )
             return ObjectiveLandUpdate(objective_id, tuple(marked), None)
         try:
             # Isolated fail-open: a close failure must NOT fall into the outer handler (which
@@ -282,6 +288,10 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
                 file=sys.stderr,
             )
             return ObjectiveLandUpdate(objective_id, tuple(marked), f"close_failed: {exc}")
+        if marked:
+            _post_landed_update(
+                store, objective_id=objective_id, node_ids=marked, pr=pr_id, complete=True
+            )
         return ObjectiveLandUpdate(objective_id, tuple(marked), None, closed=True)
     except Exception as exc:  # fail-open: objective tracking never blocks landing
         print(
@@ -289,6 +299,34 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
             file=sys.stderr,
         )
         return ObjectiveLandUpdate(objective_id, (), f"error: {exc}")
+
+
+def _post_landed_update(
+    store: objective_store.ObjectiveStore,
+    *,
+    objective_id: str,
+    node_ids: list[str],
+    pr: object,
+    complete: bool,
+) -> None:
+    """Post the fail-open "plan landed" Project Update (Node 4.3).
+
+    Isolated like the close fail-open: a failure is logged loud-but-non-fatal and NEVER discards
+    the already-marked node result. Linear project store posts; GitHub + the issue-backed Linear
+    store no-op (return ``False``).
+    """
+    try:
+        store.post_status_update(
+            objective_id=objective_id,
+            body=objective.plan_landed_update_body(
+                node_ids, pr=cast("str | int", pr), complete=complete
+            ),
+        )
+    except Exception as exc:  # fail-open: the status update is bookkeeping, never load-bearing
+        print(
+            f"perk pr land: project update skipped (non-fatal): {exc}",
+            file=sys.stderr,
+        )
 
 
 def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUpdate:
