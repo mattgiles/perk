@@ -36,6 +36,25 @@ import httpx
 
 from perk.backends.issue_backend import IssueBackendError
 
+
+def _require_dict(value: object, what: str) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return cast("dict[str, object]", value)
+
+
+def _require_list(value: object, what: str) -> list[object]:
+    if not isinstance(value, list):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return cast("list[object]", value)
+
+
+def _require_str(value: object, what: str) -> str:
+    if not isinstance(value, str):
+        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
+    return value
+
+
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
 RATELIMITED_CODE = "RATELIMITED"
@@ -65,6 +84,17 @@ class LinearGraphQLError(IssueBackendError):
         self.codes = codes
 
 
+_ENTITY_NOT_FOUND_CODE = "INPUT_ERROR"
+
+
+def _is_entity_not_found(exc: LinearGraphQLError) -> bool:
+    """A missing-entity error: Linear returns the generic ``INPUT_ERROR`` code with an
+    ``"Entity not found: <Entity>"`` message (observed at the live smoke gate, 2026-06-15 —
+    docs/linear-smoke-gate.md gate-8 row). ``INPUT_ERROR`` alone is too broad (a generic
+    input-error code), so pair it with the message prefix."""
+    return _ENTITY_NOT_FOUND_CODE in exc.codes and "entity not found" in str(exc).lower()
+
+
 class LinearClient:
     """The one Linear GraphQL request wrapper.
 
@@ -89,6 +119,12 @@ class LinearClient:
         # OAuth tokens (e.g. an actor=app agent token) use the `Bearer <token>` form;
         # personal API keys keep the plain `Authorization: <API_KEY>` header byte-identically.
         self._bearer = bearer
+        # Resolved-id memoization, the natural home for the shared caches (correction §3d): a
+        # store that owns one client and constructs both op classes over it gets a single shared
+        # cache automatically — without the op classes composing each other. The client stays
+        # team-agnostic at construction, so `_team_id_cache` is keyed by team key.
+        self._team_id_cache: dict[str, str] = {}
+        self._uuid_cache: dict[str, str] = {}
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         """POST one GraphQL request; return the ``data`` dict or raise ``IssueBackendError``.
@@ -145,6 +181,81 @@ class LinearClient:
                 f"Linear API response missing data: {response.text[:_BODY_SLICE]}"
             )
         return data
+
+    # ------------------------------------------------------------------ shared machinery
+    # The single home for Linear GraphQL API-client logic (correction §3): team-UUID + uuid
+    # resolution and the generic cursor loop live on the client, so both op classes reach them
+    # through ``self._client`` instead of one composing the other.
+
+    def team_id(self, team_key: str) -> str:
+        """Resolve (and cache, by team key) the team UUID from a team key."""
+        cached = self._team_id_cache.get(team_key)
+        if cached is not None:
+            return cached
+        query = "query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id } } }"
+        data = self.request(query, {"key": team_key})
+        teams = _require_dict(data.get("teams"), "teams")
+        nodes = _require_list(teams.get("nodes"), "teams.nodes")
+        if not nodes:
+            raise IssueBackendError(f"Linear team {team_key!r} not found")
+        node = _require_dict(nodes[0], "teams.nodes[0]")
+        team_id = _require_str(node.get("id"), "team id")
+        self._team_id_cache[team_key] = team_id
+        return team_id
+
+    def uuid_for(self, issue_id: str) -> str:
+        """Resolve a boundary id (identifier-or-UUID) to the issue UUID — the mutation path.
+
+        ``issue(id:)`` *reads* accept the human identifier interchangeably with the UUID;
+        mutation ``id``/``issueId`` args are not documented to, so every mutation routes its
+        target id through here. Cached; issue reads seed the cache (via :meth:`cache_uuid`), so
+        the common mutate-after-read path issues no extra query.
+        """
+        cached = self._uuid_cache.get(issue_id)
+        if cached is not None:
+            return cached
+        query = "query UuidForIssue($id: String!) { issue(id: $id) { id } }"
+        try:
+            data = self.request(query, {"id": issue_id})
+        except LinearGraphQLError as exc:
+            if _is_entity_not_found(exc):
+                raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
+            raise
+        issue = data.get("issue")
+        if issue is None:
+            raise IssueBackendError(f"Linear issue {issue_id!r} not found")
+        uuid = _require_str(_require_dict(issue, "issue").get("id"), "issue id")
+        self._uuid_cache[issue_id] = uuid
+        return uuid
+
+    def cache_uuid(self, identifier: str, uuid: str) -> None:
+        """Seed the shared boundary-id → UUID cache (issue read paths call this so a later
+        mutation on the same id issues no extra resolution query)."""
+        self._uuid_cache[identifier] = uuid
+
+    def paginate(
+        self, query: str, variables: dict[str, object], *path: str
+    ) -> list[dict[str, object]]:
+        """Generic cursor loop over a ``nodes`` + ``pageInfo`` connection at ``path``.
+
+        ``query`` must accept a ``$cursor: String`` variable and select
+        ``pageInfo { hasNextPage endCursor }``. Malformed payload shapes raise (never silently
+        truncate).
+        """
+        nodes: list[dict[str, object]] = []
+        cursor: str | None = None
+        while True:
+            data = self.request(query, {**variables, "cursor": cursor})
+            connection: object = data
+            for key in path:
+                connection = _require_dict(connection, ".".join(path)).get(key)
+            conn = _require_dict(connection, ".".join(path))
+            for raw in _require_list(conn.get("nodes"), "nodes"):
+                nodes.append(_require_dict(raw, "node"))
+            page_info = _require_dict(conn.get("pageInfo"), "pageInfo")
+            if not page_info.get("hasNextPage"):
+                return nodes
+            cursor = _require_str(page_info.get("endCursor"), "endCursor")
 
 
 def client_from_env(env: Mapping[str, str] | None = None) -> LinearClient:

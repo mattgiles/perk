@@ -160,8 +160,8 @@ def parse_issues_team(raw: Any) -> str | None:
 
     LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
     absent/ill-typed/blank ``team`` yields ``None``. The value is the Linear **team key**
-    (e.g. ``"ENG"``) — what ``LinearIssueBackend`` resolves to a team UUID via its ``_team_id()``
-    query. Returns the stripped string otherwise.
+    (e.g. ``"ENG"``) — what ``LinearIssueBackend`` resolves to a team UUID via
+    ``client.team_id(...)``. Returns the stripped string otherwise.
     """
     table = raw if isinstance(raw, dict) else {}
     value = table.get("team")

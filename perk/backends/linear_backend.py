@@ -53,12 +53,19 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import cast
 
 from perk import github, objective, plan
 from perk.backends import issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import LinearGraphQLError
+from perk.backends.linear import (
+    LinearClient,
+    LinearGraphQLError,
+    _is_entity_not_found,
+    _require_dict,
+    _require_list,
+    _require_str,
+)
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 
@@ -71,14 +78,6 @@ _PERK_MARKER_RE = re.compile(r"<!--\s*(/?perk:[^>]+?)\s*-->")
 # The exact perk-rendered `<details>` wrapper shapes (perk.plan's html-style renderers).
 _DETAILS_OPEN_RE = re.compile(r"^<details><summary><code>[^<]*</code></summary>$")
 _DETAILS_CLOSE = "</details>"
-
-
-class GraphQLClient(Protocol):
-    """The structural client seam: ``LinearClient`` satisfies it; offline tests pass a fake."""
-
-    def request(
-        self, query: str, variables: dict[str, object] | None = None
-    ) -> dict[str, object]: ...
 
 
 def to_linear_markdown(text: str) -> str:
@@ -102,72 +101,28 @@ def to_linear_markdown(text: str) -> str:
     return result
 
 
-def _require_dict(value: object, what: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
-    return cast("dict[str, object]", value)
-
-
-def _require_list(value: object, what: str) -> list[object]:
-    if not isinstance(value, list):
-        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
-    return cast("list[object]", value)
-
-
-def _require_str(value: object, what: str) -> str:
-    if not isinstance(value, str):
-        raise IssueBackendError(f"unexpected Linear payload shape ({what}): {value!r}")
-    return value
-
-
 def _hex_color(color: str) -> str:
     """Map the GitHub bare-hex label colors into Linear's ``#``-prefixed form."""
     return color if color.startswith("#") else f"#{color}"
 
 
-_ENTITY_NOT_FOUND_CODE = "INPUT_ERROR"
-
-
-def _is_entity_not_found(exc: LinearGraphQLError) -> bool:
-    """A missing-entity error: Linear returns the generic ``INPUT_ERROR`` code with an
-    ``"Entity not found: <Entity>"`` message (observed at the live smoke gate, 2026-06-15 —
-    docs/linear-smoke-gate.md gate-8 row). ``INPUT_ERROR`` alone is too broad (a generic
-    input-error code), so pair it with the message prefix."""
-    return _ENTITY_NOT_FOUND_CODE in exc.codes and "entity not found" in str(exc).lower()
-
-
 class _LinearIssueOps:
-    """The shared Linear substrate (Node 2.2 facade refactor): the GraphQL client, the
-    constructor-bound team key, the caches, and every private issue-op helper. Both
-    ``LinearIssueBackend`` (the issue tier) and ``LinearObjectiveStore`` (the objective tier) own
-    one and delegate through it — a registered collaborator, not an inheritance base."""
+    """The shared Linear issue substrate (correction §3b): the GraphQL client, the
+    constructor-bound team key, the issue-tier caches (done-state + labels), and every private
+    issue-op helper. **Client-only** — it registers the :class:`LinearClient` and reaches all
+    GraphQL machinery (``team_id``/``uuid_for``/``paginate``) through ``self._client``; it does
+    NOT own that machinery. Both ``LinearIssueBackend`` (the issue tier) and the objective stores
+    own one and delegate through it."""
 
-    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+    def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
         self._client = client
         self._team_key = team_key
         # Public: the PR-tier ``github.get_pr`` call in ``LinearIssueBackend.get_plan`` reads it.
         self.repo_root = repo_root
-        self._team_id_cache: str | None = None
         self._done_state_id_cache: str | None = None
         self._label_ids: dict[str, str] = {}
-        # Boundary-id → issue UUID (the mutation-path resolution; seeded by every issue read).
-        self._uuid_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------ internal helpers
-
-    def _team_id(self) -> str:
-        """Resolve (and cache) the team UUID from the constructor-bound team key."""
-        if self._team_id_cache is not None:
-            return self._team_id_cache
-        query = "query($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { id } } }"
-        data = self._client.request(query, {"key": self._team_key})
-        teams = _require_dict(data.get("teams"), "teams")
-        nodes = _require_list(teams.get("nodes"), "teams.nodes")
-        if not nodes:
-            raise IssueBackendError(f"Linear team {self._team_key!r} not found")
-        node = _require_dict(nodes[0], "teams.nodes[0]")
-        self._team_id_cache = _require_str(node.get("id"), "team id")
-        return self._team_id_cache
 
     def _done_state_id(self) -> str:
         """The team's first Done-category workflow state (lowest-position ``completed``)."""
@@ -177,7 +132,7 @@ class _LinearIssueOps:
             "query($teamId: String!) { team(id: $teamId) "
             "{ states { nodes { id name type position } } } }"
         )
-        data = self._client.request(query, {"teamId": self._team_id()})
+        data = self._client.request(query, {"teamId": self._client.team_id(self._team_key)})
         team = _require_dict(data.get("team"), "team")
         states = _require_dict(team.get("states"), "team.states")
         nodes = _require_list(states.get("nodes"), "team.states.nodes")
@@ -198,30 +153,6 @@ class _LinearIssueOps:
             )
         self._done_state_id_cache = min(completed)[1]
         return self._done_state_id_cache
-
-    def _paginate(
-        self, query: str, variables: dict[str, object], *path: str
-    ) -> list[dict[str, object]]:
-        """Generic cursor loop over a ``nodes`` + ``pageInfo`` connection at ``path``.
-
-        ``query`` must accept a ``$cursor: String`` variable and select
-        ``pageInfo { hasNextPage endCursor }``. Malformed payload shapes raise (never silently
-        truncate).
-        """
-        nodes: list[dict[str, object]] = []
-        cursor: str | None = None
-        while True:
-            data = self._client.request(query, {**variables, "cursor": cursor})
-            connection: object = data
-            for key in path:
-                connection = _require_dict(connection, ".".join(path)).get(key)
-            conn = _require_dict(connection, ".".join(path))
-            for raw in _require_list(conn.get("nodes"), "nodes"):
-                nodes.append(_require_dict(raw, "node"))
-            page_info = _require_dict(conn.get("pageInfo"), "pageInfo")
-            if not page_info.get("hasNextPage"):
-                return nodes
-            cursor = _require_str(page_info.get("endCursor"), "endCursor")
 
     def _issue_or_none(self, issue_id: str, selection: str) -> dict[str, object] | None:
         """Fetch one issue by id; ``None`` when Linear reports the entity missing.
@@ -245,7 +176,7 @@ class _LinearIssueOps:
         payload = _require_dict(issue, "issue")
         uuid = payload.get("id")
         if isinstance(uuid, str) and uuid:
-            self._uuid_cache[issue_id] = uuid
+            self._client.cache_uuid(issue_id, uuid)
         return payload
 
     def _get_issue(self, issue_id: str, selection: str) -> dict[str, object]:
@@ -255,32 +186,6 @@ class _LinearIssueOps:
             raise IssueBackendError(f"Linear issue {issue_id!r} not found")
         return issue
 
-    def _uuid_for(self, issue_id: str) -> str:
-        """Resolve a boundary id (identifier-or-UUID) to the issue UUID — the mutation path.
-
-        ``issue(id:)`` *reads* accept the human identifier interchangeably with the UUID;
-        mutation ``id``/``issueId`` args are not documented to, so every mutation routes its
-        target id through here. Cached; issue reads seed the cache, so the common
-        mutate-after-read path issues no extra query.
-        """
-        cached = self._uuid_cache.get(issue_id)
-        if cached is not None:
-            return cached
-        query = "query UuidForIssue($id: String!) { issue(id: $id) { id } }"
-        try:
-            data = self._client.request(query, {"id": issue_id})
-        except LinearGraphQLError as exc:
-            # Same observed `INPUT_ERROR` + "Entity not found" pairing as `_issue_or_none`.
-            if _is_entity_not_found(exc):
-                raise IssueBackendError(f"Linear issue {issue_id!r} not found") from exc
-            raise
-        issue = data.get("issue")
-        if issue is None:
-            raise IssueBackendError(f"Linear issue {issue_id!r} not found")
-        uuid = _require_str(_require_dict(issue, "issue").get("id"), "issue id")
-        self._uuid_cache[issue_id] = uuid
-        return uuid
-
     def _comments(self, issue_id: str) -> list[dict[str, object]]:
         """All comments on an issue, sorted ascending by ``createdAt`` — pins GitHub's
         oldest-first first-match semantics without depending on Linear's connection ordering."""
@@ -289,7 +194,7 @@ class _LinearIssueOps:
             f"{{ comments(first: {_PAGE_SIZE}, after: $cursor) "
             "{ nodes { id body createdAt } pageInfo { hasNextPage endCursor } } } }"
         )
-        nodes = self._paginate(query, {"id": issue_id}, "issue", "comments")
+        nodes = self._client.paginate(query, {"id": issue_id}, "issue", "comments")
         return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
 
     def _ensure_label_id(self, name: str, *, color: str, description: str) -> tuple[str, bool]:
@@ -314,7 +219,7 @@ class _LinearIssueOps:
                 "name": name,
                 "color": _hex_color(color),
                 "description": description,
-                "teamId": self._team_id(),
+                "teamId": self._client.team_id(self._team_key),
             }
         }
         try:
@@ -360,7 +265,9 @@ class _LinearIssueOps:
             'state: { type: { nin: ["completed", "canceled"] } } '
             f"}}) {{ nodes {{ {selection} }} pageInfo {{ hasNextPage endCursor }} }} }}"
         )
-        return self._paginate(query, {"teamId": self._team_id(), "label": label}, "issues")
+        return self._client.paginate(
+            query, {"teamId": self._client.team_id(self._team_key), "label": label}, "issues"
+        )
 
     def _find_issue_by_run_id(
         self, *, label: str, header_key: str, run_id: str
@@ -375,7 +282,7 @@ class _LinearIssueOps:
                 and plan.extract_run_id(description, header_key=header_key) == run_id
             ):
                 identifier = _require_str(node.get("identifier"), "issue identifier")
-                self._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
+                self._client.cache_uuid(identifier, _require_str(node.get("id"), "issue id"))
                 return issue_backend.IssueRef(
                     id=identifier,
                     url=_require_str(node.get("url"), "issue url"),
@@ -388,7 +295,7 @@ class _LinearIssueOps:
         *,
         title: str,
         description: str,
-        label_id: str,
+        label_id: str | None = None,
         project_id: str | None = None,
         milestone_id: str | None = None,
     ) -> issue_backend.IssueRef:
@@ -396,15 +303,17 @@ class _LinearIssueOps:
             "mutation($input: IssueCreateInput!) { issueCreate(input: $input) "
             "{ success issue { id identifier url } } }"
         )
-        # Conditional project/milestone attachment (Node 3.1 create-in-project support): only add
-        # the keys when set — omit, never send an explicit `null`. Every current caller
-        # (plan/learn/objective) passes neither, so the input is byte-identical for them.
+        # Conditional label/project/milestone attachment: only add the keys when set — omit,
+        # never send an explicit `null`. Every plan/learn/objective caller passes a label, so the
+        # input is byte-identical for them; node-issues (Node 3.2) pass `label_id=None` (they are
+        # discovered by project membership + the node block, so they carry no perk label).
         issue_input: dict[str, object] = {
-            "teamId": self._team_id(),
+            "teamId": self._client.team_id(self._team_key),
             "title": title,
             "description": description,
-            "labelIds": [label_id],
         }
+        if label_id is not None:
+            issue_input["labelIds"] = [label_id]
         if project_id is not None:
             issue_input["projectId"] = project_id
         if milestone_id is not None:
@@ -416,7 +325,7 @@ class _LinearIssueOps:
             raise IssueBackendError(f"failed to create Linear issue {title!r}")
         issue = _require_dict(payload.get("issue"), "issueCreate.issue")
         identifier = _require_str(issue.get("identifier"), "issue identifier")
-        self._uuid_cache[identifier] = _require_str(issue.get("id"), "issue id")
+        self._client.cache_uuid(identifier, _require_str(issue.get("id"), "issue id"))
         return issue_backend.IssueRef(
             id=identifier,
             url=_require_str(issue.get("url"), "issue url"),
@@ -428,7 +337,9 @@ class _LinearIssueOps:
             "mutation($id: String!, $input: IssueUpdateInput!) "
             "{ issueUpdate(id: $id, input: $input) { success } }"
         )
-        data = self._client.request(mutation, {"id": self._uuid_for(issue_id), "input": fields})
+        data = self._client.request(
+            mutation, {"id": self._client.uuid_for(issue_id), "input": fields}
+        )
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to {what} on Linear issue {issue_id!r}")
@@ -439,7 +350,7 @@ class _LinearIssueOps:
             "mutation($input: CommentCreateInput!) { commentCreate(input: $input) { success } }"
         )
         variables: dict[str, object] = {
-            "input": {"issueId": self._uuid_for(issue_id), "body": body}
+            "input": {"issueId": self._client.uuid_for(issue_id), "body": body}
         }
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
@@ -455,7 +366,7 @@ class _LinearIssueOps:
             "{ success comment { id } } }"
         )
         variables: dict[str, object] = {
-            "input": {"issueId": self._uuid_for(issue_id), "body": body}
+            "input": {"issueId": self._client.uuid_for(issue_id), "body": body}
         }
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("commentCreate"), "commentCreate")
@@ -497,20 +408,22 @@ class _LinearProjectOps:
     not-yet-built ``LinearProjectObjectiveStore`` (Nodes 3.2-3.4) will consume, exactly the shapes
     proven live at the Node 1.4 spike (``docs/linear-smoke-gate.md``, "Mode 3").
 
-    Composes (never inherits) the shared :class:`_LinearIssueOps` substrate via ``issue_ops`` — it
-    reaches the client, the cached ``_team_id()``/``_uuid_for()``, ``_paginate(...)``, the
-    ``_require_*`` validators, ``_is_entity_not_found``, and ``_create_issue``/``_update_issue``
-    through ``self.issue_ops``. This keeps a single shared cache (one ``_team_id_cache``, one
-    ``_uuid_cache``) for the consuming store, which owns one ``_LinearProjectOps`` and reaches
-    node-issue creation/comments through ``.issue_ops``.
+    **Client-only** (correction §3b): it registers the :class:`LinearClient` and reaches all
+    GraphQL machinery (``team_id``/``uuid_for``/``paginate``) through ``self._client`` — it does
+    NOT compose an ``_LinearIssueOps``. The single shared cache (one ``_team_id_cache``, one
+    ``_uuid_cache``) is the client's: a consuming store owns one client and constructs both op
+    classes over it, so the cache is shared automatically.
 
     Methods return parsed primitives/dicts — the ``ObjectiveRef``/``ObjectiveState`` mapping lives
     in the consuming store (Node 3.2), not here. **Dormant**: no production caller constructs this
     yet (only the offline tests do), so there is no cross-plane behavior change in this node.
     """
 
-    def __init__(self, issue_ops: _LinearIssueOps) -> None:
-        self.issue_ops = issue_ops
+    def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
+        self._client = client
+        self._team_key = team_key
+        # Stored for the mandated symmetric signature with `_LinearIssueOps` (unused here today).
+        self._repo_root = repo_root
 
     # ------------------------------------------------------------------ projects
 
@@ -524,12 +437,12 @@ class _LinearProjectOps:
         )
         variables: dict[str, object] = {
             "input": {
-                "teamIds": [self.issue_ops._team_id()],
+                "teamIds": [self._client.team_id(self._team_key)],
                 "name": name,
                 "content": content,
             }
         }
-        data = self.issue_ops._client.request(mutation, variables)
+        data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("projectCreate"), "projectCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create Linear project {name!r}")
@@ -546,9 +459,7 @@ class _LinearProjectOps:
             "mutation($id: String!, $input: ProjectUpdateInput!) "
             "{ projectUpdate(id: $id, input: $input) { success project { id content } } }"
         )
-        data = self.issue_ops._client.request(
-            mutation, {"id": project_id, "input": {"content": content}}
-        )
+        data = self._client.request(mutation, {"id": project_id, "input": {"content": content}})
         payload = _require_dict(data.get("projectUpdate"), "projectUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to update Linear project {project_id!r}")
@@ -559,7 +470,7 @@ class _LinearProjectOps:
         Project" — so ``_is_entity_not_found`` keys on it). Every other error re-raises."""
         query = f"query($id: String!) {{ project(id: $id) {{ {selection} }} }}"
         try:
-            data = self.issue_ops._client.request(query, {"id": project_id})
+            data = self._client.request(query, {"id": project_id})
         except LinearGraphQLError as exc:
             if _is_entity_not_found(exc):
                 return None
@@ -577,7 +488,7 @@ class _LinearProjectOps:
             f"{{ projectMilestones(first: {_PAGE_SIZE}, after: $cursor) "
             "{ nodes { id name } pageInfo { hasNextPage endCursor } } } }"
         )
-        nodes = self.issue_ops._paginate(query, {"id": project_id}, "project", "projectMilestones")
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "projectMilestones")
         return [
             {
                 "id": _require_str(node.get("id"), "milestone id"),
@@ -593,7 +504,7 @@ class _LinearProjectOps:
             f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
             "{ nodes { id identifier } pageInfo { hasNextPage endCursor } } } }"
         )
-        nodes = self.issue_ops._paginate(query, {"id": project_id}, "project", "issues")
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
         return [
             {
                 "id": _require_str(node.get("id"), "issue id"),
@@ -609,7 +520,7 @@ class _LinearProjectOps:
             "{ projectMilestoneCreate(input: $input) { success projectMilestone { id name } } }"
         )
         variables: dict[str, object] = {"input": {"projectId": project_id, "name": name}}
-        data = self.issue_ops._client.request(mutation, variables)
+        data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("projectMilestoneCreate"), "projectMilestoneCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create Linear project milestone {name!r}")
@@ -619,9 +530,22 @@ class _LinearProjectOps:
         return _require_str(milestone.get("id"), "milestone id")
 
     def attach_issue_to_project(self, *, issue_id: str, project_id: str) -> None:
-        """Attach an existing issue to a project (``issueUpdate`` resolves the issue id via
-        ``_uuid_for``)."""
-        self.issue_ops._update_issue(issue_id, {"projectId": project_id}, what="attach to project")
+        """Attach an existing issue to a project. Inlines the ``issueUpdate`` mutation (resolve
+        the issue id via ``self._client.uuid_for``, send ``issueUpdate(id:$id, input:{projectId})``,
+        check ``success``) — decoupling over DRY: a 2-line mutation duplication is the accepted
+        cost of not borrowing ``_LinearIssueOps._update_issue``. The GraphQL document stays
+        byte-faithful to the issue-tier update."""
+        mutation = (
+            "mutation($id: String!, $input: IssueUpdateInput!) "
+            "{ issueUpdate(id: $id, input: $input) { success } }"
+        )
+        data = self._client.request(
+            mutation,
+            {"id": self._client.uuid_for(issue_id), "input": {"projectId": project_id}},
+        )
+        payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to attach to project on Linear issue {issue_id!r}")
 
     # ------------------------------------------------------------------ documents (reserved)
 
@@ -636,7 +560,7 @@ class _LinearProjectOps:
         variables: dict[str, object] = {
             "input": {"projectId": project_id, "title": title, "content": content}
         }
-        data = self.issue_ops._client.request(mutation, variables)
+        data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("documentCreate"), "documentCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to create Linear document {title!r}")
@@ -648,7 +572,7 @@ class _LinearProjectOps:
         (a bogus ``document(id)`` matches ``_is_entity_not_found``). Every other error re-raises."""
         query = "query($id: String!) { document(id: $id) { content } }"
         try:
-            data = self.issue_ops._client.request(query, {"id": document_id})
+            data = self._client.request(query, {"id": document_id})
         except LinearGraphQLError as exc:
             if _is_entity_not_found(exc):
                 return None
@@ -677,7 +601,7 @@ class _LinearProjectOps:
                 "type": "blocks",
             }
         }
-        data = self.issue_ops._client.request(mutation, variables)
+        data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("issueRelationCreate"), "issueRelationCreate")
         if payload.get("success") is not True:
             raise IssueBackendError(
@@ -696,7 +620,7 @@ class _LinearProjectOps:
             "{ nodes { type relatedIssue { identifier } } "
             "pageInfo { hasNextPage endCursor } } } }"
         )
-        nodes = self.issue_ops._paginate(query, {"id": issue_id}, "issue", "relations")
+        nodes = self._client.paginate(query, {"id": issue_id}, "issue", "relations")
         identifiers: list[str] = []
         for node in nodes:
             if node.get("type") != "blocks":
@@ -715,7 +639,7 @@ class _LinearProjectOps:
             "{ nodes { type issue { identifier } } "
             "pageInfo { hasNextPage endCursor } } } }"
         )
-        nodes = self.issue_ops._paginate(query, {"id": issue_id}, "issue", "inverseRelations")
+        nodes = self._client.paginate(query, {"id": issue_id}, "issue", "inverseRelations")
         identifiers: list[str] = []
         for node in nodes:
             if node.get("type") != "blocks":
@@ -736,7 +660,7 @@ class LinearIssueBackend:
     # resolver module, which will import us at wiring time).
     backend_id = "linear"
 
-    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+    def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
         # The shared substrate (caches + every issue-op helper), also owned by
         # ``LinearObjectiveStore``. `repo_root` lives on `_ops` (the PR-tier `_get_pr` reads it).
         self._ops = _LinearIssueOps(client, team_key=team_key, repo_root=repo_root)
@@ -908,7 +832,7 @@ class LinearIssueBackend:
         for node in self._ops._list_label_issues(plan.LEARN_LABEL, selection):
             description = node.get("description")
             identifier = _require_str(node.get("identifier"), "issue identifier")
-            self._ops._uuid_cache[identifier] = _require_str(node.get("id"), "issue id")
+            self._ops._client.cache_uuid(identifier, _require_str(node.get("id"), "issue id"))
             summaries.append(
                 issue_backend.LearnIssueSummary(
                     id=identifier,
@@ -1014,7 +938,7 @@ class LinearObjectiveStore:
     # resolver module, which imports us at wiring time). Mirrors `LinearIssueBackend.backend_id`.
     backend_id = "linear"
 
-    def __init__(self, client: GraphQLClient, *, team_key: str, repo_root: Path) -> None:
+    def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
         self._ops = _LinearIssueOps(client, team_key=team_key, repo_root=repo_root)
 
     def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
@@ -1233,8 +1157,8 @@ class LinearObjectiveStore:
 # ===========================================================================
 # Shared readiness probe (Node 2.4) — used by both `perk init` and `perk doctor`.
 # Report-shaped (never raises): every failure mode lands in a `LinearReadiness` field,
-# mirroring `github.check_auth`'s degrade discipline. Offline-testable through the
-# `GraphQLClient` protocol fake.
+# mirroring `github.check_auth`'s degrade discipline. Offline-testable through a
+# `LinearClient`-subclass fake.
 # ===========================================================================
 
 # The four perk labels (name, color, description), the readiness probe ensures/looks up.
@@ -1262,9 +1186,7 @@ class LinearReadiness:
     error: str | None = None
 
 
-def check_readiness(
-    client: GraphQLClient, *, team_key: str, ensure_labels: bool
-) -> LinearReadiness:
+def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool) -> LinearReadiness:
     """Probe Linear readiness: viewer auth, team resolution, and the four perk labels.
 
     Report-shaped — every failure mode lands in a ``LinearReadiness`` field (never raises),
@@ -1289,10 +1211,10 @@ def check_readiness(
         if user is None and isinstance(email, str) and email.strip():
             user = email
 
-    # --- team: resolve the team UUID (reuses the backend's `_team_id`) ---
+    # --- team: resolve the team UUID (the client's shared resolver) ---
     backend = LinearIssueBackend(client, team_key=team_key, repo_root=Path())
     try:
-        backend._ops._team_id()
+        client.team_id(team_key)
     except IssueBackendError as exc:
         return LinearReadiness(auth_ok=True, user=user, team_ok=False, error=str(exc))
 

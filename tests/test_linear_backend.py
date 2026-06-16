@@ -15,7 +15,7 @@ import pytest
 from perk import github, objective, plan
 from perk.backends import issue_backend, linear_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import LinearGraphQLError
+from perk.backends.linear import LinearClient, LinearGraphQLError
 from perk.backends.linear_backend import (
     LinearIssueBackend,
     LinearObjectiveStore,
@@ -49,14 +49,18 @@ def _no_issues() -> dict[str, object]:
     return {"issues": _page([])}
 
 
-class _FakeLinear:
-    """A scripted ``GraphQLClient``: records every ``(query, variables)`` pair; responses keyed
-    by query-substring match in insertion order. A queue with >1 entries pops per call (the last
-    entry is then reused); an ``Exception`` entry is raised."""
+class _FakeLinear(LinearClient):
+    """A scripted ``LinearClient`` subclass: records every ``(query, variables)`` pair; responses
+    keyed by query-substring match in insertion order. A queue with >1 entries pops per call (the
+    last entry is then reused); an ``Exception`` entry is raised. Subclasses ``LinearClient`` (no
+    ``super().__init__``) so it INHERITS the real ``team_id``/``uuid_for``/``paginate`` machinery
+    driven by this scripted ``request`` — the two caches are initialized directly."""
 
     def __init__(self, responses: dict[str, list[object]] | None = None) -> None:
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._responses = {key: list(queue) for key, queue in (responses or {}).items()}
+        self._team_id_cache: dict[str, str] = {}
+        self._uuid_cache: dict[str, str] = {}
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         self.requests.append((query, variables or {}))
@@ -1603,12 +1607,19 @@ class TestCheckReadiness:
 def _make_project_ops(
     responses: dict[str, list[object]] | None = None,
 ) -> tuple[linear_backend._LinearProjectOps, _FakeLinear]:
-    """Construct the dormant ``_LinearProjectOps`` over a fresh ``_LinearIssueOps`` + fake client
-    (the Node 3.2 ownership shape — one shared substrate, one cache)."""
+    """Construct the dormant ``_LinearProjectOps`` client-only (the correction §3b ownership shape
+    — it registers the client; the shared cache lives on the client)."""
     fake = _FakeLinear(responses)
-    ops = linear_backend._LinearProjectOps(
-        linear_backend._LinearIssueOps(fake, team_key="ENG", repo_root=Path("/repo"))
-    )
+    ops = linear_backend._LinearProjectOps(fake, team_key="ENG", repo_root=Path("/repo"))
+    return ops, fake
+
+
+def _make_issue_ops(
+    responses: dict[str, list[object]] | None = None,
+) -> tuple[linear_backend._LinearIssueOps, _FakeLinear]:
+    """Construct a client-only ``_LinearIssueOps`` (for the `_create_issue` substrate tests)."""
+    fake = _FakeLinear(responses)
+    ops = linear_backend._LinearIssueOps(fake, team_key="ENG", repo_root=Path("/repo"))
     return ops, fake
 
 
@@ -1824,7 +1835,7 @@ class TestLinearProjectOps:
         assert ops.issue_blocked_by("ENG-1") == ["ENG-9", "ENG-7"]
 
     def test_create_issue_with_project_and_milestone_adds_keys(self) -> None:
-        ops, fake = _make_project_ops(
+        ops, fake = _make_issue_ops(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issueCreate(": [
@@ -1837,7 +1848,7 @@ class TestLinearProjectOps:
                 ],
             }
         )
-        ops.issue_ops._create_issue(
+        ops._create_issue(
             title="T", description="D", label_id="lbl-1", project_id="p-1", milestone_id="m-1"
         )
         [(_, variables)] = _queries(fake, "issueCreate(")
@@ -1846,7 +1857,7 @@ class TestLinearProjectOps:
         assert payload["projectMilestoneId"] == "m-1"
 
     def test_create_issue_without_project_omits_keys(self) -> None:
-        ops, fake = _make_project_ops(
+        ops, fake = _make_issue_ops(
             {
                 "teams(filter": [_TEAM_RESPONSE],
                 "issueCreate(": [
@@ -1859,8 +1870,44 @@ class TestLinearProjectOps:
                 ],
             }
         )
-        ops.issue_ops._create_issue(title="T", description="D", label_id="lbl-1")
+        ops._create_issue(title="T", description="D", label_id="lbl-1")
         [(_, variables)] = _queries(fake, "issueCreate(")
         payload = _input_payload(variables)
         assert "projectId" not in payload
         assert "projectMilestoneId" not in payload
+
+    def test_create_issue_label_optional_omits_label_ids(self) -> None:
+        ops, fake = _make_issue_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "i-1", "identifier": "ENG-1", "url": "u"},
+                        }
+                    }
+                ],
+            }
+        )
+        ops._create_issue(title="T", description="D")
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        assert "labelIds" not in _input_payload(variables)
+
+    def test_create_issue_label_given_includes_label_ids(self) -> None:
+        ops, fake = _make_issue_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "i-1", "identifier": "ENG-1", "url": "u"},
+                        }
+                    }
+                ],
+            }
+        )
+        ops._create_issue(title="T", description="D", label_id="lbl-1")
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        assert _input_payload(variables)["labelIds"] == ["lbl-1"]
