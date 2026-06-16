@@ -5,10 +5,11 @@ read_when: You are spawning a subagent for fresh-context work, configuring a pro
 
 # perk's subagent orchestration
 
-perk delegates fresh-context work (PR review, classification, objective exploration) to subagents
-via the `pi-subagents` package. perk's three agent defs are **delivered into consumer repos by `perk
-init`** (a committed managed convergence — see below); the warm commands (`/pr-review`, `/address`)
-spawn them. This doc captures the non-obvious rules an agent can't derive from any single file.
+perk delegates fresh-context work (PR review, classification, objective exploration, conflict
+resolution) to subagents via the `pi-subagents` package. perk's **four** agent defs are **delivered
+into consumer repos by `perk init`** (a committed managed convergence — see below); the warm commands
+(`/pr-review`, `/address`) and the `/submit` mergeability drive spawn them. This doc captures the
+non-obvious rules an agent can't derive from any single file.
 
 > **One Code Rule.** Everything below names files and describes behavior; it does not reproduce
 > source (the one GitHub-API reference is flagged as such). Read the pointers.
@@ -88,10 +89,23 @@ comment (`POST .../issues/{n}/comments`) so a review *always* lands, recording w
 (`mode: "review" | "comment_fallback"`). `event=COMMENT` is **hardcoded** so the agent can never
 approve / request-changes. (This is an API-behavior reference — see `## Sources`.)
 
+## The newest agent: `conflict-resolver` (first write-capable + context-inheriting)
+
+The agent-def set is now **four**: `conflict-resolver`, `objective-explorer`, `pr-reviewer`,
+`review-classifier` (`PERK_AGENTS` keeps them sorted). `conflict-resolver` is **the first
+write-capable + context-inheriting** perk agent — `tools: read,grep,find,ls,bash,edit,write`,
+`inheritProjectContext: true`, `inheritSkills: true` — **departing** from the read-only
+classifier/reviewer, because resolving merge conflicts requires understanding the code and running
+the repo's checks. Like the reviewer it **fetches its own context** read-only via
+`perk pr review-context --json` and is **driven reactively by the `/submit` warm door**. (The verified
+tree has four; do **not** restate the learning's "5th" wording.) The orchestration that drives it lives
+in `workflow/mergeability-and-conflict-resolution.md`.
+
 ## Agent-def delivery to consumer repos (the realized design)
 
-perk's three subagent defs (`pr-reviewer`, `review-classifier`, `objective-explorer`) reach consumer
-repos via the Python wheel + `perk init`. This closed the former "known gap."
+perk's **four** subagent defs (`conflict-resolver`, `objective-explorer`, `pr-reviewer`,
+`review-classifier`) reach consumer repos via the Python wheel + `perk init`. This closed the former
+"known gap."
 
 ### How pi-subagents discovers project agents
 
@@ -112,6 +126,15 @@ is *why* the carrier is the Python wheel + `perk init` materialization, not the 
 - **The resolver mirrors `shared_dir()`**: package-data candidate `perk/_agents`, else editable repo
   sibling `<repo>/agents`, else a `FileNotFoundError` naming both.
 
+### The widening-lockstep census (surfaces to touch when adding an agent)
+
+Adding an agent touches, in lockstep: the `agents/<name>.md` source + `PERK_AGENTS` (kept sorted) +
+the commented `[subagents]` sample + `_SUBAGENT_KEYS` (`config.py`) + `SUBAGENT_KEYS` / the
+`subagents` field type (`config.ts`) + tests (`test_config.py`, `config.test.ts`, `test_packaging.py`
+expecting `perk/_agents/<name>.md`). `test_doctor` / `test_init_idempotent` auto-cover delivery. The
+model is configurable via `[subagents] <name>`, injected as a **per-call inline `model` override**
+(agentOverrides don't reach project agents — see the top of this doc).
+
 ### A committed managed convergence
 
 A `PERK_AGENTS` SSOT tuple drives a content convergence (`_converge_subagent_agents`) that delivers
@@ -128,7 +151,7 @@ self-repo and consumers get byte-identical defs. Because `.pi/agents/perk/` is *
 
 The `subagent-engine` enumeration moved from `.pi/agents/*.md` to `.pi/agents/perk/*.md` (still
 informational; the `subagent-agents` convergence owns drift). The `[subagents]` config stays
-**fixed-key** (perk's three agents only) — it does **not** configure user agents (those set `model:`
+**fixed-key** (perk's four agents only) — it does **not** configure user agents (those set `model:`
 in frontmatter; see `how-to/write-a-custom-subagent.md`).
 
 ### Process note
@@ -209,6 +232,7 @@ parsed-but-unused today (only the TS warm path consumes it — no cold `/pr-revi
 ## Cross-references
 
 - `extension/doors/prReview.ts` — `prReviewGuidance`, `registerPrReview`, the child-posts-own-mutation header (defers the review rubric to the agent prompt)
+- `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` orchestration that drives the `conflict-resolver` agent
 - `agents/*.md` — the SSOT agent-def sources (delivered into `.pi/agents/perk/` by `perk init`); `agents/pr-reviewer.md` carries the entire reviewer rubric
 - `skills/perk-pr-review/SKILL.md` — the orchestration skill that defers to the agent prompt (not where review logic lives)
 - `perk/convergence/init.py` — `PERK_AGENTS`, `_converge_subagent_agents` (the committed managed convergence)
