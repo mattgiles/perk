@@ -384,20 +384,32 @@ class _LinearIssueOps:
         return None
 
     def _create_issue(
-        self, *, title: str, description: str, label_id: str
+        self,
+        *,
+        title: str,
+        description: str,
+        label_id: str,
+        project_id: str | None = None,
+        milestone_id: str | None = None,
     ) -> issue_backend.IssueRef:
         mutation = (
             "mutation($input: IssueCreateInput!) { issueCreate(input: $input) "
             "{ success issue { id identifier url } } }"
         )
-        variables: dict[str, object] = {
-            "input": {
-                "teamId": self._team_id(),
-                "title": title,
-                "description": description,
-                "labelIds": [label_id],
-            }
+        # Conditional project/milestone attachment (Node 3.1 create-in-project support): only add
+        # the keys when set — omit, never send an explicit `null`. Every current caller
+        # (plan/learn/objective) passes neither, so the input is byte-identical for them.
+        issue_input: dict[str, object] = {
+            "teamId": self._team_id(),
+            "title": title,
+            "description": description,
+            "labelIds": [label_id],
         }
+        if project_id is not None:
+            issue_input["projectId"] = project_id
+        if milestone_id is not None:
+            issue_input["projectMilestoneId"] = milestone_id
+        variables: dict[str, object] = {"input": issue_input}
         data = self._client.request(mutation, variables)
         payload = _require_dict(data.get("issueCreate"), "issueCreate")
         if payload.get("success") is not True:
@@ -478,6 +490,239 @@ class _LinearIssueOps:
         payload = _require_dict(data.get("commentUpdate"), "commentUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
+
+
+class _LinearProjectOps:
+    """The dormant Linear *Projects* substrate (Objective #548, Node 3.1) — the GraphQL ops the
+    not-yet-built ``LinearProjectObjectiveStore`` (Nodes 3.2-3.4) will consume, exactly the shapes
+    proven live at the Node 1.4 spike (``docs/linear-smoke-gate.md``, "Mode 3").
+
+    Composes (never inherits) the shared :class:`_LinearIssueOps` substrate via ``issue_ops`` — it
+    reaches the client, the cached ``_team_id()``/``_uuid_for()``, ``_paginate(...)``, the
+    ``_require_*`` validators, ``_is_entity_not_found``, and ``_create_issue``/``_update_issue``
+    through ``self.issue_ops``. This keeps a single shared cache (one ``_team_id_cache``, one
+    ``_uuid_cache``) for the consuming store, which owns one ``_LinearProjectOps`` and reaches
+    node-issue creation/comments through ``.issue_ops``.
+
+    Methods return parsed primitives/dicts — the ``ObjectiveRef``/``ObjectiveState`` mapping lives
+    in the consuming store (Node 3.2), not here. **Dormant**: no production caller constructs this
+    yet (only the offline tests do), so there is no cross-plane behavior change in this node.
+    """
+
+    def __init__(self, issue_ops: _LinearIssueOps) -> None:
+        self.issue_ops = issue_ops
+
+    # ------------------------------------------------------------------ projects
+
+    def create_project(self, *, name: str, content: str) -> dict[str, object]:
+        """Create a project with overview ``content`` at create (the 2024 create-then-update
+        wrinkle does NOT apply — proven at the spike). ``teamIds`` is a **list**. Returns the
+        parsed ``{id, url}`` project dict; ``id`` is the opaque project UUID."""
+        mutation = (
+            "mutation($input: ProjectCreateInput!) { projectCreate(input: $input) "
+            "{ success project { id url } } }"
+        )
+        variables: dict[str, object] = {
+            "input": {
+                "teamIds": [self.issue_ops._team_id()],
+                "name": name,
+                "content": content,
+            }
+        }
+        data = self.issue_ops._client.request(mutation, variables)
+        payload = _require_dict(data.get("projectCreate"), "projectCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear project {name!r}")
+        project = _require_dict(payload.get("project"), "projectCreate.project")
+        return {
+            "id": _require_str(project.get("id"), "project id"),
+            "url": _require_str(project.get("url"), "project url"),
+        }
+
+    def update_project_content(self, project_id: str, content: str) -> None:
+        """Patch a project's overview ``content``. Project ids are opaque UUIDs — no ``_uuid_for``
+        resolution (there is no human identifier for a project)."""
+        mutation = (
+            "mutation($id: String!, $input: ProjectUpdateInput!) "
+            "{ projectUpdate(id: $id, input: $input) { success project { id content } } }"
+        )
+        data = self.issue_ops._client.request(
+            mutation, {"id": project_id, "input": {"content": content}}
+        )
+        payload = _require_dict(data.get("projectUpdate"), "projectUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to update Linear project {project_id!r}")
+
+    def project_or_none(self, project_id: str, selection: str) -> dict[str, object] | None:
+        """Fetch one project by id; ``None`` when Linear reports the entity missing (a bogus
+        ``project(id)`` matches the issue not-found shape — ``INPUT_ERROR`` + "Entity not found:
+        Project" — so ``_is_entity_not_found`` keys on it). Every other error re-raises."""
+        query = f"query($id: String!) {{ project(id: $id) {{ {selection} }} }}"
+        try:
+            data = self.issue_ops._client.request(query, {"id": project_id})
+        except LinearGraphQLError as exc:
+            if _is_entity_not_found(exc):
+                return None
+            raise
+        project = data.get("project")
+        if project is None:
+            return None
+        return _require_dict(project, "project")
+
+    def project_milestones(self, project_id: str) -> list[dict[str, object]]:
+        """All milestones (phases) of a project, as ``[{id, name}, …]``. **Milestone order is NOT
+        insertion order** — callers key phases by *name*, never list position."""
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ projectMilestones(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id name } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self.issue_ops._paginate(query, {"id": project_id}, "project", "projectMilestones")
+        return [
+            {
+                "id": _require_str(node.get("id"), "milestone id"),
+                "name": _require_str(node.get("name"), "milestone name"),
+            }
+            for node in nodes
+        ]
+
+    def project_issues(self, project_id: str) -> list[dict[str, object]]:
+        """All issues attached to a project, as ``[{id, identifier}, …]`` (paginated)."""
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self.issue_ops._paginate(query, {"id": project_id}, "project", "issues")
+        return [
+            {
+                "id": _require_str(node.get("id"), "issue id"),
+                "identifier": _require_str(node.get("identifier"), "issue identifier"),
+            }
+            for node in nodes
+        ]
+
+    def create_project_milestone(self, *, project_id: str, name: str) -> str:
+        """Create a milestone (phase) on a project; returns the milestone id."""
+        mutation = (
+            "mutation($input: ProjectMilestoneCreateInput!) "
+            "{ projectMilestoneCreate(input: $input) { success projectMilestone { id name } } }"
+        )
+        variables: dict[str, object] = {"input": {"projectId": project_id, "name": name}}
+        data = self.issue_ops._client.request(mutation, variables)
+        payload = _require_dict(data.get("projectMilestoneCreate"), "projectMilestoneCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear project milestone {name!r}")
+        milestone = _require_dict(
+            payload.get("projectMilestone"), "projectMilestoneCreate.projectMilestone"
+        )
+        return _require_str(milestone.get("id"), "milestone id")
+
+    def attach_issue_to_project(self, *, issue_id: str, project_id: str) -> None:
+        """Attach an existing issue to a project (``issueUpdate`` resolves the issue id via
+        ``_uuid_for``)."""
+        self.issue_ops._update_issue(issue_id, {"projectId": project_id}, what="attach to project")
+
+    # ------------------------------------------------------------------ documents (reserved)
+
+    def create_document(self, *, project_id: str, title: str, content: str) -> str:
+        """Create a document attached to a project; returns the document id. The **reserved**
+        overview fallback — the canonical overview path is the Project ``content`` (per the 1.4
+        decision), not a document."""
+        mutation = (
+            "mutation($input: DocumentCreateInput!) { documentCreate(input: $input) "
+            "{ success document { id title content } } }"
+        )
+        variables: dict[str, object] = {
+            "input": {"projectId": project_id, "title": title, "content": content}
+        }
+        data = self.issue_ops._client.request(mutation, variables)
+        payload = _require_dict(data.get("documentCreate"), "documentCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create Linear document {title!r}")
+        document = _require_dict(payload.get("document"), "documentCreate.document")
+        return _require_str(document.get("id"), "document id")
+
+    def document_content_or_none(self, document_id: str) -> str | None:
+        """Fetch one document's ``content`` by id; ``None`` when Linear reports the entity missing
+        (a bogus ``document(id)`` matches ``_is_entity_not_found``). Every other error re-raises."""
+        query = "query($id: String!) { document(id: $id) { content } }"
+        try:
+            data = self.issue_ops._client.request(query, {"id": document_id})
+        except LinearGraphQLError as exc:
+            if _is_entity_not_found(exc):
+                return None
+            raise
+        document = data.get("document")
+        if document is None:
+            return None
+        content = _require_dict(document, "document").get("content")
+        return content if isinstance(content, str) else None
+
+    # ------------------------------------------------------------------ relations (blocks)
+
+    def create_issue_relation(self, *, issue_id: str, related_issue_id: str) -> str:
+        """Create a ``blocks`` relation (``issue_id`` blocks ``related_issue_id``); returns the
+        relation id. Both args are **resolved UUIDs supplied by the caller** — this does NOT route
+        through ``_is_entity_not_found``: a bad id here returns ``INVALID_INPUT`` / "Argument
+        Validation Error" (argument validation fires before entity lookup), which fails loud."""
+        mutation = (
+            "mutation($input: IssueRelationCreateInput!) { issueRelationCreate(input: $input) "
+            "{ success issueRelation { id type } } }"
+        )
+        variables: dict[str, object] = {
+            "input": {
+                "issueId": issue_id,
+                "relatedIssueId": related_issue_id,
+                "type": "blocks",
+            }
+        }
+        data = self.issue_ops._client.request(mutation, variables)
+        payload = _require_dict(data.get("issueRelationCreate"), "issueRelationCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(
+                f"failed to create Linear issue relation {issue_id!r} blocks {related_issue_id!r}"
+            )
+        relation = _require_dict(payload.get("issueRelation"), "issueRelationCreate.issueRelation")
+        return _require_str(relation.get("id"), "relation id")
+
+    def issue_blocks(self, issue_id: str) -> list[str]:
+        """The identifiers of issues this one **blocks** — ``relations`` filtered to
+        ``type == "blocks"`` (Linear returns all relation types; direction is carried by the
+        field, the enum stays ``"blocks"`` on both directions)."""
+        query = (
+            "query($id: String!, $cursor: String) { issue(id: $id) "
+            f"{{ relations(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { type relatedIssue { identifier } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self.issue_ops._paginate(query, {"id": issue_id}, "issue", "relations")
+        identifiers: list[str] = []
+        for node in nodes:
+            if node.get("type") != "blocks":
+                continue
+            related = _require_dict(node.get("relatedIssue"), "relation.relatedIssue")
+            identifiers.append(_require_str(related.get("identifier"), "related issue identifier"))
+        return identifiers
+
+    def issue_blocked_by(self, issue_id: str) -> list[str]:
+        """The identifiers of issues that **block** this one (the ``depends_on`` sources for Node
+        3.3) — ``inverseRelations`` filtered to ``type == "blocks"`` (there is no ``"blockedBy"``
+        enum value; the inverse field carries the direction)."""
+        query = (
+            "query($id: String!, $cursor: String) { issue(id: $id) "
+            f"{{ inverseRelations(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { type issue { identifier } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self.issue_ops._paginate(query, {"id": issue_id}, "issue", "inverseRelations")
+        identifiers: list[str] = []
+        for node in nodes:
+            if node.get("type") != "blocks":
+                continue
+            blocker = _require_dict(node.get("issue"), "inverseRelation.issue")
+            identifiers.append(_require_str(blocker.get("identifier"), "blocker issue identifier"))
+        return identifiers
 
 
 class LinearIssueBackend:

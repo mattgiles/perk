@@ -1595,3 +1595,272 @@ class TestCheckReadiness:
         assert readiness.auth_ok is True
         assert readiness.team_ok is True
         assert readiness.error is not None and "rate limited" in readiness.error
+
+
+# ---------------------------------------------------------------------- project ops (Node 3.1)
+
+
+def _make_project_ops(
+    responses: dict[str, list[object]] | None = None,
+) -> tuple[linear_backend._LinearProjectOps, _FakeLinear]:
+    """Construct the dormant ``_LinearProjectOps`` over a fresh ``_LinearIssueOps`` + fake client
+    (the Node 3.2 ownership shape — one shared substrate, one cache)."""
+    fake = _FakeLinear(responses)
+    ops = linear_backend._LinearProjectOps(
+        linear_backend._LinearIssueOps(fake, team_key="ENG", repo_root=Path("/repo"))
+    )
+    return ops, fake
+
+
+def _project_not_found(entity: str = "Project") -> LinearGraphQLError:
+    return LinearGraphQLError(
+        f"Linear GraphQL error: Entity not found: {entity}", codes=("INPUT_ERROR",)
+    )
+
+
+def _relation_validation_error() -> LinearGraphQLError:
+    # The DIVERGENT relation-create miss: argument validation fires before entity lookup, so a
+    # bogus relatedIssueId is INVALID_INPUT / "Argument Validation Error" — neither the code nor
+    # the message-prefix matches `_is_entity_not_found`, so it must propagate (fail loud).
+    return LinearGraphQLError(
+        "Linear GraphQL error: Argument Validation Error", codes=("INVALID_INPUT",)
+    )
+
+
+class TestLinearProjectOps:
+    """The dormant Linear Projects substrate (Node 3.1): the ten ops + the `_create_issue`
+    create-in-project extension, all offline through the `_FakeLinear` `GraphQLClient`."""
+
+    def test_create_project_resolves_team_and_returns_id_url(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projectCreate(": [
+                    {"projectCreate": {"success": True, "project": {"id": "p-1", "url": "u"}}}
+                ],
+            }
+        )
+        result = ops.create_project(name="Phase 3", content="overview")
+        assert result == {"id": "p-1", "url": "u"}
+        [(_, variables)] = _queries(fake, "projectCreate(")
+        payload = _input_payload(variables)
+        assert payload["teamIds"] == ["team-1"]  # the resolved team UUID, as a list
+        assert payload["name"] == "Phase 3"
+        assert payload["content"] == "overview"
+
+    def test_create_project_failure_raises(self) -> None:
+        ops, _ = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projectCreate(": [{"projectCreate": {"success": False}}],
+            }
+        )
+        with pytest.raises(IssueBackendError, match="failed to create Linear project"):
+            ops.create_project(name="Phase 3", content="overview")
+
+    def test_update_project_content_no_uuid_resolution(self) -> None:
+        ops, fake = _make_project_ops(
+            {"projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "p-1"}}}]}
+        )
+        ops.update_project_content("p-1", "new overview")
+        # Project ids are opaque UUIDs: no UuidForIssue resolution.
+        assert not _queries(fake, "UuidForIssue")
+        [(_, variables)] = _queries(fake, "projectUpdate(")
+        assert variables["id"] == "p-1"
+        assert _input_payload(variables)["content"] == "new overview"
+
+    def test_update_project_content_failure_raises(self) -> None:
+        ops, _ = _make_project_ops({"projectUpdate(": [{"projectUpdate": {"success": False}}]})
+        with pytest.raises(IssueBackendError, match="failed to update Linear project"):
+            ops.update_project_content("p-1", "x")
+
+    def test_project_or_none_hit_returns_parsed_dict(self) -> None:
+        ops, _ = _make_project_ops(
+            {"project(id": [{"project": {"id": "p-1", "content": "overview"}}]}
+        )
+        assert ops.project_or_none("p-1", "id content") == {"id": "p-1", "content": "overview"}
+
+    def test_project_or_none_entity_not_found_is_none(self) -> None:
+        ops, _ = _make_project_ops({"project(id": [_project_not_found()]})
+        assert ops.project_or_none("p-gone", "content") is None
+
+    def test_project_or_none_other_error_reraises(self) -> None:
+        ops, _ = _make_project_ops({"project(id": [_relation_validation_error()]})
+        with pytest.raises(IssueBackendError, match="Argument Validation Error"):
+            ops.project_or_none("p-1", "content")
+
+    def test_project_milestones_paginates_and_keys_by_name(self) -> None:
+        page1 = {
+            "project": {
+                "projectMilestones": _page(
+                    [{"id": "m-1", "name": "Phase 1"}], has_next=True, cursor="C"
+                )
+            }
+        }
+        page2 = {"project": {"projectMilestones": _page([{"id": "m-2", "name": "Phase 2"}])}}
+        ops, _ = _make_project_ops({"projectMilestones(": [page1, page2]})
+        assert ops.project_milestones("p-1") == [
+            {"id": "m-1", "name": "Phase 1"},
+            {"id": "m-2", "name": "Phase 2"},
+        ]
+
+    def test_project_issues_paginates(self) -> None:
+        page1 = {
+            "project": {
+                "issues": _page([{"id": "i-1", "identifier": "ENG-1"}], has_next=True, cursor="C")
+            }
+        }
+        page2 = {"project": {"issues": _page([{"id": "i-2", "identifier": "ENG-2"}])}}
+        ops, _ = _make_project_ops({"issues(first": [page1, page2]})
+        assert ops.project_issues("p-1") == [
+            {"id": "i-1", "identifier": "ENG-1"},
+            {"id": "i-2", "identifier": "ENG-2"},
+        ]
+
+    def test_create_project_milestone_returns_id(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "projectMilestoneCreate(": [
+                    {
+                        "projectMilestoneCreate": {
+                            "success": True,
+                            "projectMilestone": {"id": "m-1", "name": "Phase 1"},
+                        }
+                    }
+                ]
+            }
+        )
+        assert ops.create_project_milestone(project_id="p-1", name="Phase 1") == "m-1"
+        [(_, variables)] = _queries(fake, "projectMilestoneCreate(")
+        payload = _input_payload(variables)
+        assert payload == {"projectId": "p-1", "name": "Phase 1"}
+
+    def test_attach_issue_to_project_resolves_issue_uuid(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "UuidForIssue": [{"issue": {"id": "uuid-1"}}],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        ops.attach_issue_to_project(issue_id="ENG-1", project_id="p-1")
+        [(_, variables)] = _queries(fake, "issueUpdate(")
+        assert variables["id"] == "uuid-1"  # resolved via _uuid_for
+        assert _input_payload(variables)["projectId"] == "p-1"
+
+    def test_create_document_returns_id(self) -> None:
+        ops, fake = _make_project_ops(
+            {"documentCreate(": [{"documentCreate": {"success": True, "document": {"id": "d-1"}}}]}
+        )
+        assert ops.create_document(project_id="p-1", title="Overview", content="x") == "d-1"
+        [(_, variables)] = _queries(fake, "documentCreate(")
+        assert _input_payload(variables) == {
+            "projectId": "p-1",
+            "title": "Overview",
+            "content": "x",
+        }
+
+    def test_document_content_hit(self) -> None:
+        ops, _ = _make_project_ops({"document(id": [{"document": {"content": "overview"}}]})
+        assert ops.document_content_or_none("d-1") == "overview"
+
+    def test_document_content_not_found_is_none(self) -> None:
+        ops, _ = _make_project_ops({"document(id": [_project_not_found("Document")]})
+        assert ops.document_content_or_none("d-gone") is None
+
+    def test_create_issue_relation_fires_blocks_type(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "issueRelationCreate(": [
+                    {
+                        "issueRelationCreate": {
+                            "success": True,
+                            "issueRelation": {"id": "rel-1", "type": "blocks"},
+                        }
+                    }
+                ]
+            }
+        )
+        rel = ops.create_issue_relation(issue_id="uuid-a", related_issue_id="uuid-b")
+        assert rel == "rel-1"
+        [(_, variables)] = _queries(fake, "issueRelationCreate(")
+        assert _input_payload(variables) == {
+            "issueId": "uuid-a",
+            "relatedIssueId": "uuid-b",
+            "type": "blocks",
+        }
+
+    def test_create_issue_relation_validation_error_propagates(self) -> None:
+        # The divergent miss: NOT swallowed as not-found — it fails loud.
+        ops, _ = _make_project_ops({"issueRelationCreate(": [_relation_validation_error()]})
+        with pytest.raises(IssueBackendError, match="Argument Validation Error"):
+            ops.create_issue_relation(issue_id="uuid-a", related_issue_id="uuid-bogus")
+
+    def test_create_issue_relation_failure_raises(self) -> None:
+        ops, _ = _make_project_ops(
+            {"issueRelationCreate(": [{"issueRelationCreate": {"success": False}}]}
+        )
+        with pytest.raises(IssueBackendError, match="failed to create Linear issue relation"):
+            ops.create_issue_relation(issue_id="uuid-a", related_issue_id="uuid-b")
+
+    def test_issue_blocks_filters_to_blocks_type(self) -> None:
+        nodes: list[dict[str, object]] = [
+            {"type": "blocks", "relatedIssue": {"identifier": "ENG-2"}},
+            {"type": "related", "relatedIssue": {"identifier": "ENG-3"}},
+            {"type": "duplicate", "relatedIssue": {"identifier": "ENG-4"}},
+            {"type": "blocks", "relatedIssue": {"identifier": "ENG-5"}},
+        ]
+        ops, _ = _make_project_ops({"relations(first": [{"issue": {"relations": _page(nodes)}}]})
+        assert ops.issue_blocks("ENG-1") == ["ENG-2", "ENG-5"]
+
+    def test_issue_blocked_by_filters_to_blocks_type(self) -> None:
+        nodes: list[dict[str, object]] = [
+            {"type": "blocks", "issue": {"identifier": "ENG-9"}},
+            {"type": "related", "issue": {"identifier": "ENG-8"}},
+            {"type": "blocks", "issue": {"identifier": "ENG-7"}},
+        ]
+        ops, _ = _make_project_ops(
+            {"inverseRelations(first": [{"issue": {"inverseRelations": _page(nodes)}}]}
+        )
+        assert ops.issue_blocked_by("ENG-1") == ["ENG-9", "ENG-7"]
+
+    def test_create_issue_with_project_and_milestone_adds_keys(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "i-1", "identifier": "ENG-1", "url": "u"},
+                        }
+                    }
+                ],
+            }
+        )
+        ops.issue_ops._create_issue(
+            title="T", description="D", label_id="lbl-1", project_id="p-1", milestone_id="m-1"
+        )
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        payload = _input_payload(variables)
+        assert payload["projectId"] == "p-1"
+        assert payload["projectMilestoneId"] == "m-1"
+
+    def test_create_issue_without_project_omits_keys(self) -> None:
+        ops, fake = _make_project_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "i-1", "identifier": "ENG-1", "url": "u"},
+                        }
+                    }
+                ],
+            }
+        )
+        ops.issue_ops._create_issue(title="T", description="D", label_id="lbl-1")
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        payload = _input_payload(variables)
+        assert "projectId" not in payload
+        assert "projectMilestoneId" not in payload
