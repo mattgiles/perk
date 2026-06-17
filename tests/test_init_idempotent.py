@@ -452,6 +452,69 @@ def test_init_migrates_legacy_npm_perk_entry(tmp_path):
     assert "npm:@me/custom" in packages  # user entry preserved
 
 
+def test_init_reconciles_stale_perk_ref(tmp_path):
+    # #635: a consumer pinned to a stale tag must be reconciled forward to @main (ref-aware
+    # convergence), preserving list position and the user's unrelated packages.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {"packages": ["git:github.com/mattgiles/perk@v0.0.1", "npm:@me/custom"]}, indent=2
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "git:github.com/mattgiles/perk@main" in packages  # reconciled forward
+    assert "git:github.com/mattgiles/perk@v0.0.1" not in packages  # stale ref gone
+    assert "npm:@me/custom" in packages  # user entry preserved
+    # position preserved (rewritten in place, not appended)
+    assert packages.index("git:github.com/mattgiles/perk@main") < packages.index("npm:@me/custom")
+
+
+def test_init_reconciles_noref_perk_entry(tmp_path):
+    # #635: a no-ref perk entry reconciles to @main too (identity matches, spec differs).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["git:github.com/mattgiles/perk"]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "git:github.com/mattgiles/perk@main" in packages
+    assert "git:github.com/mattgiles/perk" not in packages
+
+
+def test_init_preserves_unrelated_git_package(tmp_path):
+    # #635: a user's *unrelated* git: package with its own ref is never reconciled (only perk's
+    # own identity is ever in the desired set).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["git:github.com/someone/other@v1.2.3"]}, indent=2) + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    assert "git:github.com/someone/other@v1.2.3" in packages  # untouched
+    assert "git:github.com/mattgiles/perk@main" in packages  # perk entry still added
+
+
+def test_init_ref_reconcile_is_idempotent(tmp_path):
+    # #635: once at @main, a re-run is a no-op (spec equals desired → no change).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    run_init(tmp_path, verify=False)
+    first = (pi_dir / "settings.json").read_text()
+    run_init(tmp_path, verify=False)
+    assert (pi_dir / "settings.json").read_text() == first  # converged → stable
+
+
 def test_init_rejects_malformed_settings(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()

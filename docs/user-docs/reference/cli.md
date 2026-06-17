@@ -59,7 +59,11 @@ never prompts (CI/supervisor); `--json` emits a machine-readable report.
 
 Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-converges drifted
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
-edits. The `environment` group reports required tools as `fail` when missing and optional tools
+edits. `--fix` also **reinstalls the perk extension's Node dependencies** in pi's git-clone of
+perk (under `.pi/git/`) when they are missing or partial — running `npm install` there (respecting
+your `.pi/settings.json` `npmCommand`) — and **reconciles perk's own git-package ref** in
+`.pi/settings.json` to the version this perk wants (e.g. a stale pinned `@v0.0.1` → `@main`). The
+`environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.
 This is a group whose bare invocation runs the health report.
 

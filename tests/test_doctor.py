@@ -1139,3 +1139,136 @@ def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
     checks = doctor.workflow_checks(git_repo, False, verify=True)
     runner_checks = [c for c in checks if c.name == "runner-prereqs"]
     assert len(runner_checks) == 1 and runner_checks[0].status == "info"
+
+
+# --- extension-deps check + repair gesture (#635) -------------------------------------------
+
+
+def _fake_clone(repo, deps, *, present):
+    """Build a fake pi git-clone with a package.json declaring ``deps`` (a list of names) and a
+    node_modules/<dep> dir for each name in ``present`` (a subset). Returns the clone root."""
+    import json as _json
+
+    clone = init.consumer_git_clone_root(repo)
+    clone.mkdir(parents=True)
+    (clone / "package.json").write_text(
+        _json.dumps({"dependencies": {name: "1.0.0" for name in deps}}), encoding="utf-8"
+    )
+    for name in present:
+        (clone / "node_modules" / name).mkdir(parents=True)
+    return clone
+
+
+def _ext_check(repo, self_repo=False):
+    return doctor_mod._extension_deps_check(repo, self_repo)
+
+
+def test_extension_deps_info_when_clone_absent(tmp_path):
+    check = _ext_check(tmp_path)
+    assert check.name == "extension-deps" and check.group == "package"
+    assert check.status == "info" and "first launch" in check.message
+
+
+def test_extension_deps_ok_when_all_present(tmp_path):
+    _fake_clone(tmp_path, ["yaml"], present=["yaml"])
+    check = _ext_check(tmp_path)
+    assert check.status == "ok"
+
+
+def test_extension_deps_fail_when_dep_missing(tmp_path):
+    _fake_clone(tmp_path, ["yaml"], present=[])
+    check = _ext_check(tmp_path)
+    assert check.status == "fail" and "yaml" in check.detail
+    assert check.remediation == "perk doctor --fix"
+
+
+def test_extension_deps_self_repo_is_noop(tmp_path):
+    # Even with a (would-be) broken clone, self-repo never fails — deps live in the dev tree.
+    _fake_clone(tmp_path, ["yaml"], present=[])
+    check = _ext_check(tmp_path, self_repo=True)
+    assert check.status == "info" and "self-repo" in check.message
+
+
+def test_extension_deps_warn_on_malformed_package_json(tmp_path):
+    clone = init.consumer_git_clone_root(tmp_path)
+    clone.mkdir(parents=True)
+    (clone / "package.json").write_text("{not json", encoding="utf-8")
+    check = _ext_check(tmp_path)
+    assert check.status == "warn" and "not verified" in check.message
+
+
+def test_fix_extension_deps_default_argv(tmp_path, monkeypatch):
+    _fake_clone(tmp_path, ["yaml"], present=[])
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append((argv, kw.get("cwd")))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(doctor_mod.subprocess, "run", fake_run)
+    fixed, errors = doctor_mod._fix_extension_deps(tmp_path)
+    assert errors == []
+    argv, cwd = calls[0]
+    assert argv == ["npm", "install", "--omit=dev"]
+    assert cwd == init.consumer_git_clone_root(tmp_path)
+    assert fixed and "installed extension deps" in fixed[0]
+
+
+def test_fix_extension_deps_respects_npm_command(tmp_path, monkeypatch):
+    import json as _json
+
+    _fake_clone(tmp_path, ["yaml"], present=[])
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir(parents=True, exist_ok=True)
+    (pi_dir / "settings.json").write_text(_json.dumps({"npmCommand": ["pnpm"]}), encoding="utf-8")
+    calls = []
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(doctor_mod.subprocess, "run", fake_run)
+    doctor_mod._fix_extension_deps(tmp_path)
+    assert calls[0] == ["pnpm", "install"]
+
+
+def test_fix_extension_deps_noop_when_all_present(tmp_path, monkeypatch):
+    _fake_clone(tmp_path, ["yaml"], present=["yaml"])
+    called = []
+    monkeypatch.setattr(doctor_mod.subprocess, "run", lambda *a, **k: called.append(a) or None)
+    fixed, errors = doctor_mod._fix_extension_deps(tmp_path)
+    assert fixed == [] and errors == [] and called == []  # idempotent: nothing to install
+
+
+def test_fix_extension_deps_reports_nonzero_loudly(tmp_path, monkeypatch):
+    _fake_clone(tmp_path, ["yaml"], present=[])
+
+    def fake_run(argv, **kw):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="npm boom\n")
+
+    monkeypatch.setattr(doctor_mod.subprocess, "run", fake_run)
+    fixed, errors = doctor_mod._fix_extension_deps(tmp_path)
+    assert fixed == [] and errors and "npm boom" in errors[0]
+
+
+def test_ref_drift_detected_and_fixed(git_repo):
+    # #635: a stale pinned perk ref surfaces as a settings-wiring fail; --fix reconciles to @main.
+    import json as _json
+
+    _scaffold(git_repo)
+    settings_path = git_repo / ".pi" / "settings.json"
+    settings = _json.loads(settings_path.read_text())
+    settings["packages"] = [
+        "git:github.com/mattgiles/perk@v0.0.1"
+        if isinstance(p, str) and "mattgiles/perk" in p
+        else p
+        for p in settings["packages"]
+    ]
+    settings_path.write_text(_json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    assert "settings-wiring" in {c.name for c in report.checks if c.status == "fail"}
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert fixed.healthy
+    packages = _json.loads(settings_path.read_text())["packages"]
+    assert "git:github.com/mattgiles/perk@main" in packages
+    assert "git:github.com/mattgiles/perk@v0.0.1" not in packages

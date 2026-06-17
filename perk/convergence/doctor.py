@@ -16,6 +16,7 @@ Principles (T6, from the erk prior-art pass):
 """
 
 import json
+import subprocess
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -833,6 +834,84 @@ def _subagent_engine_check(root: Path) -> Check:
     )
 
 
+def _missing_extension_deps(clone: Path) -> tuple[list[str], str | None]:
+    """Return the declared deps absent under ``clone/node_modules``, or a read-error reason.
+
+    Reads ``clone/package.json`` ``dependencies`` and checks each name resolves to a
+    ``clone/node_modules/<dep>`` dir. Returns ``(missing, None)`` on success (``missing`` empty
+    when all present) or ``([], reason)`` when ``package.json`` is unreadable/malformed (no silent
+    pass). Assumes ``clone`` exists (the caller checks).
+    """
+    package_json = clone / "package.json"
+    try:
+        data = json.loads(package_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"could not read {package_json.name}: {exc}"
+    if not isinstance(data, dict):
+        return [], f"{package_json.name} is not a JSON object"
+    deps = data.get("dependencies")
+    if deps is None:
+        return [], None
+    if not isinstance(deps, dict):
+        return [], f"{package_json.name} `dependencies` is not an object"
+    node_modules = clone / "node_modules"
+    missing = [name for name in deps if not (node_modules / name).exists()]
+    return missing, None
+
+
+def _extension_deps_check(root: Path, self_repo: bool) -> Check:
+    """The perk extension's Node deps are resolvable in pi's git-package clone (#635).
+
+    Pure filesystem (no shell/network) so it runs under both ``verify`` modes. pi loads the perk
+    extension from its git-package clone (``.pi/git/<host>/<path>``), which has no ``node_modules``
+    unless pi installed it — and pi's ``installGit`` skips the install when the clone already
+    exists at the pinned ref, so a clone with a missing/partial ``node_modules`` strands the
+    extension on an unresolvable ``import { parse } from "yaml"``. Outcomes:
+
+    - **self_repo** → ``info`` no-op (the extension *is* the repo; its deps live in the repo-root
+      ``node_modules`` managed by the dev toolchain, not a git clone).
+    - **clone dir absent** → ``info`` (a fresh repo — pi's fresh-clone path installs deps on first
+      launch; not a fail).
+    - **clone present, a declared dep missing** → ``fail`` listing the missing deps.
+    - **clone present, all deps present** → ``ok``.
+    - **unreadable/malformed ``package.json``** → ``warn`` with the reason (no silent pass).
+    """
+    if self_repo:
+        return Check(
+            "extension-deps",
+            "package",
+            "info",
+            "extension deps managed by the dev toolchain (self-repo)",
+        )
+    clone = init.consumer_git_clone_root(root)
+    if not clone.is_dir():
+        return Check(
+            "extension-deps",
+            "package",
+            "info",
+            "extension not yet cloned; pi installs deps on first launch",
+        )
+    missing, reason = _missing_extension_deps(clone)
+    if reason is not None:
+        return Check(
+            "extension-deps",
+            "package",
+            "warn",
+            "extension deps not verified",
+            reason,
+        )
+    if missing:
+        return Check(
+            "extension-deps",
+            "package",
+            "fail",
+            f"{len(missing)} extension dep(s) not installed",
+            ", ".join(missing),
+            "perk doctor --fix",
+        )
+    return Check("extension-deps", "package", "ok", "extension deps installed")
+
+
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     """The fail-level skills-delivery substrate check (#289 — skills delivery is load-bearing).
 
@@ -962,6 +1041,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_providers_check(root))
     checks.append(_issues_check(root))
     checks.append(_subagent_engine_check(root))
+    checks.append(_extension_deps_check(root, self_repo))
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))
     return checks
@@ -1058,6 +1138,82 @@ def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
     return fixed, errors
 
 
+# A generous timeout: an `npm install` for the extension can be slow on a cold cache.
+_EXTENSION_DEPS_INSTALL_TIMEOUT_S = 300
+
+
+def _npm_install_argv(root: Path) -> list[str]:
+    """The npm install argv mirroring pi's ``getGitDependencyInstallArgs``.
+
+    Respects ``.pi/settings.json`` ``npmCommand`` exactly like pi: a non-empty list →
+    ``[*npmCommand, "install"]``; else ``["npm", "install", "--omit=dev"]``. A missing/malformed
+    settings file degrades to the default (the convergence checks own settings validity).
+    """
+    settings_path = root / ".pi" / "settings.json"
+    npm_command: object = None
+    if settings_path.is_file():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            settings = {}
+        if isinstance(settings, dict):
+            npm_command = settings.get("npmCommand")
+    if (
+        isinstance(npm_command, list)
+        and npm_command
+        and all(isinstance(x, str) for x in npm_command)
+    ):
+        return [*npm_command, "install"]
+    return ["npm", "install", "--omit=dev"]
+
+
+def _fix_extension_deps(root: Path) -> tuple[list[str], list[str]]:
+    """The verify-gated `--fix` gesture: reinstall the perk extension's Node deps in pi's clone.
+
+    Modeled on ``init.sync_skills`` / ``_fix_linear_labels`` (re-derives its own conditions,
+    idempotent, reports loudly). Acts only when the clone exists AND at least one declared
+    dependency is missing under ``node_modules`` (else a no-op ``([], [])``). Runs one
+    ``npm install`` (mirroring pi's ``getGitDependencyInstallArgs`` via :func:`_npm_install_argv`)
+    in the clone root. Returns ``(fixed, errors)`` — a non-zero exit / timeout / OSError lands
+    loudly on ``errors``, never swallowed.
+    """
+    clone = init.consumer_git_clone_root(root)
+    if not clone.is_dir():
+        return [], []
+    missing, reason = _missing_extension_deps(clone)
+    if reason is not None or not missing:
+        return [], []
+    argv = _npm_install_argv(root)
+    rel = _clone_rel(root, clone)
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=clone,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_EXTENSION_DEPS_INSTALL_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return [], [
+            f"{rel}: `{' '.join(argv)}` timed out after {_EXTENSION_DEPS_INSTALL_TIMEOUT_S}s"
+        ]
+    except OSError as exc:
+        return [], [f"{rel}: `{' '.join(argv)}` could not run: {exc}"]
+    if proc.returncode != 0:
+        stderr = "\n".join((proc.stderr or "").strip().splitlines()[:5]) or "(no stderr)"
+        return [], [f"{rel}: `{' '.join(argv)}` exited {proc.returncode}:\n{stderr}"]
+    return [f"{rel}: installed extension deps ({' '.join(argv)})"], []
+
+
+def _clone_rel(root: Path, clone: Path) -> str:
+    """The clone path relative to ``root`` for change/error lines (absolute on a surprise miss)."""
+    try:
+        return str(clone.relative_to(root))
+    except ValueError:
+        return str(clone)
+
+
 def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list[str], list[str]]:
     fixed: list[str] = []
     errors: list[str] = []
@@ -1108,6 +1264,12 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
             linear_fixed, linear_errors = _fix_linear_labels(root)
             fixed.extend(linear_fixed)
             fix_errors.extend(linear_errors)
+            # The extension-deps repair gesture (verify-gated like sync_skills — it shells npm).
+            # Re-derives its own conditions (idempotent); the post-fix re-verify below then
+            # re-runs `_extension_deps_check`, so the exit code reflects the post-fix state.
+            deps_fixed, deps_errors = _fix_extension_deps(root)
+            fixed.extend(deps_fixed)
+            fix_errors.extend(deps_errors)
         if fixed or fix_errors:
             checks = _build_checks(root, self_repo, verify=verify)
     return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo, fix_errors=fix_errors)

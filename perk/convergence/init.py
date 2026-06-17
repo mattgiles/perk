@@ -493,6 +493,21 @@ def _package_identity(entry: object) -> str | None:
     return _npm_name(spec) or _git_identity(spec) or spec
 
 
+def consumer_git_clone_root(repo_root: Path) -> Path:
+    """The root of pi's git-package clone for perk, derived from ``GIT_PACKAGE``.
+
+    pi clones a ``git:`` package to ``.pi/git/<host>/<path>`` (docs/packages.md). Deriving the
+    path from ``GIT_PACKAGE`` (rather than hardcoding segments) keeps every consumer of the clone
+    location — the run-worker entrypoint resolver and the ``extension-deps`` doctor check — in
+    lockstep with the package URL, so a URL change cannot silently desync them.
+    """
+    remainder = GIT_PACKAGE.removeprefix("git:")
+    clone = repo_root / ".pi" / "git"
+    for segment in remainder.split("/"):
+        clone = clone / segment
+    return clone
+
+
 def _desired_packages(self_repo: bool) -> list[str]:
     own = ".." if self_repo else f"{GIT_PACKAGE}@main"
     return [own, *BORROWED_PACKAGES]
@@ -500,13 +515,26 @@ def _desired_packages(self_repo: bool) -> list[str]:
 
 def _merge_static_packages(
     packages: list[object], desired: list[str]
-) -> tuple[list[object], list[str]]:
-    """Append-only merge of the static perk+borrowed package set; returns (packages, added)."""
+) -> tuple[list[object], list[str], list[str]]:
+    """Merge the static perk+borrowed package set; returns (packages, added, updated).
+
+    Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles perk's own
+    `git:` ref *forward*: when a desired `git:` identity already exists as a **string-form** entry
+    whose full spec differs from the desired spec (e.g. a stale pinned `@v0.0.1`, or a no-ref
+    `git:github.com/mattgiles/perk`), the entry is **rewritten in place** (list position
+    preserved) to the desired spec instead of being skipped. Only perk's own identity is ever in
+    ``desired`` (`_desired_packages`), so this can only ever touch perk's own package — a user's
+    other `git:` entries are never in ``desired`` and stay append-only/untouched. Object-form
+    entries are left alone (perk never writes object-form for its own package — Invariant 2;
+    a hand-written object-form perk entry is a documented limitation). Idempotent: once at the
+    desired spec, the entry equals it → no change.
+    """
     have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
     have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
     have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
 
     added: list[str] = []
+    updated: list[str] = []
     for want in desired:
         if want.startswith("npm:"):
             name = _npm_name(want)
@@ -516,7 +544,18 @@ def _merge_static_packages(
             have_npm.add(name)
         elif want.startswith("git:"):
             identity = _git_identity(want)
-            if identity is None or identity in have_git:
+            if identity is None:
+                continue
+            if identity in have_git:
+                # Identity present — reconcile a stale ref forward (string-form entries only).
+                for i, entry in enumerate(packages):
+                    if (
+                        isinstance(entry, str)
+                        and _git_identity(entry) == identity
+                        and entry != want
+                    ):
+                        packages[i] = want
+                        updated.append(f"updated {entry} -> {want}")
                 continue
             packages.append(want)
             have_git.add(identity)
@@ -526,7 +565,7 @@ def _merge_static_packages(
             packages.append(want)
             have_local.add(want)
         added.append(want)
-    return packages, added
+    return packages, added, updated
 
 
 def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
@@ -555,7 +594,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     # Migration: strip legacy npm perk entries written by earlier perk init runs.
     packages = [p for p in packages if not (isinstance(p, str) and p.startswith("npm:@perk/pi"))]
 
-    packages, added = _merge_static_packages(packages, _desired_packages(self_repo))
+    packages, added, updated = _merge_static_packages(packages, _desired_packages(self_repo))
 
     # Provider-driven two-directional wiring (Node 2.1). Composes on top of the static layer
     # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT
@@ -586,6 +625,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     removed = [*provider_changes.removed, *linear_changes.removed]
     if removed:
         parts.append(f"removed {', '.join(removed)}")
+    parts.extend(updated)
     parts.extend(compaction_changes)
     return [f".pi/settings.json: {'; '.join(parts)}" if parts else ".pi/settings.json: normalized"]
 
