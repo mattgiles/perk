@@ -59,6 +59,15 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
   table re-renders from it) **AND** extend the per-node landed-narrative — both tied to the concrete
   PR diff scope (here: the diff touched only the prompt helpers, never the store-routing), not the
   original framing.
+- **The landing-log recipe (the safe single-entry append).** The Reconcilable prose is a per-node
+  **landing log**: reconciling a just-landed node = **add one "Node X.Y landed (PR #n)" entry after
+  the prior one** and let it resolve earlier entries' forward-references *collectively* — do **not**
+  rewrite older entries (keep-and-annotate, don't rewrite history). Because the reconcile call
+  **overwrites the whole region**, the safe mechanical recipe is: extract the exact current region
+  between the bare reconcilable markers, insert one entry programmatically, **`difflib` to prove
+  only-additions** (1 line added / 0 removed), then pass the full region as `prose`. Node
+  scope/naming drift still goes through the **node-description path** (re-renders the mechanical table
+  while preserving status/pr) — not the prose region.
 
 ## Cross-references
 

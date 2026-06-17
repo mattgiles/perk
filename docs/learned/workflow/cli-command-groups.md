@@ -314,6 +314,17 @@ pure relocation (`SectionedAliasGroup` + `mark_kind`, Launchers/Workers sections
 alias); `plan`/`pr` use the hybrid `PlanGroup`/`pr` shapes with `MergedCommand` for the merged verbs.
 Doc/test reconciliation (node 4.1) deleted the brittle cli.md guard for the structural guards.
 
+## The `objective doctor` worker (#626)
+
+`perk objective doctor <id> [--fix] [--dry-run] [--json]` (`perk/cli/commands/objective/doctor_cmd.py`)
+is the manifest-drift detect/repair worker (the engine lives in `objective-store.md`). Its **exit
+codes** follow the report-vs-abort split: a detect or fix that *completes* → **0** — **even an
+ERROR-severity report-only drift is a clean report** (drift was successfully *detected*); an
+**aborted** repair (a failed write) → **1**; not-a-repo → **2**. The `--json` `fix.failed.error`
+maps from an **optional `error` field** on the repair-action shape (`applied` / would-apply entries
+omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECTED_SURFACE` in
+`tests/test_cli_parity_smoke.py` **alphabetically within its group** (`("doctor", ("doc",))`).
+
 ## Warm-plane ids are decoupled from cold spellings
 
 A CLI regrouping does not ripple into the warm plane: `/learn-docs`, `command:learn-docs`,

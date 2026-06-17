@@ -179,9 +179,10 @@ UUID.)
 
 ### Adding a Protocol method now means THREE implementers
 
-The `ObjectiveStore` Protocol grew **6 → 9 → 10** methods across Phase 3/4: Phase 3 added
-`save_node_plan` / `close_objective` / `post_status_update`; Phase 4 (#614) added
-`add_objective_node`. There are now **three** concrete implementers — GitHub, the dormant
+The `ObjectiveStore` Protocol grew **6 → 9 → 10 → 12** methods across Phase 3/4: Phase 3 added
+`save_node_plan` / `close_objective` / `post_status_update`; Phase 4 added
+`add_objective_node` (#614) then `detect_objective_drift` / `repair_objective_drift` (#626). There
+are now **three** concrete implementers — GitHub, the dormant
 issue-backed `LinearObjectiveStore`, and the **live** project-backed `LinearProjectObjectiveStore`
 (`linear-backend.md`). **Durable rule: adding any Protocol method now means writing THREE
 implementers**, all enforced by ty static conformance — the `_make_store` / `_make_project_store`
@@ -189,7 +190,9 @@ typed-annotation bindings plus `_FakeObjectiveStore` in `tests/test_objective_st
 Phase-2-era plan authored against a 2-backend world **under-counts** this after a rebase pulls in the
 third store (the #614 plan predated `LinearProjectObjectiveStore` and hit exactly this expansion); the
 Protocol-append rebase conflict is purely additive (both parties append after `update_objective_body`
-→ keep both).
+→ keep both). The #626 growth carries its own trap: CI's **whole-repo `uv run ty check` caught the
+stale `_FakeObjectiveStore`** when `ty check perk/` alone did **not** — the conformance fake lives
+under `tests/`, so scope the type check to the whole repo, never just `perk/`.
 
 ### `add_objective_node`: the re-render-vs-materialize split
 
@@ -216,10 +219,57 @@ already-marked node set — the same posture as the existing close fail-open.
 ### The manifest unifies both backends (the #609 design decision)
 
 GitHub's `objective-roadmap` YAML block **already IS its manifest** (atomically edited → trivially-empty
-drift report), so the prospective `detect/repair_objective_drift` methods carry real behavior **only**
+drift report), so the `detect/repair_objective_drift` methods carry real behavior **only**
 on the project store (which derives its roadmap live from node-issues — no baseline to diff) and no-op
 everywhere else — the same precedent as the no-op family above. Cross-ref `linear-backend.md` for the
 manifest's storage shape (a visible inline-code block in the project overview).
+
+## The manifest + drift-detection/repair design (#626)
+
+The #609 design (`docs/planning/objective-repair.md`) landed: persist an authoritative manifest,
+detect drift = `diff(manifest, observed)`, repair only the safe/unambiguous cases.
+
+### The manifest pattern (structural identity, not live state)
+
+The `objective-manifest` block (primitives in `perk/objective.py`) pins each node's
+**id/slug/description + explicit `depends_on` (always a list)** plus a `phases` map of pinned
+milestone names. `status`/`pr` are **deliberately excluded** — they are live/observed, not identity.
+Parsing is **three-state**: absent / malformed / valid. The block lives in the overview **between**
+the `objective-header` block and the Reconcilable region, inline-code (Linear-safe). It is a **no-op
+on GitHub + issue-backed stores** (their roadmap edits are atomic with the body → no divergence
+surface), extending the `save_node_plan→None` / `post_status_update→False` no-op family above.
+
+### Pure engine split
+
+`perk/objective_drift.py` is fully **offline** (no network/clock/Click): the **store** builds an
+observed snapshot (the one network step), then the pure `detect_drift` returns a report of conditions
+each carrying a stable **code / severity / target / `repairable` flag**. The test suite is one case
+per code; a **malformed or absent manifest short-circuits** (no baseline to diff).
+
+### Authority precedence — the subtle invariant
+
+Who owns phase names **depends on the operation**:
+
+- **add-node:** the **manifest** is authority for an **existing** phase — attach the node to the
+  manifest-pinned milestone, **never re-derive** from externally-editable overview prose (the
+  overview only *seeds* a brand-new phase).
+- **reconcile:** the **overview** is authority — refresh the pins to match it exactly, **including
+  reverting to the `Phase N` default** when a header is removed.
+
+Consistent framing: manifest authoritative on add-node *reads*, overview authoritative on reconcile
+*writes*. (A first attempt guarded against the default-clobber on reconcile — **wrong**; reconcile
+tracks the overview.)
+
+### Graph reconstruction with intra-batch deps (the deferred-edge sweep)
+
+Detection can only diff a dependency **between two observed nodes** — it can't diff an edge while an
+endpoint is absent. So the recreate path **owns every edge touching a recreated node in BOTH
+directions** (the node's own `depends_on` AND an already-existing dependent's edge to it). The robust
+shape: **create all missing node-issues first**, then **one comprehensive post-loop sweep** restores
+every manifest edge Linear lacks — skipping edges already present and observed↔observed (owned by the
+explicit dependency repair, so no double-create), failing loud on a genuinely unresolvable endpoint.
+**General lesson:** when repairs create nodes other repairs depend on, **split node-creation from
+edge-creation** and drive edges off the **full manifest**, not per-node.
 
 ## Deferred-doc staleness is intentional, tracked
 
