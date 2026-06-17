@@ -165,7 +165,10 @@ committed `.pi/perk.toml` (structurally preventing a committed secret).
 
 An exported `LINEAR_API_KEY` environment variable **wins** over this config (the config is a
 fallback). When set here, perk seeds the launched `pi` session's environment with the key so the
-borrowed in-session `linear_*` tools authenticate too. Malformed local TOML is ignored (fail-soft).
+borrowed in-session `linear_*` tools authenticate too. The key is read from your **main checkout**
+at launch — since the file is gitignored it is never copied into a worktree, so this env-seed is
+what carries the key into the worktree session and any tools/workers it spawns (they inherit the
+seeded environment). Malformed local TOML is ignored (fail-soft).
 
 ```toml
 # .pi/perk.local.toml (gitignored)

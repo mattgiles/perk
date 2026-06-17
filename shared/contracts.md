@@ -2904,7 +2904,11 @@ The config read is local-file-only (`config.load_local_linear_api_key`, the inve
 bridge it: the Python clients pass `linear.client_from_env(repo_root=…)` (env-first, config
 fallback), and `launch_stage` seeds the launched session's env with the local key (env wins) so the
 borrowed in-session `linear_*` tools and any spawned `perk <stage> --json` cold-door worker (which
-inherit the session env) authenticate. This is a deliberate, documented relaxation of the
+inherit the session env) authenticate. The local file is read from the **main checkout** at launch
+(the env dict is built before `os.chdir(worktree)`); because it is gitignored it is never copied
+into the linked worktree, so the env-seed is precisely the bridge that carries the key into the
+worktree-resident session and its cold-door workers — those consumers read it from the inherited
+env, never from a `perk.local.toml` in the worktree. This is a deliberate, documented relaxation of the
 "secrets in the environment only" rule: the secret may live in the gitignored local file, never a
 version-controlled one. **Python-plane-only** — the TS plane reads no Linear key, so there is no
 cross-plane TS mirror (the `launch_stage` env-seed is what carries the key into the TS session).
