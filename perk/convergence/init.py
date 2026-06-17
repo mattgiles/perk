@@ -275,12 +275,14 @@ root = ".worktrees"
 
 # Issue backend (optional) — where canonical plan/learn/objective issues live.
 # "github" (the default when unset) and "linear" are supported. Selecting
-# "linear" requires `team` (the Linear team key, e.g. "ENG") and the
-# LINEAR_API_KEY environment variable (a personal API key — never stored in
-# config). Both keys are committed-only: read from THIS file, never from the
-# perk.local.toml overlay (a per-user override would fragment the canonical
-# issue store). `perk init` converges the npm:pi-mono-linear Pi package when
-# linear is selected (and removes it when deselected).
+# "linear" requires `team` (the Linear team key, e.g. "ENG") and a personal
+# LINEAR_API_KEY — set it in the environment, or in the gitignored
+# .pi/perk.local.toml [linear] api_key (an exported env var wins); never in
+# THIS committed file. The `backend`/`team` keys below are committed-only: read
+# from THIS file, never from the perk.local.toml overlay (a per-user override
+# would fragment the canonical issue store). `perk init` converges the
+# npm:pi-mono-linear Pi package when linear is selected (and removes it when
+# deselected).
 #
 # [issues]
 # backend = "linear"
@@ -295,6 +297,13 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 #
 # A local [[bindings]] array REPLACES the committed [[bindings]] array wholesale
 # (whole-array override, not element-wise merge — unlike scalar leaf-merge).
+#
+# Linear API key (optional) — a personal Linear API key, used by perk's Linear
+# issue backend AND the in-session linear_* tools. ONLY read from this gitignored
+# file (never the committed perk.toml). An exported LINEAR_API_KEY env var wins.
+#
+# [linear]
+# api_key = "lin_api_…"
 """
 
 # The post-init handoff — an agent-readable markdown on-ramp (distinct from the T3/T4
@@ -1363,7 +1372,7 @@ def _linear_readiness(root: Path) -> LinearReport | None:
             "set the Linear team key in .pi/perk.toml",
         )
     try:
-        client = linear.client_from_env()
+        client = linear.client_from_env(repo_root=root)
     except IssueBackendError as exc:
         return LinearReport(readiness=None, error=str(exc))
     readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)

@@ -5,6 +5,7 @@ tested with explicit ``env={...}`` mappings, never the real environ.
 """
 
 import json
+from pathlib import Path
 
 import httpx
 import pytest
@@ -232,3 +233,27 @@ class TestConstructorAndEnv:
     def test_client_from_env_returns_a_working_client(self) -> None:
         client = client_from_env(env={"LINEAR_API_KEY": "lin_api_x"})
         assert isinstance(client, LinearClient)
+
+    @staticmethod
+    def _write_local_key(repo: Path, key: str) -> None:
+        pi = repo / ".pi"
+        pi.mkdir(parents=True, exist_ok=True)
+        (pi / "perk.local.toml").write_text(f'[linear]\napi_key = "{key}"\n', encoding="utf-8")
+
+    def test_client_from_env_falls_back_to_local_config(self, tmp_path: Path) -> None:
+        self._write_local_key(tmp_path, "lin_api_local")
+        client = client_from_env(env={}, repo_root=tmp_path)
+        assert isinstance(client, LinearClient)
+
+    def test_client_from_env_env_wins_over_local_config(self, tmp_path: Path) -> None:
+        self._write_local_key(tmp_path, "lin_api_local")
+        client = client_from_env(env={"LINEAR_API_KEY": "lin_api_env"}, repo_root=tmp_path)
+        assert client._api_key == "lin_api_env"
+
+    def test_client_from_env_repo_root_none_empty_env_raises(self) -> None:
+        with pytest.raises(IssueBackendError, match="Security & access"):
+            client_from_env(env={}, repo_root=None)
+
+    def test_client_from_env_repo_root_without_key_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(IssueBackendError, match="LINEAR_API_KEY is not set"):
+            client_from_env(env={}, repo_root=tmp_path)

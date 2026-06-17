@@ -277,7 +277,7 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
                 '[issues] team is required when backend = "linear" — '
                 "set the Linear team key in .pi/perk.toml"
             )
-        client = linear.client_from_env()
+        client = linear.client_from_env(repo_root=repo_root)
         return linear_backend.LinearProjectObjectiveStore(
             client, team_key=team, repo_root=repo_root
         )

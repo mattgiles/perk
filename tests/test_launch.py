@@ -447,6 +447,46 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
 
 
+def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
+    """Drive a local implement launch, returning the env handed to ``os.execvpe``."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    captured: dict[str, dict[str, str]] = {}
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr(
+        "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
+    )
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    return captured["env"]
+
+
+def test_launch_seeds_linear_key_from_local_config_when_env_absent(git_repo, monkeypatch):
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    pi = git_repo / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
+    env = _launch_capturing_env(git_repo, monkeypatch)
+    assert env["LINEAR_API_KEY"] == "lin_api_local"
+
+
+def test_launch_exported_linear_key_wins_over_local_config(git_repo, monkeypatch):
+    monkeypatch.setenv("LINEAR_API_KEY", "lin_api_env")
+    pi = git_repo / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
+    env = _launch_capturing_env(git_repo, monkeypatch)
+    assert env["LINEAR_API_KEY"] == "lin_api_env"
+
+
 class _Result:
     def __init__(self, returncode: int) -> None:
         self.returncode = returncode

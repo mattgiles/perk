@@ -222,6 +222,35 @@ def load_committed_issues_team(repo_root: Path) -> str | None:
     return parse_issues_team(raw.get("issues"))
 
 
+def load_local_linear_api_key(repo_root: Path) -> str | None:
+    """Read `[linear] api_key` from **local** `.pi/perk.local.toml` only (the inverse of the
+    ``load_committed_*`` readers, which read the committed file only).
+
+    A Linear personal API key is a secret, so it is read **only** from the gitignored
+    ``perk.local.toml`` — never the committed ``perk.toml`` — structurally preventing a committed
+    secret. Not threaded through the merged ``Config`` dataclass for the same reason (that would
+    make it readable from the committed file and widen the surface). Returns the stripped string
+    when ``[linear]`` is a table and ``api_key`` is a non-blank ``str``; otherwise ``None`` (absent
+    table/key, ill-typed, or blank).
+
+    **Fail-soft on malformed TOML**: a ``tomllib.TOMLDecodeError`` is caught and yields ``None``.
+    This deliberately diverges from the ``load_committed_*`` readers, which *propagate*
+    ``TOMLDecodeError`` (the config check maps it): a best-effort secret seed must never crash a
+    command, and malformed ``perk.local.toml`` is not surfaced anywhere else today.
+    """
+    try:
+        raw = _read_toml(repo_root / ".pi" / LOCAL_CONFIG_FILENAME)
+    except tomllib.TOMLDecodeError:
+        return None
+    table = raw.get("linear")
+    if not isinstance(table, dict):
+        return None
+    value = table.get("api_key")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
 def _parse_providers_selection(raw: Any) -> dict[str, str | None]:
     """Read the flat `[providers]` table into a per-seam selection (string values).
 

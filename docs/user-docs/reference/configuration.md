@@ -140,8 +140,9 @@ Where canonical plan / learn / objective issues live. **Committed-only** — rea
 | `backend` | string | `github` | `"github"` or `"linear"`. |
 | `team` | string | _(none)_ | The Linear team key (e.g. `"ENG"`); required when `backend = "linear"`. |
 
-Selecting `linear` also requires the `LINEAR_API_KEY` environment variable (a personal API key —
-never stored in config). This is **config-key reference depth only**; the Linear backend reference
+Selecting `linear` also requires a personal `LINEAR_API_KEY` — set it in the environment **or** in
+the gitignored `.pi/perk.local.toml` `[linear] api_key` (see [`[linear]`](#linear) below); never in
+this committed file. This is **config-key reference depth only**; the Linear backend reference
 (auth, labels, identifiers, maturity) is in the
 [providers & issue backends reference](./providers-and-backends.md#issue-backend--linear-reference),
 and the recipe is [How to switch the issue backend to Linear](../how-to/switch-to-linear.md).
@@ -150,6 +151,29 @@ and the recipe is [How to switch the issue backend to Linear](../how-to/switch-t
 [issues]
 backend = "linear"
 team = "ENG"
+```
+
+### `[linear]`
+
+A personal Linear API key, used by **both** perk's Linear issue backend and the in-session
+`linear_*` tools. **Gitignored-local-only** — read from `.pi/perk.local.toml`, **never** the
+committed `.pi/perk.toml` (structurally preventing a committed secret).
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `api_key` | string | _(none)_ | A personal Linear API key (linear.app → Settings → Security & access). |
+
+An exported `LINEAR_API_KEY` environment variable **wins** over this config (the config is a
+fallback). When set here, perk seeds the launched `pi` session's environment with the key so the
+borrowed in-session `linear_*` tools authenticate too. The key is read from your **main checkout**
+at launch — since the file is gitignored it is never copied into a worktree, so this env-seed is
+what carries the key into the worktree session and any tools/workers it spawns (they inherit the
+seeded environment). Malformed local TOML is ignored (fail-soft).
+
+```toml
+# .pi/perk.local.toml (gitignored)
+[linear]
+api_key = "lin_api_…"
 ```
 
 ### `[subagents]`

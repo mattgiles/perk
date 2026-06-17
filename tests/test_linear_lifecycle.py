@@ -420,8 +420,8 @@ def _scaffold_repo(root: Path) -> None:
 
 
 def _patch_linear(monkeypatch: pytest.MonkeyPatch, ws: FakeLinearWorkspace) -> None:
-    # Late-bound: resolve_issue_backend calls linear.client_from_env() at call time.
-    monkeypatch.setattr(linear, "client_from_env", lambda: ws)
+    # Late-bound: resolve_issue_backend calls linear.client_from_env(repo_root=...) at call time.
+    monkeypatch.setattr(linear, "client_from_env", lambda *a, **k: ws)
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
     )

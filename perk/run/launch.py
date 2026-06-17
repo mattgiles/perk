@@ -30,7 +30,7 @@ from perk.run import runner
 from perk.state import cache, run_id
 from perk.substrate import git
 from perk.substrate.binding_delivery import render_cold_bindings
-from perk.substrate.config import Config
+from perk.substrate.config import Config, load_local_linear_api_key
 from perk.substrate.git import GitError
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage
@@ -521,6 +521,15 @@ def launch_stage(
     if resolved.created and config.worktree_setup:
         run_worktree_setup(wt, config.worktree_setup)
     env = {**_NPM_QUIET_ENV, **os.environ, "PERK_RUN_ID": rid}
+    # Seed LINEAR_API_KEY from the gitignored `.pi/perk.local.toml` `[linear] api_key` so the
+    # borrowed in-session `linear_*` tools and any `perk <stage> --json` cold-door worker the
+    # session spawns (they inherit this env) can authenticate. Env wins: only fill it when the
+    # environment does not already provide the key. Best-effort (fail-soft reader) — reached only
+    # on the local path (`--dry-run`/`--remote` returned earlier).
+    if not os.environ.get("LINEAR_API_KEY", "").strip():
+        local_linear_key = load_local_linear_api_key(repo_root)
+        if local_linear_key is not None:
+            env["LINEAR_API_KEY"] = local_linear_key
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
