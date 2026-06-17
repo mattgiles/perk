@@ -195,6 +195,21 @@ can only be harness-tested for arms that never reach a dialog (headless / bad_in
 bridge); dialog arms test via an extracted core + a scripted UI fake — see
 `workflow/plan-review-flow.md` for the realized recipe.
 
+## Vendored-extension test/infra facts (#628)
+
+Vendoring a TS-only feature surfaced the offline-test scaffolding facts:
+
+- **Run one node:test file directly with `node --test <file>`** (Node 26 native TS) — there is **NO**
+  `extension/testing/register.ts` import hook (that path does not exist; `--import` it and you get
+  `ERR_MODULE_NOT_FOUND`). The full suite is `node --test "extension/**/*.test.ts"`.
+- **A registration smoke** binds the real extension via the harness's
+  `loadPerkSession({ cwd: scaffoldRepo() })` and asserts the command registers — proving
+  `session_start` doesn't throw, **fully offline**.
+- **The extracted-core pattern** keeps glyph/color/width-sweep assertions offline: move pure helpers
+  into a `core.ts`, test them with a **tagging theme fake** (`fg:(c,t)=>...`) for glyph+color and a
+  **seeded `Math.random`** for a deterministic random pick (export the pick helper + message list
+  purely so the test can seed it).
+
 ## Sources
 
 - `@earendil-works/pi-coding-agent` dist (`agent-session.js`, `dist/index.d.ts`) — verified at

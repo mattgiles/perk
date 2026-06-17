@@ -99,6 +99,12 @@ delivery is whole-directory sync, and the launch prompt naming the variant (e.g.
 `implementing perk plan <backend> #<id>`) is the routing signal the model uses to pick
 `backends/<backend>.md`. See `linear-backend.md` for the backend-aware prompt side.
 
+**Confirmed again by a bundled upstream skill (#617):** the worktree skill-materialization
+(`materialize_skills`) symlinks the **whole skill dir per-skill**, so a skill's `references/` files
+(e.g. `ast-grep/references/rule_reference.md`) travel into worktrees **for free** — no manifest or
+force-include entry. And **no skill is added to the wheel**: skills ship via the skills CLI, not a
+`pyproject` force-include. The `references:` zero-wiring property is not perk-skill-specific.
+
 ## doctor validation + the injection-time presence mirror (Node 3.1)
 
 `doctor` validates skill bindings, and a missing/unknown binding target yields a **loud-but-non-fatal

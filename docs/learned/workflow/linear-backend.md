@@ -277,9 +277,33 @@ did not fire.
 
 `issueUpdate(id:"PER-n")` and `commentCreate(input:{issueId:"PER-n"})` both succeed with the **bare
 identifier** (a bogus `PER-99999` still errors `INPUT_ERROR` / "Entity not found"), so `_uuid_for`
-*could* collapse to a pass-through. That is **substantive but deferred to follow-up #562** — not
-done here. The existing `_uuid_for` discipline note (UUIDs-only-on-mutations in the
-`FakeLinearWorkspace` section) still stands as the offline pin until the collapse lands.
+*could* collapse to a pass-through. That observation **delivered as #562 (PR for #620)** — see below.
+
+#### The `uuid_for` collapse delivered (#562 / #620)
+
+The deferred collapse landed: `LinearClient.uuid_for` + its cache are **deleted**, and the verified
+mutations now pass the **bare boundary identifier** directly (no resolve-on-demand). Two reusable
+lessons:
+
+- **Shared issue-mutation behavior both op classes need lives MODULE-LEVEL, not on one op class.**
+  The plan said "a tiny private helper on the issue-ops class," but the verified-mutation call sites
+  span **two** client-only op classes (the issue ops AND the project ops' attach-issue-to-project),
+  and — per the substrate-home principle above — the project ops do **not** compose the issue ops;
+  both only register the shared client. A method on one class is unreachable from the other. So the
+  not-found-mapping wrapper is a **free function parameterized by `client`** (`_request_issue_mutation`),
+  the only shape that avoids four copies. *General rule: shared mutation behavior the two op classes
+  both need is module-level (client-parameterized), because they are **siblings over a shared client,
+  not a composition**.*
+- **A byte-identical not-found mapping survives the deletion by RELOCATING it** into that thin
+  request wrapper (it governs only the wrapped `request` call; the `success is not True` payload
+  checks stay AFTER the wrapper returns). And **capture-at-create beats resolve-on-demand** for the
+  one consumer that still needs a UUID: a raw create variant returns the create-time UUID for the
+  UUID-only `issueRelationCreate` (relations still take UUIDs; zero extra queries).
+- One intentional `uuid_for` string survives in production — a docstring back-reference on the
+  request wrapper (a `grep` for `uuid_for` in `perk/` hits it; **expected, not a leftover**). The
+  test-fakes dropped their scripted `UuidForIssue` reply entries / branch and **flipped mutation-id
+  assertions from the resolved UUID to the boundary identifier** (plus `assert not` a resolution
+  query fired).
 
 ### GitHub-integration coexistence (#564)
 
@@ -306,6 +330,39 @@ done here. The existing `_uuid_for` discipline note (UUIDs-only-on-mutations in 
 A name silently fails team resolution and surfaces only at **land** as a *non-fatal*
 `plan issue close skipped (non-fatal): Linear team '<x>' not found` (`plan_issue_closed: false`); the
 GitHub squash-merge still succeeds.
+
+### Mode 4 — project-backed objective lifecycle proven live (#621)
+
+The four previously not-live-proven Project ops are now **proven live** (driven from perk's own
+GitHub-backed dev repo against team PER):
+
+- **Idempotency:** find-by-run-id returns the **same UUID** / `existed:true` with **no duplicate**
+  milestones or issues.
+- **Project Update posts on create / land / reconcile**; **close** drives the Project state to
+  `completed`; the **node workflow-state mirror fires BOTH directions** (in-progress→started at
+  plan-save, done→completed on mark-done).
+- **ProseMirror metadata round-trip is CLEAN** through create→reconcile (zero HTML artifacts), and
+  a re-save **patches in place**. **Node↔plan unification creates NO new `perk:plan` issue** (the
+  plan-header merges into the node-issue). **No RATELIMITED** at low volume.
+
+**Setup gotchas** (running Linear from a GitHub-default repo):
+
+- **Backend selection reads COMMITTED `.pi/perk.toml` only** — the `.pi/perk.local.toml` overlay is
+  deliberately **ignored** (same committed-only discipline as compaction). So pointing perk at
+  Linear needs a **working-tree edit** to committed `.pi/perk.toml` reverted before commit; a local
+  overlay silently no-ops.
+- Use **`uv run perk`**, not the stale global `perk` (a separate uv-tool install). The doctor
+  `linear` group only appears **once committed config selects linear**.
+
+**GraphQL probe gotchas:** `issueRelationCreate`'s `type` is a GraphQL **enum** — a quoted inline
+literal fails validation; pass it via a typed `$input` variable. And **urllib HTTPS fails on this
+host** (`CERTIFICATE_VERIFY_FAILED`) — use `curl` for ad-hoc probes (see Measurement-node facts).
+
+**`get_objective` reconstruction facts** (the empirical baseline the #626 drift doctor formalizes):
+`objective show --json` **omits `depends_on`** and **derives `phase` from the node id** (not the
+milestone); `depends_on` is reconstructed from **blocking relations**. And `get_objective` **silently
+absorbs drift** — an un-assigned node disappears, an unknown relation is dropped, a milestone rename
+is invisible — which is exactly why the manifest-pinned drift doctor exists.
 
 ## Linear Projects substrate + `LinearProjectObjectiveStore` (now BUILT)
 
@@ -492,9 +549,9 @@ in `try/except`, logs a non-fatal stderr line (`... skipped (non-fatal): {exc}`)
 changes the command result**; in `_reconcile_objective_on_land` the post lives in its own helper
 (`_post_landed_update`) so a failure can't discard already-marked node ids (same isolation as the
 existing close fail-open). `projectUpdateCreate(` does **not** substring-collide with `projectUpdate(`
-(next char `C`), but place the more-specific needle first defensively. `projectUpdateCreate` is
-offline-covered only — it joins the still-deferred Node-5.1 smoke-gate register (`set_project_state` /
-`list_projects` / `_workflow_state_id`).
+(next char `C`), but place the more-specific needle first defensively. `projectUpdateCreate` was
+offline-covered only at authoring — now **proven live** along with `set_project_state` /
+`list_projects` / `_workflow_state_id` (the Mode-4 confirmations above, #621).
 
 ### The manifest-drift architecture (#609) — for the follow-up implementer
 
@@ -514,6 +571,27 @@ load-bearing decisions:
   structure without inventing status).
 - **The observed snapshot needs a new sibling op:** `_LinearProjectOps.project_issues` carries no
   milestone membership, so don't perturb `get_objective`'s byte-stable query — add a sibling.
+
+### Manifest-drift Linear mechanics delivered (#626)
+
+The #609 design landed (drift engine + worker detail live in `objective-store.md` / `cli-command-groups.md`).
+The **Linear-backend-specific** mechanics:
+
+- **`attach_issue_to_milestone` mirrors `attach_issue_to_project`** — the **bare boundary identifier**
+  through the module-level mutation wrapper, **no UUID resolution** (consistent with the #562 collapse
+  above). The observed-snapshot read is a `project_issues` **sibling**, `project_issues_with_milestones`,
+  that joins each issue's milestone id/name; the byte-stable `project_issues` query is left untouched.
+- **The `replace_metadata_block` append-when-absent path emits an HTML form** (bad for Linear's
+  ProseMirror). So a *fresh* manifest insert does **not** go through that path: render the block as
+  inline-code and splice it manually before the reconcilable marker (derive the split point from the
+  Linear-markdown rendering of the reconcilable start marker). The *present*-block update path stays
+  form-preserving and is safe.
+- **`FakeLinearWorkspace` must cascade-delete relations on issue delete** (mirrors Linear's real
+  cascade) — else a stale `(blocker, blocked)` tuple survives a deleted issue and crashes the
+  blocked-by lookup on the missing uuid. Store-level drift tests drive the real project store, then
+  mutate the fake's issues/relations/milestones directly to inject each drift class.
+- Both new ops were **offline-only / not-live-proven** at authoring time — now live-proven, see the
+  Mode-4 confirmations below.
 
 ### `check_project_readiness` (#603) — a separate function
 

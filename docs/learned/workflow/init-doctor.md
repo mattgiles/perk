@@ -152,6 +152,24 @@ make it render unless that group is also in the render module's `GROUP_ORDER`
 (`perk/cli/commands/doctor/render.py`). Any new doctor groups will remain completely invisible in
 the condensed human text unless explicitly added there.
 
+## The optional `EnvCheck` tier (a non-fatal tool — #617)
+
+Adding a tool whose **absence should warn, not block** is a reusable three-touch pattern in
+`perk/convergence/`:
+
+- **`env.py`:** add an `optional: bool = False` flag to the frozen `EnvCheck` dataclass; add an
+  optional-tool check helper mirroring the required one but stamping **`optional=True` on BOTH the
+  present and absent results**; and change `required_tools_ok` to filter optional checks out
+  (`all(c.ok for c in checks if not c.optional)`). **That filter is what keeps a missing optional
+  tool off the `missing_tool` exit-2 path.**
+- **`doctor.py`:** map the env status as `"ok" if c.ok else ("warn" if c.optional else "fail")`
+  (annotate the local as `Status` for ty). **No `GROUP_ORDER` change** — `environment` already
+  renders, and a `warn` leaves `report.healthy` / the exit code untouched (the existing
+  healthy-allows-warnings invariant).
+- **`init`'s human render:** the success-path env loop gains a **3-way mark** (`✓` / `⚠️`
+  optional-not-ok / `✗`). The failure path stays unreachable for optional tools because
+  `required_tools_ok` ignores them.
+
 ## Fail-level checks, fix_errors, and the machine-surface co-owners
 
 Lessons from making skills delivery a fail-level concern (see also `init-external-cli.md`):

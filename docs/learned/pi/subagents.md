@@ -51,6 +51,17 @@ token or composes the mutation itself.
 branches the parent's history. Pick `fresh` whenever the child's judgment must not be colored by
 parent context.
 
+## Isolated `createAgentSession` bypasses perk's read-only gate (#628)
+
+perk's read-only enforcement is a per-session `pi.on("tool_call")` hook on the **main** session. An
+extension feature that spins up its **own** isolated `createAgentSession` (e.g. `/btw`'s side-chat)
+runs **outside** that hook — so during a read-only perk session it could edit/write. The fix:
+**thread the tool-gating state into the feature** and derive the side session's toolset from it —
+read-only ⇒ `["read"]` only (a foreign session's `bash` can't be sandboxed by perk's read-only bash
+check, so bash/edit/write are all excluded), read-write ⇒ the full set. And **fold the gate state
+into the side-session cache key** so a gate flip **recreates** the side session instead of reusing a
+stale toolset.
+
 ## Flat agent/seam-keyed config pattern
 
 perk uses a flat selection pattern under `[subagents]` in `perk.toml` to map specific agent seams to

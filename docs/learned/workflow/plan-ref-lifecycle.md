@@ -56,6 +56,16 @@ the full plan-ref dict (`test_implement_cmd`, `test_plan_save`, `test_resume`). 
 2. Thread the new field through `resume.reconstruct_plan_ref` so a fresh-clone resume still carries
    it.
 
+## The cross-backend plan-ref clobber hazard (#621)
+
+Running an objective-linked **`perk plan save --objective-id <uuid> --node-id <id>` inside an active
+worktree** **overwrites that worktree's `.pi/workflow/plan-ref.json`** with the Linear node-issue ref
+(e.g. `provider:linear, pr_id:PER-15`), silently replacing the worktree's own GitHub plan-ref. A
+subsequent `/submit` then fails with a numeric-id error (`GitHub issue ids are numeric; got 'PER-15'`).
+Because `plan-ref.json` is **gitignored** there is **no `git restore`** — reconstruct it via the cache
+writer (the `objective_id` comes from the roadmap node's `pr:` backlink). **Lesson: never run a
+cross-backend `plan save` inside an active worktree — it hijacks the active plan-ref.**
+
 ## Cross-references
 
 - `docs/learned/workflow/plan-factories.md` — how factories avoid consuming the plan-ref

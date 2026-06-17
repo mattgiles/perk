@@ -15,7 +15,10 @@ the session-data path guards in both planes.
 - **Leading-dot patterns skip declarations.** `/\.setStatus\(/` matches *call/member* sites
   (`handle.setStatus(`) but not structural-type **declarations** (`setStatus(slot: string): void;`
   in a `ui: {…}` interface) — those have no leading dot. This lets modules carry the UI interface
-  type without tripping the guard.
+  type without tripping the guard. **Bringing a new `ctx.ui.*` method under governance reuses this
+  recipe verbatim** (#628): add a `.`-prefixed pattern (`/\.setWorkingMessage\(/`) allowlisted to the
+  surfaces module — the seam's OWN interface declaration (`setWorkingMessage(message?): void;` inside
+  a `ui:{…}` structural target) has no leading dot, so it is correctly **not** flagged as a violation.
 - **Naive comment stripping is fine when justified.** Strip `/* */` then `//.*$` before matching;
   this would eat `//` inside string literals, but that's acceptable when no banned token plausibly
   appears in a string/URL — say so in a comment rather than building a real lexer.
@@ -51,8 +54,9 @@ When banning a *string literal* (vs a call site), two additions:
 
 Rich-UI calls (`ui.notify`/`setStatus`/`setWidget`/`setFooter`) live ONLY in
 `extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`; **extend the surfaces module rather than
-allowlisting a new file** when the guard fires. `setWorkingIndicator` is banned everywhere
-(charter D5 rescinded). The convention is recorded in three places — AGENTS.md "Developing perk",
+allowlisting a new file** when the guard fires. `setWorkingMessage` is **governed-but-permitted**
+(confined to the surfaces module via its own leading-dot rule); `setWorkingIndicator` is banned
+everywhere (charter D5 rescinded). The convention is recorded in three places — AGENTS.md "Developing perk",
 `shared/contracts.md` §8.3, charter §7 row 4.1 — keep them in sync if the allowlist ever changes.
 
 ## Sources

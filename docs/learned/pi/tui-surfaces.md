@@ -118,6 +118,42 @@ When a plan names a helper AND gives an output example, verify they agree before
 helper is reusable as-is — the footer plan's own `200k` example forced a change to the existing
 token formatter (which rendered `200.0k`), rippling into other consumers of the shared helper.
 
+## Vendoring a TS extension that touches pi-tui (#628)
+
+Three concerns surfaced vendoring `btw`/`whimsical` from upstream into the perk extension:
+
+### The dual-copy pi-tui CLASS type clash
+
+Two physical pi-tui copies (the top-level dep vs the **nested** copy bundled inside
+`@earendil-works/pi-coding-agent`) make tsc treat **value classes with private fields** as **distinct
+nominal types** (`Types have separate declarations of a private property 'previousLines'`). The
+symptom: `ctx.ui.custom`'s factory hands you the *nested-copy* `TUI`, but `new MyOverlay(topLevelTUI)`
+fails. **Functions and interfaces/types do NOT clash** (structural) — only value classes with private
+members. The fix that worked **without a dep bump or deep-path import**: at the single pi boundary,
+type the clash-prone params as **structural slices** of only the methods used (`{ requestRender(): void }`,
+etc.); for a value you must instantiate/extend, import it as a VALUE from top-level pi-tui, but import
+the **keybindings manager from `@earendil-works/pi-coding-agent`** (it re-exports the nested copy, so
+it matches the `ui.custom` factory param); returning an overlay where a structural `Component` is
+expected type-checks structurally. **Version skew is the trap** — "confirmed exported" is true but
+silently assumes a single copy.
+
+### Bringing a new `ctx.ui.*` method under governance (the `setWorkingMessage` seam)
+
+A new rich-UI method gets a **headless-no-op seam** in the surfaces module over a **minimal
+structural target** (early-return when `!hasUI`), mirroring the existing report/standing-widget
+recipe; `whimsical` flavors pi's existing default working indicator with a text-only label.
+`setWorkingMessage` is **governed-but-permitted**; `setWorkingIndicator` stays **banned** (D5
+rescinded).
+
+### The charter "bounded exception that proves the rule" pattern
+
+`/btw`'s entire UI is a `ctx.ui.custom` overlay the charter §6 D6 **declines** — recorded **not** by
+rescinding the decline but as a **named, sole, bounded exception**, permitted ONLY because it is
+human-invoked (no model tool, not a stage/door), `hasUI`-gated, and never machine-reachable; the
+exception's boundary IS the rule's criterion. Recorded **in lockstep across the three discipline
+records** (`docs/design/tui-charter.md`, `shared/contracts.md`, `AGENTS.md`) per the "amend the
+contract / update user docs, don't drift" rule, with glyph conformance during the port.
+
 ## Cross-references
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned

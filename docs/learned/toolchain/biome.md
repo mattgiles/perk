@@ -56,6 +56,14 @@ non-optional binding. Hold a `const root = {}` reference, **seed the record with
 (`tables = { "": root }`), then assign `dest = root` — the local reference is non-optional even
 though the index access isn't.
 
+**Vendored upstream code trips this constantly (#628).** This repo's tsconfig sets
+`noUncheckedIndexedAccess`, so every `arr[i]` and `str.split("\n")[0]` is `T | undefined` — code
+written against a looser config won't compile as-is. The patterns: **`?? ""`** for string-indexing
+into a renderer (`a.command.split("\n")[0] ?? ""`); **`?? messages[0] ?? "fallback"`** for a random
+pick (`messages[Math.floor(...)]`); and a **guard before discriminant-narrowing** an array-walk over
+a discriminated union (`if (entry && entry.type === "custom")` before reading the variant-only field,
+since the element access is possibly-`undefined`).
+
 ## `Omit<Union, K>` collapses a discriminated union — use a distributive Omit
 
 Building an emitter whose `emit()` accepts "any variant minus the stamped fields" (e.g.
