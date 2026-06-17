@@ -1,5 +1,14 @@
 # The Road to Using Linear Projects as perk Objectives
 
+> **Historical — realized (Objective #548, 2026-06).** The memo's key prediction came true: perk
+> introduced an **explicit objective storage abstraction** (the `ObjectiveStore` seam +
+> `LinearProjectObjectiveStore`) rather than stretching the issue backend, and Linear Projects are
+> now **canonical objectives**. The staged path the memo proposed was **compressed** — the optional
+> mirror-first / learn / maybe-adopt intermediate stages were skipped and perk adopted the Project
+> representation directly. See the cross-plane contract `shared/contracts.md` §8.24 and the current
+> operator reference
+> [`../user-docs/reference/objectives.md`](../user-docs/reference/objectives.md).
+
 This memo thinks through what it would mean for perk to use Linear Projects as
 the representation of objectives. It is deliberately narrower than
 `docs/planning/linear-masterplan.md`: that memo covers Linear as an issue backend in

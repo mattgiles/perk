@@ -1,5 +1,18 @@
 # Linear as a perk Issue Backend: Operating Principles and Masterplan
 
+> **Historical — largely realized (Objective #548, 2026-06).** This memo's core recommendations
+> shipped: Linear is the canonical **issue backend** for plan / learn / objective issues; PRs, CI,
+> and merge stay **GitHub-universal**; workflow status is a **fail-open visibility mirror**. One
+> honest **divergence**: the memo recommended that a perk objective *initially remain* a Linear
+> issue (not a Project or Initiative). Reality went further — perk introduced an explicit
+> `ObjectiveStore` split and made **Linear Projects canonical objectives** (overview = `objective-header`
+> + Reconcilable prose; one node-issue per node; phases = milestones; explicit `depends_on` =
+> blocking relations). See the current operator docs
+> [`../user-docs/reference/providers-and-backends.md`](../user-docs/reference/providers-and-backends.md)
+> and [`../user-docs/reference/objectives.md`](../user-docs/reference/objectives.md), the cross-plane
+> contract `shared/contracts.md` §8.21 / §8.24, and the live-validation runbook
+> [`./linear-smoke-gate.md`](./linear-smoke-gate.md).
+
 This memo lays out an opinionated model for using Linear as a canonical issue
 backend for perk while preserving the spirit of developing-with-erk: plan first,
 separate thinking from doing, keep durable state outside a chat session, and make
