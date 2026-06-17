@@ -62,6 +62,10 @@ managed pieces (and seeds missing config) without ever mutating GitHub or overwr
 edits. `--fix` also **reconciles perk's own git-package ref** in `.pi/settings.json` to the
 version this perk wants (e.g. a stale pinned `@v0.0.1` → `@main`). (The perk extension is
 self-contained — it has no runtime Node dependencies — so the git-clone needs no `node_modules`.)
+The `package` group's `extension-clone` check verifies the loaded git-package clone is at current
+`main` and **fails** on a stale clone (pi does not self-advance an existing clone); `perk doctor
+--fix` repairs it by removing the clone so pi re-clones fresh on the next launch, and `perk init`
+performs the same forward reconcile on every run.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.

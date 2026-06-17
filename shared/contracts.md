@@ -1707,6 +1707,24 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   unsupported YAML construct makes `miniYaml` throw loudly rather than silently mis-parse. (This
   supersedes #637's `extension-deps` doctor check + `npm install` repair gesture, now retired: with
   no runtime deps there is nothing to install.)
+- **Clone commit-freshness is a *distinct* concern from dependency installation, and perk owns
+  it (#642).** #639's retirement of `extension-deps` was correct that a no-runtime-deps clone has
+  no `node_modules` to install — but it silently assumed pi would self-advance the clone. It does
+  not: `resolvePackageSources`' present-project-scope branch only calls `collectPackageResources`
+  (no `git fetch`/`reset`), so a clone first created at an old commit stays frozen across launches
+  (wrong import paths, a retired `yaml` import → a hard `Cannot find module 'yaml'` load failure)
+  while `perk doctor` reported green. perk now owns freshness: `perk init` advances the clone
+  *forward* (a best-effort, non-fatal reclone-when-stale after `sync_skills`), the verify-gated
+  `extension-clone` doctor check (group `package`) **fails** on a stale clone, and
+  `perk doctor --fix` repairs it. The repair is a **blow-away-and-reclone**: perk `rm -rf`s the
+  clone (filesystem-only, no perk-side network) and lets pi re-clone fresh at `main` on the next
+  launch — the verified absent → `git clone` + `git checkout main` path (the clone is tiny now
+  that #639 eliminated `node_modules`). Detection compares the clone `HEAD` to `origin/main`
+  (perk's pinned ref — `_desired_packages` writes `@main`) and is a **network** op, so both the
+  doctor check and the init reconcile are verify-gated and degrade to `warn` / no-op
+  (`unverifiable`) when offline — never a silent `ok`, never a crash. (`perk doctor`/`perk init`
+  are Python CLIs that do not load the TS extension, so they run fine against a clone too stale to
+  load, repairing it for the *next* launch.)
 
 ---
 

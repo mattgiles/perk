@@ -17,7 +17,7 @@ import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from perk import __version__, _resources, github
 from perk.backends import linear, linear_backend
@@ -506,6 +506,54 @@ def consumer_git_clone_root(repo_root: Path) -> Path:
     for segment in remainder.split("/"):
         clone = clone / segment
     return clone
+
+
+ExtensionCloneStatus = Literal["self", "absent", "fresh", "stale", "unverifiable"]
+
+
+def extension_clone_status(repo_root: Path, *, self_repo: bool) -> tuple[ExtensionCloneStatus, str]:
+    """Classify the freshness of pi's git-package clone for perk + a human detail string.
+
+    pi loads perk's extension from ``consumer_git_clone_root(repo_root)`` but never
+    self-advances a present project-scoped ``git:`` clone (verified in pi's
+    ``resolvePackageSources``), so a clone first created at an old commit stays frozen. perk
+    owns the freshness check:
+
+    - ``self`` — the self-repo uses the local ``..`` package, so there is no clone.
+    - ``absent`` — the clone dir does not exist; pi re-clones fresh at ``main`` on the next launch.
+    - ``fresh`` / ``stale`` — the clone ``HEAD`` equals / differs from ``origin/main``.
+    - ``unverifiable`` — HEAD or the remote tip is unreadable (offline / broken clone); never a
+      silent pass.
+    """
+    if self_repo:
+        return "self", "self-repo uses the local '..' package — no git clone"
+    clone = consumer_git_clone_root(repo_root)
+    if not clone.is_dir():
+        return "absent", "pi clones fresh at main on next launch"
+    # perk always pins its own package at `@main` (`_desired_packages` writes
+    # `f"{GIT_PACKAGE}@main"`), so `origin/main` is the correct freshness comparison ref.
+    local = git.head_sha(clone)
+    remote = git.ls_remote_sha(clone, "refs/heads/main")
+    if local is None or remote is None:
+        return "unverifiable", "clone HEAD or origin/main tip unreadable — offline?"
+    if local == remote:
+        return "fresh", local
+    return "stale", f"clone HEAD {local[:8]} != origin/main {remote[:8]}"
+
+
+def reclone_extension_clone(repo_root: Path) -> str:
+    """Blow away pi's git-package clone so pi re-clones fresh ``main`` on the next launch.
+
+    Filesystem-only — **no network** in perk itself; pi performs the actual reclone on the next
+    launch (the verified absent → ``git clone`` + ``git checkout main`` path). Idempotent: a
+    no-op message when the clone is already absent. Returns a human-readable change line.
+    """
+    clone = consumer_git_clone_root(repo_root)
+    rel = clone.relative_to(repo_root)
+    if not clone.is_dir():
+        return f"{rel}: clone already absent (pi clones fresh main next launch)"
+    shutil.rmtree(clone)
+    return f"{rel}: removed stale clone (pi re-clones fresh main next launch)"
 
 
 def _desired_packages(self_repo: bool) -> list[str]:
@@ -1197,6 +1245,9 @@ def run_init(
                 error_type="skills_sync_failed",
                 message=sync_error,
             )
+        # Forward-reconcile pi's git-package clone (reclone-when-stale). Best-effort + non-fatal:
+        # a network op (verify-gated), it degrades to a no-op when offline (`unverifiable`).
+        _reconcile_extension_clone(root, changes, self_repo)
 
     github_report: GitHubReport | None = None
     if verify:
@@ -1226,6 +1277,21 @@ def run_init(
         capabilities=managed,
         linear=linear_report,
     )
+
+
+def _reconcile_extension_clone(root: Path, changes: list[str], self_repo: bool) -> None:
+    """Best-effort forward reconcile of pi's git-package clone (verify-gated, non-fatal).
+
+    Detects ``extension_clone_status``; a ``stale`` clone is blown away
+    (``reclone_extension_clone``) so pi re-clones fresh ``main`` on the next launch, and the
+    change is recorded. Every other
+    status (``self``/``absent``/``fresh``/``unverifiable``) is a no-op — ``unverifiable`` (offline)
+    never blocks init, mirroring how GitHub readiness degrades (D3). Kept a small free helper so
+    it is unit-testable.
+    """
+    status, _detail = extension_clone_status(root, self_repo=self_repo)
+    if status == "stale":
+        changes.append(reclone_extension_clone(root))
 
 
 def _linear_readiness(root: Path) -> LinearReport | None:

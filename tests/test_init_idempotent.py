@@ -596,3 +596,56 @@ def test_init_preserves_user_skills_manifest(tmp_path):
     run_init(tmp_path, verify=False)
     assert user_manifest.read_text(encoding="utf-8") == original  # untouched
     assert (agents / "manifest.d" / "perk.yaml").is_file()  # fragment still written alongside
+
+
+# --- forward-reconcile of pi's git-package clone (#642) --------------------------------------
+
+
+def test_reconcile_extension_clone_reclones_when_stale(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
+    )
+    monkeypatch.setattr(
+        init_mod, "reclone_extension_clone", lambda root: ".pi/git/...: removed stale clone"
+    )
+    changes: list[str] = []
+    init_mod._reconcile_extension_clone(tmp_path, changes, False)
+    assert changes == [".pi/git/...: removed stale clone"]
+
+
+@pytest.mark.parametrize("status", ["fresh", "absent", "self", "unverifiable"])
+def test_reconcile_extension_clone_noop_when_not_stale(tmp_path, monkeypatch, status):
+    from perk.convergence import init as init_mod
+
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: (status, "detail")
+    )
+
+    def _boom(root):  # pragma: no cover - must not be called
+        raise AssertionError("reclone must not run when the clone is not stale")
+
+    monkeypatch.setattr(init_mod, "reclone_extension_clone", _boom)
+    changes: list[str] = []
+    init_mod._reconcile_extension_clone(tmp_path, changes, False)
+    assert changes == []
+
+
+def test_init_verify_reconciles_stale_extension_clone(git_repo, stub_env, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    calls: list = []
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
+    )
+
+    def _spy(root):
+        calls.append(root)
+        return ".pi/git/github.com/mattgiles/perk: removed stale clone"
+
+    monkeypatch.setattr(init_mod, "reclone_extension_clone", _spy)
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    assert len(calls) == 1
+    assert any("removed stale clone" in line for line in report.changes)

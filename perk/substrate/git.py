@@ -152,6 +152,37 @@ def current_branch(repo: Path) -> str | None:
     return None if branch == "HEAD" else branch
 
 
+def head_sha(repo: Path) -> str | None:
+    """The commit SHA at ``HEAD`` (``git rev-parse HEAD``), or ``None`` on failure.
+
+    Offline-safe — reads a local ref only and never raises (mirrors ``current_branch``'s
+    try/except shape). ``None`` when ``repo`` is not a usable git repo / has no HEAD.
+    """
+    try:
+        out = _run(["rev-parse", "HEAD"], cwd=repo)
+    except GitError:
+        return None
+    return out.strip() or None
+
+
+def ls_remote_sha(repo: Path, ref: str, *, remote: str = "origin") -> str | None:
+    """The SHA ``remote`` advertises for ``ref`` (``git ls-remote <remote> <ref>``), or ``None``.
+
+    A **network** op (reuses ``_run``, which sets ``GIT_TERMINAL_PROMPT=0`` so it fails fast
+    offline rather than hanging). Parses defensively: the first field of the first non-empty
+    output line. ``None`` when the ref is absent / the command fails / nothing parses.
+    """
+    try:
+        out = _run(["ls-remote", remote, ref], cwd=repo)
+    except GitError:
+        return None
+    for line in out.splitlines():
+        fields = line.split()
+        if fields:
+            return fields[0]
+    return None
+
+
 def push(cwd: Path, branch: str, *, set_upstream: bool = True, force: bool = False) -> None:
     """Push ``branch`` to ``origin`` from ``cwd`` (the worktree).
 
