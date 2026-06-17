@@ -833,6 +833,39 @@ def _subagent_engine_check(root: Path) -> Check:
     )
 
 
+def _extension_clone_check(root: Path, self_repo: bool) -> Check:
+    """Freshness of pi's git-package clone for perk (group ``package``; verify-gated network op).
+
+    pi never self-advances a present project-scoped ``git:`` clone, so a clone first created at an
+    old commit stays frozen and loads stale extension code. Built from
+    ``init.extension_clone_status``: ``stale`` is a **fail** (with the ``perk doctor --fix``
+    remediation — the reclone), ``unverifiable`` is a ``warn`` (no silent pass — carries the
+    reason), and ``self``/``absent``/``fresh`` are benign (``info``/``info``/``ok``).
+    """
+    status, detail = init.extension_clone_status(root, self_repo=self_repo)
+    if status == "self":
+        return Check("extension-clone", "package", "info", "self-repo — local package, no clone")
+    if status == "absent":
+        return Check(
+            "extension-clone",
+            "package",
+            "info",
+            "clone absent — pi clones fresh main on next launch",
+        )
+    if status == "fresh":
+        return Check("extension-clone", "package", "ok", "extension clone at current main")
+    if status == "stale":
+        return Check(
+            "extension-clone",
+            "package",
+            "fail",
+            "extension clone is stale",
+            detail,
+            "perk doctor --fix",
+        )
+    return Check("extension-clone", "package", "warn", "extension clone not verified", detail)
+
+
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     """The fail-level skills-delivery substrate check (#289 — skills delivery is load-bearing).
 
@@ -955,6 +988,8 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
             checks.extend(_linear_checks(root))
         # Verify-gated like env/github: it shells git + validates external-CLI outcomes.
         checks.append(_skills_delivery_check(root, self_repo))
+        # Verify-gated like _skills_delivery_check / github: a network op (ls-remote).
+        checks.append(_extension_clone_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
     checks.append(_registry_check())
@@ -1067,6 +1102,10 @@ def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list
             fixed.extend(mc_by_name[check.name].converge(True))
         elif check.name == "config":
             fixed.extend(_fix_config(root))
+        elif check.name == "extension-clone":
+            # The reclone is filesystem-only (pi re-clones on next launch), so it is safe inside
+            # `_apply_fixes`; it only triggers when the verify-gated check flagged `fail` (stale).
+            fixed.append(init.reclone_extension_clone(root))
     for migration in _MIGRATIONS:
         changes, migration_errors = migration(root)
         fixed.extend(changes)
