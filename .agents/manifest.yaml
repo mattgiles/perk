@@ -24,5 +24,9 @@ skills:
           name: grill-with-docs
         - source: mattpocock
           name: improve-codebase-architecture
+        - source: mattpocock
+          name: codebase-design
+        - source: mattpocock
+          name: domain-modeling
         - source: spillwave
           name: mastering-typescript
