@@ -1,5 +1,7 @@
 """Pure-mechanics tests for perk/objective.py (no network, no Click)."""
 
+from typing import cast
+
 from perk import objective as o
 from perk.plan import render_metadata_block
 
@@ -467,6 +469,89 @@ def test_render_node_block_required_and_optional_fields():
         "slug": "beta",
         "comment": "note",
     }
+
+
+# --- Node 4.4 (#612): the objective-manifest drift baseline ----------------------------------
+
+
+def _manifest_nodes() -> list[o.ObjectiveNode]:
+    return [
+        o.ObjectiveNode(id="1.1", description="Alpha", status=N.DONE, slug="alpha"),
+        o.ObjectiveNode(
+            id="1.2", description="Beta", status=N.PENDING, slug="beta", depends_on=("1.1",)
+        ),
+        o.ObjectiveNode(id="2A.1", description="Gamma", status=N.IN_PROGRESS, slug="gamma"),
+    ]
+
+
+def test_phase_key_str_derives_from_node_id():
+    assert o.phase_key_str("1.2") == "1"
+    assert o.phase_key_str("2A.1") == "2A"
+    assert o.phase_key_str("3") == "1"
+
+
+def test_render_manifest_block_excludes_status_and_pr():
+    nodes = _manifest_nodes()
+    data = o.render_manifest_block(nodes, {"1": "Phase 1: Foundations", "2A": "Phase 2A: Extra"})
+    assert data["schema_version"] == "1"
+    node_dicts = cast("list[dict[str, object]]", data["nodes"])
+    assert node_dicts == [
+        {"id": "1.1", "slug": "alpha", "description": "Alpha", "depends_on": []},
+        {"id": "1.2", "slug": "beta", "description": "Beta", "depends_on": ["1.1"]},
+        {"id": "2A.1", "slug": "gamma", "description": "Gamma", "depends_on": []},
+    ]
+    # no live state leaks into the manifest
+    for nd in node_dicts:
+        assert "status" not in nd and "pr" not in nd
+    assert data["phases"] == {"1": "Phase 1: Foundations", "2A": "Phase 2A: Extra"}
+
+
+def test_manifest_round_trips_through_inline_code_and_prosemirror():
+    from perk.backends.linear_backend import to_linear_markdown
+
+    nodes = _manifest_nodes()
+    names = {"1": "Phase 1: Foundations", "2A": "Phase 2A: Extra"}
+    overview = to_linear_markdown(
+        render_metadata_block(
+            o.OBJECTIVE_MANIFEST_KEY, o.render_manifest_block(nodes, names), style="inline-code"
+        )
+    )
+    assert "<!--" not in overview  # the transcode dropped every HTML marker
+    manifest, errors = o.parse_manifest(overview)
+    assert errors == [] and manifest is not None
+    assert [n.id for n in manifest.nodes] == ["1.1", "1.2", "2A.1"]
+    assert manifest.nodes[1].depends_on == ("1.1",)
+    assert manifest.nodes[0].depends_on == ()  # explicit empty edge set
+    assert manifest.nodes[2].slug == "gamma"
+    assert manifest.phase_names == names
+    assert o.phase_key_str(manifest.nodes[2].id) == "2A"
+
+
+def test_parse_manifest_three_cases_absent_malformed_valid():
+    # absent -> (None, []) (a valid backfill target)
+    assert o.parse_manifest("just prose, no manifest block") == (None, [])
+    # malformed -> (None, [error])
+    broken = "`perk:metadata-block:objective-manifest`\n\n```yaml\nnodes: [\n```"
+    manifest, errors = o.parse_manifest(broken)
+    assert manifest is None and errors and "malformed" in errors[0]
+    # invalid (bad phases shape) -> (None, [error])
+    bad = render_metadata_block(
+        o.OBJECTIVE_MANIFEST_KEY,
+        {
+            "schema_version": "1",
+            "nodes": [{"id": "1.1", "slug": "a", "description": "x", "depends_on": []}],
+            "phases": {"1": 5},
+        },
+    )
+    manifest, errors = o.parse_manifest(bad)
+    assert manifest is None and errors and "phases" in errors[0]
+    # valid
+    good = render_metadata_block(
+        o.OBJECTIVE_MANIFEST_KEY,
+        o.render_manifest_block(_manifest_nodes(), {"1": "Phase 1", "2A": "Phase 2A"}),
+    )
+    manifest, errors = o.parse_manifest(good)
+    assert errors == [] and manifest is not None and len(manifest.nodes) == 3
 
 
 def test_node_issue_title_slug_vs_truncated_description():

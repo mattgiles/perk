@@ -42,6 +42,7 @@ A compact recap of the objective surface. Each row links to its authoritative en
 | [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite the Reconcilable prose region against the merged diff. |
 | [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
 | [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously-safe step. |
+| [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc) (`doc`) | Detect (and `--fix` repair) drift between a Linear objective's manifest and live state. |
 | [`/objective`](./in-session.md#objective) | Show, set, or clear the active objective + budget. |
 | [`/objective-plan`](./in-session.md#objective-plan) + `objective_node` | Start the plan factory; link a plan or advance a node. |
 | [`/objective-reconcile`](./in-session.md#objective-reconcile) + `reconcile_objective` | Reconcile the prose region post-land. |
@@ -107,6 +108,19 @@ sections an operator can read with `gh issue view N`:
   (marker-bounded by `<!-- perk:roadmap-table -->`, re-rendered from the canonical roadmap) **plus
   prose**, where the prose is the marker-bounded **Reconcilable** region. Reconcile rewrites only
   this Reconcilable region; the table and any **Immutable** notes are never touched.
+
+### The manifest (Linear-Project objectives only)
+
+A Linear objective is a **Project**, not an issue — its roadmap is *observed* state (one node-issue
+per node, blocking relations, phase milestones) that anyone can edit in Linear. To detect that
+divergence, the Project overview also persists an **`objective-manifest`** block (between the
+`objective-header` block and the Reconcilable region) recording the roadmap's **structural
+identity**: each node's `id` / `slug` / `description` and explicit `depends_on`, plus the pinned
+milestone name per phase. `status`/`pr` are excluded (they are live state). perk keeps this manifest
+in sync on every write; [`perk objective doctor`](./cli.md#perk-objective-doctor-number-alias-doc)
+diffs it against the live Project to find — and safely repair — drift. GitHub objectives have no
+separate observed surface and so carry no manifest. See
+[How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
 
 ## See also
 

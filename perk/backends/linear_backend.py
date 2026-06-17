@@ -58,7 +58,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
-from perk import github, objective, plan
+from perk import github, objective, objective_drift, plan
 from perk.backends import issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
@@ -630,6 +630,43 @@ class _LinearProjectOps:
             )
         return result
 
+    def project_issues_with_milestones(self, project_id: str) -> list[dict[str, object]]:
+        """All issues attached to a project **with milestone membership**, as
+        ``[{id, identifier, url, description, milestone_name}, …]`` (paginated). A **sibling** of
+        :meth:`project_issues` (the drift snapshot needs each node-issue's phase milestone); the
+        byte-stable ``project_issues`` query is deliberately left untouched. ``milestone_name`` is
+        ``None`` when the issue is attached to no milestone.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** this milestone-join selection is NOT yet
+        live-proven — #619's Mode 4 gate proved create/milestone/attach/relation, not this query.
+        Covered offline here; verify live before relying on it.
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier url description projectMilestone { id name } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            description = node.get("description")
+            milestone = node.get("projectMilestone")
+            milestone_name: str | None = None
+            if isinstance(milestone, dict):
+                raw_name = cast("dict[str, object]", milestone).get("name")
+                milestone_name = raw_name if isinstance(raw_name, str) else None
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
+                    "description": description if isinstance(description, str) else "",
+                    "milestone_name": milestone_name,
+                }
+            )
+        return result
+
     def list_projects(self) -> list[dict[str, object]]:
         """All of the team's projects, as ``[{id, url, content}, …]`` (``content`` may be
         ``None``) — the find-by-run-id scan source for the project-backed objective store. Team-
@@ -753,6 +790,33 @@ class _LinearProjectOps:
         payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to attach to project on Linear issue {issue_id!r}")
+
+    def attach_issue_to_milestone(self, *, issue_id: str, milestone_id: str) -> None:
+        """Reattach an existing issue to a project milestone (the deleted-phase-milestone repair).
+
+        Sends ``issueUpdate(id:$id, input:{projectMilestoneId})`` with the **bare boundary
+        identifier** routed through :func:`_request_issue_mutation` (the same not-found mapping the
+        post-#622 :meth:`attach_issue_to_project` uses) — decoupling over DRY, exactly mirroring
+        that sibling's inline mutation. No identifier→UUID resolution (``uuid_for`` was deleted in
+        #622). Checks ``success``.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** ``issueUpdate(input:{projectMilestoneId})`` is
+        NOT yet live-proven — #619's Mode 4 gate proved create/milestone/attach/relation, not this
+        mutation. Covered offline here; verify live before relying on it.
+        """
+        mutation = (
+            "mutation($id: String!, $input: IssueUpdateInput!) "
+            "{ issueUpdate(id: $id, input: $input) { success } }"
+        )
+        data = _request_issue_mutation(
+            self._client,
+            mutation,
+            {"id": issue_id, "input": {"projectMilestoneId": milestone_id}},
+            issue_id=issue_id,
+        )
+        payload = _require_dict(data.get("issueUpdate"), "issueUpdate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to attach to milestone on Linear issue {issue_id!r}")
 
     # ------------------------------------------------------------------ documents (reserved)
 
@@ -1461,6 +1525,19 @@ class LinearObjectiveStore:
         (no-op; Node 4.3)."""
         return False
 
+    def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
+        """The issue-backed store edits its roadmap block atomically with the issue body — no
+        divergence surface, so the drift report is trivially empty (Node 4.4 / #612 no-op)."""
+        return objective_store.DriftReport()
+
+    def repair_objective_drift(
+        self, *, objective_id: str, dry_run: bool = False
+    ) -> objective_store.RepairResult:
+        """The issue-backed store has no divergence surface — an empty no-op repair (#612)."""
+        return objective_store.RepairResult(
+            applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
+        )
+
 
 # ===========================================================================
 # The project-backed objective-storage tier (Objective #548, Node 3.2):
@@ -1559,6 +1636,19 @@ class LinearProjectObjectiveStore:
             header_block = plan.render_metadata_block(
                 objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
             )
+            # The phase names (enriched from the prose `### Phase N:` headers) seed BOTH the
+            # milestone loop below and the persisted manifest's pinned `phases` map.
+            grouped = objective.group_nodes_by_phase(nodes)
+            names = objective.enrich_phase_names(body, [key for key, _ in grouped])
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            # The drift baseline (#612): the `objective-manifest` block pins the intended roadmap's
+            # structural identity + the canonical phase names, between the header block and the
+            # Reconcilable region. Status/pr are excluded (live/observed state).
+            manifest_block = plan.render_metadata_block(
+                objective.OBJECTIVE_MANIFEST_KEY,
+                objective.render_manifest_block(nodes, manifest_names),
+                style="inline-code",
+            )
             reconcilable = (
                 f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
                 f"{body.strip()}\n"
@@ -1566,7 +1656,7 @@ class LinearProjectObjectiveStore:
             )
             # Transcode the whole overview so the HTML Reconcilable markers become inline-code
             # sentinels (the 4.1 reconcile splice is dual-encoding and finds them either way).
-            overview = to_linear_markdown(f"{header_block}\n\n{reconcilable}\n")
+            overview = to_linear_markdown(f"{header_block}\n\n{manifest_block}\n\n{reconcilable}\n")
             created = self._projects.create_project(name=title, content=overview)
             project_id = created["id"]
             assert isinstance(project_id, str)
@@ -1580,8 +1670,6 @@ class LinearProjectObjectiveStore:
             # blind-create loop (no extra `project_milestones` read; same `create_project_milestone`
             # sequence). The seam's reusable value is its `known is None` branch for a future
             # `add_node`-to-an-existing-objective path.
-            grouped = objective.group_nodes_by_phase(nodes)
-            names = objective.enrich_phase_names(body, [key for key, _ in grouped])
             known_milestones: dict[str, str] = {}
             phase_milestone: dict[tuple[int, str], str] = {}
             for key, _phase_nodes in grouped:
@@ -1805,6 +1893,12 @@ class LinearProjectObjectiveStore:
                 issue_uuid, {"description": new_body}, what="update objective node"
             )
 
+            # Manifest-sync (#612): a `description` change updates the matching manifest entry
+            # (structural identity); a status/pr-only change does NOT touch the manifest. Skips
+            # cleanly when the objective carries no manifest block (a pre-manifest objective).
+            if description is not None:
+                self._sync_manifest_node_description(objective_id, node_id, description)
+
             # Best-effort workflow-state mirror: nudge the issue's Linear state to match the new
             # status. The status block is the source of truth — a missing state type or a Linear
             # hiccup must never fail the node update (fail-open).
@@ -1851,6 +1945,11 @@ class LinearProjectObjectiveStore:
                 return objective_store.ObjectiveBodyUpdate(
                     objective_id=objective_id, comment_id=None, updated=False, dry_run=True
                 )
+            # Manifest phase-pin refresh (#612): in the SAME write, re-derive the phase names from
+            # the spliced overview (a reconcile may have rewritten a `### Phase N:` header) and
+            # refresh the manifest `phases` pins so the pin stays authoritative. Node descriptions
+            # are synced via `update_objective_node`, not here. No-op when no manifest block exists.
+            spliced = self._refresh_manifest_phase_pins(spliced)
             self._projects.update_project_content(objective_id, spliced)
             return objective_store.ObjectiveBodyUpdate(
                 objective_id=objective_id, comment_id=None, updated=True, dry_run=False
@@ -1932,15 +2031,24 @@ class LinearProjectObjectiveStore:
                     objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=True
                 )
 
-            # Resolve (or mint) the phase milestone by its enriched name (`known=None` lists the
-            # project's milestones once — the seam's add-node branch).
+            # Resolve (or mint) the phase milestone by name (`known=None` lists the project's
+            # milestones once — the seam's add-node branch). Once a manifest exists,
+            # `manifest.phase_names` is the phase-name AUTHORITY for an existing phase (a node-add
+            # must never re-derive a different name from externally-edited overview prose, which
+            # would attach the node to a wrong/new milestone while the manifest stays pinned to the
+            # old one); `enrich_phase_names` only SEEDS the name for a brand-new phase.
             project = self._projects.project_or_none(objective_id, "content")
             overview = project.get("content") if project is not None else ""
             overview = overview if isinstance(overview, str) else ""
             phase_key = objective.derive_phase(new_id)
-            names = objective.enrich_phase_names(overview, [phase_key])
+            manifest, _manifest_errors = objective.parse_manifest(overview)
+            phase_key_str = objective.phase_key_str(new_id)
+            if manifest is not None and phase_key_str in manifest.phase_names:
+                milestone_name = manifest.phase_names[phase_key_str]
+            else:
+                milestone_name = objective.enrich_phase_names(overview, [phase_key])[phase_key]
             milestone_id = self._projects.ensure_phase_milestone(
-                project_id=objective_id, name=names[phase_key], known=None
+                project_id=objective_id, name=milestone_name, known=None
             )
 
             # Materialize the single node-issue (objective-node block + prose), inline-code.
@@ -1974,9 +2082,450 @@ class LinearProjectObjectiveStore:
                         issue_id=found[0], related_issue_id=new_uuid
                     )
 
+            # Manifest-sync (#612): on a manifest-bearing objective, append the new node's entry
+            # (id/slug/description; explicit `depends_on`) and pin a new phase name when the node
+            # opens a phase not already in the manifest. Skips entirely on a pre-manifest objective
+            # (no manifest to maintain; `doctor --fix` backfill remains the path).
+            self._sync_manifest_add_node(objective_id, new_node)
+
             return objective_store.ObjectiveNodeAdd(
                 objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=False
             )
+
+    # ================================================================== manifest sync (#612)
+    # The persisted `objective-manifest` block is the drift baseline; these keep it current on the
+    # live write paths. Every one is a clean no-op on a pre-manifest objective (no manifest block).
+
+    def _insert_or_replace_manifest(self, overview: str, data: dict[str, object]) -> str:
+        """Upsert the manifest block into an overview: replace in place when present (form-
+        preserving), else insert (inline-code) just before the Reconcilable region."""
+        if plan.has_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY):
+            return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
+        block = to_linear_markdown(
+            plan.render_metadata_block(objective.OBJECTIVE_MANIFEST_KEY, data, style="inline-code")
+        )
+        for marker in (
+            to_linear_markdown(objective.OBJECTIVE_RECONCILABLE_MARKER_START),
+            objective.OBJECTIVE_RECONCILABLE_MARKER_START,
+        ):
+            idx = overview.find(marker)
+            if idx != -1:
+                return f"{overview[:idx]}{block}\n\n{overview[idx:]}"
+        return f"{overview.rstrip()}\n\n{block}\n"
+
+    def _sync_manifest_node_description(
+        self, objective_id: str, node_id: str, description: str
+    ) -> None:
+        """Update the matching manifest entry's description (structural identity sync)."""
+        project = self._projects.project_or_none(objective_id, "content")
+        overview = project.get("content") if project is not None else ""
+        overview = overview if isinstance(overview, str) else ""
+        manifest, _errors = objective.parse_manifest(overview)
+        if manifest is None or all(n.id != node_id for n in manifest.nodes):
+            return
+        new_nodes = [
+            replace(n, description=description) if n.id == node_id else n for n in manifest.nodes
+        ]
+        data = objective.render_manifest_block(new_nodes, manifest.phase_names)
+        new_overview = plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
+        self._projects.update_project_content(objective_id, new_overview)
+
+    def _sync_manifest_add_node(self, objective_id: str, new_node: objective.ObjectiveNode) -> None:
+        """Append the new node's entry to the manifest, pinning a brand-new phase's name."""
+        project = self._projects.project_or_none(objective_id, "content")
+        overview = project.get("content") if project is not None else ""
+        overview = overview if isinstance(overview, str) else ""
+        manifest, _errors = objective.parse_manifest(overview)
+        if manifest is None:
+            return  # pre-manifest objective — doctor --fix backfill is the path
+        entry = objective.ObjectiveNode(
+            id=new_node.id,
+            description=new_node.description,
+            status=objective.NodeStatus.PENDING,
+            depends_on=new_node.depends_on or (),
+            slug=new_node.slug,
+        )
+        phase_names = dict(manifest.phase_names)
+        phase_key = objective.phase_key_str(new_node.id)
+        if phase_key not in phase_names:
+            phase = objective.derive_phase(new_node.id)
+            phase_names[phase_key] = objective.enrich_phase_names(overview, [phase])[phase]
+        data = objective.render_manifest_block([*manifest.nodes, entry], phase_names)
+        new_overview = plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
+        self._projects.update_project_content(objective_id, new_overview)
+
+    def _refresh_manifest_phase_pins(self, overview: str) -> str:
+        """Refresh the manifest's `phases` pins to MATCH the spliced overview's `### Phase N:`
+        headers — the overview is the authority on a reconcile, so a pin tracks exactly what
+        `enrich_phase_names` derives, including **reverting to the `Phase N` default** when a
+        reconcile removed (or defaulted) a phase header (never preserving a now-stale custom name).
+        Returns the (possibly-rewritten) overview; a no-op when no manifest block exists or nothing
+        changed."""
+        manifest, _errors = objective.parse_manifest(overview)
+        if manifest is None:
+            return overview
+        keys = sorted({objective.derive_phase(n.id) for n in manifest.nodes})
+        found = objective.enrich_phase_names(overview, keys)
+        new_phase_names = dict(manifest.phase_names)
+        for key in keys:
+            new_phase_names[f"{key[0]}{key[1]}"] = found[key]
+        if new_phase_names == manifest.phase_names:
+            return overview
+        data = objective.render_manifest_block(list(manifest.nodes), new_phase_names)
+        return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
+
+    # ============================================================ drift detect / repair (#612)
+
+    def _build_observed_snapshot(self, objective_id: str) -> objective_drift.ObservedSnapshot:
+        """Build the offline-diffable :class:`ObservedSnapshot` from the live project state (the
+        ONLY network step of the drift pass). Raises ``IssueBackendError`` when the project is
+        absent. Foreign issues (no ``objective-node`` block) are excluded; a node-issue with a
+        present-but-unparseable block is retained with ``block_valid=False``."""
+        project = self._projects.project_or_none(objective_id, "id url name content")
+        if project is None:
+            raise IssueBackendError(f"objective {objective_id!r} not found")
+        overview = project.get("content")
+        overview = overview if isinstance(overview, str) else ""
+        manifest, manifest_errors = objective.parse_manifest(overview)
+        header_ok = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) is not None
+        reconcilable_ok = objective.replace_reconcilable_section(overview, "") is not None
+
+        milestone_names = tuple(
+            _require_str(m["name"], "milestone name")
+            for m in self._projects.project_milestones(objective_id)
+        )
+        issues = self._projects.project_issues_with_milestones(objective_id)
+
+        identifier_to_node: dict[str, str] = {}
+        parsed: list[
+            tuple[str, str, str | None, objective.NodeStatus | None, str | None, bool, bool]
+        ] = []
+        for issue in issues:
+            identifier = _require_str(issue.get("identifier"), "issue identifier")
+            uuid = _require_str(issue.get("id"), "issue id")
+            body_raw = issue.get("description")
+            body = body_raw if isinstance(body_raw, str) else ""
+            milestone_raw = issue.get("milestone_name")
+            milestone_name = milestone_raw if isinstance(milestone_raw, str) else None
+            if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
+                continue  # foreign issue — not a roadmap node
+            block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
+            node_id: str | None = None
+            status: objective.NodeStatus | None = None
+            block_valid = True
+            if block is None:
+                block_valid = False  # block present but unparseable
+            else:
+                raw_id = block.get("id")
+                raw_status = block.get("status")
+                if isinstance(raw_id, str) and raw_id:
+                    node_id = raw_id
+                else:
+                    block_valid = False
+                if isinstance(raw_status, str):
+                    try:
+                        status = objective.NodeStatus(raw_status)
+                    except ValueError:
+                        block_valid = False
+                else:
+                    block_valid = False
+            has_plan_header = plan.has_metadata_block(body, plan.PLAN_HEADER_KEY)
+            if node_id is not None:
+                identifier_to_node[identifier] = node_id
+            parsed.append(
+                (identifier, uuid, node_id, status, milestone_name, has_plan_header, block_valid)
+            )
+
+        nodes: list[objective_drift.ObservedNode] = []
+        for (
+            identifier,
+            uuid,
+            node_id,
+            status,
+            milestone_name,
+            has_plan_header,
+            block_valid,
+        ) in parsed:
+            blockers = self._projects.issue_blocked_by(uuid)
+            depends_on_observed = tuple(
+                identifier_to_node[b] for b in blockers if b in identifier_to_node
+            )
+            unknown_blockers = tuple(b for b in blockers if b not in identifier_to_node)
+            nodes.append(
+                objective_drift.ObservedNode(
+                    node_id=node_id,
+                    identifier=identifier,
+                    status=status,
+                    milestone_name=milestone_name,
+                    has_plan_header=has_plan_header,
+                    depends_on_observed=depends_on_observed,
+                    unknown_blockers=unknown_blockers,
+                    block_valid=block_valid,
+                )
+            )
+        return objective_drift.ObservedSnapshot(
+            manifest=manifest,
+            manifest_errors=tuple(manifest_errors),
+            nodes=tuple(nodes),
+            milestone_names=milestone_names,
+            header_ok=header_ok,
+            reconcilable_ok=reconcilable_ok,
+        )
+
+    def detect_objective_drift(self, *, objective_id: str) -> objective_drift.DriftReport:
+        """Build the observed snapshot and diff it against the manifest baseline (#612)."""
+        with _translate_objective():
+            return objective_drift.detect_drift(self._build_observed_snapshot(objective_id))
+
+    @staticmethod
+    def _ordered_repairs(
+        report: objective_drift.DriftReport,
+    ) -> list[objective_drift.DriftCondition]:
+        """The deterministic repair order: a manifest backfill short-circuits everything; otherwise
+        milestone → node-issue → dependency (parents before edges), then by node id."""
+        repairable = [c for c in report.conditions if c.repairable]
+        absent = [c for c in repairable if c.code is objective_drift.DriftCode.MANIFEST_ABSENT]
+        if absent:
+            return absent
+        order = {
+            objective_drift.DriftCode.DELETED_PHASE_MILESTONE: 0,
+            objective_drift.DriftCode.MISSING_NODE_ISSUE: 1,
+            objective_drift.DriftCode.DEPENDENCY_MISSING_IN_LINEAR: 2,
+        }
+        return sorted(
+            repairable, key=lambda c: (order.get(c.code, 99), c.node_id or "", c.target or "")
+        )
+
+    def repair_objective_drift(
+        self, *, objective_id: str, dry_run: bool = False
+    ) -> objective_store.RepairResult:
+        """Apply the safe/unambiguous repairs in order, stop at the first failed write (#612)."""
+        with _translate_objective():
+            snapshot = self._build_observed_snapshot(objective_id)
+            ordered = self._ordered_repairs(objective_drift.detect_drift(snapshot))
+            if dry_run:
+                return objective_store.RepairResult(
+                    applied=tuple(objective_store.RepairAction(c.code, c.node_id) for c in ordered),
+                    failed=None,
+                    remaining=tuple(
+                        c
+                        for c in objective_drift.detect_drift(snapshot).conditions
+                        if not c.repairable
+                    ),
+                    aborted=False,
+                    dry_run=True,
+                )
+            applied: list[objective_store.RepairAction] = []
+            failed: objective_store.RepairAction | None = None
+            aborted = False
+            created_uuid: dict[str, str] = {}
+            # Node-issue recreation is deferred-edge: ALL missing node-issues are created first
+            # (recorded in `recreated_ids`), then a single post-loop sweep restores every manifest
+            # edge **touching a recreated node** that Linear is still missing. Detection cannot
+            # raise a `DEPENDENCY_MISSING_IN_LINEAR` action while either endpoint is absent
+            # (objective_drift only diffs deps between two observed nodes), so the recreate path
+            # owns BOTH directions: a recreated node's own `depends_on` AND an already-existing
+            # dependent's edge to the recreated node. Observed↔observed missing edges stay with the
+            # explicit `DEPENDENCY_MISSING_IN_LINEAR` repairs in the loop (no overlap — the sweep
+            # skips edges whose endpoints are both already-observed).
+            recreated_ids: set[str] = set()
+            for cond in ordered:
+                try:
+                    self._apply_repair(objective_id, snapshot, cond, created_uuid, recreated_ids)
+                except IssueBackendError as exc:
+                    failed = objective_store.RepairAction(cond.code, cond.node_id, str(exc))
+                    aborted = True
+                    break
+                applied.append(objective_store.RepairAction(cond.code, cond.node_id))
+            if not aborted and recreated_ids and snapshot.manifest is not None:
+                failed = self._restore_recreated_node_edges(
+                    objective_id, snapshot, recreated_ids, created_uuid
+                )
+                aborted = failed is not None
+            remaining = objective_drift.detect_drift(
+                self._build_observed_snapshot(objective_id)
+            ).conditions
+            return objective_store.RepairResult(
+                applied=tuple(applied),
+                failed=failed,
+                remaining=remaining,
+                aborted=aborted,
+                dry_run=False,
+            )
+
+    def _apply_repair(
+        self,
+        objective_id: str,
+        snapshot: objective_drift.ObservedSnapshot,
+        cond: objective_drift.DriftCondition,
+        created_uuid: dict[str, str],
+        recreated_ids: set[str],
+    ) -> None:
+        """Dispatch one repairable condition to its writer (backfill is the no-manifest case)."""
+        code = cond.code
+        if code is objective_drift.DriftCode.MANIFEST_ABSENT:
+            self._backfill_manifest(objective_id, snapshot)
+            return
+        manifest = snapshot.manifest
+        assert manifest is not None  # every non-backfill repair has a parsed manifest baseline
+        if code is objective_drift.DriftCode.DELETED_PHASE_MILESTONE:
+            self._repair_deleted_milestone(objective_id, snapshot, manifest, cond)
+        elif code is objective_drift.DriftCode.MISSING_NODE_ISSUE:
+            self._repair_missing_node(objective_id, manifest, cond, created_uuid, recreated_ids)
+        elif code is objective_drift.DriftCode.DEPENDENCY_MISSING_IN_LINEAR:
+            self._repair_missing_dependency(objective_id, cond, created_uuid)
+
+    def _resolve_node_uuid(
+        self, objective_id: str, node_id: str, created_uuid: dict[str, str]
+    ) -> str | None:
+        """The node-issue UUID for ``node_id`` — from this pass's freshly-created map, else the live
+        project; ``None`` when no node-issue exists."""
+        if node_id in created_uuid:
+            return created_uuid[node_id]
+        found = self._find_node_issue(objective_id, node_id)
+        if found is not None:
+            created_uuid[node_id] = found[0]
+            return found[0]
+        return None
+
+    def _repair_deleted_milestone(
+        self,
+        objective_id: str,
+        snapshot: objective_drift.ObservedSnapshot,
+        manifest: objective.Manifest,
+        cond: objective_drift.DriftCondition,
+    ) -> None:
+        """Recreate a missing phase milestone (by pinned name) and reattach the phase's nodes."""
+        pinned_name = cond.target
+        assert pinned_name is not None
+        phase_key = next((k for k, v in manifest.phase_names.items() if v == pinned_name), None)
+        milestone_id = self._projects.ensure_phase_milestone(
+            project_id=objective_id, name=pinned_name, known=None
+        )
+        if phase_key is not None:
+            for obs in snapshot.nodes:
+                if obs.node_id is not None and objective.phase_key_str(obs.node_id) == phase_key:
+                    self._projects.attach_issue_to_milestone(
+                        issue_id=obs.identifier, milestone_id=milestone_id
+                    )
+
+    def _restore_recreated_node_edges(
+        self,
+        objective_id: str,
+        snapshot: objective_drift.ObservedSnapshot,
+        recreated_ids: set[str],
+        created_uuid: dict[str, str],
+    ) -> objective_store.RepairAction | None:
+        """Post-recreation edge sweep: restore every manifest edge **touching a recreated node**
+        that Linear is still missing — in BOTH directions (the recreated node's own ``depends_on``
+        AND an already-existing dependent's edge to it), which detection could not see while an
+        endpoint was absent. Skips edges already present in Linear and observed↔observed edges
+        (owned by the explicit dependency repair). Returns a failed :class:`RepairAction` on the
+        first unresolvable endpoint (fail-loud), else ``None``."""
+        manifest = snapshot.manifest
+        assert manifest is not None
+        observed_edges = {
+            (dep, obs.node_id)
+            for obs in snapshot.nodes
+            if obs.node_id is not None
+            for dep in obs.depends_on_observed
+        }
+        for node in manifest.nodes:
+            for dep in node.depends_on or ():
+                if (dep, node.id) in observed_edges:
+                    continue  # already a blocking relation in Linear
+                if node.id not in recreated_ids and dep not in recreated_ids:
+                    continue  # observed↔observed — owned by the explicit dependency repair
+                node_uuid = self._resolve_node_uuid(objective_id, node.id, created_uuid)
+                dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
+                if node_uuid is None or dep_uuid is None:
+                    return objective_store.RepairAction(
+                        objective_drift.DriftCode.MISSING_NODE_ISSUE,
+                        node.id,
+                        f"cannot restore manifest edge {dep}→{node.id}: node-issue not found",
+                    )
+                self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=node_uuid)
+        return None
+
+    def _repair_missing_node(
+        self,
+        objective_id: str,
+        manifest: objective.Manifest,
+        cond: objective_drift.DriftCondition,
+        created_uuid: dict[str, str],
+        recreated_ids: set[str],
+    ) -> None:
+        """Recreate a missing node-issue from its manifest entry (block + prose, under its phase
+        milestone); record it in ``recreated_ids`` and DEFER **all** its blocking relations to the
+        post-loop edge sweep (so every endpoint — in either direction — exists before any edge)."""
+        node_id = cond.node_id
+        entry = next((n for n in manifest.nodes if n.id == node_id), None)
+        if entry is None or node_id is None:
+            return
+        phase_key = objective.phase_key_str(node_id)
+        pinned_name = manifest.phase_names.get(
+            phase_key, objective.phase_label(objective.derive_phase(node_id))
+        )
+        milestone_id = self._projects.ensure_phase_milestone(
+            project_id=objective_id, name=pinned_name, known=None
+        )
+        node_description = to_linear_markdown(
+            plan.render_metadata_block(
+                objective.OBJECTIVE_NODE_KEY,
+                objective.render_node_block(entry),
+                style="inline-code",
+            )
+            + "\n\n"
+            + entry.description
+        )
+        _ref, uuid = self._issue_ops._create_issue_raw(
+            title=objective.node_issue_title(entry),
+            description=node_description,
+            label_id=None,
+            project_id=objective_id,
+            milestone_id=milestone_id,
+        )
+        created_uuid[node_id] = uuid
+        recreated_ids.add(node_id)
+
+    def _repair_missing_dependency(
+        self,
+        objective_id: str,
+        cond: objective_drift.DriftCondition,
+        created_uuid: dict[str, str],
+    ) -> None:
+        """Re-add a manifest blocking relation (dep BLOCKS node) absent from Linear."""
+        node_id, dep = cond.node_id, cond.target
+        assert node_id is not None and dep is not None
+        node_uuid = self._resolve_node_uuid(objective_id, node_id, created_uuid)
+        dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
+        if node_uuid is None or dep_uuid is None:
+            raise IssueBackendError(f"cannot create relation {dep}→{node_id}: node-issue not found")
+        self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=node_uuid)
+
+    def _backfill_manifest(
+        self, objective_id: str, snapshot: objective_drift.ObservedSnapshot
+    ) -> None:
+        """Backfill an absent manifest from the live roadmap (the canonical read path) + observed
+        milestone membership (phase pins fall back to the default label for unmilestoned phases)."""
+        state = self.get_objective(objective_id=objective_id)
+        if state is None:
+            raise IssueBackendError(f"objective {objective_id!r} not found")
+        nodes = list(state.nodes)
+        phase_names: dict[str, str] = {}
+        for obs in snapshot.nodes:
+            if obs.node_id is not None and obs.milestone_name:
+                phase_names.setdefault(objective.phase_key_str(obs.node_id), obs.milestone_name)
+        for node in nodes:
+            key = objective.phase_key_str(node.id)
+            phase_names.setdefault(key, objective.phase_label(objective.derive_phase(node.id)))
+        project = self._projects.project_or_none(objective_id, "content")
+        overview = project.get("content") if project is not None else ""
+        overview = overview if isinstance(overview, str) else ""
+        data = objective.render_manifest_block(nodes, phase_names)
+        self._projects.update_project_content(
+            objective_id, self._insert_or_replace_manifest(overview, data)
+        )
 
     def save_node_plan(
         self,

@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from perk import objective
+from perk.objective_drift import DriftCode, DriftCondition, DriftReport
 
 
 class ObjectiveStoreError(Exception):
@@ -101,6 +102,34 @@ class ObjectiveNodeAdd:
     objective_id: str
     node_id: str  # the auto-assigned <phase>.<n>
     comment_updated: bool
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class RepairAction:
+    """One repair the ``--fix`` path applied (or would apply / failed at), identified by its drift
+    ``code`` and the affected ``node_id`` (``None`` for objective-scoped repairs). ``error`` carries
+    the write-failure message on the **failed** action (``None`` for applied / would-apply ones)."""
+
+    code: DriftCode
+    node_id: str | None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class RepairResult:
+    """The result of a ``repair_objective_drift`` pass (Node 4.4 / #612).
+
+    Fail-loud: repairs apply in a deterministic order and the **first** failed Linear write stops
+    the batch (``aborted=True``, the failing condition in ``failed``); ``applied`` records what
+    landed before the abort (durable + idempotent on a re-run). ``remaining`` is the still-present
+    drift after the pass (or the would-apply set under ``dry_run``).
+    """
+
+    applied: tuple[RepairAction, ...]
+    failed: RepairAction | None
+    remaining: tuple[DriftCondition, ...]
+    aborted: bool
     dry_run: bool
 
 
@@ -267,4 +296,28 @@ class ObjectiveStore(Protocol):
         phase's last node): re-render the authoritative objective-roadmap block AND best-effort
         re-render the objective-body comment table. Raises ``ObjectiveStoreError`` on an id
         collision / invalid roadmap. A dry run validates + composes only."""
+        ...
+
+    def detect_objective_drift(self, *, objective_id: str) -> DriftReport:
+        """Detect drift between the persisted ``objective-manifest`` baseline and the observed
+        project state (Node 4.4 / #612).
+
+        Only a store with an independently-editable divergence surface carries real behavior: the
+        project-backed ``LinearProjectObjectiveStore`` builds the observed snapshot and runs
+        ``objective_drift.detect_drift``. ``GitHubObjectiveStore`` and the issue-backed
+        ``LinearObjectiveStore`` return an **empty** ``DriftReport()`` (their roadmap is edited
+        atomically with the rest of the body — no divergence surface, no drift), mirroring the
+        ``save_node_plan → None`` / ``post_status_update → False`` no-op precedent. Raises
+        ``ObjectiveStoreError`` when the objective is absent / on an infra failure."""
+        ...
+
+    def repair_objective_drift(self, *, objective_id: str, dry_run: bool = False) -> RepairResult:
+        """Apply the **safe, unambiguous** (repairable) drift repairs in a deterministic order,
+        stopping at the first failed Linear write (fail-loud; Node 4.4 / #612).
+
+        ``dry_run`` plans the repairs (the would-apply set) without any write. Only
+        ``LinearProjectObjectiveStore`` carries real behavior; the other stores return an empty
+        ``RepairResult`` (no divergence surface). Raises ``ObjectiveStoreError`` when the objective
+        is absent / on an infra failure (never on a repairable drift write, which is recorded in
+        ``failed`` + ``aborted``)."""
         ...

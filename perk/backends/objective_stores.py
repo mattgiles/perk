@@ -232,6 +232,19 @@ class GitHubObjectiveStore:
         """GitHub has no Project Updates surface — always ``False`` (no-op; Node 4.3)."""
         return False
 
+    def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
+        """GitHub's roadmap block is edited atomically with the issue body — no divergence surface,
+        so the drift report is trivially empty (Node 4.4 / #612 no-op precedent)."""
+        return objective_store.DriftReport()
+
+    def repair_objective_drift(
+        self, *, objective_id: str, dry_run: bool = False
+    ) -> objective_store.RepairResult:
+        """GitHub has no divergence surface — an empty no-op repair (Node 4.4 / #612)."""
+        return objective_store.RepairResult(
+            applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
+        )
+
 
 def resolve_objective_store_id(repo_root: Path) -> str:
     """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.

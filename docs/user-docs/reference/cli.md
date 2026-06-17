@@ -207,6 +207,19 @@ Advance an objective's backlog one autonomously-safe step, then pause at the hum
 `--remote` sets the runner ref for remote dispatches; `--wait` polls an in-flight run to
 completion then re-evaluates; `--dry-run` resolves and reports the decision only.
 
+### `perk objective doctor NUMBER` (alias `doc`)
+
+Detect (and optionally repair) **drift** between a Linear-Project objective's persisted
+`objective-manifest` and its live state (node-issues, blocking relations, milestones). Detect-only
+by default; `--fix` applies the **safe, unambiguous** repairs (a missing manifest is backfilled, a
+missing node-issue or phase milestone is recreated, a missing blocking relation is re-added) in a
+deterministic order, stopping at the first failed write; `--dry-run` (with `--fix`) plans the
+repairs without writing. Report-only conditions perk has no authority to auto-resolve (duplicate
+ids, an unexpected extra relation, a renamed milestone, a relation cycle) are surfaced but never
+touched. GitHub objectives have no divergence surface, so the report is always empty. `--json`
+emits the full drift + fix report. See
+[How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
+
 ### `perk pr`
 
 PR lifecycle group: the submit/land launchers, the address launcher, and the review workers.

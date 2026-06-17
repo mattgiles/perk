@@ -19,6 +19,7 @@ run-report marker idempotency through the transcoder, and tolerance of foreign
 
 import itertools
 import json
+import re
 import subprocess
 import uuid
 from pathlib import Path
@@ -27,10 +28,12 @@ from typing import cast
 import pytest
 from click.testing import CliRunner
 
-from perk import github, plan
+from perk import github, objective, plan
 from perk.backends import issues, linear
 from perk.backends.linear import LinearClient, LinearGraphQLError
+from perk.backends.objective_stores import resolve_objective_store
 from perk.cli.cli import cli
+from perk.objective_drift import DriftCode
 from perk.run import run_report
 from perk.state import cache
 
@@ -136,6 +139,7 @@ class FakeLinearWorkspace(LinearClient):
             "label_ids": list(cast("list[str]", payload.get("labelIds", []))),
             # node-issues (project-backed objectives) carry a projectId; plan/learn issues None.
             "project_id": payload.get("projectId"),
+            "milestone_id": payload.get("projectMilestoneId"),
             "comments": [],
         }
         self.issues[str(issue["id"])] = issue
@@ -151,13 +155,25 @@ class FakeLinearWorkspace(LinearClient):
     def project_state(self, project_id: str) -> str:
         return str(self.project_by_id(project_id)["state"])
 
-    def _project_issue_node(self, issue: dict[str, object]) -> dict[str, object]:
-        return {
+    def _milestone_node_of(self, issue: dict[str, object]) -> dict[str, object] | None:
+        mid = issue.get("milestone_id")
+        if mid is None:
+            return None
+        milestone = self.milestones.get(str(mid))
+        return None if milestone is None else {"id": milestone["id"], "name": milestone["name"]}
+
+    def _project_issue_node(
+        self, issue: dict[str, object], *, with_milestone: bool = False
+    ) -> dict[str, object]:
+        node: dict[str, object] = {
             "id": issue["id"],
             "identifier": issue["identifier"],
             "url": issue["url"],
             "description": issue["description"],
         }
+        if with_milestone:
+            node["projectMilestone"] = self._milestone_node_of(issue)
+        return node
 
     # ------------------------------------------------------------------ wire shapes
 
@@ -208,8 +224,9 @@ class FakeLinearWorkspace(LinearClient):
             if project is None:
                 raise _not_found()
             if "issues(first" in query:
+                with_milestone = "projectMilestone" in query
                 nodes = [
-                    self._project_issue_node(issue)
+                    self._project_issue_node(issue, with_milestone=with_milestone)
                     for issue in self.issues.values()
                     if issue.get("project_id") == project["id"]
                 ]
@@ -312,6 +329,8 @@ class FakeLinearWorkspace(LinearClient):
                 issue["label_ids"] = list(cast("list[str]", payload["labelIds"]))
             if "stateId" in payload:
                 issue["state_id"] = payload["stateId"]
+            if "projectMilestoneId" in payload:
+                issue["milestone_id"] = payload["projectMilestoneId"]
             return {"issueUpdate": {"success": True}}
         if "commentCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
@@ -834,3 +853,415 @@ def test_foreign_linkback_comment_does_not_perturb_marker_scans(
         assert len(marked) == 1 and "done" in str(marked[0]["body"])
         foreign = [c for c in comments if "GitHub sync" in str(c["body"])]
         assert len(foreign) == 1 and "done" not in str(foreign[0]["body"])
+
+
+# ----------------------------------------------------------------------- manifest + drift (#612)
+
+
+def _manifest_of(ws: FakeLinearWorkspace, obj_id: str) -> objective.Manifest | None:
+    manifest, _errors = objective.parse_manifest(str(ws.project_by_id(obj_id)["content"]))
+    return manifest
+
+
+def _project_store(root: Path):
+    store = resolve_objective_store(root)
+    return store
+
+
+def test_objective_create_writes_manifest_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None
+        assert [n.id for n in manifest.nodes] == ["1.1", "1.2"]
+        # structural identity only — no status/pr persisted, the depends_on edge IS captured
+        assert manifest.nodes[1].depends_on == ("1.1",)
+        assert "1" in manifest.phase_names  # the phase pin is present
+
+
+def test_add_node_syncs_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        _invoke(
+            runner,
+            [
+                "objective",
+                "node-add",
+                obj_id,
+                "--phase",
+                "1",
+                "--description",
+                "Node two",
+                "--json",
+            ],
+        )
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None
+        assert [n.id for n in manifest.nodes] == ["1.1", "1.2"]
+        assert manifest.nodes[1].description == "Node two"
+
+
+def test_update_node_description_syncs_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        store.update_objective_node(
+            objective_id=obj_id, node_id="1.1", description="Reworded node one"
+        )
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None
+        assert manifest.nodes[0].description == "Reworded node one"
+        # a status-only change does NOT touch the manifest description
+        store.update_objective_node(
+            objective_id=obj_id, node_id="1.1", status=objective.NodeStatus.DONE
+        )
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None and manifest.nodes[0].description == "Reworded node one"
+
+
+def test_reconcile_refreshes_manifest_phase_pin(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        store.update_objective_body(
+            objective_id=obj_id, prose="### Phase 1: Foundations\n\nReconciled."
+        )
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None
+        assert manifest.phase_names["1"] == "Foundations"
+
+
+def test_detect_and_repair_missing_node_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        _delete_node_issue(ws, "1.2")  # drift: node-issue 1.2 vanished from the live project
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        codes = [c.code for c in report.conditions]
+        assert DriftCode.MISSING_NODE_ISSUE in codes
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        assert any(a.code == DriftCode.MISSING_NODE_ISSUE for a in result.applied)
+        # the node-issue is back and its manifest blocking relation restored
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_repair_backfills_absent_manifest(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        # strip the manifest block (simulate a pre-manifest objective)
+        project = ws.project_by_id(obj_id)
+        stripped = re.sub(
+            r"`perk:metadata-block:objective-manifest`.*?`/perk:metadata-block:objective-manifest`",
+            "",
+            str(project["content"]),
+            flags=re.DOTALL,
+        )
+        project["content"] = stripped
+        assert _manifest_of(ws, obj_id) is None
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert [c.code for c in report.conditions] == [DriftCode.MANIFEST_ABSENT]
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False
+        assert _manifest_of(ws, obj_id) is not None
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_repair_deleted_phase_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        # delete every milestone of the project (drift)
+        ws.milestones.clear()
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert DriftCode.DELETED_PHASE_MILESTONE in [c.code for c in report.conditions]
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_dry_run_repair_plans_without_writing(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        ws.milestones.clear()
+        result = store.repair_objective_drift(objective_id=obj_id, dry_run=True)
+        assert result.dry_run is True
+        assert any(a.code == DriftCode.DELETED_PHASE_MILESTONE for a in result.applied)
+        # nothing written — the drift is still present
+        assert ws.milestones == {}
+        assert DriftCode.DELETED_PHASE_MILESTONE in [
+            c.code for c in store.detect_objective_drift(objective_id=obj_id).conditions
+        ]
+
+
+def test_doctor_reports_clean_objective(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        assert payload["success"] is True
+        assert payload["drift"] == []
+        assert payload["fix"] is None
+
+
+def test_doctor_detects_and_fixes_deleted_milestone(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        ws.milestones.clear()  # drift: the phase milestone vanished
+
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        codes = [c["code"] for c in cast("list[dict[str, object]]", payload["drift"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in codes
+        assert payload["fix"] is None
+
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--fix", "--json"])
+        fix = cast("dict[str, object]", payload["fix"])
+        assert fix["aborted"] is False and fix["failed"] is None
+        applied = [a["code"] for a in cast("list[dict[str, object]]", fix["applied"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in applied
+        assert fix["remaining"] == []
+
+        # idempotent: a re-run is clean
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--json"])
+        assert payload["drift"] == []
+
+
+def test_doctor_fix_dry_run_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        ws.milestones.clear()
+        payload = _invoke(runner, ["objective", "doctor", obj_id, "--fix", "--dry-run", "--json"])
+        fix = cast("dict[str, object]", payload["fix"])
+        assert fix["dry_run"] is True
+        applied = [a["code"] for a in cast("list[dict[str, object]]", fix["applied"])]
+        assert DriftCode.DELETED_PHASE_MILESTONE.value in applied
+        assert ws.milestones == {}  # nothing written
+
+
+def test_repair_recreates_both_missing_nodes_and_their_edge_in_one_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Both endpoints of a manifest dependency edge are missing — detection raises no separate
+    # DEPENDENCY_MISSING action for them, so the recreate path owns the edge. The deferred edge
+    # sweep must restore it in a SINGLE --fix pass (no remaining drift).
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        for node in ("1.1", "1.2"):
+            _delete_node_issue(ws, node)
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        # one pass fully converges — both node-issues AND the 1.1→1.2 relation are restored
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_add_node_uses_manifest_pin_not_externally_edited_prose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The manifest is the phase-name authority for an EXISTING phase: an external overview edit
+    # must not make node-add attach to a different/new milestone.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)  # phase 1 pinned to the default "Phase 1"
+        # an external editor rewrites the phase header in the overview prose (manifest unchanged)
+        project = ws.project_by_id(obj_id)
+        project["content"] = str(project["content"]).replace(
+            "Prose.", "### Phase 1: Externally Renamed\n\nProse."
+        )
+        milestones_before = {m["name"] for m in ws.milestones.values()}
+
+        add_args = ["objective", "node-add", obj_id, "--phase", "1"]
+        _invoke(runner, [*add_args, "--description", "Node two", "--json"])
+        # no "Externally Renamed" milestone was minted — the node attached to the pinned one
+        assert "Externally Renamed" not in {m["name"] for m in ws.milestones.values()}
+        assert {m["name"] for m in ws.milestones.values()} == milestones_before
+        manifest = _manifest_of(ws, obj_id)
+        assert manifest is not None and manifest.phase_names["1"] == "Phase 1"
+
+
+def test_reconcile_reverts_pin_to_default_when_header_removed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The overview is the authority on a reconcile — removing a custom header reverts the pin to
+    # the default (never preserving a now-stale custom name).
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        store.update_objective_body(
+            objective_id=obj_id, prose="### Phase 1: Foundations\n\nReconciled."
+        )
+        custom = _manifest_of(ws, obj_id)
+        assert custom is not None and custom.phase_names["1"] == "Foundations"
+        # a later reconcile drops the header — the pin reverts to the default
+        store.update_objective_body(objective_id=obj_id, prose="Reconciled again, no header.")
+        reverted = _manifest_of(ws, obj_id)
+        assert reverted is not None and reverted.phase_names["1"] == "Phase 1"
+
+
+def _delete_node_issue(ws: FakeLinearWorkspace, node_id: str) -> None:
+    def _is(iss: dict[str, object]) -> bool:
+        block = plan.find_metadata_block(str(iss["description"]), objective.OBJECTIVE_NODE_KEY)
+        return block is not None and block.get("id") == node_id
+
+    victim = next(iid for iid, iss in ws.issues.items() if _is(iss))
+    del ws.issues[victim]
+    # Linear cascade-deletes the issue's relations when the issue is removed.
+    ws.relations[:] = [(bk, bl) for bk, bl in ws.relations if victim not in (bk, bl)]
+
+
+def test_repair_restores_existing_dependent_edge_to_a_recreated_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The reviewer's edge: node 1.1 is missing, EXISTING node 1.2 depends on 1.1. Detection raises
+    # only MISSING_NODE_ISSUE(1.1) (it cannot diff a dep to an absent endpoint), so the recreate
+    # sweep must restore the dependent's 1.1→1.2 edge in ONE pass.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        _delete_node_issue(ws, "1.1")  # 1.2 survives but its blocker (1.1) is gone
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert [c.code for c in report.conditions] == [DriftCode.MISSING_NODE_ISSUE]
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        # one pass restores both the node-issue AND the existing dependent's edge to it
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_repair_creates_a_missing_blocking_relation_between_observed_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The explicit DEPENDENCY_MISSING_IN_LINEAR repair path (both endpoints observed): the manifest
+    # declares 1.2 depends on 1.1, both node-issues exist, but the blocking relation was removed.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        ws.relations.clear()  # both node-issues survive; only the blocking relation is gone
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert DriftCode.DEPENDENCY_MISSING_IN_LINEAR in [c.code for c in report.conditions]
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        assert any(a.code == DriftCode.DEPENDENCY_MISSING_IN_LINEAR for a in result.applied)
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()

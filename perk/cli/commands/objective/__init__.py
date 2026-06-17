@@ -17,6 +17,7 @@ import click
 from perk.cli.alias import SectionedAliasGroup, alias, mark_kind, register_with_aliases
 from perk.cli.commands.objective.author_cmd import author_objective
 from perk.cli.commands.objective.create_cmd import create_objective
+from perk.cli.commands.objective.doctor_cmd import doctor_objective
 from perk.cli.commands.objective.next_cmd import next_objective
 from perk.cli.commands.objective.node_add_cmd import node_add_objective
 from perk.cli.commands.objective.node_cmd import node_objective
@@ -46,3 +47,4 @@ register_with_aliases(objective_group, mark_kind(node_add_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(reconcile_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(next_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(run_objective, "worker"))
+register_with_aliases(objective_group, mark_kind(doctor_objective, "worker"))
