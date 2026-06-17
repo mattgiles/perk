@@ -237,7 +237,13 @@ def _resolve_plan_base(
     if objective_id is not None:
         try:
             state = store.get_objective(objective_id=str(objective_id).lstrip("#"))
-        except Exception:  # fail-soft: a base lookup must never block a save.
+        except Exception as exc:  # fail-soft: a base lookup must never block a save.
+            # Report (never silent) — matches the repo's fail-open-with-report norm so a misconfig
+            # objective store surfaces, while the save still proceeds (falls through to config).
+            print(
+                f"perk plan save: objective base lookup skipped (non-fatal): {exc}",
+                file=sys.stderr,
+            )
             state = None
         if state is not None:
             obj_base = state.header.get("base")

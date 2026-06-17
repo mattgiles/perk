@@ -1080,6 +1080,40 @@ class TestCreateObjectiveIssue:
         assert backfilled is not None
         assert backfilled["objective_comment_id"] == "cmt-uuid-1"
 
+    def test_create_persists_base_into_objective_header(self) -> None:
+        # #633: the issue-backed store threads `base` into the composed inline-code
+        # objective-header block; absent `base` leaves it null.
+        store, fake = _make_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [_no_issues()],
+                "issueLabels(filter": [_LABEL_FOUND],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "obj-1", "identifier": "ENG-9", "url": "u-obj"},
+                        }
+                    }
+                ],
+                "commentCreate(": [_COMMENT_CREATED],
+                "issue(id": [_objective_issue_response(_inline_objective_description("01NEW"))],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        store.create_objective(
+            title="t",
+            body="The objective prose.",
+            run_id="01NEW",
+            base="develop",
+            roadmap_nodes=_objective_nodes(),
+        )
+        [(_, create_vars)] = _queries(fake, "issueCreate(")
+        description = _input_payload(create_vars)["description"]
+        assert isinstance(description, str)
+        header = plan.find_metadata_block(description, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None and header["base"] == "develop"
+
 
 class TestGetObjective:
     def test_happy_path(self) -> None:
@@ -2382,6 +2416,21 @@ class TestLinearProjectObjectiveStore:
         }
         assert all(r["type"] == "blocks" for r in rels)
         assert not _queries(fake, "UuidForIssue")
+
+    def test_create_objective_persists_base_into_overview_header(self) -> None:
+        # #633: the project-backed overview header composer (header.to_data()) carries `base`.
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            base="develop",
+            roadmap_nodes=_store_nodes(),
+        )
+        [(_, pvars)] = _queries(fake, "projectCreate(")
+        content = cast("str", _input_payload(pvars)["content"])
+        header = plan.find_metadata_block(content, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None and header["base"] == "develop"
 
     def test_create_objective_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store()

@@ -184,6 +184,7 @@ def resolve_worktree(
 
     plan_ref: dict[str, Any] | None = None
     name = worktree
+    base_ref: dict[str, Any] | None = None
     if name is None:  # D2/D3: derive the name from the active plan-ref
         plan_ref = cache.read_plan_ref(repo_root)
         if plan_ref is None:
@@ -193,12 +194,15 @@ def resolve_worktree(
                 error_type="no_plan_ref",
             )
         name = resolve_plan_worktree_name(plan_ref)
+        base_ref = plan_ref
     else:
-        # Explicit --worktree NAME: best-effort recover the active plan-ref so the plan's pinned
-        # base (#633) still drives the start-point. A missing ref simply leaves plan_base=None.
-        plan_ref = cache.read_plan_ref(repo_root)
+        # Explicit --worktree NAME: best-effort recover the active plan-ref for the pinned base
+        # (#633) ONLY — it drives the start-point but is NOT returned as `plan_ref` (which stays
+        # None on this path, as before #633, so a reuse-stage run never clobbers the named
+        # worktree's own cache.plan-ref). A missing ref simply leaves plan_base=None.
+        base_ref = cache.read_plan_ref(repo_root)
 
-    plan_base = plan_ref.get("base") if plan_ref else None
+    plan_base = base_ref.get("base") if base_ref else None
     plan_base = plan_base if isinstance(plan_base, str) and plan_base.strip() else None
 
     Ensure.invariant(

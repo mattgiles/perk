@@ -87,8 +87,12 @@ passthrough `pi_args` are forwarded to `pi`.
 ### `perk implement [PLAN]` (alias `impl`)
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
-(`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. Adds
-`--base` to branch off a ref other than `origin/<trunk>` (e.g. to stack on an unlanded branch).
+(`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. The worktree
+branch is cut from the plan's pinned base (`origin/<base>`) when the plan declared one, else
+`origin/<trunk>` (see
+[Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Adds `--base`
+to override the start-point with a ref of your choosing (e.g. to stack on an unlanded branch); the
+flag wins verbatim over the plan's pinned base but does not change the PR's merge target.
 
 ### `perk submit`
 
