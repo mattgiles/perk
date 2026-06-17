@@ -15,6 +15,7 @@ from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.state import run_id
+from perk.substrate.config import load_config
 from perk.substrate.output import machine_output, user_output
 
 
@@ -29,6 +30,11 @@ from perk.substrate.output import machine_output, user_output
 )
 @click.option("--title", help="Objective title (else derived from body).")
 @click.option(
+    "--base",
+    help="Target branch for this objective's plans (else `[workflow] base`, else the GitHub "
+    "default).",
+)
+@click.option(
     "--roadmap",
     "roadmap_json",
     help="Structured roadmap as a JSON array of nodes (preferred over embedding YAML in --body).",
@@ -42,6 +48,7 @@ def create_objective(
     *,
     body_path: Path,
     title: str | None,
+    base: str | None,
     roadmap_json: str | None,
     run_id_arg: str | None,
     dry_run: bool,
@@ -85,11 +92,16 @@ def create_objective(
             )
         resolved_title = title or plan.derive_title(body_text, fallback="perk objective")
         resolved_run_id = run_id_arg or os.environ.get("PERK_RUN_ID") or run_id.mint()
+        # Pin the objective's base at create time: explicit --base wins, else the repo's
+        # `[workflow] base` default, else None (node plans then fall through to the GitHub
+        # default). Pinning keeps the objective self-describing for its node plans.
+        resolved_base = base or load_config(repo_root).workflow_base
         store = objective_stores.resolve_objective_store(repo_root)
         issue = store.create_objective(
             title=resolved_title,
             body=body_text,
             run_id=resolved_run_id,
+            base=resolved_base,
             roadmap_nodes=roadmap_nodes,
             dry_run=dry_run,
         )

@@ -49,4 +49,7 @@ def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) 
         "labels": [plan.PLAN_LABEL],
         "objective_id": plan_state.header.get("objective_id"),
         "consumed_learn": plan_state.header.get("consumed_learn") or [],
+        # The pinned base (#633): recovered from the canonical `plan-header` so implement/resume/
+        # the remote run-worker base off it even when the local cache.plan-ref is absent.
+        "base": plan_state.header.get("base"),
     }

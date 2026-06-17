@@ -173,6 +173,7 @@ class ObjectiveStore(Protocol):
         body: str,
         run_id: str,
         status: str = "active",
+        base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
     ) -> ObjectiveRef:
@@ -180,6 +181,8 @@ class ObjectiveStore(Protocol):
         roadmap blocks), post the objective-body comment (rendered table + prose), then backfill
         the comment id into the header. ``body`` is the authored objective prose; the roadmap comes
         from ``roadmap_nodes`` when given (the structured path), else is parsed from ``body``.
+        ``base`` is the objective's target branch (#633), persisted into the ``objective-header``
+        block; ``None`` leaves it unset (node plans fall through to ``[workflow] base`` → default).
         Idempotent on ``run_id`` (find-then-return, ``existed=True``). A dry run returns
         ``ObjectiveRef(id="0", url="(dry-run)", existed=False)`` without touching the backend. An
         empty roadmap raises (the storage backstop: no surface may store a node-less objective)."""

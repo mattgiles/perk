@@ -97,6 +97,7 @@ def create_objective_issue(
     repo_root: Path,
     run_id: str,
     status: str = "active",
+    base: str | None = None,
     roadmap_nodes: list[objective.ObjectiveNode] | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
@@ -139,7 +140,11 @@ def create_objective_issue(
     )
 
     header = objective.ObjectiveHeader(
-        run_id=run_id, created=plan.now_iso(), objective_comment_id=None, status=status
+        run_id=run_id,
+        created=plan.now_iso(),
+        objective_comment_id=None,
+        status=status,
+        base=base,
     )
     header_block = plan.render_metadata_block(objective.OBJECTIVE_HEADER_KEY, header.to_data())
     roadmap_block = plan.render_metadata_block(

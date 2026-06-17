@@ -16,11 +16,12 @@ from pathlib import Path
 import click
 
 from perk import objective, plan
-from perk.backends import issue_backend, issues, objective_stores
+from perk.backends import issue_backend, issues, objective_store, objective_stores
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
+from perk.substrate.config import load_config
 from perk.substrate.output import machine_output, user_output
 
 # error_type -> process exit code (default 1).
@@ -221,6 +222,30 @@ def _parse_consumed_learn(raw: str | None) -> tuple[str, ...]:
     return tuple(sorted(ids))
 
 
+def _resolve_plan_base(
+    repo_root: Path,
+    store: objective_store.ObjectiveStore,
+    objective_id: str | None,
+) -> str | None:
+    """Resolve the plan's pinned base (#633): the linked objective's own ``base`` wins (it is the
+    source of truth for its node plans), else the repo's ``[workflow] base``, else ``None``.
+
+    Fail-soft on the objective read: a ``None``/missing objective, a header without ``base``, or any
+    store error falls through to the config step (never blocks a save). When unset everywhere the
+    submit + start-point paths fall back to the GitHub default branch (byte-identical to today).
+    """
+    if objective_id is not None:
+        try:
+            state = store.get_objective(objective_id=str(objective_id).lstrip("#"))
+        except Exception:  # fail-soft: a base lookup must never block a save.
+            state = None
+        if state is not None:
+            obj_base = state.header.get("base")
+            if isinstance(obj_base, str) and obj_base.strip():
+                return obj_base.strip()
+    return load_config(repo_root).workflow_base
+
+
 def _plan_save_impl(
     *,
     repo_root: Path,
@@ -245,17 +270,23 @@ def _plan_save_impl(
         raise UserFacingCliError(f"Plan file is empty: {plan_file}", error_type="invalid_input")
 
     resolved_title = title or plan.derive_title(plan_markdown)
+    backend = issues.resolve_issue_backend(repo_root)
+    store = objective_stores.resolve_objective_store(repo_root)
+
+    # Resolve + pin the plan's base (#633): the objective's own base wins (it is the source of
+    # truth for its node plans), else the repo's `[workflow] base`, else None (submit/start-point
+    # fall back to the GitHub default branch). Pinned once here into BOTH the plan-header and the
+    # cache.plan-ref so a later config change never retargets this plan.
+    resolved_base = _resolve_plan_base(repo_root, store, objective_id)
     header = plan.PlanHeader(
         run_id=run_id or "",
         created=plan.now_iso(),
         objective_id=objective_id,
         consumed_learn=consumed_learn,
+        base=resolved_base,
     )
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
-
-    backend = issues.resolve_issue_backend(repo_root)
-    store = objective_stores.resolve_objective_store(repo_root)
 
     # Node 3.4 unification: an objective-linked REAL save writes the plan INTO the existing
     # node-issue (project-backed stores) instead of minting a second perk:plan issue. The store's
@@ -318,6 +349,8 @@ def _plan_save_impl(
                     header_fields["objective_id"] = objective_id
                 if consumed_learn:
                     header_fields["consumed_learn"] = list(consumed_learn)
+                if resolved_base is not None:
+                    header_fields["base"] = resolved_base
                 if header_fields:
                     backend.update_plan_header(issue_id=issue.id, fields=header_fields)
                 updated = True
@@ -332,6 +365,7 @@ def _plan_save_impl(
         labels=labels,
         objective_id=objective_id,
         consumed_learn=consumed_learn,
+        base=resolved_base,
     )
     # Persist the ref as the cache.plan-ref pointer (turn-2b §7): the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.

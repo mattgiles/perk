@@ -47,7 +47,16 @@ LEARN_HEADER_KEY = "learn-header"  # carries { run_id, created, plan } in the le
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
 PLAN_HEADER_FIELDS = frozenset(
-    {"run_id", "lifecycle_stage", "branch", "pr", "created", "objective_id", "consumed_learn"}
+    {
+        "run_id",
+        "lifecycle_stage",
+        "branch",
+        "pr",
+        "created",
+        "objective_id",
+        "consumed_learn",
+        "base",
+    }
 )
 
 _OPEN = "<!-- perk:metadata-block:{key} -->"
@@ -89,6 +98,9 @@ class PlanHeader:
     # hop-2: the perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
     # Linear "ENG-45"; contracts §8.21).
     consumed_learn: tuple[str, ...] = ()
+    # The pinned PR merge target / worktree start-point branch (#633). `None` ⇒ fall back to the
+    # GitHub default branch (byte-identical to pre-#633 behavior).
+    base: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -99,6 +111,7 @@ class PlanHeader:
             "created": self.created,
             "objective_id": self.objective_id,
             "consumed_learn": list(self.consumed_learn),
+            "base": self.base,
         }
 
 
@@ -118,6 +131,8 @@ class PlanRef:
     objective_id: str | None = None
     # hop-2: consumed perk:learn issue ids (opaque strings; closed on land).
     consumed_learn: tuple[str, ...] = ()
+    # The pinned PR merge target / worktree start-point branch (#633); `None` ⇒ GitHub default.
+    base: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -127,6 +142,7 @@ class PlanRef:
             "labels": list(self.labels),
             "objective_id": self.objective_id,
             "consumed_learn": list(self.consumed_learn),
+            "base": self.base,
         }
 
 
