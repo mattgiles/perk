@@ -102,8 +102,11 @@ An objective stores three `perk:`-namespaced, schema-version-`"1"` metadata bloc
 sections an operator can read with `gh issue view N`:
 
 - **`objective-header`** (issue body) — compact, queryable
-  `{run_id, created, objective_comment_id, status}`, where `status` is the objective-level rollup
-  (e.g. `"active"`). Marked by `<!-- perk:metadata-block:objective-header -->`.
+  `{run_id, created, objective_comment_id, status, base}`, where `status` is the objective-level
+  rollup (e.g. `"active"`) and `base` is the objective's target branch (inherited by every node
+  plan; `null` when unset — see
+  [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Marked by
+  `<!-- perk:metadata-block:objective-header -->`.
 - **`objective-roadmap`** (issue body) — the **canonical** flat-node roadmap YAML
   (`{schema_version: "1", nodes: [...]}`), deterministically re-rendered on every node update.
   `depends_on` / `comment` columns are omitted from serialization unless some node specifies them.
@@ -136,6 +139,7 @@ separate observed surface and so carry no manifest. See
 - How-to guides: [author a roadmap](../how-to/author-a-roadmap.md),
   [advance or skip nodes](../how-to/advance-or-skip-nodes.md),
   [reconcile an objective](../how-to/reconcile-an-objective.md),
+  [target a non-default base branch](../how-to/target-a-non-default-base-branch.md),
   [run the learn-docs factory](../how-to/run-the-learn-docs-factory.md).
 - The [user-docs router](../index.md).
 

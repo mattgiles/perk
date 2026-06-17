@@ -56,15 +56,17 @@ root = ".worktrees"
 
 ### `[workflow]`
 
-Project-supplied plan-authoring guidance.
+Project-supplied plan-authoring guidance and the default target branch.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `plan_authoring` | string | _(none)_ | Appended into the plan-authoring context injection inside `plan` sessions. |
+| `base` | string | _(GitHub default branch)_ | The default target branch plans and objectives base off and target. Overrides the repo's GitHub default; an objective's own `--base` wins for its node plans. Pinned at save time — see [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md). |
 
 ```toml
 [workflow]
 plan_authoring = "Prefer the smallest diff that satisfies the acceptance criteria."
+base = "develop"
 ```
 
 ### `[[ci]]`

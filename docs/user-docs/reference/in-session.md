@@ -176,8 +176,10 @@ tracking — the read-only → read-write objective boundary (the manual failsaf
 save flow). Paired tools:
 
 - **`objective_draft`** — write the working objective draft to the session data dir (sanctioned
-  read-only write; not a save). *Non-terminating.*
-- **`objective_save`** — the canonical objective save tool. *Terminating.*
+  read-only write; not a save). Optional `base` targets a non-default branch (omit for the repo
+  default). *Non-terminating.*
+- **`objective_save`** — the canonical objective save tool (also accepts the optional `base`).
+  *Terminating.*
 
 The cold authoring door **`perk objective author`** has **no** warm slash twin — objective
 authoring is reached cold, or via plan-mode read-only authoring (`objective_draft` →

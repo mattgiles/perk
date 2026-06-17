@@ -93,6 +93,7 @@ class GitHubObjectiveStore:
         body: str,
         run_id: str,
         status: str = "active",
+        base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
@@ -103,6 +104,7 @@ class GitHubObjectiveStore:
                 repo_root=self._repo_root,
                 run_id=run_id,
                 status=status,
+                base=base,
                 roadmap_nodes=roadmap_nodes,
                 dry_run=dry_run,
             )

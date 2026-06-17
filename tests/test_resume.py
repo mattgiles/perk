@@ -61,7 +61,14 @@ def test_reconstruct_plan_ref():
         "labels": ["perk:plan"],
         "objective_id": "O1",
         "consumed_learn": [],
+        "base": None,
     }
+
+
+def test_reconstruct_plan_ref_carries_base():
+    # #633: the pinned base is recovered from the canonical plan-header.
+    ref = resume.reconstruct_plan_ref(_neutral_state(header={"base": "develop"}), provider="github")
+    assert ref["base"] == "develop"
 
 
 # --- the CLI (CliRunner; get_plan + launch_stage stubbed) ------------------------------

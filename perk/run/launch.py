@@ -132,7 +132,9 @@ def resolve_plan_worktree_name(plan_ref: dict[str, Any]) -> str:
     return f"plan-{pr_id}"
 
 
-def resolve_base(repo_root: Path, name: str, base_override: str | None) -> str | None:
+def resolve_base(
+    repo_root: Path, name: str, base_override: str | None, plan_base: str | None = None
+) -> str | None:
     """The start-point ref a freshly-created ``plan-<pr_id>`` branch should base off (D: origin-
     aware create). Reads **local** refs only (no network) so it is dry-run-safe; the caller
     fetches first on the materialize path so a fresh ``origin/*`` is visible here.
@@ -140,13 +142,15 @@ def resolve_base(repo_root: Path, name: str, base_override: str | None) -> str |
     Precedence: an explicit ``--base`` wins verbatim (deliberate stacking, even on a non-origin
     ref); else track an existing ``origin/<name>`` (resumed/remote plan); else base off
     ``origin/<trunk>`` when it exists; else ``None`` (no usable origin ref — fall back to local
-    HEAD, e.g. no remote).
+    HEAD, e.g. no remote). ``plan_base`` (the plan's pinned target branch, #633) replaces the
+    detected trunk as the trunk source when set, so a plan declaring a non-default base cuts its
+    worktree from that branch.
     """
     if base_override is not None:
         return base_override
     if git.remote_ref_exists(repo_root, f"origin/{name}"):
         return f"origin/{name}"
-    trunk = git.detect_trunk_branch(repo_root)
+    trunk = plan_base or git.detect_trunk_branch(repo_root)
     if git.remote_ref_exists(repo_root, f"origin/{trunk}"):
         return f"origin/{trunk}"
     return None
@@ -180,6 +184,7 @@ def resolve_worktree(
 
     plan_ref: dict[str, Any] | None = None
     name = worktree
+    base_ref: dict[str, Any] | None = None
     if name is None:  # D2/D3: derive the name from the active plan-ref
         plan_ref = cache.read_plan_ref(repo_root)
         if plan_ref is None:
@@ -189,6 +194,16 @@ def resolve_worktree(
                 error_type="no_plan_ref",
             )
         name = resolve_plan_worktree_name(plan_ref)
+        base_ref = plan_ref
+    else:
+        # Explicit --worktree NAME: best-effort recover the active plan-ref for the pinned base
+        # (#633) ONLY — it drives the start-point but is NOT returned as `plan_ref` (which stays
+        # None on this path, as before #633, so a reuse-stage run never clobbers the named
+        # worktree's own cache.plan-ref). A missing ref simply leaves plan_base=None.
+        base_ref = cache.read_plan_ref(repo_root)
+
+    plan_base = base_ref.get("base") if base_ref else None
+    plan_base = plan_base if isinstance(plan_base, str) and plan_base.strip() else None
 
     Ensure.invariant(
         "/" not in name and name not in ("", ".", ".."),
@@ -201,7 +216,7 @@ def resolve_worktree(
             pass  # D4: idempotent reuse (resume) — do not fetch, re-base, re-create, or error
         elif materialize:
             _fetch_best_effort(repo_root)  # network sync first so a fresh origin/* is seen
-            resolved_base = resolve_base(repo_root, name, base)
+            resolved_base = resolve_base(repo_root, name, base, plan_base)
             try:
                 git.worktree_add(
                     repo_root, path, branch=name, create_branch=True, base=resolved_base
@@ -209,7 +224,7 @@ def resolve_worktree(
             except GitError as exc:
                 raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
         else:  # dry-run create: resolve the base from local refs only (no fetch, no create)
-            resolved_base = resolve_base(repo_root, name, base)
+            resolved_base = resolve_base(repo_root, name, base, plan_base)
     else:  # reuse
         Ensure.path_exists(
             path,
@@ -566,14 +581,21 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     rid = run_id.mint()  # a cold dispatch is a cold launch => mints (registry policy)
     runner_ref = target.runner or ""
     selected = runner.select_runner(runner_ref)
-    try:
-        base = github.default_branch(repo_root)
-    except GitHubError as exc:
-        base = "main"
-        user_output(
-            f"⚠ could not resolve the default branch ({exc}); basing the dispatch on "
-            f"{base!r} — pass an explicit base if that is wrong."
-        )
+    # Prefer the plan's pinned base (#633) so the runner input carries the real target; fall back
+    # to the GitHub default branch. (run_worker still treats `base` as informational — this keeps
+    # the §8.13 input honest.)
+    plan_base = plan_ref.get("base")
+    if isinstance(plan_base, str) and plan_base.strip():
+        base = plan_base.strip()
+    else:
+        try:
+            base = github.default_branch(repo_root)
+        except GitHubError as exc:
+            base = "main"
+            user_output(
+                f"⚠ could not resolve the default branch ({exc}); basing the dispatch on "
+                f"{base!r} — pass an explicit base if that is wrong."
+            )
     pr_id = str(plan_ref.get("pr_id", ""))
     inputs = {
         "run_id": rid,

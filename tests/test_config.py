@@ -42,6 +42,36 @@ def test_user_bindings_absent_is_empty(tmp_path):
     assert load_config(tmp_path).user_bindings == []
 
 
+def test_workflow_base_absent_is_none(tmp_path):
+    assert load_config(tmp_path).workflow_base is None
+
+
+def test_workflow_base_parses_string(tmp_path):
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "develop"\n')
+    assert load_config(tmp_path).workflow_base == "develop"
+
+
+def test_workflow_base_strips_whitespace(tmp_path):
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "  develop  "\n')
+    assert load_config(tmp_path).workflow_base == "develop"
+
+
+def test_workflow_base_non_string_is_none(tmp_path):
+    _write(tmp_path, "perk.toml", "[workflow]\nbase = 7\n")
+    assert load_config(tmp_path).workflow_base is None
+
+
+def test_workflow_base_blank_is_none(tmp_path):
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "   "\n')
+    assert load_config(tmp_path).workflow_base is None
+
+
+def test_workflow_base_local_overrides_committed(tmp_path):
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "develop"\n')
+    _write(tmp_path, "perk.local.toml", '[workflow]\nbase = "release"\n')
+    assert load_config(tmp_path).workflow_base == "release"
+
+
 def test_seeded_template_is_inert(tmp_path):
     # The seeded `.pi/perk.toml` carries a *commented* [[bindings]] example; it must
     # parse to zero user bindings (guards the comment-only invariant against edits).

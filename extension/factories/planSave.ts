@@ -111,7 +111,12 @@ function decodePlanRef(payload: ColdJson): PlanRef | null {
   ) {
     return null;
   }
-  return { provider, pr_id: prId, url, labels, objective_id: objectiveId };
+  // `base` (#633) stays Python-owned for all behavior; carrying it keeps the workflow-state
+  // `active_plan_ref` copy byte-consistent with the cold door's `--json` plan_ref. Parity-only +
+  // lenient: a present null/string is carried, an absent/mistyped value is simply omitted (never a
+  // decode failure — legacy pre-#633 plan-refs lack the field).
+  const base = nullableStringField(ref, "base");
+  return { provider, pr_id: prId, url, labels, objective_id: objectiveId, base };
 }
 
 /** Validate the optional `objective_node` sub-object; malformed → null (advisory, never fatal). */

@@ -1234,6 +1234,7 @@ class LinearObjectiveStore:
         body: str,
         run_id: str,
         status: str = "active",
+        base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
@@ -1267,7 +1268,11 @@ class LinearObjectiveStore:
             # Composed directly in the inline-code style (no transcoding needed — the
             # `create_learn_issue` precedent).
             header = objective.ObjectiveHeader(
-                run_id=run_id, created=plan.now_iso(), objective_comment_id=None, status=status
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+                base=base,
             )
             header_block = plan.render_metadata_block(
                 objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
@@ -1601,6 +1606,7 @@ class LinearProjectObjectiveStore:
         body: str,
         run_id: str,
         status: str = "active",
+        base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
@@ -1634,6 +1640,7 @@ class LinearProjectObjectiveStore:
                 created=plan.now_iso(),
                 objective_comment_id=None,
                 status=status,
+                base=base,
             )
             header_block = plan.render_metadata_block(
                 objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"

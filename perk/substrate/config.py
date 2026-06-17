@@ -33,6 +33,11 @@ class Config:
     # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
     # `user_bindings` is raw and `resolve_bindings` resolves it).
     providers: dict[str, str | None] = field(default_factory=dict)
+    # The `[workflow] base` default target branch (#633): the trunk that plans/objectives base off
+    # and target when no objective-level override is set. `None` (absent/non-string) ⇒ fall back
+    # to the GitHub default branch (byte-identical to pre-#633 behavior). The sibling
+    # `[workflow] plan_authoring` key is TS-read and untouched.
+    workflow_base: str | None = None
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -69,7 +74,22 @@ def load_config(repo_root: Path) -> Config:
         user_bindings=parse_user_bindings(merged.get("bindings")),
         providers=_parse_providers_selection(merged.get("providers")),
         subagents=_parse_subagents_selection(merged.get("subagents")),
+        workflow_base=_parse_workflow_base(merged.get("workflow")),
     )
+
+
+def _parse_workflow_base(raw: Any) -> str | None:
+    """Read the `[workflow] base` value when it is a non-blank ``str`` (#633).
+
+    LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
+    absent/ill-typed/blank ``base`` yields ``None`` (callers fall back to the GitHub default
+    branch). The sibling ``plan_authoring`` key is TS-read and ignored here.
+    """
+    table = raw if isinstance(raw, dict) else {}
+    value = table.get("base")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 # The perk-owned project agents configurable via the `[subagents]` table.

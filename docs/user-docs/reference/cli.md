@@ -87,8 +87,12 @@ passthrough `pi_args` are forwarded to `pi`.
 ### `perk implement [PLAN]` (alias `impl`)
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
-(`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. Adds
-`--base` to branch off a ref other than `origin/<trunk>` (e.g. to stack on an unlanded branch).
+(`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. The worktree
+branch is cut from the plan's pinned base (`origin/<base>`) when the plan declared one, else
+`origin/<trunk>` (see
+[Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Adds `--base`
+to override the start-point with a ref of your choosing (e.g. to stack on an unlanded branch); the
+flag wins verbatim over the plan's pinned base but does not change the PR's merge target.
 
 ### `perk submit`
 
@@ -129,7 +133,10 @@ deterministic save worker instead (the mode the warm `/plan-save` door shells). 
 takes `--worktree`, `--dry-run`, and `--remote`. As the worker (`--json`) it keeps the full
 plan-write flag set: `--plan-file` (the plan markdown to save), `--run-id`, `--title`,
 `--objective-id`/`--node-id` (link to an objective and advance the node), `--consumed-learn` (the
-perk:learn ids a docs plan consumes), and `--dry-run` (compose + print, no GitHub).
+perk:learn ids a docs plan consumes), and `--dry-run` (compose + print, no GitHub). The plan's
+target branch is *derived* at save time (the linked objective's base → `[workflow] base` → the
+GitHub default) and pinned — there is no `--base` flag here; see
+[Target a non-default base branch](../how-to/target-a-non-default-base-branch.md).
 
 ### `perk plan resume PLAN`
 
@@ -170,7 +177,10 @@ instead of the next actionable one. Local-only; adds `--json`.
 
 Mint a `run_id` and create the perk:objective issue from authored markdown. Reads the required
 `--body` file; `--title`, `--roadmap` (a JSON array of nodes, preferred over embedding YAML),
-`--run-id`, `--dry-run`, and `--json` tune the create.
+`--base` (the target branch this objective's node plans inherit — else `[workflow] base`, else the
+GitHub default; see
+[Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)), `--run-id`,
+`--dry-run`, and `--json` tune the create.
 
 ### `perk objective show NUMBER` (alias `s`)
 

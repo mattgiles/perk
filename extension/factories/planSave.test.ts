@@ -131,6 +131,86 @@ test("tool: plan_save delegates, links the session, and terminates", async () =>
   }
 });
 
+test("tool: plan_save carries plan_ref.base into active_plan_ref (#633 parity)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const withBase = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+    plan_ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+      base: "develop",
+    },
+    cached: true,
+    dry_run: false,
+  });
+  const bin = fakePerk(cwd, { stdout: withBase });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(
+      (h.workflowState().active_plan_ref as { base?: string | null } | null)?.base,
+      "develop",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save tolerates a legacy plan_ref with no base (still links, base absent)", async () => {
+  // #633 lenient decode: a pre-#633 cold-door payload whose plan_ref lacks `base` must still
+  // decode + link (never bad_output); active_plan_ref simply carries no base.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON }); // PLAN_JSON's plan_ref has no `base`
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    const ref = h.workflowState().active_plan_ref as { pr_id?: string; base?: unknown } | null;
+    assert.equal(ref?.pr_id, "42", "linked despite no base");
+    assert.equal(ref?.base, undefined, "absent base omitted, not a failure");
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save drops a mistyped plan_ref.base (lenient parity, still links)", async () => {
+  // #633 lenient decode: a non-string/non-null `base` is omitted (never a decode failure).
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const mistyped = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+    plan_ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+      base: 7,
+    },
+    cached: true,
+    dry_run: false,
+  });
+  const bin = fakePerk(cwd, { stdout: mistyped });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal((result.details as { ok: boolean }).ok, true);
+    const ref = h.workflowState().active_plan_ref as { pr_id?: string; base?: unknown } | null;
+    assert.equal(ref?.pr_id, "42");
+    assert.equal(ref?.base, undefined, "mistyped base dropped");
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");

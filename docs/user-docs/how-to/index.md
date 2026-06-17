@@ -25,6 +25,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   feedback, fix actionable items, resolve threads.
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
+- [How to target a non-default base branch](./target-a-non-default-base-branch.md) — point plans
+  and objectives at a target branch other than the GitHub default.
 - [How to run CI checks in a session](./run-ci-in-session.md) — run the project's configured
   `[[ci]]` checks and read results in-session.
 - [How to recover a dirty worktree](./recover-a-dirty-worktree.md) — get unblocked when

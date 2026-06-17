@@ -1295,8 +1295,10 @@ erk migrated away from GitHub-specific refs and issue-numbers-in-branch-names):
   url: string,                 # during planning: the plan issue url/id; branch/pr staged null
   labels: string[],            # ["perk:plan"]
   objective_id: string|null,   # Phase 2
-  consumed_learn: string[] }   # hop-2: perk:learn issue ids a docs plan consolidates (closed on
+  consumed_learn: string[],    # hop-2: perk:learn issue ids a docs plan consolidates (closed on
                                # land) — opaque strings (§8.21; Node 4.1)
+  base: string|null }          # #633: the pinned PR merge target / worktree start-point branch;
+                               # null ⇒ fall back to the GitHub default branch
 ```
 
 **Plan-header block (P1.T2a — the queryable metadata in the issue *body*).** The minimal
@@ -1310,8 +1312,24 @@ block; the full plan markdown lives in the `plan-body` first comment:
   pr: string|null,             # staged — populated at submit
   created: string,             # ISO-8601 UTC
   objective_id: string|null,   # Phase 2
-  consumed_learn: string[] }   # hop-2: perk:learn issue ids (opaque strings — §8.21; Node 4.1)
+  consumed_learn: string[],    # hop-2: perk:learn issue ids (opaque strings — §8.21; Node 4.1)
+  base: string|null }          # #633: the pinned PR merge target / worktree start-point branch;
+                               # null ⇒ fall back to the GitHub default branch
 ```
+
+**The pinned base (`base`, #633).** A plan or objective can declare a **non-default target
+branch**. `perk plan save` resolves the effective base **once** — the linked objective's own
+`base` (the `objective-header` `base`, the source of truth for its node plans) → the repo's
+`[workflow] base` config → `None` — and pins it into BOTH the `plan-header.base` and the
+`cache.plan-ref.base`. Three consumers read it: `create_pr` (the PR merge target), the worktree
+start-point (`launch.resolve_base` bases the `plan-<id>` branch off `origin/<base>` instead of the
+detected trunk), and the `/submit` merge-conflict probe. The submit base-resolution chain is
+`cache.plan-ref.base` → `plan-header.base` → `default_branch()`; when `base` is absent everywhere
+the behavior is byte-identical to pre-#633 (fall back to the GitHub default / `detect_trunk_branch`).
+The explicit `implement`/`run-worker` `--base` flag (a one-off git start-point override for
+stacking) still wins the start-point verbatim. `reconstruct_plan_ref` carries `base` from the
+`plan-header` so `implement`/`resume`/the remote `run-worker` recover the pinned value when the
+local `cache.plan-ref` is absent.
 
 **Label taxonomy (minimal, PRIOR_ART §2/§6):** `perk:plan` (green `1f883d`), `perk:learn` (purple
 `8250df`), `perk:objective` (indigo `5319e7`, description "perk objective issue", since P2.T9), and
@@ -1342,8 +1360,9 @@ its block engine); the GitHub writes live in `perk/github/objectives.py`; the co
 
 **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
 - `objective-header` (issue body) — compact, queryable: `{ run_id, created,
-  objective_comment_id, status }` (`status` is the explicit objective-level rollup, e.g.
-  `"active"`; `objective_comment_id` is backfilled in the two-step create).
+  objective_comment_id, status, base }` (`status` is the explicit objective-level rollup, e.g.
+  `"active"`; `objective_comment_id` is backfilled in the two-step create; `base` (#633) is the
+  objective's target branch, inherited by every node plan, `null` when unset).
 - `objective-roadmap` (issue body) — the **canonical** flat-node YAML frontmatter:
   `{ schema_version: "1", nodes: [ { id, slug, description, status, pr, depends_on?, comment? } ] }`.
   Phase membership is derived from the **ID prefix** (`"1.2" → phase 1`, `"2A.1" → phase 2A`); phase
@@ -1360,8 +1379,9 @@ column** — `update_node` takes `status` verbatim or preserves it; setting `pr`
 **Gateway ops (canonical Python plane; same idempotency + two-step pattern as plan/learn):**
 - `find_objective_issue(*, run_id, repo_root) -> ObjectiveIssue | None` — label-scoped to
   `perk:objective` + the `objective-header` block (delegates to the parameterized `find_plan_issue`).
-- `create_objective_issue(*, title, body, repo_root, run_id, status="active", dry_run=False) ->
-  ObjectiveIssue` — the **two-step** create: idempotency check → lazy `perk:objective` label →
+- `create_objective_issue(*, title, body, repo_root, run_id, status="active", base=None,
+  dry_run=False) -> ObjectiveIssue` — the **two-step** create (`base` (#633) persists into the
+  `objective-header`): idempotency check → lazy `perk:objective` label →
   compose body (`objective-header` with `objective_comment_id: null` + `objective-roadmap`) → POST
   issue → POST `objective-body` comment (capturing its id) → **backfill** `objective_comment_id`
   into the header.

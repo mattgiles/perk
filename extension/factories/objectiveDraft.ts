@@ -46,6 +46,8 @@ export interface ObjectiveSaveParams {
   prose: string;
   title?: string;
   roadmap?: unknown[];
+  // The objective's target branch (#633); omitted to use the repo default.
+  base?: string;
 }
 
 /**
@@ -87,8 +89,9 @@ export function decodeObjectiveSaveParams(params: unknown): ObjectiveSaveParams 
   const prose = stringParam(p, "prose");
   const title = stringParam(p, "title");
   const roadmap = arrayParam(p, "roadmap");
-  if (prose === null || title === null || roadmap === null) return null;
-  return { prose: prose ?? "", title, roadmap };
+  const base = stringParam(p, "base");
+  if (prose === null || title === null || roadmap === null || base === null) return null;
+  return { prose: prose ?? "", title, roadmap, base };
 }
 
 /** The fixed working-objective artifact name (one JSON file: prose + the structured roadmap). */
@@ -116,7 +119,7 @@ export type ObjectiveDraftResult = Result<ObjectiveDraftOk>;
 export function writeObjectiveDraft(
   sink: EntrySink,
   ctx: SessionDataCtx & ReportTarget,
-  opts: { prose: string; title?: string; roadmap?: unknown[] },
+  opts: { prose: string; title?: string; roadmap?: unknown[]; base?: string },
 ): ObjectiveDraftResult {
   const fail = failFor(ctx, "objective-draft");
 
@@ -129,12 +132,14 @@ export function writeObjectiveDraft(
     return fail("session has no run_id — cannot write the objective-draft artifact", "no_run_id");
   }
 
-  // Deterministic key order via the explicit literal; `title` is omitted when absent/blank.
+  // Deterministic key order via the explicit literal; `title`/`base` are omitted when blank.
   const title = opts.title?.trim();
+  const base = opts.base?.trim();
   const roadmap = opts.roadmap ?? [];
   const payload = {
     schema_version: 1,
     ...(title ? { title } : {}),
+    ...(base ? { base } : {}),
     prose: opts.prose,
     roadmap,
   };
@@ -168,6 +173,8 @@ export interface ObjectiveDraft {
   title?: string;
   prose: string;
   roadmap: unknown[];
+  // The objective's target branch (#633); kept only when a non-blank string in the artifact.
+  base?: string;
 }
 
 /**
@@ -205,7 +212,13 @@ export function readObjectiveDraft(ctx: SessionDataCtx): ObjectiveDraft | null {
   const roadmap = Array.isArray(payload.roadmap) ? payload.roadmap : [];
   const title =
     typeof payload.title === "string" && payload.title.trim() ? payload.title : undefined;
-  return { ...(title !== undefined ? { title } : {}), prose, roadmap };
+  const base = typeof payload.base === "string" && payload.base.trim() ? payload.base : undefined;
+  return {
+    ...(title !== undefined ? { title } : {}),
+    ...(base !== undefined ? { base } : {}),
+    prose,
+    roadmap,
+  };
 }
 
 /** Sanitize a table cell: `|` escaped, newlines collapsed to a single space. */
@@ -262,6 +275,7 @@ export function renderObjectiveDraft(draft: ObjectiveDraft): string {
 const TOOL_GUIDELINES = [
   "Call objective_draft to persist the current working objective as you author or revise it; pass the FULL prose and the FULL structured roadmap each time (it rewrites the whole draft).",
   "objective_draft never saves to GitHub and never ends the turn — objective_save//objective-save remain the canonical save surface. Never hand-write roadmap YAML — hand the structured roadmap to the tool.",
+  "Pass `base` only to target a non-default branch; omit it to use the repo default.",
 ];
 
 /** Register the `objective_draft` tool (the #352 Node 2.1 carve-out producer; interior-only). */
@@ -290,6 +304,11 @@ export function registerObjectiveDraft(pi: ExtensionAPI): void {
         title: {
           type: "string",
           description: "Optional objective title (defaults to the prose's first heading).",
+        },
+        base: {
+          type: "string",
+          description:
+            "Optional target branch for this objective's plans (omit to use the repo default).",
         },
         roadmap: {
           type: "array",

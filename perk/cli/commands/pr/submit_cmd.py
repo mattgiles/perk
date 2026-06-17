@@ -151,7 +151,17 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             "Commit your changes before submitting — uncommitted work isn't pushed.",
             error_type="dirty_tree",
         )
-    base = github.default_branch(repo_root)
+    # Resolve the PR merge target / conflict-probe base (#633): the plan's pinned base wins
+    # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to pre-#633).
+    # Mirror the `isinstance(...).strip()` guard the start-point resolver uses (launch.py) so all
+    # three base readers treat a malformed/non-string cached value identically (ignore it), rather
+    # than stringifying it into a bogus branch name.
+    pinned = plan_ref.get("base") or state.header.get("base")
+    base = (
+        pinned.strip()
+        if isinstance(pinned, str) and pinned.strip()
+        else github.default_branch(repo_root)
+    )
     # Auto-force (--force-with-lease): perk plan branches are single-author and expected to
     # diverge after amend/squash/rebase; a no-op on the first push.
     git.push(repo_root, branch, force=True)

@@ -3,7 +3,7 @@
 from typing import cast
 
 from perk import objective as o
-from perk.plan import render_metadata_block
+from perk.plan import find_metadata_block, render_metadata_block
 
 N = o.NodeStatus
 
@@ -322,6 +322,17 @@ def test_objective_header_to_data():
         and data["objective_comment_id"] == 5
         and data["status"] == "active"
     )
+    assert data["base"] is None  # #633: absent by default
+
+
+def test_objective_header_base_round_trips():
+    header = o.ObjectiveHeader(run_id="01RID", created="t", base="develop")
+    data = header.to_data()
+    assert data["base"] == "develop"
+    rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
+    parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
+    assert parsed is not None and parsed["base"] == "develop"
+    assert "base" in o.OBJECTIVE_HEADER_FIELDS
 
 
 # --- P2.T11: nodes_for_pr + reconcilable splice + render_body_comment markers --------------

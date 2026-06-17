@@ -56,7 +56,7 @@ OBJECTIVE_SCHEMA_VERSION = "1"
 
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
 # plan.PLAN_HEADER_FIELDS). `status` is the objective-level rollup, stored explicitly.
-OBJECTIVE_HEADER_FIELDS = frozenset({"run_id", "created", "objective_comment_id", "status"})
+OBJECTIVE_HEADER_FIELDS = frozenset({"run_id", "created", "objective_comment_id", "status", "base"})
 
 # The human-readable rendered-table markers spliced into the `objective-body` comment.
 ROADMAP_TABLE_MARKER_START = "<!-- perk:roadmap-table -->"
@@ -181,6 +181,9 @@ class ObjectiveHeader:
     # Backend-owned opaque value: GitHub stores its numeric comment id, Linear its string UUID.
     objective_comment_id: int | str | None = None
     status: str = "active"
+    # The objective's target branch (#633); inherited by every node plan. `None` ⇒ no override
+    # (node plans fall through to `[workflow] base` → the GitHub default branch).
+    base: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -188,6 +191,7 @@ class ObjectiveHeader:
             "created": self.created,
             "objective_comment_id": self.objective_comment_id,
             "status": self.status,
+            "base": self.base,
         }
 
 

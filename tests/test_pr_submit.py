@@ -148,6 +148,68 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
     assert calls["probed"] is True
 
 
+def test_submit_targets_pinned_base_from_plan_ref(monkeypatch):
+    # #633: a plan-ref carrying `base` retargets create_pr + the mergeability probe (over the
+    # GitHub default branch).
+    _authed(monkeypatch)
+    captured: dict[str, object] = {}
+    _stub_gh(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "create_pr",
+        lambda **k: (
+            captured.update(create_base=k["base"])
+            or github.PullRequest(
+                number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False
+            )
+        ),
+    )
+
+    def _probe(_root, *, base, branch_ref):
+        captured["probe_base"] = base
+        return _CLEAN_PROBE
+
+    monkeypatch.setattr(git, "detect_merge_conflicts", _probe)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), {**_REF, "base": "develop"})
+        result = runner.invoke(cli, ["pr", "submit", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["base"] == "develop"
+    assert captured["create_base"] == "develop"
+    assert captured["probe_base"] == "develop"
+
+
+def test_submit_falls_back_to_header_then_default_base(monkeypatch):
+    # #633: with no plan-ref base, submit resolves base from the plan-header, else default_branch.
+    _authed(monkeypatch)
+    captured: dict[str, object] = {}
+    _stub_gh(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "get_plan",
+        lambda **k: github.PlanState(
+            number=7, url="u/7", title="My Feature", header={"base": "release"}, pr=None
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "create_pr",
+        lambda **k: (
+            captured.update(create_base=k["base"])
+            or github.PullRequest(
+                number=42, url="u/pr/42", is_draft=True, state="OPEN", existed=False
+            )
+        ),
+    )
+    result = _run(monkeypatch, ["pr", "submit", "--json"])  # _REF has no base
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["base"] == "release"
+    assert captured["create_base"] == "release"
+
+
 def test_submit_surfaces_conflicts_but_succeeds(monkeypatch):
     _authed(monkeypatch)
     _stub_gh(

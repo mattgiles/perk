@@ -13,6 +13,7 @@ from perk.run.launch import (
     _sweep_stale_pi_agent_locks,
     launch_stage,
     materialize_skills,
+    resolve_base,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
@@ -106,6 +107,40 @@ def test_resolve_worktree_none_is_repo_root(tmp_path):
     )
     assert resolved.path == tmp_path
     assert resolved.plan_ref is None
+
+
+# --- #633: plan_base drives the start-point ---------------------------------------------
+
+
+def test_resolve_base_uses_plan_base_as_trunk(monkeypatch, tmp_path):
+    # A plan's pinned base replaces the detected trunk as the trunk source.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: ref == "origin/develop")
+
+    def _no_detect(_root):
+        raise AssertionError("detect_trunk_branch must not run when plan_base is set")
+
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", _no_detect)
+    assert resolve_base(tmp_path, "plan-42", None, "develop") == "origin/develop"
+
+
+def test_resolve_base_explicit_override_wins_over_plan_base(monkeypatch, tmp_path):
+    # An explicit --base still wins verbatim, even over a plan_base.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: True)
+    assert resolve_base(tmp_path, "plan-42", "custom-ref", "develop") == "custom-ref"
+
+
+def test_resolve_base_no_plan_base_uses_detected_trunk(monkeypatch, tmp_path):
+    # With no plan_base, behavior is unchanged: detect_trunk_branch supplies the trunk.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: ref == "origin/main")
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", lambda _root: "main")
+    assert resolve_base(tmp_path, "plan-42", None, None) == "origin/main"
+
+
+def test_resolve_base_resumed_branch_wins_over_plan_base(monkeypatch, tmp_path):
+    # An existing origin/<name> (a resumed/remote plan) is tracked before the plan_base trunk.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: True)
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", lambda _root: "main")
+    assert resolve_base(tmp_path, "plan-42", None, "develop") == "origin/plan-42"
 
 
 # --- T4a: plan-ref-aware worktree resolution -------------------------------------------
@@ -905,6 +940,34 @@ def test_remote_drive_persists_verified_linkage_and_surfaces_handle(tmp_path, ca
     assert payload["run_id"] == record["run_id"]
 
 
+def test_remote_drive_prefers_pinned_plan_base(tmp_path, capsys, monkeypatch):
+    # #633: a base-carrying plan-ref makes the runner input target the pinned base, NOT the
+    # GitHub default branch (which must not even be consulted).
+    from perk.run import runner
+
+    cache.write_plan_ref(tmp_path, {**_PLAN_REF, "base": "develop"})
+    handle = runner.RunHandle(
+        runner="ci-large", kind="github-actions", run_ref="99", url="https://gh/run/99"
+    )
+    fake = _FakeRunner(handle=handle)
+
+    def _no_default(_r):
+        raise AssertionError("default_branch must not be consulted when the plan pins a base")
+
+    monkeypatch.setattr(launch.github, "default_branch", _no_default)
+    monkeypatch.setattr(launch.runner, "select_runner", lambda _ref: fake)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote="ci-large",
+        pi_args=[],
+    )
+    assert fake.calls and fake.calls[0]["base"] == "develop"
+
+
 def test_remote_drive_failure_records_failed_and_raises(tmp_path, monkeypatch):
     from perk.run import runner
 
@@ -1079,6 +1142,80 @@ def test_base_override_is_used_verbatim(git_repo_with_remote, monkeypatch):
         base="main",
     )
     assert bases == ["main"]  # verbatim, no origin/<trunk> override
+
+
+def _push_origin_branch(clone, name: str) -> None:
+    """Create ``origin/<name>`` pointing at a distinct commit, then drop the local branch."""
+    subprocess.run(
+        ["git", "checkout", "-q", "-b", name, "main"], cwd=clone, check=True, capture_output=True
+    )
+    (clone / f"{name}.txt").write_text("branch\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=clone, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-qm", f"on {name}"], cwd=clone, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "push", "-q", "origin", name], cwd=clone, check=True, capture_output=True
+    )
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=clone, check=True, capture_output=True)
+    subprocess.run(["git", "branch", "-qD", name], cwd=clone, check=True, capture_output=True)
+
+
+def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
+    # #633: a plan-ref carrying `base` cuts the worktree from origin/<base>, not the trunk.
+    clone, _remote, _advance = git_repo_with_remote
+    _push_origin_branch(clone, "develop")
+    cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})
+    _no_exec(monkeypatch)
+    bases: list[str | None] = []
+    real_add = git_mod.worktree_add
+    monkeypatch.setattr(
+        "perk.run.launch.git.worktree_add",
+        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
+    )
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert bases == ["origin/develop"]
+    wt = clone / ".worktrees" / "plan-42"
+    assert _sha(wt) == _sha(clone, "origin/develop")
+
+
+def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
+    git_repo_with_remote, monkeypatch
+):
+    # #633 regression guard: an explicit --worktree NAME recovers the active plan-ref's pinned
+    # base for the start-point, but must NOT write that ref into the named worktree (the returned
+    # ResolvedWorktree.plan_ref stays None on this path, as before #633).
+    clone, _remote, _advance = git_repo_with_remote
+    _push_origin_branch(clone, "develop")
+    cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})
+    _no_exec(monkeypatch)
+    bases: list[str | None] = []
+    real_add = git_mod.worktree_add
+    monkeypatch.setattr(
+        "perk.run.launch.git.worktree_add",
+        lambda *a, **k: (bases.append(k.get("base")), real_add(*a, **k))[1],
+    )
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree="custom-wt",
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    # The pinned base still drove the start-point...
+    assert bases == ["origin/develop"]
+    # ...but the named worktree's own cache.plan-ref was NOT written (no clobber).
+    assert not (clone / ".worktrees" / "custom-wt" / ".pi" / "workflow" / "plan-ref.json").exists()
 
 
 def test_dry_run_surfaces_base_without_fetching(git_repo_with_remote, monkeypatch, capsys):
