@@ -51,7 +51,7 @@ are point design sketches read directly from the [`docs/design/`](./design/) dir
 
 | Doc | What it is |
 |---|---|
-| [linear-smoke-gate.md](./linear-smoke-gate.md) | The **Linear live smoke gate runbook** (Objective #252, Node 4.1): the manual two-mode validation of the Linear issue backend against a real workspace (bare; GitHub-integration-installed), with a recorded-observations section feeding the documented follow-ups (`.codes` tightening, RATELIMITED posture, mutation identifier acceptance). The offline twin is `tests/test_linear_lifecycle.py`. |
+| [linear-smoke-gate.md](./planning/linear-smoke-gate.md) | The **Linear live smoke gate runbook** (Objective #252, Node 4.1): the manual two-mode validation of the Linear issue backend against a real workspace (bare; GitHub-integration-installed), with a recorded-observations section feeding the documented follow-ups (`.codes` tightening, RATELIMITED posture, mutation identifier acceptance). The offline twin is `tests/test_linear_lifecycle.py`. |
 
 ## How the documents relate
 

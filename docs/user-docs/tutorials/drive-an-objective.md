@@ -67,6 +67,11 @@ review. **Approve** it. On approval, perk **saves the objective as a GitHub issu
 `perk:objective` issue), activates it, and the session leaves read-only mode. perk prints the
 issue URL; you can also see it with:
 
+> **On a Linear backend?** This lesson is GitHub-pathed, but if your `[issues]` backend is Linear
+> the objective is saved as a **Linear Project** (not a GitHub issue) — overview + node-issues +
+> phase milestones. See [Objectives → Orientation](../reference/objectives.md#orientation) for the
+> per-backend storage shape.
+
 ```bash
 gh issue list
 ```

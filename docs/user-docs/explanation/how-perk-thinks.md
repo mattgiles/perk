@@ -83,9 +83,11 @@ what a session can enforce about itself and what it cannot.
 perk keeps workflow state in **three tiers**, and the single most useful thing to understand is
 which one is authoritative when they disagree.
 
-- **GitHub — canonical.** This is the source of truth. Plans are GitHub issues; pull requests,
-  review threads, objectives, and the learnings captured at the end of a plan all live there. If
-  two tiers ever disagree, GitHub wins, full stop. This is *why* the work is resumable from
+- **GitHub — canonical.** This is the source of truth (under the default backend). Plans are GitHub
+  issues; pull requests, review threads, objectives, and the learnings captured at the end of a plan
+  all live there. (On a Linear backend the canonical issue tier moves to Linear and objectives live
+  as **Linear Projects**, while pull requests, review threads, CI, and merge stay GitHub-universal.)
+  If two tiers ever disagree, the canonical issue tier wins, full stop. This is *why* the work is resumable from
   anywhere and shareable with a team: the truth is not sitting on one laptop waiting to be lost.
 
 - **`.pi/workflow/` — cache.** A local, per-repo mirror that lets a session work quickly without

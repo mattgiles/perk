@@ -23,8 +23,8 @@ Two related but distinct knobs live here:
   default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`.
 - **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
   The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
-  issues) and the *objective-storage tier* (objectives) — both stored as issues under either backend
-  today.
+  issues, stored as issues under **either** backend) and the *objective-storage tier* (objectives,
+  stored as an **issue** under GitHub but as a **Linear Project** under Linear).
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
@@ -201,14 +201,14 @@ The project also posts a fail-open **Project Update** (the status-report feed) o
 transitions: when the objective is **created**, when **a plan lands** (marking node(s) done), and
 when **reconciliation** rewrites the objective prose. Both behaviors are **additive and
 non-fatal** — a Linear bookkeeping failure is logged but never breaks a merge or a node
-transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write is
-offline-covered today and live-verified at the Node 5.1 smoke gate.)
+transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write was
+**live-verified 2026-06-16** at the Mode-4 smoke run — see the runbook's *Fourth live run* block.)
 
 ## Known caveats & maturity
 
 The Linear backend is **validated offline (against fakes) and live-validated on 2026-06-15**
 against a real workspace. Its live-validation runbook is
-[`docs/linear-smoke-gate.md`](../../linear-smoke-gate.md); the **Mode 1** lifecycle
+[`docs/planning/linear-smoke-gate.md`](../../planning/linear-smoke-gate.md); the **Mode 1** lifecycle
 (`plan → implement → submit → land → learn`) plus the issue-backed objective loop ran green
 end-to-end — string `PER-*` ids throughout, the `perk:plan`/`perk:learn` labels applied, the
 plan issue closed (Done) on land, and the node auto-marked done on the objective. See the
@@ -256,7 +256,7 @@ issue). This is **off by default**: it requires a separate **`LINEAR_AGENT_TOKEN
 fully dormant without it. The mirror is one-way (perk → Linear), and its GraphQL mutation signatures
 (`agentSessionCreateOnIssue`, `agentActivityCreate`, `agentSessionUpdate`) are **substring-pinned
 offline but unverified against a live workspace**. It is **not** part of the switch-to-linear happy
-path; see the agent-session section of [`docs/linear-smoke-gate.md`](../../linear-smoke-gate.md) for
+path; see the agent-session section of [`docs/planning/linear-smoke-gate.md`](../../planning/linear-smoke-gate.md) for
 the validation script and deferral register.
 
 ## See also
@@ -267,7 +267,7 @@ the validation script and deferral register.
   recipe.
 - [Configuration reference — `[providers]` / `[issues]`](./configuration.md#providers) — the raw
   config keys.
-- [The Linear live smoke gate](../../linear-smoke-gate.md) — the live-validation runbook (Mode 1 +
+- [The Linear live smoke gate](../../planning/linear-smoke-gate.md) — the live-validation runbook (Mode 1 +
   the objective loop validated 2026-06-15).
 
 ---

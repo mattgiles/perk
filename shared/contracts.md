@@ -2989,7 +2989,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   Done-on-merge automation).
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
   `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
-  `docs/linear-smoke-gate.md`.
+  `docs/planning/linear-smoke-gate.md`.
 
 ## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
 
@@ -3006,7 +3006,7 @@ there is no TS twin).
   in the OAuth `Authorization: Bearer <token>` header form (`LinearClient(bearer=True)`;
   personal-key requests keep the plain header byte-identically). Environment only — never
   config/committed files. No new config keys, no doctor check — the live smoke doc
-  (`docs/linear-smoke-gate.md`) is the verification surface.
+  (`docs/planning/linear-smoke-gate.md`) is the verification surface.
 - **The file**: `.pi/workflow/agent-session.json` (cache tier, §8.1) —
   `{"session_id": str, "issue": str, "url": str | null}`, written at session create
   (`cache.write_agent_session`/`read_agent_session`). Absent at a follow-up hook → fail-soft
@@ -3193,9 +3193,9 @@ unchanged.
   preserved (a close failure never changes the land result).
 - The objective id is the opaque **Project UUID** across `active_objective` / `--objective-id` /
   the handoff / `cache.plan-ref.objective_id` — no numeric/`ENG-`-shape assumption anywhere.
-- **Deferred:** the `projectUpdate(state)` mark-complete is offline-covered here, live-verified at
-  the Node 5.1 smoke gate; the **docs/user-docs** operator narrative for the project-backed
-  objective lifecycle is Node 5.2.
+- **Realized:** the `projectUpdate(state)` mark-complete is **live-verified 2026-06-16** (Node 5.1
+  Mode-4 gate 4.6, `set_project_state`); the **docs/user-docs** operator narrative for the
+  project-backed objective lifecycle was **reconciled in Node 5.2** (this node).
 
 **Node 4.3 amendment — phase→milestone sync seam + fail-open Project Updates.** Two additive,
 **non-fatal** enrichments to the Linear project-backed objective (GitHub unchanged: no Project
@@ -3225,8 +3225,8 @@ failure never breaks a merge or a node transition).
   (`objective_created_update_body` / `plan_landed_update_body` / `reconciled_update_body`) computed
   from counts the call site already holds — **no extra network reads**. There is **no** plan-save
   Project Update (out of this node's scope).
-- **Deferred:** `projectUpdateCreate` is offline-covered here, **live-verified at the Node 5.1
-  smoke gate** (alongside `set_project_state` / `list_projects`).
+- **Realized:** `projectUpdateCreate` / `set_project_state` / `list_projects` are **live-verified
+  2026-06-16** (Node 5.1 Mode-4 gates 4.1 / 4.3 / 4.5 / 4.6).
 
 **Node 4.4 amendment — the objective manifest + drift detection/repair (`perk objective doctor`).**
 A Linear Project's roadmap is *observed* state (node-issues, blocking relations, milestones) that a
@@ -3269,8 +3269,8 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   recreate path owns those edges; observed↔observed missing edges stay with the explicit dependency
   repair (the sweep skips edges whose endpoints are both already-observed, so no double-create). The
   drain fails loud on a genuinely unresolvable endpoint, never silently skips.
-- **Two new project ops** (`_LinearProjectOps`, **flagged not-live-proven** — verify at the Node 5.1
-  gate): `project_issues_with_milestones` (a `project_issues` sibling joining each node-issue's
+- **Two new project ops** (`_LinearProjectOps`, **offline-covered / not-yet-live-proven** — see the
+  correction below): `project_issues_with_milestones` (a `project_issues` sibling joining each node-issue's
   `projectMilestone`) and `attach_issue_to_milestone` (the deleted-milestone reattach — bare
   boundary identifier through `_request_issue_mutation`, mirroring post-#622 `attach_issue_to_project`;
   **no `uuid_for`**, deleted in #622). A recreated missing node-issue uses `_create_issue_raw` to
@@ -3293,5 +3293,18 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   remaining, aborted, dry_run}}` to stdout; human text to stderr. Exit `0` ran (drift, even
   ERROR-severity report-only drift, is a clean report) · `1` op-failure or an **aborted** repair ·
   `2` not-a-repo.
-- **Deferred:** the two new project ops are offline-covered here, **live-verified at the Node 5.1
-  smoke gate** (the manifest-drift design lives in `docs/planning/objective-repair.md`).
+- **Live-unverified (corrected):** the two new project ops (`project_issues_with_milestones`,
+  `attach_issue_to_milestone`) were added in #624 **after** the Node 5.1 gate ran. The Node 5.1
+  Mode-4 run executed with the drift doctor design-only and substituted a `get_objective`
+  perturbation baseline (gate 4.9) for the doctor run, so these two ops were **not** verified at 5.1
+  and remain **offline-covered / not-yet-live-proven** — a live-unverified follow-up (no Phase-5
+  gate now covers them). The manifest-drift design lives in `docs/planning/objective-repair.md`.
+
+**Node 5.2 amendment — Phase 5 close-out (docs-only reconciliation).** Phase 5 closed Objective
+#548. Node 5.1 (PR #610) **live-proved** the four targeted Project ops on 2026-06-16 (Mode-4 gates
+4.1–4.10: `list_projects`, `create_project_update`, `set_project_state`, `_workflow_state_id` both
+directions). Node 5.2 (this node) finalized the contract + `docs/user-docs/` against what was built
+and live-verified, relocated the three Linear docs (`linear-masterplan.md`,
+`the-road-to-using-linear-projects-as-objectives.md`, `linear-smoke-gate.md`) into `docs/planning/`,
+and annotated the two historical memos as realized. No production logic changed. The two drift ops
+above remain the one honest live-unverified residual.

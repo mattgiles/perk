@@ -155,7 +155,7 @@ than the landed design (it also de-duplicates the cache when only one op class i
   (e.g. `create_project` still resolves the team UUID and sends `teamIds: [<uuid>]`; relation reads
   still filter to `type == "blocks"`).
 - Keep `_is_entity_not_found`'s **pairing** semantics intact (`INPUT_ERROR` in `exc.codes` AND the
-  `"Entity not found"` message prefix — Node 1.2 / docs/linear-smoke-gate.md gate-8). Do not loosen
+  `"Entity not found"` message prefix — Node 1.2 / docs/planning/linear-smoke-gate.md gate-8). Do not loosen
   it to a `.codes`-only check during the move.
 - No cross-plane behavior change, no CLI/envelope/tool surface change — this stays dormant substrate
   (consumed by 3.2's `create_objective` and 3.3's reads). Contract/user-doc amendments remain
