@@ -12,7 +12,7 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse } from "yaml";
+import { parse } from "./miniYaml.ts";
 import { sharedDir } from "./resources.ts";
 
 export interface SkillBinding {

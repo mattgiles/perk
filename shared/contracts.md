@@ -1669,7 +1669,7 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the four perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
-`package` (settings wiring + the pure-filesystem `extension-deps` check — §8.6a) ·
+`package` (settings wiring + perk-package ref reconcile — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
@@ -1679,9 +1679,9 @@ handoff-blob integrity). Managed-piece checks are filtered by `capabilities.appl
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
 
-### §8.6a · perk-package ref reconcile + the `extension-deps` check/repair (#635)
+### §8.6a · perk-package ref reconcile + the self-contained extension (#635/#639)
 
-Two coupled behaviors keep a consumer's pi-loaded perk extension runnable:
+Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
 
 - **perk's own `git:` entry is ref-reconciled *forward*** (no longer purely append-only).
   `_merge_static_packages` rewrites perk's own `packages` entry **in place** (list position
@@ -1692,20 +1692,21 @@ Two coupled behaviors keep a consumer's pi-loaded perk extension runnable:
   for its own package — Invariant 2; a hand-written object-form perk entry is a documented
   limitation). This rides the existing `settings-wiring` `ManagedConvergence` — ref drift becomes
   a `settings-wiring` **fail** that `--fix` repairs, with **no new doctor wiring** for the ref.
-- **The `extension-deps` doctor check** (group `package`, pure filesystem — runs under both
-  `verify` modes). pi loads the perk extension from its git-package clone
-  (`.pi/git/<host>/<path>`, derived by `init.consumer_git_clone_root`), which has no
-  `node_modules` unless pi installed it — and pi's `installGit` skips the install when the clone
-  already exists at the pinned ref, so a missing/partial `node_modules` strands the extension on
-  an unresolvable `import { parse } from "yaml"`. Outcomes: self-repo → `info` no-op; clone
-  absent → `info` (pi installs on first launch); a declared `dependency` missing under
-  `node_modules` → `fail`; all present → `ok`; unreadable/malformed `package.json` → `warn`.
-  The **verify-gated `--fix` gesture** `_fix_extension_deps` runs one `npm install` in the clone
-  root, mirroring pi's `getGitDependencyInstallArgs` exactly: it respects `.pi/settings.json`
-  `npmCommand` (`[*npmCommand, "install"]`) and otherwise runs `npm install --omit=dev`. It is
-  idempotent (re-derives its own conditions, no-op once deps resolve) and reports loudly
-  (non-zero/timeout/OSError → `fix_errors`). The post-fix re-verify re-runs the check, so the
-  exit code reflects the post-fix state.
+- **The perk extension is self-contained in a consumer git clone.** pi loads the extension from
+  its git-package clone (`.pi/git/<host>/<path>`) via `jiti`, resolving imports through a **fixed
+  host-alias set** (`@earendil-works/pi-coding-agent`/`-pi-ai`/`-pi-tui`, the `@mariozechner/*`
+  aliases, and `typebox`) plus native `node_modules` walking. pi's `installGit`/`ensureGitRef`
+  **skip** `npm install` when the clone already exists at the pinned ref (and `pi update` shares
+  the early return), so the clone may have **no `node_modules`**. The extension therefore imports
+  **only** host-aliased packages + Node builtins — it has **zero runtime `dependencies`** — so the
+  clone needs no `node_modules` in every case (fresh, stale, partial, offline). The three bundled
+  `shared/*.yaml` contracts are parsed by the vendored `extension/substrate/miniYaml.ts` reader
+  (the twin of the Python plane's `pyyaml`-based readers), a deliberately minimal YAML-subset
+  parser scoped to perk's own files whose fidelity to the reference parser is pinned by
+  `miniYaml.test.ts` (`yaml` survives as a **dev-only** dependency powering that test). An
+  unsupported YAML construct makes `miniYaml` throw loudly rather than silently mis-parse. (This
+  supersedes #637's `extension-deps` doctor check + `npm install` repair gesture, now retired: with
+  no runtime deps there is nothing to install.)
 
 ---
 

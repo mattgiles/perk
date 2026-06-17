@@ -498,8 +498,8 @@ def consumer_git_clone_root(repo_root: Path) -> Path:
 
     pi clones a ``git:`` package to ``.pi/git/<host>/<path>`` (docs/packages.md). Deriving the
     path from ``GIT_PACKAGE`` (rather than hardcoding segments) keeps every consumer of the clone
-    location — the run-worker entrypoint resolver and the ``extension-deps`` doctor check — in
-    lockstep with the package URL, so a URL change cannot silently desync them.
+    location — the run-worker entrypoint resolver — in lockstep with the package URL, so a URL
+    change cannot silently desync them.
     """
     remainder = GIT_PACKAGE.removeprefix("git:")
     clone = repo_root / ".pi" / "git"
