@@ -16,6 +16,7 @@ locally — the Node 2.2 workflow positions the worker in CI).
 
 import json
 import os
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,10 @@ _NPM_QUIET_ENV = {
     "npm_config_fund": "false",
     "npm_config_audit": "false",
 }
+
+# Per-command wall-clock cap for `[worktree] setup` commands (10 minutes) — `uv sync` / `npm ci`
+# can be slow on a cold cache, but a hung command must not wedge the launch forever.
+_WORKTREE_SETUP_TIMEOUT_S = 600
 
 
 def _pi_agent_dir() -> Path:
@@ -87,6 +92,10 @@ class ResolvedWorktree:
     path: Path
     plan_ref: dict[str, Any] | None
     base: str | None = None  # the start-point the create path used (None => off local HEAD)
+    # True only when this resolution **freshly created** the worktree (the `git.worktree_add`
+    # branch) — not idempotent reuse, a dry run, or a `worktree: none` stage. Gates the
+    # `[worktree] setup` hook so it fires once per fresh worktree.
+    created: bool = False
 
 
 @dataclass(frozen=True)
@@ -211,6 +220,7 @@ def resolve_worktree(
     )
     path = config.worktree_root / name
     resolved_base: str | None = None
+    created = False
     if stage.worktree == "create":
         if path.exists():
             pass  # D4: idempotent reuse (resume) — do not fetch, re-base, re-create, or error
@@ -223,6 +233,7 @@ def resolve_worktree(
                 )
             except GitError as exc:
                 raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
+            created = True  # fresh creation only — gates the `[worktree] setup` hook
         else:  # dry-run create: resolve the base from local refs only (no fetch, no create)
             resolved_base = resolve_base(repo_root, name, base, plan_base)
     else:  # reuse
@@ -230,7 +241,7 @@ def resolve_worktree(
             path,
             f"Worktree not found: {path}\nRun 'perk implement' first.",
         )
-    return ResolvedWorktree(path=path, plan_ref=plan_ref, base=resolved_base)
+    return ResolvedWorktree(path=path, plan_ref=plan_ref, base=resolved_base, created=created)
 
 
 def _initial_prompt(
@@ -474,7 +485,13 @@ def launch_stage(
     argv = ["pi", *trust_args, *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
-        _emit_dry_run_preview(stage=stage, resolved=resolved, rid=rid, argv=argv)
+        _emit_dry_run_preview(
+            stage=stage,
+            resolved=resolved,
+            rid=rid,
+            argv=argv,
+            setup=config.worktree_setup,
+        )
         return
 
     cache.ensure_layout(wt)
@@ -497,6 +514,12 @@ def launch_stage(
             run_id=rid,
             environ=os.environ,
         )
+    # Run the project's `[worktree] setup` commands inside a freshly created worktree before the
+    # exec. `run_worktree_setup` raises a `UserFacingCliError` on failure, so a failed setup aborts
+    # the launch here (before `exec pi`); the worktree is left in place so a fixed re-run reuses it.
+    # Never reached on a dry run (the `if dry_run:` block returns above) or on reuse.
+    if resolved.created and config.worktree_setup:
+        run_worktree_setup(wt, config.worktree_setup)
     env = {**_NPM_QUIET_ENV, **os.environ, "PERK_RUN_ID": rid}
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
@@ -542,11 +565,20 @@ def _resolve_prompt(
 
 
 def _emit_dry_run_preview(
-    *, stage: Stage, resolved: ResolvedWorktree, rid: str, argv: list[str]
+    *,
+    stage: Stage,
+    resolved: ResolvedWorktree,
+    rid: str,
+    argv: list[str],
+    setup: list[str] | None = None,
 ) -> None:
     """The side-effect-free ``--dry-run`` preview of a cold-local launch (user lines + the
     machine-readable JSON payload). The remote dispatch preview in :func:`_drive_remote_target`
-    is a different payload and stays inline there."""
+    is a different payload and stays inline there.
+
+    ``setup`` is the project's ``[worktree] setup`` commands; when the worktree would be freshly
+    created and the list is non-empty, the planned commands are previewed (but never run).
+    """
     user_output(f"would launch stage '{stage.id}' in {resolved.path}")
     user_output(f"  run_id={rid}  PERK_RUN_ID={rid}  argv={' '.join(argv)}")
     payload: dict[str, object] = {
@@ -559,6 +591,13 @@ def _emit_dry_run_preview(
     }
     if resolved.plan_ref is not None:
         payload["plan_ref"] = resolved.plan_ref
+    # On a dry run the worktree is never created, so `resolved.created` is always False; preview
+    # the setup commands when the stage WOULD freshly create the worktree (a `create` stage whose
+    # path does not yet exist — the same condition that gates `run_worktree_setup` on a real run).
+    would_create = stage.worktree == "create" and not resolved.path.exists()
+    if would_create and setup:
+        user_output(f"  would run setup: {'; '.join(setup)}")
+        payload["setup"] = setup
     machine_output(json.dumps(payload))
 
 
@@ -685,6 +724,48 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
             }
         )
     )
+
+
+def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
+    """Run the project's `[worktree] setup` commands, in order, inside a freshly created worktree.
+
+    Each command runs via ``bash -lc <command>`` (the same mechanism the CI executor uses) with
+    ``cwd`` = the worktree and **inherited** stdio so progress streams live. Each command has a
+    ``_WORKTREE_SETUP_TIMEOUT_S`` (10-minute) wall-clock cap.
+
+    Abort-on-failure: a non-zero exit, a timeout, or a missing ``bash`` raises a
+    ``UserFacingCliError`` (``error_type="worktree_setup_failed"``) and stops before any later
+    command runs — the caller aborts the launch (the worktree is left in place for a fixed re-run).
+    A no-op when ``commands`` is empty (no subprocess).
+
+    The single canonical setup-execution path; the cold door and ``perk worktree create`` both
+    consume it (mirrors ``materialize_plan_body``).
+    """
+    for command in commands:
+        user_output(f"  $ {command}")
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", command],
+                cwd=worktree,
+                check=False,
+                timeout=_WORKTREE_SETUP_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise UserFacingCliError(
+                f"worktree setup command timed out after {_WORKTREE_SETUP_TIMEOUT_S}s: {command}",
+                error_type="worktree_setup_failed",
+            ) from exc
+        except FileNotFoundError as exc:
+            raise UserFacingCliError(
+                f"worktree setup needs `bash` on PATH to run: {command}\n"
+                "Install bash, or remove the [worktree] setup commands.",
+                error_type="worktree_setup_failed",
+            ) from exc
+        if result.returncode != 0:
+            raise UserFacingCliError(
+                f"worktree setup command failed: {command} (exit {result.returncode})",
+                error_type="worktree_setup_failed",
+            )
 
 
 def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, Any] | None) -> None:

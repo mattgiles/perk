@@ -189,6 +189,15 @@ PERK_TOML_TEMPLATE = """\
 # Relative paths resolve against the repo root.
 root = ".worktrees"
 
+# Worktree setup hook (optional) — shell commands run, in order, inside each
+# freshly created worktree before pi starts (via `bash -lc`, cwd = the worktree).
+# Use it to prepare the environment (dependency installs, codegen). A non-zero
+# exit ABORTS the launch (re-run after fixing — the worktree is reused). Skipped
+# on resume/reuse and on the remote runner. Overlay-aware (a perk.local.toml
+# [worktree] setup array replaces this one wholesale).
+#
+# setup = ["uv sync", "npm ci"]
+
 # Skill bindings (optional) — attach a skill to a stage or command, delivered
 # into that session. Each [[bindings]] row binds one trigger to one skill:
 #   trigger — "<kind>:<id>"; kind is `stage` or `command`.

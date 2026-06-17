@@ -571,7 +571,16 @@ symlinks (`launch.materialize_skills`): a linked worktree never carries the giti
 mirror a worktree session sees zero skills (ENOENT on `perk-implement/SKILL.md`). Best-effort +
 loud-but-non-fatal (a missing source set warns; doctor's fail-level `skills-delivery` check owns the
 hard gate); idempotent on resume (an already-correct symlink is left untouched, a real non-symlink
-entry is never clobbered). It is **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
+entry is never clobbered). **After** materialization (and only when the cold door **freshly
+created** the worktree, never on idempotent reuse/dry-run), the cold door runs the project's
+`[worktree] setup` commands (`launch.run_worktree_setup`) — an ordered array of shell command lines
+read from `.pi/perk.toml` (overlay-aware) — each via `bash -lc` with `cwd` = the worktree and
+inherited stdio, **aborting the launch** (a `UserFacingCliError`) on any non-zero exit / timeout /
+missing `bash` (a half-built environment is worse than a clear failure; the worktree is left for a
+fixed re-run). This is **Python-plane-only** (no TS twin — the extension never creates worktrees);
+the manual `perk worktree create` runs the same hook, and the remote runner's `position_worktree`
+deliberately does **not** (CI environment setup belongs to the GHA composite action). It is
+**opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
 present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
 optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
 (`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start`, `session_tree`, AND
