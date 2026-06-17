@@ -67,7 +67,7 @@ function decodeObjectiveCreate(payload: ColdJson): ObjectiveCreatePayload | null
 export async function saveObjective(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  opts: { prose: string; title?: string; roadmap?: unknown[] },
+  opts: { prose: string; title?: string; roadmap?: unknown[]; base?: string },
 ): Promise<ObjectiveSaveResult> {
   const fail = failFor(ctx, "objective-save");
 
@@ -83,6 +83,7 @@ export async function saveObjective(
 
   const args = ["objective", "create", "--json"];
   if (opts.title) args.push("--title", opts.title);
+  if (opts.base) args.push("--base", opts.base);
   if (runId) args.push("--run-id", runId);
   if (opts.roadmap && opts.roadmap.length > 0) {
     args.push("--roadmap", JSON.stringify(opts.roadmap));
@@ -157,6 +158,7 @@ export async function objectiveApprovalSave(
     prose: draft.prose,
     title: opts.title ?? draft.title,
     roadmap: draft.roadmap,
+    base: draft.base,
   });
   let gateExited = false;
   if (result.details.ok && wasReadOnly) {
@@ -218,6 +220,11 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
         title: {
           type: "string",
           description: "Optional objective title (defaults to the prose's first heading).",
+        },
+        base: {
+          type: "string",
+          description:
+            "Optional target branch for this objective's plans (omit to use the repo default).",
         },
         roadmap: {
           type: "array",

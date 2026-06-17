@@ -101,17 +101,21 @@ function decodePlanRef(payload: ColdJson): PlanRef | null {
   const url = stringField(ref, "url");
   const labels = ref.labels;
   const objectiveId = nullableStringField(ref, "objective_id");
+  const base = nullableStringField(ref, "base");
   if (
     provider === undefined ||
     prId === undefined ||
     url === undefined ||
     !Array.isArray(labels) ||
     !labels.every((l) => typeof l === "string") ||
-    objectiveId === undefined
+    objectiveId === undefined ||
+    base === undefined
   ) {
     return null;
   }
-  return { provider, pr_id: prId, url, labels, objective_id: objectiveId };
+  // `base` (#633) stays Python-owned for all behavior; carrying it keeps the workflow-state
+  // `active_plan_ref` copy byte-consistent with the cold door's `--json` plan_ref.
+  return { provider, pr_id: prId, url, labels, objective_id: objectiveId, base };
 }
 
 /** Validate the optional `objective_node` sub-object; malformed → null (advisory, never fatal). */

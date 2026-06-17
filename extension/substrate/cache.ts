@@ -104,6 +104,8 @@ export interface PlanRef {
   url: string;
   labels: string[];
   objective_id: string | null;
+  // The pinned target branch (#633); Python-owned, parity-only on the warm plane.
+  base?: string | null;
 }
 
 export function planRefPath(cwd: string): string {
