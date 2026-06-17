@@ -561,18 +561,27 @@ def test_init_self_mode_uses_local_path(tmp_path):
 
 
 def test_init_writes_skills_manifest_fragment(tmp_path):
-    # Consumer mode: the fragment declares the perk source tracking main and lists
-    # every perk skill. The fragment is a committed declaration, never gitignored.
+    # Consumer mode: the fragment declares the perk source tracking main plus the required
+    # external sources, and lists the union of perk + external skills. The fragment is a
+    # committed declaration, never gitignored.
     run_init(tmp_path, verify=False)
     fragment = tmp_path / ".agents" / "manifest.d" / "perk.yaml"
     assert fragment.is_file()
     text = fragment.read_text(encoding="utf-8")
     assert "url: https://github.com/mattgiles/perk" in text
     assert "ref: main" in text
-    from perk.convergence.init import PERK_SKILLS
+    from perk.convergence.init import PERK_SKILLS, REQUIRED_EXTERNAL_SKILLS
 
     for name in PERK_SKILLS:
         assert f"name: {name}" in text
+    # The three required external sources are declared (note dagster tracks `master`).
+    assert "url: https://github.com/astral-sh/claude-code-plugins" in text
+    assert "url: https://github.com/dagster-io/skills" in text
+    assert "ref: master" in text
+    assert "url: https://github.com/mattpocock/skills" in text
+    # Every promoted external skill is declared from its source.
+    for src, name in REQUIRED_EXTERNAL_SKILLS:
+        assert f"  - source: {src}\n    name: {name}" in text
 
 
 def test_init_self_mode_skills_manifest_tracks_main(tmp_path):

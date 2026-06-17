@@ -35,15 +35,15 @@ def stub_env(monkeypatch):
 
 @pytest.fixture
 def converge_skills_workspace():
-    """Plant a healthy skills-delivery substrate: `.agents/manifest.yaml` + every PERK_SKILLS
-    SKILL.md under `.agents/skills/` (what a successful `skills init` + `skills update --sync`
-    leaves behind, minus the symlink indirection)."""
+    """Plant a healthy skills-delivery substrate: `.agents/manifest.yaml` + every
+    MANAGED_SKILL_NAMES SKILL.md under `.agents/skills/` (what a successful `skills init` +
+    `skills update --sync` leaves behind, minus the symlink indirection)."""
 
     def converge(root):
         manifest = root / ".agents" / "manifest.yaml"
         manifest.parent.mkdir(parents=True, exist_ok=True)
         manifest.write_text("sources: {}\nskills: []\n", encoding="utf-8")
-        for name in init_mod.PERK_SKILLS:
+        for name in init_mod.MANAGED_SKILL_NAMES:
             skill = root / ".agents" / "skills" / name / "SKILL.md"
             skill.parent.mkdir(parents=True, exist_ok=True)
             skill.write_text("# skill\n", encoding="utf-8")

@@ -814,6 +814,19 @@ def test_skills_delivery_fails_on_missing_skills(git_repo, converge_skills_works
     assert check.remediation == "Run 'perk doctor --fix'."
 
 
+def test_skills_delivery_fails_on_missing_external_skill(
+    git_repo, converge_skills_workspace, stub_env
+):
+    # The promoted external skills are enforced just like perk-authored ones: removing one
+    # makes verified-mode skills-delivery fail and names it.
+    _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
+    external = init.REQUIRED_EXTERNAL_SKILLS[0][1]  # e.g. "ruff"
+    shutil.rmtree(git_repo / ".agents" / "skills" / external)
+    check = _delivery_check(run_doctor(git_repo, verify=True))
+    assert check.status == "fail" and external in check.detail
+
+
 def test_skills_delivery_absent_without_verify(git_repo):
     _scaffold(git_repo)
     report = run_doctor(git_repo, verify=False)

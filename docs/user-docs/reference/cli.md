@@ -50,7 +50,10 @@ Aliases are noted inline next to each command. Common flags: launcher commands a
 Scaffold or converge the current repo for perk (idempotent; safe to re-run). Wires
 `.pi/settings.json` and the borrowed package set, creates the `.pi/workflow/` cache, scaffolds
 config, manages `.gitignore` and the `AGENTS.md` managed block, and verifies GitHub access
-without mutating it. It also checks for the optional `ast-grep` CLI (structural code search) —
+without mutating it. It converges a skills-manifest fragment (`.agents/manifest.d/perk.yaml`)
+declaring perk's own skills **plus a set of required external skills** (from upstream sources),
+materialized via the `skills` CLI; a missing required skill fails `init` (and `doctor`). It also
+checks for the optional `ast-grep` CLI (structural code search) —
 non-fatal: a missing `ast-grep` is a `⚠️` warning, never a blocking failure. `--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.

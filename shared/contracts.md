@@ -1912,15 +1912,20 @@ dangling-pointer warning, which stays a last-resort signal).
 - **Fatal sync:** any `skills init --cache=local` / `skills update --sync` failure (non-zero exit,
   missing CLI, OSError, timeout) is fatal — `init` returns `skills_sync_failed` (exit 2) with the
   failing command + first stderr lines in `message`, **preserving `changes`** (convergence already
-  happened). After a successful sync, every `PERK_SKILLS` name must pass
+  happened). After a successful sync, every `MANAGED_SKILL_NAMES` name must pass
   `bindings.is_skill_installed` — a sync that delivers nothing (e.g. an outdated `skills` CLI) is
-  the same fatal failure, never a silent pass.
+  the same fatal failure, never a silent pass. `MANAGED_SKILL_NAMES` is the verified set:
+  perk-authored skills (source `perk`) **plus** a set of required external skills. The managed
+  fragment now declares **multiple sources** — perk's own (`PERK_SKILL_SOURCE`) plus the required
+  external sources (`REQUIRED_SKILL_SOURCES`: `astral`, `dagster`, `mattpocock`) — promoting those
+  external skills from repo-specific to managed/required.
 - **`doctor` check:** a fail-level **`skills-delivery`** check (group `skills`, evaluated under
   `verify` only — it shells git + validates external-CLI outcomes). Fail conditions, first match
   wins: (a) tracked content under the managed pathspecs (a `GitError` degrades to `warn`, no
   silent pass); (b) the perk fragment (`.agents/manifest.d/perk.yaml`) exists but
   `.agents/manifest.yaml` does not (`skills init` failed or never ran, so `skills update --sync`
-  can never run); (c) any `PERK_SKILLS` name not installed per `bindings.is_skill_installed`.
+  can never run); (c) any `MANAGED_SKILL_NAMES` name (perk-authored + the required external
+  skills) not installed per `bindings.is_skill_installed`.
 - **`doctor --fix`:** the repair-gesture sync's failure message is carried on
   `DoctorReport.fix_errors` (rendered loudly; `fix_errors` in the `--json` report — §8.6); the
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
