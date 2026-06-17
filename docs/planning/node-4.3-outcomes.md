@@ -28,7 +28,7 @@ Part of Objective #548, Node 4.3. The plan body is the GitHub issue #604; this r
 - **Pure body composers (`perk/objective.py`):** `objective_created_update_body`,
   `plan_landed_update_body` (pr normalized via `canonical_pr`), `reconciled_update_body`.
 - **Contract:** `shared/contracts.md` §8.24 — method count eight→**nine**, Node 4.3 amendment added.
-- **Docs:** `docs/linear-smoke-gate.md` gained a "Not-yet-live-proven Project ops (verify at Node
+- **Docs:** `docs/planning/linear-smoke-gate.md` gained a "Not-yet-live-proven Project ops (verify at Node
   5.1)" section with the `projectUpdateCreate` document; `providers-and-backends.md` notes the
   milestone grouping + Project Updates (additive / non-fatal).
 

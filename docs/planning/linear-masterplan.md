@@ -69,7 +69,7 @@ on it, verify through `perk init --verify` or `perk doctor`.
 
 The current Linear backend is offline-validated against fakes but not yet proven
 against a live workspace. The live validation runbook is
-`docs/linear-smoke-gate.md`. This is not a minor caveat. The following are still
+`docs/planning/linear-smoke-gate.md`. This is not a minor caveat. The following are still
 live-unproven:
 
 - ProseMirror round-trip fidelity for perk's metadata blocks.
@@ -80,7 +80,7 @@ live-unproven:
 - Interaction with Linear's GitHub Issues Sync if it is enabled.
 
 Any live rollout should start with a throwaway or low-risk repo and explicitly
-record observations in `docs/linear-smoke-gate.md`.
+record observations in `docs/planning/linear-smoke-gate.md`.
 
 ## The Spirit to Preserve
 
@@ -795,7 +795,7 @@ No code change is required for this phase.
 
 ### Phase 1: Live Smoke the Existing Backend
 
-Use `docs/linear-smoke-gate.md`.
+Use `docs/planning/linear-smoke-gate.md`.
 
 Exercise:
 

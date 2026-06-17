@@ -2989,7 +2989,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   Done-on-merge automation).
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
   `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
-  `docs/linear-smoke-gate.md`.
+  `docs/planning/linear-smoke-gate.md`.
 
 ## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
 
@@ -3006,7 +3006,7 @@ there is no TS twin).
   in the OAuth `Authorization: Bearer <token>` header form (`LinearClient(bearer=True)`;
   personal-key requests keep the plain header byte-identically). Environment only — never
   config/committed files. No new config keys, no doctor check — the live smoke doc
-  (`docs/linear-smoke-gate.md`) is the verification surface.
+  (`docs/planning/linear-smoke-gate.md`) is the verification surface.
 - **The file**: `.pi/workflow/agent-session.json` (cache tier, §8.1) —
   `{"session_id": str, "issue": str, "url": str | null}`, written at session create
   (`cache.write_agent_session`/`read_agent_session`). Absent at a follow-up hook → fail-soft

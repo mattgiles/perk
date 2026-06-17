@@ -232,7 +232,7 @@ documented above (a third instance; see `shared-contracts.md`).
 
 ## Live smoke gate — RAN green (Modes 1 & 2 + the Projects spike)
 
-The gate that `docs/linear-smoke-gate.md` once held UNRUN has now **run**: Mode 1 (issue lifecycle,
+The gate that `docs/planning/linear-smoke-gate.md` once held UNRUN has now **run**: Mode 1 (issue lifecycle,
 #554), Mode 2 (GitHub-integration coexistence, #564), and the Linear Projects spike (#567) all fired
 **green — no backend defect, docs-only PRs.** The facts below resolve what the runbook reserved; the
 residual register at the bottom carries only the items the live runs did *not* answer.
@@ -544,7 +544,7 @@ avoid duplication.
   (idempotency keys off that sentinel). Use a throwaway field or restore immediately.
 - **Gotcha — Python `urllib` SSL fails in this env** (`CERTIFICATE_VERIFY_FAILED`); use `curl` for
   ad-hoc Linear GraphQL probes.
-- **Runbook drift corrected** in `docs/linear-smoke-gate.md`: `perk init --verify` is **not** a flag
+- **Runbook drift corrected** in `docs/planning/linear-smoke-gate.md`: `perk init --verify` is **not** a flag
   (labels are created by `perk doctor --fix`); `perk plan-save` is `perk plan save`; `perk resume` is
   `perk plan resume`; the `perk submit` / `perk land` flat aliases *do* work; `perk pr land` is
   idempotent on an already-merged PR.

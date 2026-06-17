@@ -2,7 +2,7 @@
 
 This memo thinks through what it would mean for perk to use Linear Projects as
 the representation of objectives. It is deliberately narrower than
-`docs/linear-masterplan.md`: that memo covers Linear as an issue backend in
+`docs/planning/linear-masterplan.md`: that memo covers Linear as an issue backend in
 general; this one focuses on the specific question of whether a perk objective
 should eventually become a Linear Project.
 

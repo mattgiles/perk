@@ -39,7 +39,8 @@ boundary — contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Live round-trip fidelity** — recorded at the live smoke gate (``docs/linear-smoke-gate.md``).
+- **Live round-trip fidelity** — recorded at the live smoke gate
+  (``docs/planning/linear-smoke-gate.md``).
 - **Not-found discrimination** — *implemented* (Node 1.2, 2026-06-15 observation): the three
   not-found sites pair ``INPUT_ERROR in exc.codes`` with the ``"Entity not found"`` message
   prefix (``_is_entity_not_found``). The gate-8 row recorded ``INPUT_ERROR`` as a *generic*
@@ -48,7 +49,7 @@ Explicit deferrals (flagged, not silently omitted):
 - **Rate-limit retry/backoff** — *decided fail-loud* (Node 1.2): no RATELIMITED tripped at the
   smoke gate (gate-9, "not tripped at low volume"), so there is no observed behavior to justify
   backoff. The client keeps raising the typed ``LinearGraphQLError``; retry/backoff stays
-  deferred until a live RATELIMITED is observed (``docs/linear-smoke-gate.md``).
+  deferred until a live RATELIMITED is observed (``docs/planning/linear-smoke-gate.md``).
 """
 
 import re
@@ -243,7 +244,8 @@ class _LinearIssueOps:
             data = self._client.request(query, {"id": issue_id})
         except LinearGraphQLError as exc:
             # Missing-entity discriminator: the observed `INPUT_ERROR` code paired with the
-            # "Entity not found" message prefix (docs/linear-smoke-gate.md gate-8, 2026-06-15).
+            # "Entity not found" message prefix
+            # (docs/planning/linear-smoke-gate.md gate-8, 2026-06-15).
             # INPUT_ERROR alone is too broad, so both must match. Every other error re-raises.
             if _is_entity_not_found(exc):
                 return None
@@ -498,7 +500,7 @@ class _LinearIssueOps:
 class _LinearProjectOps:
     """The dormant Linear *Projects* substrate (Objective #548, Node 3.1) — the GraphQL ops the
     not-yet-built ``LinearProjectObjectiveStore`` (Nodes 3.2-3.4) will consume, exactly the shapes
-    proven live at the Node 1.4 spike (``docs/linear-smoke-gate.md``, "Mode 3").
+    proven live at the Node 1.4 spike (``docs/planning/linear-smoke-gate.md``, "Mode 3").
 
     **Client-only** (correction §3b): it registers the :class:`LinearClient` and reaches all
     GraphQL machinery (``team_id``/``paginate``) through ``self._client`` — it does
