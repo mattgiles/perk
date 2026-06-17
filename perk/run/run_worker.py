@@ -61,7 +61,7 @@ def _git_clone_worker_entry(repo_root: Path) -> Path:
 
     Derives the clone root via :func:`init.consumer_git_clone_root` (the SSOT for the
     ``.pi/git/<host>/<path>`` derivation), so a ``GIT_PACKAGE`` URL change cannot desync this
-    candidate from the ``extension-deps`` doctor check.
+    candidate from the other consumers of the clone location.
     """
     return init.consumer_git_clone_root(repo_root) / "extension" / "workerMain.ts"
 
