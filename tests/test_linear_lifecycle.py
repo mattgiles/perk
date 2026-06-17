@@ -974,19 +974,7 @@ def test_detect_and_repair_missing_node_issue(monkeypatch: pytest.MonkeyPatch) -
             ],
         )
         store = _project_store(root)
-        # delete node-issue 1.2 from the live project (drift the observed state)
-        victim = next(
-            iid
-            for iid, iss in ws.issues.items()
-            if (
-                block := plan.find_metadata_block(
-                    str(iss["description"]), objective.OBJECTIVE_NODE_KEY
-                )
-            )
-            is not None
-            and block.get("id") == "1.2"
-        )
-        del ws.issues[victim]
+        _delete_node_issue(ws, "1.2")  # drift: node-issue 1.2 vanished from the live project
 
         report = store.detect_objective_drift(objective_id=obj_id)
         codes = [c.code for c in report.conditions]
@@ -1145,18 +1133,7 @@ def test_repair_recreates_both_missing_nodes_and_their_edge_in_one_pass(
         )
         store = _project_store(root)
         for node in ("1.1", "1.2"):
-            victim = next(
-                iid
-                for iid, iss in ws.issues.items()
-                if (
-                    block := plan.find_metadata_block(
-                        str(iss["description"]), objective.OBJECTIVE_NODE_KEY
-                    )
-                )
-                is not None
-                and block.get("id") == node
-            )
-            del ws.issues[victim]
+            _delete_node_issue(ws, node)
 
         result = store.repair_objective_drift(objective_id=obj_id)
         assert result.aborted is False and result.failed is None
@@ -1214,3 +1191,77 @@ def test_reconcile_reverts_pin_to_default_when_header_removed(
         store.update_objective_body(objective_id=obj_id, prose="Reconciled again, no header.")
         reverted = _manifest_of(ws, obj_id)
         assert reverted is not None and reverted.phase_names["1"] == "Phase 1"
+
+
+def _delete_node_issue(ws: FakeLinearWorkspace, node_id: str) -> None:
+    def _is(iss: dict[str, object]) -> bool:
+        block = plan.find_metadata_block(str(iss["description"]), objective.OBJECTIVE_NODE_KEY)
+        return block is not None and block.get("id") == node_id
+
+    victim = next(iid for iid, iss in ws.issues.items() if _is(iss))
+    del ws.issues[victim]
+    # Linear cascade-deletes the issue's relations when the issue is removed.
+    ws.relations[:] = [(bk, bl) for bk, bl in ws.relations if victim not in (bk, bl)]
+
+
+def test_repair_restores_existing_dependent_edge_to_a_recreated_node(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The reviewer's edge: node 1.1 is missing, EXISTING node 1.2 depends on 1.1. Detection raises
+    # only MISSING_NODE_ISSUE(1.1) (it cannot diff a dep to an absent endpoint), so the recreate
+    # sweep must restore the dependent's 1.1→1.2 edge in ONE pass.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        _delete_node_issue(ws, "1.1")  # 1.2 survives but its blocker (1.1) is gone
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert [c.code for c in report.conditions] == [DriftCode.MISSING_NODE_ISSUE]
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        # one pass restores both the node-issue AND the existing dependent's edge to it
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()
+
+
+def test_repair_creates_a_missing_blocking_relation_between_observed_nodes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The explicit DEPENDENCY_MISSING_IN_LINEAR repair path (both endpoints observed): the manifest
+    # declares 1.2 depends on 1.1, both node-issues exist, but the blocking relation was removed.
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        obj_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Node one"},
+                {"id": "1.2", "description": "Node two", "depends_on": ["1.1"]},
+            ],
+        )
+        store = _project_store(root)
+        ws.relations.clear()  # both node-issues survive; only the blocking relation is gone
+
+        report = store.detect_objective_drift(objective_id=obj_id)
+        assert DriftCode.DEPENDENCY_MISSING_IN_LINEAR in [c.code for c in report.conditions]
+
+        result = store.repair_objective_drift(objective_id=obj_id)
+        assert result.aborted is False and result.failed is None
+        assert any(a.code == DriftCode.DEPENDENCY_MISSING_IN_LINEAR for a in result.applied)
+        assert store.detect_objective_drift(objective_id=obj_id).conditions == ()

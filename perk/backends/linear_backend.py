@@ -2319,30 +2319,29 @@ class LinearProjectObjectiveStore:
             failed: objective_store.RepairAction | None = None
             aborted = False
             created_uuid: dict[str, str] = {}
-            # A recreated node's OWN manifest depends_on edges are DEFERRED to a second sweep so
-            # that every missing node-issue exists before any edge is restored (the manifest may
-            # declare an edge between two simultaneously-missing nodes in either id direction;
-            # detection never raises a separate DEPENDENCY_MISSING action for those, so the
-            # recreate path owns the edge). Endpoints are resolvable by the drain, never skipped.
-            deferred_edges: list[tuple[str, str]] = []
+            # Node-issue recreation is deferred-edge: ALL missing node-issues are created first
+            # (recorded in `recreated_ids`), then a single post-loop sweep restores every manifest
+            # edge **touching a recreated node** that Linear is still missing. Detection cannot
+            # raise a `DEPENDENCY_MISSING_IN_LINEAR` action while either endpoint is absent
+            # (objective_drift only diffs deps between two observed nodes), so the recreate path
+            # owns BOTH directions: a recreated node's own `depends_on` AND an already-existing
+            # dependent's edge to the recreated node. Observed↔observed missing edges stay with the
+            # explicit `DEPENDENCY_MISSING_IN_LINEAR` repairs in the loop (no overlap — the sweep
+            # skips edges whose endpoints are both already-observed).
+            recreated_ids: set[str] = set()
             for cond in ordered:
                 try:
-                    self._apply_repair(objective_id, snapshot, cond, created_uuid, deferred_edges)
+                    self._apply_repair(objective_id, snapshot, cond, created_uuid, recreated_ids)
                 except IssueBackendError as exc:
                     failed = objective_store.RepairAction(cond.code, cond.node_id, str(exc))
                     aborted = True
                     break
                 applied.append(objective_store.RepairAction(cond.code, cond.node_id))
-            if not aborted:
-                for node_id, dep in deferred_edges:
-                    try:
-                        self._restore_manifest_edge(objective_id, node_id, dep, created_uuid)
-                    except IssueBackendError as exc:
-                        failed = objective_store.RepairAction(
-                            objective_drift.DriftCode.MISSING_NODE_ISSUE, node_id, str(exc)
-                        )
-                        aborted = True
-                        break
+            if not aborted and recreated_ids and snapshot.manifest is not None:
+                failed = self._restore_recreated_node_edges(
+                    objective_id, snapshot, recreated_ids, created_uuid
+                )
+                aborted = failed is not None
             remaining = objective_drift.detect_drift(
                 self._build_observed_snapshot(objective_id)
             ).conditions
@@ -2360,7 +2359,7 @@ class LinearProjectObjectiveStore:
         snapshot: objective_drift.ObservedSnapshot,
         cond: objective_drift.DriftCondition,
         created_uuid: dict[str, str],
-        deferred_edges: list[tuple[str, str]],
+        recreated_ids: set[str],
     ) -> None:
         """Dispatch one repairable condition to its writer (backfill is the no-manifest case)."""
         code = cond.code
@@ -2372,7 +2371,7 @@ class LinearProjectObjectiveStore:
         if code is objective_drift.DriftCode.DELETED_PHASE_MILESTONE:
             self._repair_deleted_milestone(objective_id, snapshot, manifest, cond)
         elif code is objective_drift.DriftCode.MISSING_NODE_ISSUE:
-            self._repair_missing_node(objective_id, manifest, cond, created_uuid, deferred_edges)
+            self._repair_missing_node(objective_id, manifest, cond, created_uuid, recreated_ids)
         elif code is objective_drift.DriftCode.DEPENDENCY_MISSING_IN_LINEAR:
             self._repair_missing_dependency(objective_id, cond, created_uuid)
 
@@ -2410,18 +2409,43 @@ class LinearProjectObjectiveStore:
                         issue_id=obs.identifier, milestone_id=milestone_id
                     )
 
-    def _restore_manifest_edge(
-        self, objective_id: str, node_id: str, dep: str, created_uuid: dict[str, str]
-    ) -> None:
-        """Create a recreated node's manifest blocking relation (dep BLOCKS node), failing loud if
-        either endpoint is still unresolvable (every endpoint exists by the time the drain runs)."""
-        node_uuid = self._resolve_node_uuid(objective_id, node_id, created_uuid)
-        dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
-        if node_uuid is None or dep_uuid is None:
-            raise IssueBackendError(
-                f"cannot restore manifest edge {dep}→{node_id}: node-issue not found"
-            )
-        self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=node_uuid)
+    def _restore_recreated_node_edges(
+        self,
+        objective_id: str,
+        snapshot: objective_drift.ObservedSnapshot,
+        recreated_ids: set[str],
+        created_uuid: dict[str, str],
+    ) -> objective_store.RepairAction | None:
+        """Post-recreation edge sweep: restore every manifest edge **touching a recreated node**
+        that Linear is still missing — in BOTH directions (the recreated node's own ``depends_on``
+        AND an already-existing dependent's edge to it), which detection could not see while an
+        endpoint was absent. Skips edges already present in Linear and observed↔observed edges
+        (owned by the explicit dependency repair). Returns a failed :class:`RepairAction` on the
+        first unresolvable endpoint (fail-loud), else ``None``."""
+        manifest = snapshot.manifest
+        assert manifest is not None
+        observed_edges = {
+            (dep, obs.node_id)
+            for obs in snapshot.nodes
+            if obs.node_id is not None
+            for dep in obs.depends_on_observed
+        }
+        for node in manifest.nodes:
+            for dep in node.depends_on or ():
+                if (dep, node.id) in observed_edges:
+                    continue  # already a blocking relation in Linear
+                if node.id not in recreated_ids and dep not in recreated_ids:
+                    continue  # observed↔observed — owned by the explicit dependency repair
+                node_uuid = self._resolve_node_uuid(objective_id, node.id, created_uuid)
+                dep_uuid = self._resolve_node_uuid(objective_id, dep, created_uuid)
+                if node_uuid is None or dep_uuid is None:
+                    return objective_store.RepairAction(
+                        objective_drift.DriftCode.MISSING_NODE_ISSUE,
+                        node.id,
+                        f"cannot restore manifest edge {dep}→{node.id}: node-issue not found",
+                    )
+                self._projects.create_issue_relation(issue_id=dep_uuid, related_issue_id=node_uuid)
+        return None
 
     def _repair_missing_node(
         self,
@@ -2429,11 +2453,11 @@ class LinearProjectObjectiveStore:
         manifest: objective.Manifest,
         cond: objective_drift.DriftCondition,
         created_uuid: dict[str, str],
-        deferred_edges: list[tuple[str, str]],
+        recreated_ids: set[str],
     ) -> None:
         """Recreate a missing node-issue from its manifest entry (block + prose, under its phase
-        milestone); DEFER its manifest ``depends_on`` blocking relations to the post-loop edge
-        sweep (so a dep that is itself a missing node is created before its edge is restored)."""
+        milestone); record it in ``recreated_ids`` and DEFER **all** its blocking relations to the
+        post-loop edge sweep (so every endpoint — in either direction — exists before any edge)."""
         node_id = cond.node_id
         entry = next((n for n in manifest.nodes if n.id == node_id), None)
         if entry is None or node_id is None:
@@ -2462,8 +2486,7 @@ class LinearProjectObjectiveStore:
             milestone_id=milestone_id,
         )
         created_uuid[node_id] = uuid
-        for dep in entry.depends_on or ():
-            deferred_edges.append((node_id, dep))
+        recreated_ids.add(node_id)
 
     def _repair_missing_dependency(
         self,

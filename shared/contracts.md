@@ -3254,11 +3254,14 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   issue → dependency (parents before edges), then by node id — and **fail loud**: the first failed
   Linear write stops the batch (`aborted=True`, the failing condition in `failed`); `applied` records
   what landed before the abort (durable + idempotent on re-run). A `dry_run` plans the would-apply
-  set without any write. A recreated node's **own** manifest `depends_on` edges are **deferred** to a
-  post-loop sweep so that *every* missing node-issue exists before any edge is restored (the manifest
-  may declare an edge between two simultaneously-missing nodes in either id direction, for which
-  detection raises no separate dependency action) — the recreate path owns those edges and the drain
-  fails loud on a genuinely unresolvable endpoint, never silently skips.
+  set without any write. Node-issue recreation is **deferred-edge**: all missing node-issues are
+  created first, then a single post-loop sweep restores every manifest edge **touching a recreated
+  node** that Linear still lacks — in **both** directions (the recreated node's own `depends_on` AND
+  an already-existing dependent's edge to it). Detection cannot raise a `DEPENDENCY_MISSING_IN_LINEAR`
+  action while either endpoint is absent (it only diffs deps between two observed nodes), so the
+  recreate path owns those edges; observed↔observed missing edges stay with the explicit dependency
+  repair (the sweep skips edges whose endpoints are both already-observed, so no double-create). The
+  drain fails loud on a genuinely unresolvable endpoint, never silently skips.
 - **Two new project ops** (`_LinearProjectOps`, **flagged not-live-proven** — verify at the Node 5.1
   gate): `project_issues_with_milestones` (a `project_issues` sibling joining each node-issue's
   `projectMilestone`) and `attach_issue_to_milestone` (the deleted-milestone reattach — bare
