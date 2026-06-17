@@ -29,9 +29,11 @@ import {
   STATUS_SLOT_PERK,
   type StandingTarget,
   setStandingWidget,
+  setWorkingMessage,
   stepGlyphKind,
   type ThemeLike,
   WIDGET_SLOT_CHECKPOINTS,
+  type WorkingMessageTarget,
   windowProgress,
 } from "./surfaces.ts";
 
@@ -62,6 +64,32 @@ test("height bounds match the charter §4 / D1/D8 budgets", () => {
 
 test("surfaces.ts re-exports the report seam", () => {
   assert.equal(typeof report, "function");
+});
+
+// --- setWorkingMessage seam (vendored `whimsical`; charter §6 text-only, headless-no-op) ----------
+
+test("setWorkingMessage forwards the message (and undefined) when hasUI", () => {
+  const calls: (string | undefined)[] = [];
+  const target: WorkingMessageTarget = {
+    hasUI: true,
+    ui: { setWorkingMessage: (message) => calls.push(message) },
+  };
+  setWorkingMessage(target, "Schlepping...");
+  setWorkingMessage(target); // undefined restores pi's default
+  assert.deepEqual(calls, ["Schlepping...", undefined]);
+});
+
+test("setWorkingMessage no-ops headlessly (never touches rich UI)", () => {
+  const calls: (string | undefined)[] = [];
+  const target: WorkingMessageTarget = {
+    hasUI: false,
+    ui: {
+      setWorkingMessage: (message) => calls.push(message),
+    },
+  };
+  setWorkingMessage(target, "Schlepping...");
+  setWorkingMessage(target);
+  assert.deepEqual(calls, []);
 });
 
 // --- createPerkStatus (the composed `perk` status, node 2.3 / D2) ---------------------------------

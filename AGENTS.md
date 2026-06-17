@@ -55,11 +55,14 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   **same turn**, in the matching Divio quadrant. The operator-facing mirror of "amend the
   contract, don't drift."
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
-  `setWidget`/`setFooter` are called only inside `extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`;
-  everything else uses their seams (`report()`, `createPerkStatus`, `setStandingWidget`,
-  `installPerkFooter`). `setWorkingIndicator` is never called (charter D5 rescinded).
-  `extension/surfacesGuard.test.ts` fails CI on violations — extend the surfaces module rather
-  than allowlisting a new file.
+  `setWidget`/`setFooter`/`setWorkingMessage` are called only inside `extension/surfaces/surfaces.ts`
+  + `extension/surfaces/report.ts`; everything else uses their seams (`report()`, `createPerkStatus`,
+  `setStandingWidget`, `installPerkFooter`, `setWorkingMessage`). `setWorkingIndicator` is never
+  called (charter D5 rescinded); `setWorkingMessage` (text-only, headless-no-op) is permitted and
+  flavors pi's default spinner via `whimsical`. `ctx.ui.custom` stays declined for every workflow
+  surface — the one sanctioned exception is `/btw`, a human-only, `hasUI`-gated side-chat that is
+  never machine-reachable (no model tool, not a stage/door). `extension/surfacesGuard.test.ts` fails
+  CI on violations — extend the surfaces module rather than allowlisting a new file.
 - **`init` converges forward; `doctor --fix` repairs.** New desired state goes into `init`'s
   idempotent convergence; one-off/legacy repairs go into `doctor --fix` — keep `init` a clean
   forward path, never a pile of version branches.

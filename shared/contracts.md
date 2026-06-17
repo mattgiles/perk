@@ -674,11 +674,18 @@ text) — never a failed session start. The plan issue is never mutated (generat
 cache-tier, session-local state).
 
 **Surfaces discipline (Objective #251, node 4.1).** Every interior rich-UI call — `ctx.ui.notify`,
-`setStatus`, `setWidget`, `setFooter` — lives in the surfaces module (`extension/surfaces/surfaces.ts` +
-`extension/surfaces/report.ts`); every other extension module reaches the UI only through the seams
-(`report()`, `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator`
-is never called anywhere (D5 rescinded). Enforced by the source-scan guard
-`extension/surfacesGuard.test.ts` (node:test, runs in `just test`/`just ci`).
+`setStatus`, `setWidget`, `setFooter`, `setWorkingMessage` — lives in the surfaces module
+(`extension/surfaces/surfaces.ts` + `extension/surfaces/report.ts`); every other extension module
+reaches the UI only through the seams (`report()`, `createPerkStatus`, `setStandingWidget`,
+`installPerkFooter`, `setWorkingMessage`). `setWorkingIndicator` is never called anywhere (D5
+rescinded); the distinct **`setWorkingMessage`** call (text-only label on pi's default spinner,
+headless-no-op) **is** permitted (it was never declined) and is routed through the
+`setWorkingMessage` surfaces seam — `whimsical` flavors the spinner label through it. **`ctx.ui.custom`
+stays declined for all workflow surfaces** (charter §6 D6); the sole sanctioned exception is **`/btw`**,
+a human-only side-chat popover that is `hasUI`-gated, exposes no model tool, and is not a stage/door —
+so it is never machine-reachable and cannot threaten the machine-executability the decline protects.
+Enforced by the source-scan guard `extension/surfacesGuard.test.ts` (node:test, runs in
+`just test`/`just ci`).
 
 **Tool-gating (P2.T1).** The `mode` field **structurally gates tools** — enforcement, not
 prompting. When `mode == "read-only"` the interior (`extension/substrate/toolGating.ts`):
