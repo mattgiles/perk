@@ -89,6 +89,19 @@ Fix the **allowlist**, not cold-door seed-injection: the cold door injects only 
 (e.g. an objective's title + one node description), so an agent legitimately needs the read-only
 query to read the rest.
 
+### A command-keyed allowlist entry is language-agnostic (the `ast-grep` entry, #617)
+
+The `ast-grep` allowlist entry (`/^\s*ast-grep\b/`) gates the **command itself**, not its `--lang`
+argument — so it is equally allowed against any language (the `-` in `ast-grep` is a non-word char,
+so `\b` after `grep` matches correctly). A test framing it as `--lang js` reads as language-specific
+but isn't; pin the language-agnosticism with a second `--lang python` case rather than a
+production-code change.
+
+**Mechanism-choice lesson:** perk **cannot own `grep`** — it's a Pi builtin, not a perk-registered
+tool, so there is no tool to swap or remove. Steering toward a structural-search tool is therefore
+the managed `AGENTS.md` bullet (ambient every session) + a bundled ambient skill + the read-only
+allowlist entry — **no** custom tool, no `READ_ONLY_TOOLS`/active-tools change, no default binding.
+
 ## Cross-references
 
 - `extension/substrate/toolGating.ts` — `SAFE_PATTERNS` implementation

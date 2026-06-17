@@ -109,6 +109,24 @@ stamp, **never again a ref pin**. The import was therefore **removed from `workf
 (and its test) once the last ref reference left, while `init.py` keeps it for the managed-block stamp
 and `test_init_idempotent.py` keeps it for the self-mode negative assertion.
 
+## The `PERK_SKILLS` SSOT cascade + the self-converge `missing-skill` expectation (#617)
+
+**`PERK_SKILLS` is a true SSOT — one tuple edit cascades to three mechanisms.** Adding a skill name to
+the `PERK_SKILLS` tuple in `init.py` (kept **alphabetical**) auto-regenerates the committed manifest
+fragment (the `skills-manifest` ManagedConvergence), feeds `sync_skills()`'s post-sync verification,
+and is picked up by the `skills-delivery` doctor check — **no further code change**. The SSOT holds
+even for a **non-`perk-` skill name** (e.g. a bundled upstream skill like `ast-grep`).
+
+**The pre-merge `missing-skill` failure is EXPECTED and non-fatal to the artifact write.** Running
+the worktree's `perk init` to regenerate the managed artifacts prints a loud
+`✗ skills delivery failed: ... missing-skill` — because the skills CLI resolves `source: perk →
+ref: main` and the new skill **isn't on `main` yet**. This is the **documented first-appearance
+path**: init **still converges** the managed artifacts (manifest fragment + AGENTS.md), which is
+exactly what you commit — don't try to "fix" the sync failure. The committed **working-tree
+`SKILL.md`** keeps the dev-tree doctor check green (the `is_skill_installed(self_repo=True)`
+fallback), and the test suite runs with **verification disabled** so no real shell runs. (`perk
+init` also writes a gitignored `.pi/perk.local.toml` — never appears in `git status`.)
+
 ## Committed declaration vs. transient state — the gitignore boundary
 
 The manifest fragment is a **committed declaration** and is *never* gitignored (it is desired
