@@ -99,6 +99,31 @@ export function setStandingWidget(
   }
 }
 
+// --- the working-message seam (vendored `whimsical`; charter §6 permitted text-only) ------------
+
+/**
+ * The minimal headless-aware surface the `setWorkingMessage` seam needs. `ExtensionContext`
+ * satisfies it; tests fake it (the `StandingTarget`/`ReportTarget` minimal-structural recipe).
+ * `setWorkingMessage` sets only a plain text label on pi's existing default working indicator
+ * (`undefined` restores pi's default per the SDK contract) — distinct from the declined
+ * `setWorkingIndicator` (D5).
+ */
+export interface WorkingMessageTarget {
+  hasUI: boolean;
+  ui: { setWorkingMessage(message?: string): void };
+}
+
+/**
+ * Set (or, with `undefined`, restore pi's default) the working-message label; no-op headless.
+ * The one sanctioned `ctx.ui.setWorkingMessage` call site (guard allowlist) — `whimsical` routes
+ * its per-turn phrase through here. Text-only and headless-no-op, so it never touches rich UI in a
+ * cold/headless/RPC session.
+ */
+export function setWorkingMessage(target: WorkingMessageTarget, message?: string): void {
+  if (!target.hasUI) return;
+  target.ui.setWorkingMessage(message);
+}
+
 // --- the composed perk status (node 2.3 / charter D2) --------------------------------------------
 
 /** A named segment of the composed `perk` status. Order is fixed by `PERK_SEGMENT_ORDER` (D2). */

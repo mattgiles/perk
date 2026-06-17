@@ -10,6 +10,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
+import { registerBtw } from "./btw/btw.ts";
 import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAskUser } from "./doors/askUser.ts";
@@ -56,6 +57,7 @@ import {
 import { isPerkFooterReferenceSelected } from "./surfaces/footerProvider.ts";
 import { report } from "./surfaces/report.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces/surfaces.ts";
+import { registerWhimsical } from "./whimsical.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
@@ -96,6 +98,17 @@ export default function (pi: ExtensionAPI) {
   // P2.T1 — the read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
   // both session_start AND session_tree below. enter/exit are the surface T2/T5 consume.
   const gating = registerToolGating(pi);
+
+  // Vendored `btw` (#625): a `/btw` human-only side-chat popover backed by an isolated in-memory
+  // AgentSession. Takes `gating` for the gate-mirror — its side-session toolset + cache key follow
+  // perk's read-only gate (`sideSessionTools`), so the isolated session never bypasses the read-only
+  // guarantee. Its `ctx.ui.custom` overlay is the ONE sanctioned charter exception (§6 D6): human-
+  // invoked only, `hasUI`-gated, no model tool, not a stage/door — never machine-reachable.
+  registerBtw(pi, gating);
+
+  // Vendored `whimsical` (#625): flavors pi's default working-message label with a random phrase per
+  // turn, via the headless-no-op `setWorkingMessage` surfaces seam. Always on, no config toggle.
+  registerWhimsical(pi);
 
   // P2.T2a — perk-owned plan mode: the `/plan` + Ctrl+Alt+P + `--plan` toggle surface over T1's
   // gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the

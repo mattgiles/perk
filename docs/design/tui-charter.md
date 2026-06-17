@@ -82,10 +82,18 @@ fixes).
 
 ### Not used today
 
-`setWorkingIndicator` (declined — D5 rescinded in node 3.1, see §6), `ctx.ui.custom`
-components/overlays, `renderCall`/`renderResult` tool renderers. *(Charter-time entries since
-adopted: themed widget factories + `theme.fg` + `truncateToWidth`/`visibleWidth` +
-`placement: "belowEditor"` in node 2.2; `setFooter`/`footerData` in node 3.1.)*
+`setWorkingIndicator` (declined — D5 rescinded in node 3.1, see §6), `renderCall`/`renderResult`
+tool renderers. *(Charter-time entries since adopted: themed widget factories + `theme.fg` +
+`truncateToWidth`/`visibleWidth` + `placement: "belowEditor"` in node 2.2; `setFooter`/`footerData`
+in node 3.1.)*
+
+### Bounded exceptions / permitted text-only surfaces (vendored extensions)
+
+| Surface | Owner | Status | Note |
+|---|---|---|---|
+| `ctx.ui.custom` overlay | `btw/btw.ts` (`BtwOverlay`) | **Sanctioned exception** (§6 D6) | The **one** `ctx.ui.custom` use — `/btw`'s human-only side-chat popover. Human-invoked only, `hasUI`-gated, no model tool, not a stage/door → never machine-reachable. `ctx.ui.custom` stays **declined for all workflow surfaces**. |
+| `setWorkingMessage` | `whimsical.ts` (via the `setWorkingMessage` surfaces seam) | **Permitted** (never declined) | Text-only label on pi's existing default spinner; the new seam no-ops headless. Distinct from the still-declined `setWorkingIndicator` (D5). |
+| `ctx.ui.select` | `btw/btw.ts` close flow | Already adopted | `confirm`/`select`/`input` are charter-permitted interactive prompts (§3). |
 
 ## §3 Surface taxonomy + placement rules
 
@@ -152,7 +160,10 @@ full `done/total` summary, so no information is lost — only standing screen he
 ## §5 Glyph + severity vocabulary
 
 **D3 — glyph vocabulary.** Emoji serve as **identity marks in the footer only**; everywhere else
-perk uses themed single-width glyphs:
+perk uses themed single-width glyphs. The vocabulary governs perk's **standing surfaces +
+notify/tool-result text**; the **`btw` exception overlay** (§6) follows the same themed-glyph set
+where it draws glyphs (its charter-time `❌` error glyph → themed `✗` `error`, its running `⚙` →
+themed `▸` `accent`; `✓` `success` / `✗` `error` kept).
 
 | Glyph | Theme color (`theme.fg`) | Meaning | Where allowed |
 |---|---|---|---|
@@ -244,8 +255,37 @@ factory form so glyphs are theme-colored without pre-baking (§5).
   itself, which collides with the D10 never-pre-bake-theme-colors law, and no theme-change hook
   exists to rebuild them against. Perk keeps pi's default spinner; perk never calls
   `setWorkingIndicator`.
-- **`ctx.ui.custom` components/overlays (D6): not adopted** in this objective. The existing
-  `confirm`/`select`/`input` prompts suffice; recorded as out of charter scope.
+- **`ctx.ui.custom` components/overlays (D6): declined for all workflow surfaces.** The existing
+  `confirm`/`select`/`input` prompts suffice for machine-driven surfaces. The **purpose** of the
+  decline is to keep every perk surface **machine-executable**: perk's workflow runs cold (the
+  Python CLI launches `pi`), headless, and over RPC/`--json`, driven by model **tools** and
+  stage/door transitions — a focus-owning interactive overlay cannot be driven by a machine, so
+  workflow surfaces must never depend on one.
+
+  **Exception criteria (the exception that proves the rule).** A `ctx.ui.custom` overlay is
+  permitted **only** when it is, in full: (1) **human-invoked only** — no model tool, no stage, no
+  door, no cold/headless/RPC entry point; (2) **`ctx.hasUI`-gated** — never opens outside an
+  interactive TUI; (3) outside the machine-driven workflow entirely; and it must still obey (4) the
+  §4 D9 width law, (5) the §5 D10 stateless-render law, and (6) the §5 themed-glyph vocabulary.
+  Anything reachable by a machine stays bound by this D6 decline. The exception's boundary **is** the
+  rule's own criterion (machine-unreachability), so it proves the rule rather than eroding it.
+
+  **`btw` is the named, sole sanctioned instance.** `/btw`'s entire UI is a `ctx.ui.custom` overlay
+  (`BtwOverlay`) — a live side-chat transcript + input that cannot be expressed via
+  `confirm`/`select`/`input`. It is invoked **only** by a human typing `/btw`, exposes **no model
+  tool**, is **not** a stage or door, and its overlay is **`ctx.hasUI`-gated** (never opens cold /
+  headless / RPC). Because it sits entirely outside machine reach it cannot threaten the
+  machine-executability this decline protects — which is exactly why it is a *sanctioned exception*
+  and `ctx.ui.custom` **remains declined for all workflow surfaces**. (Recorded as a bounded
+  exception, **not** a charter adoption.)
+
+- **`setWorkingMessage` (text-only): permitted, not a reversal of D5.** `setWorkingMessage` was
+  never declined — only `setWorkingIndicator` was (D5: indicator frames render verbatim with
+  pre-baked colors, the D10 conflict). `setWorkingMessage` sets only a plain **text** label on pi's
+  existing default indicator — no frames, no colors, no theming — and the new surfaces seam
+  **no-ops headless**. perk still keeps pi's default spinner; `whimsical` only flavors its label
+  through the seam. Brought under the surfaces seam + guard as governance; `setWorkingIndicator`
+  stays declined.
 - **`renderCall`/`renderResult` tool renderers: not adopted.** Not needed yet — recorded as
   future-eligible (a later objective may render perk tool calls richly; nothing here forecloses
   it).
@@ -273,4 +313,5 @@ factory form so glyphs are theme-colored without pre-baking (§5).
 | 2.2 | Checkpoints convergence: D1 windowing (≤ ~4 lines), D3 glyphs (retire `☑ ▶ ☐`), themed factories + D10, D9 truncation; amends the `shared/contracts.md` checkpoints render spec in the same turn. |
 | 2.3 | Status coordination: the two `setStatus` keys become ordered footer segments; the `perk-objective` widget may be retired (D2/D8). *(Implemented: the two per-feature status slots collapsed into one composed `perk` slot — objective → checkpoints order, two-space join — and the `perk-objective` widget is retired; the checkpoints widget keeps slot `perk-checkpoints`.)* |
 | 3.1 | Footer adoption (shipped): `setFooter` with the D2 segment spec + the node-3.1 context segment + split layout, ownership law, and reactivity contract; the extended D9 overflow order; the `perk ${version} loaded` toast retired — identity is a standing footer segment (D7). D5 **rescinded** (no `setWorkingIndicator`); the API gaps recorded in §6. |
+| vendored (`btw`/`whimsical`) | The bounded `ctx.ui.custom` exception (§2/§6: `btw`, human-only, machine-unreachable — the exception that proves the D6 rule) and the permitted text-only `setWorkingMessage` surface (§2/§6: `whimsical`, headless-no-op, distinct from the declined `setWorkingIndicator`), both routed through the surfaces module + guard. |
 | 4.1 | Regression guard: tests pinning the charter's budgets and vocabulary so drift fails CI. *(Implemented: the budget/vocabulary pins already live in `extension/surfaces.test.ts` (node 2.1 — slot keys, `GLYPHS`, `*_MAX_LINES`); this node added the call-site regression guard `extension/surfacesGuard.test.ts` — rich-UI calls (`ui.notify`/`setStatus`/`setWidget`/`setFooter`) allowlisted to surfaces.ts + report.ts, `setWorkingIndicator` banned everywhere — plus the discipline records in AGENTS.md and `shared/contracts.md` §8.3.)* |

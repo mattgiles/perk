@@ -241,6 +241,22 @@ documentation, not re-documented here (in read-only mode `bash` is sub-allowlist
 commands). The borrowed web/Linear research tools are allowed while exploring; their depth belongs
 to the config/provider reference nodes (4.1/4.2).
 
+## Ancillary in-session features
+
+Two small first-party conveniences ride along inside the perk extension. Neither is a workflow
+stage, door, or model tool — they are human-facing only.
+
+- **`/btw`** — a side-chat popover (a separate, in-memory conversation seeded with your main
+  conversation context, so it can give informed answers without polluting the main thread).
+  `/btw <text>` asks immediately; bare `/btw` opens (or, with an existing thread, offers to continue
+  or start fresh). Closing the popover offers to **inject a summary** of the side conversation back
+  into the main chat. Its side session's tools follow perk's read-only mode — read-only sessions get
+  `read` only, read-write sessions get the full tool set — so it never escapes the structural
+  read-only guarantee. **TUI-only** (it never opens in a headless / RPC / cold session) and exposes
+  **no model tool**.
+- **`whimsical`** — replaces pi's default “Working…” label with a random whimsical phrase each turn.
+  Ambient and cosmetic; always on, no command, no config toggle.
+
 ## See also
 
 If you want the shell exterior — the `perk …` commands you run before a session — that is the

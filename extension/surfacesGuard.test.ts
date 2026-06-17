@@ -22,6 +22,10 @@ const RULES: { pattern: RegExp; allowlist: string[] }[] = [
   { pattern: /\.setStatus\(/, allowlist: SURFACES_MODULE },
   { pattern: /\.setWidget\(/, allowlist: SURFACES_MODULE },
   { pattern: /\.setFooter\(/, allowlist: SURFACES_MODULE },
+  // The vendored `whimsical` working-message label routes through the `setWorkingMessage` surfaces
+  // seam (charter §6: text-only, permitted, headless-no-op — distinct from the banned
+  // `setWorkingIndicator` below).
+  { pattern: /\.setWorkingMessage\(/, allowlist: SURFACES_MODULE },
 ];
 
 // Banned everywhere — D5 rescinded: perk keeps pi's default working indicator.
