@@ -112,6 +112,95 @@ def test_create_structured_roadmap_passes_nodes(monkeypatch):
     assert nodes[1].depends_on == ("1.1",)
 
 
+def _invoke_with_config(args, *, body, config):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        pi = Path(d) / ".pi"
+        pi.mkdir(parents=True, exist_ok=True)
+        (pi / "perk.toml").write_text(config, encoding="utf-8")
+        bf = Path(d) / "obj.md"
+        bf.write_text(body, encoding="utf-8")
+        return runner.invoke(cli, [*args, "--body", str(bf)])
+
+
+def test_create_base_flag_stored(monkeypatch):
+    # #633: --base develop pins the objective's base into create_objective(base=...).
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--base", "develop", "--roadmap", roadmap],
+        body="# Ship it\n\nprose",
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["base"] == "develop"
+
+
+def test_create_base_from_config(monkeypatch):
+    # #633: with no --base, the repo's [workflow] base is pinned at create time.
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_with_config(
+        ["objective", "create", "--json", "--roadmap", roadmap],
+        body="# Ship it\n\nprose",
+        config='[workflow]\nbase = "release"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["base"] == "release"
+
+
+def test_create_base_flag_wins_over_config(monkeypatch):
+    # #633: an explicit --base wins over the [workflow] base config.
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_with_config(
+        ["objective", "create", "--json", "--base", "develop", "--roadmap", roadmap],
+        body="# Ship it\n\nprose",
+        config='[workflow]\nbase = "release"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["base"] == "develop"
+
+
+def test_create_base_none_when_unset(monkeypatch):
+    # #633: neither --base nor [workflow] base → base=None (default-branch behavior).
+    _authed(monkeypatch)
+    captured = {}
+
+    def _create(**k):
+        captured.update(k)
+        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+
+    monkeypatch.setattr(github, "create_objective_issue", _create)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke(
+        ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["base"] is None
+
+
 def test_create_structured_roadmap_invalid(monkeypatch):
     # A structurally invalid --roadmap node is rejected as invalid_roadmap before any write.
     _authed(monkeypatch)

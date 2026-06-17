@@ -85,6 +85,21 @@ test("tool: objective_save passes the structured roadmap as --roadmap <json>", a
   }
 });
 
+test("tool: objective_save passes --base when supplied, omits it otherwise (#633)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const argvFile = `${cwd}/argv.txt`;
+  const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("objective_save", { prose: PROSE, base: "develop" });
+    assert.match(readFileSync(argvFile, "utf8"), /--base\ndevelop/);
+    await h.invokeTool("objective_save", { prose: PROSE });
+    assert.doesNotMatch(readFileSync(argvFile, "utf8"), /--base/);
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: a success:false envelope at non-zero exit surfaces the structured error (no linkage)", async () => {
   // The envelope-aware regression (Node 2.2): the Python plane prints a structured failure
   // envelope to stdout before exiting non-zero — the door surfaces it, not the stderr tail.
@@ -317,6 +332,34 @@ test("objectiveApprovalSave: happy path — artifact saved, gate exited once, se
     "7",
     "active_objective linked",
   );
+});
+
+test("objectiveApprovalSave: a draft base rides --base; absent draft base omits it (#633)", async () => {
+  const cwd = scaffoldRepo();
+  const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx = reportableCtx(cwd, branch);
+  const payloadWithBase = `${JSON.stringify({
+    schema_version: 1,
+    title: "Ship retries",
+    prose: PROSE,
+    roadmap: DRAFT_ROADMAP,
+    base: "develop",
+  })}\n`;
+  assert.ok(writeSessionArtifact(fakeSink(branch), ctx, OBJECTIVE_DRAFT_ARTIFACT, payloadWithBase));
+  const argvs: string[][] = [];
+  const pi = fakeApprovalPi(branch, { stdout: CREATE_JSON, argvs });
+  await objectiveApprovalSave(pi, ctx as unknown as ExtensionContext, fakeGating(true));
+  const argv = argvs[0] ?? [];
+  assert.equal(argv[argv.indexOf("--base") + 1], "develop", "the draft's base rode --base");
+
+  // A base-less draft omits --base entirely.
+  const branch2: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
+  const ctx2 = reportableCtx(cwd, branch2);
+  plantDraft(ctx2, branch2);
+  const argvs2: string[][] = [];
+  const pi2 = fakeApprovalPi(branch2, { stdout: CREATE_JSON, argvs: argvs2 });
+  await objectiveApprovalSave(pi2, ctx2 as unknown as ExtensionContext, fakeGating(true));
+  assert.ok(!(argvs2[0] ?? []).includes("--base"), "no --base for a base-less draft");
 });
 
 test("objectiveApprovalSave: an explicit title overrides the draft title", async () => {

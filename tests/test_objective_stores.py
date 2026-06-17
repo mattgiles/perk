@@ -142,6 +142,7 @@ class TestGitHubDelegation:
             "repo_root": tmp_path,
             "run_id": "RUN1",
             "status": "active",
+            "base": None,
             "roadmap_nodes": None,
             "dry_run": False,
         }

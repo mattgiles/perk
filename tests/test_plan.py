@@ -39,6 +39,7 @@ def test_plan_header_to_data_shape():
     assert data["lifecycle_stage"] == "planned"  # StrEnum -> value
     assert data["branch"] is None and data["pr"] is None and data["objective_id"] is None
     assert data["consumed_learn"] == []  # hop-2: empty by default, serialized as a list
+    assert data["base"] is None  # #633: absent by default
 
 
 def test_plan_header_consumed_learn_round_trips():
@@ -74,7 +75,29 @@ def test_plan_ref_to_data_pr_id_is_string():
         "labels": ["perk:plan"],
         "objective_id": None,
         "consumed_learn": [],
+        "base": None,
     }
+
+
+def test_plan_header_base_round_trips():
+    header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z", base="develop")
+    data = header.to_data()
+    assert data["base"] == "develop"
+    rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
+    parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
+    assert parsed is not None and parsed["base"] == "develop"
+    assert "base" in plan.PLAN_HEADER_FIELDS
+
+
+def test_plan_ref_base_in_to_data():
+    ref = plan.PlanRef(
+        provider="github",
+        pr_id="123",
+        url="u",
+        labels=(plan.PLAN_LABEL,),
+        base="develop",
+    )
+    assert ref.to_data()["base"] == "develop"
 
 
 def test_render_plan_body_keeps_markdown_verbatim():

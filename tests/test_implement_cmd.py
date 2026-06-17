@@ -23,6 +23,7 @@ _PLAN_REF = {
     "labels": ["perk:plan"],
     "objective_id": None,
     "consumed_learn": [],
+    "base": None,
 }
 
 

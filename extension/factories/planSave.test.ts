@@ -131,6 +131,37 @@ test("tool: plan_save delegates, links the session, and terminates", async () =>
   }
 });
 
+test("tool: plan_save carries plan_ref.base into active_plan_ref (#633 parity)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  const withBase = JSON.stringify({
+    success: true,
+    error_type: null,
+    message: null,
+    issue: { id: "42", url: "https://gh/o/r/issues/42", existed: false },
+    plan_ref: {
+      provider: "github",
+      pr_id: "42",
+      url: "https://gh/o/r/issues/42",
+      labels: ["perk:plan"],
+      objective_id: null,
+      base: "develop",
+    },
+    cached: true,
+    dry_run: false,
+  });
+  const bin = fakePerk(cwd, { stdout: withBase });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    assert.equal(
+      (h.workflowState().active_plan_ref as { base?: string | null } | null)?.base,
+      "develop",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");

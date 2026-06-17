@@ -13,6 +13,7 @@ from perk.run.launch import (
     _sweep_stale_pi_agent_locks,
     launch_stage,
     materialize_skills,
+    resolve_base,
     resolve_plan_worktree_name,
     resolve_target,
     resolve_worktree,
@@ -106,6 +107,40 @@ def test_resolve_worktree_none_is_repo_root(tmp_path):
     )
     assert resolved.path == tmp_path
     assert resolved.plan_ref is None
+
+
+# --- #633: plan_base drives the start-point ---------------------------------------------
+
+
+def test_resolve_base_uses_plan_base_as_trunk(monkeypatch, tmp_path):
+    # A plan's pinned base replaces the detected trunk as the trunk source.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: ref == "origin/develop")
+
+    def _no_detect(_root):
+        raise AssertionError("detect_trunk_branch must not run when plan_base is set")
+
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", _no_detect)
+    assert resolve_base(tmp_path, "plan-42", None, "develop") == "origin/develop"
+
+
+def test_resolve_base_explicit_override_wins_over_plan_base(monkeypatch, tmp_path):
+    # An explicit --base still wins verbatim, even over a plan_base.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: True)
+    assert resolve_base(tmp_path, "plan-42", "custom-ref", "develop") == "custom-ref"
+
+
+def test_resolve_base_no_plan_base_uses_detected_trunk(monkeypatch, tmp_path):
+    # With no plan_base, behavior is unchanged: detect_trunk_branch supplies the trunk.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: ref == "origin/main")
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", lambda _root: "main")
+    assert resolve_base(tmp_path, "plan-42", None, None) == "origin/main"
+
+
+def test_resolve_base_resumed_branch_wins_over_plan_base(monkeypatch, tmp_path):
+    # An existing origin/<name> (a resumed/remote plan) is tracked before the plan_base trunk.
+    monkeypatch.setattr(git_mod, "remote_ref_exists", lambda _root, ref: True)
+    monkeypatch.setattr(git_mod, "detect_trunk_branch", lambda _root: "main")
+    assert resolve_base(tmp_path, "plan-42", None, "develop") == "origin/plan-42"
 
 
 # --- T4a: plan-ref-aware worktree resolution -------------------------------------------

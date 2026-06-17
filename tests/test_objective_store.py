@@ -49,6 +49,7 @@ class _FakeObjectiveStore:
         body: str,
         run_id: str,
         status: str = "active",
+        base: str | None = None,
         roadmap_nodes: list[objective.ObjectiveNode] | None = None,
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:

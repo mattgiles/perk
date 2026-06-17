@@ -95,7 +95,14 @@ test("decode smoke: absent prose decodes to empty string (the core owns invalid_
     prose: "",
     title: undefined,
     roadmap: undefined,
+    base: undefined,
   });
+});
+
+test("decode: base is decoded when a string, refused when mistyped (#633)", () => {
+  const decoded = decodeObjectiveSaveParams({ prose: "p", base: "develop" });
+  assert.equal(decoded?.base, "develop");
+  assert.equal(decodeObjectiveSaveParams({ prose: "p", base: 7 }), null);
 });
 
 // --- core (offline fakes) -----------------------------------------------------------------------
@@ -189,6 +196,27 @@ test("core: title omitted from the JSON when not passed; absent roadmap serializ
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     assert.deepEqual(parsed, { schema_version: 1, prose: PROSE, roadmap: [] });
     assert.ok(!("title" in parsed));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("core: base persists through write/read; omitted when absent (#633)", () => {
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    writeObjectiveDraft(fakeSink(branch), ctx, { prose: PROSE, base: "develop" });
+    const path = join(sessionDataDir(cwd, "RID"), OBJECTIVE_DRAFT_ARTIFACT);
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    assert.equal(parsed.base, "develop");
+    assert.equal(readObjectiveDraft(ctx)?.base, "develop");
+
+    // A subsequent write with no base drops it from disk + the validated read.
+    writeObjectiveDraft(fakeSink(branch), ctx, { prose: PROSE });
+    const reparsed = JSON.parse(readFileSync(path, "utf8"));
+    assert.ok(!("base" in reparsed));
+    assert.equal(readObjectiveDraft(ctx)?.base, undefined);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -411,6 +439,7 @@ test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
     prose: "p",
     title: undefined,
     roadmap: [{ id: "1.1" }],
+    base: undefined,
   });
   // prose absent decodes to "" (saveObjective's invalid_input arm keeps owning that message).
   assert.equal(decodeObjectiveSaveParams({})?.prose, "");

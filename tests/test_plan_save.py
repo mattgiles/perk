@@ -106,6 +106,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         "labels": ["perk:plan"],
         "objective_id": None,
         "consumed_learn": [],
+        "base": None,
     }
 
 
@@ -386,6 +387,145 @@ def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == []
+
+
+def _run_with_config(monkeypatch, args, *, config):
+    """Run plan-save in an isolated repo seeded with a committed `.pi/perk.toml` (#633 base)."""
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        pi = Path(d) / ".pi"
+        pi.mkdir(parents=True, exist_ok=True)
+        (pi / "perk.toml").write_text(config, encoding="utf-8")
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        result = runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
+        ref = None
+        ref_path = pi / "workflow" / "plan-ref.json"
+        if ref_path.exists():
+            ref = json.loads(ref_path.read_text())
+    return result, ref
+
+
+def test_plan_save_pins_base_from_config(monkeypatch):
+    # #633: a standalone save with [workflow] base set pins it into BOTH the plan-header body and
+    # the cache.plan-ref.
+    _authed(monkeypatch)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+
+    def _create(**k):
+        captured["body"] = k["body"]
+        return github.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
+
+    monkeypatch.setattr(github, "create_plan_issue", _create)
+    monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
+    result, ref = _run_with_config(
+        monkeypatch, ["--plan-file", "plan.md"], config='[workflow]\nbase = "develop"\n'
+    )
+    assert result.exit_code == 0, result.output
+    assert "base: develop" in captured["body"]
+    assert ref is not None and ref["base"] == "develop"
+
+
+def test_plan_save_inherits_objective_base(monkeypatch):
+    # #633: an objective-linked save reads the objective's own base (objective-header) and pins it
+    # into the plan-header + plan-ref, winning over the config default.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: github.ObjectiveState(
+            number=7, url="u/7", title="t", header={"base": "release"}, nodes=()
+        ),
+    )
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    result, ref = _run_with_config(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+        config='[workflow]\nbase = "develop"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert ref is not None and ref["base"] == "release"  # objective base wins over config
+    assert json.loads(result.stdout)["plan_ref"]["base"] == "release"
+
+
+def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
+    # #633: an objective whose header carries NO base falls through fail-soft to [workflow] base.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    monkeypatch.setattr(
+        github,
+        "get_objective",
+        lambda **k: github.ObjectiveState(number=7, url="u/7", title="t", header={}, nodes=()),
+    )
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    result, ref = _run_with_config(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+        config='[workflow]\nbase = "develop"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert ref is not None and ref["base"] == "develop"
+
+
+def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
+    # #633: a failing get_objective must be fail-soft — fall through to config base, never block.
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+
+    def _boom(**_k):
+        raise github.GitHubError("boom")
+
+    monkeypatch.setattr(github, "get_objective", _boom)
+    monkeypatch.setattr(
+        github,
+        "update_objective_node",
+        lambda **k: github.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    result, ref = _run_with_config(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--objective-id", "7", "--node-id", "1.1", "--json"],
+        config='[workflow]\nbase = "develop"\n',
+    )
+    assert result.exit_code == 0, result.output
+    assert ref is not None and ref["base"] == "develop"
+
+
+def test_plan_save_no_base_anywhere_is_none(monkeypatch):
+    # #633: neither an objective base nor [workflow] base → base stays None (default-branch path).
+    _authed(monkeypatch)
+    _stub_writes(monkeypatch)
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["plan_ref"]["base"] is None
+
+
+def test_plan_save_resave_preserves_base(monkeypatch):
+    # #633: an idempotent re-save merges base back into the existing plan-header (never drops it).
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    result, _ref = _run_with_config(
+        monkeypatch, ["--plan-file", "plan.md"], config='[workflow]\nbase = "develop"\n'
+    )
+    assert result.exit_code == 0, result.output
+    header = calls["header"]
+    assert isinstance(header, dict)
+    assert cast("dict[str, object]", header)["fields"] == {"base": "develop"}
 
 
 def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
