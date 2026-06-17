@@ -69,8 +69,8 @@ def test_sync_skills_not_run_without_verify(tmp_path, monkeypatch):
 
 
 def _install_perk_skills(root):
-    """Plant every PERK_SKILLS SKILL.md under .agents/skills/ (a delivered substrate)."""
-    for name in init_mod.PERK_SKILLS:
+    """Plant every MANAGED_SKILL_NAMES SKILL.md under .agents/skills/ (a delivered substrate)."""
+    for name in init_mod.MANAGED_SKILL_NAMES:
         path = root / ".agents" / "skills" / name / "SKILL.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# skill\n", encoding="utf-8")

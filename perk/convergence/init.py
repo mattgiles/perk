@@ -120,6 +120,43 @@ PERK_SKILLS_MANIFEST_DIR = ".agents/manifest.d"
 PERK_SKILLS_MANIFEST_FILENAME = "perk.yaml"
 PERK_GITHUB_URL = "https://github.com/mattgiles/perk"
 
+
+# A skills-CLI manifest source: a named upstream repo + ref the skills CLI clones to resolve
+# skills. Same `@dataclass(frozen=True)` style as `_ProviderChanges`.
+@dataclass(frozen=True)
+class SkillSource:
+    key: str
+    url: str
+    ref: str
+
+
+# The skills perk delivers split into two SSOTs:
+#   - `PERK_SKILLS` (above): perk-authored skill names, all from source `perk`.
+#   - The external set below: non-perk skills perk *requires*, promoted from repo-specific to
+#     managed/required and declared from their upstream sources.
+# `MANAGED_SKILL_NAMES` is the union — the SSOT for "every skill perk requires delivered" used
+# by the fragment generator's verification consumers (`sync_skills`, `_skills_delivery_check`).
+PERK_SKILL_SOURCE = SkillSource("perk", PERK_GITHUB_URL, "main")
+REQUIRED_SKILL_SOURCES: tuple[SkillSource, ...] = (
+    SkillSource("astral", "https://github.com/astral-sh/claude-code-plugins", "main"),
+    SkillSource("dagster", "https://github.com/dagster-io/skills", "master"),
+    SkillSource("mattpocock", "https://github.com/mattpocock/skills", "main"),
+)
+# `(source_key, skill_name)` pairs, kept sorted by `(source, name)`.
+REQUIRED_EXTERNAL_SKILLS: tuple[tuple[str, str], ...] = (
+    ("astral", "ruff"),
+    ("astral", "ty"),
+    ("astral", "uv"),
+    ("dagster", "dignified-python"),
+    ("mattpocock", "codebase-design"),
+    ("mattpocock", "domain-modeling"),
+    ("mattpocock", "grill-with-docs"),
+    ("mattpocock", "improve-codebase-architecture"),
+)
+MANAGED_SKILL_NAMES: tuple[str, ...] = tuple(
+    sorted({*PERK_SKILLS, *(name for _, name in REQUIRED_EXTERNAL_SKILLS)})
+)
+
 GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
 # Pi install caches + perk's transient tier-2 cache subtrees + per-user config +
@@ -826,14 +863,14 @@ def _desired_skills_manifest(self_repo: bool) -> str:
     state; a stale clone is refreshed by re-sync / ``git pull``. Mirrors how
     ``_desired_packages`` resolves the git package entry from ``main`` for consumers.
     """
-    ref = "main"
-    skills_block = "\n".join(f"  - source: perk\n    name: {name}" for name in PERK_SKILLS)
+    sources = sorted([PERK_SKILL_SOURCE, *REQUIRED_SKILL_SOURCES], key=lambda s: s.key)
+    skills = sorted([("perk", name) for name in PERK_SKILLS] + list(REQUIRED_EXTERNAL_SKILLS))
+    sources_block = "\n".join(f"  {s.key}:\n    url: {s.url}\n    ref: {s.ref}" for s in sources)
+    skills_block = "\n".join(f"  - source: {src}\n    name: {name}" for src, name in skills)
     return (
         "# Managed by perk init — do not edit by hand.\n"
         "sources:\n"
-        "  perk:\n"
-        f"    url: {PERK_GITHUB_URL}\n"
-        f"    ref: {ref}\n"
+        f"{sources_block}\n"
         "skills:\n"
         f"{skills_block}\n"
     )
@@ -917,8 +954,9 @@ def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> s
 
     **Load-bearing** (#289 — supersedes the old best-effort/D3 posture for skills specifically):
     returns ``None`` on success, else a failure message naming the failing command plus its
-    stderr (or the ``OSError``/timeout text). After a successful sync, every ``PERK_SKILLS`` name
-    must be installed (``bindings.is_skill_installed``) — a sync that links nothing (e.g. an
+    stderr (or the ``OSError``/timeout text). After a successful sync, every ``MANAGED_SKILL_NAMES``
+    name (perk-authored + the required external skills) must be installed
+    (``bindings.is_skill_installed``) — a sync that links nothing (e.g. an
     outdated ``skills`` CLI) is a failure, never a silent pass. ``skills init`` is idempotent
     (no-op once initialized); ``skills update --sync`` enforces the declared state by (re)linking
     ``.agents/skills/*``. A ``changes`` entry is appended only when the link set actually changes,
@@ -950,7 +988,7 @@ def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> s
             return _sync_failure(command, f"exited {proc.returncode}:\n{stderr}")
     missing = [
         name
-        for name in PERK_SKILLS
+        for name in MANAGED_SKILL_NAMES
         if not bindings.is_skill_installed(root, name, self_repo=self_repo)
     ]
     if missing:

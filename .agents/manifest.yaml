@@ -1,32 +1,7 @@
 sources:
-         dagster:
-           url: https://github.com/dagster-io/skills
-           ref: master
-         astral:
-           url: https://github.com/astral-sh/claude-code-plugins
-           ref: main
-         mattpocock:
-           url: https://github.com/mattpocock/skills
-           ref: main
          spillwave:
            url: https://github.com/SpillwaveSolutions/mastering-typescript-skill
            ref: main
 skills:
-        - source: dagster
-          name: dignified-python
-        - source: astral
-          name: uv
-        - source: astral
-          name: ty
-        - source: astral
-          name: ruff
-        - source: mattpocock
-          name: grill-with-docs
-        - source: mattpocock
-          name: improve-codebase-architecture
-        - source: mattpocock
-          name: codebase-design
-        - source: mattpocock
-          name: domain-modeling
         - source: spillwave
           name: mastering-typescript

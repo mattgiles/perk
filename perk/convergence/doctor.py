@@ -878,7 +878,8 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
         a ``GitError`` during the probe degrades to ``warn`` (no silent pass);
     (b) the perk manifest fragment exists but `.agents/manifest.yaml` does not — `skills init`
         failed or never ran (so `skills update --sync` can never run);
-    (c) any ``PERK_SKILLS`` name is not installed (``bindings.is_skill_installed``).
+    (c) any ``MANAGED_SKILL_NAMES`` name (perk-authored + the required external skills) is not
+        installed (``bindings.is_skill_installed``).
     """
     try:
         conflicts = init.skills_conflict_paths(root)
@@ -913,7 +914,7 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
         )
     missing = [
         name
-        for name in init.PERK_SKILLS
+        for name in init.MANAGED_SKILL_NAMES
         if not bindings.is_skill_installed(root, name, self_repo=self_repo)
     ]
     if missing:
