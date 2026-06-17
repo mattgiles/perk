@@ -31,12 +31,22 @@ labels, identifiers, doctor groups, maturity) is the
 
    `team` is the Linear team key and is required when `backend = "linear"`.
 
-2. **Export `LINEAR_API_KEY`.** A personal API key from linear.app → Settings → Security & access.
-   It is **environment-only** — never put it in a config file.
+2. **Supply `LINEAR_API_KEY`.** A personal API key from linear.app → Settings → Security & access.
+   Either export it as an environment variable:
 
    ```sh
    export LINEAR_API_KEY=lin_api_…
    ```
+
+   or set it in the **gitignored** `.pi/perk.local.toml` (never the committed `.pi/perk.toml`):
+
+   ```toml
+   [linear]
+   api_key = "lin_api_…"
+   ```
+
+   An exported env var wins over the config. Setting it in `perk.local.toml` also feeds the
+   in-session `linear_*` tools (perk seeds the launched session's environment with the key).
 
 3. **Run `perk init --verify`.** This converges the borrowed Linear-tools package
    `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the

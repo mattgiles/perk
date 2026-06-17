@@ -673,7 +673,8 @@ def _linear_selected(root: Path) -> bool:
 
 
 _LINEAR_KEY_REMEDIATION = (
-    "export LINEAR_API_KEY (create a personal API key at linear.app Settings → Security & access)"
+    "export LINEAR_API_KEY (create a personal API key at linear.app Settings → Security & access), "
+    "or set [linear] api_key in .pi/perk.local.toml"
 )
 
 
@@ -686,7 +687,7 @@ def _linear_checks(root: Path) -> list[Check]:
     """
     team = load_committed_issues_team(root)
     try:
-        client = linear.client_from_env()
+        client = linear.client_from_env(repo_root=root)
     except IssueBackendError as exc:
         return [
             Check(

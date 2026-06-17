@@ -2897,8 +2897,17 @@ team = "ENG"         # the Linear team key — required when backend = "linear"
 `load_committed_issues_backend` / `load_committed_issues_team`; TS: `resolveIssueBackendId` reads
 only the committed file). Rationale: the backend decides where canonical durable state
 (plan/learn/objective issues) is *written*; a per-user override would fragment the canonical
-store. **`LINEAR_API_KEY` lives in the environment only** — never in config/committed files
-(`linear.client_from_env`; matches pi-mono-linear's own auth order, which reads the same var).
+store. **`LINEAR_API_KEY` lives in the environment or the gitignored `.pi/perk.local.toml`
+`[linear] api_key`** (an exported env var wins over the config) — **never** in a committed file.
+The config read is local-file-only (`config.load_local_linear_api_key`, the inverse of the
+`load_committed_*` readers; fail-soft on malformed TOML — returns `None`, never raised). Two seams
+bridge it: the Python clients pass `linear.client_from_env(repo_root=…)` (env-first, config
+fallback), and `launch_stage` seeds the launched session's env with the local key (env wins) so the
+borrowed in-session `linear_*` tools and any spawned `perk <stage> --json` cold-door worker (which
+inherit the session env) authenticate. This is a deliberate, documented relaxation of the
+"secrets in the environment only" rule: the secret may live in the gitignored local file, never a
+version-controlled one. **Python-plane-only** — the TS plane reads no Linear key, so there is no
+cross-plane TS mirror (the `launch_stage` env-seed is what carries the key into the TS session).
 
 **Python is the authoritative validator** (`perk/backends/issues.py::resolve_issue_backend_id`):
 
@@ -2954,7 +2963,7 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
 
 - `linear-auth` — ok: `authenticated as <user>`; failure (or missing `LINEAR_API_KEY`): warn,
   remediation "export LINEAR_API_KEY (create a personal API key at linear.app Settings →
-  Security & access)".
+  Security & access), or set [linear] api_key in .pi/perk.local.toml".
 - `linear-team` — ok: `team <key> found`; failure: warn with the error detail.
 - `linear-labels` — all four perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
   `perk:objective`): ok; otherwise warn listing the missing names, remediation "run `perk init`

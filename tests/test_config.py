@@ -9,6 +9,7 @@ from perk.substrate.config import (
     load_committed_issues_backend,
     load_committed_issues_team,
     load_config,
+    load_local_linear_api_key,
 )
 
 
@@ -345,3 +346,47 @@ def test_issues_team_malformed_toml_raises(tmp_path):
     _write(tmp_path, "perk.toml", "[issues\nteam =")
     with pytest.raises(tomllib.TOMLDecodeError):
         load_committed_issues_team(tmp_path)
+
+
+def test_local_linear_api_key_absent_file_is_none(tmp_path):
+    assert load_local_linear_api_key(tmp_path) is None
+
+
+def test_local_linear_api_key_reads_local_value(tmp_path):
+    _write(tmp_path, "perk.local.toml", '[linear]\napi_key = "lin_api_abc"\n')
+    assert load_local_linear_api_key(tmp_path) == "lin_api_abc"
+
+
+def test_local_linear_api_key_strips_surrounding_whitespace(tmp_path):
+    _write(tmp_path, "perk.local.toml", '[linear]\napi_key = "  lin_api_abc  "\n')
+    assert load_local_linear_api_key(tmp_path) == "lin_api_abc"
+
+
+def test_local_linear_api_key_is_local_only_ignores_committed(tmp_path):
+    # The inverse of the committed-only readers: a committed perk.toml value is ignored.
+    _write(tmp_path, "perk.toml", '[linear]\napi_key = "lin_api_committed"\n')
+    assert load_local_linear_api_key(tmp_path) is None
+
+
+def test_local_linear_api_key_absent_table_is_none(tmp_path):
+    _write(tmp_path, "perk.local.toml", '[worktree]\nroot = ".worktrees"\n')
+    assert load_local_linear_api_key(tmp_path) is None
+
+
+@pytest.mark.parametrize("value", ["true", "7", '""', '"   "'])
+def test_local_linear_api_key_illtyped_or_blank_is_none(tmp_path, value):
+    _write(tmp_path, "perk.local.toml", f"[linear]\napi_key = {value}\n")
+    assert load_local_linear_api_key(tmp_path) is None
+
+
+def test_local_linear_api_key_seeded_template_is_inert(tmp_path):
+    from perk.convergence.init import PERK_LOCAL_TOML_TEMPLATE
+
+    _write(tmp_path, "perk.local.toml", PERK_LOCAL_TOML_TEMPLATE)
+    assert load_local_linear_api_key(tmp_path) is None
+
+
+def test_local_linear_api_key_malformed_toml_is_none(tmp_path):
+    # Diverges from the committed-only readers: fail-soft (returns None, never raises).
+    _write(tmp_path, "perk.local.toml", "[linear\napi_key =")
+    assert load_local_linear_api_key(tmp_path) is None

@@ -265,6 +265,32 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
     assert group["linear-workflow-states"].status == "ok"
 
 
+def test_linear_checks_ok_with_key_from_local_config(git_repo, stub_env, monkeypatch):
+    # The key supplied via .pi/perk.local.toml [linear] api_key (env unset) is threaded through
+    # to client_from_env(repo_root=...), so the auth check passes without an exported var.
+    _scaffold(git_repo)
+    _select_linear(git_repo)
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    (git_repo / ".pi" / "perk.local.toml").write_text(
+        '[linear]\napi_key = "lin_api_local"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_readiness",
+        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+            auth_ok=True, user="Mat", team_ok=True
+        ),
+    )
+    monkeypatch.setattr(
+        doctor_mod.linear_backend,
+        "check_project_readiness",
+        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+    )
+    report = run_doctor(git_repo, verify=True)
+    group = {c.name: c for c in _linear_group(report)}
+    assert group["linear-auth"].status == "ok" and "Mat" in group["linear-auth"].message
+
+
 def test_linear_checks_warn_on_missing_api_key(git_repo, stub_env, monkeypatch):
     # Network readiness is non-fatal (the github-group D3 mirror): warn, never fail.
     _scaffold(git_repo)

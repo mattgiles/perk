@@ -30,11 +30,13 @@ Explicit deferrals (flagged, not silently omitted):
 
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import cast
 
 import httpx
 
 from perk.backends.issue_backend import IssueBackendError
+from perk.substrate import config
 
 
 def _require_dict(value: object, what: str) -> dict[str, object]:
@@ -227,10 +229,21 @@ class LinearClient:
             cursor = _require_str(page_info.get("endCursor"), "endCursor")
 
 
-def client_from_env(env: Mapping[str, str] | None = None) -> LinearClient:
-    """Build a ``LinearClient`` from ``LINEAR_API_KEY`` (default ``os.environ``)."""
+def client_from_env(
+    env: Mapping[str, str] | None = None, *, repo_root: Path | None = None
+) -> LinearClient:
+    """Build a ``LinearClient`` from ``LINEAR_API_KEY`` (default ``os.environ``).
+
+    The env value **wins**: it is resolved first (stripped). Only when it is empty/blank **and**
+    ``repo_root`` is given does the local-only ``config.load_local_linear_api_key(repo_root)``
+    fallback (the gitignored ``.pi/perk.local.toml`` ``[linear] api_key``) apply. ``repo_root=None``
+    (the default) preserves the env-only behavior for every existing caller. Still empty ⇒ the
+    unchanged hinted ``IssueBackendError``.
+    """
     source = os.environ if env is None else env
     api_key = source.get("LINEAR_API_KEY", "").strip()
+    if not api_key and repo_root is not None:
+        api_key = config.load_local_linear_api_key(repo_root) or ""
     if not api_key:
         raise IssueBackendError(f"LINEAR_API_KEY is not set; {_API_KEY_HINT}")
     return LinearClient(api_key=api_key)
