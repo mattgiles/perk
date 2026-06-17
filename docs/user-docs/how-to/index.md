@@ -31,6 +31,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   `[[ci]]` checks and read results in-session.
 - [How to recover a dirty worktree](./recover-a-dirty-worktree.md) — get unblocked when
   uncommitted changes are in the way.
+- [How to run a worktree setup hook](./run-a-worktree-setup-hook.md) — declare `[worktree] setup`
+  commands that prepare every fresh worktree before `pi` starts.
 - [How to work with implementation checkpoints](./work-with-checkpoints.md) — track step-by-step
   implement progress with `## Steps` + `[WIP:n]`/`[DONE:n]`.
 

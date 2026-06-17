@@ -447,6 +447,227 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
 
 
+class _Result:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+
+
+def test_run_worktree_setup_empty_runs_nothing(tmp_path, monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(launch.subprocess, "run", lambda *a, **k: calls.append((a, k)))
+    launch.run_worktree_setup(tmp_path, [])
+    assert calls == []
+
+
+def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch):
+    calls: list = []
+
+    def _run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _Result(0)
+
+    monkeypatch.setattr(launch.subprocess, "run", _run)
+    launch.run_worktree_setup(tmp_path, ["uv sync", "npm ci"])
+    assert [c[0] for c in calls] == [
+        ["bash", "-lc", "uv sync"],
+        ["bash", "-lc", "npm ci"],
+    ]
+    for _argv, kwargs in calls:
+        assert kwargs["cwd"] == tmp_path
+        assert kwargs["check"] is False
+        assert kwargs["timeout"] == launch._WORKTREE_SETUP_TIMEOUT_S
+
+
+def test_run_worktree_setup_nonzero_aborts_and_stops(tmp_path, monkeypatch):
+    calls: list = []
+
+    def _run(argv, **kwargs):
+        calls.append(argv)
+        return _Result(0 if argv[-1] == "ok" else 3)
+
+    monkeypatch.setattr(launch.subprocess, "run", _run)
+    with pytest.raises(UserFacingCliError) as exc:
+        launch.run_worktree_setup(tmp_path, ["ok", "boom", "never"])
+    assert exc.value.error_type == "worktree_setup_failed"
+    assert "boom" in str(exc.value)
+    # stops at the failing command — "never" is not reached
+    assert calls == [["bash", "-lc", "ok"], ["bash", "-lc", "boom"]]
+
+
+def test_run_worktree_setup_timeout_aborts(tmp_path, monkeypatch):
+    def _run(argv, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+    monkeypatch.setattr(launch.subprocess, "run", _run)
+    with pytest.raises(UserFacingCliError) as exc:
+        launch.run_worktree_setup(tmp_path, ["uv sync"])
+    assert exc.value.error_type == "worktree_setup_failed"
+
+
+def test_run_worktree_setup_missing_bash_aborts(tmp_path, monkeypatch):
+    def _run(argv, **kwargs):
+        raise FileNotFoundError("bash")
+
+    monkeypatch.setattr(launch.subprocess, "run", _run)
+    with pytest.raises(UserFacingCliError) as exc:
+        launch.run_worktree_setup(tmp_path, ["uv sync"])
+    assert exc.value.error_type == "worktree_setup_failed"
+
+
+def test_resolve_worktree_created_true_on_fresh_create(git_repo):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    resolved = resolve_worktree(
+        repo_root=git_repo,
+        config=Config(worktree_root=git_repo / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        materialize=True,
+    )
+    assert resolved.created is True
+
+
+def test_resolve_worktree_created_false_on_dry_run(tmp_path):
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    resolved = resolve_worktree(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("implement"),
+        worktree=None,
+        materialize=False,
+    )
+    assert resolved.created is False
+
+
+def test_resolve_worktree_created_false_on_reuse(git_repo):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+
+    def _resolve():
+        return resolve_worktree(
+            repo_root=git_repo,
+            config=config,
+            stage=_stage("implement"),
+            worktree=None,
+            materialize=True,
+        )
+
+    assert _resolve().created is True  # fresh
+    assert _resolve().created is False  # idempotent reuse
+
+
+def test_resolve_worktree_created_false_on_worktree_none(tmp_path):
+    resolved = resolve_worktree(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        materialize=True,
+    )
+    assert resolved.created is False
+
+
+def test_launch_runs_setup_before_exec_on_fresh_create(git_repo, monkeypatch):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["uv sync", "npm ci"])
+    events: list = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append(("exec", f)))
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch, "run_worktree_setup", lambda wt, cmds: events.append(("setup", wt, cmds))
+    )
+
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert events == [
+        ("setup", config.worktree_root / "plan-42", ["uv sync", "npm ci"]),
+        ("exec", "pi"),
+    ]
+
+
+def test_launch_setup_failure_aborts_before_exec(git_repo, monkeypatch):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["boom"])
+    execs: list = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+
+    def _boom(_wt, _cmds):
+        raise UserFacingCliError("nope", error_type="worktree_setup_failed")
+
+    monkeypatch.setattr(launch, "run_worktree_setup", _boom)
+    with pytest.raises(UserFacingCliError) as exc:
+        launch_stage(
+            repo_root=git_repo,
+            config=config,
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=False,
+            remote=None,
+            pi_args=[],
+        )
+    assert exc.value.error_type == "worktree_setup_failed"
+    assert execs == []  # exec pi was never reached
+
+
+def test_launch_resume_does_not_run_setup(git_repo, monkeypatch):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees", worktree_setup=["uv sync"])
+    setup_calls: list = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch, "run_worktree_setup", lambda wt, cmds: setup_calls.append((wt, cmds))
+    )
+
+    def _run() -> None:
+        launch_stage(
+            repo_root=git_repo,
+            config=config,
+            stage=_stage("implement"),
+            worktree=None,
+            dry_run=False,
+            remote=None,
+            pi_args=[],
+        )
+
+    _run()  # fresh create → setup runs
+    _run()  # idempotent reuse → setup skipped
+    assert len(setup_calls) == 1
+
+
+def test_launch_dry_run_previews_setup_without_running(tmp_path, capsys, monkeypatch):
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    config = Config(worktree_root=tmp_path / ".worktrees", worktree_setup=["uv sync", "npm ci"])
+    setup_calls: list = []
+    monkeypatch.setattr(
+        launch, "run_worktree_setup", lambda wt, cmds: setup_calls.append((wt, cmds))
+    )
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    assert data["setup"] == ["uv sync", "npm ci"]
+    assert "would run setup: uv sync; npm ci" in (captured.out + captured.err)
+    assert setup_calls == []  # never executed on a dry run
+
+
 def _launch_and_capture_env(git_repo, monkeypatch) -> dict[str, str]:
     """Drive a real implement launch to the exec and capture the child env."""
     cache.write_plan_ref(git_repo, _PLAN_REF)

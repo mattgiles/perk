@@ -7,6 +7,7 @@ import click
 from perk.cli.alias import alias
 from perk.cli.context import require_config, require_repo
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.run import launch
 from perk.substrate import git
 from perk.substrate.git import GitError
 from perk.substrate.output import user_output
@@ -19,15 +20,24 @@ from perk.substrate.output import user_output
 @click.pass_context
 def create_worktree(ctx: click.Context, *, name: str, branch: str | None) -> None:
     """Create a worktree NAME under the configured worktree root."""
+    config = require_config(ctx)
     _create_impl(
         repo_root=require_repo(ctx),
-        worktree_root=require_config(ctx).worktree_root,
+        worktree_root=config.worktree_root,
+        worktree_setup=config.worktree_setup,
         name=name,
         branch=branch,
     )
 
 
-def _create_impl(*, repo_root: Path, worktree_root: Path, name: str, branch: str | None) -> None:
+def _create_impl(
+    *,
+    repo_root: Path,
+    worktree_root: Path,
+    worktree_setup: list[str],
+    name: str,
+    branch: str | None,
+) -> None:
     Ensure.not_empty(name, "Worktree name cannot be empty.")
     Ensure.invariant(
         "/" not in name and name not in (".", ".."),
@@ -41,3 +51,7 @@ def _create_impl(*, repo_root: Path, worktree_root: Path, name: str, branch: str
         raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
     user_output(click.style("✓ ", fg="green") + f"created worktree {name}")
     user_output(f"  {path}")
+    # Run the project's `[worktree] setup` hook in the just-created worktree (the same canonical
+    # path the cold-door launchers use). A failure raises `UserFacingCliError` and the command
+    # exits non-zero, leaving the worktree in place for a fixed re-run.
+    launch.run_worktree_setup(path, worktree_setup)

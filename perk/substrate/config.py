@@ -23,6 +23,10 @@ class Config:
     """Resolved perk config. ``worktree_root`` is absolute."""
 
     worktree_root: Path
+    # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
+    # `pi` starts (overlay-aware, like `worktree_root` — a `perk.local.toml` array replaces this
+    # one wholesale). Empty when absent/ill-typed.
+    worktree_setup: list[str] = field(default_factory=list)
     user_bindings: list[Binding] = field(default_factory=list)
     # The agent-keyed `[subagents]` table (#196) — a per-agent model override for each perk-owned
     # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`), injected as a
@@ -71,11 +75,26 @@ def load_config(repo_root: Path) -> Config:
         root = repo_root / root
     return Config(
         worktree_root=root,
+        worktree_setup=_parse_worktree_setup(worktree),
         user_bindings=parse_user_bindings(merged.get("bindings")),
         providers=_parse_providers_selection(merged.get("providers")),
         subagents=_parse_subagents_selection(merged.get("subagents")),
         workflow_base=_parse_workflow_base(merged.get("workflow")),
     )
+
+
+def _parse_worktree_setup(raw: Any) -> list[str]:
+    """Read the `[worktree] setup` value into an ordered list of shell command strings.
+
+    LBYL silent-omit (mirrors ``_parse_workflow_base``/``_parse_subagents_selection``): a non-dict
+    table or a non-list ``setup`` yields ``[]``; within a list, only non-blank ``str`` entries are
+    kept (each ``.strip()``-ed) and everything else is dropped.
+    """
+    table = raw if isinstance(raw, dict) else {}
+    value = table.get("setup")
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _parse_workflow_base(raw: Any) -> str | None:

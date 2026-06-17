@@ -38,6 +38,42 @@ def test_absolute_root_preserved(tmp_path):
     assert load_config(tmp_path).worktree_root == Path("/abs/wt")
 
 
+def test_worktree_setup_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).worktree_setup == []
+
+
+def test_worktree_setup_no_table_is_empty(tmp_path):
+    _write(tmp_path, "perk.toml", '[workflow]\nbase = "main"\n')
+    assert load_config(tmp_path).worktree_setup == []
+
+
+def test_worktree_setup_parses_ordered_list(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["uv sync", "npm ci"]\n')
+    assert load_config(tmp_path).worktree_setup == ["uv sync", "npm ci"]
+
+
+def test_worktree_setup_non_list_is_empty(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = "uv sync"\n')
+    assert load_config(tmp_path).worktree_setup == []
+
+
+def test_worktree_setup_filters_and_strips_entries(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["  uv sync  ", "", 7, "npm ci"]\n')
+    assert load_config(tmp_path).worktree_setup == ["uv sync", "npm ci"]
+
+
+def test_worktree_setup_local_replaces_committed_wholesale(tmp_path):
+    _write(tmp_path, "perk.toml", '[worktree]\nsetup = ["a"]\n')
+    _write(tmp_path, "perk.local.toml", '[worktree]\nsetup = ["b"]\n')
+    assert load_config(tmp_path).worktree_setup == ["b"]
+
+
+def test_worktree_setup_seeded_template_is_inert(tmp_path):
+    # The seeded template carries a *commented* `setup` example; it must parse to no commands.
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_config(tmp_path).worktree_setup == []
+
+
 def test_user_bindings_absent_is_empty(tmp_path):
     assert load_config(tmp_path).user_bindings == []
 
