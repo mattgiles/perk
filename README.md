@@ -34,7 +34,7 @@ perk init                   # scaffold/converge Pi wiring (idempotent; safe to r
 perk doctor                 # report health; perk doctor --fix repairs drift
 ```
 
-`perk init` requires a git repo + `git`, `gh`, `node ≥ 22`, and `pi` on PATH. GitHub auth
+`perk init` requires a git repo + `git`, `gh`, `node ≥ 22`, `ast-grep`, and `pi` on PATH. GitHub auth
 is verified but never required (it is reported, never fatal).
 
 For the guided first run, follow
@@ -56,15 +56,6 @@ the four [Divio](https://docs.divio.com/documentation-system/) quadrants:
 
 perk's internal research and planning record lives under [`docs/`](docs/index.md) and is for
 perk's own developers.
-
-## Where this is going
-
-Phases 0–2 ship the **scaffolding**, the **thin loop**, and its **deepening** on the
-**borrow-then-own** substrate. Phase 2 internalized the borrowed pieces: perk now owns plan mode
-(retiring `@tombell/pi-plan`, P2.T2a) **and** implement-progress checkpoints (retiring
-`@juicesharp/rpiv-todo`, P2.T12). The surviving borrows are `@tombell/pi-diff` and the
-`pi-subagents` **engine** (behind perk's thin seam — perk
-owns the agent definitions). **Phase 3** adds the headless worker + queue (autonomy).
 
 ## Layout
 
