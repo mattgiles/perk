@@ -505,6 +505,31 @@ def test_init_preserves_unrelated_git_package(tmp_path):
     assert "git:github.com/mattgiles/perk@main" in packages  # perk entry still added
 
 
+def test_init_dedups_duplicate_perk_entries(tmp_path):
+    # #635: a pathological repo with two perk git entries converges to a single @main entry
+    # (rewrite the first, drop the rest) rather than producing duplicate @main entries.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps(
+            {
+                "packages": [
+                    "git:github.com/mattgiles/perk@v0.0.1",
+                    "git:github.com/mattgiles/perk@v0.0.2",
+                ]
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    perk_entries = [p for p in packages if isinstance(p, str) and "mattgiles/perk" in p]
+    assert perk_entries == ["git:github.com/mattgiles/perk@main"]  # collapsed to one
+
+
 def test_init_ref_reconcile_is_idempotent(tmp_path):
     # #635: once at @main, a re-run is a no-op (spec equals desired → no change).
     pi_dir = tmp_path / ".pi"

@@ -1272,3 +1272,43 @@ def test_ref_drift_detected_and_fixed(git_repo):
     packages = _json.loads(settings_path.read_text())["packages"]
     assert "git:github.com/mattgiles/perk@main" in packages
     assert "git:github.com/mattgiles/perk@v0.0.1" not in packages
+
+
+def test_fix_extension_deps_reports_timeout_loudly(tmp_path, monkeypatch):
+    _fake_clone(tmp_path, ["yaml"], present=[])
+
+    def fake_run(argv, **kw):
+        raise subprocess.TimeoutExpired(argv, 300)
+
+    monkeypatch.setattr(doctor_mod.subprocess, "run", fake_run)
+    fixed, errors = doctor_mod._fix_extension_deps(tmp_path)
+    assert fixed == [] and errors and "timed out" in errors[0]
+
+
+def test_fix_extension_deps_reports_oserror_loudly(tmp_path, monkeypatch):
+    _fake_clone(tmp_path, ["yaml"], present=[])
+
+    def fake_run(argv, **kw):
+        raise OSError("npm not found")
+
+    monkeypatch.setattr(doctor_mod.subprocess, "run", fake_run)
+    fixed, errors = doctor_mod._fix_extension_deps(tmp_path)
+    assert fixed == [] and errors and "could not run" in errors[0] and "npm not found" in errors[0]
+
+
+def test_npm_install_argv_default_on_malformed_settings(tmp_path):
+    # A malformed .pi/settings.json degrades to the default argv (settings validity is owned by
+    # the convergence checks, not this gesture).
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir(parents=True)
+    (pi_dir / "settings.json").write_text("{not json", encoding="utf-8")
+    assert doctor_mod._npm_install_argv(tmp_path) == ["npm", "install", "--omit=dev"]
+
+
+def test_extension_deps_wired_into_run_doctor(git_repo, monkeypatch):
+    # Guard against accidental de-wiring: the check must appear in a full run_doctor report.
+    _scaffold(git_repo)
+    _fake_clone(git_repo, ["yaml"], present=[])
+    report = run_doctor(git_repo, verify=False)
+    ext = next((c for c in report.checks if c.name == "extension-deps"), None)
+    assert ext is not None and ext.status == "fail"

@@ -522,9 +522,11 @@ def _merge_static_packages(
     `git:` ref *forward*: when a desired `git:` identity already exists as a **string-form** entry
     whose full spec differs from the desired spec (e.g. a stale pinned `@v0.0.1`, or a no-ref
     `git:github.com/mattgiles/perk`), the entry is **rewritten in place** (list position
-    preserved) to the desired spec instead of being skipped. Only perk's own identity is ever in
-    ``desired`` (`_desired_packages`), so this can only ever touch perk's own package — a user's
-    other `git:` entries are never in ``desired`` and stay append-only/untouched. Object-form
+    preserved) to the desired spec instead of being skipped; any extra string entries sharing
+    that identity are dropped so the repo converges to a single canonical perk entry. Only perk's
+    own identity is ever in ``desired`` (`_desired_packages`), so this can only ever touch perk's
+    own package — a user's other `git:` entries are never in ``desired`` and stay
+    append-only/untouched. Object-form
     entries are left alone (perk never writes object-form for its own package — Invariant 2;
     a hand-written object-form perk entry is a documented limitation). Idempotent: once at the
     desired spec, the entry equals it → no change.
@@ -547,15 +549,24 @@ def _merge_static_packages(
             if identity is None:
                 continue
             if identity in have_git:
-                # Identity present — reconcile a stale ref forward (string-form entries only).
-                for i, entry in enumerate(packages):
-                    if (
-                        isinstance(entry, str)
-                        and _git_identity(entry) == identity
-                        and entry != want
-                    ):
-                        packages[i] = want
-                        updated.append(f"updated {entry} -> {want}")
+                # Identity present — reconcile forward to the desired spec (string-form entries
+                # only), collapsing any duplicates so the repo converges to a single perk entry.
+                match_indices = [
+                    i
+                    for i, entry in enumerate(packages)
+                    if isinstance(entry, str) and _git_identity(entry) == identity
+                ]
+                if match_indices:
+                    first = match_indices[0]
+                    existing = cast("str", packages[first])
+                    if existing != want:
+                        packages[first] = want
+                        updated.append(f"updated {existing} -> {want}")
+                    # Drop any further duplicate string entries for this identity (high index
+                    # first so earlier indices stay valid).
+                    for i in reversed(match_indices[1:]):
+                        dup = cast("str", packages.pop(i))
+                        updated.append(f"removed duplicate {dup}")
                 continue
             packages.append(want)
             have_git.add(identity)
