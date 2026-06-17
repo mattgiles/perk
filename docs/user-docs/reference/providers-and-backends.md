@@ -23,8 +23,8 @@ Two related but distinct knobs live here:
   default. There are five seams: `plan`, `todo`, `askuser`, `footer`, and `web`.
 - **Issue backend** — where canonical durable state is stored: GitHub (the default) or Linear.
   The `[issues]` selection governs **two storage tiers** — the *issue-tracking tier* (plan / learn
-  issues) and the *objective-storage tier* (objectives) — both stored as issues under either backend
-  today.
+  issues, stored as issues under **either** backend) and the *objective-storage tier* (objectives,
+  stored as an **issue** under GitHub but as a **Linear Project** under Linear).
 
 Both are selected by config keys documented at key depth in the
 [configuration reference](./configuration.md) — the `[providers]` table (`plan` / `todo` /
@@ -201,8 +201,8 @@ The project also posts a fail-open **Project Update** (the status-report feed) o
 transitions: when the objective is **created**, when **a plan lands** (marking node(s) done), and
 when **reconciliation** rewrites the objective prose. Both behaviors are **additive and
 non-fatal** — a Linear bookkeeping failure is logged but never breaks a merge or a node
-transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write is
-offline-covered today and live-verified at the Node 5.1 smoke gate.)
+transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write was
+**live-verified 2026-06-16** at the Mode-4 smoke run — see the runbook's *Fourth live run* block.)
 
 ## Known caveats & maturity
 
