@@ -45,6 +45,7 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("_exec", "_run"),
     ("env", "_node_version"),
     ("init", "sync_skills"),
+    ("doctor", "_fix_extension_deps"),
     ("run_worker", "_spawn_worker"),
 }
 

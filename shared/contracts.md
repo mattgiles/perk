@@ -1669,7 +1669,8 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the four perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
-`package` (settings wiring) · `repository` (gitignore/agents blocks + config present/valid) ·
+`package` (settings wiring + the pure-filesystem `extension-deps` check — §8.6a) ·
+`repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
 non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
@@ -1677,6 +1678,34 @@ linear requires a committed `team` — §8.21) · `state` (the `.pi/workflow/` c
 handoff-blob integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
+
+### §8.6a · perk-package ref reconcile + the `extension-deps` check/repair (#635)
+
+Two coupled behaviors keep a consumer's pi-loaded perk extension runnable:
+
+- **perk's own `git:` entry is ref-reconciled *forward*** (no longer purely append-only).
+  `_merge_static_packages` rewrites perk's own `packages` entry **in place** (list position
+  preserved) when its identity already exists but the full spec differs from the desired
+  `git:github.com/mattgiles/perk@main` — so a stale pinned `@v0.0.1` (or a no-ref entry) is
+  reconciled to `@main`. Only perk's own identity is ever in the desired set, so a user's other
+  `git:` packages stay untouched/append-only. **String-form only** (perk never writes object-form
+  for its own package — Invariant 2; a hand-written object-form perk entry is a documented
+  limitation). This rides the existing `settings-wiring` `ManagedConvergence` — ref drift becomes
+  a `settings-wiring` **fail** that `--fix` repairs, with **no new doctor wiring** for the ref.
+- **The `extension-deps` doctor check** (group `package`, pure filesystem — runs under both
+  `verify` modes). pi loads the perk extension from its git-package clone
+  (`.pi/git/<host>/<path>`, derived by `init.consumer_git_clone_root`), which has no
+  `node_modules` unless pi installed it — and pi's `installGit` skips the install when the clone
+  already exists at the pinned ref, so a missing/partial `node_modules` strands the extension on
+  an unresolvable `import { parse } from "yaml"`. Outcomes: self-repo → `info` no-op; clone
+  absent → `info` (pi installs on first launch); a declared `dependency` missing under
+  `node_modules` → `fail`; all present → `ok`; unreadable/malformed `package.json` → `warn`.
+  The **verify-gated `--fix` gesture** `_fix_extension_deps` runs one `npm install` in the clone
+  root, mirroring pi's `getGitDependencyInstallArgs` exactly: it respects `.pi/settings.json`
+  `npmCommand` (`[*npmCommand, "install"]`) and otherwise runs `npm install --omit=dev`. It is
+  idempotent (re-derives its own conditions, no-op once deps resolve) and reports loudly
+  (non-zero/timeout/OSError → `fix_errors`). The post-fix re-verify re-runs the check, so the
+  exit code reflects the post-fix state.
 
 ---
 

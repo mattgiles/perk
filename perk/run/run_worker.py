@@ -21,7 +21,7 @@ from typing import Any
 from perk.backends import issues, linear_agent
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence.init import GIT_PACKAGE
+from perk.convergence import init
 from perk.run import launch, resume, run_report
 from perk.state import cache
 from perk.substrate.output import user_output
@@ -57,17 +57,13 @@ def _drivable_stage(stage_id: str) -> Stage:
 
 
 def _git_clone_worker_entry(repo_root: Path) -> Path:
-    """The worker entrypoint inside pi's git-package clone, derived from ``GIT_PACKAGE``.
+    """The worker entrypoint inside pi's git-package clone.
 
-    pi clones a ``git:`` package to ``.pi/git/<host>/<path>`` (docs/packages.md). Deriving the path
-    from ``GIT_PACKAGE`` (rather than hardcoding segments) keeps the resolver in lockstep with the
-    package URL — a URL change cannot silently desync this candidate.
+    Derives the clone root via :func:`init.consumer_git_clone_root` (the SSOT for the
+    ``.pi/git/<host>/<path>`` derivation), so a ``GIT_PACKAGE`` URL change cannot desync this
+    candidate from the ``extension-deps`` doctor check.
     """
-    remainder = GIT_PACKAGE.removeprefix("git:")
-    clone = repo_root / ".pi" / "git"
-    for segment in remainder.split("/"):
-        clone = clone / segment
-    return clone / "extension" / "workerMain.ts"
+    return init.consumer_git_clone_root(repo_root) / "extension" / "workerMain.ts"
 
 
 def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntry:
