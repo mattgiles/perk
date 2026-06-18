@@ -1,6 +1,6 @@
 ---
 title: Pi context system — no transclusion, ambient index split, bash allowlist
-read_when: You are designing how to surface information to a plan session, building a plan factory, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (incl. the subcommand-shaped gh entries).
+read_when: You are designing how to surface information to a plan session, building a plan factory, debugging why a bash command is blocked in a read-only session, or extending the read-only bash allowlist (incl. the subcommand-shaped gh entries) — which is a five-surface lockstep, not a one-line edit.
 ---
 
 # Pi context system
@@ -108,6 +108,22 @@ granularity. This is accepted and documented (not arg-sniffed), consistent with 
 destructive veto still applies. No `READ_ONLY_TOOLS` / `READ_ONLY_CONTEXT` change — `agent-browser`
 is a bash CLI already covered by the `bash` tool entry, and safe bash commands are not enumerated in
 the injected context.
+
+### Allowlisting a read-only bash gate command is a five-surface lockstep
+
+Adding a command to the read-only `bash` sub-allowlist is **FIVE coordinated surfaces**, not a
+one-line `SAFE_PATTERNS` edit — the `agent-browser` precedent above is an *instance* of this durable
+shape (landed exactly as planned, zero deviations):
+
+1. **Production** — the `SAFE_PATTERNS` regex(es) in `extension/substrate/toolGating.ts`.
+2. **Tests** — the **paired allowed/blocked** case lists in `toolGating.test.ts`: add allowed cases
+   (incl. a `cd repo && <cmd>` case proving per-segment acceptance) AND blocked cases pinning the
+   anchoring (e.g. `npx some-other-pkg` stays blocked) and the destructive-`>`-redirect veto (a
+   `<cmd> > file` stays blocked even though the leading command is now safe).
+3. **`shared/contracts.md`** — amend the read-only-gate paragraph (same-turn contract discipline).
+4. **`docs/user-docs/reference/in-session.md`** — the **two** read-only-allowlist notes (near the
+   top + the later `READ_ONLY_TOOLS` note); both need updating.
+5. **This learned doc** — record the new entry as a command-keyed precedent.
 
 **Mechanism-choice lesson:** perk **cannot own `grep`** — it's a Pi builtin, not a perk-registered
 tool, so there is no tool to swap or remove. Steering toward a structural-search tool is therefore
