@@ -16,7 +16,7 @@ import pytest
 
 import perk
 from perk import github, objective
-from perk.backends import issues, objective_store
+from perk.backends import engagement, issues, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear_backend import LinearObjectiveStore, LinearProjectObjectiveStore
 from perk.backends.objective_store import ObjectiveStoreError
@@ -292,6 +292,13 @@ class TestGitHubDelegation:
         store = GitHubObjectiveStore(tmp_path)
         assert store.post_status_update(objective_id="252", body="x") is False
         assert store.post_status_update(objective_id="252", body="x", dry_run=True) is False
+
+    def test_read_node_engagement_is_empty(self, tmp_path: Path) -> None:
+        # GitHub single-issue objectives have no per-node issues — honest empty no-op (Node 2.1).
+        result = GitHubObjectiveStore(tmp_path).read_node_engagement(
+            objective_id="252", node_id="1.1"
+        )
+        assert result is engagement.EMPTY_NODE_ENGAGEMENT
 
 
 class TestErrorTranslation:

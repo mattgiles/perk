@@ -1844,6 +1844,10 @@ class LinearObjectiveStore:
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
         return engagement.EMPTY_AGENT_SESSION
 
+    def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
+        # Dormant issue-backed store: the roadmap lives in one issue body, no per-node issues.
+        return engagement.EMPTY_NODE_ENGAGEMENT
+
 
 # ===========================================================================
 # The project-backed objective-storage tier (Objective #548, Node 3.2):
@@ -2717,6 +2721,26 @@ class LinearProjectObjectiveStore:
 
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
         return engagement.EMPTY_AGENT_SESSION
+
+    def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
+        """Read the node-issue's pre-planning engagement (comments + description edits).
+
+        Honest for the project model: resolve the node-issue via :meth:`_find_node_issue`, then map
+        its comments + description-history rows through ``_engagement_comment`` /
+        ``_description_edit`` (the same neutral mappers the issue-tier reads use). An unresolvable
+        node → the empty bundle. ``ObjectiveStoreError`` on an infra/auth failure (translated)."""
+        with _translate_objective():
+            found = self._find_node_issue(objective_id, node_id)
+            if found is None:
+                return engagement.EMPTY_NODE_ENGAGEMENT
+            uuid = found[0]
+            comments = tuple(
+                _engagement_comment(node) for node in self._issue_ops._comments_with_authors(uuid)
+            )
+            edits = tuple(
+                _description_edit(node) for node in self._issue_ops._description_edits(uuid)
+            )
+            return engagement.NodeEngagement(comments=comments, description_edits=edits)
 
     def _apply_repair(
         self,

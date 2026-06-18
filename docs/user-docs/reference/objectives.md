@@ -43,6 +43,7 @@ A compact recap of the objective surface. Each row links to its authoritative en
 | [`perk objective plan`](./cli.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
 | [`perk objective show`](./cli.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
 | [`perk objective node`](./cli.md#perk-objective-node-number) | Update one node (explicit-status-only). |
+| [`perk objective node-engagement`](./cli.md#perk-objective-node-engagement-number) | Read a node-issue's pre-planning human engagement (Linear-first). |
 | [`perk objective reconcile`](./cli.md#perk-objective-reconcile-number-alias-rec) (`rec`) | Rewrite the Reconcilable prose region against the merged diff. |
 | [`perk objective next`](./cli.md#perk-objective-next-number-alias-n) (`n`) | Print the next plannable node. |
 | [`perk objective run`](./cli.md#perk-objective-run-number-alias-r) (`r`) | Advance the backlog one autonomously-safe step. |
@@ -135,6 +136,17 @@ in sync on every write; [`perk objective doctor`](./cli.md#perk-objective-doctor
 diffs it against the live Project to find — and safely repair — drift. GitHub objectives have no
 separate observed surface and so carry no manifest. See
 [How to check an objective for drift](../how-to/check-an-objective-for-drift.md).
+
+### Pre-planning node-issue engagement (Linear-Project objectives only)
+
+Because each Linear-Project roadmap node **is** a node-issue, a human can comment on it (or edit its
+description) **before** perk ever plans it. When you run `/objective-plan`, perk reads that
+engagement and folds it into the plan-authoring context as an **untrusted-DATA** block (comments +
+description edits, with distinguishable authorship; perk's own machinery comments are skipped) — so
+the authored plan comprehends your feedback. You can inspect it directly with
+[`perk objective node-engagement N --node <id>`](./cli.md#perk-objective-node-engagement-number).
+GitHub single-issue objectives have no per-node issues, so this is a Linear-first behavior (empty on
+GitHub).
 
 ## See also
 

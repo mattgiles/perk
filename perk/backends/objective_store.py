@@ -44,6 +44,7 @@ from perk.backends.engagement import (
     AgentSessionRead,
     DescriptionEdit,
     EngagementComment,
+    NodeEngagement,
 )
 from perk.objective_drift import DriftCode, DriftCondition, DriftReport
 
@@ -351,4 +352,17 @@ class ObjectiveStore(Protocol):
         """Read the objective's agent-session activities + the derived stop indicator. A store with
         no agent-session surface returns the empty ``AgentSessionRead``; **raises** on an
         infra/auth failure."""
+        ...
+
+    def read_node_engagement(self, *, objective_id: str, node_id: str) -> NodeEngagement:
+        """Read a single roadmap node-issue's pre-planning human engagement (Objective #682,
+        Node 2.1).
+
+        The **node-keyed** read (the other reads above are keyed on the whole objective/issue): the
+        node-issue's comments + description edits, with distinguishable authorship, bundled as a
+        :class:`NodeEngagement`. Agent-session reads are excluded (a pre-planning node-issue has no
+        perk agent session — Phase 4). Returns the empty ``EMPTY_NODE_ENGAGEMENT`` for a store with
+        no per-node-issue surface (GitHub single-issue objectives; the dormant issue-backed Linear
+        store) or a node-issue that cannot be resolved; **raises** ``ObjectiveStoreError`` on an
+        infra/auth failure (never masks infra as empty)."""
         ...

@@ -13,7 +13,7 @@ from typing import cast
 import pytest
 
 from perk import github, objective, plan
-from perk.backends import issue_backend, linear_backend, objective_store
+from perk.backends import engagement, issue_backend, linear_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import LinearClient, LinearGraphQLError
 from perk.backends.linear_backend import (
@@ -3579,3 +3579,99 @@ class TestLinearProjectObjectiveStore:
         )
         with pytest.raises(ObjectiveStoreError, match="failed to create Linear project update"):
             store.post_status_update(objective_id="proj-1", body="x")
+
+
+class TestReadNodeEngagement:
+    """`read_node_engagement` (Objective #682, Node 2.1): node-keyed engagement over the project
+    store (honest) + the empty no-ops on the issue-backed store."""
+
+    def _node(self) -> objective.ObjectiveNode:
+        return objective.ObjectiveNode(
+            id="2.1", description="Gamma", status=objective.NodeStatus.PENDING, slug="gamma"
+        )
+
+    def _responses(self) -> dict[str, list[object]]:
+        node = self._node()
+        return {
+            # _find_node_issue → project_issues → resolves node 2.1 to UUID i-21.
+            "project(id: $id)": [
+                {
+                    "project": {
+                        "issues": _page([_node_issue(node, uuid="i-21", identifier="ENG-21")])
+                    }
+                }
+            ],
+            # _comments_with_authors(i-21)
+            "botActor": [
+                {
+                    "issue": {
+                        "comments": _page(
+                            [
+                                {
+                                    "id": "c-1",
+                                    "body": "please scope this down",
+                                    "createdAt": "2026-03-01",
+                                    "editedAt": None,
+                                    "user": {"id": "u-1", "name": "ada", "displayName": "Ada L"},
+                                    "botActor": None,
+                                }
+                            ]
+                        )
+                    }
+                }
+            ],
+            # _description_edits(i-21)
+            "descriptionUpdatedBy": [
+                {
+                    "issue": {
+                        "history": _page(
+                            [
+                                {
+                                    "id": "h-1",
+                                    "createdAt": "2026-03-02",
+                                    "actor": {"id": "u-1", "name": "Ada"},
+                                    "descriptionUpdatedBy": {"id": "u-1", "name": "Ada"},
+                                }
+                            ]
+                        )
+                    }
+                }
+            ],
+        }
+
+    def test_resolves_node_issue_and_maps_comments_and_edits(self) -> None:
+        store, _ = _make_project_store(self._responses())
+        ne = store.read_node_engagement(objective_id="proj-1", node_id="2.1")
+        assert isinstance(ne, engagement.NodeEngagement)
+        assert [c.id for c in ne.comments] == ["c-1"]
+        assert ne.comments[0].author.kind == "human"
+        assert ne.comments[0].author.display_name == "Ada L"
+        assert ne.comments[0].body == "please scope this down"
+        assert len(ne.description_edits) == 1
+        assert ne.description_edits[0].created_at == "2026-03-02"
+        assert ne.description_edits[0].diff is None
+
+    def test_unknown_node_yields_empty(self) -> None:
+        # project_issues resolves no matching node-issue → empty bundle (no comment/history query).
+        store, fake = _make_project_store(
+            {
+                "project(id: $id)": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [_node_issue(self._node(), uuid="i-21", identifier="ENG-21")]
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+        ne = store.read_node_engagement(objective_id="proj-1", node_id="9.9")
+        assert ne is engagement.EMPTY_NODE_ENGAGEMENT
+        assert _queries(fake, "botActor") == []
+
+    def test_issue_backed_store_is_empty(self) -> None:
+        store, fake = _make_store()
+        ne = store.read_node_engagement(objective_id="ENG-7", node_id="2.1")
+        assert ne is engagement.EMPTY_NODE_ENGAGEMENT
+        assert fake.requests == []  # honest no-op: no network
