@@ -73,8 +73,10 @@ class PrLandResult:
     dry_run: bool
     objective: ObjectiveLandUpdate
     learn: LearnConsumeUpdate
-    # Non-github backends get an explicit on-land plan-issue close (GitHub relies on the squash
-    # footer's `Closes #N` autoclose). Fail-open: False when skipped or the close failed.
+    # An explicit on-land plan-issue close. GitHub relies on the squash footer's `Closes #N`
+    # autoclose for default-branch merges, so this only fires for github when the PR's base is
+    # non-default (autoclose never runs there); non-github backends always close explicitly.
+    # Fail-open: False when skipped (autoclose path) or the close failed.
     plan_issue_closed: bool = False
 
 
@@ -152,6 +154,9 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
         raise UserFacingCliError(
             f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
         )
+    # Capture the PR's actual base before the merge reassigns `pr` to a synthetic PullRequest
+    # (which carries no base_ref). An idempotent re-land still sees the real base here.
+    pr_base = pr.base_ref
     if pr.state != "MERGED":
         if pr.is_draft:
             github.mark_pr_ready(number=pr.number, repo_root=repo_root)
@@ -166,7 +171,9 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             ),
         )
     cache.set_marker(repo_root, cache.PENDING_LEARN)
-    plan_issue_closed = _close_plan_issue_on_land(backend, issue=issue)
+    plan_issue_closed = _close_plan_issue_on_land(
+        backend, issue=issue, repo_root=repo_root, pr_base=pr_base
+    )
     obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
     learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
     # Node 5.1 (stretch): mirror the land into the Linear agent session. Gated inside the emitter
@@ -203,17 +210,36 @@ def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
     return line
 
 
-def _close_plan_issue_on_land(backend: issue_backend.IssueBackend, *, issue: str) -> bool:
-    """Explicitly close the plan issue after the merge — **non-github backends only** (D4).
+def _github_base_is_non_default(repo_root: Path, pr_base: str) -> bool:
+    """True when the merged PR's base is a confirmed **non-default** GitHub branch.
 
-    GitHub's autoclose (the squash footer's ``Closes #N``) already closes the plan issue there;
-    other backends have no commit-footer autoclose perk can assume (Linear's Done-on-merge
-    automation is integration/team-config dependent), so perk closes the issue itself.
-    Fail-open + idempotent beside any tracker automation: a failure is logged
-    loud-but-non-fatal and NEVER changes the land result (mirrors
-    :func:`_reconcile_objective_on_land`).
+    GitHub only autocloses a ``Closes #N`` footer when the PR merges into the repo's *default*
+    branch, so only a confirmed non-default base warrants an explicit close. Fail-open both ways:
+    an unknown base (``""``) short-circuits **without** calling ``default_branch`` (rely on
+    autoclose), and a ``default_branch`` lookup failure also defers to autoclose.
     """
-    if backend.backend_id == "github":
+    if not pr_base:
+        return False
+    try:
+        return pr_base != github.default_branch(repo_root)
+    except GitHubError:
+        return False
+
+
+def _close_plan_issue_on_land(
+    backend: issue_backend.IssueBackend, *, issue: str, repo_root: Path, pr_base: str
+) -> bool:
+    """Explicitly close the plan issue after the merge — fail-open + idempotent.
+
+    GitHub's ``Closes #N`` squash-footer autoclose fires **only on a default-branch merge**; a
+    merge into a non-default base never autocloses, so perk closes the plan issue explicitly there
+    (beside autoclose). Non-github backends have no commit-footer autoclose perk can assume
+    (Linear's Done-on-merge automation is integration/team-config dependent), so they always get
+    the explicit close. A failure is logged loud-but-non-fatal and NEVER changes the land result
+    (mirrors :func:`_reconcile_objective_on_land`); the outcome is surfaced as the envelope's
+    ``plan_issue_closed``.
+    """
+    if backend.backend_id == "github" and not _github_base_is_non_default(repo_root, pr_base):
         return False
     try:
         return bool(backend.close_issue(issue_id=issue))
@@ -425,6 +451,10 @@ def _render_human(result: PrLandResult) -> None:
         + click.style(f"#{result.pr.number}", fg="cyan")
         + " (squash-merged); pending-learn set"
     )
+    if result.plan_issue_closed:
+        user_output(
+            click.style("  plan issue closed explicitly (non-default base branch)", dim=True)
+        )
     if result.objective.nodes_marked:
         nodes = ", ".join(result.objective.nodes_marked)
         user_output(f"  objective #{result.objective.objective}: marked node(s) {nodes} done")

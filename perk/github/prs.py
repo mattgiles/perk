@@ -25,6 +25,7 @@ class PullRequest:
     is_draft: bool
     state: str  # "OPEN" | "MERGED" | "CLOSED" (normalized)
     existed: bool
+    base_ref: str = ""  # the PR's actual base branch (from REST `base.ref`); "" when synthetic
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,7 @@ def _pull_request(pr: dict[str, Any], *, existed: bool) -> PullRequest:
         is_draft=bool(pr.get("draft", False)),
         state=_pr_state(pr),
         existed=existed,
+        base_ref=str((pr.get("base") or {}).get("ref", "")),
     )
 
 
@@ -143,7 +145,8 @@ def create_pr(
             "-F",
             f"draft={'true' if draft else 'false'}",
             "--jq",
-            "{number: .number, html_url: .html_url, draft: .draft, state: .state}",
+            "{number: .number, html_url: .html_url, draft: .draft, state: .state, "
+            "base: {ref: .base.ref}}",
         ]
         data = _exec._run_json(
             args,

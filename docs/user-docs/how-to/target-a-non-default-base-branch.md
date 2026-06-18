@@ -51,6 +51,10 @@ time, the objective pins the repo's `[workflow] base` instead (so it stays self-
 2. **Implement.** `perk implement` cuts the `plan-<id>` worktree branch from `origin/<base>` instead
    of the detected trunk.
 3. **Submit.** `/submit` opens the PR against the pinned base and probes mergeability against it.
+4. **Land.** GitHub only autocloses a `Closes #N` footer when a PR merges into the **default**
+   branch, so when the PR's base is non-default perk closes the plan issue explicitly at land
+   (idempotent, fail-open). Default-base lands are unchanged — GitHub's native autoclose handles
+   them.
 
 When no base is declared anywhere, behavior is unchanged: plans target the GitHub default branch.
 

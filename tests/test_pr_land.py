@@ -40,7 +40,7 @@ def _authed(monkeypatch) -> None:
 
 
 def _stub_land(
-    monkeypatch, *, draft: bool, merged: bool = False, title: str = "My Feature"
+    monkeypatch, *, draft: bool, merged: bool = False, title: str = "My Feature", base_ref: str = ""
 ) -> dict[str, object]:
     calls: dict[str, object] = {"readied": False, "merged": False, "commit_message": None}
     state = "MERGED" if merged else "OPEN"
@@ -48,7 +48,7 @@ def _stub_land(
         github,
         "find_pr_for_branch",
         lambda **k: github.PullRequest(
-            number=42, url="u/pr/42", is_draft=draft, state=state, existed=True
+            number=42, url="u/pr/42", is_draft=draft, state=state, existed=True, base_ref=base_ref
         ),
     )
     monkeypatch.setattr(
@@ -163,6 +163,82 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
         assert calls["readied"] is False and calls["merged"] is False
         assert json.loads(result.output)["pending_learn"] is True
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
+
+
+# --- #691: explicit plan-issue close on a non-default-base github land -----------------------
+
+
+def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
+    """A github PR merged into a non-default base never autocloses, so perk closes explicitly."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
+    closed: list[int] = []
+    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        _stub_land(monkeypatch, draft=False, base_ref="release")
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["plan_issue_closed"] is True
+        assert closed == [7]
+
+
+def test_real_land_default_base_keeps_autoclose(monkeypatch):
+    """A github PR merged into the default base relies on GitHub autoclose — no explicit close."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
+
+    def _boom(**k):
+        raise AssertionError("close_issue must not be called on a default-base land")
+
+    monkeypatch.setattr(github, "close_issue", _boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        _stub_land(monkeypatch, draft=False, base_ref="main")
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["plan_issue_closed"] is False
+
+
+def test_real_land_unknown_base_is_fail_open(monkeypatch):
+    """An undeterminable base short-circuits WITHOUT calling default_branch (rely on autoclose)."""
+    _authed(monkeypatch)
+
+    def _no_default(repo_root):
+        raise AssertionError("default_branch must not be called when the base is unknown")
+
+    monkeypatch.setattr(github, "default_branch", _no_default)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        _stub_land(monkeypatch, draft=False, base_ref="")
+        result = runner.invoke(cli, ["pr", "land", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["plan_issue_closed"] is False
+
+
+def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, capsys):
+    """A close failure on a non-default github base is fail-open: returns False, warns on stderr,
+    never raises (so the land result is unchanged)."""
+    from perk.backends import issues
+
+    monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
+
+    def _boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(github, "close_issue", _boom)
+    backend = issues.GitHubIssueBackend(repo_root=Path())
+    out = land_cmd._close_plan_issue_on_land(
+        backend, issue="7", repo_root=Path(), pr_base="release"
+    )
+    assert out is False
+    assert "plan issue close skipped (non-fatal)" in capsys.readouterr().err
 
 
 # --- P2.T11a: mechanical auto-on-merge node-done --------------------------------------------
