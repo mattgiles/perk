@@ -350,3 +350,39 @@ def derive_title(plan_markdown: str, *, fallback: str = "perk plan") -> str:
 def now_iso() -> str:
     """The current time as ISO-8601 UTC (``…Z``), for the header ``created`` field."""
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ----------------------------------------------------------- command callout (§664)
+
+
+def render_command_callout(label: str, command: str, hint: str) -> str:
+    """A portable, copyable Markdown command callout: a bold label, a bare fenced command
+    block (one-click copy button on GitHub **and** Linear), and an italic hint.
+
+    Pure portable Markdown (bold + fenced code + italic) — no HTML comments / ``<details>`` /
+    perk sentinels — so ``to_linear_markdown`` passes it through unchanged (no transcoded variant).
+    """
+    return f"**{label}**\n\n```\n{command}\n```\n\n_{hint}_"
+
+
+def plan_callout(plan_id: str) -> str:
+    """The plan command callout — ``perk impl <plan_id>`` (a real alias of ``perk implement``)."""
+    return render_command_callout(
+        "Implement this plan:",
+        f"perk impl {plan_id}",
+        "Run from the repo root to start a worktree session.",
+    )
+
+
+def prepend_callout(body: str, callout: str, *, command: str) -> str:
+    """Idempotently prepend ``callout`` above ``body``, keyed on the literal ``command`` string.
+
+    Returns ``body`` unchanged when ``command`` already occurs in ``body`` (the idempotency key —
+    no duplicate callouts on re-save); otherwise returns the callout followed by ``body`` (or just
+    the callout when ``body`` is empty). Pure string op.
+    """
+    if command in body:
+        return body
+    if body:
+        return f"{callout}\n\n{body}"
+    return callout + "\n"
