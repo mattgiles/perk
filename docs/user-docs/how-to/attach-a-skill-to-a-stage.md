@@ -60,6 +60,15 @@ include every binding you want active, not just your additions. See the
 [overlay semantics](../reference/configuration.md#local-overrides--overlay-semantics) in the
 configuration reference.
 
+## perk ships an auto-discovered `perk-expert` skill
+
+Alongside the workflow `perk-*` skills (which orchestrate individual stages), perk delivers a
+`perk-expert` skill that Pi **auto-discovers by description** — no `[[bindings]]` row needed. It is
+the on-demand expert on configuring and customizing perk (the `.pi/perk.toml` tables, provider
+seams, the issue backend, CI checks, subagent overrides), carrying self-contained references that
+travel into your repo. Pi invokes it when a task matches "how does perk … / how do I configure … /
+which knob controls …".
+
 ## See also
 
 - [Configuration reference — `[[bindings]]`](../reference/configuration.md#bindings) — the row shape

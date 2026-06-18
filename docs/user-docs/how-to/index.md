@@ -63,7 +63,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 ### Customization
 
 - [How to attach your own skill to a stage or command](./attach-a-skill-to-a-stage.md) — bind an
-  installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override.
+  installed skill to a stage or command via `[[bindings]]`, as a new trigger or an override (also
+  notes the auto-discovered `perk-expert` skill perk delivers for configuration/customization help).
 - [How to write a custom subagent](./write-a-custom-subagent.md) — author your own
   `.pi/agents/<name>.md` agent def and invoke it via pi's native `subagent` tool.
 
