@@ -65,12 +65,24 @@
 # but with INSTALL-SITE (runtime) vacating rather than registration-time vacating: perk installs
 # its own footer (`installPerkFooter`) inside the `session_start` event handler, so under a foreign
 # `[providers] footer` selection perk simply does NOT call `installPerkFooter` (a runtime guard at
-# that single install site, keyed off `ctx.cwd`), leaving the foreign footer (`pi-powerline-footer`
-# or `pi-bar`) as the sole footer surface. `adapter: null`, no shim: perk's objective/checkpoints
-# progress reaches the foreign footer automatically via the already-publishing composed `perk`
-# `setStatus` slot (both foreign footers render extension statuses), so the bridge is automatic.
+# that single install site, keyed off `ctx.cwd`), leaving the foreign footer (`pi-powerline-footer`,
+# `pi-bar`, or `@tombell/pi-status`) as the sole footer surface. `adapter: null`, no shim: for
+# `pi-powerline-footer`/`pi-bar` perk's objective/checkpoints progress reaches the foreign footer
+# automatically via the already-publishing composed `perk` `setStatus` slot (both render extension
+# statuses), so the bridge is automatic; `@tombell/pi-status` is the exception (it does NOT render
+# extension statuses — see the `pi-status-footer` note below).
 # Fail-safe: any config-read error resolves to the reference id → perk installs its footer (the
 # default path is the hard zero-change guarantee).
+#
+# Two more footer outcomes round out the catalog so the footer is governed EXCLUSIVELY by
+# `[providers] footer` (no footer outcome ever needs a manual `packages` edit):
+#   - `pi-status-footer` (`npm:@tombell/pi-status`) is vacate-only like the two above, BUT — unlike
+#     `powerline-footer`/`pi-bar-footer` — pi-status does NOT render extension statuses, so perk's
+#     objective/checkpoints progress is NOT shown in the footer when it is selected. This is an
+#     accepted limitation (it matches what pi-status already does today); perk does not build a
+#     status-bridge adapter for it (it is a genuine interface seam).
+#   - `pi-default` (`package: null`) is the "install nothing / leave pi's stock built-in footer"
+#     option: perk vacates (gate false), convergence adds no package, so pi's own footer stands.
 #
 # The WEB seam is the THIRD INTERFACE seam (no durable artifact to bridge), but with a genuine
 # novelty: it is the FIRST seam whose `default: true` provider has a NON-NULL `package`. perk owns
@@ -165,6 +177,22 @@ providers:
                              # visible", so perk's `perk` setStatus slot appears automatically — no shim.
     default: false
     # No `package_filter`: load the package's sole footer extension ("load all of that type").
+  - id: pi-status-footer     # REAL footer provider — VACATE-ONLY (interface seam, no adapter)
+    seam: footer
+    package: "npm:@tombell/pi-status"   # the foreign Pi package to add to `packages`
+    adapter: null            # VACATE-ONLY: the footer produces no durable artifact (interface seam).
+                             # UNLIKE powerline/pi-bar, pi-status does NOT render extension statuses,
+                             # so perk's objective/checkpoints progress is NOT shown in the footer
+                             # under this selection (an accepted limitation — matches pi-status today;
+                             # no status-bridge adapter is built).
+    default: false
+    # No `package_filter`: load the package's sole footer extension ("load all of that type").
+  - id: pi-default           # "install nothing" footer provider — leaves pi's stock built-in footer
+    seam: footer
+    package: null            # null ⇒ perk adds NO package; pi's own built-in footer stands.
+    adapter: null            # VACATE-ONLY: perk's footer-install gate is false (resolved id ≠
+                             # perk-footer), so perk skips installPerkFooter; nothing else to add.
+    default: false
   - id: pi-web-access        # web seam DEFAULT — the FOREIGN reference provider (perk owns no native web impl)
     seam: web
     package: "npm:pi-web-access"   # NON-NULL default package: the novelty — perk has no native web provider

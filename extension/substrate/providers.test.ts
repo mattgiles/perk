@@ -16,6 +16,8 @@ import {
   PERK_FOOTER_PROVIDER_ID,
   PERK_PLAN_PROVIDER_ID,
   PI_BAR_FOOTER_PROVIDER_ID,
+  PI_DEFAULT_FOOTER_PROVIDER_ID,
+  PI_STATUS_FOOTER_PROVIDER_ID,
   PI_WEB_ACCESS_PROVIDER_ID,
   PLANNOTATOR_PLAN_PROVIDER_ID,
   POWERLINE_FOOTER_PROVIDER_ID,
@@ -42,6 +44,8 @@ test("loadProviders: returns the shipped supported-set entries", () => {
       ["perk-footer", "footer", null, true],
       ["powerline-footer", "footer", "npm:pi-powerline-footer", false],
       ["pi-bar-footer", "footer", "npm:pi-bar", false],
+      ["pi-status-footer", "footer", "npm:@tombell/pi-status", false],
+      ["pi-default", "footer", null, false],
       ["pi-web-access", "web", "npm:pi-web-access", true],
       ["ollama-web-search", "web", "npm:@ollama/pi-web-search", false],
       ["juicesharp-web-tools", "web", "npm:@juicesharp/rpiv-web-tools", false],
@@ -87,6 +91,20 @@ test("loadProviders: the foreign footer entries are VACATE-ONLY (null adapter, n
   assert.equal(piBar?.seam, "footer");
   assert.equal(piBar?.default, false);
   assert.equal(piBar?.packageFilter, undefined);
+  // pi-status-footer: vacate-only foreign footer (no extension-status rendering, accepted limit).
+  const piStatus = loadProviders().find((p) => p.id === PI_STATUS_FOOTER_PROVIDER_ID);
+  assert.equal(piStatus?.adapter, null);
+  assert.equal(piStatus?.package, "npm:@tombell/pi-status");
+  assert.equal(piStatus?.seam, "footer");
+  assert.equal(piStatus?.default, false);
+  assert.equal(piStatus?.packageFilter, undefined);
+  // pi-default: the "install nothing / pi stock footer" option (null package, vacate-only).
+  const piDefault = loadProviders().find((p) => p.id === PI_DEFAULT_FOOTER_PROVIDER_ID);
+  assert.equal(piDefault?.adapter, null);
+  assert.equal(piDefault?.package, null);
+  assert.equal(piDefault?.seam, "footer");
+  assert.equal(piDefault?.default, false);
+  assert.equal(piDefault?.packageFilter, undefined);
 });
 
 test("loadProviders: reference provider has null package/adapter and no filter", () => {

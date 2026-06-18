@@ -113,7 +113,7 @@ Per-seam provider selection — provider-id strings pointing into perk's support
 | `plan` | string | `perk-plan` | The plan-authoring provider. |
 | `todo` | string | `perk-checkpoints` | The checkpoint/todo provider. |
 | `askuser` | string | `perk-ask-user` | The `ask_user_question` tool provider (selectable: `juicesharp-ask-user`). |
-| `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`). |
+| `footer` | string | `perk-footer` | The footer provider (selectable: `powerline-footer`, `pi-bar-footer`, `pi-status-footer`, `pi-default`). |
 | `web` | string | `pi-web-access` | The web search/fetch provider (selectable: `ollama-web-search`, `juicesharp-web-tools`). |
 
 An absent key falls back to the behavior-preserving default. This is **config-key reference depth

@@ -50,6 +50,12 @@ export const POWERLINE_FOOTER_PROVIDER_ID = "powerline-footer";
 /** The foreign `pi-bar` footer-provider id (vacate-only interface seam). */
 export const PI_BAR_FOOTER_PROVIDER_ID = "pi-bar-footer";
 
+/** The foreign `@tombell/pi-status` footer-provider id (vacate-only; no extension-status rendering). */
+export const PI_STATUS_FOOTER_PROVIDER_ID = "pi-status-footer";
+
+/** The "install nothing / pi stock footer" footer-provider id (`package: null`, vacate-only). */
+export const PI_DEFAULT_FOOTER_PROVIDER_ID = "pi-default";
+
 /** The web seam DEFAULT id — the FOREIGN reference provider (`pi-web-access`; perk owns no native web impl). */
 export const PI_WEB_ACCESS_PROVIDER_ID = "pi-web-access";
 

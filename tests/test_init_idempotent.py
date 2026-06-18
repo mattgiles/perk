@@ -270,6 +270,55 @@ def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_pat
     assert "npm:@tombell/pi-diff" in _identities(packages)
 
 
+def test_init_governs_pi_status_and_pi_default_footers(tmp_path):
+    # #670: the footer is governed EXCLUSIVELY by `[providers] footer` — no footer outcome ever
+    # needs a manual `packages` edit. Four cases prove the two new providers + the managed-identity
+    # "revert the manual edit" guarantee for `npm:@tombell/pi-status`.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    settings = pi_dir / "settings.json"
+    perk_toml = pi_dir / "perk.toml"
+
+    # (1) footer = "pi-status-footer" adds `npm:@tombell/pi-status` in object form.
+    settings.write_text(json.dumps({"packages": ["npm:@me/custom"]}, indent=2) + "\n")
+    perk_toml.write_text('[providers]\nfooter = "pi-status-footer"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads(settings.read_text())["packages"]
+    entry = next(
+        p for p in packages if isinstance(p, dict) and p.get("source") == "npm:@tombell/pi-status"
+    )
+    assert entry == {"source": "npm:@tombell/pi-status"}  # no `package_filter`
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+
+    # (2) pi-default (`package: null`) adds nothing — pi's stock footer stands.
+    settings.write_text(json.dumps({"packages": ["npm:@me/custom"]}, indent=2) + "\n")
+    perk_toml.write_text('[providers]\nfooter = "pi-default"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads(settings.read_text())["packages"]
+    assert "npm:@tombell/pi-status" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+
+    # (3) switching to pi-status then back to the default removes the managed pi-status entry.
+    perk_toml.write_text('[providers]\nfooter = "pi-status-footer"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    assert "npm:@tombell/pi-status" in _identities(json.loads(settings.read_text())["packages"])
+    perk_toml.write_text('[providers]\nfooter = "perk-footer"\n', encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    assert "npm:@tombell/pi-status" not in _identities(json.loads(settings.read_text())["packages"])
+
+    # (4) a HAND-ADDED `npm:@tombell/pi-status` string with footer UNSELECTED is removed by
+    # convergence (now that pi-status is a managed identity) — the machine-governed "revert the
+    # manual edit" guarantee.
+    settings.write_text(
+        json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-status"]}, indent=2) + "\n"
+    )
+    perk_toml.write_text("[providers]\n", encoding="utf-8")
+    run_init(tmp_path, verify=False)
+    packages = json.loads(settings.read_text())["packages"]
+    assert "npm:@tombell/pi-status" not in _identities(packages)
+    assert "npm:@me/custom" in _identities(packages)  # user package preserved
+
+
 def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
     # The web-seam two-directional swap (#529): selecting the foreign `ollama-web-search` provider
     # REMOVES the default `npm:pi-web-access` (also provider-managed) and ADDS

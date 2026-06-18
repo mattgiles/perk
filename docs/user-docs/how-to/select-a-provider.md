@@ -25,7 +25,10 @@ want. The `[providers]` row shape is documented in the
    - `askuser`: `perk-ask-user` (default), `juicesharp-ask-user` (REPLACE / vacate-only,
      `npm:@juicesharp/rpiv-ask-user-question`).
    - `footer`: `perk-footer` (default), `powerline-footer` (REPLACE / vacate-only,
-     `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`).
+     `npm:pi-powerline-footer`), `pi-bar-footer` (REPLACE / vacate-only, `npm:pi-bar`),
+     `pi-status-footer` (REPLACE / vacate-only, `npm:@tombell/pi-status` — **does not render
+     extension statuses**, so perk's objective/checkpoints progress is not shown), `pi-default`
+     (**install nothing** — leaves pi's stock built-in footer, no package added).
    - `web`: `pi-web-access` (default — a **foreign package**, zero-config), `ollama-web-search`
      (REPLACE / vacate-only, `npm:@ollama/pi-web-search` — needs a **local Ollama daemon**),
      `juicesharp-web-tools` (REPLACE / vacate-only, `npm:@juicesharp/rpiv-web-tools` — needs an
@@ -45,6 +48,20 @@ want. The `[providers]` row shape is documented in the
    [providers]
    plan = "tombell-plan"
    todo = "perk-checkpoints"
+   ```
+
+   Or, to use `@tombell/pi-status` as the footer (perk vacates; convergence adds the package):
+
+   ```toml
+   [providers]
+   footer = "pi-status-footer"
+   ```
+
+   Or, to keep pi's stock built-in footer (no footer package at all):
+
+   ```toml
+   [providers]
+   footer = "pi-default"
    ```
 
 4. **Run `perk init` to converge the package.** Selecting a foreign provider adds its npm package to

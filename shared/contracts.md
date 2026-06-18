@@ -641,7 +641,14 @@ likewise **retired** from `BORROWED_PACKAGES`: `ctx.ui.setFooter` is a single la
 pi-status's `session_start` footer install replaced perk's footer — a *borrowed* package must never
 own the footer. (Distinct from a *selected* `footer` provider, which legitimately does: the footer
 seam is the sanctioned way to hand the footer to a foreign package — perk vacates `installPerkFooter`
-so there is no last-wins clobber. See §8.10's footer interface-seam note.)
+so there is no last-wins clobber. See §8.10's footer interface-seam note.) **`@tombell/pi-status` is
+now ALSO a selectable footer provider** (`pi-status-footer`, #670): selecting it via `[providers]
+footer` makes `perk init` converge `npm:@tombell/pi-status` into `packages` (object form) and perk
+vacates `installPerkFooter` — the machine-governed way to get pi-status's footer, replacing the
+unmanaged settings.json hand-edit. Unlike `powerline-footer`/`pi-bar-footer`, pi-status does **not**
+render extension statuses, so perk's objective/checkpoints progress is **not shown** under it (an
+accepted limitation, no status-bridge adapter). A sibling `pi-default` provider (`package: null`)
+adds **no** footer package and vacates perk's install gate, leaving pi's stock built-in footer.
 
 **Rejected `@juicesharp/rpiv-todo` ideas (deliberate non-adoptions).** A survey of rpiv-todo's
 model-driven todo design against perk's passive, plan-derived, linear checkpoints (see
@@ -2053,9 +2060,13 @@ a foreign `[providers] todo` selection — Node 3.1 — with **no** registration
 the todo seam has no command-name collision; the `todoAdapterJuicesharp` shim carries perk's
 progress discipline onto the foreign overlay — see the Node 3.2 status note in contracts-history.md §8.10). The **askuser** seam is an **interface seam** — see the askuser status
 note in [`contracts-history.md`](./contracts-history.md) §8.10. A fourth reference entry `perk-footer` (seam `footer`, `package: null` / `adapter: null` /
-`default: true`) plus two **real** foreign footer providers `powerline-footer` (→ `npm:pi-powerline-footer`)
-and `pi-bar-footer` (→ `npm:pi-bar`) make the **footer** seam a **second interface seam** (vacate-only,
-`adapter: null`) — see the footer status note in contracts-history.md §8.10. A fifth reference entry `pi-web-access` (seam
+`default: true`) plus **four** foreign/null footer providers — `powerline-footer` (→ `npm:pi-powerline-footer`),
+`pi-bar-footer` (→ `npm:pi-bar`), `pi-status-footer` (→ `npm:@tombell/pi-status`, #670), and
+`pi-default` (`package: null`, #670 — "install nothing / pi stock footer") — make the **footer** seam
+a **second interface seam** (vacate-only, `adapter: null`). `pi-status-footer` does **not** render
+extension statuses, so perk progress is not shown under it (accepted limitation). With these the
+footer is governed **exclusively** by `[providers] footer` — no footer outcome needs a manual
+`packages` edit. See the footer status note in contracts-history.md §8.10. A fifth reference entry `pi-web-access` (seam
 `web`, **`package: "npm:pi-web-access"`** — the first non-null-package default — / `adapter: null` /
 `default: true`) plus two **real** foreign web providers `ollama-web-search` (→ `npm:@ollama/pi-web-search`)
 and `juicesharp-web-tools` (→ `npm:@juicesharp/rpiv-web-tools`) make the **web** seam a **third interface

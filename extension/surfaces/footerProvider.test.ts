@@ -36,6 +36,15 @@ test("isPerkFooterReferenceSelected: a foreign footer selection is NOT the refer
   writePerkToml(cwd, '[providers]\nfooter = "powerline-footer"\n');
   assert.equal(resolvedFooterProviderId(cwd), "powerline-footer");
   assert.equal(isPerkFooterReferenceSelected(cwd), false);
+
+  writePerkToml(cwd, '[providers]\nfooter = "pi-status-footer"\n');
+  assert.equal(resolvedFooterProviderId(cwd), "pi-status-footer");
+  assert.equal(isPerkFooterReferenceSelected(cwd), false);
+
+  // pi-default = "install nothing / pi stock footer": perk still vacates (gate false).
+  writePerkToml(cwd, '[providers]\nfooter = "pi-default"\n');
+  assert.equal(resolvedFooterProviderId(cwd), "pi-default");
+  assert.equal(isPerkFooterReferenceSelected(cwd), false);
 });
 
 test("isPerkFooterReferenceSelected: a corrupt config fails safe to the reference (perk installs)", () => {
