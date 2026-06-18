@@ -48,7 +48,9 @@ give that bug a findable home.
 
 ## Mutation-posting policies (the /pr-review verdict split)
 
-The verdict-driven `/pr-review` work established three policy patterns for gateway mutations:
+The verdict-driven `/pr-review` work established three policy patterns for gateway mutations, and
+was later **reshaped** from a single posting child to a parent-driven classify-then-act boundary
+(see the parent-posts sub-point below):
 
 - **The verdict-driven mutation split**: when an agent-posted artifact has a "nothing to say"
   outcome, give it a *distinct minimal* artifact — one 👍 reaction via the issues-reactions
@@ -62,6 +64,21 @@ The verdict-driven `/pr-review` work established three policy patterns for gatew
 - **In-session-only fields are enforced structurally**: the gateway functions simply have no
   parameter for the in-session `fyi` channel, so it *cannot* reach a GitHub payload. Prefer that
   shape over prompt-level "don't post it" policy.
+- **Single→parallel parent-posts reshape**: `/pr-review` was converted from a **single posting
+  child** to the **same classify-then-act shape as `/address`** — 2–3 read-only
+  **angle-specialized** children report structured findings, and the **parent reconciles + posts**
+  via a new warm tool (`post_pr_review`). The verdict split (rich COMMENT review when actionable; a
+  single 👍 reaction when clean) is unchanged — it just moved to a parent-driven boundary. See
+  `docs/learned/workflow/cold-door-client.md` for the reusable parent-posts warm-tool recipe and
+  `docs/learned/pi/subagents.md` for the report-only reviewer-agent change.
+- **Structural-symmetry insight (recorded in contracts §8.3, build deferred):** the old "child
+  posts" door gave the parent **no terminal tool signal**, so it could never be a worker-driven
+  `DriveStage`. The new `post_pr_review` ok-result + a `last_pr_review` workflow-state append is
+  **structurally identical** to `address`'s `resolve_review_threads` + `last_review_batch` — what a
+  worker's `applyEvent`/`evaluateTerminal` latches onto. **Reshaping a "child-posts" door to
+  "parent-posts" incidentally unlocks headless-drivability** — worth noting even when deferring the
+  build (promotion is a clean follow-up: a `DriveStage` arm + terminal branch + `cold_remote` door +
+  seed-prompt mirror).
 
 Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-def delivery to
 consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
@@ -80,3 +97,5 @@ plumb-through — the `= False` defaults are audited and stay.
 - `docs/learned/pi/extension-seams.md` — the TS sibling of idiom consolidation (minimal structural
   seams)
 - `docs/learned/toolchain/ruff.md` — the preview-rule enablement collateral from the same sweep
+- `docs/learned/workflow/cold-door-client.md` — the parent-posts warm-tool recipe (`post_pr_review`)
+- `docs/learned/pi/subagents.md` — the report-only reviewer-agent change (read-only fan-out)

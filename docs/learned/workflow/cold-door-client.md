@@ -1,6 +1,6 @@
 ---
 title: The runColdDoor envelope-aware client — decode policy, narrowing helpers, door migrations
-read_when: You are adding a warm door that shells to a `--json` cold door (the substrate is mandatory), writing a decode for a cold-door JSON envelope, choosing strict vs advisory vs fully-lenient vs derived for a payload field, consuming a fail-arm payload, chasing a door/fixture assertion change after strictening a decode, hardening a door against cold/warm version skew, or auditing fixtures after a cross-plane shape change merges.
+read_when: You are adding a warm door that shells to a `--json` cold door (the substrate is mandatory), adding a parent-posts warm tool that delegates a GitHub mutation to a cold door (the `post_pr_review` recipe), writing a decode for a cold-door JSON envelope, choosing strict vs advisory vs fully-lenient vs derived for a payload field, adding a parity-only field to an existing strict cross-plane decoder (which must be lenient), consuming a fail-arm payload, chasing a door/fixture assertion change after strictening a decode, hardening a door against cold/warm version skew, or auditing fixtures after a cross-plane shape change merges.
 ---
 
 # The cold-door client (`runColdDoor`)
@@ -66,6 +66,15 @@ field:
 **The `bad_output` reachability acceptance test.** The doctrine's intended end-state for a door's
 decode: `bad_output` is reachable **only** for a payload whose persistence would corrupt
 workflow-state. When auditing other doors' decodes, use that as the acceptance criterion.
+
+**A new parity-only field on a STRICT cross-plane decoder must be LENIENT.** TS `decodePlanRef`
+rejects on `objective_id === undefined` (strict) but treats the newer `base` **leniently**
+(`nullableStringField` → present null/string carried; absent/mistyped → `undefined`, never a decode
+failure). Two reasons it MUST be lenient: (1) `planRefsEqual`/dedup compares only `provider`+`pr_id`,
+so a malformed `base` can't poison anything; (2) a strict `base === undefined` guard would reject
+**legacy pre-`base` plan-refs** that lack the field (and hand-written fixtures lack it too). **Rule:
+adding a parity-only field to an existing strict cross-plane decoder requires lenient handling
+whenever any pre-existing payload could lack the field.**
 
 **Plan-internal inconsistency rule:** when a plan's test expectation contradicts its own
 implementation spec (the `existed === false` vs `null` resolution — a legacy fixture that *is* a
@@ -184,6 +193,30 @@ Future doors only test their own decode edges.
   `process.platform === "win32" || process.getuid?.() === 0` skip guard — root and Windows ignore
   the read-only bit.
 
+## The parent-posts warm tool (post_pr_review)
+
+The reusable recipe for a warm tool where the **parent** posts a durable GitHub mutation by
+delegating to an existing cold door:
+
+- A **strict `decode*Params`** that refuses the **whole batch** — ANY malformed field ⇒ `null` —
+  *because posting is a durable GitHub mutation* (mirrors `decodeResolveParams`). Each new tool's
+  decode tends to grow its **own** row/array validators (the `/pr-review` one needed local
+  `decodeComments`/`decodeStringArray` rather than reusing address's `decodeCounts` — different
+  shapes).
+- A `postX(pi, ctx, params)` that builds the exact `--batch` shape, calls
+  `runColdDoor([..., "--json"], {stdin:{flag:"--batch", content, filename}, decode})`, returns a
+  **soft** `Result` (`failFor`/`ok`, never throws), and on success does a **best-effort**
+  `appendWorkflowState` **with strict read-back**. `execute` decodes → `bad_input` on `null`, else
+  delegates.
+- **The existing cold door is reused unchanged** — `perk pr review-post --batch <file>` was already
+  `runColdDoor`-stdin-compatible (same as `resolve-threads`); **no Python changes were needed at
+  all**. When reshaping a posting boundary, check whether the cold door already speaks `--batch`
+  before adding a Python surface.
+- **A new workflow-state field needs no rebuild change.** Adding `last_pr_review?: unknown` to
+  `WorkflowState` required only the interface field — `rebuildWorkflowState`'s per-field LWW handles
+  any new key automatically (same as `conflict_resolution_attempts`). Recorded
+  `{pr, verdict, angles, comment_count, mode, at}`, best-effort/non-fatal.
+
 ## Cross-references
 
 - `extension/substrate/coldDoor.ts` — `runColdDoor`, the narrowing helpers (incl. `nullableStringField`),
@@ -196,3 +229,5 @@ Future doors only test their own decode edges.
   this client is the mechanism
 - `docs/learned/pi/tool-param-decode.md` — the tool boundary's tri-state strict-fail decode (a
   deliberately separate policy; never share helpers across the two boundaries)
+- `docs/learned/workflow/plan-ref-lifecycle.md` — the non-default `base` field whose parity-only
+  lenient decode this doc references

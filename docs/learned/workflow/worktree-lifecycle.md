@@ -1,6 +1,6 @@
 ---
 title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
-read_when: You are writing a worktree-batch CLI command, matching git worktree paths, or your worktree test is unexpectedly dirty.
+read_when: You are writing a worktree-batch CLI command, matching git worktree paths, working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, or your worktree test is unexpectedly dirty.
 ---
 
 # Worktree filesystem lifecycle
@@ -96,6 +96,32 @@ out in a live worktree.
 returns the `CompletedProcess` (callers parse stdout/stderr on partial failure), but still raises
 `GitError` on `TimeoutExpired`. `_run` (raises on non-zero) remains the default for single ops.
 
+## The `[worktree] setup` hook and the `created`-flag dry-run asymmetry (#652)
+
+`[worktree] setup` is an array of shell commands run inside a freshly created worktree before
+`exec pi` (see `cold-door-launch.md` for `run_worktree_setup`, the single canonical
+setup-execution path). The durable gotcha is in the dry-run preview:
+
+- **`ResolvedWorktree.created` does NOT cover the dry-run "would create" case.** `created=True` is
+  set only in the `elif materialize:` branch of `resolve_worktree`, so on a `--dry-run`
+  (`materialize=False`) `created` is **always False**, even when the stage *would* freshly create
+  the worktree. The real-run hook gate (`if resolved.created and config.worktree_setup`) therefore
+  can't drive the dry-run preview. The fix: the `_emit_dry_run_preview` "would run setup" branch
+  **re-derives the would-create signal independently** as
+  `stage.worktree == "create" and not resolved.path.exists()` (the same condition that gates a real
+  create), NOT `resolved.created` — the same two-signal split the existing dry-run base-resolution
+  already uses. **Future "fires only on fresh create" features should expect this
+  real-run-vs-preview asymmetry.**
+- **`user_output` → stderr, `machine_output` → stdout.** A dry-run preview test asserting the human
+  "would run setup: …" line reads `capsys.readouterr().err`; the JSON payload is on `.out`.
+- **ty gotcha:** a `**kwargs` dict passed to a keyword-only `resolve_worktree` trips ty
+  (`invalid-argument-type` — the dict's inferred union value type isn't assignable); use an inner
+  helper closure calling the function with explicit keywords instead of unpacking an untyped dict.
+
+This is exterior-only (no `shared/` change; the contract + a new Divio how-to landed in the same
+turn per the amend-don't-drift rules). See `docs/learned/workflow/config-tables.md` for the
+overlay-aware `[worktree] setup` parser.
+
 ## Exterior-only — no `shared/` change
 
 Worktree lifecycle lives entirely in the Python plane. `wipe` is a plain CLI subcommand (not a stage),
@@ -116,3 +142,5 @@ is the sole signal under test.
 - `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_list`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule
+- `docs/learned/workflow/cold-door-launch.md` — `run_worktree_setup`, the single canonical setup-execution path
+- `docs/learned/workflow/config-tables.md` — the overlay-aware `[worktree] setup` config key

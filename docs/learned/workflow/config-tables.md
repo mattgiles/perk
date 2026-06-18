@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
+read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`perk.local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
 ---
 
 # Adding a `perk.toml` config table
@@ -66,6 +66,37 @@ settings-convergence reads); the recipe is fixed: a pure `parse_*(raw)` parser +
 `load_committed_*(repo_root)` that reads `.pi/perk.toml` via `_read_toml` only, lets
 `TOMLDecodeError` propagate, and stays OUT of the overlaid `Config` dataclass. Tests must include
 the **"local overlay is ignored"** case — it's the whole point of the shape.
+
+## The local-only secret-fallback reader (`perk.local.toml`)
+
+A secret may now live in the **gitignored** `perk.local.toml` (never the committed `perk.toml`) — a
+deliberate, documented relaxation of "Linear key in the environment only." `LINEAR_API_KEY`'s
+`[linear] api_key` is read by `config.load_local_linear_api_key(repo_root)`, which reads
+`repo_root/.pi/perk.local.toml` **only** — the **inverse** of the `load_committed_*` family.
+
+- **Critical divergence:** it is **fail-soft on `tomllib.TOMLDecodeError` (returns `None`)**, unlike
+  the committed readers which **propagate** it for the config check to map. Rationale: a best-effort
+  secret seed must never crash an otherwise-valid command, and a malformed `perk.local.toml` is
+  surfaced nowhere else today.
+- The key is **deliberately NOT added to the merged `Config` dataclass** (that would make it
+  readable from the **committed** file and widen the surface) — a standalone reader, mirroring
+  `load_committed_issues_team`. **Env still wins; config is a fallback.**
+- This is a **third reader shape** alongside the committed-only and overlaid readers:
+  *committed-only* (canonical-store knobs), *overlaid* (`load_config`, session-transient), and now
+  *local-only* (best-effort secret fallback, fail-soft on malformed).
+
+See `docs/learned/workflow/linear-backend.md` for the consumer side (the env-first /
+config-fallback `client_from_env` seam + the worktree env bridge).
+
+## The `[worktree] setup` overlay-aware config key (#652)
+
+`[worktree] setup` (an array of shell command strings) followed the **LBYL silent-omit** parser
+pattern (`_parse_worktree_setup` mirroring `_parse_workflow_base`) and is **overlay-aware via
+`load_config`** — a `perk.local.toml` array **replaces wholesale**. This contrasts with
+`[issues]`/`[compaction]`, which deliberately bypass the overlay (they pick the canonical store).
+The decision rule is reaffirmed: **overlay is safe for session-transient config (a per-user
+worktree setup), unsafe for config that lands in a committed file or picks a canonical store.** See
+`docs/learned/workflow/worktree-lifecycle.md` for the hook's `created`-flag dry-run asymmetry.
 
 ## Change-scoped CI gating: the `[[ci]]` glob convention (#490)
 
@@ -188,4 +219,6 @@ interior-only.
 - `perk/convergence/init.py` — `_converge_settings` / `_converge_compaction` composition
 - `docs/learned/workflow/init-doctor.md` — the managed-convergence SSOT
 - `docs/learned/workflow/provider-seam.md` — the mirrored selection shape
+- `docs/learned/workflow/linear-backend.md` — the consumer side of the local-only `[linear] api_key` reader
+- `docs/learned/workflow/worktree-lifecycle.md` — the `[worktree] setup` hook + the `created`-flag dry-run asymmetry
 - `shared/contracts.md` — the `[trust]` + `[compaction]` cross-plane prose

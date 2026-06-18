@@ -1,6 +1,6 @@
 ---
 title: perk init shelling out to external CLIs (the skills-manifest pattern)
-read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), declaring a committed manifest fragment, pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
+read_when: You are making perk init shell out to an external CLI (skills, gh, …), choosing a failure posture for an external substrate (best-effort vs load-bearing), declaring a committed manifest fragment, promoting an external skill into the managed manifest (the three-SSOT split — PERK_SKILLS / REQUIRED_EXTERNAL_SKILLS / MANAGED_SKILL_NAMES verification SSOT), pinning a ref for self-repo vs consumers, or scoping a cross-repo plan to the perk slice.
 ---
 
 # `perk init` and external CLIs
@@ -126,6 +126,47 @@ exactly what you commit — don't try to "fix" the sync failure. The committed *
 `SKILL.md`** keeps the dev-tree doctor check green (the `is_skill_installed(self_repo=True)`
 fallback), and the test suite runs with **verification disabled** so no real shell runs. (`perk
 init` also writes a gitignored `.pi/perk.local.toml` — never appears in `git status`.)
+
+## Promoting external skills into the managed manifest (the three-SSOT split) (#647)
+
+The skills-delivery surface has **three** constants in `init.py`, each with a distinct meaning —
+editing the wrong one is the trap:
+
+- **`PERK_SKILLS`** — perk-authored skill names only, source `perk`. Add a **perk** skill here.
+- **`REQUIRED_EXTERNAL_SKILLS`** — `(source_key, name)` pairs for non-perk skills perk *requires*,
+  declared from upstream `REQUIRED_SKILL_SOURCES` (a frozen `SkillSource` key/url/ref dataclass).
+  Add a **promoted external** skill here, and its source if new.
+- **`MANAGED_SKILL_NAMES = tuple(sorted({*PERK_SKILLS, *external}))`** — the **verification SSOT**
+  ("every skill perk requires delivered"). **Both verification consumers iterate
+  `MANAGED_SKILL_NAMES`, not `PERK_SKILLS`** (`sync_skills()`'s post-sync missing-loop and
+  `doctor._skills_delivery_check()`'s (c) clause). `bindings.is_skill_installed` is source-agnostic
+  (checks `.agents/skills/<name>/SKILL.md`), so promoting required **no** change there.
+
+- **Idempotency hinges on deterministic ordering.** `_desired_skills_manifest` sorts sources by
+  `.key` and skills by `(source, name)` so the fragment is byte-stable — the `skills-manifest`
+  ManagedConvergence stays a no-op and doctor's byte-for-byte drift compare holds. **Verify a regen
+  via `_desired_skills_manifest(True) == fragment.read_text()`**, not a full `perk init` (which can
+  fail on unrelated worktree state).
+- **Test-substrate ripple.** Promoting external skills to *required* means verified-mode
+  doctor/init tests see them missing unless the healthy-substrate planters cover them. Two planters
+  had to switch `PERK_SKILLS → MANAGED_SKILL_NAMES` (`tests/conftest.py::converge_skills_workspace`,
+  `tests/test_init_t5.py::_install_perk_skills`). **General rule: when widening the verified set,
+  sweep every fixture that plants the "healthy" substrate.**
+- **Gotchas confirmed live:** **dagster tracks `ref: master`** (the one off-default ref — tests
+  assert it). A worktree `perk init` regen can surface a **`conflict`** failure (not the planned
+  first-appearance `missing-skill`) because the worktree's `.agents/skills/` symlinks were already
+  materialized; crucially init reports **"Converged before failure: …perk.yaml: updated"** — the
+  fragment convergence runs **before** the fatal sync, so the regenerated fragment is correct and
+  committable regardless of the sync conflict. **Don't be alarmed by the conflict; check "Converged
+  before failure" and verify the fragment content.**
+- **Posture note:** this is **consumer-visible** — a consumer's `perk init` now clones the new
+  sources (`astral`/`dagster`/`mattpocock`) and fails if any required skill isn't delivered.
+  `mastering-typescript` (source `spillwave`) deliberately stays in the **user-editable**
+  `.agents/manifest.yaml` as the one repo-specific add-on (the skills CLI merges `manifest.yaml` +
+  `manifest.d/*.yaml`).
+- Cross-ref the recurring **"run_ci green ≠ committable"** rule (pre-commit `ruff-format` can
+  collapse a multi-line `"\n".join(...)` after CI passed — re-stage, re-commit) →
+  `docs/learned/toolchain/ruff.md`.
 
 ## Committed declaration vs. transient state — the gitignore boundary
 

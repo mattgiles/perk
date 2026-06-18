@@ -203,6 +203,14 @@ lookup-only path from init/`--fix`'s converge path. Probe results carry only wha
 a verify-gated group that can't run must say *why it stopped* (a single warn check), never
 silently pass.
 
+**The extension-clone concern is a sibling verify-gated reconcile (routing pointer).** Commit-freshness
+detection + repair, the retired `extension-deps` check, and the ref-aware package convergence riding
+`settings-wiring` are now consolidated in `docs/learned/workflow/extension-clone-lifecycle.md` — read
+it when touching extension-clone materialization. The durable cross-cutting lesson: **commit-freshness
+≠ dependency installation** — a correct "nothing to install" check retirement left freshness uncovered
+until a separate fix (#642). When retiring a bundled check, separate the concerns it covered. Don't
+duplicate the clone narrative here.
+
 ## Adding a NEW gated probe beside an existing gated check (#603)
 
 The project-backed objective readiness probe (`check_project_readiness`, a SEPARATE function beside
@@ -283,3 +291,4 @@ the `again.fixed == []` idempotency tests.
 - `extension/doors/selfcheck.ts` — `MANAGED_AGENTS_MARKER`, `readAmbientIndex`, `buildSelfcheckReport`
 - `docs/learned/pi/extension-api.md` — why selfcheck must be a command handler
 - `docs/learned/workflow/linear-backend.md` — the full Linear readiness probe shape
+- `docs/learned/workflow/extension-clone-lifecycle.md` — the extension-clone freshness reconcile, the retired `extension-deps` check, and the ref-aware package convergence (commit-freshness ≠ dependency installation)
