@@ -81,6 +81,26 @@ class TestRequestComposition:
         assert json.loads(seen[0].content)["variables"] == {}
 
 
+class TestViewerId:
+    def test_resolves_and_caches_the_viewer_uuid(self) -> None:
+        client, seen = _client_with_response(body={"data": {"viewer": {"id": "usr-1"}}})
+        assert client.viewer_id() == "usr-1"
+        # cached: a second call issues no further request
+        assert client.viewer_id() == "usr-1"
+        assert len(seen) == 1
+        assert "viewer" in json.loads(seen[0].content)["query"]
+
+    def test_malformed_payload_raises(self) -> None:
+        client, _ = _client_with_response(body={"data": {"viewer": {"id": 7}}})
+        with pytest.raises(IssueBackendError, match="viewer id"):
+            client.viewer_id()
+
+    def test_missing_viewer_raises(self) -> None:
+        client, _ = _client_with_response(body={"data": {"viewer": None}})
+        with pytest.raises(IssueBackendError, match="viewer"):
+            client.viewer_id()
+
+
 class TestGraphQLErrors:
     def test_ratelimited_arrives_as_http_400_with_a_code(self) -> None:
         # The documented rate-limit shape: HTTP 400, extensions.code == "RATELIMITED".

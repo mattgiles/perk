@@ -1390,10 +1390,13 @@ stacking) still wins the start-point verbatim. `reconstruct_plan_ref` carries `b
 local `cache.plan-ref` is absent.
 
 **Label taxonomy (minimal, PRIOR_ART §2/§6):** `perk:plan` (green `1f883d`), `perk:learn` (purple
-`8250df`), `perk:objective` (indigo `5319e7`, description "perk objective issue", since P2.T9), and
+`8250df`), `perk:objective` (indigo `5319e7`, description "perk objective issue", since P2.T9),
+`perk:objective-node` (indigo `5319e7`, on Linear project-backed roadmap node-issues; #669), and
 — since hop-2 — `perk:consolidated` (gray `6e7781`, description "perk learn issue consolidated into
 docs/learned"), each **lazily created** by its gateway create-op on first use (perk never seeds
-labels in `init`). Query by a **single** label — GitHub label filters are AND-semantics.
+labels in `init`). Query by a **single** label — GitHub label filters are AND-semantics. (On
+Linear, `perk init` / `doctor --fix` proactively ensure the five `perk:*` labels at **workspace**
+scope — §8.21.)
 
 **The `pending-learn` semaphore (P1.T5b; Q2/Q5).** An existence-only `cache.markers` file
 (`.pi/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
@@ -1736,7 +1739,7 @@ GitHub readiness is **non-fatal** (`warn`, never `fail`); doctor **never mutates
 **Groups.** `environment` (tools; required tools missing = `fail`; optional tools (e.g. ast-grep)
 missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
-`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the four perk
+`[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the five perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
@@ -3050,9 +3053,11 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
   remediation "export LINEAR_API_KEY (create a personal API key at linear.app Settings →
   Security & access), or set [linear] api_key in .pi/perk.local.toml".
 - `linear-team` — ok: `team <key> found`; failure: warn with the error detail.
-- `linear-labels` — all four perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
-  `perk:objective`): ok; otherwise warn listing the missing names, remediation "run `perk init`
-  or `perk doctor --fix`".
+- `linear-labels` — all five perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
+  `perk:objective`, `perk:objective-node`): ok; otherwise warn listing the missing names,
+  remediation "run `perk init` or `perk doctor --fix`". perk's labels are created
+  **workspace-scoped** (no `teamId` on create — Linear's cross-team-label guidance; the lookup is
+  unscoped, so a pre-existing team-scoped label still counts).
 - `linear-project-scopes` — ok: `Linear Projects accessible`; warn: `Linear Projects not
   accessible` (a non-mutating read probe of `team { projects(first:1) }` — read-access is the
   honest proxy; write/create scope is not probeable without a mutation).
@@ -3070,14 +3075,14 @@ safely auto-create them).
 
 **The `--fix` label repair gesture** (`_fix_linear_labels`, verify-gated like the skills sync —
 network I/O, so never a `ManagedConvergence`): when `fix` AND `verify` AND linear is selected AND
-key + team are available, `check_readiness(..., ensure_labels=True)` ensures the four labels;
+key + team are available, `check_readiness(..., ensure_labels=True)` ensures the five labels;
 created names land on `fixed` (`Linear: created label perk:plan`), failures on `fix_errors`.
 Lookup-first idempotency: a converged workspace reports nothing (the doctor idempotency rule).
 
 **The init readiness step** (`perk/convergence/init.py::_linear_readiness`, verify-gated, non-fatal — the
 GitHub D3 mirror: file convergence already succeeded). Only when `verify` AND the committed
 backend is `"linear"`: missing key/team degrade to an errored `LinearReport`; otherwise the probe
-runs with `ensure_labels=True` (init converges the four perk labels upfront; the lazy write-time
+runs with `ensure_labels=True` (init converges the five perk labels upfront; the lazy write-time
 `ensure_label` calls remain the safety net). Created labels are reported through the
 `LinearReport` (the `--json` `linear` key, §8.5; the human `✓ Linear: <user>, team <key>` line) —
 **never** appended to `InitReport.changes`, which stays a pure filesystem-delta list.
@@ -3484,3 +3489,48 @@ and live-verified, relocated the three Linear docs (`linear-masterplan.md`,
 `the-road-to-using-linear-projects-as-objectives.md`, `linear-smoke-gate.md`) into `docs/planning/`,
 and annotated the two historical memos as realized. No production logic changed. The two drift ops
 above remain the one honest live-unverified residual.
+
+**Idiomatic-Linear amendment (#669) — attribution, attachments, labels, prose-first metadata.**
+Additive, **Linear-only** (every GitHub-backed render path is byte-identical; the only cross-plane
+artifact touched is this contract). perk authenticates with a personal `LINEAR_API_KEY`, so the
+actor is the human user; these changes make perk's footprint read as native:
+
+- **Attribution = the API-key user (the viewer).** `LinearClient.viewer_id()` resolves + caches
+  the viewer UUID (`query { viewer { id } }`, mirroring `team_id` memoization). **Every**
+  perk-created issue (plan, learn, objective-issue, node-issue — all through
+  `_create_issue_raw`) sets `assigneeId` to the viewer, so it appears in the user's *My Issues*;
+  **every** project (`create_project`) sets `leadId` to the viewer.
+- **Project `startDate` at create.** `create_project` sets `startDate` to today (ISO `YYYY-MM-DD`),
+  the prerequisite for Linear's project graph; target date stays unset (perk has no deadline
+  signal).
+- **Project lifecycle → Started on first node work.** `LinearProjectObjectiveStore.update_objective_node`
+  best-effort advances the Project to `started` (`set_project_state`) when a node enters a
+  `started`-type status (planning/in_progress/blocked per `_NODE_STATUS_STATE_TYPE`). Forward-only
+  (it only ever writes `started`; completion is owned by `close_objective`), idempotent, and
+  fail-open (same posture as the workflow-state mirror beside it).
+- **Workspace-scoped perk labels.** `_ensure_label_id` omits `teamId` on create, so the five
+  `perk:*` labels are created at workspace level (Linear's cross-team-label guidance); the lookup
+  is unscoped, so a pre-existing team-scoped label still counts (no duplicate).
+- **The fifth label `perk:objective-node`.** Roadmap node-issues now carry it (additive
+  human-filterability — discovery is still by project membership + the `objective-node` block, so
+  `get_objective` is unaffected). It joins `_PERK_LABELS` (init / `doctor --fix` / readiness ensure
+  it) and is applied at `create_objective`, `add_objective_node`, and node-issue drift-recreation.
+- **Native PR attachments (idempotent by URL).** `_LinearIssueOps.create_attachment(issue_id, *,
+  url, title, subtitle=None)` issues `attachmentCreate` (a sidebar card; re-creating the same URL
+  updates in place — no id to track). `LinearIssueBackend.update_plan_header` posts one
+  best-effort, **fail-open** when the stamped `pr` resolves to a GitHub PR (title `GitHub PR #N`,
+  subtitle the PR state). This single seam covers both a standalone Linear plan issue and a unified
+  node-issue (both stamp `pr` here). The attachment is bookkeeping — a Linear/PR-lookup failure
+  never fails the header stamp.
+- **Prose-first metadata composition.** Linear bodies now render the human prose **first**, the
+  machine blocks after: the project overview is `Reconcilable(prose)` then `objective-header` +
+  `objective-manifest`; node-issues are `description` (prose) then the `objective-node` block.
+  Reads are position-independent (`find_metadata_block` / `replace_reconcilable_section` scan by
+  marker), and the manifest-backfill insert (`_insert_or_replace_manifest`) places the manifest
+  **after** the Reconcilable region. The GitHub `style="html"` `<details>` render is unchanged.
+- **Deferred — the collapsed-toggle render.** Wrapping the Linear metadata blocks in a native
+  collapsible toggle (the true `<details>` analog) depends on an **undocumented** markdown
+  round-trip and is gated on the live smoke gate (`docs/planning/linear-smoke-gate.md` Mode 5).
+  Per the plan's safe-degradation, prose-first ships now and the toggle is deferred until the live
+  round-trip is proven lossless (else dropped). Becoming a true Linear **Agent** (`actor=app`) is a
+  separate, out-of-scope follow-up.

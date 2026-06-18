@@ -126,6 +126,9 @@ class LinearClient:
         # cache automatically — without the op classes composing each other. The client stays
         # team-agnostic at construction, so `_team_id_cache` is keyed by team key.
         self._team_id_cache: dict[str, str] = {}
+        # The API-key user's viewer UUID (the project lead / issue assignee). Resolved once and
+        # memoized, mirroring `_team_id_cache`; the viewer is constant for one API key.
+        self._viewer_id_cache: str | None = None
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         """POST one GraphQL request; return the ``data`` dict or raise ``IssueBackendError``.
@@ -203,6 +206,22 @@ class LinearClient:
         team_id = _require_str(node.get("id"), "team id")
         self._team_id_cache[team_key] = team_id
         return team_id
+
+    def viewer_id(self) -> str:
+        """Resolve (and cache) the API-key user's viewer UUID.
+
+        One ``query { viewer { id } }`` request; the viewer is the human user behind the personal
+        API key, so the id is constant for one client and cached after the first call (mirroring
+        :meth:`team_id`'s memoization). Raises ``IssueBackendError`` on a malformed payload.
+        """
+        cached = self._viewer_id_cache
+        if cached is not None:
+            return cached
+        data = self.request("query { viewer { id } }")
+        viewer = _require_dict(data.get("viewer"), "viewer")
+        viewer_id = _require_str(viewer.get("id"), "viewer id")
+        self._viewer_id_cache = viewer_id
+        return viewer_id
 
     def paginate(
         self, query: str, variables: dict[str, object], *path: str

@@ -1073,7 +1073,7 @@ def _fix_config(root: Path) -> list[str]:
 
 
 def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
-    """The verify-gated `--fix` label repair: ensure the four perk labels in Linear.
+    """The verify-gated `--fix` label repair: ensure the five perk labels in Linear.
 
     Only acts when linear is selected AND key + team are available (otherwise the warn-level
     `linear` group already carries the remediation — nothing repairable here). Idempotent

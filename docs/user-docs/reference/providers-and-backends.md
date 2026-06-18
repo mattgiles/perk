@@ -176,12 +176,15 @@ under GitHub and Linear today.
 ### Ensured labels
 
 The init readiness probe (`check_readiness` / `_PERK_LABELS` in
-`perk/backends/linear_backend.py`) ensures the four perk labels exist on the workspace:
+`perk/backends/linear_backend.py`) ensures the five perk labels exist on the workspace. They are
+created **workspace-scoped** (no `teamId` on create), matching Linear's cross-team-label guidance:
 
 - `perk:plan`
 - `perk:learn`
 - `perk:consolidated`
 - `perk:objective`
+- `perk:objective-node` — on Linear project-backed roadmap node-issues (additive
+  filterability; discovery is still by project membership + the node block)
 
 ### Identifier shapes
 
@@ -215,6 +218,26 @@ when **reconciliation** rewrites the objective prose. Both behaviors are **addit
 non-fatal** — a Linear bookkeeping failure is logged but never breaks a merge or a node
 transition, and neither exists on the GitHub backend. (The `projectUpdateCreate` write was
 **live-verified 2026-06-16** at the Mode-4 smoke run — see the runbook's *Fourth live run* block.)
+
+### Native footprint — attribution, status, attachments, prose-first metadata (#669)
+
+perk authenticates with a personal `LINEAR_API_KEY` (the actor is **you**), and makes its Linear
+footprint read natively. All of the following are **Linear-only** (the GitHub backend is
+unchanged):
+
+- **Attribution.** Every perk-created issue is **assigned to you** (the API-key user, via the
+  cached `LinearClient.viewer_id()`); every objective **Project** has you as **lead** and a
+  **start date** (required for Linear's project graph).
+- **Project lifecycle.** A project-backed objective advances to **Started** when its first node
+  enters a started-type status, and to **Completed** on land — both best-effort/fail-open.
+- **PR attachments.** When a plan's PR is stamped, perk posts a native sidebar **attachment** card
+  (`GitHub PR #N`, subtitle the PR state) — idempotent by URL, so re-stamps update it in place;
+  best-effort/fail-open (it never fails the header write).
+- **Prose-first, unobtrusive metadata.** Linear bodies render the human prose first and perk's
+  inline-code bookkeeping blocks after — no HTML-comment markers or `<details>` artifacts. A
+  native collapsed-toggle wrapper is a pending enhancement (gated on a live round-trip check).
+
+Becoming a true Linear **Agent** (`actor=app`) is a separate, out-of-scope future effort.
 
 ## Known caveats & maturity
 
