@@ -1070,6 +1070,12 @@ class TestCreateObjectiveIssue:
         assert "`perk:objective-reconcilable`" in comment_body
         assert "The objective prose." in comment_body
         assert "<!--" not in comment_body
+        # leads with the copyable `perk objective plan <ENG-N>` callout, above the rendered table
+        assert comment_body.startswith("**Plan the next node:**")
+        assert "perk objective plan ENG-9" in comment_body
+        assert comment_body.index("perk objective plan ENG-9") < comment_body.index(
+            "`perk:roadmap-table`"
+        )
 
         # 3) the captured comment UUID is backfilled into the header (form-preserving)
         [(_, update_vars)] = _queries(fake, "issueUpdate(")
@@ -2359,6 +2365,7 @@ class TestLinearProjectObjectiveStore:
             "teams(filter": [_TEAM_RESPONSE],
             "projects(first": [{"team": {"projects": _page([])}}],  # find_objective dedup miss
             "projectCreate(": [_project_create_ok()],
+            "projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}],
             "projectMilestoneCreate(": [_milestone_create("m-1"), _milestone_create("m-2")],
             "issueCreate(": [
                 _issue_create("ENG-1", "i-1"),
@@ -2432,6 +2439,21 @@ class TestLinearProjectObjectiveStore:
         header = plan.find_metadata_block(content, objective.OBJECTIVE_HEADER_KEY)
         assert header is not None and header["base"] == "develop"
 
+    def test_create_objective_prepends_overview_callout(self) -> None:
+        # A fresh project-backed objective leads its overview with the copyable
+        # `perk objective plan <project-uuid>` callout, written via a post-create projectUpdate.
+        store, fake = _make_project_store(self._create_responses())
+        store.create_objective(
+            title="Big Objective",
+            body=_STORE_BODY,
+            run_id="01RUN",
+            roadmap_nodes=_store_nodes(),
+        )
+        [(_, uvars)] = _queries(fake, "projectUpdate(")
+        content = cast("str", _input_payload(uvars)["content"])
+        assert content.startswith("**Plan the next node:**")
+        assert "perk objective plan proj-1" in content
+
     def test_create_objective_dry_run_writes_nothing(self) -> None:
         store, fake = _make_project_store()
         ref = store.create_objective(
@@ -2464,6 +2486,9 @@ class TestLinearProjectObjectiveStore:
                 "teams(filter": [_TEAM_RESPONSE],
                 "projects(first": [{"team": {"projects": _page([])}}],
                 "projectCreate(": [_project_create_ok()],
+                "projectUpdate(": [
+                    {"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}
+                ],
                 "projectMilestoneCreate(": [_milestone_create("m-1")],
                 "issueCreate(": [_issue_create("ENG-1", "i-1")],
             }
@@ -3047,6 +3072,9 @@ class TestLinearProjectObjectiveStore:
         assert plan.find_metadata_block(desc, objective.OBJECTIVE_NODE_KEY) is not None
         assert "Alpha" in desc
         assert "<!--" not in desc
+        # the node-issue description leads with the copyable `perk impl <ENG-N>` callout
+        assert desc.startswith("**Implement this plan:**")
+        assert "perk impl ENG-1" in desc
         # (2) the plan body is upserted as a single inline-code comment (create path here).
         [(_, cvars)] = _queries(fake, "commentCreate(")
         body = cast("str", _input_payload(cvars)["body"])
@@ -3076,6 +3104,42 @@ class TestLinearProjectObjectiveStore:
         body = cast("str", _input_payload(uvars)["body"])
         assert plan.extract_plan_body(body) == "# New\n\nnew body"
         assert not _queries(fake, "commentCreate(")
+
+    def test_save_node_plan_does_not_duplicate_callout_on_resave(self) -> None:
+        # The node description already carries the `perk impl ENG-1` callout (a prior save); a
+        # re-save must not prepend a second one (idempotent on the command string).
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.IN_PROGRESS, slug="a"
+        )
+        base_desc = cast("str", _node_issue(node, uuid="i-1", identifier="ENG-1")["description"])
+        existing_desc = plan.plan_callout("ENG-1") + "\n\n" + base_desc
+        responses = self._save_node_responses(node=node)
+        responses["issues(first"] = [
+            {
+                "project": {
+                    "issues": _page(
+                        [
+                            {
+                                "id": "i-1",
+                                "identifier": "ENG-1",
+                                "url": "u/ENG-1",
+                                "description": existing_desc,
+                            }
+                        ]
+                    )
+                }
+            }
+        ]
+        store, fake = _make_project_store(responses)
+        store.save_node_plan(
+            objective_id="proj-1",
+            node_id="1.1",
+            header_fields=plan.PlanHeader(run_id="01RUN", created="t").to_data(),
+            plan_markdown="# My Plan\n\nbody\n",
+        )
+        [(_, uvars)] = _queries(fake, "issueUpdate(")
+        desc = cast("str", _input_payload(uvars)["description"])
+        assert desc.count("perk impl ENG-1") == 1
 
     def test_save_node_plan_node_not_found_raises(self) -> None:
         node = objective.ObjectiveNode(
