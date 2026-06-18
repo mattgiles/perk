@@ -65,6 +65,7 @@ over asking when a question is answerable from the code.
 """
 
 [providers]
-plan = "plannotator-plan"
 askuser = "juicesharp-ask-user"
+footer = "perk-footer"
+plan = "plannotator-plan"
 todo = "juicesharp-todo"
