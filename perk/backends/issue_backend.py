@@ -178,6 +178,16 @@ class IssueBackend(Protocol):
         ``plan.PLAN_HEADER_FIELDS`` (LBYL on the schema). A dry run validates + composes only."""
         ...
 
+    def prepend_plan_callout(
+        self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
+    ) -> bool:
+        """Read the plan issue's current description, idempotently prepend ``callout`` above it
+        (via :func:`perk.plan.prepend_callout`, keyed on the literal ``command`` string), and
+        write it back. Returns ``True`` when a write occurred, ``False`` when the callout was
+        already present (idempotent) or on a ``dry_run``. Raises ``IssueBackendError`` on an
+        infra failure."""
+        ...
+
     def get_plan(self, *, issue_id: str) -> PlanState | None:
         """Read a plan issue's observable state (header + PR). The PR is resolved from the
         header's ``pr`` field via the (GitHub-universal) PR tier — legitimate for every backend.

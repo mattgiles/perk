@@ -1016,6 +1016,20 @@ class LinearIssueBackend:
         self._ops._update_issue(issue_id, {"description": new_body}, what="update plan-header")
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
+    def prepend_plan_callout(
+        self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
+    ) -> bool:
+        issue = self._ops._get_issue(issue_id, "id description")
+        description = issue.get("description")
+        body = description if isinstance(description, str) else ""
+        new_body = plan.prepend_callout(body, callout, command=command)
+        if new_body == body:
+            return False
+        if dry_run:
+            return False
+        self._ops._update_issue(issue_id, {"description": new_body}, what="prepend plan callout")
+        return True
+
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
         issue = self._ops._issue_or_none(
             issue_id, "id identifier url title description state { type }"

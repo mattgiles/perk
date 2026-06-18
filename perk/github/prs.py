@@ -185,6 +185,34 @@ def update_plan_header(
     return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
 
+def prepend_plan_callout(
+    *, issue: int, callout: str, command: str, repo_root: Path, dry_run: bool = False
+) -> bool:
+    """Idempotently prepend ``callout`` above the plan issue's description and PATCH it (REST).
+
+    Keyed on the literal ``command`` string (``plan.prepend_callout``): a no-op when the callout
+    is already present. Returns True when a write occurred, False when already present or on a
+    dry run.
+    """
+    body = plans._get_issue_body(issue, repo_root)
+    new_body = plan.prepend_callout(body, callout, command=command)
+    if new_body == body:
+        return False
+    if dry_run:
+        return False
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{issue}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to prepend plan callout on #{issue}")
+    return True
+
+
 def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
     """Find the integer id of the issue comment carrying the ``plan-body`` block (REST list).
 

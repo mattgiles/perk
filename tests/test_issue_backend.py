@@ -95,6 +95,18 @@ class _FakeBackend:
     ) -> issue_backend.PlanHeaderUpdate:
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=dry_run)
 
+    def prepend_plan_callout(
+        self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
+    ) -> bool:
+        from perk import plan
+
+        issue = self._issues[issue_id]
+        new_body = plan.prepend_callout(issue.body, callout, command=command)
+        if new_body == issue.body or dry_run:
+            return False
+        issue.body = new_body
+        return True
+
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
         issue = self._issues.get(issue_id)
         if issue is None:
@@ -219,6 +231,34 @@ class TestFakeBackendConformance:
         backend.upsert_marked_comment(issue_id=ref.id, marker=marker, body=f"{marker}\ndone")
         second = backend.find_comment_id_by_marker(issue_id=ref.id, marker=marker)
         assert second == first  # patched in place, not re-posted
+
+    def test_prepend_plan_callout_idempotent(self) -> None:
+        backend = _make_backend()
+        ref = backend.create_plan_issue(title="t", body="original body", run_id="RUNC")
+        callout = "**Implement this plan:**\n\n```\nperk impl 1\n```\n\n_hint_"
+        wrote = backend.prepend_plan_callout(
+            issue_id=ref.id, callout=callout, command="perk impl 1"
+        )
+        assert wrote is True
+        state = backend.get_plan(issue_id=ref.id)
+        assert state is not None
+        # second call is a no-op (already present)
+        again = backend.prepend_plan_callout(
+            issue_id=ref.id, callout=callout, command="perk impl 1"
+        )
+        assert again is False
+
+    def test_prepend_plan_callout_dry_run_writes_nothing(self) -> None:
+        backend = _make_backend()
+        ref = backend.create_plan_issue(title="t", body="original body", run_id="RUND")
+        wrote = backend.prepend_plan_callout(
+            issue_id=ref.id, callout="CALLOUT", command="perk impl 1", dry_run=True
+        )
+        assert wrote is False
+        again = backend.prepend_plan_callout(
+            issue_id=ref.id, callout="CALLOUT", command="perk impl 1"
+        )
+        assert again is True  # the dry run did not persist the callout
 
     def test_string_ids_everywhere(self) -> None:
         backend = _make_backend()
