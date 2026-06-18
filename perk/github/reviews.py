@@ -154,17 +154,6 @@ class BatchResolveResult:
     results: tuple[ThreadResolveResult, ...]
 
 
-def _owner_repo(repo_root: Path) -> tuple[str, str]:
-    """The ``(owner, repo)`` pair (for GraphQL variables; REST uses gh's auto-fill placeholders)."""
-    proc = _exec._run(
-        ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cwd=repo_root
-    )
-    if proc.returncode != 0 or "/" not in proc.stdout:
-        raise _exec._failed(proc, "failed to resolve owner/repo")
-    owner, _, name = proc.stdout.strip().partition("/")
-    return owner, name
-
-
 def _graphql_proc(
     query: str,
     *,
@@ -263,7 +252,7 @@ def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
     comments (REST). The three sources are kept **separate** (counted apart). Read-only; raises
     ``GitHubError`` on an infra failure. This is what the classify child runs (`perk pr feedback`).
     """
-    owner, repo = _owner_repo(repo_root)
+    owner, repo = _exec._owner_repo(repo_root)
     threads_payload = _graphql(
         GET_PR_REVIEW_THREADS_QUERY,
         repo_root=repo_root,
