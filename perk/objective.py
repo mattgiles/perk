@@ -36,6 +36,13 @@ OBJECTIVE_LABEL = "perk:objective"
 OBJECTIVE_LABEL_COLOR = "5319e7"  # indigo (distinct from plan green / learn purple)
 OBJECTIVE_LABEL_DESCRIPTION = "perk objective issue"
 
+# The roadmap node-issue label (project-backed Linear store): node-issues are discovered by
+# project membership + the `objective-node` block, but the label makes them human-filterable in
+# Linear (additive; never load-bearing for discovery).
+OBJECTIVE_NODE_LABEL = "perk:objective-node"
+OBJECTIVE_NODE_LABEL_COLOR = "5319e7"  # indigo, matching the objective label
+OBJECTIVE_NODE_LABEL_DESCRIPTION = "A perk objective roadmap node (managed by perk)."
+
 OBJECTIVE_HEADER_KEY = "objective-header"
 OBJECTIVE_ROADMAP_KEY = "objective-roadmap"
 # The project-overview drift baseline (Node 4.4 / #612): an authoritative manifest of the intended

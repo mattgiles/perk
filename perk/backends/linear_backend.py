@@ -54,8 +54,9 @@ Explicit deferrals (flagged, not silently omitted):
 
 import re
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -290,12 +291,15 @@ class _LinearIssueOps:
             "mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) "
             "{ success issueLabel { id } } }"
         )
+        # No `teamId`: perk's `perk:*` labels are conceptually workspace-wide (Linear's
+        # issues/labels.md recommends workspace-level labels for cross-team labels), and the
+        # lookup is already unscoped (a workspace label counts), so a team-scoped create would
+        # be a duplicate-name error against an existing workspace label.
         variables: dict[str, object] = {
             "input": {
                 "name": name,
                 "color": _hex_color(color),
                 "description": description,
-                "teamId": self._client.team_id(self._team_key),
             }
         }
         try:
@@ -408,6 +412,10 @@ class _LinearIssueOps:
             "teamId": self._client.team_id(self._team_key),
             "title": title,
             "description": description,
+            # Every perk-created issue (plan, learn, objective-issue, node-issue) is owned by the
+            # API-key user, so it surfaces in their My Issues. The viewer UUID is resolved once
+            # and cached on the client.
+            "assigneeId": self._client.viewer_id(),
         }
         if label_id is not None:
             issue_input["labelIds"] = [label_id]
@@ -496,6 +504,31 @@ class _LinearIssueOps:
         if payload.get("success") is not True:
             raise IssueBackendError(f"failed to update Linear comment {comment_id!r}")
 
+    def create_attachment(
+        self, issue_id: str, *, url: str, title: str, subtitle: str | None = None
+    ) -> None:
+        """Create (or update-in-place) a native sidebar **attachment** on an issue.
+
+        ``attachmentCreate`` is **idempotent by URL** (re-creating the same URL on the same issue
+        updates the existing card — no id to track), so callers may post on every PR stamp without
+        duplicates. ``issue_id`` is the boundary identifier directly (consistent with
+        :meth:`_LinearProjectOps.attach_issue_to_project`), routed through
+        :func:`_request_issue_mutation` for the same not-found mapping; checks ``success``.
+        """
+        mutation = (
+            "mutation($input: AttachmentCreateInput!) { attachmentCreate(input: $input) "
+            "{ success } }"
+        )
+        attachment_input: dict[str, object] = {"issueId": issue_id, "url": url, "title": title}
+        if subtitle is not None:
+            attachment_input["subtitle"] = subtitle
+        data = _request_issue_mutation(
+            self._client, mutation, {"input": attachment_input}, issue_id=issue_id
+        )
+        payload = _require_dict(data.get("attachmentCreate"), "attachmentCreate")
+        if payload.get("success") is not True:
+            raise IssueBackendError(f"failed to create attachment on Linear issue {issue_id!r}")
+
 
 class _LinearProjectOps:
     """The dormant Linear *Projects* substrate (Objective #548, Node 3.1) — the GraphQL ops the
@@ -534,6 +567,11 @@ class _LinearProjectOps:
                 "teamIds": [self._client.team_id(self._team_key)],
                 "name": name,
                 "content": content,
+                # The API-key user owns the objective: project lead. A `startDate` of today
+                # (ISO `YYYY-MM-DD`) is REQUIRED for Linear's project graphs (target date stays
+                # unset — perk has no deadline signal).
+                "leadId": self._client.viewer_id(),
+                "startDate": datetime.now(UTC).date().isoformat(),
             }
         }
         data = self._client.request(mutation, variables)
@@ -1014,7 +1052,32 @@ class LinearIssueBackend:
         if dry_run:
             return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
         self._ops._update_issue(issue_id, {"description": new_body}, what="update plan-header")
+        # Best-effort native PR attachment: when this stamp carries a `pr` that resolves to a
+        # GitHub PR, post (idempotently-by-URL) a sidebar card linking it. Bookkeeping, never
+        # load-bearing — a Linear hiccup or a PR-lookup miss must never fail the header stamp.
+        self._post_pr_attachment(issue_id, fields.get("pr"))
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+    def _post_pr_attachment(self, issue_id: str, pr_field: object) -> None:
+        """Best-effort, fail-open PR attachment. ``pr_field`` is the header `pr` value (a GitHub
+        PR number as str/int, or ``None``). No-op when absent/unresolvable; the single seam covers
+        both a standalone Linear plan issue and a unified node-issue (both stamp `pr` here)."""
+        if not (
+            isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
+        ):
+            return
+        try:
+            pr = self._get_pr(int(pr_field))
+            if pr is None:
+                return
+            self._ops.create_attachment(
+                issue_id,
+                url=pr.url,
+                title=f"GitHub PR #{pr.number}",
+                subtitle=pr.state,
+            )
+        except (IssueBackendError, GitHubError, ValueError):
+            pass
 
     def prepend_plan_callout(
         self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
@@ -1685,9 +1748,12 @@ class LinearProjectObjectiveStore:
                 f"{body.strip()}\n"
                 f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
             )
-            # Transcode the whole overview so the HTML Reconcilable markers become inline-code
-            # sentinels (the 4.1 reconcile splice is dual-encoding and finds them either way).
-            overview = to_linear_markdown(f"{header_block}\n\n{manifest_block}\n\n{reconcilable}\n")
+            # Prose-first composition (Pillar 2): the human Reconcilable prose renders FIRST, the
+            # machine blocks (header + manifest) follow. Reads are position-independent
+            # (find_metadata_block / replace_reconcilable_section scan by marker), so only the
+            # render order changes. Transcode the whole overview so the HTML Reconcilable markers
+            # become inline-code sentinels (the reconcile splice is dual-encoding either way).
+            overview = to_linear_markdown(f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n")
             created = self._projects.create_project(name=title, content=overview)
             project_id = created["id"]
             assert isinstance(project_id, str)
@@ -1720,21 +1786,30 @@ class LinearProjectObjectiveStore:
                 )
 
             # --- one node-issue per node (node-block + description), in node_sort_key order ---
+            # Each node-issue carries the workspace `perk:objective-node` label (resolved once,
+            # then cached): additive human-filterability, never load-bearing for discovery.
+            node_label_id, _ = self._issue_ops._ensure_label_id(
+                objective.OBJECTIVE_NODE_LABEL,
+                color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+                description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+            )
             node_uuid: dict[str, str] = {}
             for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
+                # Prose-first (Pillar 2): the node's prose description renders FIRST, the
+                # `objective-node` block follows (reads scan by marker, position-independent).
                 description = to_linear_markdown(
-                    plan.render_metadata_block(
+                    node.description
+                    + "\n\n"
+                    + plan.render_metadata_block(
                         objective.OBJECTIVE_NODE_KEY,
                         objective.render_node_block(node),
                         style="inline-code",
                     )
-                    + "\n\n"
-                    + node.description
                 )
                 _ref, uuid = self._issue_ops._create_issue_raw(
                     title=objective.node_issue_title(node),
                     description=description,
-                    label_id=None,
+                    label_id=node_label_id,
                     project_id=project_id,
                     milestone_id=phase_milestone[objective.derive_phase(node.id)],
                 )
@@ -1959,6 +2034,15 @@ class LinearProjectObjectiveStore:
                 except IssueBackendError:
                     pass
 
+                # Project lifecycle nudge (Pillar 7): when a node enters a `started`-type status
+                # (planning/in_progress/blocked), advance the project Planned→Started so an active
+                # objective stops displaying as "Planned". Forward-only by construction — this only
+                # ever writes `started`; completion is owned by `close_objective`. Idempotent (a
+                # same-state write is a no-op) and fail-open (same posture as the mirror above).
+                if _NODE_STATUS_STATE_TYPE.get(status.value) == "started":
+                    with suppress(IssueBackendError):
+                        self._projects.set_project_state(objective_id, "started")
+
             return objective_store.ObjectiveNodeUpdate(
                 objective_id=objective_id,
                 node_id=node_id,
@@ -2093,20 +2177,27 @@ class LinearProjectObjectiveStore:
                 project_id=objective_id, name=milestone_name, known=None
             )
 
-            # Materialize the single node-issue (objective-node block + prose), inline-code.
+            # Materialize the single node-issue (objective-node block + prose), inline-code,
+            # carrying the workspace `perk:objective-node` label (mirrors `create_objective`).
+            node_label_id, _ = self._issue_ops._ensure_label_id(
+                objective.OBJECTIVE_NODE_LABEL,
+                color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+                description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+            )
+            # Prose-first (Pillar 2): prose description first, then the `objective-node` block.
             node_description = to_linear_markdown(
-                plan.render_metadata_block(
+                new_node.description
+                + "\n\n"
+                + plan.render_metadata_block(
                     objective.OBJECTIVE_NODE_KEY,
                     objective.render_node_block(new_node),
                     style="inline-code",
                 )
-                + "\n\n"
-                + new_node.description
             )
             _ref, new_uuid = self._issue_ops._create_issue_raw(
                 title=objective.node_issue_title(new_node),
                 description=node_description,
-                label_id=None,
+                label_id=node_label_id,
                 project_id=objective_id,
                 milestone_id=milestone_id,
             )
@@ -2140,19 +2231,22 @@ class LinearProjectObjectiveStore:
 
     def _insert_or_replace_manifest(self, overview: str, data: dict[str, object]) -> str:
         """Upsert the manifest block into an overview: replace in place when present (form-
-        preserving), else insert (inline-code) just before the Reconcilable region."""
+        preserving), else insert (inline-code) just AFTER the Reconcilable region (prose-first:
+        machine blocks follow the human prose; Pillar 2). Falls back to an append when no
+        Reconcilable region is present."""
         if plan.has_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY):
             return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
         block = to_linear_markdown(
             plan.render_metadata_block(objective.OBJECTIVE_MANIFEST_KEY, data, style="inline-code")
         )
         for marker in (
-            to_linear_markdown(objective.OBJECTIVE_RECONCILABLE_MARKER_START),
-            objective.OBJECTIVE_RECONCILABLE_MARKER_START,
+            to_linear_markdown(objective.OBJECTIVE_RECONCILABLE_MARKER_END),
+            objective.OBJECTIVE_RECONCILABLE_MARKER_END,
         ):
             idx = overview.find(marker)
             if idx != -1:
-                return f"{overview[:idx]}{block}\n\n{overview[idx:]}"
+                after = idx + len(marker)
+                return f"{overview[:after]}\n\n{block}{overview[after:]}"
         return f"{overview.rstrip()}\n\n{block}\n"
 
     def _sync_manifest_node_description(
@@ -2511,19 +2605,25 @@ class LinearProjectObjectiveStore:
         milestone_id = self._projects.ensure_phase_milestone(
             project_id=objective_id, name=pinned_name, known=None
         )
+        node_label_id, _ = self._issue_ops._ensure_label_id(
+            objective.OBJECTIVE_NODE_LABEL,
+            color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+            description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+        )
+        # Prose-first (Pillar 2): prose description first, then the `objective-node` block.
         node_description = to_linear_markdown(
-            plan.render_metadata_block(
+            entry.description
+            + "\n\n"
+            + plan.render_metadata_block(
                 objective.OBJECTIVE_NODE_KEY,
                 objective.render_node_block(entry),
                 style="inline-code",
             )
-            + "\n\n"
-            + entry.description
         )
         _ref, uuid = self._issue_ops._create_issue_raw(
             title=objective.node_issue_title(entry),
             description=node_description,
-            label_id=None,
+            label_id=node_label_id,
             project_id=objective_id,
             milestone_id=milestone_id,
         )
@@ -2669,7 +2769,7 @@ class LinearProjectObjectiveStore:
 # `LinearClient`-subclass fake.
 # ===========================================================================
 
-# The four perk labels (name, color, description), the readiness probe ensures/looks up.
+# The five perk labels (name, color, description), the readiness probe ensures/looks up.
 _PERK_LABELS: tuple[tuple[str, str, str], ...] = (
     (plan.PLAN_LABEL, plan.PLAN_LABEL_COLOR, plan.PLAN_LABEL_DESCRIPTION),
     (plan.LEARN_LABEL, plan.LEARN_LABEL_COLOR, plan.LEARN_LABEL_DESCRIPTION),
@@ -2678,6 +2778,11 @@ _PERK_LABELS: tuple[tuple[str, str, str], ...] = (
         objective.OBJECTIVE_LABEL,
         objective.OBJECTIVE_LABEL_COLOR,
         objective.OBJECTIVE_LABEL_DESCRIPTION,
+    ),
+    (
+        objective.OBJECTIVE_NODE_LABEL,
+        objective.OBJECTIVE_NODE_LABEL_COLOR,
+        objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
     ),
 )
 
@@ -2695,13 +2800,13 @@ class LinearReadiness:
 
 
 def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool) -> LinearReadiness:
-    """Probe Linear readiness: viewer auth, team resolution, and the four perk labels.
+    """Probe Linear readiness: viewer auth, team resolution, and the five perk labels.
 
     Report-shaped — every failure mode lands in a ``LinearReadiness`` field (never raises),
     mirroring ``github.check_auth``. Phases short-circuit: an auth failure skips team + labels; a
     team failure skips labels. With ``ensure_labels=False`` (doctor report path) labels are
     looked up only and missing names land in ``missing_labels``; with ``ensure_labels=True``
-    (init + doctor ``--fix``) each label is ensured and names actually created land in
+    (init + doctor ``--fix``) each of the five labels is ensured and names actually created land in
     ``created_labels`` (lookup-first idempotency → a converged workspace reports none).
     """
     # --- auth: one viewer query ---

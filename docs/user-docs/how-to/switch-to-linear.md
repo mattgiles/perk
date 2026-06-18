@@ -50,12 +50,14 @@ labels, identifiers, doctor groups, maturity) is the
 
 3. **Run `perk init --verify`.** This converges the borrowed Linear-tools package
    `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the
-   four perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
-   `perk:objective`.
+   five perk labels on the workspace: `perk:plan`, `perk:learn`, `perk:consolidated`,
+   `perk:objective`, and `perk:objective-node`. perk creates them **workspace-scoped** (not
+   team-scoped), matching Linear's guidance for cross-team labels.
 
 4. **Run `perk doctor` and verify green.** Check the offline `issues-backend` check (selection +
    `team`) and the verify-gated `linear` group: `linear-auth`, `linear-team`, `linear-labels`,
-   `linear-project-scopes`, `linear-workflow-states`. These network probes are always non-fatal
+   `linear-project-scopes`, `linear-workflow-states` (`linear-labels` now covers all **five** perk
+   labels). These network probes are always non-fatal
    `warn`, so read them to confirm auth and labels resolved. The last two confirm Project
    read-access and the workflow states the node-status board mirror needs for project-backed
    objectives.
@@ -67,6 +69,25 @@ Once Linear is the backend, issue identifiers become **strings** (`ENG-123`) ins
 
 - the worktree / branch name — `plan-ENG-123`,
 - the land squash-commit footer — `Plan: ENG-<n> — <url>` (no `Closes #N`).
+
+perk also makes its Linear footprint read natively, rather than as a foreign body:
+
+- **Attribution.** Every perk-created issue (plan, learn, objective, roadmap node) is **assigned
+  to you** (the API-key user), so it shows up in your *My Issues*; every objective **Project** has
+  you as its **lead** and a **start date** (which Linear's project graph requires).
+- **Project status.** A project-backed objective advances to **In Progress** automatically when
+  its first node starts, and to **Completed** when the objective lands.
+- **Roadmap labels.** Roadmap node-issues carry the `perk:objective-node` label so you can filter
+  them in Linear (they're still discovered by project membership, so the label is purely for you).
+- **PR links as attachments.** When a plan's PR is stamped, perk posts a native **sidebar
+  attachment** card (`GitHub PR #N`) on the Linear issue, updated in place on every push.
+- **Unobtrusive metadata.** perk's bookkeeping blocks render **below** the human prose (prose
+  first) in inline-code form — no raw HTML-comment markers, no `<details>` artifacts. (A native
+  collapsed-toggle wrapper is a pending enhancement, gated on a live round-trip check; until then
+  the blocks render prose-first but expanded.)
+
+These are all **Linear-only**; the GitHub backend is unchanged. perk authenticates as **you** (a
+personal API key), not as a Linear Agent — full Agent integration is a separate, future effort.
 
 ## Switching back
 

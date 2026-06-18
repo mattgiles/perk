@@ -60,6 +60,11 @@ class _FakeLinear(LinearClient):
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._responses = {key: list(queue) for key, queue in (responses or {}).items()}
         self._team_id_cache: dict[str, str] = {}
+        # Pre-seeded so `viewer_id()` resolves without a scripted `viewer` arm on every
+        # issue/project create (the request path is covered by `test_linear.py` against a
+        # MockTransport and by the stateful `FakeLinearWorkspace`). `assigneeId`/`leadId`
+        # assertions use this sentinel.
+        self._viewer_id_cache: str | None = "viewer-1"
 
     def request(self, query: str, variables: dict[str, object] | None = None) -> dict[str, object]:
         self.requests.append((query, variables or {}))
@@ -198,7 +203,7 @@ class TestEnsureLabel:
         assert label == issue_backend.Label(name="perk:plan", created=False)
         assert not _queries(fake, "issueLabelCreate(")
 
-    def test_absent_label_created_team_scoped_with_hash_color(self) -> None:
+    def test_absent_label_created_workspace_scoped_with_hash_color(self) -> None:
         backend, fake = _make_backend(
             {
                 "teams(filter": [_TEAM_RESPONSE],
@@ -211,11 +216,11 @@ class TestEnsureLabel:
         label = backend.ensure_label("perk:plan", color="1f883d", description="d")
         assert label == issue_backend.Label(name="perk:plan", created=True)
         [(_, variables)] = _queries(fake, "issueLabelCreate(")
+        # Workspace-scoped: NO teamId (perk's labels are conceptually workspace-wide).
         assert variables["input"] == {
             "name": "perk:plan",
             "color": "#1f883d",
             "description": "d",
-            "teamId": "team-1",
         }
 
     def test_duplicate_create_race_relooks_up(self) -> None:
@@ -563,7 +568,9 @@ class TestPlanUpserts:
             backend.update_plan_header(issue_id="iss-1", fields={"nope": 1})
         assert fake.requests == []
 
-    def test_update_plan_header_merges_form_preserving(self) -> None:
+    def test_update_plan_header_merges_form_preserving(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         description = _inline_plan_description("01HDR")
         backend, fake = _make_backend(
             {
@@ -571,6 +578,8 @@ class TestPlanUpserts:
                 "issueUpdate(": [{"issueUpdate": {"success": True}}],
             }
         )
+        # No PR resolves → no attachment attempt (the attachment path is its own test).
+        monkeypatch.setattr(github, "get_pr", lambda **k: None)
         update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
         assert update == issue_backend.PlanHeaderUpdate(fields_updated=("pr",), dry_run=False)
         [(_, variables)] = _queries(fake, "issueUpdate(")
@@ -580,6 +589,66 @@ class TestPlanUpserts:
         assert "<!--" not in new_description and "<details>" not in new_description
         header = plan.find_metadata_block(new_description, plan.PLAN_HEADER_KEY)
         assert header is not None and header["pr"] == "12" and header["run_id"] == "01HDR"
+
+    def test_update_plan_header_posts_pr_attachment(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        backend, fake = _make_backend(
+            {
+                "issue(id": [
+                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
+                ],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "attachmentCreate(": [{"attachmentCreate": {"success": True}}],
+            }
+        )
+        monkeypatch.setattr(
+            github,
+            "get_pr",
+            lambda **k: github.PullRequest(
+                number=12,
+                url="https://github.com/o/r/pull/12",
+                state="OPEN",
+                is_draft=True,
+                existed=True,
+            ),
+        )
+        backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
+        [(_, variables)] = _queries(fake, "attachmentCreate(")
+        payload = _input_payload(variables)
+        assert payload["issueId"] == "iss-1"
+        assert payload["url"] == "https://github.com/o/r/pull/12"
+        assert payload["title"] == "GitHub PR #12"
+        assert payload["subtitle"] == "OPEN"
+
+    def test_update_plan_header_attachment_is_fail_open(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The PR lookup raising must NOT fail the header stamp (attachment is bookkeeping).
+        backend, fake = _make_backend(
+            {
+                "issue(id": [
+                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
+                ],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        monkeypatch.setattr(
+            github, "get_pr", lambda **k: (_ for _ in ()).throw(GitHubError("gh exploded"))
+        )
+        update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
+        assert update.dry_run is False  # the header write committed
+        assert not _queries(fake, "attachmentCreate(")  # no attachment posted
+
+    def test_update_plan_header_no_pr_posts_no_attachment(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "issue(id": [
+                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
+                ],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        backend.update_plan_header(issue_id="iss-1", fields={"branch": "plan-ENG-1"})
+        assert not _queries(fake, "attachmentCreate(")
 
     def test_update_plan_header_dry_run_composes_only(self) -> None:
         backend, fake = _make_backend(
@@ -1645,7 +1714,7 @@ class TestCheckReadiness:
         )
         # Lookup-only: no create mutation issued under ensure_labels=False.
         assert not _queries(fake, "issueLabelCreate")
-        assert len(_queries(fake, "issueLabels(filter")) == 4
+        assert len(_queries(fake, "issueLabels(filter")) == 5
 
     def test_missing_labels_reported(self) -> None:
         fake = _FakeLinear(
@@ -1661,6 +1730,7 @@ class TestCheckReadiness:
             plan.LEARN_LABEL,
             plan.CONSOLIDATED_LABEL,
             objective.OBJECTIVE_LABEL,
+            objective.OBJECTIVE_NODE_LABEL,
         )
         assert readiness.created_labels == ()
         assert readiness.error is None
@@ -1680,9 +1750,10 @@ class TestCheckReadiness:
             plan.LEARN_LABEL,
             plan.CONSOLIDATED_LABEL,
             objective.OBJECTIVE_LABEL,
+            objective.OBJECTIVE_NODE_LABEL,
         )
         assert readiness.missing_labels == ()
-        assert len(_queries(fake, "issueLabelCreate")) == 4
+        assert len(_queries(fake, "issueLabelCreate")) == 5
 
     def test_ensure_labels_preexisting_reports_none(self) -> None:
         # The genuine-delta rule: lookup-first idempotency → a converged workspace creates none.
@@ -2215,6 +2286,50 @@ class TestLinearProjectOps:
         [(_, variables)] = _queries(fake, "issueCreate(")
         assert _input_payload(variables)["labelIds"] == ["lbl-1"]
 
+    def test_create_issue_assigns_the_viewer(self) -> None:
+        ops, fake = _make_issue_ops(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "i-1", "identifier": "ENG-1", "url": "u"},
+                        }
+                    }
+                ],
+            }
+        )
+        ops._create_issue(title="T", description="D")
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        assert _input_payload(variables)["assigneeId"] == "viewer-1"
+
+    def test_create_attachment_sends_idempotent_card_input(self) -> None:
+        ops, fake = _make_issue_ops(
+            {"attachmentCreate(": [{"attachmentCreate": {"success": True}}]}
+        )
+        ops.create_attachment("ENG-1", url="u/pr/9", title="GitHub PR #9", subtitle="OPEN")
+        [(_, variables)] = _queries(fake, "attachmentCreate(")
+        assert _input_payload(variables) == {
+            "issueId": "ENG-1",
+            "url": "u/pr/9",
+            "title": "GitHub PR #9",
+            "subtitle": "OPEN",
+        }
+
+    def test_create_attachment_omits_absent_subtitle(self) -> None:
+        ops, fake = _make_issue_ops(
+            {"attachmentCreate(": [{"attachmentCreate": {"success": True}}]}
+        )
+        ops.create_attachment("ENG-1", url="u/pr/9", title="GitHub PR #9")
+        [(_, variables)] = _queries(fake, "attachmentCreate(")
+        assert "subtitle" not in _input_payload(variables)
+
+    def test_create_attachment_failure_raises(self) -> None:
+        ops, _ = _make_issue_ops({"attachmentCreate(": [{"attachmentCreate": {"success": False}}]})
+        with pytest.raises(IssueBackendError, match="failed to create attachment"):
+            ops.create_attachment("ENG-1", url="u", title="t")
+
 
 def _make_project_store(
     responses: dict[str, list[object]] | None = None,
@@ -2367,6 +2482,11 @@ class TestLinearProjectObjectiveStore:
             "projectCreate(": [_project_create_ok()],
             "projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}],
             "projectMilestoneCreate(": [_milestone_create("m-1"), _milestone_create("m-2")],
+            # The `perk:objective-node` label: looked up (absent) then created once (cached).
+            "issueLabels(filter": [_LABEL_ABSENT],
+            "issueLabelCreate(": [
+                {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+            ],
             "issueCreate(": [
                 _issue_create("ENG-1", "i-1"),
                 _issue_create("ENG-2", "i-2"),
@@ -2394,6 +2514,14 @@ class TestLinearProjectObjectiveStore:
         assert "Objective prose here." in content
         assert "roadmap-table" not in content
         assert "<!--" not in content  # fully transcoded to inline-code sentinels
+        # prose-first: the human Reconcilable prose precedes the machine header/manifest blocks
+        assert content.index("Objective prose here.") < content.index(
+            "`perk:metadata-block:objective-header`"
+        )
+        # the API-key user is the project lead, and a startDate is set (required for the graph)
+        pinput = _input_payload(pvars)
+        assert pinput["leadId"] == "viewer-1"
+        assert isinstance(pinput["startDate"], str) and pinput["startDate"]
 
         # (b) one milestone per phase, enriched names from the body headers
         mvars = [_input_payload(v) for _, v in _queries(fake, "projectMilestoneCreate(")]
@@ -2403,12 +2531,15 @@ class TestLinearProjectObjectiveStore:
         # create path's network calls byte-identical — NO extra `project_milestones` read.
         assert not _queries(fake, "projectMilestones(")
 
-        # (c) one issue per node, in node_sort_key order, projectId + milestone, no labelIds
+        # (c) one issue per node, in node_sort_key order, projectId + milestone, node label
         ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
         assert [v["title"] for v in ivars] == ["1.1: alpha", "1.2: beta", "2.1: gamma"]
         assert [v.get("projectMilestoneId") for v in ivars] == ["m-1", "m-1", "m-2"]
         assert all(v["projectId"] == "proj-1" for v in ivars)
-        assert all("labelIds" not in v for v in ivars)
+        # node-issues carry the workspace `perk:objective-node` label (additive filterability)
+        assert all(v["labelIds"] == ["lbl-node"] for v in ivars)
+        # every perk-created issue is assigned to the API-key user (the viewer)
+        assert all(v["assigneeId"] == "viewer-1" for v in ivars)
         # node block + description embedded in the issue description
         assert "`perk:metadata-block:objective-node`" in cast("str", ivars[0]["description"])
         assert "Alpha" in cast("str", ivars[0]["description"])
@@ -2490,6 +2621,10 @@ class TestLinearProjectObjectiveStore:
                     {"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}
                 ],
                 "projectMilestoneCreate(": [_milestone_create("m-1")],
+                "issueLabels(filter": [_LABEL_ABSENT],
+                "issueLabelCreate(": [
+                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+                ],
                 "issueCreate(": [_issue_create("ENG-1", "i-1")],
             }
         )
@@ -2750,6 +2885,8 @@ class TestLinearProjectObjectiveStore:
         ]
         responses["teams(filter"] = [_TEAM_RESPONSE]
         responses["team(id"] = [_STATES_WITH_STARTED]
+        # the project lifecycle nudge: in_progress maps to a `started`-type → Planned→Started
+        responses["projectUpdate("] = [{"projectUpdate": {"success": True}}]
         store, fake = _make_project_store(responses)
         result = store.update_objective_node(
             objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
@@ -2766,6 +2903,9 @@ class TestLinearProjectObjectiveStore:
         assert "<!--" not in desc  # form preserved: inline-code, no HTML markers
         # (2) the best-effort workflow-state mirror sets the mapped `started` state
         assert updates[1] == {"stateId": "state-doing"}
+        # (3) the project lifecycle nudge advances the project Planned→Started
+        [(_, pvars)] = _queries(fake, "projectUpdate(")
+        assert _input_payload(pvars) == {"state": "started"}
 
     def test_update_objective_node_mirror_fail_open(self) -> None:
         node = objective.ObjectiveNode(
@@ -2779,6 +2919,8 @@ class TestLinearProjectObjectiveStore:
         ]
         responses["teams(filter"] = [_TEAM_RESPONSE]
         responses["team(id"] = [_STATES_WITH_STARTED]
+        # the lifecycle nudge fires after the (failed) mirror; it is independently fail-open
+        responses["projectUpdate("] = [{"projectUpdate": {"success": False}}]
         store, fake = _make_project_store(responses)
         result = store.update_objective_node(
             objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
@@ -2843,6 +2985,10 @@ class TestLinearProjectObjectiveStore:
                 "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
                 "inverseRelations(": [_blocked_by()],
                 "projectMilestoneCreate(": [_milestone_create("m-2")],
+                "issueLabels(filter": [_LABEL_ABSENT],
+                "issueLabelCreate(": [
+                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+                ],
                 "issueCreate(": [_issue_create("ENG-22", "i-22")],
                 "project(id": [
                     {
@@ -2869,10 +3015,15 @@ class TestLinearProjectObjectiveStore:
         payload = _input_payload(ivars)
         assert payload["projectId"] == "proj-1"
         assert payload["projectMilestoneId"] == "m-2"
+        assert payload["labelIds"] == ["lbl-node"]  # workspace perk:objective-node label
         description = cast("str", payload["description"])
         assert "`perk:metadata-block:objective-node`" in description
         assert "Beta work" in description
         assert "<!--" not in description  # inline-code form
+        # prose-first: the node prose precedes the objective-node block
+        assert description.index("Beta work") < description.index(
+            "`perk:metadata-block:objective-node`"
+        )
         # no depends_on -> no blocking relations
         assert not _queries(fake, "issueRelationCreate(")
 
@@ -2896,6 +3047,10 @@ class TestLinearProjectObjectiveStore:
                 "projectMilestones(first": [{"project": {"projectMilestones": _page([])}}],
                 "inverseRelations(": [_blocked_by()],
                 "projectMilestoneCreate(": [_milestone_create("m-2")],
+                "issueLabels(filter": [_LABEL_ABSENT],
+                "issueLabelCreate(": [
+                    {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+                ],
                 "issueCreate(": [_issue_create("ENG-22", "i-22")],
                 "issueRelationCreate(": [_relation_create_ok()],
                 "project(id": [

@@ -73,12 +73,15 @@ class FakeLinearWorkspace(LinearClient):
         self.projects: dict[str, dict[str, object]] = {}  # uuid -> project
         self.milestones: dict[str, dict[str, object]] = {}  # uuid -> {id, name, project_id}
         self.relations: list[tuple[str, str]] = []  # (blocker_uuid, blocked_uuid)
+        # idempotent-by-URL attachments: (issue_uuid, url) -> {title, subtitle}
+        self.attachments: dict[tuple[str, str], dict[str, object]] = {}
         self.requests: list[tuple[str, dict[str, object]]] = []
         self._seq = itertools.count(1)
         self._clock = itertools.count(1)
         # Subclasses LinearClient (no super().__init__) to inherit the shared team_id/paginate
-        # machinery driven by this scripted request; init the team cache directly.
+        # machinery driven by this scripted request; init the id caches directly.
         self._team_id_cache: dict[str, str] = {}
+        self._viewer_id_cache: str | None = None
 
     # ------------------------------------------------------------------ state helpers
 
@@ -113,6 +116,10 @@ class FakeLinearWorkspace(LinearClient):
         ids = cast("list[str]", issue["label_ids"])
         return {name for name, label_id in self.labels.items() if label_id in ids}
 
+    def attachments_of(self, issue: dict[str, object]) -> list[dict[str, object]]:
+        """Attachment cards on an issue (by its UUID)."""
+        return [v for (iid, _url), v in self.attachments.items() if iid == issue["id"]]
+
     def comments_of(self, issue: dict[str, object]) -> list[dict[str, object]]:
         return cast("list[dict[str, object]]", issue["comments"])
 
@@ -137,6 +144,8 @@ class FakeLinearWorkspace(LinearClient):
             "description": payload.get("description", ""),
             "state_id": "st-todo",
             "label_ids": list(cast("list[str]", payload.get("labelIds", []))),
+            # Every perk-created issue is assigned to the API-key user (the viewer).
+            "assignee_id": payload.get("assigneeId"),
             # node-issues (project-backed objectives) carry a projectId; plan/learn issues None.
             "project_id": payload.get("projectId"),
             "milestone_id": payload.get("projectMilestoneId"),
@@ -359,7 +368,10 @@ class FakeLinearWorkspace(LinearClient):
                 "url": f"https://linear.app/test/project/{pid}",
                 "name": payload.get("name", ""),
                 "content": payload.get("content", ""),
-                "state": "started",
+                # Default "planned": create sets no live state; the started nudge moves it on work.
+                "state": "planned",
+                "lead_id": payload.get("leadId"),
+                "start_date": payload.get("startDate"),
             }
             self.projects[pid] = project
             return {
@@ -390,6 +402,15 @@ class FakeLinearWorkspace(LinearClient):
                     "projectMilestone": {"id": mid, "name": payload.get("name", "")},
                 }
             }
+        if "attachmentCreate(" in query:
+            payload = cast("dict[str, object]", v["input"])
+            issue = self._issue_for_mutation(str(payload.get("issueId", "")))
+            key = (str(issue["id"]), str(payload["url"]))  # idempotent by (issue, url)
+            self.attachments[key] = {
+                "title": payload.get("title"),
+                "subtitle": payload.get("subtitle"),
+            }
+            return {"attachmentCreate": {"success": True}}
         if "issueRelationCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
             blocker = str(payload["issueId"])
@@ -526,10 +547,15 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         assert header is not None and header["run_id"] == "01OBJRUN"
         assert "roadmap-table" not in overview  # roadmap is node-issues, not an overview table
         node_issue = ws.issue_by_identifier("ENG-1")  # the single node 1.1 → node-issue ENG-1
-        assert ws.label_names(node_issue) == set()  # node-issues carry no perk label
+        # node-issues carry the workspace `perk:objective-node` label (additive filterability)
+        assert ws.label_names(node_issue) == {objective.OBJECTIVE_NODE_LABEL}
+        assert str(node_issue["assignee_id"]) == "u1"  # assigned to the API-key user (viewer)
         assert (
             plan.find_metadata_block(str(node_issue["description"]), "objective-node") is not None
         )
+        # the project has the API-key user as lead and a startDate (Linear's graph prerequisite)
+        assert project["lead_id"] == "u1"
+        assert isinstance(project["start_date"], str) and project["start_date"]
 
         # --- plan-save: create + node link ---------------------------------------------------
         (root / "plan.md").write_text(_PLAN_MD, encoding="utf-8")
@@ -560,7 +586,9 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         # exactly one issue exists — the original node-issue (no second plan issue minted)
         assert [str(i["identifier"]) for i in ws.issues.values()] == ["ENG-1"]
         node_issue = ws.issue_by_identifier("ENG-1")
-        assert ws.label_names(node_issue) == set()
+        # the node-issue keeps its `perk:objective-node` label; no `perk:plan` label is added
+        # (the node-issue IS the plan under unification)
+        assert ws.label_names(node_issue) == {objective.OBJECTIVE_NODE_LABEL}
         desc = str(node_issue["description"])
         assert "<!--" not in desc
         # the plan-header merged into the node-issue description; the objective-node block intact

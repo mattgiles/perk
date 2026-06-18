@@ -283,6 +283,53 @@ block, one row per gate). If a gate trips a backend defect, record it as a dated
 open a follow-up issue** (the #562 precedent) — do **not** fix substantive code in this node;
 correct only stale command references / runbook drift inline.
 
+## Mode 5 — idiomatic Linear footprint (#669)
+
+Validates the additive, **Linear-only** native-footprint changes (#669): attribution, project
+start date + lifecycle, workspace-scoped labels, the `perk:objective-node` label, PR attachments,
+prose-first metadata, and — the one genuinely undocumented mechanism — whether Linear's
+**collapsible-toggle markdown round-trips** so the metadata sentinels survive. The offline suite
+(`tests/test_linear.py`, `tests/test_linear_backend.py`, `tests/test_linear_lifecycle.py`) already
+pins request composition and prose-first ordering; this gate covers what no fake can prove.
+
+Run against team `PER` from perk's own repo (the documented firing mechanism), with
+`[issues] backend = "linear"`, `team = "PER"`, and `LINEAR_API_KEY` exported.
+
+Run a full project-backed objective lifecycle (Mode 4's setup) and additionally verify:
+
+1. **Workspace-label permission (gate 5.1).** `perk doctor --fix` (or `perk init --verify`) creates
+   any missing perk labels with **no `teamId`** (workspace-scoped). Confirm the create succeeds for
+   the API-key user; if Linear rejects a workspace-level label create, record it and the fallback
+   is a one-line re-add of `teamId` in `_ensure_label_id`.
+2. **The five labels incl. `perk:objective-node` (gate 5.2).** After convergence, all five
+   `perk:*` labels exist; roadmap node-issues carry `perk:objective-node`.
+3. **Lead / assignee / startDate (gate 5.3).** The objective **Project** shows the API-key user as
+   **lead** and a **start date**; every perk-created issue (plan, learn, objective, node) is
+   **assigned** to that user (appears in *My Issues*).
+4. **Project status transitions (gate 5.4).** The Project shows **In Progress** after a node
+   enters a started-type status, and **Completed** after the objective lands.
+5. **PR attachment (gate 5.5).** After `/submit`, the node-issue (or standalone plan issue) shows a
+   native sidebar **attachment** card titled `GitHub PR #N`. Re-stamp (`/land` re-runs the
+   header stamp) and confirm the card **updates in place** (idempotent by URL — no duplicate).
+6. **Prose-first metadata (gate 5.6).** The project overview leads with the human prose; the
+   `objective-header`/`objective-manifest` blocks follow. Node-issue bodies lead with the node
+   prose, the `objective-node` block after. No `<!-- … -->` or `<details>` artifacts.
+7. **THE collapsible round-trip — the keep/drop decision (gate 5.7).** *Currently deferred — the
+   #669 implementation shipped prose-first only and did **not** wire a collapsible toggle, because
+   no live key was available to probe the round-trip.* When run: on a throwaway Linear issue,
+   write a metadata block wrapped in a candidate collapsible markdown form (starting hypothesis:
+   the `+++`/`>>>`-prefixed collapsible-section syntax), then **read it back** and check (a) the
+   Linear UI renders it **collapsed** AND (b) `plan.find_metadata_block` still parses the block
+   (the inline-code sentinels survived the ProseMirror round-trip). **If a lossless form exists**,
+   wire it into `render_metadata_block` + `to_linear_markdown` in lockstep (preserving the
+   renderer↔transcoder byte-identity invariant) and ship it. **If no lossless form exists**, leave
+   prose-first as the final design and record the drop. Record the exact markdown probed and the
+   verdict here.
+
+Append the run's findings to **Recorded observations** as a dated **Fifth live run** block (one row
+per gate). Record any backend defect as a dated observation and open a follow-up — do not fix
+substantive code at the gate.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
