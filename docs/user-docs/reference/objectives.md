@@ -116,6 +116,13 @@ sections an operator can read with `gh issue view N`:
   prose**, where the prose is the marker-bounded **Reconcilable** region. Reconcile rewrites only
   this Reconcilable region; the table and any **Immutable** notes are never touched.
 
+When an objective is first created, perk prepends a **copyable command callout** to the top of its
+human-readable surface — the `objective-body` comment (GitHub / Linear issue-backed) or the Project
+**overview** (Linear project-backed) — a one-click-copy ` ```perk objective plan <id>``` ` block
+(where `<id>` is the objective's ref id: the GitHub number, a Linear `ENG-N` identifier, or the
+Project UUID). Opening the objective surfaces the exact command to plan its next actionable node. It
+is added once and sits above every metadata block, so reconciles and table re-renders preserve it.
+
 ### The manifest (Linear-Project objectives only)
 
 A Linear objective is a **Project**, not an issue — its roadmap is *observed* state (one node-issue

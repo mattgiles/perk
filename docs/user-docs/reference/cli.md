@@ -153,6 +153,12 @@ target branch is *derived* at save time (the linked objective's base → `[workf
 GitHub default) and pinned — there is no `--base` flag here; see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md).
 
+When a plan issue is first created, perk prepends a **copyable command callout** to the top of the
+issue body — a one-click-copy ` ```perk impl <id>``` ` block (where `<id>` is the plan's ref id:
+the GitHub issue number, a Linear `ENG-N` identifier, or a Linear project UUID) — so opening the
+plan surfaces the exact command to start implementing it. It renders with a copy button on both
+GitHub and Linear and is added only once (re-saving never duplicates it).
+
 ### `perk plan resume PLAN`
 
 Resume `PLAN` (a plan issue id) at its current lifecycle stage, relaunching it with fresh context.

@@ -1104,6 +1104,9 @@ create_pr{ head, base, title, body, draft }         -> PullRequest{ number, url,
 update_plan_header{ issue, fields }                 -> PlanHeaderUpdate{ fields_updated[], dry_run }
     # GET issue body -> merge fields into the plan-header block -> PATCH .../issues/{n}
     # rejects unknown header keys (LBYL on the schema); submit sets branch/pr/lifecycle_stage=impl
+prepend_plan_callout{ issue, callout, command }     -> bool (#664)
+    # GET issue body -> plan.prepend_callout(body, callout, command=) -> PATCH .../issues/{n}
+    # idempotent on `command`; True iff a write occurred (False when already present / dry-run)
 get_plan{ number }                                  -> PlanState{ number, url, title, header, pr, state } | null
     # gh issue view --json (+ pulls/{n} when the header carries pr); the `perk resume` read (T5c).
     # `state` is the issue's OPEN/CLOSED state (the `replan` OPEN guard reads it).
@@ -1346,6 +1349,22 @@ block; the full plan markdown lives in the `plan-body` first comment:
                                # null ⇒ fall back to the GitHub default branch
 ```
 
+**The copyable command callout (#664).** A freshly-created plan issue's **body/description** (which
+otherwise holds only the hidden `plan-header` block) now **leads with a visible, copyable command
+callout** — a bold label, a bare fenced ` ```perk impl <id>``` ` block (GitHub/Linear render a
+one-click copy button), and an italic hint. It is injected on the **fresh standalone-create** path
+of `plan save` (in `_plan_save_impl`, via the new `IssueBackend.prepend_plan_callout`) with the
+**server-assigned** id (`issue.id`), since that id is only known post-create. `<id>` is the
+artifact's own ref id (GitHub number, Linear `ENG-N`, or — for project-backed objectives — the raw
+project UUID), all already accepted by `parse_plan_id`/`parse_objective_id`. The callout is pure
+portable Markdown (no HTML/`<details>`/perk sentinels), so `to_linear_markdown` passes it through
+unchanged. It is **idempotent** (keyed on the literal command string — no duplicate on re-save) and
+sits **structurally above** the `plan-header` block, so `extract_run_id`/header parsing and the
+submit-time `update_plan_header` rewrite (which touches only the header block) are unaffected.
+Forward-only: artifacts created before #664 are not retro-fitted. For the Linear **project node↔plan
+unified** plan the same `perk impl <ENG-N>` callout is folded into the node-issue description by
+`save_node_plan` (no extra write).
+
 **The pinned base (`base`, #633).** A plan or objective can declare a **non-default target
 branch**. `perk plan save` resolves the effective base **once** — the linked objective's own
 `base` (the `objective-header` `base`, the source of truth for its node plans) → the repo's
@@ -1400,6 +1419,17 @@ its block engine); the GitHub writes live in `perk/github/objectives.py`; the co
   columns are omitted from the serialization unless some node specifies them.
 - `objective-body` (first comment) — the human-readable rendered roadmap table (marker-bounded by
   `<!-- perk:roadmap-table -->`, deterministically re-rendered from the frontmatter) + prose.
+
+**The copyable command callout (#664).** An objective's human-readable surface — the `objective-body`
+comment (issue-backed) / the project **overview** (Linear project-backed) — now **leads with a
+visible, copyable ` ```perk objective plan <id>``` ` callout** (bold label + fenced block + italic
+hint), the objective sibling of the plan callout. For an issue-backed objective the callout is folded
+into the `objective-body` comment at compose time (the `created.number`/`created.id` is known before
+the comment is posted — **no extra write**); for a Linear project-backed objective it is written into
+the overview with one post-create `update_project_content` (the project UUID is only known after
+`create_project`). It is idempotent (keyed on the command string), pure portable Markdown, and sits
+**above** every metadata/marker block, so the table re-render and the §8.4 reconcile splice (which
+work strictly between markers) preserve it.
 
 **Explicit-status-only (foundation open #3).** A node's `status` is **never inferred from a PR
 column** — `update_node` takes `status` verbatim or preserves it; setting `pr` never changes
