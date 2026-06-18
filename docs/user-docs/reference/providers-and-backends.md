@@ -56,6 +56,8 @@ foreign providers are first-class selections, not experiments.
 | `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
 | `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
 | `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
+| `pi-status-footer` | `footer` | | REPLACE (vacate-only) | `npm:@tombell/pi-status` |
+| `pi-default` | `footer` | | install nothing (pi stock footer) | _(none)_ |
 | `pi-web-access` | `web` | ✅ | reference (foreign package) | `npm:pi-web-access` |
 | `ollama-web-search` | `web` | | REPLACE (vacate-only) | `npm:@ollama/pi-web-search` |
 | `juicesharp-web-tools` | `web` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-web-tools` |
@@ -88,15 +90,22 @@ How perk yields its own surface to a selected foreign provider differs by provid
   registration time**: `registerAskUser` registers **nothing**, leaving the foreign tool as the
   sole `ask_user_question`. There is **no adapter shim** (`adapter: null`); the foreign tool
   self-documents via its own guidelines.
-- **REPLACE / vacate-only (`powerline-footer`, `pi-bar-footer`).** The `footer` seam is the second
-  **interface seam** — the footer produces no durable artifact, so there is nothing to bridge. perk
-  installs its own footer (`installPerkFooter`) inside its `session_start` handler, so under a
-  foreign footer selection perk **vacates at install time**: it simply does not call
-  `installPerkFooter`, leaving the foreign footer (`pi-powerline-footer` or `pi-bar`) as the sole
-  footer surface. There is **no adapter shim** (`adapter: null`) — perk's objective/checkpoints
-  progress still reaches the foreign footer automatically because both foreign footers render
-  extension statuses, and perk's composed `perk` status slot keeps publishing those segments
-  regardless of footer ownership.
+- **REPLACE / vacate-only (`powerline-footer`, `pi-bar-footer`, `pi-status-footer`).** The `footer`
+  seam is the second **interface seam** — the footer produces no durable artifact, so there is
+  nothing to bridge. perk installs its own footer (`installPerkFooter`) inside its `session_start`
+  handler, so under a foreign footer selection perk **vacates at install time**: it simply does not
+  call `installPerkFooter`, leaving the foreign footer (`pi-powerline-footer`, `pi-bar`, or
+  `@tombell/pi-status`) as the sole footer surface. There is **no adapter shim** (`adapter: null`).
+  For `powerline-footer` / `pi-bar-footer`, perk's objective/checkpoints progress still reaches the
+  foreign footer automatically because both render extension statuses, and perk's composed `perk`
+  status slot keeps publishing those segments regardless of footer ownership. **`pi-status-footer`
+  is the exception:** `@tombell/pi-status` does **not** render extension statuses, so perk's
+  objective/checkpoints progress is **not shown** in the footer when it is selected — an accepted
+  limitation (it matches what pi-status already does today; perk does not build a status-bridge
+  adapter for it).
+- **Install nothing (`pi-default`).** Selecting `pi-default` (`package: null`) tells perk to add
+  **no** footer package at all and to vacate its own install gate, leaving **pi's stock built-in
+  footer** in place. Use this when you want neither perk's footer nor any foreign footer extension.
 - **REPLACE / vacate-only (`ollama-web-search`, `juicesharp-web-tools`), with a foreign default.**
   The `web` seam is the third **interface seam** — its providers share no durable artifact *and* no
   common tool name, so there is nothing to bridge and **no adapter shim** (`adapter: null`).

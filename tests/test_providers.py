@@ -84,6 +84,8 @@ def test_real_providers_load_the_entries():
         "juicesharp-ask-user",
         "powerline-footer",
         "pi-bar-footer",
+        "pi-status-footer",
+        "pi-default",
         "pi-web-access",
         "ollama-web-search",
         "juicesharp-web-tools",
@@ -124,6 +126,20 @@ def test_real_providers_load_the_entries():
     assert pi_bar.adapter is None
     assert pi_bar.default is False
     assert pi_bar.package_filter is None
+    # pi-status-footer: VACATE-ONLY foreign footer (no extension-status rendering, accepted limit).
+    pi_status = by_id["pi-status-footer"]
+    assert pi_status.seam == "footer"
+    assert pi_status.package == "npm:@tombell/pi-status"
+    assert pi_status.adapter is None
+    assert pi_status.default is False
+    assert pi_status.package_filter is None
+    # pi-default: "install nothing / pi stock footer" (null package, vacate-only).
+    pi_default = by_id["pi-default"]
+    assert pi_default.seam == "footer"
+    assert pi_default.package is None
+    assert pi_default.adapter is None
+    assert pi_default.default is False
+    assert pi_default.package_filter is None
     # askuser reference: perk's own tool (behavior-preserving default, no package/adapter).
     ask = by_id["perk-ask-user"]
     assert (ask.seam, ask.package, ask.adapter, ask.default) == ("askuser", None, None, True)
@@ -265,6 +281,10 @@ def test_resolve_footer_selection():
     assert resolve_providers({"footer": "powerline-footer"}, _set()).footer.id == (
         "powerline-footer"
     )
+    assert resolve_providers({"footer": "pi-status-footer"}, _set()).footer.id == (
+        "pi-status-footer"
+    )
+    assert resolve_providers({"footer": "pi-default"}, _set()).footer.id == "pi-default"
     mismatch = resolve_providers({"footer": "perk-plan"}, _set())
     assert mismatch.footer.id == "perk-footer"
     assert len(mismatch.issues) == 1
