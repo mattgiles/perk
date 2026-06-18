@@ -53,7 +53,10 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
 - **Update the user docs, don't drift.** A change to user-facing behavior — a command, an
   in-session tool/door, a config key, a provider/backend — updates `docs/user-docs/` in the
   **same turn**, in the matching Divio quadrant. The operator-facing mirror of "amend the
-  contract, don't drift."
+  contract, don't drift." perk's config/provider surface has a **second self-contained mirror**
+  in the delivered `perk-expert` skill references (`skills/perk-expert/references/`): a change to a
+  config key / provider / backend updates the canonical `docs/user-docs/` reference **and** the
+  matching `perk-expert` reference in the **same turn**.
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
   `setWidget`/`setFooter`/`setWorkingMessage` are called only inside `extension/surfaces/surfaces.ts`
   + `extension/surfaces/report.ts`; everything else uses their seams (`report()`, `createPerkStatus`,

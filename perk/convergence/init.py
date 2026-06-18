@@ -89,6 +89,7 @@ LINEAR_PACKAGE = "npm:pi-mono-linear"
 PERK_SKILLS: tuple[str, ...] = (
     "ast-grep",
     "perk-address",
+    "perk-expert",
     "perk-implement",
     "perk-learn",
     "perk-learn-docs",

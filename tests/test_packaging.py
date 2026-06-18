@@ -132,3 +132,14 @@ def test_skills_shipped():
     # npm tarball: the `pi` manifest must not declare skills and the tarball must not ship them.
     assert "skills" not in pkg.get("pi", {})
     assert "skills/" not in pkg["files"]
+
+
+def test_perk_skills_matches_skills_dir():
+    # The `PERK_SKILLS` SSOT (drives the manifest fragment + post-sync presence check) must match
+    # the on-disk `skills/` directory listing exactly, in both directions: a skill dir without a
+    # tuple entry would silently not be delivered; a tuple entry without a dir would fail delivery.
+    from perk.convergence.init import PERK_SKILLS
+
+    skills_dir = REPO_ROOT / "skills"
+    on_disk = {d.name for d in skills_dir.iterdir() if d.is_dir()}
+    assert on_disk == set(PERK_SKILLS), f"PERK_SKILLS {set(PERK_SKILLS)} != skills/ dirs {on_disk}"

@@ -1,0 +1,122 @@
+# perk providers & issue backends
+
+Two distinct knobs:
+
+- **Provider seams** — five surfaces a foreign Pi package can fill in place of perk's bundled
+  default: `plan`, `todo`, `askuser`, `footer`, `web`. Selected by the `[providers]` table.
+- **Issue backend** — where canonical durable state is stored: GitHub (default) or Linear. Selected
+  by `[issues] backend`. It governs **two storage tiers**: the issue-tracking tier (plan / learn
+  issues — issues under either backend) and the objective-storage tier (objectives — a GitHub issue
+  under GitHub, a **Linear Project** under Linear).
+
+## The supported provider set
+
+The catalog is `shared/providers.yaml`, read by both planes. perk's own bundled providers are the
+zero-config **defaults** (the no-config hard guarantee); the foreign providers are first-class
+selections.
+
+| Provider id | Seam | Default? | Posture | Foreign package |
+| --- | --- | --- | --- | --- |
+| `perk-plan` | `plan` | ✅ | reference (native) | _(none)_ |
+| `tombell-plan` | `plan` | | REPLACE | `npm:@tombell/pi-plan` |
+| `plannotator-plan` | `plan` | | AUGMENT | `npm:@plannotator/pi-extension` |
+| `perk-checkpoints` | `todo` | ✅ | reference (native) | _(none)_ |
+| `juicesharp-todo` | `todo` | | runtime-defer | `npm:@juicesharp/rpiv-todo` |
+| `perk-ask-user` | `askuser` | ✅ | reference (native) | _(none)_ |
+| `juicesharp-ask-user` | `askuser` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-ask-user-question` |
+| `perk-footer` | `footer` | ✅ | reference (native) | _(none)_ |
+| `powerline-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-powerline-footer` |
+| `pi-bar-footer` | `footer` | | REPLACE (vacate-only) | `npm:pi-bar` |
+| `pi-status-footer` | `footer` | | REPLACE (vacate-only) | `npm:@tombell/pi-status` |
+| `pi-default` | `footer` | | install nothing (pi stock footer) | _(none)_ |
+| `pi-web-access` | `web` | ✅ | reference (foreign package) | `npm:pi-web-access` |
+| `ollama-web-search` | `web` | | REPLACE (vacate-only) | `npm:@ollama/pi-web-search` |
+| `juicesharp-web-tools` | `web` | | REPLACE (vacate-only) | `npm:@juicesharp/rpiv-web-tools` |
+
+## Postures (how perk yields its surface)
+
+- **REPLACE** (`tombell-plan`) — perk **vacates at registration time** (does not register its own
+  `/plan` command, shortcut, or `--plan` flag) so the foreign package is the sole registrant. An
+  adapter shim bridges the foreign surface to perk's canonical `plan_save` → `cache.plan-ref`
+  contract.
+- **AUGMENT** (`plannotator-plan`) — perk **keeps** its plan surface and skips only the two real
+  registration collisions (the `--plan` flag + the `Ctrl+Alt+P` shortcut). A shim bridges the
+  `plan_review` tool to plannotator's browser review flow; saving stays the human-run `/plan-save`.
+- **Runtime-defer** (`juicesharp-todo`) — no registration collision, so perk's checkpoints simply
+  **defer at runtime**. A shim carries perk's implement-progress discipline onto the foreign
+  checklist overlay (injection-only, gated to an active workflow).
+- **REPLACE / vacate-only** (the **interface seams** — `askuser`, `footer`, `web`) — no durable
+  artifact to bridge, so **no adapter shim** (`adapter: null`). perk vacates its own surface and the
+  foreign provider stands alone:
+  - `askuser`: the contract is the tool **name** `ask_user_question`; perk registers nothing under a
+    foreign selection (tools aren't numerically suffixed — a same-named tool replaces by load order).
+  - `footer`: perk just doesn't call `installPerkFooter`. For `powerline-footer` / `pi-bar-footer`,
+    perk's objective/checkpoints progress still reaches the footer (both render extension statuses);
+    **`pi-status-footer` is the exception** — it does **not** render extension statuses, so perk's
+    progress is not shown (accepted limitation).
+  - `web`: selection swaps the installed web package; perk registers no web tools of its own, so
+    there is **nothing to vacate**. The seam is novel — its default (`pi-web-access`) is itself a
+    **foreign package** (perk owns no native web impl). Tool names diverge across providers and are
+    **not** normalized (the read-only allowlist carries the union). Only `pi-web-access` is
+    zero-config (`@ollama/pi-web-search` needs a local Ollama daemon; `@juicesharp/rpiv-web-tools`
+    needs an API key). Selecting a foreign web provider also **drops the bundled `librarian` skill**
+    (pi-web-access-specific).
+- **Install nothing** (`pi-default`) — adds no footer package and vacates perk's install gate,
+  leaving pi's stock built-in footer.
+
+## What selection does
+
+- **`perk init` converges the package** — selecting a foreign provider adds its npm package to
+  `.pi/settings.json` `packages`; deselecting removes it (two-directional). perk's native reference
+  providers have no package. (`pi-web-access` is wired even by default — it's a foreign package.)
+- **`perk doctor` reports the resolution** — the `providers` check reports
+  `plan=…, todo=…, askuser=…, footer=…, web=…`. It **warns** on problems but is never fatal.
+
+## Fallback semantics
+
+Resolved by `resolve_providers`:
+
+- **Absent** key → seam default, **silently**.
+- **Unknown id / wrong-seam id** → seam default, **loud-but-non-fatal** (a warning, never a crash).
+
+## Issue backend — Linear
+
+`[issues] backend` is `"github"` (default) or `"linear"`, read **committed-only**. Switching to
+Linear moves where canonical plan / learn / objective state lives.
+
+- **Auth — `LINEAR_API_KEY`.** A personal Linear key (linear.app → Settings → Security & access),
+  set as an **environment variable** or via the gitignored `.pi/perk.local.toml` `[linear] api_key`
+  (an exported env var wins); **never** committed. Sent as a **plain `Authorization: <key>`**
+  header — **not** `Bearer`-prefixed.
+- **Required config — `[issues] team`** — the Linear team **key** (e.g. `"ENG"`).
+- **Converged package** — `perk init` adds `npm:pi-mono-linear` (the borrowed Linear-tools
+  extension) when Linear is selected, removes it when deselected.
+- **Ensured labels** — the init readiness probe ensures four labels exist: `perk:plan`,
+  `perk:learn`, `perk:consolidated`, `perk:objective`.
+- **Identifier shape** — Linear ids are **strings** like `ENG-123` (vs GitHub's `#42`); flows
+  through `cache.plan-ref.provider == "linear"`, the branch name `plan-ENG-123`, and the land
+  squash footer `Plan: ENG-<n> — <url>` (no `Closes #N`).
+- **Doctor groups** — `issues-backend` (group `issues`, offline) validates the selection (+ `team`
+  for Linear); `linear-auth` / `linear-team` / `linear-labels` (group `linear`, verify-gated,
+  non-fatal `warn`) are the network probes; `linear-project-scopes` / `linear-workflow-states`
+  (verify-gated, report-only) probe project-backed objective readiness.
+- **Project-backed objectives** — under Linear an objective is a Linear **Project**: each roadmap
+  node is a node-issue attached to the project, **phases group under Project Milestones** (one per
+  phase, keyed by the `### Phase N: …` header), and a fail-open **Project Update** posts on create /
+  plan-land / reconcile. Both behaviors are additive and non-fatal, and neither exists on GitHub.
+
+## Maturity caveat
+
+The Linear backend is **validated offline (against fakes) and live-validated 2026-06-15** (Mode 1
+lifecycle + the issue-backed objective loop ran green end-to-end; Mode-4 project-backed lifecycle
+live-verified 2026-06-16). **Proven live:** ProseMirror round-trip fidelity; the real "not found"
+error shape (paired `INPUT_ERROR` code + `"Entity not found"` message); bare-identifier mutation
+acceptance. **Still deferred / unproven:** RATELIMITED retry/backoff (fail-loud by design, no
+backoff); the **agent-session emission** mirror into Linear's Agents UI (off by default, requires a
+separate `LINEAR_AGENT_TOKEN` OAuth `actor=app` token, GraphQL signatures substring-pinned offline
+but **unverified live** — not part of the switch-to-linear happy path); GitHub Issues Sync
+interactions (use a team without Issues Sync). Never overstate Linear's proven surface beyond this.
+
+---
+
+*Canonical source: `docs/user-docs/reference/providers-and-backends.md`.*
