@@ -743,6 +743,7 @@ def test_materialize_swallows_giterror(tmp_path, monkeypatch):
     monkeypatch.setattr(init_mod.git, "clone", _boom)
     # Non-fatal: a GitError is swallowed and reported in the returned message, never raised.
     msg = init_mod.materialize_extension_clone(tmp_path, self_repo=False)
+    assert msg is not None
     assert "non-fatal" in msg and "network down" in msg
 
 
@@ -814,10 +815,11 @@ def test_ensure_present_swallows_giterror(tmp_path, monkeypatch):
     assert init_mod.ensure_extension_clone_present(tmp_path, self_repo=False) is None
 
 
-def test_ensure_present_two_racers_clone_exactly_once(tmp_path):
+def test_ensure_present_two_racers_clone_exactly_once(tmp_path, monkeypatch):
     # Core race regression: two concurrent invocations against an absent clone serialize on the
     # flock + double-checked is_dir() so `git.clone` runs EXACTLY once.
     import threading
+    import time
 
     from perk.convergence import init as init_mod
 
@@ -831,31 +833,21 @@ def test_ensure_present_two_racers_clone_exactly_once(tmp_path):
         with count_lock:
             call_count += 1
         # Simulate a slow checkout, then actually create the dir so the loser sees it present.
-        import time
-
         time.sleep(0.2)
         clone.mkdir(parents=True, exist_ok=True)
 
-    import perk.substrate.git as git_mod
+    monkeypatch.setattr(init_mod.git, "clone", _slow_clone)
+    monkeypatch.setattr(init_mod.git, "reset_hard", lambda repo, ref: None)
 
-    orig_clone = git_mod.clone
-    git_mod.clone = _slow_clone  # patch the module so both threads see the stub
-    orig_reset = git_mod.reset_hard
-    git_mod.reset_hard = lambda repo, ref: None
-    try:
+    def _racer():
+        barrier.wait()
+        init_mod.ensure_extension_clone_present(tmp_path, self_repo=False)
 
-        def _racer():
-            barrier.wait()
-            init_mod.ensure_extension_clone_present(tmp_path, self_repo=False)
-
-        threads = [threading.Thread(target=_racer) for _ in range(2)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-    finally:
-        git_mod.clone = orig_clone
-        git_mod.reset_hard = orig_reset
+    threads = [threading.Thread(target=_racer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
     assert call_count == 1  # the lock + double-checked is_dir() serialized the racers
     assert (tmp_path / ".pi" / "git" / ".perk-extension-clone.lock").is_file()

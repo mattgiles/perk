@@ -1722,18 +1722,35 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   not: `resolvePackageSources`' present-project-scope branch only calls `collectPackageResources`
   (no `git fetch`/`reset`), so a clone first created at an old commit stays frozen across launches
   (wrong import paths, a retired `yaml` import → a hard `Cannot find module 'yaml'` load failure)
-  while `perk doctor` reported green. perk now owns freshness: `perk init` advances the clone
-  *forward* (a best-effort, non-fatal reclone-when-stale after `sync_skills`), the verify-gated
-  `extension-clone` doctor check (group `package`) **fails** on a stale clone, and
-  `perk doctor --fix` repairs it. The repair is a **blow-away-and-reclone**: perk `rm -rf`s the
-  clone (filesystem-only, no perk-side network) and lets pi re-clone fresh at `main` on the next
-  launch — the verified absent → `git clone` + `git checkout main` path (the clone is tiny now
-  that #639 eliminated `node_modules`). Detection compares the clone `HEAD` to `origin/main`
-  (perk's pinned ref — `_desired_packages` writes `@main`) and is a **network** op, so both the
-  doctor check and the init reconcile are verify-gated and degrade to `warn` / no-op
-  (`unverifiable`) when offline — never a silent `ok`, never a crash. (`perk doctor`/`perk init`
-  are Python CLIs that do not load the TS extension, so they run fine against a clone too stale to
-  load, repairing it for the *next* launch.)
+  while `perk doctor` reported green. perk now owns freshness: the verify-gated `extension-clone`
+  doctor check (group `package`) **fails** on a stale clone, `perk init` advances the clone
+  *forward* after `sync_skills`, and `perk doctor --fix` repairs it. Detection compares the clone
+  `HEAD` to `origin/main` (perk's pinned ref — `_desired_packages` writes `@main`) and is a
+  **network** op, so both the doctor check and the init reconcile are verify-gated and degrade to
+  `warn` / no-op (`unverifiable`) when offline — never a silent `ok`, never a crash. (`perk
+  doctor`/`perk init` are Python CLIs that do not load the TS extension, so they run fine against a
+  clone too stale to load, repairing it for the *next* launch.)
+- **perk materializes the clone *in place*, under a cross-process lock, and warms it pre-launch
+  (#655).** The original `#642` repair was a *blow-away-and-reclone* (`rm -rf` the clone, let pi
+  re-clone lazily on the next launch). That opened a **missing-clone window**: pi's lazy git-package
+  install (`resolvePackageSources`) is **unlocked** — `if (!existsSync(clonePath)) { installGit }
+  else { collectPackageResources }` — so when two perk sessions launch nearly simultaneously against
+  an absent clone, the second process sees the first's **half-created** clone dir, takes the `else`
+  branch, and collects resources from an **incomplete checkout** → the perk extension silently fails
+  to register (a session with *none* of perk's tools, perk absent from `[Extensions]`). perk now
+  removes that window and owns materialization end-to-end: it **never blows the clone away**.
+  `materialize_extension_clone` (init/doctor) converges the clone forward **in place** —
+  clone-if-absent / `git fetch`+`git reset --hard origin/main`-if-stale, **no `npm install`** — and
+  `ensure_extension_clone_present` warms it **pre-launch** in `launch_stage` (clone-on-absent only;
+  a cheap `is_dir()` no-op once present, so the launch hot path stays network-free). Both run under
+  an exclusive `fcntl.flock` on `<repo_root>/.pi/git/.perk-extension-clone.lock` (the lock lives in
+  the clone's *parent* so a clone-dir removal never drops it; degrades to a no-op lock on non-POSIX),
+  so concurrent launches **serialize** on the lock and a double-checked `is_dir()` clones exactly
+  once. Because perk pre-materializes the clone, pi's `--omit=dev` install never runs, so the clone
+  stays `node_modules`-free. All git work is best-effort + **non-fatal** (a `GitError` is swallowed,
+  never raised) so a flaky network never fails an init/doctor/launch; offline `unverifiable` leaves
+  a present clone as-is. The self-repo (`..` package) has no clone and is exempt. The moving `@main`
+  pin is kept — warming + in-place materialize make it safe.
 
 ---
 

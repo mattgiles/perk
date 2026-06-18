@@ -464,7 +464,7 @@ def test_launch_warms_extension_clone_before_exec(git_repo, monkeypatch):
     # #655: ensure_extension_clone_present is invoked before os.execvpe on the local consumer path.
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
-    events: list[str] = []
+    events: list[object] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
