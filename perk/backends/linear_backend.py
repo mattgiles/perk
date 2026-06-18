@@ -1016,6 +1016,20 @@ class LinearIssueBackend:
         self._ops._update_issue(issue_id, {"description": new_body}, what="update plan-header")
         return issue_backend.PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
 
+    def prepend_plan_callout(
+        self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
+    ) -> bool:
+        issue = self._ops._get_issue(issue_id, "id description")
+        description = issue.get("description")
+        body = description if isinstance(description, str) else ""
+        new_body = plan.prepend_callout(body, callout, command=command)
+        if new_body == body:
+            return False
+        if dry_run:
+            return False
+        self._ops._update_issue(issue_id, {"description": new_body}, what="prepend plan callout")
+        return True
+
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
         issue = self._ops._issue_or_none(
             issue_id, "id identifier url title description state { type }"
@@ -1292,6 +1306,14 @@ class LinearObjectiveStore:
             # transcoded to the inline-code sentinels.
             comment_body = to_linear_markdown(
                 objective.render_body_comment(nodes, prose=body.strip())
+            )
+            # Prepend the copyable `perk objective plan <ENG-N>` callout (the identifier is known
+            # here). The callout is sentinel-free portable Markdown, so prepending after transcoding
+            # is byte-equivalent to before.
+            comment_body = plan.prepend_callout(
+                comment_body,
+                objective.objective_callout(created.id),
+                command=f"perk objective plan {created.id}",
             )
             comment_id = self._ops._create_comment_with_id(created.id, comment_body)
             self.update_objective_header(
@@ -1671,6 +1693,17 @@ class LinearProjectObjectiveStore:
             assert isinstance(project_id, str)
             url = created["url"]
             assert isinstance(url, str)
+
+            # Prepend the copyable `perk objective plan <project-uuid>` callout to the overview (the
+            # project UUID is only known after create). One extra write, mirroring the existing
+            # post-create `update_project_content` pattern; the splice helpers preserve text around
+            # their blocks, so the callout is durable across reconciles/manifest re-renders.
+            overview = plan.prepend_callout(
+                overview,
+                objective.objective_callout(project_id),
+                command=f"perk objective plan {project_id}",
+            )
+            self._projects.update_project_content(project_id, overview)
 
             # --- one milestone per phase (enriched names), in grouped order ---
             # Routed through the name-keyed `ensure_phase_milestone` seam (Node 4.3). The project
@@ -2573,6 +2606,14 @@ class LinearProjectObjectiveStore:
                     plan.PLAN_HEADER_KEY, header_fields, style="inline-code"
                 )
                 new_desc = f"{body.rstrip()}\n\n{header_block}\n"
+            # The node-issue IS the plan issue here, so lead its description with the copyable
+            # `perk impl <ENG-N>` callout. Keyed on the command string, so a re-save (this method
+            # re-runs on every objective-linked save) never duplicates it.
+            new_desc = plan.prepend_callout(
+                new_desc,
+                plan.plan_callout(identifier),
+                command=f"perk impl {identifier}",
+            )
             self._issue_ops._update_issue(
                 uuid, {"description": new_desc}, what="write node plan-header"
             )

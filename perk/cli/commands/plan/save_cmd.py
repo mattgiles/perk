@@ -362,6 +362,16 @@ def _plan_save_impl(
                 updated = True
             else:
                 backend.add_issue_comment(issue_id=issue.id, body=body_comment, dry_run=dry_run)
+                # The plan issue body holds only the hidden `plan-header` block, so prepend a
+                # visible, copyable `perk impl <id>` callout as the first thing a human sees. The
+                # server-assigned id is only known here (post-create). Idempotent on the command
+                # string and structurally above the header block, so the submit-time
+                # `update_plan_header` rewrite preserves it.
+                backend.prepend_plan_callout(
+                    issue_id=issue.id,
+                    callout=plan.plan_callout(issue.id),
+                    command=f"perk impl {issue.id}",
+                )
         labels = (plan.PLAN_LABEL,)
 
     plan_ref = plan.PlanRef(

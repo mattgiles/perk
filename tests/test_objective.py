@@ -599,3 +599,18 @@ def test_reconciled_update_body():
     assert o.reconciled_update_body() == (
         "**Roadmap reconciled** — the objective prose was updated against the merged diff."
     )
+
+
+def test_objective_callout_content_and_routing():
+    from perk import plan as _plan
+
+    out = o.objective_callout("ENG-7")
+    assert "**Plan the next node:**" in out
+    assert "```\nperk objective plan ENG-7\n```" in out
+    assert "_Run from the repo root to plan the next actionable node._" in out
+    # routes through render_command_callout
+    assert out == _plan.render_command_callout(
+        "Plan the next node:",
+        "perk objective plan ENG-7",
+        "Run from the repo root to plan the next actionable node.",
+    )

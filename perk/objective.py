@@ -30,7 +30,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
 
-from perk.plan import find_metadata_block, has_metadata_block
+from perk.plan import find_metadata_block, has_metadata_block, render_command_callout
 
 OBJECTIVE_LABEL = "perk:objective"
 OBJECTIVE_LABEL_COLOR = "5319e7"  # indigo (distinct from plan green / learn purple)
@@ -880,6 +880,19 @@ def render_roadmap_table(nodes: list[ObjectiveNode], *, body: str = "") -> str:
             rows.append("| " + " | ".join(_escape_cell(c) for c in cells) + " |")
         sections.append(header + "\n" + "\n".join(rows))
     return "\n\n".join(sections)
+
+
+def objective_callout(objective_id: str) -> str:
+    """The objective command callout — ``perk objective plan <objective_id>`` (plans the next node).
+
+    Reuses :func:`perk.plan.render_command_callout`; ``objective_id`` is the artifact's own ref id
+    (GitHub number, Linear ``ENG-N`` identifier, or a raw Linear project UUID).
+    """
+    return render_command_callout(
+        "Plan the next node:",
+        f"perk objective plan {objective_id}",
+        "Run from the repo root to plan the next actionable node.",
+    )
 
 
 def render_body_comment(nodes: list[ObjectiveNode], *, prose: str = "") -> str:

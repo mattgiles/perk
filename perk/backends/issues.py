@@ -139,6 +139,19 @@ class GitHubIssueBackend:
             fields_updated=updated.fields_updated, dry_run=updated.dry_run
         )
 
+    def prepend_plan_callout(
+        self, *, issue_id: str, callout: str, command: str, dry_run: bool = False
+    ) -> bool:
+        number = _number(issue_id)
+        with _translate():
+            return github.prepend_plan_callout(
+                issue=number,
+                callout=callout,
+                command=command,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
         number = _number(issue_id)
         with _translate():

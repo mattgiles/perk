@@ -161,6 +161,14 @@ def create_objective_issue(
     )
 
     comment_body = objective.render_body_comment(nodes, prose=body.strip())
+    # Prepend a visible, copyable `perk objective plan <number>` callout above the rendered table
+    # (the issue number is server-assigned and known here). The reconcile / table-rerender helpers
+    # splice between markers only, so the callout is durable.
+    comment_body = plan.prepend_callout(
+        comment_body,
+        objective.objective_callout(str(created.number)),
+        command=f"perk objective plan {created.number}",
+    )
     comment_id = plans._post_comment_with_id(
         issue=created.number, body=comment_body, repo_root=repo_root
     )

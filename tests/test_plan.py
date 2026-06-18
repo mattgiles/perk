@@ -249,3 +249,29 @@ def test_has_metadata_block_is_presence_only_even_when_malformed():
     assert plan.find_metadata_block(broken_inline, plan.PLAN_HEADER_KEY) is None
     assert plan.has_metadata_block(broken_html, plan.PLAN_HEADER_KEY)
     assert plan.has_metadata_block(broken_inline, plan.PLAN_HEADER_KEY)
+
+
+def test_render_command_callout_shape():
+    out = plan.render_command_callout("Do it:", "perk impl 42", "Some hint.")
+    assert out == "**Do it:**\n\n```\nperk impl 42\n```\n\n_Some hint._"
+
+
+def test_plan_callout_content():
+    out = plan.plan_callout("42")
+    assert "**Implement this plan:**" in out
+    assert "```\nperk impl 42\n```" in out
+    assert "_Run from the repo root to start a worktree session._" in out
+
+
+def test_prepend_callout_prepends_when_absent():
+    out = plan.prepend_callout("BODY", "CALLOUT", command="perk impl 42")
+    assert out == "CALLOUT\n\nBODY"
+
+
+def test_prepend_callout_noop_when_command_present():
+    body = "CALLOUT\n\nperk impl 42 lives here"
+    assert plan.prepend_callout(body, "NEW", command="perk impl 42") == body
+
+
+def test_prepend_callout_empty_body():
+    assert plan.prepend_callout("", "CALLOUT", command="perk impl 42") == "CALLOUT\n"
