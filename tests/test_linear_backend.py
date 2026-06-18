@@ -950,6 +950,208 @@ class TestCloseOps:
         assert updates[1][1]["input"] == {"stateId": "state-done"}
 
 
+class TestReadComments:
+    def test_maps_authors_and_edited_at(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "botActor": [
+                    {
+                        "issue": {
+                            "comments": _page(
+                                [
+                                    {
+                                        "id": "c-2",
+                                        "body": "please rebase",
+                                        "createdAt": "2026-01-02",
+                                        "editedAt": "2026-01-03",
+                                        "user": {
+                                            "id": "u-1",
+                                            "name": "ada",
+                                            "displayName": "Ada L",
+                                        },
+                                        "botActor": None,
+                                    },
+                                    {
+                                        "id": "c-1",
+                                        "body": "`perk:metadata-block:plan-body`",
+                                        "createdAt": "2026-01-01",
+                                        "editedAt": None,
+                                        "user": None,
+                                        "botActor": {
+                                            "id": "bot-x",
+                                            "name": "perk",
+                                            "type": "app",
+                                        },
+                                    },
+                                ]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        comments = backend.read_comments(issue_id="ENG-1")
+        # Oldest-first (c-1 createdAt < c-2), independent of payload order.
+        assert [c.id for c in comments] == ["c-1", "c-2"]
+        # c-1 carries a perk sentinel in its body → perk.
+        assert comments[0].author.kind == "perk"
+        assert comments[0].body == "`perk:metadata-block:plan-body`"
+        assert comments[0].edited_at is None
+        # c-2 is a human (user, no botActor); displayName preferred; editedAt mapped.
+        assert comments[1].author.kind == "human"
+        assert comments[1].author.display_name == "Ada L"
+        assert comments[1].edited_at == "2026-01-03"
+
+    def test_empty_issue_yields_empty_tuple(self) -> None:
+        backend, _ = _make_backend({"botActor": [{"issue": {"comments": _page([])}}]})
+        assert backend.read_comments(issue_id="ENG-1") == ()
+
+
+class TestReadDescriptionEdits:
+    def test_filters_to_description_updates_and_maps(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "descriptionUpdatedBy": [
+                    {
+                        "issue": {
+                            "history": _page(
+                                [
+                                    {
+                                        "id": "h-2",
+                                        "createdAt": "2026-02-02",
+                                        "actor": {"id": "u-1", "name": "Ada"},
+                                        "descriptionUpdatedBy": {"id": "u-1", "name": "Ada"},
+                                    },
+                                    {
+                                        "id": "h-1",
+                                        "createdAt": "2026-02-01",
+                                        "actor": {"id": "u-1", "name": "Ada"},
+                                        # A non-description history event (state change etc.):
+                                        # no descriptionUpdatedBy → filtered out.
+                                        "descriptionUpdatedBy": None,
+                                    },
+                                ]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        edits = backend.read_description_edits(issue_id="ENG-1")
+        assert len(edits) == 1
+        assert edits[0].created_at == "2026-02-02"
+        assert edits[0].author.kind == "human"
+        assert edits[0].author.display_name == "Ada"
+        assert edits[0].diff is None  # Linear history exposes no inline diff (flagged)
+
+    def test_missing_issue_yields_empty(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "descriptionUpdatedBy": [
+                    LinearGraphQLError("Entity not found: Issue", codes=("INPUT_ERROR",))
+                ]
+            }
+        )
+        assert backend.read_description_edits(issue_id="ENG-404") == ()
+
+
+class TestReadAgentSession:
+    def test_maps_activities_and_derives_stop_signal(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "agentSessions(first": [
+                    {"issue": {"agentSessions": {"nodes": [{"id": "sess-1"}]}}}
+                ],
+                "agentSession(id": [
+                    {
+                        "agentSession": {
+                            "activities": _page(
+                                [
+                                    {
+                                        "id": "a-1",
+                                        "createdAt": "2026-03-01",
+                                        "signal": None,
+                                        "content": {
+                                            "__typename": "AgentActivityPromptContent",
+                                            "body": "do the thing",
+                                        },
+                                    },
+                                    {
+                                        "id": "a-2",
+                                        "createdAt": "2026-03-02",
+                                        "signal": "stop",
+                                        "content": {
+                                            "__typename": "AgentActivityPromptContent",
+                                            "body": "stop now",
+                                        },
+                                    },
+                                ]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        session = backend.read_agent_session(issue_id="ENG-1")
+        assert [a.id for a in session.activities] == ["a-1", "a-2"]
+        assert session.activities[0].kind == "AgentActivityPromptContent"
+        assert session.activities[0].body == "do the thing"
+        assert session.stop_signal.stopped is True
+        assert session.stop_signal.at == "2026-03-02"
+
+    def test_no_stop_signal_indicator_is_not_stopped(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "agentSessions(first": [
+                    {"issue": {"agentSessions": {"nodes": [{"id": "sess-1"}]}}}
+                ],
+                "agentSession(id": [
+                    {
+                        "agentSession": {
+                            "activities": _page(
+                                [
+                                    {
+                                        "id": "a-1",
+                                        "createdAt": "2026-03-01",
+                                        "signal": None,
+                                        "content": {
+                                            "__typename": "AgentActivityThoughtContent",
+                                            "body": "thinking",
+                                        },
+                                    }
+                                ]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        session = backend.read_agent_session(issue_id="ENG-1")
+        assert session.stop_signal.stopped is False
+        assert session.stop_signal.at is None
+
+    def test_missing_session_yields_empty(self) -> None:
+        backend, _ = _make_backend(
+            {"agentSessions(first": [{"issue": {"agentSessions": {"nodes": []}}}]}
+        )
+        session = backend.read_agent_session(issue_id="ENG-1")
+        assert session.activities == ()
+        assert session.stop_signal.stopped is False
+
+    def test_auth_failure_raises(self) -> None:
+        # The personal API key cannot read the session: a non-not-found GraphQL error propagates
+        # (the contract — read_agent_session raises on infra/auth failure).
+        backend, _ = _make_backend(
+            {
+                "agentSessions(first": [
+                    LinearGraphQLError("access denied", codes=("AUTHENTICATION_ERROR",))
+                ]
+            }
+        )
+        with pytest.raises(IssueBackendError, match="access denied"):
+            backend.read_agent_session(issue_id="ENG-1")
+
+
 def _objective_nodes() -> list[objective.ObjectiveNode]:
     return [
         objective.ObjectiveNode(id="1.1", description="Alpha", status=objective.NodeStatus.DONE),
