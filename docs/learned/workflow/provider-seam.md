@@ -1,6 +1,6 @@
 ---
 title: The provider seam — artifact seams vs the askuser/footer/web interface seams, owned-surface deferral vs always-registered substrate
-read_when: You are working on a provider seam (the five-seam substrate is now plan/todo/askuser/footer/web) — classifying a proposed seam artifact-vs-interface (it decides whether you write an adapter at all), the vacate-only askuser/footer/web interface seams, the three vacating mechanisms + the "nothing to vacate at all" posture (web), install-site/runtime vacating keyed off `ctx.cwd` (footer), the first non-null-`package` default + its string-membership test trap (web), the 2→N widening census, the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating vs runtime deferral (picked by the collision kind), the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
+read_when: You are working on a provider seam (the five-seam substrate is now plan/todo/askuser/footer/web) — classifying a proposed seam artifact-vs-interface (it decides whether you write an adapter at all), the vacate-only askuser/footer/web interface seams, the three vacating mechanisms + the "nothing to vacate at all" posture (web), install-site/runtime vacating keyed off `ctx.cwd` (footer), widening the footer catalog with a new declarative provider (`pi-status-footer` / `pi-default`, zero convergence-code change) and the `pi-status` no-extension-status counterexample to "both foreign footers bridge automatically", the first non-null-`package` default + its string-membership test trap (web), the 2→N widening census, the provider-selection substrate, deferring perk's own authoring surface under a foreign selection, the cross-plane resolver, wiring a foreign plan/todo adapter, registration-time vacating vs runtime deferral (picked by the collision kind), the injection-only adapter shim, gating adapter behavior on a foreign package's persisted state (the state-twin read), injected prompts under foreign tool restrictions (the tools-hidden branch), an augment-posture provider (the plannotator bridge), or `package_filter`.
 ---
 
 # The provider seam
@@ -174,9 +174,12 @@ now three distinct vacating mechanisms plus a limit-case posture:
 Like askuser, footer produces **no durable artifact** → `adapter: null`, no shim module. The
 no-bridge claim holds because of a **decoupling**: perk's composed `perk` `setStatus` slot (via
 `createPerkStatus` / `extension/checkpoints/checkpoints.ts`) publishes progress **independently of
-footer ownership** — both foreign footers (`pi-powerline-footer`, `pi-bar`) render extension
-statuses, so **footer ownership ≠ status publishing**. perk's objective/checkpoints progress reaches
-the foreign footer automatically; the bridge is automatic, not authored. The config reader belongs
+footer ownership** — the **powerline-class** foreign footers (`pi-powerline-footer`, `pi-bar`)
+render extension statuses, so **footer ownership ≠ status publishing**. perk's objective/checkpoints
+progress reaches *those* foreign footers automatically; the bridge is automatic, not authored. The
+decoupling holds **only for footers that render extension statuses** — `@tombell/pi-status` is the
+documented counterexample (it renders none; see the footer-catalog-widening subsection below), so
+the "automatic bridge" is a property of the footer, not a guarantee of the seam. The config reader belongs
 in **`extension/surfaces/footerProvider.ts`** (it reads config → not the dependency-free
 `surfaces.ts`; it makes **no** rich-UI calls → passes `surfacesGuard.test.ts`), mirroring the
 `askUser.ts` helper pair.
@@ -198,6 +201,40 @@ only *adds* a package when absent — but **fresh-init fixtures get object form*
   **Lesson:** for the next non-null-`package` default (or any change converging an object-form entry
   on the default path), **grep every test that does string-membership over `packages`** and guard
   with `isinstance(p, str)` or route through the identity helper.
+
+### Widening the footer catalog — `pi-status-footer` + `pi-default` (the cleanest seam-widening shape yet)
+
+Adding two footer providers (`pi-status-footer` = `@tombell/pi-status`; `pi-default` = leave pi's
+stock footer) closed the catalog gap that had forced a downstream repo to hand-edit
+`.pi/settings.json` `packages`. The footer is now governed **exclusively** by `[providers] footer`.
+What the widening confirms about the substrate:
+
+- **A new footer provider is PURELY declarative** — one catalog row in `shared/providers.yaml` + one
+  TS id constant in `extension/substrate/providers.ts` + tests + docs. **Zero runtime/convergence
+  code change.** The Python `_converge_provider_packages` is fully generic, and the TS
+  `resolveProviders` / `byId` / `defaultFor` are generic, so there is **no census beyond the
+  test/doc surfaces**. This is the cleanest seam-widening shape yet.
+- **The footer install gate vacates for free.** `isPerkFooterReferenceSelected(cwd)`
+  (`extension/surfaces/footerProvider.ts`) is true ONLY when the resolved id === `perk-footer`, so
+  *every* non-default footer selection — **including the null-package `pi-default`** — makes perk
+  skip `installPerkFooter` with no per-provider gate logic.
+- **`pi-default` is the first `package: null` NON-default provider** ("install nothing / leave pi's
+  stock footer"), distinct from the seam DEFAULT reference (`perk-footer`, also null-package). A
+  null-package *non-default* means convergence adds nothing AND perk vacates its own install —
+  confirming **`package: null` is orthogonal to `default: true`**.
+- **A catalogued foreign package becomes a MANAGED IDENTITY.** `perk init` now two-directionally
+  *removes* a hand-added `@tombell/pi-status` `packages` entry from any repo that does **not** select
+  it via `[providers] footer` (the "revert the manual edit" guarantee, D5), pinned by the 4-case
+  idempotency test in `tests/test_init_idempotent.py` (add object-form / `pi-default` adds nothing /
+  deselect removes / hand-added-unselected removed).
+- **`pi-status` is an interface seam with an ACCEPTED LIMITATION.** Unlike `pi-powerline-footer` /
+  `pi-bar`, `@tombell/pi-status` does **not** render extension statuses, so perk's
+  objective/checkpoints progress is invisible under it — accepted, documented, **no status-bridge
+  adapter built**. It is the **first foreign footer that breaks** the "both foreign footers render
+  extension statuses → bridge automatic" assumption baked into the seam (reconciled in the
+  footer-is-the-SECOND-interface-seam subsection above). The durable process lesson: **when you add
+  a counterexample, reconcile the whole adjacent region, don't just append** — a new catalog row
+  next to a pre-existing seam comment leaves the old comment stale.
 
 ### Contract reconciliation: the borrow-ban vs a selected footer provider
 
@@ -453,8 +490,9 @@ carries perk's progress discipline onto the foreign overlay via an injected cont
 `perk:checkpoint` population, no registration-time vacating — there is no `/checkpoints`
 command-name collision). The three **interface** seams are all **vacate-only** (no adapter, no
 bridge): askuser (`@juicesharp/rpiv-ask-user-question`) early-returns before registering its
-`ask_user_question` tool; footer (`pi-powerline-footer` / `pi-bar`) skips `installPerkFooter` at the
-`session_start` install site (the config reader is `extension/surfaces/footerProvider.ts`); and web
+`ask_user_question` tool; footer (`pi-powerline-footer` / `pi-bar` / `pi-status-footer` /
+`pi-default`) skips `installPerkFooter` at the `session_start` install site (the config reader is
+`extension/surfaces/footerProvider.ts`); and web
 (`pi-web-access` default — itself foreign — / `@ollama/pi-web-search` / `@juicesharp/rpiv-web-tools`)
 has **nothing to vacate** because perk registers no web tools. The default path remains the hard
 zero-change guarantee in every mode — with the one novelty that the **web default's `package` is

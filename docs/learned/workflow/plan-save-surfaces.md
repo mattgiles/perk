@@ -1,6 +1,6 @@
 ---
 title: plan-save surfaces — fidelity gap, handoff_extra carrier, asymmetric write paths
-read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, adding context that must survive a model's choice of save surface, touching resolvePlanSource's artifact→param→transcript chain, or extending the warm objective_node_claim recovery carrier.
+read_when: You are working on plan-save / objective-node linkage, debugging a dropped objective_id / consumed_learn, adding context that must survive a model's choice of save surface, touching resolvePlanSource's artifact→param→transcript chain, extending the warm objective_node_claim recovery carrier, or prepending a copyable command callout to a plan/objective artifact (server-assigned-id timing dictates the four per-backend write strategies).
 ---
 
 # plan-save surfaces
@@ -124,6 +124,51 @@ needless PATCH on a plain revise). Additive matters: omitting a field leaves the
 intact, so it never clobbers a previously-linked objective/learn set nor resets the
 submit-populated `branch`/`pr`/`lifecycle_stage`.
 
+## The copyable command callout — server-assigned-id timing dictates the per-backend write strategy
+
+Prepending a visible, copyable Markdown command callout (`perk impl <id>` / `perk objective plan
+<id>`) to the human-visible surface of a plan/objective artifact is a write-strategy problem, not a
+formatting one. The lesson: **when the id you want to embed is server-assigned, *when* the backend
+hands it back dictates the write shape — four distinct shapes:**
+
+- **GitHub standalone plan** — id known only **post-create** → a separate read+PATCH
+  (`prepend_plan_callout`) on the fresh-create path (**one extra write**).
+- **GitHub / Linear issue-backed objective** — `created.number` / `created.id` known **before** the
+  body comment is posted → **fold the callout into the compose step** at compose time (**zero extra
+  writes**).
+- **Linear project-backed objective** — project UUID known only **after** create → **one post-create
+  content update** (mirrors the existing post-create pattern).
+- **Linear node↔plan-unified plan** — fold into the description the unified save already writes
+  (**zero extra writes**), where an **idempotency guard matters** because that method **re-runs on
+  every objective-linked save**.
+
+**"Prepend above all metadata/marker blocks" is durable by construction.** Because every metadata
+finder/replacer and every objective splice operates strictly *between* delimiters and preserves the
+surrounding text, a callout prepended to the very top survives header rewrites, reconciles, and
+table re-renders untouched (verified by a header-survival unit test: prepend → `extract_run_id`
+still parses → simulated `update_plan_header` → callout still leads).
+
+**Pure portable Markdown needs no transcoding.** A callout that is bold + fenced code + italic (no
+HTML comments / `<details>` / perk sentinels) passes the Linear transcoder **byte-unchanged** and
+renders a one-click copy button on both GitHub and Linear — so prepending before-or-after the
+transcode is byte-equivalent for sentinel-free content.
+
+**Accepted idempotency-prefix-collision risk.** The idempotency key is a literal `command in body`
+substring match, so a shorter id is a substring of a longer one (`perk impl 1` ⊂ `perk impl 10`;
+`ENG-1` ⊂ `ENG-10`) — a body already referencing the longer id would skip the shorter id's callout.
+Matching the **fenced** form would make it precise; low real risk, deferred.
+
+**Fixture-sweep refinement (the real friction).** Inserting a **new network call into an existing
+create/mutation sequence** breaks every scripted-fake test whose response map didn't anticipate it —
+**including error-path tests that proceed *past* the insertion point** (e.g. an unknown-dependency
+error raised at a *later* relation step still trips the newly-inserted call). Census ALL tests
+exercising that path — **happy AND error** — and add the response to each map. (A refinement of the
+fixture-sweep rules in `linear-backend.md` / `cold-door-client.md` — cross-ref, don't duplicate.)
+
+Mechanical aside: adding the gateway function's name to `perk/github/__init__.py` must place it in
+isort-alphabetical position in BOTH the import list and `__all__`, or ruff's `RUF022` fails CI — see
+`docs/learned/toolchain/ruff.md`.
+
 ## Fail-loud at the canonical save; fail-open downstream
 
 The canonical-save write is **fail-loud** (raises `GitHubError` → exit `github_error`) — it is the
@@ -153,3 +198,6 @@ on-land step is fail-open and only prints on success, a stale header broke the w
 - `tests/test_plan_save.py` — recover/override/unlinked + the empty-dict skip assertion
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref/header schema and fail-open on-land shape
 - `docs/learned/workflow/objective-lifecycle.md` — node linkage + the objective re-save gap
+- `docs/learned/workflow/linear-backend.md` — the Linear transcoder + scripted-GraphQL fixture-sweep rules
+- `docs/learned/workflow/issue-backend.md` — the IssueBackend protocol-method ripple (the callout gateway adds one method)
+- `docs/learned/toolchain/ruff.md` — the `RUF022` `__all__`-sort gotcha from the same change

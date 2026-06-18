@@ -62,6 +62,17 @@ An en-dash (`–`) inside a docstring — e.g. a numeric range like "Nodes 3.2�
 the **em-dash** (`—`) is fine. (Sibling to the RUF043 note above — both bite prose under test/source
 that looks innocuous.)
 
+## `RUF022`: keep `__all__` isort-sorted
+
+Adding a name to a package `__init__.py` (e.g. a new re-export in `perk/github/__init__.py`)
+requires inserting it in **isort-alphabetical** position in BOTH the import list AND `__all__` —
+ruff's **RUF022** (`unsorted-dunder-all`) fails CI on an unsorted `__all__`. A first commit that
+appends the new symbol to the end of `__all__` will be rejected; the fix is mechanical (place the
+new symbol in alphabetical order — e.g. after `post_pr_review`, before `rerun_workflow_run`).
+Sibling to the `RUF100` / `RUF043` / `RUF002` rule notes. (Distinct from the
+sorted-`__all__`-silences-F401 fact in `docs/learned/toolchain/python-package-splits.md` — that is
+about silencing F401 on a partially-initialized package; this is about RUF022 sort enforcement.)
+
 ## Template string E501 (line length) rule
 
 Embedded multiline string templates (such as inline workflow YAML blocks defined inside Python files)
