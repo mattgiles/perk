@@ -5,7 +5,7 @@ from typing import cast
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.backends import issue_backend, issues, objective_store, objective_stores
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.context import PerkContext
@@ -24,7 +24,12 @@ def _authed(monkeypatch) -> None:
 
 
 def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
-    calls: dict[str, object] = {"commented": False, "updated": None, "header": None}
+    calls: dict[str, object] = {
+        "commented": False,
+        "updated": None,
+        "header": None,
+        "callout": None,
+    }
     monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
     monkeypatch.setattr(
         github,
@@ -46,9 +51,14 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         calls["header"] = k
         return github.PlanHeaderUpdate(fields_updated=tuple(k.get("fields", {})), dry_run=False)
 
+    def _callout(**k):
+        calls["callout"] = k
+        return True
+
     monkeypatch.setattr(github, "add_issue_comment", _comment)
     monkeypatch.setattr(github, "update_plan_issue", _update)
     monkeypatch.setattr(github, "update_plan_header", _update_header)
+    monkeypatch.setattr(github, "prepend_plan_callout", _callout)
     return calls
 
 
@@ -68,6 +78,50 @@ def test_plan_save_success(monkeypatch):
     assert result.exit_code == 0
     assert "#123" in result.output
     assert calls["commented"] is True
+
+
+def test_plan_save_fresh_create_prepends_plan_callout(monkeypatch):
+    # A fresh standalone save prepends a visible `perk impl <id>` callout to the plan issue body.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch)
+    result = _run(monkeypatch, ["--plan-file", "plan.md"])
+    assert result.exit_code == 0
+    callout = calls["callout"]
+    assert isinstance(callout, dict)
+    kwargs = cast("dict[str, object]", callout)
+    assert kwargs["issue"] == 123
+    assert kwargs["command"] == "perk impl 123"
+    assert "perk impl 123" in str(kwargs["callout"])
+    assert str(kwargs["callout"]).startswith("**Implement this plan:**")
+
+
+def test_plan_save_callout_survives_header_block_rewrite():
+    # The callout lives above the hidden plan-header block, so it parses fine and survives a
+    # subsequent submit-time update_plan_header (which rewrites only the header block).
+    issue_body = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, {"run_id": "RUN-XYZ", "lifecycle_stage": "plan"}
+    )
+    callout = plan.plan_callout("123")
+    body = plan.prepend_callout(issue_body, callout, command="perk impl 123")
+    assert body.startswith("**Implement this plan:**")
+    assert plan.extract_run_id(body) == "RUN-XYZ"
+    # Simulate update_plan_header: rewrite only the header block in place.
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+    rewritten = plan.replace_metadata_block(
+        body, plan.PLAN_HEADER_KEY, {**header, "branch": "perk/plan-123"}
+    )
+    assert rewritten.startswith("**Implement this plan:**")
+    assert plan.extract_run_id(rewritten) == "RUN-XYZ"
+    assert "perk impl 123" in rewritten
+
+
+def test_plan_save_resave_does_not_prepend_callout(monkeypatch):
+    # The callout is injected only on the fresh-create path; a re-save never re-prepends.
+    _authed(monkeypatch)
+    calls = _stub_writes(monkeypatch, existed=True)
+    result = _run(monkeypatch, ["--plan-file", "plan.md"])
+    assert result.exit_code == 0
+    assert calls["callout"] is None
 
 
 def test_plan_save_json_shape(monkeypatch):
@@ -127,6 +181,9 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
         def add_issue_comment(self, *, issue_id, body, dry_run=False):
             return issue_backend.CommentResult(posted=True)
 
+        def prepend_plan_callout(self, *, issue_id, callout, command, dry_run=False):
+            return True
+
     monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _StubBackend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
@@ -150,6 +207,7 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
 
     monkeypatch.setattr(github, "create_plan_issue", _create)
     monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
+    monkeypatch.setattr(github, "prepend_plan_callout", lambda **k: True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -419,6 +477,7 @@ def test_plan_save_pins_base_from_config(monkeypatch):
 
     monkeypatch.setattr(github, "create_plan_issue", _create)
     monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
+    monkeypatch.setattr(github, "prepend_plan_callout", lambda **k: True)
     result, ref = _run_with_config(
         monkeypatch, ["--plan-file", "plan.md"], config='[workflow]\nbase = "develop"\n'
     )
