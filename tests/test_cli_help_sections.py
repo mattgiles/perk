@@ -48,6 +48,7 @@ def test_command_groups_section_lists_groups():
         "objective (obj)",
         "pr",
         "registry (reg)",
+        "skills (sk)",
         "state (st)",
         "workflow",
     ):

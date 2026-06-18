@@ -16,7 +16,7 @@ current by hand against the canonical taxonomy (SSOT:
 ## Orientation
 
 The `perk` surface is organized as **noun-groups** — `plan`, `objective`, `pr`, `learn`,
-`worktree`, `state`, `registry`, `workflow` — each holding both **warm stage launchers** (a launch
+`worktree`, `state`, `registry`, `skills`, `workflow` — each holding both **warm stage launchers** (a launch
 opens a primed `pi` session for one workflow stage) and **cold deterministic workers** (`--json`
 machine surfaces the warm in-session doors shell out to), separated by help sections. Three things
 escape a group:
@@ -396,6 +396,35 @@ error. `--json` emits a machine-readable result.
 ### `perk registry show` (alias `s`)
 
 Print the stages and their transitions (a dev/doctor convenience).
+
+### `perk skills` (alias `sk`)
+
+Ergonomic sugar over the upstream [`skills`](https://github.com/mattgiles/skills) CLI for managing
+this repo's skills. **Every verb is a thin pass-through to the `skills` binary** (inheriting its
+stdio and propagating its exit code) **except `remove`**, which the upstream CLI does not support and
+which perk therefore implements by editing `.agents/manifest.yaml` directly. The `skills` CLI must
+be on `PATH` (and the repo initialized via `perk init`, which runs `skills init`); otherwise the
+verbs surface a clean error.
+
+- **`perk skills list` (alias `ls`)** — list skills discoverable across this repo's sources
+  (→ `skills skill list`).
+- **`perk skills status`** — show installed skill link status for this repo (→ `skills status`).
+- **`perk skills add --source S --skill K [--source-url URL] [--ref R]`** — add a skill (and its
+  source) and sync (→ `skills add S K [--url URL] [--ref R]`). `--source-url` is **optional** when
+  the source alias is already declared; it is required for a brand-new source. `--ref` pins a git
+  ref (defaults to the remote's default branch). `skills` owns the reuse/require-url/sync/rollback
+  logic.
+- **`perk skills remove` (alias `rm`) `--source S --skill K`** — remove a skill from
+  `.agents/manifest.yaml` (dropping its source when no skills remain), then run `skills sync` to
+  drop the now-undeclared link. **The single reimplementation** (no upstream removal command). It
+  edits only the user's main manifest, **refuses perk-managed sources** (those declared in
+  `.agents/manifest.d/perk.yaml` — re-run `perk init` after editing perk's source set instead), and
+  restores the original bytes if `skills sync` fails. Note: the rewrite uses `yaml.safe_dump`, so
+  the main manifest's comments/layout are not preserved.
+- **`perk skills sync`** — update all sources to newer commits and re-sync links
+  (→ `skills update --sync`).
+
+Repo-scoped only (no `--global`); for broader upstream flags use the `skills` CLI directly.
 
 ### `perk workflow` (alias `wf`)
 
