@@ -221,6 +221,22 @@ def fetch(repo: Path, *, remote: str = "origin") -> None:
     _run(["fetch", remote], cwd=repo, timeout=120)
 
 
+def clone(url: str, target: Path, *, timeout: int = 120) -> None:
+    """Clone ``url`` into ``target`` (``git clone <url> <target>``; a **network** op).
+
+    Reuses ``_run`` (``GIT_TERMINAL_PROMPT=0`` → fails fast offline rather than hanging) and
+    raises ``GitError`` on failure. Does **not** create ``target`` itself beyond what ``git
+    clone`` does; the caller is responsible for creating ``target``'s parent directory (mirroring
+    pi's ``mkdirSync(dirname(targetDir), { recursive: true })``).
+    """
+    _run(["clone", url, str(target)], timeout=timeout)
+
+
+def reset_hard(repo: Path, ref: str) -> None:
+    """Hard-reset ``repo`` to ``ref`` (``git reset --hard <ref>``; a local op; ``GitError``)."""
+    _run(["reset", "--hard", ref], cwd=repo)
+
+
 def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
     """The repository's trunk branch name (mirrors erk's ``detect_trunk_branch``).
 

@@ -34,6 +34,19 @@ _PLAN_REF = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _no_network_clone_warm(monkeypatch):
+    """Stub the pre-exec clone warming (#655) so launch_stage tests never `git clone` the network.
+
+    `launch_stage` warms pi's git-package clone before exec; in a throwaway `git_repo` (not the
+    self-repo, clone absent) that would shell a real `git clone`. The dedicated call-site test
+    overrides this with its own recorder.
+    """
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_clone_present", lambda repo_root, *, self_repo: None
+    )
+
+
 def _stage(stage_id: str) -> Stage:
     return next(s for s in load_registry().stages if s.id == stage_id)
 
@@ -445,6 +458,52 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     _run()
     assert len(execs) == 2  # launched again
     assert wt.is_dir()
+
+
+def test_launch_warms_extension_clone_before_exec(git_repo, monkeypatch):
+    # #655: ensure_extension_clone_present is invoked before os.execvpe on the local consumer path.
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    events: list[object] = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch.init,
+        "ensure_extension_clone_present",
+        lambda repo_root, *, self_repo: events.append(("warm", repo_root, self_repo)),
+    )
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append("exec"))
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert events == [("warm", git_repo, False), "exec"]  # warmed first, then exec
+
+
+def test_launch_does_not_warm_on_dry_run(git_repo, monkeypatch, capsys):
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    warmed: list = []
+    monkeypatch.setattr(
+        launch.init,
+        "ensure_extension_clone_present",
+        lambda repo_root, *, self_repo: warmed.append(repo_root),
+    )
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    assert warmed == []  # --dry-run early-returns before the warm
 
 
 def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:

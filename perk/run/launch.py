@@ -25,6 +25,7 @@ from perk import github
 from perk.backends import issues, linear_agent
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import Ensure, UserFacingCliError
+from perk.convergence import init
 from perk.github import GitHubError
 from perk.run import runner
 from perk.state import cache, run_id
@@ -531,6 +532,14 @@ def launch_stage(
         if local_linear_key is not None:
             env["LINEAR_API_KEY"] = local_linear_key
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
+    # Warm pi's git-package clone before exec so the perk extension always loads from a COMPLETE
+    # clone. pi clones a missing `git:` package lazily and unlocked, so a missing-clone window +
+    # parallel launches let a second process collect resources from a half-created clone and drop
+    # the perk extension (#655). `ensure_extension_clone_present` clones-on-absent under a
+    # cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and best-effort
+    # + non-fatal internally. Targets the repo-root clone (`worktree: none` stages load from
+    # there). Not reached on --dry-run / --remote (both early-returned above).
+    init.ensure_extension_clone_present(repo_root, self_repo=init.is_self_repo(repo_root))
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 

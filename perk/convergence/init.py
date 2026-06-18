@@ -10,13 +10,15 @@ managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags
 ``--json``, and the post-init handoff are T5; the TOML config scaffold is T4.
 """
 
+import contextlib
 import json
 import shutil
 import subprocess
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Literal, cast
 
 from perk import __version__, _resources, github
@@ -39,6 +41,14 @@ from perk.substrate.config import (
 )
 from perk.substrate.output import user_confirm
 from perk.substrate.providers import ProviderSet, load_providers, resolve_providers
+
+fcntl: ModuleType | None
+try:
+    import fcntl as _fcntl
+
+    fcntl = _fcntl
+except ImportError:  # pragma: no cover - non-POSIX (perk dev platforms are macOS/Linux)
+    fcntl = None
 
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
 
@@ -596,19 +606,114 @@ def extension_clone_status(repo_root: Path, *, self_repo: bool) -> tuple[Extensi
     return "stale", f"clone HEAD {local[:8]} != origin/main {remote[:8]}"
 
 
-def reclone_extension_clone(repo_root: Path) -> str:
-    """Blow away pi's git-package clone so pi re-clones fresh ``main`` on the next launch.
+def _extension_clone_url() -> str:
+    """The HTTPS URL pi clones perk's extension from, derived from ``GIT_PACKAGE``.
 
-    Filesystem-only — **no network** in perk itself; pi performs the actual reclone on the next
-    launch (the verified absent → ``git clone`` + ``git checkout main`` path). Idempotent: a
-    no-op message when the clone is already absent. Returns a human-readable change line.
+    pi turns a ``git:github.com/<path>`` package spec into ``https://github.com/<path>`` for the
+    clone (verified against the consumer clone reflog's ``clone: from https://github.com/...``
+    line). Deriving it from ``GIT_PACKAGE`` keeps the URL single-sourced (no second hardcode).
     """
+    return "https://" + GIT_PACKAGE.removeprefix("git:")
+
+
+@contextlib.contextmanager
+def _extension_clone_lock(repo_root: Path) -> Iterator[None]:
+    """Hold an exclusive cross-process lock while materializing perk's extension clone.
+
+    Acquires ``fcntl.flock(LOCK_EX)`` on ``<repo_root>/.pi/git/.perk-extension-clone.lock``. The
+    lock file lives in the clone's **parent** (``.pi/git/``, already gitignored) so a reclone /
+    ``rm -rf`` of the clone dir never removes the lock. On a platform without ``fcntl`` (non-POSIX),
+    degrades to a no-op lock (best-effort; perk's supported dev platforms are macOS/Linux).
+    """
+    git_dir = repo_root / ".pi" / "git"
+    git_dir.mkdir(parents=True, exist_ok=True)
+    if fcntl is None:  # pragma: no cover - non-POSIX
+        yield
+        return
+    lock_path = git_dir / ".perk-extension-clone.lock"
+    with lock_path.open("w", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _clone_extension_fresh(clone: Path, url: str) -> None:
+    """Materialize a fresh clone at ``clone`` (no ``npm install`` — zero runtime deps).
+
+    Creates the clone's parent dir, ``git clone <url> <clone>``, then checks out ``main`` for
+    parity with the ``@main`` pin (idempotent — a fresh clone already checks out the default
+    branch). Raises ``GitError`` on any git failure (callers swallow it as best-effort).
+    """
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    git.clone(url, clone)
+    git.reset_hard(clone, "main")
+
+
+def _freshen_extension(clone: Path) -> None:
+    """In-place freshen of an existing clone: ``fetch origin`` then ``reset --hard origin/main``.
+
+    No ``npm install`` (zero runtime deps). Raises ``GitError`` (callers swallow it).
+    """
+    git.fetch(clone, remote="origin")
+    git.reset_hard(clone, "origin/main")
+
+
+def materialize_extension_clone(repo_root: Path, *, self_repo: bool) -> str | None:
+    """Materialize pi's git-package clone for perk **in place**, under a cross-process lock.
+
+    The full version used by init/doctor: re-checks ``extension_clone_status`` under the lock and
+    converges the clone forward — clone-if-absent, ``fetch``+``reset``-if-stale, no-op otherwise.
+    Best-effort + **non-fatal**: a ``GitError`` (flaky network) is swallowed and reported in the
+    returned message, never raised — init/doctor and especially a launch must not fail on it.
+    Returns a human-readable change line **only when it actually changed something** (absent →
+    cloned, stale → freshened, or a swallowed error worth surfacing); ``None`` for a genuine no-op
+    (``self`` / ``fresh`` / offline ``unverifiable``) so a converged re-run reports no change.
+    """
+    if self_repo:
+        return None
     clone = consumer_git_clone_root(repo_root)
     rel = clone.relative_to(repo_root)
-    if not clone.is_dir():
-        return f"{rel}: clone already absent (pi clones fresh main next launch)"
-    shutil.rmtree(clone)
-    return f"{rel}: removed stale clone (pi re-clones fresh main next launch)"
+    with _extension_clone_lock(repo_root):
+        status, _detail = extension_clone_status(repo_root, self_repo=self_repo)
+        try:
+            if status == "absent":
+                _clone_extension_fresh(clone, _extension_clone_url())
+                return f"{rel}: cloned fresh main (perk-owned, no npm install)"
+            if status == "stale":
+                _freshen_extension(clone)
+                return f"{rel}: freshened to origin/main in place (no npm install)"
+            # fresh / unverifiable (offline): leave a present clone for pi to load (nothing to do
+            # if absent + offline) — a genuine no-op, reported as no change.
+            return None
+        except git.GitError as exc:
+            return f"{rel}: clone materialize failed (non-fatal): {exc}"
+
+
+def ensure_extension_clone_present(repo_root: Path, *, self_repo: bool) -> str | None:
+    """Cheap launch hot-path guarantee that perk's extension clone **exists** (no freshness).
+
+    ``self_repo`` → ``None``. If the clone dir already exists → ``None`` fast (**no network, no
+    ``ls-remote``**) — the norm after init/doctor. Else, under the lock, **re-check** ``is_dir()``
+    (double-checked locking so concurrent launches clone exactly once) and clone fresh if still
+    absent. A ``GitError`` is swallowed (returns ``None``, non-fatal). Returns a change line only
+    when it actually cloned. Shares the lock + clone primitive with ``materialize_extension_clone``.
+    """
+    if self_repo:
+        return None
+    clone = consumer_git_clone_root(repo_root)
+    if clone.is_dir():
+        return None
+    rel = clone.relative_to(repo_root)
+    with _extension_clone_lock(repo_root):
+        if clone.is_dir():  # double-checked: a racing launch already cloned it
+            return None
+        try:
+            _clone_extension_fresh(clone, _extension_clone_url())
+        except git.GitError:
+            return None
+        return f"{rel}: cloned fresh main pre-launch (perk-owned, no npm install)"
 
 
 def _desired_packages(self_repo: bool) -> list[str]:
@@ -1338,16 +1443,16 @@ def run_init(
 def _reconcile_extension_clone(root: Path, changes: list[str], self_repo: bool) -> None:
     """Best-effort forward reconcile of pi's git-package clone (verify-gated, non-fatal).
 
-    Detects ``extension_clone_status``; a ``stale`` clone is blown away
-    (``reclone_extension_clone``) so pi re-clones fresh ``main`` on the next launch, and the
-    change is recorded. Every other
-    status (``self``/``absent``/``fresh``/``unverifiable``) is a no-op — ``unverifiable`` (offline)
-    never blocks init, mirroring how GitHub readiness degrades (D3). Kept a small free helper so
-    it is unit-testable.
+    Materializes the clone **in place** (``materialize_extension_clone``): clone-if-absent /
+    ``fetch``+``reset``-if-stale (no ``npm install``), leaving a present, fresh clone for both
+    ``absent`` and ``stale``. ``self``/``fresh`` are internal no-ops and ``unverifiable``
+    (offline) is left as-is — it never blocks init, mirroring how GitHub readiness degrades (D3).
+    A change line is recorded only when materialize actually changed something (``None`` no-ops
+    keep a converged re-run change-free). Kept a small free helper so it is unit-testable.
     """
-    status, _detail = extension_clone_status(root, self_repo=self_repo)
-    if status == "stale":
-        changes.append(reclone_extension_clone(root))
+    message = materialize_extension_clone(root, self_repo=self_repo)
+    if message is not None:
+        changes.append(message)
 
 
 def _linear_readiness(root: Path) -> LinearReport | None:

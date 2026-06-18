@@ -1105,9 +1105,12 @@ def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list
         elif check.name == "config":
             fixed.extend(_fix_config(root))
         elif check.name == "extension-clone":
-            # The reclone is filesystem-only (pi re-clones on next launch), so it is safe inside
-            # `_apply_fixes`; it only triggers when the verify-gated check flagged `fail` (stale).
-            fixed.append(init.reclone_extension_clone(root))
+            # Materialize the clone in place (clone-if-absent / fetch+reset-if-stale, no npm
+            # install) under a cross-process lock; best-effort + non-fatal. Only triggers when the
+            # verify-gated check flagged `fail` (stale) — a real change, so a message is returned.
+            message = init.materialize_extension_clone(root, self_repo=self_repo)
+            if message is not None:
+                fixed.append(message)
     for migration in _MIGRATIONS:
         changes, migration_errors = migration(root)
         fixed.extend(changes)
