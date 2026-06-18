@@ -183,6 +183,16 @@ const SAFE_PATTERNS = [
   /^\s*rg\b/,
   /^\s*fd\b/,
   /^\s*ast-grep\b/,
+  // Browser-automation skill (.agents/skills/agent-browser): a command-keyed entry mirroring
+  // `ast-grep` — it gates the command, not its args. Two invocation forms: the bare global
+  // install on PATH, and the `npx` fallback anchored to `agent-browser` so bare `npx <anything>`
+  // stays blocked. Accepted known leniency: the leading-command model cannot inspect args, so
+  // agent-browser's own output flags (screenshot/video `--output`) can write files and its actions
+  // can mutate external sites — outside the gate's granularity. This is accepted and documented,
+  // consistent with the allowlisted `curl` / `fetch_content` GitHub-clone cache-write precedent
+  // (both write outside the gate). The whole-string `>`-redirect destructive veto still applies.
+  /^\s*agent-browser\b/,
+  /^\s*npx\s+agent-browser\b/,
   /^\s*bat\b/,
   /^\s*eza\b/,
   // perk's own read-only objective queries (show/next + their s/n aliases). The trailing \b keeps
