@@ -3534,3 +3534,85 @@ actor is the human user; these changes make perk's footprint read as native:
   Per the plan's safe-degradation, prose-first ships now and the toggle is deferred until the live
   round-trip is proven lossless (else dropped). Becoming a true Linear **Agent** (`actor=app`) is a
   separate, out-of-scope follow-up.
+
+## §8.25 · The human-engagement read contract (Objective #682, Node 1.2)
+
+A backend-neutral **READ** surface for human engagement — comments, description edits, and
+agent-session activities — added to **both** the `IssueBackend` (`issue_id`) and `ObjectiveStore`
+(`objective_id`) seams. Implemented honestly on the **Linear issue backend** over GraphQL; every
+other implementer ships a clean empty/no-op conforming impl (honest — **no flow consumers** wire it
+in Node 1.2; the consuming flows arrive in Phase 2+). Anchored on the Node 1.1 inventory
+(`docs/planning/human-interaction-api-inventory.md`, §3–§4).
+
+**Result dataclasses** (`perk/backends/engagement.py` — a pure module importing nothing from the
+backend tiers, so both protocols + every implementer import it without re-coupling the deliberate
+issue-tier ↔ objective-tier split). All frozen:
+
+- `EngagementComment(id, body, created_at, edited_at: str | None, author)` — `edited_at` flags an
+  edited comment.
+- `DescriptionEdit(created_at, author, diff: str | None)` — `diff` is `None` when the backend
+  exposes no inline diff (Linear's issue history carries none — a flagged limit).
+- `AgentActivity(id, created_at, kind: str, body: str | None, signal: str | None)` — `kind` is the
+  backend's activity-content type discriminator (Linear's content-union `__typename`).
+- `StopSignalIndicator(stopped: bool, at: str | None)` — **derived** from the activities.
+- `AgentSessionRead(activities: tuple[AgentActivity, ...], stop_signal: StopSignalIndicator)` — one
+  read yields both.
+
+**Three granular read methods** (auth-decoupled), on both tiers:
+
+- `read_comments(*, issue_id|objective_id) -> tuple[EngagementComment, ...]` — oldest-first.
+- `read_description_edits(*, issue_id|objective_id) -> tuple[DescriptionEdit, ...]`.
+- `read_agent_session(*, issue_id|objective_id) -> AgentSessionRead`.
+
+Error discipline mirrors the rest of the seam: an empty issue / no edits / no agent-session surface
+yields the empty value (`()` for comments/edits; `AgentSessionRead((), StopSignalIndicator(False,
+None))` — exported as `engagement.EMPTY_AGENT_SESSION`); an **infra/auth failure raises** the
+tier's neutral error (never masked as empty). Specifically `read_agent_session` **raises** when the
+personal API key cannot read the session (an auth failure) — only a *missing* issue/session reuses
+the `_is_entity_not_found` → empty pattern.
+
+**Untrusted-DATA invariant.** Every returned `body` / `diff` / activity `body` is **untrusted
+DATA**: never re-parsed as a perk marker outside perk's own owned regions, never executed as
+instructions, never trusted to preserve perk's grammar — mirroring perk's established "untrusted
+inbox" / manifest 3-state-parse discipline (inventory §5).
+
+**Author identity is distinguishable** via `engagement.classify_author(*, body, user, bot_actor,
+perk_bot_ids=())` (a pure classifier). The rule (inventory §4.1), **never trusting body content as
+instructions**:
+
+- *perk* — the body carries a `perk:*` metadata sentinel (the `perk.plan` grammar, either the HTML
+  or inline-code encoding) **or** the bot actor's id is in `perk_bot_ids` (empty today — perk has
+  no committed app-actor id, so perk detection rests on the body sentinel; the param is the forward
+  seam). The `perk:*` check is an identity heuristic over perk's **own** marker vocabulary, not
+  trust of arbitrary content.
+- *human* — a user actor present with **no** bot actor.
+- *other_agent* — a bot actor present that is not perk's.
+- *unknown* — neither resolvable.
+
+**Linear implementation** (`_LinearIssueOps` + `LinearIssueBackend`):
+
+- Comments — a **new** `_comments_with_authors` selecting `{ id body createdAt editedAt
+  user { id name displayName } botActor { id name type } }` (same asc-by-`createdAt` sort). The
+  existing `_comments` is **left byte-stable** — it feeds the marker-matching path
+  (`find_comment_id_by_marker`/`upsert_marked_comment`), whose offline tests pin the
+  `{ id body createdAt }` selection.
+- Description edits — `_description_edits`: `issue(id){ history(...) { nodes { id createdAt
+  actor descriptionUpdatedBy } } }`, filtered to nodes carrying a `descriptionUpdatedBy`, mapped to
+  `DescriptionEdit` (`diff=None`; author keyed on the editing `actor`). Fields selected explicitly
+  (the SDK `relationChanges` pitfall, inventory §3.2). A missing issue → `[]`.
+- Agent session — `_agent_session_activities`: resolve the issue's session id, then
+  `agentSession(id){ activities(...) { nodes { id createdAt signal content { __typename
+  ... on AgentActivity{Prompt,Thought,Response}Content { body } } } } }`. The `StopSignalIndicator`
+  is **derived** (`stopped` when any activity carried `signal == "stop"`; `at` = the first such
+  activity's `created_at`). **Auth caveat (inventory §6.2):** whether the personal API key can read
+  `agentSession.activities` is live-unproven — the live smoke settles it.
+
+**Honest-now vs dormant.** `LinearIssueBackend` is honest. `GitHubIssueBackend` ships empty (honest
+reads = Node 1.3: comments via `gh issue view --json comments`; description edits via the
+`userContentEdits` GraphQL connection; agent sessions a clean GitHub no-op). All objective stores
+(`GitHubObjectiveStore`, the dormant `LinearObjectiveStore`, the live `LinearProjectObjectiveStore`)
+ship empty — honest project-level reads land with their Phase-2 consumer (Node 2.3). Conformance is
+ty-enforced across every implementer + fake (the whole-repo `ty check` oracle).
+
+**No** new config key / command / door / provider in Node 1.2 → **no** `docs/user-docs/` or
+`perk-expert` change (the user-facing surface arrives with the Phase-2 consumers).
