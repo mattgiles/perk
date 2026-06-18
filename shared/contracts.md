@@ -922,13 +922,16 @@ first consumer of the T6 spawned-delegation engine. It adds the `address` stage 
   see the `[subagents]` paragraph below).
 
 **PR review (`/pr-review`, #175).** A standalone warm command (like `/ci`, **not** a registry
-stage — `shared/registry.yaml` is unchanged) that conducts automated code review of the active PR.
-The outcome is **verdict-driven**: the review lands **as comments on the PR only on an
-`actionable` verdict**; a `clean` verdict posts a single 👍 reaction to the PR description and
-nothing else — comments and `/address` are reserved for actionable feedback, and a clean verdict
-unambiguously routes to `/land`. It spawns the perk-owned **`perk.pr-reviewer`** agent via the
-borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the implementation
-session's history never biases the review.
+stage — `shared/registry.yaml` is unchanged) that conducts **multi-angle** automated code review of
+the active PR. The parent spawns **2–3 angle-specialized `perk.pr-reviewer` children in parallel**
+via the borrowed `pi-subagents` engine with **`context: "fresh"`** (not a fork) so the implementation
+session's history never biases the review; each child reviews **one assigned angle** and **returns
+structured findings** (no posting, no file writes). The **parent reconciles** the per-angle findings
+and records **one** consolidated outcome on the PR via the new warm **`post_pr_review`** tool. The
+outcome is **verdict-driven**: the review lands **as comments on the PR only on an `actionable`
+verdict**; a `clean` verdict posts a single 👍 reaction to the PR description and nothing else —
+comments and `/address` are reserved for actionable feedback, and a clean verdict unambiguously
+routes to `/land`.
 
 - **Verdict-driven batch.** The review batch requires a `verdict` of exactly `"clean"` or
   `"actionable"` (a clean verdict with non-empty `comments` is a `bad_batch`). The optional
@@ -937,14 +940,22 @@ session's history never biases the review.
   (`add_pr_reaction`, the issues-reactions endpoint — idempotent on rerun) is a **hard error** on
   failure (mutations raise; no fallback ladder — nothing review-shaped is lost).
 
-- **Deliberate departure from the read-only-child convention.** Unlike `/address` (read-only child
-  classifies; the **parent** acts), the reviewer child **posts its own review**. Rationale: the PR
-  is the sole output sink and there is no parent-side fix to apply, so relaying the review back
-  through the parent would reintroduce exactly the session pollution this command avoids. D1 is
-  still honored — the mutation stays canonical in the **Python gateway**: the child posts via
-  `perk pr review-post` (the child has `write` only to stage the payload file + `bash` to run the
-  CLI). The review is **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway,
-  so the agent can never approve/request-changes.
+- **Follows the read-only-child convention (multi-angle classify-then-act, #658).** Like `/address`,
+  the reviewer children are **read-only and report-only** — they classify their assigned angle and
+  **return** findings; the **parent** reconciles and posts. The parent always spawns the **Plan
+  fidelity & completeness** reviewer plus **1–2** of: **Correctness & regressions** (security/edge
+  cases), **Tests & validation adequacy**, **Code quality, simplicity & docs/contracts accuracy** —
+  chosen to fit the change (2–3 reviewers total), with the angle passed per-call in the spawn `task`
+  (one parameterized agent, no new defs). Each child returns a fenced JSON block
+  `{angle, verdict, findings:[{path,line,body}], fyi}` with inline findings **already anchored to
+  diff lines**; the parent **unions + dedupes** across angles (same `path`+`line` → merge bodies),
+  **derives the overall verdict** (`actionable` if **any** reviewer is actionable, else `clean`), and
+  passes the findings straight into `post_pr_review`'s `comments[]` — the parent **never re-anchors**
+  (the raw diff never enters the parent; each child runs its own `review-context`). D1 is still
+  honored — the GitHub mutation stays canonical in the **Python gateway**: `post_pr_review` delegates
+  to `perk pr review-post` (the existing cold door) via `runColdDoor` (stdin `--batch`). The review is
+  **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway, so the parent can never
+  approve/request-changes.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
   agent's model is configurable through one flat `[subagents]` table in `.pi/perk.toml` (overlaid by
   `.pi/perk.local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
@@ -962,9 +973,17 @@ session's history never biases the review.
   — `pi-subagents`' `applyBuiltinOverrides` applies overrides only to **builtin** agents — so the
   inline per-call override (not an override map) is the configuration mechanism for project agents
   like `perk.review-classifier` and `perk.pr-reviewer`.
-- **No workflow-state record (deferral).** There is no parent-side tool turn (the child posts), so
-  no `last_review_batch`-style record is written; the PR comment is the canonical record. A richer
-  in-session record is a future enhancement.
+- **Workflow-state record (`last_pr_review`, #658).** The `post_pr_review` parent tool turn appends
+  a compact `last_pr_review` (`{pr, verdict, angles, comment_count, mode, at}`) to
+  `perk:workflow-state`, best-effort / non-fatal (mirrors `resolve_review_threads`'s
+  `last_review_batch`). The PR comment stays the canonical record; this is the in-session twin
+  (the earlier deferral is delivered).
+- **Still a warm command, not a `DriveStage`.** `/pr-review` remains human-invoked — the registry is
+  unchanged and `DriveStage = implement | address` (the headless worker drives only those two). But
+  the new `post_pr_review` tool turn + `last_pr_review` append make it **structurally symmetric with
+  `address`** (an ok tool result + an appended workflow-state field is exactly the terminal signal
+  the worker's `applyEvent`/`evaluateTerminal` latches onto), so a future promotion to a
+  headless-drivable stage is a clean follow-up (deferred — not built here).
 - **Agent-def delivery.** perk's agent **sources** live at top-level `agents/<name>.md` (no leading
   dot, so pi never discovers them in the source tree) and are bundled into the wheel as `perk/_agents`
   (hatchling `force-include`) + the sdist `only-include`. `perk init` materializes them into the
@@ -1230,8 +1249,9 @@ get_pr_review_context{ pr_number, branch }          -> PrReviewContext{ pr_numbe
 post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
     # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
-    # comment when the review submission fails)}. The warm twin is the /pr-review child, which
-    # delegates via `perk pr review-post --json --batch <path>`.
+    # comment when the review submission fails)}. The warm twin is `/pr-review`'s parent-side
+    # `post_pr_review` tool (#658), which delegates via `perk pr review-post --json --batch <path>`
+    # (the reviewer children no longer call it directly — they report findings to the parent).
 ```
 
 **Authored (P2.T8a — PR-body craft + the deliberate review gate).** The submit body is composed
