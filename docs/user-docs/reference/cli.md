@@ -303,14 +303,16 @@ validates without touching GitHub.
 
 ### `perk pr review-context`
 
-Fetch the active plan's PR review context (read-only; the pr-reviewer child runs this).
+Fetch the active plan's PR review context (read-only; each angle-specialized pr-reviewer child runs
+this).
 
 ### `perk pr review-post`
 
 Submit a `/pr-review` verdict to the active plan's PR. Reads the review from the required
 `--batch` JSON file (`{verdict, summary, comments?}`); an `actionable` verdict posts an advisory
 COMMENT review, a `clean` verdict posts a single thumbs-up reaction. `--dry-run` validates without
-touching GitHub.
+touching GitHub. Invoked by the warm **`post_pr_review`** tool (the parent reconciles the reviewers'
+findings and posts once) — the reviewer children no longer call it directly.
 
 ### `perk learn`
 

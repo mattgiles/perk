@@ -37,6 +37,12 @@ export interface WorkflowState {
   active_plan_ref?: PlanRef | null;
   active_objective?: string | null;
   last_review_batch?: unknown;
+  /**
+   * The last `/pr-review` outcome posted via the `post_pr_review` warm tool (#658, §8.3):
+   * `{pr, verdict, angles, comment_count, mode, at}`. Best-effort tier (per-field LWW in
+   * `rebuildWorkflowState`, no rebuild change). The PR comment stays canonical.
+   */
+  last_pr_review?: unknown;
   /** Session-artifact provenance pointers, keyed by artifact name (Node 1.3, §8.3). */
   session_artifacts?: Record<string, SessionArtifactPointer> | null;
   /**

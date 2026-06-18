@@ -35,8 +35,8 @@ page names them only as a pointer.
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
 The rest are non-terminating — the turn continues (`plan_draft`, `objective_draft`,
-`objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`, `run_ci`,
-`ask_user_question`).
+`objective_node`, `reconcile_objective`, `add_objective_node`, `resolve_review_threads`,
+`post_pr_review`, `run_ci`, `ask_user_question`).
 Each entry marks this property.
 
 ## The stage/door model
@@ -206,12 +206,19 @@ Run the project's configured CI checks and report pass/fail + failure output; ne
 
 ### `/pr-review`
 
-Automated code review: spawn a fresh-context reviewer subagent that reviews the active PR and
-posts a verdict-driven outcome (actionable → an advisory COMMENT review; clean → a single 👍
-reaction). The reviewer reads adversarially and runs an explicit **plan-conformance pass** —
-verifying the diff implements what the plan called for and flagging forgotten items (and noting when
-no plan body was found) — so a clean verdict means *no actionable findings after a genuine hunt*,
-not a rubber stamp. No paired tool.
+Multi-angle automated code review: spawn **2–3 angle-specialized fresh-context reviewers** in
+parallel — always **Plan fidelity & completeness** plus 1–2 of **Correctness & regressions**,
+**Tests & validation adequacy**, **Code quality, simplicity & docs/contracts accuracy** — each
+reviewing one assigned angle and **returning structured findings** (they never post). The parent
+**reconciles** the per-angle findings (union, dedupe, derive one verdict) and posts a single
+verdict-driven outcome via the paired **`post_pr_review`** tool (actionable → an advisory COMMENT
+review; clean → a single 👍 reaction). The reviewers read adversarially and the plan-fidelity angle
+runs an explicit **plan-conformance pass** — verifying the diff implements what the plan called for
+and flagging forgotten items (and noting when no plan body was found) — so a clean verdict means
+*no actionable findings after a genuine hunt*, not a rubber stamp.
+
+- **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
+  `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
 
 ### `/learn-docs`
 
@@ -232,7 +239,7 @@ Tools available across stages, independent of a single command.
 
 The per-stage tools documented above are enumerable here in one place (see each command's section
 for the full description): `plan_draft`, `plan_review`, `plan_save`, `submit`, `ready`,
-`resolve_review_threads`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
+`resolve_review_threads`, `post_pr_review`, `land`, `learn`, `run_ci`, `objective_draft`, `objective_save`,
 `objective_node`, `reconcile_objective`, `add_objective_node`.
 
 **The read-only-mode allowlist (`READ_ONLY_TOOLS`).** While plan mode is active the agent is
