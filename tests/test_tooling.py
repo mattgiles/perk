@@ -47,6 +47,8 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("init", "sync_skills"),
     ("run_worker", "_spawn_worker"),
     ("launch", "run_worktree_setup"),
+    ("shared", "run_skills"),
+    ("rm_cmd", "remove_skill"),
 }
 
 
