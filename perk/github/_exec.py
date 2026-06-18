@@ -53,6 +53,17 @@ def _failed(proc: subprocess.CompletedProcess[str], what: str) -> GitHubError:
     return GitHubError(f"{what}: {(proc.stderr + proc.stdout).strip() or 'no output'}")
 
 
+def _owner_repo(repo_root: Path) -> tuple[str, str]:
+    """The ``(owner, repo)`` pair (for GraphQL variables; REST uses gh's auto-fill placeholders)."""
+    proc = _run(
+        ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], cwd=repo_root
+    )
+    if proc.returncode != 0 or "/" not in proc.stdout:
+        raise _failed(proc, "failed to resolve owner/repo")
+    owner, _, name = proc.stdout.strip().partition("/")
+    return owner, name
+
+
 def _is_not_found(proc: subprocess.CompletedProcess[str]) -> bool:
     """Did a failed ``gh`` call report a missing resource (a 404 / "not found" lookup miss)?"""
     haystack = (proc.stderr + proc.stdout).lower()

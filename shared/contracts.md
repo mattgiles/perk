@@ -3607,9 +3607,15 @@ instructions**:
   activity's `created_at`). **Auth caveat (inventory §6.2):** whether the personal API key can read
   `agentSession.activities` is live-unproven — the live smoke settles it.
 
-**Honest-now vs dormant.** `LinearIssueBackend` is honest. `GitHubIssueBackend` ships empty (honest
-reads = Node 1.3: comments via `gh issue view --json comments`; description edits via the
-`userContentEdits` GraphQL connection; agent sessions a clean GitHub no-op). All objective stores
+**Honest-now vs dormant.** `LinearIssueBackend` is honest. `GitHubIssueBackend` is now honest for
+comments + description edits (Node 1.3), both via read-only `gh api graphql`: comments from
+`IssueComment` (`lastEditedAt` → the `edited_at` flag; `author { __typename databaseId login }` →
+the bot/human discriminator + opaque id), description edits from `Issue.userContentEdits`
+(`editedAt` / `editor` / a best-effort `diff` — GitHub may return null). `gh api graphql` does not
+auto-template `{owner}/{repo}`, so the queries pass explicit `owner`/`name`/`number` variables
+(cursor-paginated); a not-found issue folds to `()`. `perk_bot_ids` stays empty (perk has no
+committed GitHub app actor — perk-authored content is detected by its body sentinel). Agent
+sessions stay a clean GitHub no-op (no agent-session surface). All objective stores
 (`GitHubObjectiveStore`, the dormant `LinearObjectiveStore`, the live `LinearProjectObjectiveStore`)
 ship empty — honest project-level reads land with their Phase-2 consumer (Node 2.3). Conformance is
 ty-enforced across every implementer + fake (the whole-repo `ty check` oracle).

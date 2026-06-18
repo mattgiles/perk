@@ -16,7 +16,7 @@ import pytest
 
 import perk
 from perk import github
-from perk.backends import issue_backend, issues
+from perk.backends import engagement, issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
 from perk.backends.linear_backend import LinearIssueBackend
@@ -304,6 +304,97 @@ class TestDelegation:
             "dry_run": True,
         }
         assert result == issue_backend.CommentResult(posted=False)
+
+
+class TestEngagementReads:
+    """The honest GitHub reads (Node 1.3): github-native rows → neutral engagement contract."""
+
+    def test_read_comments_maps_authors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rows = [
+            github.IssueCommentRow(
+                id="IC_1",
+                body="a human note",
+                created_at="2026-03-01T00:00:00Z",
+                edited_at=None,
+                author_login="alice",
+                author_id="11",
+                author_is_bot=False,
+            ),
+            github.IssueCommentRow(
+                id="IC_2",
+                body="automation beep",
+                created_at="2026-03-02T00:00:00Z",
+                edited_at="2026-03-03T00:00:00Z",
+                author_login="other-bot",
+                author_id="22",
+                author_is_bot=True,
+            ),
+            github.IssueCommentRow(
+                id="IC_3",
+                body="summary <!-- perk:metadata-block:plan-body --> end",
+                created_at="2026-03-04T00:00:00Z",
+                edited_at=None,
+                author_login="carol",
+                author_id="33",
+                author_is_bot=False,
+            ),
+        ]
+        rec = _Recorder(rows)
+        monkeypatch.setattr(github, "read_issue_comments", rec)
+        comments = GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
+        assert rec.kwargs == {"issue": 42, "repo_root": tmp_path}
+        assert [c.author.kind for c in comments] == ["human", "other_agent", "perk"]
+        assert comments[0].author.id == "11" and comments[0].edited_at is None
+        assert comments[1].edited_at == "2026-03-03T00:00:00Z"
+        # the perk-by-sentinel comment came from a human actor but classifies as perk
+        assert comments[2].author.display_name == "carol"
+
+    def test_read_description_edits_maps_diff_and_authors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rows = [
+            github.DescriptionEditRow(
+                edited_at="2026-04-01T00:00:00Z",
+                diff="@@ -1 +1 @@",
+                editor_login="human",
+                editor_id="8",
+                editor_is_bot=False,
+            ),
+            github.DescriptionEditRow(
+                edited_at="2026-04-02T00:00:00Z",
+                diff=None,
+                editor_login="bot",
+                editor_id="9",
+                editor_is_bot=True,
+            ),
+        ]
+        rec = _Recorder(rows)
+        monkeypatch.setattr(github, "read_description_edits", rec)
+        edits = GitHubIssueBackend(tmp_path).read_description_edits(issue_id="42")
+        assert rec.kwargs == {"issue": 42, "repo_root": tmp_path}
+        assert edits[0].diff == "@@ -1 +1 @@" and edits[0].author.kind == "human"
+        assert edits[1].diff is None and edits[1].author.kind == "other_agent"
+        assert edits[1].created_at == "2026-04-02T00:00:00Z"
+
+    def test_read_agent_session_is_github_no_op(self, tmp_path: Path) -> None:
+        result = GitHubIssueBackend(tmp_path).read_agent_session(issue_id="42")
+        assert result is engagement.EMPTY_AGENT_SESSION
+
+    def test_read_comments_error_translation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def boom(**kwargs: Any) -> None:
+            raise github.GitHubError("HTTP 500: boom")
+
+        monkeypatch.setattr(github, "read_issue_comments", boom)
+        with pytest.raises(issue_backend.IssueBackendError, match="HTTP 500: boom"):
+            GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
+
+    def test_read_comments_non_numeric_id_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(issue_backend.IssueBackendError, match="numeric"):
+            GitHubIssueBackend(tmp_path).read_comments(issue_id="LIN-42")
 
 
 class TestErrorTranslation:

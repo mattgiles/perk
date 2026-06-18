@@ -24,6 +24,12 @@ from perk.github.auth import (
     check_auth,
     check_repo_access,
 )
+from perk.github.engagement import (
+    DescriptionEditRow,
+    IssueCommentRow,
+    read_description_edits,
+    read_issue_comments,
+)
 from perk.github.objectives import (
     ObjectiveBodyUpdate,
     ObjectiveHeaderUpdate,
@@ -118,9 +124,11 @@ __all__ = [
     "AuthStatus",
     "BatchResolveResult",
     "CommentResult",
+    "DescriptionEditRow",
     "DiscussionComment",
     "GitHubError",
     "InlineReviewComment",
+    "IssueCommentRow",
     "Label",
     "LearnIssueSummary",
     "ObjectiveBodyUpdate",
@@ -180,6 +188,8 @@ __all__ = [
     "merge_pr",
     "post_pr_review",
     "prepend_plan_callout",
+    "read_description_edits",
+    "read_issue_comments",
     "rerun_workflow_run",
     "resolve_review_threads",
     "secret_exists",

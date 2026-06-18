@@ -67,6 +67,41 @@ def _issue_ref(found: github.PlanIssue) -> issue_backend.IssueRef:
     return issue_backend.IssueRef(id=str(found.number), url=found.url, existed=found.existed)
 
 
+def _actor(name: str | None, actor_id: str | None) -> engagement.Actor:
+    return engagement.Actor(id=actor_id, name=name)
+
+
+def _engagement_comment(row: github.IssueCommentRow) -> engagement.EngagementComment:
+    """Map a github-native comment row into an :class:`EngagementComment` (untrusted body). The
+    author is classified via :func:`engagement.classify_author`: a bot row routes to ``bot_actor``,
+    a human row to ``user``; the body feeds the ``perk:*`` sentinel heuristic."""
+    actor = _actor(row.author_login, row.author_id)
+    author = engagement.classify_author(
+        body=row.body,
+        user=None if row.author_is_bot else actor,
+        bot_actor=actor if row.author_is_bot else None,
+    )
+    return engagement.EngagementComment(
+        id=row.id,
+        body=row.body,
+        created_at=row.created_at,
+        edited_at=row.edited_at,
+        author=author,
+    )
+
+
+def _description_edit(row: github.DescriptionEditRow) -> engagement.DescriptionEdit:
+    """Map a github-native description-edit row into a :class:`DescriptionEdit`. ``diff`` is passed
+    through best-effort (``None`` when GitHub returned null); author keyed on the editor."""
+    actor = _actor(row.editor_login, row.editor_id)
+    author = engagement.classify_author(
+        body="",
+        user=None if row.editor_is_bot else actor,
+        bot_actor=actor if row.editor_is_bot else None,
+    )
+    return engagement.DescriptionEdit(created_at=row.edited_at, author=author, diff=row.diff)
+
+
 class GitHubIssueBackend:
     """``IssueBackend`` over GitHub Issues — a thin adapter over ``perk.github``'s issue-tier
     functions (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
@@ -244,18 +279,25 @@ class GitHubIssueBackend:
             )
         return issue_backend.CommentResult(posted=result.posted)
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
-    # Clean empty impl: honest GitHub reads (comments via `gh issue view --json comments`;
-    # description edits via the `userContentEdits` GraphQL connection; agent sessions are a GitHub
-    # no-op) land in Node 1.3. No flow consumers in 1.2.
+    # --- human-engagement reads (Objective #682, Node 1.3) ---
+    # Honest where GitHub exposes the primitive: comments + description edits via read-only
+    # `gh api graphql` (Node 1.3). Agent sessions stay the only stub — GitHub has no agent-session
+    # surface, so the derived stop signal is a clean no-op (the Linear-only surface).
 
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
-        return ()
+        number = _number(issue_id)
+        with _translate():
+            rows = github.read_issue_comments(issue=number, repo_root=self._repo_root)
+        return tuple(_engagement_comment(row) for row in rows)
 
     def read_description_edits(self, *, issue_id: str) -> tuple[engagement.DescriptionEdit, ...]:
-        return ()
+        number = _number(issue_id)
+        with _translate():
+            rows = github.read_description_edits(issue=number, repo_root=self._repo_root)
+        return tuple(_description_edit(row) for row in rows)
 
     def read_agent_session(self, *, issue_id: str) -> engagement.AgentSessionRead:
+        # GitHub has no agent-session surface (the Linear-only no-op).
         return engagement.EMPTY_AGENT_SESSION
 
 
