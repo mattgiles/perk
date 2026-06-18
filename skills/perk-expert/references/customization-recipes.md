@@ -113,6 +113,9 @@ base = "develop"   # repo-wide default for standalone plans + objectives that do
 Per-objective: `perk objective create --base develop` (every node plan inherits it), or pass `base`
 to the `objective_draft` / `objective_save` tools in a read-only authoring session.
 
+At land, a non-default base makes perk close the plan issue explicitly (GitHub's `Closes #N`
+autoclose only fires on the default branch); default-base lands rely on GitHub's autoclose.
+
 ## Write a custom subagent (`.pi/agents/<name>.md`)
 
 Distinct from the fixed `[subagents]` model-override table. Author your own agent def anywhere under

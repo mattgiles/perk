@@ -3162,12 +3162,14 @@ everywhere — PRs are GitHub-universal. Concretely:
   in-flight resolution treats any non-empty node `pr` backlink as the plan id.
 - Plan worktrees are `plan-<id>` for any id shape (`plan-ENG-123` exploits Linear's branch-name
   auto-link when the GitHub integration is installed); `worktree wipe` matches `^plan-(\S+)$`.
-- **Land closure branches per backend.** GitHub keeps the squash footer `Closes #N` (autoclose
-  — byte-identical); non-github backends get a plain `Plan: <id> — <url>` footer (no commit
-  magic words — Linear's commit-linking needs a non-assumable webhook) **plus** an explicit
-  fail-open `close_issue` on the plan issue after the merge (`_close_plan_issue_on_land`,
-  surfaced as the envelope's `plan_issue_closed: bool`; idempotent beside any tracker
-  Done-on-merge automation).
+- **Land closure branches per backend.** GitHub keeps the squash footer `Closes #N` autoclose
+  **for default-branch merges** (byte-identical); when the PR's base is a **non-default** branch
+  (GitHub does not autoclose there), perk additionally performs the same explicit fail-open
+  `close_issue` on the plan issue that non-github backends always get. Non-github backends get a
+  plain `Plan: <id> — <url>` footer (no commit magic words — Linear's commit-linking needs a
+  non-assumable webhook) **plus** that explicit fail-open close after the merge
+  (`_close_plan_issue_on_land`, surfaced as the envelope's `plan_issue_closed: bool`; idempotent
+  beside autoclose or any tracker Done-on-merge automation).
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
   `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
   `docs/planning/linear-smoke-gate.md`.

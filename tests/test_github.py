@@ -480,6 +480,37 @@ def test_find_pr_for_branch_prefers_open(monkeypatch):
     assert pr is not None and pr.number == 2 and pr.is_draft and pr.state == "OPEN"
 
 
+def test_find_pr_for_branch_carries_base_ref(monkeypatch):
+    # #691: the PR's actual base.ref is surfaced on the dataclass (the land-time autoclose
+    # determinant); a payload without `base` defaults to "".
+    pulls = [
+        {
+            "number": 2,
+            "html_url": "u/2",
+            "state": "open",
+            "draft": False,
+            "base": {"ref": "release"},
+        },
+    ]
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, json.dumps(pulls))),
+            ]
+        ),
+    )
+    pr = github.find_pr_for_branch(branch="plan-7", repo_root=ROOT)
+    assert pr is not None and pr.base_ref == "release"
+    # A construction from a base-less payload defaults base_ref to "".
+    assert (
+        github.PullRequest(number=1, url="u", is_draft=False, state="OPEN", existed=True).base_ref
+        == ""
+    )
+
+
 def test_find_pr_for_branch_none(monkeypatch):
     monkeypatch.setattr(
         subprocess,
