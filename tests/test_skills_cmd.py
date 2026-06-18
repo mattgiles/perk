@@ -197,6 +197,30 @@ def test_passthrough_errors_when_skills_missing(monkeypatch, tmp_path):
     assert "not on PATH" in result.output
 
 
+def test_passthrough_maps_timeout_to_cli_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
+
+    def fake_run(args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=shared.SKILLS_TIMEOUT_S)
+
+    monkeypatch.setattr(shared.subprocess, "run", fake_run)
+    result = CliRunner().invoke(cli, ["skills", "list"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    assert "timed out" in result.output
+
+
+def test_passthrough_maps_oserror_to_cli_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
+
+    def fake_run(args, **_kwargs):
+        raise OSError("exec format error")
+
+    monkeypatch.setattr(shared.subprocess, "run", fake_run)
+    result = CliRunner().invoke(cli, ["skills", "status"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    assert "could not run `skills`" in result.output
+
+
 # --- remove -----------------------------------------------------------------
 
 
@@ -264,6 +288,26 @@ def test_remove_happy_path_writes_and_syncs(monkeypatch, tmp_path):
     }
 
 
+def test_remove_last_skill_drops_source_and_reports(monkeypatch, tmp_path):
+    # Removing the only skill under `other` must drop the source on disk AND emit both messages.
+    manifest = _write_main_manifest(tmp_path)
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
+    monkeypatch.setattr(
+        "perk.cli.commands.skills.rm_cmd.subprocess.run",
+        lambda args, **_kwargs: subprocess.CompletedProcess(args, 0, stdout="", stderr=""),
+    )
+
+    result = CliRunner().invoke(
+        cli, ["skills", "remove", "--source", "other", "--skill", "baz"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    assert "other" not in data["sources"]
+    assert all(s["source"] != "other" for s in data["skills"])
+    assert "removed skill `baz` from source `other`" in result.output
+    assert "removed source `other`" in result.output
+
+
 def test_remove_restores_on_sync_failure(monkeypatch, tmp_path):
     manifest = _write_main_manifest(tmp_path)
     before = manifest.read_text(encoding="utf-8")
@@ -279,4 +323,54 @@ def test_remove_restores_on_sync_failure(monkeypatch, tmp_path):
     )
     assert result.exit_code == 1
     assert "boom" in result.output
+    assert manifest.read_text(encoding="utf-8") == before
+
+
+def test_remove_restores_when_skills_missing(monkeypatch, tmp_path):
+    # `remove` has its own PATH check + rollback, independent of the pass-through verbs.
+    manifest = _write_main_manifest(tmp_path)
+    before = manifest.read_text(encoding="utf-8")
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: None)
+
+    result = CliRunner().invoke(
+        cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    assert "not on PATH" in result.output
+    assert manifest.read_text(encoding="utf-8") == before
+
+
+def test_remove_restores_on_sync_timeout(monkeypatch, tmp_path):
+    manifest = _write_main_manifest(tmp_path)
+    before = manifest.read_text(encoding="utf-8")
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
+
+    def fake_run(args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd=args, timeout=shared.SKILLS_TIMEOUT_S)
+
+    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+
+    result = CliRunner().invoke(
+        cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    assert "timed out" in result.output
+    assert manifest.read_text(encoding="utf-8") == before
+
+
+def test_remove_restores_on_sync_oserror(monkeypatch, tmp_path):
+    manifest = _write_main_manifest(tmp_path)
+    before = manifest.read_text(encoding="utf-8")
+    monkeypatch.setattr(shared.shutil, "which", lambda _name: "/usr/bin/skills")
+
+    def fake_run(args, **_kwargs):
+        raise OSError("exec format error")
+
+    monkeypatch.setattr("perk.cli.commands.skills.rm_cmd.subprocess.run", fake_run)
+
+    result = CliRunner().invoke(
+        cli, ["skills", "remove", "--source", "demo", "--skill", "foo"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    assert "could not run `skills sync`" in result.output
     assert manifest.read_text(encoding="utf-8") == before
