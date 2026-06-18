@@ -1161,6 +1161,13 @@ def test_create_objective_issue_two_step(monkeypatch):
     patched = rec.body_files[-1]
     header = plan.find_metadata_block(patched, objective.OBJECTIVE_HEADER_KEY)
     assert header is not None and header["objective_comment_id"] == 555
+    # the objective-body comment leads with the copyable `perk objective plan 200` callout, above
+    # the rendered roadmap table
+    comment = next(b for b in rec.body_files if "perk objective plan 200" in b)
+    assert comment.startswith("**Plan the next node:**")
+    assert comment.index("perk objective plan 200") < comment.index(
+        objective.ROADMAP_TABLE_MARKER_START
+    )
 
 
 def test_create_objective_issue_dry_run_does_not_shell(monkeypatch):
