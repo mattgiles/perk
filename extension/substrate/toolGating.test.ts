@@ -74,6 +74,10 @@ test("isReadOnlyBashCommand: allows read-only commands", () => {
     "ast-grep run --pattern 'console.log($A)' --lang js .", // structural code search
     "ast-grep run --pattern 'print($A)' --lang python .", // language-agnostic: the allowlist gates the `ast-grep` command, not its --lang
     "ast-grep scan --inline-rules 'id: x\nlanguage: ts\nrule: {pattern: $A}'",
+    "agent-browser snapshot", // browser-automation skill (command-keyed like ast-grep)
+    "agent-browser navigate https://example.com",
+    "npx agent-browser skills get core", // npx fallback anchored to agent-browser
+    "cd repo && agent-browser screenshot", // per-segment acceptance with a cd prefix
     "find . -name '*.ts'",
     "wc -l file",
     "sed -n '1,10p' file",
@@ -133,6 +137,8 @@ test("isReadOnlyBashCommand: blocks destructive / non-allowlisted commands", () 
     "gh pr merge 7",
     "gh repo clone o/r",
     "gh issue view 12 > out.txt", // destructive-wins blocks the redirect
+    "npx some-other-pkg", // npx entry is anchored to agent-browser — bare npx stays blocked
+    "agent-browser screenshot > shot.png", // >-redirect destructive veto wins over the safe entry
   ]) {
     assert.equal(isReadOnlyBashCommand(cmd), false, `expected blocked: ${cmd}`);
   }

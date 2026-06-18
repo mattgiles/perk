@@ -28,9 +28,11 @@ pairs them; the per-stage sections document each pair together.
 **The read-only-mode allowlist.** While plan mode is active the agent is structurally restricted
 to read/search tools plus the sanctioned write tools (`plan_draft` / `objective_draft`) and the
 review door (`plan_review`) — it cannot edit or run mutating commands until the read-only → 
-read-write boundary is crossed at save. The borrowed web/Linear research tools are also allowed
-while exploring; their depth belongs to the config/provider reference nodes (4.1/4.2), so this
-page names them only as a pointer.
+read-write boundary is crossed at save. The read-only `bash` sub-allowlist also permits the
+`agent-browser` CLI (the browser-automation skill) so it can be used for dogfooding / QA while
+exploring, alongside `ast-grep` and the read-only `gh` queries. The borrowed web/Linear research
+tools are also allowed while exploring; their depth belongs to the config/provider reference nodes
+(4.1/4.2), so this page names them only as a pointer.
 
 **Terminating vs non-terminating tools.** A *terminating* tool ends the turn on success
 (`plan_save`, `plan_review` on approval, `submit`, `ready`, `land`, `learn`, `objective_save`).
@@ -247,8 +249,10 @@ structurally limited to read/search/builtin tools plus the sanctioned write tool
 (`plan_draft` / `objective_draft`) and the review door (`plan_review`). The pi builtins
 (`read` / `edit` / `write` / `bash` / `grep` / `find` / `ls`) are pi's own surface — see pi's
 documentation, not re-documented here (in read-only mode `bash` is sub-allowlisted to read-only
-commands). The borrowed web/Linear research tools are allowed while exploring; their depth belongs
-to the config/provider reference nodes (4.1/4.2).
+commands — the sub-allowlist also permits the `agent-browser` CLI (the browser-automation skill)
+for dogfooding / QA, alongside `ast-grep` and the read-only `gh` queries). The borrowed web/Linear
+research tools are allowed while exploring; their depth belongs to the config/provider reference
+nodes (4.1/4.2).
 
 ## Ancillary in-session features
 

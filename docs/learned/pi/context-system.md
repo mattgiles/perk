@@ -97,6 +97,18 @@ so `\b` after `grep` matches correctly). A test framing it as `--lang js` reads 
 but isn't; pin the language-agnosticism with a second `--lang python` case rather than a
 production-code change.
 
+**A second command-keyed precedent (`agent-browser`, #663).** The browser-automation skill's
+allowlist entries (`/^\s*agent-browser\b/` and `/^\s*npx\s+agent-browser\b/`) follow the same
+command-keyed shape — they gate the command, not the args, and the `npx` form is anchored to
+`agent-browser` so bare `npx <anything>` stays blocked. **Accepted write-leniency rationale:** the
+leading-command model cannot inspect args, so `agent-browser`'s own output flags (screenshot/video
+`--output`) can write files and its actions can mutate external sites — outside the gate's
+granularity. This is accepted and documented (not arg-sniffed), consistent with the already-allowed
+`curl` / `fetch_content` GitHub-clone cache-write precedent; the whole-string `>`-redirect
+destructive veto still applies. No `READ_ONLY_TOOLS` / `READ_ONLY_CONTEXT` change — `agent-browser`
+is a bash CLI already covered by the `bash` tool entry, and safe bash commands are not enumerated in
+the injected context.
+
 **Mechanism-choice lesson:** perk **cannot own `grep`** — it's a Pi builtin, not a perk-registered
 tool, so there is no tool to swap or remove. Steering toward a structural-search tool is therefore
 the managed `AGENTS.md` bullet (ambient every session) + a bundled ambient skill + the read-only
