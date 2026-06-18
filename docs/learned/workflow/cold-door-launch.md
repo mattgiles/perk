@@ -1,6 +1,6 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
@@ -64,6 +64,24 @@ vars into this layering rather than writing `env.setdefault()` loops.
   NOT get the quiet vars — CI logs keep full npm output.
 - **Fail-soft:** the quieting is advisory; if pi ever sanitizes the child env before spawning npm,
   the noise returns silently (no breakage, no detection).
+- **#654 — Linear key seed.** `launch_stage` seeds `env["LINEAR_API_KEY"]` from
+  `load_local_linear_api_key(repo_root)` (the **main checkout**), **only when env doesn't already
+  provide it**, just before `os.execvpe` — built **before `os.chdir(worktree)`** so worktree
+  consumers inherit it. This is the bridge that carries a gitignored `perk.local.toml` secret into a
+  linked worktree session (see `docs/learned/workflow/linear-backend.md` for the consumer side).
+
+## Running a repo-configured setup hook before exec (#652)
+
+`run_worktree_setup` runs the `[worktree] setup` commands via `bash -lc` inside a **freshly
+created** worktree before `exec pi`, **aborting the launch on any failure**. It is the **single
+canonical setup-execution path** with two consumers (cold-door `launch_stage` + manual
+`perk worktree create`'s `_create_impl`), mirroring `materialize_plan_body`/`materialize_skills`.
+
+- **Scope boundary:** the remote runner's `position_worktree` deliberately does **not** run the hook
+  (CI env setup belongs to the GHA composite action) — a recorded non-goal. This is
+  Python-plane-only (the TS extension never creates worktrees).
+- See `docs/learned/workflow/worktree-lifecycle.md` for the `created`-flag dry-run asymmetry that
+  gates the dry-run preview of this hook.
 
 ## `stage.worktree != "none"` is the canonical worktree-stage predicate
 
@@ -173,4 +191,6 @@ because the stderr note lands in the combined stream.
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`
 - `docs/learned/workflow/skill-bindings.md` — the skill-delivery subsystem the worktree mirror feeds
+- `docs/learned/workflow/worktree-lifecycle.md` — the `[worktree] setup` hook + `created`-flag dry-run asymmetry
+- `docs/learned/workflow/linear-backend.md` — the consumer side of the Linear-key env-seed
 - `docs/learned/pi/extension-api.md` — pi's git-root skill-discovery boundary

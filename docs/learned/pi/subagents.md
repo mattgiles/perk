@@ -1,6 +1,6 @@
 ---
 title: perk's subagent orchestration — project vs builtin agents, the two mutation shapes, and agent-def delivery to consumer repos
-read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, working on the `/pr-review` / `/address` orchestration, or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
+read_when: You are spawning a subagent for fresh-context work, configuring a project agent's model, choosing read-only-child-then-parent-mutates vs child-posts-own-mutation, the read-only fan-out shape (a report-only reviewer drops `write`, angle passed per-call), working on the `/pr-review` / `/address` orchestration, or delivering perk's agent defs to consumer repos (the frontmatter-derived runtime name, installed-packages-are-never-scanned, the committed managed convergence, no worktree mirror).
 ---
 
 # perk's subagent orchestration
@@ -44,6 +44,20 @@ external surface and there's no parent-side action; otherwise read-only child + 
 **D1 holds in both:** the GitHub mutation stays canonical in Python (`perk pr review-post`); the
 child only has `bash` (run the CLI) + `write` (stage the payload file). It never holds a GitHub
 token or composes the mutation itself.
+
+**Update (#660): `/pr-review` was reshaped to report-only + parent-posts.** The single posting child
+became the **same classify-then-act shape as `/address`** — the reviewer is now **read-only and
+reports structured findings**, and the **parent** reconciles + posts once via `post_pr_review`. So
+the "child-posts-own-mutation" shape no longer has a live `/pr-review` example; the decision rule
+still holds, but the parallel angle-coverage need (below) tipped `/pr-review` onto the read-only
+fan-out side.
+
+- **Report-only means dropping `write`.** The single-angle `/pr-review` reviewer drops `write` from
+  its `tools` (no temp-file staging — it only runs `review-context` and emits a fenced JSON block,
+  then stops). **The angle is passed per-call in the spawn `task`** — one parameterized agent, no
+  new agent defs, no new `[subagents]` keys, binding unchanged. This is the read-only fan-out shape:
+  prefer the read-only reviewer for parallel angle coverage; a GitHub-**posting** agent run in
+  parallel would spam duplicate reactions/reviews (the parent posts once, after reconciling).
 
 ## Isolation knob: `context: "fresh"` vs `"fork"`
 

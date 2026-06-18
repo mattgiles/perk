@@ -21,9 +21,12 @@ third, mirror exactly these six seams (no codegen, no manifest edits):
    `list[Issue]` and **never raises for content**. Reuse `Issue`/`Severity` from `perk/substrate/registry.py`
    (one findings vocabulary — don't redefine). Parse leniently (coerce missing/ill-typed fields to
    `""`) so the *validator*, not the parser, reports every shape problem in one place.
-3. **TS reader** `extension/<name>.ts` — a thin structural parse with the `yaml` package; throws on
-   missing-file/wrong-shape only. **The Python plane is the authoritative validator**; TS does not
-   deep-validate.
+3. **TS reader** `extension/<name>.ts` — a thin structural parse via the **vendored bounded reader**
+   `extension/substrate/miniYaml.ts` (scoped to perk's own files; throws loudly on any unsupported
+   construct); throws on missing-file/wrong-shape only. **The Python plane is the authoritative
+   validator**; TS does not deep-validate. (The TS plane no longer depends on the `yaml` npm
+   package — it was eliminated in #639/#641 to make the consumer extension-clone self-contained; see
+   `docs/learned/workflow/extension-clone-lifecycle.md` for *why* the npm parser was dropped.)
 4. Both readers resolve the bundled dir via `shared_dir()` / `sharedDir()` (installed bundle →
    editable repo-sibling fallback).
 5. **Bundling is automatic** — `pyproject.toml` force-includes the whole `shared/` dir (ships as

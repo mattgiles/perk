@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), or the live-spike firing mechanism.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the worktree env-seed bridge (the gitignored `perk.local.toml` carried into a linked worktree, the widening-broke-21-fakes `*a,**k` rule), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -112,6 +112,37 @@ Two distinct disciplines in one backend — keep them straight when adding ops.
 
 See `init-doctor.md` for the general rule that network repairs live in the verify-gated repair
 gesture, never a `ManagedConvergence`.
+
+## The env-first / config-fallback `client_from_env` seam + the worktree env bridge (#654)
+
+`client_from_env(env=None, *, repo_root: Path | None = None)` is **env-first** (stripped), then
+falls back to the `repo_root` `perk.local.toml` `[linear] api_key` when env is blank. The
+`repo_root=None` default preserves every existing caller byte-for-byte. It is threaded at four
+in-process sites (`resolve_issue_backend`, `resolve_objective_store`, `doctor._linear_checks`,
+`init._linear_readiness`); a **fifth** site (`doctor._fix_linear_labels`) was intentionally left
+env-only (low impact; a future "config fallback everywhere" pass should thread it for symmetry).
+
+- **The worktree/gitignore bridge (the cross-cutting insight).** A *gitignored* local file IS
+  honored *inside worktrees* — by design, **via the env-seed, not a file copy**. `launch_stage`
+  reads `load_local_linear_api_key(repo_root)` where `repo_root` is the **main checkout**, and
+  builds the env dict **before `os.chdir(worktree)`**. The gitignored file is never copied into the
+  linked worktree, but it doesn't need to be: all worktree-resident consumers (the borrowed
+  in-session `pi-mono-linear` `linear_*` tools AND any `perk <stage> --json` cold-door worker)
+  **inherit the seeded session env**, and `client_from_env` reads env-first, so the inherited value
+  wins. The `client_from_env(repo_root=worktree)` fallback is effectively moot inside a worktree (no
+  file there) — **the env-seed carries it.**
+- **Gotcha — widening `client_from_env` broke 21 lifecycle tests.** Adding the `repo_root` kwarg
+  broke the shared fake `monkeypatch.setattr(linear, "client_from_env", lambda: ws)` with
+  `TypeError: unexpected keyword argument`. Fix: `lambda *a, **k: ws`. **Rule: when you widen a
+  function's signature, grep ALL `monkeypatch.setattr(..., "<fn>", lambda ...)` fakes of it and
+  loosen them to `*a, **k`.**
+- **Out of scope (flagged):** `LINEAR_AGENT_TOKEN` (a distinct secret; the `[linear]` table leaves
+  room for a future `agent_token` key, not added); `--remote` (returns before the local exec-env
+  block; the remote runner provides its own secrets); no TS-plane mirror (the TS extension reads no
+  Linear key — the `launch_stage` env-seed is the only bridge).
+
+See `docs/learned/workflow/config-tables.md` for the local-only secret-fallback reader shape and
+`docs/learned/workflow/cold-door-launch.md` for the env-seed merge order at the launch seam.
 
 ## Agent-session emission (one-way, internally gated)
 
@@ -661,7 +692,8 @@ unobserved:
 - `docs/learned/workflow/objective-store.md` — the objective-storage tier contract the
   project-backed store implements (the facade refactor, resolver, translate-CM, node↔plan unification)
 - `docs/learned/workflow/init-doctor.md` — verify-gated network repairs, the readiness shape
-- `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table shape
+- `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table shape + the local-only secret-fallback reader
+- `docs/learned/workflow/cold-door-launch.md` — the launch-seam Linear-key env-seed (merge-order setdefault)
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment pattern
 - `docs/learned/workflow/skill-bindings.md` — skills `references:` subdirectory routing
 - `docs/learned/workflow/mergeability-and-conflict-resolution.md` — the `/submit` mergeability gate
