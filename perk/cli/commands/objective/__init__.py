@@ -21,6 +21,7 @@ from perk.cli.commands.objective.doctor_cmd import doctor_objective
 from perk.cli.commands.objective.next_cmd import next_objective
 from perk.cli.commands.objective.node_add_cmd import node_add_objective
 from perk.cli.commands.objective.node_cmd import node_objective
+from perk.cli.commands.objective.node_engagement_cmd import node_engagement_objective
 from perk.cli.commands.objective.plan_cmd import plan_objective
 from perk.cli.commands.objective.reconcile_cmd import reconcile_objective
 from perk.cli.commands.objective.run_cmd import run_objective
@@ -44,6 +45,7 @@ register_with_aliases(objective_group, mark_kind(create_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(show_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(node_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(node_add_objective, "worker"))
+register_with_aliases(objective_group, mark_kind(node_engagement_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(reconcile_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(next_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(run_objective, "worker"))

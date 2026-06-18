@@ -222,6 +222,14 @@ sets its initial status (default `pending`); `--slug` overrides the auto-derived
 validates without writing. Used **sparingly** during reconciliation, when a genuinely-new unit of
 work emerged.
 
+### `perk objective node-engagement NUMBER`
+
+Read a roadmap node-issue's **pre-planning human engagement** — comments + description edits left on
+the node-issue *before* perk planned it — as an untrusted-DATA block. `--node` selects the node id
+(required); `--json` emits the machine payload (`comments`, `description_edits`). Read-only; the
+`/objective-plan` factory uses it to fold human feedback into the authored plan. **Linear-first** —
+GitHub single-issue objectives (and the dormant issue-backed Linear store) report no engagement.
+
 ### `perk objective reconcile NUMBER` (alias `rec`)
 
 Reconcile an objective's Reconcilable prose region against the merged diff — rewriting only the

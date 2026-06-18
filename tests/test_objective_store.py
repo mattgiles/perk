@@ -188,6 +188,9 @@ class _FakeObjectiveStore:
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
         return engagement.EMPTY_AGENT_SESSION
 
+    def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
+        return engagement.EMPTY_NODE_ENGAGEMENT
+
 
 def _make_store() -> objective_store.ObjectiveStore:
     """The static conformance check: ty verifies ``_FakeObjectiveStore`` satisfies the protocol."""

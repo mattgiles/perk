@@ -115,3 +115,95 @@ class TestResultDataclasses:
         assert engagement.EMPTY_AGENT_SESSION.activities == ()
         assert engagement.EMPTY_AGENT_SESSION.stop_signal.stopped is False
         assert engagement.EMPTY_AGENT_SESSION.stop_signal.at is None
+
+
+def _author(kind: engagement.AuthorKind, name: str | None = "Ada") -> engagement.EngagementAuthor:
+    return engagement.EngagementAuthor(kind=kind, display_name=name, id="x")
+
+
+def _comment(
+    kind: engagement.AuthorKind, body: str, *, created_at: str = "2026-01-01T00:00:00Z"
+) -> engagement.EngagementComment:
+    return engagement.EngagementComment(
+        id="c", body=body, created_at=created_at, edited_at=None, author=_author(kind)
+    )
+
+
+def _edit(
+    kind: engagement.AuthorKind, *, created_at: str = "2026-01-02T00:00:00Z"
+) -> engagement.DescriptionEdit:
+    return engagement.DescriptionEdit(created_at=created_at, author=_author(kind), diff=None)
+
+
+class TestNodeEngagementRenderer:
+    def test_empty_bundle_renders_none(self) -> None:
+        assert engagement.render_node_engagement(engagement.EMPTY_NODE_ENGAGEMENT) is None
+
+    def test_only_perk_comments_renders_none(self) -> None:
+        # perk-sentinel comments are skipped → nothing left to surface → None.
+        ne = engagement.NodeEngagement(
+            comments=(_comment("perk", "`perk:metadata-block:plan-body`"),),
+            description_edits=(),
+        )
+        assert engagement.render_node_engagement(ne) is None
+
+    def test_renders_comments_and_edits_with_kind_and_timestamp(self) -> None:
+        ne = engagement.NodeEngagement(
+            comments=(
+                _comment("human", "please scope this down", created_at="2026-03-01T10:00:00Z"),
+            ),
+            description_edits=(_edit("human", created_at="2026-03-02T11:00:00Z"),),
+        )
+        out = engagement.render_node_engagement(ne)
+        assert out is not None
+        assert out.startswith("<untrusted_node_engagement>")
+        assert out.endswith("</untrusted_node_engagement>")
+        assert "human/Ada" in out
+        assert "2026-03-01T10:00:00Z" in out
+        assert "please scope this down" in out
+        assert "2026-03-02T11:00:00Z" in out
+        assert "(description edited)" in out
+
+    def test_skips_perk_comments_but_keeps_human_comments(self) -> None:
+        ne = engagement.NodeEngagement(
+            comments=(
+                _comment("perk", "`perk:metadata-block:plan-body`"),
+                _comment("human", "human feedback here"),
+            ),
+            description_edits=(),
+        )
+        out = engagement.render_node_engagement(ne)
+        assert out is not None
+        assert "human feedback here" in out
+        assert "perk:metadata-block" not in out
+
+    def test_renders_edits_unfiltered_even_when_classified_perk(self) -> None:
+        # Description edits are surfaced labeled-by-kind, NEVER filtered (classification is
+        # preview-grade; silently dropping would lose real human signal).
+        ne = engagement.NodeEngagement(
+            comments=(),
+            description_edits=(_edit("perk"), _edit("other_agent"), _edit("human")),
+        )
+        out = engagement.render_node_engagement(ne)
+        assert out is not None
+        assert out.count("(description edited)") == 3
+        assert "perk/Ada" in out
+
+    def test_bounds_item_count_to_thirty_per_surface(self) -> None:
+        comments = tuple(_comment("human", f"c{i}", created_at=f"t{i:03d}") for i in range(40))
+        ne = engagement.NodeEngagement(comments=comments, description_edits=())
+        out = engagement.render_node_engagement(ne)
+        assert out is not None
+        # Most-recent 30 kept; the oldest 10 dropped.
+        assert "t039" in out
+        assert "t010" in out
+        assert "t009" not in out
+
+    def test_truncates_long_bodies(self) -> None:
+        ne = engagement.NodeEngagement(
+            comments=(_comment("human", "x" * 5000),), description_edits=()
+        )
+        out = engagement.render_node_engagement(ne)
+        assert out is not None
+        assert "… (truncated)" in out
+        assert "x" * 5000 not in out

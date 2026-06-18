@@ -122,6 +122,7 @@ EXPECTED_SURFACE: dict[str, object] = {
             ("next", ("n",)),
             ("node", ()),
             ("node-add", ()),
+            ("node-engagement", ()),
             ("plan", ()),
             ("reconcile", ("rec",)),
             ("run", ("r",)),

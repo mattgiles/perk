@@ -262,6 +262,10 @@ class GitHubObjectiveStore:
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
         return engagement.EMPTY_AGENT_SESSION
 
+    def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
+        # GitHub objectives are one issue with no per-node issues — honest no-op (Linear-first).
+        return engagement.EMPTY_NODE_ENGAGEMENT
+
 
 def resolve_objective_store_id(repo_root: Path) -> str:
     """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.

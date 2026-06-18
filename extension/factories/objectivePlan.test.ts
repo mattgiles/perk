@@ -100,6 +100,18 @@ test("factoryGuidance instructs the file-first loop (draft → review → approv
   assert.match(text, /ALWAYS save, NEVER implement directly/);
 });
 
+test("factoryGuidance instructs the node-engagement fetch (backend-neutral, both backends)", () => {
+  // Node 2.1: the warm seed instructs the model to fetch the node-issue's pre-planning engagement
+  // once it knows the node. The instruction is backend-neutral (harmless on github) so it appears
+  // for both linear and github seeds.
+  const linear = factoryGuidance("7", "1.2", undefined, "linear", LINEAR_URL);
+  const github = factoryGuidance("7", "1.2");
+  for (const text of [linear, github]) {
+    assert.match(text, /perk objective node-engagement 7 --node <id>/);
+    assert.match(text, /untrusted\s+DATA/);
+  }
+});
+
 const OK_JSON = JSON.stringify({
   success: true,
   error_type: null,
