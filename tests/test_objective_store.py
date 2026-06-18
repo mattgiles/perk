@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from perk import objective
-from perk.backends import objective_store
+from perk.backends import engagement, objective_store
 
 
 @dataclasses.dataclass
@@ -174,6 +174,19 @@ class _FakeObjectiveStore:
         return objective_store.RepairResult(
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+
+    def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return ()
+
+    def read_description_edits(
+        self, *, objective_id: str
+    ) -> tuple[engagement.DescriptionEdit, ...]:
+        return ()
+
+    def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
+        return engagement.EMPTY_AGENT_SESSION
 
 
 def _make_store() -> objective_store.ObjectiveStore:

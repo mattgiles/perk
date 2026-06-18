@@ -330,6 +330,75 @@ Append the run's findings to **Recorded observations** as a dated **Fifth live r
 per gate). Record any backend defect as a dated observation and open a follow-up — do not fix
 substantive code at the gate.
 
+## Mode 6 — human-engagement reads (Objective #682, Node 1.2)
+
+Validates the **new READ surfaces** the Node 1.2 contract adds to `LinearIssueBackend`
+(`read_comments` / `read_description_edits` / `read_agent_session`; contracts §8.25). These are
+the **only** read surfaces the offline fakes cannot prove (field *selectability* + the
+personal-key-vs-agent-token question). Run against team `PER` with `[issues] backend = "linear"`,
+`team = "PER"`, and `LINEAR_API_KEY` exported, against an existing issue that has comments + at
+least one human description edit (and, ideally, an existing agent session).
+
+Probe the three extended selections directly (inline `LinearClient.request`), record
+**field selectability** and the **personal-key-vs-agent-token** finding for agent reads:
+
+```graphql
+# read_comments — author identity + editedAt (extends the byte-stable `_comments` selection)
+query($id: String!) {
+  issue(id: $id) {
+    comments(first: 50) {
+      nodes { id body createdAt editedAt
+              user { id name displayName }
+              botActor { id name type } }
+    }
+  }
+}
+
+# read_description_edits — who edited the body (filter to nodes carrying descriptionUpdatedBy)
+query($id: String!) {
+  issue(id: $id) {
+    history(first: 50) {
+      nodes { id createdAt actor { id name } descriptionUpdatedBy { id name } }
+    }
+  }
+}
+
+# read_agent_session — resolve the issue's session, then page its activities
+query($id: String!) { issue(id: $id) { agentSessions(first: 1) { nodes { id } } } }
+query($id: String!) {
+  agentSession(id: $id) {
+    activities(first: 50) {
+      nodes { id createdAt signal
+              content { __typename
+                        ... on AgentActivityPromptContent { body }
+                        ... on AgentActivityThoughtContent { body }
+                        ... on AgentActivityResponseContent { body } } }
+    }
+  }
+}
+```
+
+Verify + record:
+
+1. **Comment author fields (gate 6.1).** `user` / `botActor` / `editedAt` are **selectable**; a
+   human comment carries a `user` with **no** `botActor`; perk's own comments carry the
+   `perk:metadata-block:*` sentinel (inline-code form). Record whether `botActor` is populated
+   for any integration-posted comment (and, if perk ever posts as an app, perk's own bot-actor id
+   → seeds `classify_author(perk_bot_ids=…)`).
+2. **`descriptionUpdatedBy` reliability (gate 6.2 — inventory §6.1).** Whether it fires for
+   **every** human body edit (vs only some change classes), and its **shape** (single object vs
+   list). A negative finding (fires only for some edit classes) is a valid recorded observation
+   feeding Node 4.3.
+3. **Personal-key vs agent-token for agent reads (gate 6.3 — inventory §6.2).** Whether the
+   **personal `LINEAR_API_KEY`** can read `agentSession.activities` at all, or whether the
+   `LINEAR_AGENT_TOKEN` (OAuth `actor=app`) is required. Per the contract, `read_agent_session`
+   **raises** on an auth failure — so a "personal key cannot read sessions" finding confirms the
+   contract's fail-loud posture (Node 4.1, agent-token-gated, owns the consuming path).
+
+Append the run's findings to **Recorded observations** as a dated **Sixth live run** block (one row
+per gate). A negative/blocked finding is valid. Record any backend defect and open a follow-up — do
+not fix substantive code at the gate.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
@@ -595,3 +664,23 @@ reconstruction because `phase` derives from the node id) — recorded above, no 
 warranted. The git+GitHub `pr submit`/`pr land` orchestration (gates 5–6) was deferred (not run in
 perk's own repo to avoid a throwaway merge into `main`); its Linear-side Project-op targets were
 live-proven directly.
+
+> **Sixth live run: 2026-06-18** (Objective #682, Node 1.2 — **Mode 6, human-engagement reads**).
+> **BLOCKED — not executed.** The implement environment for this node carried **no
+> `LINEAR_API_KEY`** (and the repo is not Linear-configured: no `[issues]` table, no
+> `.pi/perk.local.toml` `[linear] api_key`), so the live read-surface probe could **not** be run.
+> Per the repo's "don't author fiction" discipline this is recorded honestly rather than
+> fabricated: the three new read selections (above) are **offline-covered** (scripted-fake tests in
+> `tests/test_linear_backend.py` pin the field selection + author-classification + derived
+> stop-signal mapping), but their **live field selectability** and the **personal-key-vs-agent-token**
+> question for `agentSession.activities` remain **live-unproven**. The contract ships the honest
+> fail-loud posture (`read_agent_session` raises on an auth failure), so a future "personal key
+> cannot read sessions" finding is already accommodated. **Node 4.3 is the objective's final
+> live-validation gate** for these surfaces; the Mode 6 runbook above is ready to run the moment a
+> `LINEAR_API_KEY` (+ optional `LINEAR_AGENT_TOKEN`) is available.
+
+| Date | Gate | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-18 | 6.1 (comment authors) | **Not run** — no `LINEAR_API_KEY` in the implement env. Offline-covered (`TestReadComments`: `user`/`botActor`/`editedAt` mapping + `perk` vs `human` classification). Live `botActor` population + perk's own bot-actor id deferred. | comment author selectability — **deferred to Node 4.3** |
+| 2026-06-18 | 6.2 (`descriptionUpdatedBy`) | **Not run.** Offline-covered (`TestReadDescriptionEdits`: filter to nodes carrying `descriptionUpdatedBy`, `diff=None`, author from `actor`). The single-object-vs-list shape + every-human-edit reliability (inventory §6.1) remain unproven; `_is_present` tolerates **both** shapes defensively. | description-edit reliability/shape — **deferred to Node 4.3** |
+| 2026-06-18 | 6.3 (personal-key vs agent-token) | **Not run.** Offline-covered (`TestReadAgentSession`: activity mapping, derived stop-signal, missing-session→empty, auth-failure→raises). The decisive §6.2 question (can the personal key read `agentSession.activities`, or is `LINEAR_AGENT_TOKEN` required?) is **unsettled** — the contract's fail-loud `read_agent_session` raise accommodates either outcome. | personal-key-vs-agent-token (inventory §6.2) — **deferred to Node 4.3** |

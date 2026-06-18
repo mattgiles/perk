@@ -40,6 +40,11 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from perk import objective
+from perk.backends.engagement import (
+    AgentSessionRead,
+    DescriptionEdit,
+    EngagementComment,
+)
 from perk.objective_drift import DriftCode, DriftCondition, DriftReport
 
 
@@ -323,4 +328,27 @@ class ObjectiveStore(Protocol):
         ``RepairResult`` (no divergence surface). Raises ``ObjectiveStoreError`` when the objective
         is absent / on an infra failure (never on a repairable drift write, which is recorded in
         ``failed`` + ``aborted``)."""
+        ...
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    #
+    # The objective-tier twin of the ``IssueBackend`` read contract — same untrusted-DATA +
+    # distinguishable-author discipline, keyed on ``objective_id``. Every objective store ships a
+    # clean empty/no-op impl in 1.2 (honest — no consumers); project-level honest reads land with
+    # their Phase-2 consumer (Node 2.3).
+
+    def read_comments(self, *, objective_id: str) -> tuple[EngagementComment, ...]:
+        """Read an objective's comments with author identity + edit flag. Oldest-first. Raises
+        ``ObjectiveStoreError`` on an infra failure; empty yields ``()``."""
+        ...
+
+    def read_description_edits(self, *, objective_id: str) -> tuple[DescriptionEdit, ...]:
+        """Read an objective's description/body edit events. ``diff`` is best-effort and may be
+        ``None``. Raises on an infra failure; no edits yields ``()``."""
+        ...
+
+    def read_agent_session(self, *, objective_id: str) -> AgentSessionRead:
+        """Read the objective's agent-session activities + the derived stop indicator. A store with
+        no agent-session surface returns the empty ``AgentSessionRead``; **raises** on an
+        infra/auth failure."""
         ...

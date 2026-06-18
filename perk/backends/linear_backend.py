@@ -61,7 +61,7 @@ from pathlib import Path
 from typing import cast
 
 from perk import github, objective, objective_drift, plan
-from perk.backends import issue_backend, objective_store
+from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
@@ -122,6 +122,110 @@ def to_linear_markdown(text: str) -> str:
 def _hex_color(color: str) -> str:
     """Map the GitHub bare-hex label colors into Linear's ``#``-prefixed form."""
     return color if color.startswith("#") else f"#{color}"
+
+
+# ------------------------------------------------------------------ engagement-read mapping
+# Pure mappers from Linear payload nodes into the backend-neutral engagement dataclasses
+# (Objective #682, Node 1.2). perk has no committed app-actor id, so perk detection rests on the
+# body sentinel; `perk_bot_ids=()` is the honest empty seam.
+
+
+def _is_present(value: object) -> bool:
+    """True when a nullable Linear field is populated — a non-empty dict (single actor) or a
+    non-empty list (an actor list, e.g. ``descriptionUpdatedBy``). The shape of
+    ``IssueHistory.descriptionUpdatedBy`` is live-unproven (inventory §6.1), so tolerate both."""
+    if isinstance(value, dict):
+        return bool(value)
+    if isinstance(value, list):
+        return bool(value)
+    return False
+
+
+def _actor_or_none(raw: object, *, prefer_display: bool = False) -> engagement.Actor | None:
+    """Map a Linear ``user``/``botActor``/``actor`` selection into a neutral :class:`Actor`, or
+    ``None`` when absent. ``prefer_display`` uses ``displayName`` over ``name`` (the ``user``
+    field carries both)."""
+    if not isinstance(raw, dict):
+        return None
+    node = cast("dict[str, object]", raw)
+    raw_id = node.get("id")
+    raw_name = node.get("name")
+    name = raw_name if isinstance(raw_name, str) and raw_name else None
+    if prefer_display:
+        display = node.get("displayName")
+        if isinstance(display, str) and display:
+            name = display
+    return engagement.Actor(id=raw_id if isinstance(raw_id, str) else None, name=name)
+
+
+def _engagement_comment(node: dict[str, object]) -> engagement.EngagementComment:
+    """Map a ``_comments_with_authors`` node into an :class:`EngagementComment` (untrusted body)."""
+    body = node.get("body")
+    body_text = body if isinstance(body, str) else ""
+    edited = node.get("editedAt")
+    author = engagement.classify_author(
+        body=body_text,
+        user=_actor_or_none(node.get("user"), prefer_display=True),
+        bot_actor=_actor_or_none(node.get("botActor")),
+    )
+    return engagement.EngagementComment(
+        id=_require_str(node.get("id"), "comment id"),
+        body=body_text,
+        created_at=_require_str(node.get("createdAt"), "comment createdAt"),
+        edited_at=edited if isinstance(edited, str) else None,
+        author=author,
+    )
+
+
+def _description_edit(node: dict[str, object]) -> engagement.DescriptionEdit:
+    """Map a description-history node into a :class:`DescriptionEdit`. ``diff=None`` (Linear's
+    history exposes no inline diff — a flagged deferral); author keyed on the editing ``actor``."""
+    author = engagement.classify_author(
+        body="", user=_actor_or_none(node.get("actor")), bot_actor=None
+    )
+    return engagement.DescriptionEdit(
+        created_at=_require_str(node.get("createdAt"), "history createdAt"),
+        author=author,
+        diff=None,
+    )
+
+
+def _agent_activity(node: dict[str, object]) -> engagement.AgentActivity:
+    """Map an agent-session activity node into an :class:`AgentActivity`. ``kind`` is the content
+    union ``__typename``; ``body`` (untrusted DATA) is the content's body when the variant has
+    one."""
+    content = node.get("content")
+    kind = ""
+    body: str | None = None
+    if isinstance(content, dict):
+        content_dict = cast("dict[str, object]", content)
+        typename = content_dict.get("__typename")
+        kind = typename if isinstance(typename, str) else ""
+        raw_body = content_dict.get("body")
+        body = raw_body if isinstance(raw_body, str) else None
+    signal = node.get("signal")
+    return engagement.AgentActivity(
+        id=_require_str(node.get("id"), "activity id"),
+        created_at=_require_str(node.get("createdAt"), "activity createdAt"),
+        kind=kind,
+        body=body,
+        signal=signal if isinstance(signal, str) else None,
+    )
+
+
+def _agent_session_read(
+    activities: list[engagement.AgentActivity],
+) -> engagement.AgentSessionRead:
+    """Assemble the :class:`AgentSessionRead`, deriving the stop indicator from the activities:
+    ``stopped`` when any activity carried the ``stop`` signal; ``at`` is the first such activity's
+    ``created_at`` (activities are oldest-first)."""
+    stop = next((a for a in activities if a.signal == "stop"), None)
+    return engagement.AgentSessionRead(
+        activities=tuple(activities),
+        stop_signal=engagement.StopSignalIndicator(
+            stopped=stop is not None, at=stop.created_at if stop is not None else None
+        ),
+    )
 
 
 def _request_issue_mutation(
@@ -273,6 +377,83 @@ class _LinearIssueOps:
         )
         nodes = self._client.paginate(query, {"id": issue_id}, "issue", "comments")
         return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
+
+    # ------------------------------------------------------------------ human-engagement reads
+    # The honest READ surface (Objective #682, Node 1.2). `_comments` (above) is deliberately
+    # LEFT BYTE-STABLE — it feeds the marker-matching path, whose offline tests pin the
+    # `{ id body createdAt }` selection. These are NEW, author-aware selections.
+
+    def _comments_with_authors(self, issue_id: str) -> list[dict[str, object]]:
+        """All comments on an issue with author identity + ``editedAt``, sorted ascending by
+        ``createdAt`` (the same oldest-first ordering as :meth:`_comments`). A separate selection
+        from the byte-stable marker-matching ``_comments`` — it adds ``editedAt`` + the ``user`` /
+        ``botActor`` author fields the engagement read contract maps."""
+        query = (
+            "query($id: String!, $cursor: String) { issue(id: $id) "
+            f"{{ comments(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id body createdAt editedAt user { id name displayName } "
+            "botActor { id name type } } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": issue_id}, "issue", "comments")
+        return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
+
+    def _description_edits(self, issue_id: str) -> list[dict[str, object]]:
+        """The issue's description-edit history nodes (those carrying a ``descriptionUpdatedBy``),
+        sorted ascending by ``createdAt``. Selects fields explicitly (the SDK ``relationChanges``
+        pitfall, inventory §3.2). Linear's history exposes no inline diff — the mapping sets
+        ``diff=None`` (a flagged deferral). An absent issue yields ``[]``."""
+        query = (
+            "query($id: String!, $cursor: String) { issue(id: $id) "
+            f"{{ history(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id createdAt actor { id name } descriptionUpdatedBy { id name } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        try:
+            nodes = self._client.paginate(query, {"id": issue_id}, "issue", "history")
+        except LinearGraphQLError as exc:
+            if _is_entity_not_found(exc):
+                return []
+            raise
+        edits = [node for node in nodes if _is_present(node.get("descriptionUpdatedBy"))]
+        return sorted(edits, key=lambda h: _require_str(h.get("createdAt"), "history createdAt"))
+
+    def _agent_session_activities(self, issue_id: str) -> list[dict[str, object]]:
+        """The activities of the issue's agent session, sorted ascending by ``createdAt``.
+
+        Two reads: resolve the issue's session id, then page its activities. A missing issue or
+        missing session reuses the ``_is_entity_not_found`` → empty pattern (returns ``[]``); every
+        other failure (notably an auth failure on the personal API key — inventory §6.2) **raises**
+        (the contract: ``read_agent_session`` raises on infra/auth failure)."""
+        issue = self._issue_or_none(issue_id, "agentSessions(first: 1) { nodes { id } }")
+        if issue is None:
+            return []
+        sessions = issue.get("agentSessions")
+        if not isinstance(sessions, dict):
+            return []
+        session_nodes = _require_list(
+            cast("dict[str, object]", sessions).get("nodes"), "issue.agentSessions.nodes"
+        )
+        if not session_nodes:
+            return []
+        session_id = _require_str(
+            _require_dict(session_nodes[0], "agentSession").get("id"), "agent session id"
+        )
+        query = (
+            "query($id: String!, $cursor: String) { agentSession(id: $id) "
+            f"{{ activities(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id createdAt signal content { __typename "
+            "... on AgentActivityPromptContent { body } "
+            "... on AgentActivityThoughtContent { body } "
+            "... on AgentActivityResponseContent { body } } } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        try:
+            nodes = self._client.paginate(query, {"id": session_id}, "agentSession", "activities")
+        except LinearGraphQLError as exc:
+            if _is_entity_not_found(exc):
+                return []
+            raise
+        return sorted(nodes, key=lambda a: _require_str(a.get("createdAt"), "activity createdAt"))
 
     def _ensure_label_id(self, name: str, *, color: str, description: str) -> tuple[str, bool]:
         """Lookup-first label idempotency. Returns ``(label UUID, created)``; caches.
@@ -1252,6 +1433,24 @@ class LinearIssueBackend:
             self._ops._create_comment(issue_id, transcoded)
         return issue_backend.CommentResult(posted=True)
 
+    # ------------------------------------------------------------------ human-engagement reads
+    # The honest READ surface (Objective #682, Node 1.2). All returned `body`/`diff`/activity
+    # `body` is untrusted DATA; author identity is distinguishable. No flow consumers in 1.2.
+
+    def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return tuple(
+            _engagement_comment(node) for node in self._ops._comments_with_authors(issue_id)
+        )
+
+    def read_description_edits(self, *, issue_id: str) -> tuple[engagement.DescriptionEdit, ...]:
+        return tuple(_description_edit(node) for node in self._ops._description_edits(issue_id))
+
+    def read_agent_session(self, *, issue_id: str) -> engagement.AgentSessionRead:
+        activities = [
+            _agent_activity(node) for node in self._ops._agent_session_activities(issue_id)
+        ]
+        return _agent_session_read(activities)
+
 
 # ===========================================================================
 # The objective-storage tier (Objective #548, Node 2.2): `LinearObjectiveStore`.
@@ -1629,6 +1828,21 @@ class LinearObjectiveStore:
         return objective_store.RepairResult(
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # Empty/no-op: honest project-level objective reads land with their Phase-2 consumer (Node
+    # 2.3). No flow consumers in 1.2.
+
+    def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return ()
+
+    def read_description_edits(
+        self, *, objective_id: str
+    ) -> tuple[engagement.DescriptionEdit, ...]:
+        return ()
+
+    def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
+        return engagement.EMPTY_AGENT_SESSION
 
 
 # ===========================================================================
@@ -2488,6 +2702,21 @@ class LinearProjectObjectiveStore:
                 aborted=aborted,
                 dry_run=False,
             )
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # Empty/no-op: honest project-level objective reads (over the project's node-issues + project
+    # updates) land with their Phase-2 consumer (Node 2.3). No flow consumers in 1.2.
+
+    def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return ()
+
+    def read_description_edits(
+        self, *, objective_id: str
+    ) -> tuple[engagement.DescriptionEdit, ...]:
+        return ()
+
+    def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
+        return engagement.EMPTY_AGENT_SESSION
 
     def _apply_repair(
         self,
