@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from perk import github
-from perk.backends import issue_backend
+from perk.backends import engagement, issue_backend
 
 
 @dataclasses.dataclass
@@ -193,6 +193,17 @@ class _FakeBackend:
             self._issues[issue_id].comments[comment_id] = body
             return issue_backend.CommentResult(posted=True)
         return self.add_issue_comment(issue_id=issue_id, body=body)
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+
+    def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return ()
+
+    def read_description_edits(self, *, issue_id: str) -> tuple[engagement.DescriptionEdit, ...]:
+        return ()
+
+    def read_agent_session(self, *, issue_id: str) -> engagement.AgentSessionRead:
+        return engagement.EMPTY_AGENT_SESSION
 
 
 def _make_backend() -> issue_backend.IssueBackend:

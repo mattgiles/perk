@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from perk import github
-from perk.backends import issue_backend, linear, linear_backend
+from perk.backends import engagement, issue_backend, linear, linear_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.github import GitHubError
 from perk.substrate import config
@@ -243,6 +243,20 @@ class GitHubIssueBackend:
                 issue=number, marker=marker, body=body, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.CommentResult(posted=result.posted)
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # Clean empty impl: honest GitHub reads (comments via `gh issue view --json comments`;
+    # description edits via the `userContentEdits` GraphQL connection; agent sessions are a GitHub
+    # no-op) land in Node 1.3. No flow consumers in 1.2.
+
+    def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
+        return ()
+
+    def read_description_edits(self, *, issue_id: str) -> tuple[engagement.DescriptionEdit, ...]:
+        return ()
+
+    def read_agent_session(self, *, issue_id: str) -> engagement.AgentSessionRead:
+        return engagement.EMPTY_AGENT_SESSION
 
 
 def resolve_issue_backend_id(repo_root: Path) -> str:

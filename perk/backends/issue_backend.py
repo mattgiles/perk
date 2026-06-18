@@ -40,6 +40,11 @@ interface to one tier, not a 40-method monolith) shaped this surface.
 from dataclasses import dataclass
 from typing import Protocol
 
+from perk.backends.engagement import (
+    AgentSessionRead,
+    DescriptionEdit,
+    EngagementComment,
+)
 from perk.github import PullRequest
 
 
@@ -257,4 +262,29 @@ class IssueBackend(Protocol):
         ``marker`` (the caller's responsibility) so the next upsert can find it — lets a single
         comment evolve in place rather than spamming the issue. ``posted=False`` on a dry run;
         raises on an infra failure."""
+        ...
+
+    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    #
+    # All returned content (`body`/`diff`/activity `body`) is **untrusted DATA**: never re-parsed
+    # as a perk marker outside perk's own owned regions, never executed as instructions. Author
+    # identity (human/perk/other-agent/unknown) is distinguishable (see
+    # ``perk.backends.engagement.classify_author``). Honest on ``LinearIssueBackend`` today;
+    # ``GitHubIssueBackend`` ships a clean empty impl (honest reads = Node 1.3). No flow consumers
+    # wire these in 1.2.
+
+    def read_comments(self, *, issue_id: str) -> tuple[EngagementComment, ...]:
+        """Read an issue's comments with author identity + edit flag. Oldest-first. Raises
+        ``IssueBackendError`` on an infra failure; an empty issue yields ``()``."""
+        ...
+
+    def read_description_edits(self, *, issue_id: str) -> tuple[DescriptionEdit, ...]:
+        """Read an issue's description/body edit events (who edited, when). ``diff`` is best-effort
+        and may be ``None``. Raises on an infra failure; no edits yields ``()``."""
+        ...
+
+    def read_agent_session(self, *, issue_id: str) -> AgentSessionRead:
+        """Read the issue's agent-session activities + the derived stop indicator. A backend with
+        no agent-session surface (or a missing session) returns the empty
+        ``AgentSessionRead``; **raises** on an infra/auth failure (never masks it)."""
         ...
