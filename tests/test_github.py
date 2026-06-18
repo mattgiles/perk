@@ -1635,10 +1635,19 @@ def test_read_description_edits_parses_diff_passthrough_and_orders(monkeypatch):
 
 
 def test_engagement_reads_not_found_fold_to_empty(monkeypatch):
+    # The real `gh api graphql` miss: exit 1, stderr "Could not resolve to an Issue ..." + a
+    # stdout body carrying `"type":"NOT_FOUND"` — neither the literal "not found" nor "404".
+    not_found = _Proc(
+        1,
+        stdout=json.dumps(
+            {"data": {"repository": {"issue": None}}, "errors": [{"type": "NOT_FOUND"}]}
+        ),
+        stderr="gh: Could not resolve to an Issue with the number of 999.",
+    )
     rec = _GhDispatch(
         [
             (_has("repo", "view", "nameWithOwner"), _Proc(0, "octo/repo\n")),
-            (_has("graphql"), _Proc(1, stderr="Could not resolve to an Issue (not found)")),
+            (_has("graphql"), not_found),
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)

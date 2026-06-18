@@ -378,6 +378,27 @@ class TestEngagementReads:
         assert edits[1].diff is None and edits[1].author.kind == "other_agent"
         assert edits[1].created_at == "2026-04-02T00:00:00Z"
 
+    def test_read_comments_deleted_author_classifies_unknown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A deleted/unresolvable GitHub account (author null) carries no login/id: it must
+        # classify as `unknown`, never `human`.
+        rows = [
+            github.IssueCommentRow(
+                id="IC_1",
+                body="orphaned comment",
+                created_at="2026-03-01T00:00:00Z",
+                edited_at=None,
+                author_login=None,
+                author_id=None,
+                author_is_bot=False,
+            )
+        ]
+        monkeypatch.setattr(github, "read_issue_comments", _Recorder(rows))
+        comments = GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
+        assert comments[0].author.kind == "unknown"
+        assert comments[0].author.id is None and comments[0].author.display_name is None
+
     def test_read_agent_session_is_github_no_op(self, tmp_path: Path) -> None:
         result = GitHubIssueBackend(tmp_path).read_agent_session(issue_id="42")
         assert result is engagement.EMPTY_AGENT_SESSION

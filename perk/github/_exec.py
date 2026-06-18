@@ -65,9 +65,20 @@ def _owner_repo(repo_root: Path) -> tuple[str, str]:
 
 
 def _is_not_found(proc: subprocess.CompletedProcess[str]) -> bool:
-    """Did a failed ``gh`` call report a missing resource (a 404 / "not found" lookup miss)?"""
+    """Did a failed ``gh`` call report a missing resource (a lookup miss)?
+
+    Covers both REST 404s (``"not found"`` / ``"404"``) and the GraphQL not-found shape, which
+    reports neither: ``gh api graphql`` on a missing node exits non-zero with
+    ``Could not resolve to an Issue …`` (stderr) + an ``"errors":[{"type":"NOT_FOUND"…}]`` body
+    (stdout) — lowercased ``not_found`` (underscore) / ``could not resolve to``.
+    """
     haystack = (proc.stderr + proc.stdout).lower()
-    return "not found" in haystack or "404" in haystack
+    return (
+        "not found" in haystack
+        or "not_found" in haystack
+        or "could not resolve to" in haystack
+        or "404" in haystack
+    )
 
 
 def _parse_json(

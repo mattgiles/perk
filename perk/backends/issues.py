@@ -67,7 +67,12 @@ def _issue_ref(found: github.PlanIssue) -> issue_backend.IssueRef:
     return issue_backend.IssueRef(id=str(found.number), url=found.url, existed=found.existed)
 
 
-def _actor(name: str | None, actor_id: str | None) -> engagement.Actor:
+def _actor(name: str | None, actor_id: str | None) -> engagement.Actor | None:
+    """Build an :class:`Actor`, or ``None`` when GitHub resolved neither field (a deleted/
+    unresolvable account) — so its author classifies as ``unknown``, not ``human`` (mirrors
+    Linear's ``_actor_or_none``)."""
+    if name is None and actor_id is None:
+        return None
     return engagement.Actor(id=actor_id, name=name)
 
 
