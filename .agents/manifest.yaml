@@ -2,6 +2,11 @@ sources:
          spillwave:
            url: https://github.com/SpillwaveSolutions/mastering-typescript-skill
            ref: main
+         agent-browser:
+           url: https://github.com/vercel-labs/agent-browser
+           ref: main
 skills:
         - source: spillwave
           name: mastering-typescript
+        - source: agent-browser
+          name: agent-browser
