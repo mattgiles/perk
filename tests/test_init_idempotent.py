@@ -610,38 +610,25 @@ def test_init_preserves_user_skills_manifest(tmp_path):
 # --- forward-reconcile of pi's git-package clone (#642) --------------------------------------
 
 
-def test_reconcile_extension_clone_reclones_when_stale(tmp_path, monkeypatch):
+def test_reconcile_extension_clone_materializes(tmp_path, monkeypatch):
+    # `_reconcile_extension_clone` now delegates to `materialize_extension_clone` (which itself
+    # no-ops on fresh/self) and appends its message — leaving a present, fresh clone in place.
     from perk.convergence import init as init_mod
 
-    monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
-    )
-    monkeypatch.setattr(
-        init_mod, "reclone_extension_clone", lambda root: ".pi/git/...: removed stale clone"
-    )
+    calls: list = []
+
+    def _spy(root, *, self_repo):
+        calls.append((root, self_repo))
+        return ".pi/git/...: freshened to origin/main in place"
+
+    monkeypatch.setattr(init_mod, "materialize_extension_clone", _spy)
     changes: list[str] = []
     init_mod._reconcile_extension_clone(tmp_path, changes, False)
-    assert changes == [".pi/git/...: removed stale clone"]
+    assert calls == [(tmp_path, False)]
+    assert changes == [".pi/git/...: freshened to origin/main in place"]
 
 
-@pytest.mark.parametrize("status", ["fresh", "absent", "self", "unverifiable"])
-def test_reconcile_extension_clone_noop_when_not_stale(tmp_path, monkeypatch, status):
-    from perk.convergence import init as init_mod
-
-    monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: (status, "detail")
-    )
-
-    def _boom(root):  # pragma: no cover - must not be called
-        raise AssertionError("reclone must not run when the clone is not stale")
-
-    monkeypatch.setattr(init_mod, "reclone_extension_clone", _boom)
-    changes: list[str] = []
-    init_mod._reconcile_extension_clone(tmp_path, changes, False)
-    assert changes == []
-
-
-def test_init_verify_reconciles_stale_extension_clone(git_repo, stub_env, monkeypatch):
+def test_init_verify_materializes_stale_extension_clone(git_repo, stub_env, monkeypatch):
     from perk.convergence import init as init_mod
 
     calls: list = []
@@ -649,12 +636,226 @@ def test_init_verify_reconciles_stale_extension_clone(git_repo, stub_env, monkey
         init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
     )
 
-    def _spy(root):
-        calls.append(root)
-        return ".pi/git/github.com/mattgiles/perk: removed stale clone"
+    def _freshen(clone):
+        calls.append(clone)
 
-    monkeypatch.setattr(init_mod, "reclone_extension_clone", _spy)
+    # Materialize-in-place: a stale clone is freshened, never blown away (no shutil.rmtree).
+    monkeypatch.setattr(init_mod, "_freshen_extension", _freshen)
     report = run_init(git_repo, verify=True)
     assert report.ok
     assert len(calls) == 1
-    assert any("removed stale clone" in line for line in report.changes)
+    assert any("freshened to origin/main in place" in line for line in report.changes)
+
+
+# --- perk-owned in-place clone materialization (#655) ----------------------------------------
+
+
+def test_extension_clone_url_derived_from_git_package():
+    from perk.convergence import init as init_mod
+
+    assert init_mod._extension_clone_url() == "https://github.com/mattgiles/perk"
+    assert init_mod._extension_clone_url() == "https://" + init_mod.GIT_PACKAGE.removeprefix("git:")
+
+
+def test_materialize_self_repo_is_noop(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    def _boom(*a, **k):  # pragma: no cover - must not be called
+        raise AssertionError("no git op in the self-repo")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    assert init_mod.materialize_extension_clone(tmp_path, self_repo=True) is None
+
+
+def test_materialize_absent_clones_fresh(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    clone_calls: list = []
+    reset_calls: list = []
+    monkeypatch.setattr(
+        init_mod.git, "clone", lambda url, target: clone_calls.append((url, target))
+    )
+    monkeypatch.setattr(
+        init_mod.git, "reset_hard", lambda repo, ref: reset_calls.append((repo, ref))
+    )
+    msg = init_mod.materialize_extension_clone(tmp_path, self_repo=False)
+    assert clone_calls == [("https://github.com/mattgiles/perk", clone)]
+    assert reset_calls == [(clone, "main")]
+    assert msg is not None and "cloned fresh main" in msg
+
+
+def test_materialize_stale_freshens_in_place(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    clone.mkdir(parents=True)
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "a != b")
+    )
+    fetch_calls: list = []
+    reset_calls: list = []
+    monkeypatch.setattr(
+        init_mod.git, "fetch", lambda repo, *, remote: fetch_calls.append((repo, remote))
+    )
+    monkeypatch.setattr(
+        init_mod.git, "reset_hard", lambda repo, ref: reset_calls.append((repo, ref))
+    )
+
+    def _boom(*a, **k):  # pragma: no cover - stale must not re-clone
+        raise AssertionError("stale freshens in place, never re-clones")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    msg = init_mod.materialize_extension_clone(tmp_path, self_repo=False)
+    assert fetch_calls == [(clone, "origin")]
+    assert reset_calls == [(clone, "origin/main")]
+    assert msg is not None and "freshened" in msg
+
+
+def test_materialize_fresh_is_noop(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    clone.mkdir(parents=True)
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("fresh", "sha")
+    )
+
+    def _boom(*a, **k):  # pragma: no cover - fresh does no git work
+        raise AssertionError("fresh is a no-op")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    monkeypatch.setattr(init_mod.git, "fetch", _boom)
+    # fresh → None (no-op) so a converged re-run reports no change.
+    assert init_mod.materialize_extension_clone(tmp_path, self_repo=False) is None
+
+
+def test_materialize_swallows_giterror(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("absent", "d")
+    )
+
+    def _boom(*a, **k):
+        raise init_mod.git.GitError("network down")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    # Non-fatal: a GitError is swallowed and reported in the returned message, never raised.
+    msg = init_mod.materialize_extension_clone(tmp_path, self_repo=False)
+    assert "non-fatal" in msg and "network down" in msg
+
+
+@pytest.mark.parametrize("clone_present", [True, False])
+def test_materialize_unverifiable_leaves_clone_as_is(tmp_path, monkeypatch, clone_present):
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    if clone_present:
+        clone.mkdir(parents=True)
+    monkeypatch.setattr(
+        init_mod, "extension_clone_status", lambda root, *, self_repo: ("unverifiable", "offline")
+    )
+
+    def _boom(*a, **k):  # pragma: no cover - offline does no git work
+        raise AssertionError("unverifiable performs no git op")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    monkeypatch.setattr(init_mod.git, "fetch", _boom)
+    # unverifiable (offline) → None: leave a present clone for pi to load; nothing to do if absent.
+    assert init_mod.materialize_extension_clone(tmp_path, self_repo=False) is None
+
+
+def test_ensure_present_self_repo_is_none(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    monkeypatch.setattr(init_mod.git, "clone", lambda *a, **k: pytest.fail("no clone in self-repo"))
+    assert init_mod.ensure_extension_clone_present(tmp_path, self_repo=True) is None
+
+
+def test_ensure_present_when_clone_exists_is_cheap_noop(tmp_path, monkeypatch):
+    # The hot-path cheapness guarantee: a present clone returns None with NO network/git work.
+    from perk.convergence import init as init_mod
+
+    init_mod.consumer_git_clone_root(tmp_path).mkdir(parents=True)
+
+    def _boom(*a, **k):  # pragma: no cover - must not touch the network when present
+        raise AssertionError("present clone must not clone / ls-remote")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    monkeypatch.setattr(init_mod.git, "fetch", _boom)
+    monkeypatch.setattr(init_mod.git, "ls_remote_sha", _boom)
+    assert init_mod.ensure_extension_clone_present(tmp_path, self_repo=False) is None
+
+
+def test_ensure_present_clones_when_absent(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    clone_calls: list = []
+    monkeypatch.setattr(
+        init_mod.git, "clone", lambda url, target: clone_calls.append((url, target))
+    )
+    monkeypatch.setattr(init_mod.git, "reset_hard", lambda repo, ref: None)
+    msg = init_mod.ensure_extension_clone_present(tmp_path, self_repo=False)
+    assert clone_calls == [("https://github.com/mattgiles/perk", clone)]
+    assert msg is not None and "pre-launch" in msg
+    # The lock file lives under .pi/git/ (gitignored; survives a clone-dir rm).
+    assert (tmp_path / ".pi" / "git" / ".perk-extension-clone.lock").is_file()
+
+
+def test_ensure_present_swallows_giterror(tmp_path, monkeypatch):
+    from perk.convergence import init as init_mod
+
+    def _boom(*a, **k):
+        raise init_mod.git.GitError("network down")
+
+    monkeypatch.setattr(init_mod.git, "clone", _boom)
+    assert init_mod.ensure_extension_clone_present(tmp_path, self_repo=False) is None
+
+
+def test_ensure_present_two_racers_clone_exactly_once(tmp_path):
+    # Core race regression: two concurrent invocations against an absent clone serialize on the
+    # flock + double-checked is_dir() so `git.clone` runs EXACTLY once.
+    import threading
+
+    from perk.convergence import init as init_mod
+
+    clone = init_mod.consumer_git_clone_root(tmp_path)
+    call_count = 0
+    count_lock = threading.Lock()
+    barrier = threading.Barrier(2)
+
+    def _slow_clone(url, target):
+        nonlocal call_count
+        with count_lock:
+            call_count += 1
+        # Simulate a slow checkout, then actually create the dir so the loser sees it present.
+        import time
+
+        time.sleep(0.2)
+        clone.mkdir(parents=True, exist_ok=True)
+
+    import perk.substrate.git as git_mod
+
+    orig_clone = git_mod.clone
+    git_mod.clone = _slow_clone  # patch the module so both threads see the stub
+    orig_reset = git_mod.reset_hard
+    git_mod.reset_hard = lambda repo, ref: None
+    try:
+
+        def _racer():
+            barrier.wait()
+            init_mod.ensure_extension_clone_present(tmp_path, self_repo=False)
+
+        threads = [threading.Thread(target=_racer) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        git_mod.clone = orig_clone
+        git_mod.reset_hard = orig_reset
+
+    assert call_count == 1  # the lock + double-checked is_dir() serialized the racers
+    assert (tmp_path / ".pi" / "git" / ".perk-extension-clone.lock").is_file()

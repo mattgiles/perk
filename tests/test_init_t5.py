@@ -217,6 +217,7 @@ def test_github_error_is_non_fatal(git_repo, monkeypatch):
     # A flaky/slow/broken gh (GitHubError) must not crash init (D3 — GitHub non-fatal).
     monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: True)
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)  # no network
+    monkeypatch.setattr(init_mod, "_clone_extension_fresh", lambda clone, url: None)  # no network
 
     def boom():
         raise gh_mod.GitHubError("gh timed out")

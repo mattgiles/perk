@@ -1244,7 +1244,7 @@ def test_extension_clone_check_absent_without_verify(git_repo):
     assert _clone_check(report) is None
 
 
-def test_fix_reclones_stale_extension_clone(git_repo, stub_env, monkeypatch):
+def test_fix_materializes_stale_extension_clone(git_repo, stub_env, monkeypatch):
     _scaffold(git_repo)
     monkeypatch.setattr(
         doctor_mod.init,
@@ -1253,11 +1253,12 @@ def test_fix_reclones_stale_extension_clone(git_repo, stub_env, monkeypatch):
     )
     calls: list = []
 
-    def _spy(root):
-        calls.append(root)
-        return ".pi/git/github.com/mattgiles/perk: removed stale clone"
+    def _spy(root, *, self_repo):
+        calls.append((root, self_repo))
+        return ".pi/git/github.com/mattgiles/perk: freshened to origin/main in place"
 
-    monkeypatch.setattr(doctor_mod.init, "reclone_extension_clone", _spy)
+    # The fix gesture materializes in place (no shutil.rmtree blow-away).
+    monkeypatch.setattr(doctor_mod.init, "materialize_extension_clone", _spy)
     report = run_doctor(git_repo, fix=True, verify=True)
     assert len(calls) == 1
-    assert any("removed stale clone" in line for line in report.fixed)
+    assert any("freshened to origin/main in place" in line for line in report.fixed)

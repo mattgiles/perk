@@ -31,6 +31,17 @@ def stub_env(monkeypatch):
     # The `skills init`/`skills sync` shells are external like env/github; stub them so verified
     # inits in tests never clone over the network.
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
+    # The extension-clone materialize primitives shell `git clone`/`fetch` over the network
+    # (init/doctor now materialize the clone in place); stub them so verified inits never reach
+    # the network. Dedicated #655 tests override these to assert the materialize branching.
+    # `_clone_extension_fresh` creates the clone dir (sans git/network) so a second verified init
+    # sees the clone present → status `unverifiable` → a no-op (idempotency preserved).
+    monkeypatch.setattr(
+        init_mod,
+        "_clone_extension_fresh",
+        lambda clone, url: clone.mkdir(parents=True, exist_ok=True),
+    )
+    monkeypatch.setattr(init_mod, "_freshen_extension", lambda clone: None)
 
 
 @pytest.fixture
