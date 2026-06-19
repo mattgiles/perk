@@ -63,7 +63,9 @@ OBJECTIVE_SCHEMA_VERSION = "1"
 
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
 # plan.PLAN_HEADER_FIELDS). `status` is the objective-level rollup, stored explicitly.
-OBJECTIVE_HEADER_FIELDS = frozenset({"run_id", "created", "objective_comment_id", "status", "base"})
+OBJECTIVE_HEADER_FIELDS = frozenset(
+    {"run_id", "created", "objective_comment_id", "status", "base", "adopted_from"}
+)
 
 # The human-readable rendered-table markers spliced into the `objective-body` comment.
 ROADMAP_TABLE_MARKER_START = "<!-- perk:roadmap-table -->"
@@ -191,6 +193,12 @@ class ObjectiveHeader:
     # The objective's target branch (#633); inherited by every node plan. `None` ⇒ no override
     # (node plans fall through to `[workflow] base` → the GitHub default branch).
     base: str | None = None
+    # In-place objective adoption (#709, §8.30): the source ref this objective was adopted from
+    # (a Linear project UUID — projects have no human identifier — or a GitHub issue ref `"#<n>"`).
+    # Self-referential by construction (adoption stamps perk's metadata INTO the same source); its
+    # **presence** is the canonical "this objective was adopted; the `Adopted-from` Immutable note
+    # holds the original human content" signal. `None` for a normally-authored objective.
+    adopted_from: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -199,6 +207,7 @@ class ObjectiveHeader:
             "objective_comment_id": self.objective_comment_id,
             "status": self.status,
             "base": self.base,
+            "adopted_from": self.adopted_from,
         }
 
 
@@ -335,6 +344,63 @@ def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
             for item in nodes_raw
         ]
     return validate_roadmap(data)
+
+
+def parse_adopt_mapping(raw: Any) -> dict[str, str]:
+    """Extract the per-node ``adopt_issue`` mapping from the same raw roadmap shape
+    :func:`parse_structured_roadmap` accepts (a bare list of node mappings or a
+    ``{schema_version, nodes}`` mapping) — the in-place objective-adoption side-map (#709, §8.30).
+
+    Returns ``{node_id: source_issue_id}`` for every node carrying a non-blank string
+    ``adopt_issue`` (the id/identifier of a pre-existing source issue the node adopts in place).
+    Nodes without it are skipped; non-dict items are ignored (the validator already reports those).
+    No existence check — the writer resolves/validates at write time. Carried **separately** from
+    :class:`ObjectiveNode` so the core node dataclass (used pervasively in rendering/manifest/drift)
+    stays pristine. Offline-pure.
+    """
+    if isinstance(raw, dict):
+        nodes_raw = cast(dict[str, Any], raw).get("nodes")
+    elif isinstance(raw, list):
+        nodes_raw = raw
+    else:
+        return {}
+    if not isinstance(nodes_raw, list):
+        return {}
+    mapping: dict[str, str] = {}
+    for item in nodes_raw:
+        if not isinstance(item, dict):
+            continue
+        node = cast(dict[str, Any], item)
+        node_id = node.get("id")
+        adopt = node.get("adopt_issue")
+        if isinstance(node_id, str) and node_id and isinstance(adopt, str) and adopt.strip():
+            mapping[node_id] = adopt.strip()
+    return mapping
+
+
+# The Immutable archive-note marker (#709, §8.30): the source's ORIGINAL overview/body, preserved
+# verbatim below the closing Reconcilable marker (Immutable by construction). A perk HTML-comment
+# marker so it round-trips through `to_linear_markdown` (→ inline-code) on the Linear path and is
+# recognizable/idempotent.
+ADOPTED_OVERVIEW_MARKER = "<!-- perk:adopted-original (verbatim — do not edit) -->"
+
+
+def render_adopted_overview_note(original: str) -> str:
+    """Render the Immutable archive note holding the adopted source's ORIGINAL overview/body
+    verbatim (#709, §8.30), appended below the closing Reconcilable marker (Immutable).
+
+    Empty/blank ``original`` → ``""`` (nothing to archive). Both backends call this single helper so
+    the archived shape is identical across GitHub + Linear and unit-testable.
+    """
+    body = original.strip()
+    if not body:
+        return ""
+    return (
+        f"{ADOPTED_OVERVIEW_MARKER}\n"
+        "> Adopted in place by perk. The text below is the source's original overview/body, "
+        "preserved verbatim.\n\n"
+        f"{body}"
+    )
 
 
 def render_roadmap_block(nodes: list[ObjectiveNode]) -> dict[str, object]:

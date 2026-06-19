@@ -73,6 +73,16 @@ class ObjectiveNodeAdd:
     dry_run: bool
 
 
+@dataclass(frozen=True)
+class ObjectiveAdoption:
+    """The result of an in-place :func:`adopt_issue_as_objective` stamp (#709, §8.30)."""
+
+    number: int
+    url: str
+    existed: bool
+    dry_run: bool
+
+
 def find_objective_issue(*, run_id: str, repo_root: Path) -> ObjectiveIssue | None:
     """Find an open ``perk:objective`` issue whose ``objective-header`` ``run_id`` matches.
 
@@ -178,6 +188,108 @@ def create_objective_issue(
         repo_root=repo_root,
     )
     return ObjectiveIssue(number=created.number, url=created.url, existed=False)
+
+
+def adopt_issue_as_objective(
+    *,
+    number: int,
+    title: str,
+    prose: str,
+    repo_root: Path,
+    run_id: str,
+    status: str = "active",
+    base: str | None = None,
+    roadmap_nodes: list[objective.ObjectiveNode],
+    dry_run: bool = False,
+) -> ObjectiveAdoption:
+    """Additively stamp perk objective metadata INTO a pre-existing GitHub issue — adopting it in
+    place as a perk objective (#709, §8.30), never minting a second issue.
+
+    Mirrors :func:`create_objective_issue` + :func:`perk.github.adopt_issue_as_plan`. The bounded
+    single-issue path (GitHub objectives have no child issues, so the node → issue ``adopt_map`` is
+    not applicable here; the roadmap is authored fresh). The additive stamp: (a) idempotency via
+    ``find_objective_issue(run_id=)``; (b) ensure + ADD the ``perk:objective`` label (never
+    replaces the issue's labels); (c) read the issue's CURRENT body verbatim (the human prose),
+    compose ``<human body verbatim>`` + the ``objective-header`` block (``adopted_from="#<n>"``,
+    ``objective_comment_id: null``) + the ``objective-roadmap`` block, PATCH the body (title
+    untouched); (d) post the ``objective-body`` comment — ``render_body_comment(nodes, prose=<model
+    prose>)`` + the ``render_adopted_overview_note(<original human body>)`` appended below the
+    Reconcilable markers (Immutable) + the ``perk objective plan <number>`` callout prepended — and
+    backfill ``objective_comment_id``. Raises ``GitHubError`` on an infra failure; ``dry_run`` reads
+    nothing and returns early. An empty ``roadmap_nodes`` raises (the storage backstop).
+    """
+    if dry_run:
+        return ObjectiveAdoption(number=number, url="(dry-run)", existed=False, dry_run=True)
+
+    existing = find_objective_issue(run_id=run_id, repo_root=repo_root)
+    if existing is not None:
+        return ObjectiveAdoption(
+            number=existing.number, url=existing.url, existed=True, dry_run=False
+        )
+
+    nodes = list(roadmap_nodes)
+    if not nodes:
+        raise _exec.GitHubError("objective roadmap is empty: an objective needs at least one node")
+
+    src = plans.read_issue(number=number, repo_root=repo_root)
+    if src is None:
+        raise _exec.GitHubError(f"issue #{number} not found")
+
+    # (b) ensure + additively add the perk:objective label (never replaces the issue's labels).
+    plans.create_label(
+        objective.OBJECTIVE_LABEL,
+        color=objective.OBJECTIVE_LABEL_COLOR,
+        description=objective.OBJECTIVE_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    plans.add_issue_label(issue=number, label=objective.OBJECTIVE_LABEL, repo_root=repo_root)
+
+    # (c) stamp the header + roadmap blocks additively into the issue body (human body verbatim,
+    # title untouched). The original human body is the verbatim archive source for the body comment.
+    original_body = plans._get_issue_body(number, repo_root)
+    header = objective.ObjectiveHeader(
+        run_id=run_id,
+        created=plan.now_iso(),
+        objective_comment_id=None,
+        status=status,
+        base=base,
+        adopted_from=objective.canonical_pr(number),
+    )
+    header_block = plan.render_metadata_block(objective.OBJECTIVE_HEADER_KEY, header.to_data())
+    roadmap_block = plan.render_metadata_block(
+        objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(nodes)
+    )
+    new_body = f"{original_body.rstrip()}\n\n{header_block}\n\n{roadmap_block}\n"
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to stamp objective-header on #{number}")
+
+    # (d) post the objective-body comment: rendered table + MODEL prose, then the verbatim
+    # `Adopted-from` Immutable archive note appended below the Reconcilable markers, then the
+    # copyable callout prepended. Backfill objective_comment_id into the header.
+    comment_body = objective.render_body_comment(nodes, prose=prose.strip())
+    archive_note = objective.render_adopted_overview_note(original_body)
+    if archive_note:
+        comment_body = f"{comment_body.rstrip()}\n\n{archive_note}\n"
+    comment_body = plan.prepend_callout(
+        comment_body,
+        objective.objective_callout(str(number)),
+        command=f"perk objective plan {number}",
+    )
+    comment_id = plans._post_comment_with_id(issue=number, body=comment_body, repo_root=repo_root)
+    update_objective_header(
+        number=number,
+        fields={"objective_comment_id": comment_id},
+        repo_root=repo_root,
+    )
+    return ObjectiveAdoption(number=number, url=src.url, existed=False, dry_run=False)
 
 
 def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:

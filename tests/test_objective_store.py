@@ -42,6 +42,28 @@ class _FakeObjectiveStore:
                 )
         return None
 
+    def read_objective_source(
+        self, *, source_id: str
+    ) -> objective_store.AdoptableObjectiveSource | None:
+        # The minimal fake has no project-source surface (the dormant "doesn't adopt" signal).
+        return None
+
+    def adopt_source_as_objective(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        adopt_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        # The minimal fake does not support in-place adoption (the "doesn't adopt" signal).
+        return None
+
     def create_objective(
         self,
         *,
@@ -258,6 +280,40 @@ class TestFakeStoreConformance:
         state = store.get_objective(objective_id=ref.id)
         assert state is not None
         assert [n.id for n in state.nodes] == ["1.1"]
+
+    def test_adoption_no_op_signals(self) -> None:
+        # A store with no project-source surface returns None for both adoption methods (#709).
+        store = _make_store()
+        assert store.read_objective_source(source_id="anything") is None
+        assert (
+            store.adopt_source_as_objective(
+                source_id="anything",
+                title="t",
+                prose="p",
+                run_id="RUN5",
+                roadmap_nodes=[_node()],
+                adopt_map={},
+            )
+            is None
+        )
+
+
+class TestAdoptableSourceShapes:
+    def test_adoptable_source_issue_frozen_fields(self) -> None:
+        issue = objective_store.AdoptableSourceIssue(
+            id="uuid-1", identifier="ENG-1", url="u", title="T", body="B"
+        )
+        assert issue.id == "uuid-1"
+        assert issue.identifier == "ENG-1"
+        assert issue.title == "T"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            issue.title = "X"  # ty: ignore[invalid-assignment]
+
+    def test_adoptable_objective_source_defaults_empty_issues(self) -> None:
+        src = objective_store.AdoptableObjectiveSource(id="7", url="u", title="T", prose="P")
+        assert src.issues == ()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            src.prose = "X"  # ty: ignore[invalid-assignment]
 
 
 class TestValueTypes:

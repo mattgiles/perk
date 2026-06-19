@@ -3679,6 +3679,262 @@ class TestLinearProjectObjectiveStore:
             store.post_status_update(objective_id="proj-1", body="x")
 
 
+class TestLinearProjectAdoption:
+    """In-place objective adoption on the project-backed store (#709, Node 3.2):
+    `read_objective_source` + `adopt_source_as_objective`, all offline through `_FakeLinear`.
+    """
+
+    def _existing_issue(
+        self, *, uuid: str, identifier: str, title: str, body: str
+    ) -> dict[str, object]:
+        return {
+            "id": uuid,
+            "identifier": identifier,
+            "url": f"u/{identifier}",
+            "title": title,
+            "description": body,
+        }
+
+    def test_read_objective_source_maps_project_and_issues(self) -> None:
+        # `issues(first` registered BEFORE `project(id`: project_issues_for_adoption carries both
+        # substrings, project_or_none only `project(id` (the insertion-order footgun).
+        store, _ = _make_project_store(
+            {
+                "issues(first": [
+                    {
+                        "project": {
+                            "issues": _page(
+                                [
+                                    self._existing_issue(
+                                        uuid="i-1",
+                                        identifier="ENG-1",
+                                        title="Issue one",
+                                        body="body one",
+                                    )
+                                ]
+                            )
+                        }
+                    }
+                ],
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "p/url",
+                            "name": "My Project",
+                            "content": "OVERVIEW PROSE",
+                        }
+                    }
+                ],
+            }
+        )
+        src = store.read_objective_source(source_id="proj-1")
+        assert src is not None
+        assert src.id == "proj-1"
+        assert src.url == "p/url"
+        assert src.title == "My Project"
+        assert src.prose == "OVERVIEW PROSE"
+        assert src.issues == (
+            objective_store.AdoptableSourceIssue(
+                id="i-1", identifier="ENG-1", url="u/ENG-1", title="Issue one", body="body one"
+            ),
+        )
+
+    def test_read_objective_source_absent_returns_none(self) -> None:
+        store, _ = _make_project_store({"project(id": [_project_not_found()]})
+        assert store.read_objective_source(source_id="proj-x") is None
+
+    def _adopt_nodes(self) -> list[objective.ObjectiveNode]:
+        N = objective.NodeStatus
+        return [
+            objective.ObjectiveNode(id="1.1", description="Alpha", status=N.PENDING, slug="alpha"),
+            objective.ObjectiveNode(
+                id="1.2", description="Beta", status=N.PENDING, slug="beta", depends_on=("1.1",)
+            ),
+        ]
+
+    def _adopt_responses(self) -> dict[str, list[object]]:
+        # Maps node 1.1 -> existing issue ENG-1 (in place); node 1.2 is minted fresh.
+        # Insertion order matters (the substring footgun): every `project(id` sub-query carries
+        # that needle, so the more-specific ones (`projectMilestones(`, `issues(first`) precede the
+        # generic `project(id` (project_or_none).
+        return {
+            "teams(filter": [_TEAM_RESPONSE],
+            "projects(first": [{"team": {"projects": _page([])}}],  # find_objective dedup miss
+            "projectMilestones(": [{"project": {"projectMilestones": _page([])}}],
+            "issues(first": [
+                {
+                    "project": {
+                        "issues": _page(
+                            [
+                                self._existing_issue(
+                                    uuid="i-1",
+                                    identifier="ENG-1",
+                                    title="Human issue one",
+                                    body="HUMAN ISSUE BODY",
+                                )
+                            ]
+                        )
+                    }
+                }
+            ],
+            "project(id": [
+                {
+                    "project": {
+                        "id": "proj-1",
+                        "url": "p/url",
+                        "name": "My Project",
+                        "content": "ORIGINAL OVERVIEW VERBATIM",
+                    }
+                }
+            ],
+            "projectUpdate(": [{"projectUpdate": {"success": True, "project": {"id": "proj-1"}}}],
+            "projectMilestoneCreate(": [_milestone_create("m-1")],
+            "issueLabels(filter": [_LABEL_ABSENT],
+            "issueLabelCreate(": [
+                {"issueLabelCreate": {"success": True, "issueLabel": {"id": "lbl-node"}}}
+            ],
+            # mapped issue (ENG-1) label read for the additive union
+            "issue(id": [
+                {"issue": {"id": "i-1", "description": "HUMAN ISSUE BODY", "labels": _page([])}}
+            ],
+            "issueUpdate(": [{"issueUpdate": {"success": True}}],  # mapped desc + milestone attach
+            "issueCreate(": [_issue_create("ENG-2", "i-2")],  # unmapped node 1.2
+            "issueRelationCreate(": [_relation_create_ok()],
+        }
+
+    def test_adopt_source_as_objective_stamps_in_place(self) -> None:
+        store, fake = _make_project_store(self._adopt_responses())
+        ref = store.adopt_source_as_objective(
+            source_id="proj-1",
+            title="Adopted objective",
+            prose="MODEL PROSE",
+            run_id="01RUN",
+            roadmap_nodes=self._adopt_nodes(),
+            adopt_map={"1.1": "ENG-1"},
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-1", url="p/url", existed=False)
+
+        # The overview is UPDATED in place (projectUpdate), never created (no projectCreate).
+        assert not _queries(fake, "projectCreate(")
+        update_contents = [
+            cast("str", _input_payload(v)["content"]) for _, v in _queries(fake, "projectUpdate(")
+        ]
+        # Two projectUpdate writes: the composed overview, then the callout prepend.
+        composed = update_contents[0]
+        header = plan.find_metadata_block(composed, objective.OBJECTIVE_HEADER_KEY)
+        assert header is not None and header["adopted_from"] == "proj-1"
+        assert "MODEL PROSE" in composed
+        # the original overview is archived verbatim in the Immutable note (inline-code marker)
+        assert "ORIGINAL OVERVIEW VERBATIM" in composed
+        assert to_linear_markdown(objective.ADOPTED_OVERVIEW_MARKER) in composed
+        assert "perk objective plan proj-1" in update_contents[-1]
+
+        # The mapped issue ENG-1 got the node block stamped additively (human body verbatim) +
+        # the node label union, via issueUpdate; the unmapped node 1.2 was minted fresh.
+        issue_updates = [_input_payload(v) for _, v in _queries(fake, "issueUpdate(")]
+        desc_update = next(u for u in issue_updates if "description" in u)
+        new_desc = cast("str", desc_update["description"])
+        assert "HUMAN ISSUE BODY" in new_desc
+        assert "`perk:metadata-block:objective-node`" in new_desc
+        assert desc_update["labelIds"] == ["lbl-node"]
+        # the unmapped node minted exactly one fresh issue
+        ivars = [_input_payload(v) for _, v in _queries(fake, "issueCreate(")]
+        assert [v["title"] for v in ivars] == ["1.2: beta"]
+        # a milestone attach fired for the mapped issue (issueUpdate with projectMilestoneId)
+        assert any("projectMilestoneId" in u for u in issue_updates)
+        # a blocking relation for the explicit depends_on (1.1 blocks 1.2); 1.1 is the mapped UUID
+        rels = [_input_payload(v) for _, v in _queries(fake, "issueRelationCreate(")]
+        assert {(r["issueId"], r["relatedIssueId"]) for r in rels} == {("i-1", "i-2")}
+
+    def test_adopt_source_as_objective_dry_run_returns_none(self) -> None:
+        store, fake = _make_project_store()
+        assert (
+            store.adopt_source_as_objective(
+                source_id="proj-1",
+                title="t",
+                prose="p",
+                run_id="01RUN",
+                roadmap_nodes=self._adopt_nodes(),
+                adopt_map={},
+                dry_run=True,
+            )
+            is None
+        )
+        assert fake.requests == []
+
+    def test_adopt_source_as_objective_idempotent_short_circuits(self) -> None:
+        store, fake = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [
+                    {
+                        "team": {
+                            "projects": _page(
+                                [{"id": "proj-9", "url": "p/9", "content": _overview_for("01RUN")}]
+                            )
+                        }
+                    }
+                ],
+            }
+        )
+        ref = store.adopt_source_as_objective(
+            source_id="proj-1",
+            title="t",
+            prose="p",
+            run_id="01RUN",
+            roadmap_nodes=self._adopt_nodes(),
+            adopt_map={},
+        )
+        assert ref == objective_store.ObjectiveRef(id="proj-9", url="p/9", existed=True)
+        assert not _queries(fake, "projectUpdate(")
+
+    def test_adopt_source_as_objective_empty_roadmap_raises(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([])}}],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="roadmap is empty"):
+            store.adopt_source_as_objective(
+                source_id="proj-1",
+                title="t",
+                prose="p",
+                run_id="01RUN",
+                roadmap_nodes=[],
+                adopt_map={},
+            )
+
+    def test_adopt_source_as_objective_unknown_adopt_issue_raises(self) -> None:
+        store, _ = _make_project_store(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "projects(first": [{"team": {"projects": _page([])}}],
+                "issues(first": [{"project": {"issues": _page([])}}],  # no members
+                "project(id": [
+                    {
+                        "project": {
+                            "id": "proj-1",
+                            "url": "p/url",
+                            "name": "P",
+                            "content": "OVERVIEW",
+                        }
+                    }
+                ],
+            }
+        )
+        with pytest.raises(ObjectiveStoreError, match="not a member of project"):
+            store.adopt_source_as_objective(
+                source_id="proj-1",
+                title="t",
+                prose="p",
+                run_id="01RUN",
+                roadmap_nodes=self._adopt_nodes(),
+                adopt_map={"1.1": "ENG-404"},
+            )
+
+
 class TestReadNodeEngagement:
     """`read_node_engagement` (Objective #682, Node 2.1): node-keyed engagement over the project
     store (honest) + the empty no-ops on the issue-backed store."""

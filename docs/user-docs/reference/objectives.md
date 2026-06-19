@@ -38,7 +38,7 @@ A compact recap of the objective surface. Each row links to its authoritative en
 
 | Surface | What it does |
 | --- | --- |
-| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective + roadmap in a read-only session. |
+| [`perk objective author`](./cli.md#perk-objective-author) | Draft a new objective + roadmap in a read-only session (or adopt a pre-existing source in place with `--from`). |
 | [`perk objective save`](./cli.md#perk-objective-save) | Persist the drafted objective to GitHub (read-only → read-write boundary). |
 | [`perk objective plan`](./cli.md#perk-objective-plan-number) | Select the next node and author a bounded plan. |
 | [`perk objective show`](./cli.md#perk-objective-show-number-alias-s) (`s`) | Show the header, roadmap, summary, and next node. |
@@ -71,6 +71,7 @@ required; the rest are optional.
 | `depends_on` | list \| null | no | Dependency node ids. **Tri-state:** `null`/absent → infer **sequential** deps (the previous node); `[]` → explicitly **no** deps; `["1.1", …]` → **explicit** deps. |
 | `slug` | string | no | Optional short slug. |
 | `comment` | string | no | Optional note. |
+| `adopt_issue` | string | no | **Adoption only** (`objective author --from`, Linear): the id/identifier of a pre-existing source issue this node adopts in place. The mapped issue is reused as the node (title/body verbatim); unmapped nodes mint fresh node-issues. Ignored on GitHub. Carried as a side-map, not on the stored node. |
 
 Nodes can also be **inserted post-hoc** during reconciliation — `add_objective_node` (warm tool) /
 [`perk objective node-add`](./cli.md#perk-objective-node-add-number) (cold) auto-assigns the next

@@ -69,6 +69,39 @@ class ObjectiveRef:
 
 
 @dataclass(frozen=True)
+class AdoptableSourceIssue:
+    """One pre-existing project issue read verbatim for in-place objective adoption (#709, §8.30).
+
+    ``title``/``body`` are untrusted human DATA. ``id`` is the backend-owned opaque id (a Linear
+    issue UUID); ``identifier`` is the human ref (``ENG-N``). Empty on GitHub (single-issue
+    objectives have no child issues).
+    """
+
+    id: str
+    identifier: str
+    url: str
+    title: str
+    body: str
+
+
+@dataclass(frozen=True)
+class AdoptableObjectiveSource:
+    """A pre-existing human source read verbatim for in-place objective adoption (#709, §8.30).
+
+    A Linear **Project** (and its issues) or a GitHub **issue**. ``prose`` is the overview/body
+    (untrusted human DATA); ``issues`` are the project's existing issues (empty on GitHub). ``id``
+    is opaque (a project UUID or a GitHub issue number stringified). The objective-tier twin of
+    ``IssueBackend.AdoptableIssue``.
+    """
+
+    id: str
+    url: str
+    title: str
+    prose: str
+    issues: tuple[AdoptableSourceIssue, ...] = ()
+
+
+@dataclass(frozen=True)
 class ObjectiveState:
     """An objective's observable state: header + roadmap nodes (``perk objective show``).
 
@@ -170,6 +203,53 @@ class ObjectiveStore(Protocol):
     def find_objective(self, *, run_id: str) -> ObjectiveRef | None:
         """Find the **open** objective whose objective-header ``run_id`` matches. None for no
         match; raises on an infra failure (never masks the error as None)."""
+        ...
+
+    def read_objective_source(self, *, source_id: str) -> AdoptableObjectiveSource | None:
+        """Read *any* pre-existing source (a Linear **Project** / a GitHub **issue**) verbatim for
+        in-place adoption (#709, §8.30) — the objective-tier twin of ``IssueBackend.read_issue``.
+
+        Returns the source's prose + existing issues as untrusted human DATA (``issues`` empty on
+        GitHub). ``None`` when the source is genuinely absent; **raises** ``ObjectiveStoreError`` on
+        an infra failure. The source is returned even when closed/completed — the OPEN/not-an-
+        objective refusals live in the ``objective author --from`` cold door, not here. A store with
+        no project-source surface (the dormant issue-backed Linear store) returns ``None``.
+        """
+        ...
+
+    def adopt_source_as_objective(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        adopt_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        """Stamp perk's objective metadata **additively** into a pre-existing source IN PLACE
+        (#709, §8.30), never minting a second project/issue.
+
+        ``prose`` is the MODEL-authored Reconcilable prose; the source's ORIGINAL overview/body is
+        archived verbatim into an ``Adopted-from`` Immutable note appended below the Reconcilable
+        markers (``objective.render_adopted_overview_note``). ``roadmap_nodes`` is the authored
+        roadmap; ``adopt_map`` (node id → existing source-issue id) maps a node to an EXISTING
+        project issue — a mapped node stamps the ``objective-node`` block into that issue (title +
+        human body verbatim) + attaches it to its phase milestone + reuses it as the roadmap node;
+        unmapped nodes mint a fresh node-issue. ``adopt_map`` is ignored on GitHub (no children).
+
+        Returns the source's ``ObjectiveRef`` (``existed=True`` on idempotent re-save via
+        ``run_id``, else ``existed=False``). Returns **``None``** for a store that does NOT support
+        in-place adoption (the dormant issue-backed Linear store) — the unambiguous "doesn't adopt"
+        signal (mirrors ``save_node_plan → None``). ``dry_run`` returns ``None`` (resolving the
+        source needs a network read; the cold door's ``--dry-run`` is offline). An empty
+        ``roadmap_nodes`` raises (the storage backstop). The additive stamp is idempotent: a re-save
+        finds the now-perk objective via ``run_id`` and returns ``existed=True`` (never re-archiving
+        / double-stamping).
+        """
         ...
 
     def create_objective(

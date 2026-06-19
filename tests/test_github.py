@@ -1314,6 +1314,111 @@ def test_create_objective_issue_dry_run_does_not_shell(monkeypatch):
     assert issue.number == 0 and issue.existed is False
 
 
+def test_adopt_issue_as_objective_stamps_in_place(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),  # find_objective_issue -> none
+            (
+                _has("view", "number,title,body,state,url"),
+                _Proc(
+                    0,
+                    json.dumps(
+                        {
+                            "number": 7,
+                            "title": "Human title",
+                            "body": "HUMAN OBJECTIVE OVERVIEW",
+                            "state": "OPEN",
+                            "url": "u7",
+                        }
+                    ),
+                ),
+            ),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),  # create_label
+            (_has("issues/7/labels", "POST"), _Proc(0, "{}")),  # additive label add
+            (_has("issues/7/comments", "POST"), _Proc(0, json.dumps({"id": 555}))),  # body comment
+            (_has("issues/7", ".body"), _Proc(0, "HUMAN OBJECTIVE OVERVIEW")),  # _get_issue_body
+            (_has("issues/7", "PATCH"), _Proc(0, "{}")),  # body stamp PATCH + header backfill PATCH
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    adopted = github.adopt_issue_as_objective(
+        number=7,
+        title="Human title",
+        prose="MODEL-AUTHORED PROSE",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    assert adopted == github.ObjectiveAdoption(number=7, url="u7", existed=False, dry_run=False)
+    # body_files[0] = the stamped issue body: human overview verbatim + header(adopted_from=#7) +
+    # roadmap block; title is NEVER PATCHed.
+    stamped = rec.body_files[0]
+    assert "HUMAN OBJECTIVE OVERVIEW" in stamped
+    header = plan.find_metadata_block(stamped, objective.OBJECTIVE_HEADER_KEY)
+    assert header is not None and header["adopted_from"] == "#7"
+    assert plan.find_metadata_block(stamped, objective.OBJECTIVE_ROADMAP_KEY) is not None
+    assert not any("title=" in tok for c in rec.calls for tok in c)
+    # body_files[1] = the objective-body comment: callout + table + MODEL prose + the verbatim
+    # `Adopted-from` Immutable archive note.
+    comment = rec.body_files[1]
+    assert "perk objective plan 7" in comment
+    assert "MODEL-AUTHORED PROSE" in comment
+    assert objective.ADOPTED_OVERVIEW_MARKER in comment
+    assert "HUMAN OBJECTIVE OVERVIEW" in comment
+    # the perk:objective label was lazily created + added additively (never replaced)
+    assert any("name=perk:objective" in tok for c in rec.calls for tok in c)
+
+
+def test_adopt_issue_as_objective_idempotent(monkeypatch):
+    existing = [{"number": 7, "html_url": "u/7", "body": _obj_header("01RID")}]
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps(existing)))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    adopted = github.adopt_issue_as_objective(
+        number=7,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=[
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ],
+    )
+    assert adopted.number == 7 and adopted.existed is True
+    # the idempotent short-circuit never PATCHes / posts a comment
+    assert not any("PATCH" in c for c in rec.calls)
+
+
+def test_adopt_issue_as_objective_rejects_empty_roadmap(monkeypatch):
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, "[]"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="roadmap is empty"):
+        github.adopt_issue_as_objective(
+            number=7, title="t", prose="p", repo_root=ROOT, run_id="01RID", roadmap_nodes=[]
+        )
+
+
+def test_adopt_issue_as_objective_dry_run_does_not_shell(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("dry run must not shell gh")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    adopted = github.adopt_issue_as_objective(
+        number=7,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=[
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ],
+        dry_run=True,
+    )
+    assert adopted.dry_run is True and adopted.existed is False
+
+
 def test_get_objective_parses_header_and_nodes(monkeypatch):
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE),

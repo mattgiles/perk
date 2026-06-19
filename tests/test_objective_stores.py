@@ -262,6 +262,63 @@ class TestGitHubDelegation:
         )
         assert result.comment_id is None
 
+    def test_read_objective_source(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(
+            github.IssueRead(number=7, url="u7", title="Human title", body="OVERVIEW", state="OPEN")
+        )
+        monkeypatch.setattr(github, "read_issue", rec)
+        result = GitHubObjectiveStore(tmp_path).read_objective_source(source_id="7")
+        assert rec.kwargs == {"number": 7, "repo_root": tmp_path}
+        assert result == objective_store.AdoptableObjectiveSource(
+            id="7", url="u7", title="Human title", prose="OVERVIEW", issues=()
+        )
+
+    def test_read_objective_source_none_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(github, "read_issue", _Recorder(None))
+        assert GitHubObjectiveStore(tmp_path).read_objective_source(source_id="7") is None
+
+    def test_adopt_source_as_objective(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _Recorder(github.ObjectiveAdoption(number=7, url="u7", existed=False, dry_run=False))
+        monkeypatch.setattr(github, "adopt_issue_as_objective", rec)
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ]
+        result = GitHubObjectiveStore(tmp_path).adopt_source_as_objective(
+            source_id="7",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=nodes,
+            adopt_map={"1.1": "ignored-on-github"},
+        )
+        assert rec.kwargs == {
+            "number": 7,
+            "title": "t",
+            "prose": "p",
+            "repo_root": tmp_path,
+            "run_id": "RUN1",
+            "status": "active",
+            "base": None,
+            "roadmap_nodes": nodes,
+        }
+        assert result == objective_store.ObjectiveRef(id="7", url="u7", existed=False)
+
+    def test_adopt_source_as_objective_dry_run_returns_none(self, tmp_path: Path) -> None:
+        result = GitHubObjectiveStore(tmp_path).adopt_source_as_objective(
+            source_id="7",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=[],
+            adopt_map={},
+            dry_run=True,
+        )
+        assert result is None
+
     def test_save_node_plan_returns_none(self, tmp_path: Path) -> None:
         # GitHub does not unify node + plan: always None so the caller takes the standalone path.
         result = GitHubObjectiveStore(tmp_path).save_node_plan(
@@ -411,6 +468,7 @@ OBJECTIVE_TIER_FUNCTIONS: tuple[str, ...] = (
     "update_objective_node",
     "update_objective_body",
     "add_objective_node",
+    "adopt_issue_as_objective",
 )
 
 

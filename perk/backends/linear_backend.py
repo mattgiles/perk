@@ -870,6 +870,40 @@ class _LinearProjectOps:
             )
         return result
 
+    def project_issues_for_adoption(self, project_id: str) -> list[dict[str, object]]:
+        """All issues attached to a project **with titles**, as
+        ``[{id, identifier, url, title, description}, …]`` (paginated). A **sibling** of
+        :meth:`project_issues` (in-place objective adoption needs each existing issue's title to
+        seed the authoring DATA and to preserve it verbatim on the mapped-issue stamp; #709,
+        §8.30); the byte-stable ``project_issues`` query is deliberately left untouched (mirrors
+        the ``project_issues_with_milestones`` sibling precedent). ``description``/``title`` may be
+        ``""``.
+
+        **Flagged (Phase-5 / Node 5.1 live gate):** this title-bearing selection is NOT yet
+        live-proven for adoption — covered offline here; verify live at Node 4.3.
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ issues(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id identifier url title description } "
+            "pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "issues")
+        result: list[dict[str, object]] = []
+        for node in nodes:
+            description = node.get("description")
+            title = node.get("title")
+            result.append(
+                {
+                    "id": _require_str(node.get("id"), "issue id"),
+                    "identifier": _require_str(node.get("identifier"), "issue identifier"),
+                    "url": _require_str(node.get("url"), "issue url"),
+                    "title": title if isinstance(title, str) else "",
+                    "description": description if isinstance(description, str) else "",
+                }
+            )
+        return result
+
     def project_issues_with_milestones(self, project_id: str) -> list[dict[str, object]]:
         """All issues attached to a project **with milestone membership**, as
         ``[{id, identifier, url, description, milestone_name}, …]`` (paginated). A **sibling** of
@@ -1603,6 +1637,29 @@ class LinearObjectiveStore:
             )
         return None if found is None else _objective_ref(found)
 
+    def read_objective_source(
+        self, *, source_id: str
+    ) -> objective_store.AdoptableObjectiveSource | None:
+        """Dormant issue-backed store: no project-source surface — always ``None`` (#709, §8.30)."""
+        return None
+
+    def adopt_source_as_objective(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        adopt_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Dormant issue-backed store: does NOT support in-place adoption — always ``None`` (the
+        unambiguous "doesn't adopt" signal, mirroring ``save_node_plan → None``; #709, §8.30)."""
+        return None
+
     def create_objective(
         self,
         *,
@@ -2001,6 +2058,213 @@ class LinearProjectObjectiveStore:
                         existed=True,
                     )
             return None
+
+    def read_objective_source(
+        self, *, source_id: str
+    ) -> objective_store.AdoptableObjectiveSource | None:
+        """Read a Linear **Project** (and its issues) verbatim as an adoptable objective source
+        (#709, §8.30): prose = the project overview ``content`` (untrusted DATA); ``issues`` = the
+        project's existing issues (title/body verbatim). ``None`` when the project is absent;
+        infra failures propagate (mapped to ``ObjectiveStoreError``)."""
+        with _translate_objective():
+            project = self._projects.project_or_none(source_id, "id url name content")
+            if project is None:
+                return None
+            content = project.get("content")
+            prose = content if isinstance(content, str) else ""
+            issues = tuple(
+                objective_store.AdoptableSourceIssue(
+                    id=_require_str(issue.get("id"), "issue id"),
+                    identifier=_require_str(issue.get("identifier"), "issue identifier"),
+                    url=_require_str(issue.get("url"), "issue url"),
+                    title=_require_str(issue.get("title"), "issue title"),
+                    body=_require_str(issue.get("description"), "issue description"),
+                )
+                for issue in self._projects.project_issues_for_adoption(source_id)
+            )
+            return objective_store.AdoptableObjectiveSource(
+                id=source_id,
+                url=_require_str(project.get("url"), "project url"),
+                title=_require_str(project.get("name"), "project name"),
+                prose=prose,
+                issues=issues,
+            )
+
+    def adopt_source_as_objective(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        adopt_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Stamp perk's objective metadata **additively** into a pre-existing Linear Project IN
+        PLACE (#709, §8.30), never minting a second project.
+
+        Composes the new overview preserving the original verbatim (MODEL prose in the Reconcilable
+        region + header(``adopted_from=source_id``) + manifest + the ``Adopted-from`` Immutable
+        archive note), one milestone per phase (de-duped against existing milestones), node-issues
+        (mapped → the ``objective-node`` block stamped additively into the existing issue,
+        title/body verbatim, + phase milestone + the ``perk:objective-node`` label; unmapped → fresh
+        node-issue), and a blocking relation per explicit ``depends_on``. Idempotent on ``run_id``.
+        ``dry_run`` → ``None``; an empty ``roadmap_nodes`` raises."""
+        if dry_run:
+            return None
+        with _translate_objective():
+            existing = self.find_objective(run_id=run_id)
+            if existing is not None:
+                return existing
+
+            nodes = list(roadmap_nodes)
+            if not nodes:
+                raise IssueBackendError(
+                    "objective roadmap is empty: an objective needs at least one node"
+                )
+
+            project = self._projects.project_or_none(source_id, "id url name content")
+            if project is None:
+                raise IssueBackendError(f"Linear project {source_id!r} not found")
+            project_url = _require_str(project.get("url"), "project url")
+            original_overview = project.get("content")
+            original_overview = original_overview if isinstance(original_overview, str) else ""
+
+            # Resolve each adopt_map value (an id OR human identifier) to an existing project-issue
+            # record — fail-loud on an id not in the project (the author named a non-member issue).
+            existing_issues = self._projects.project_issues_for_adoption(source_id)
+            by_key: dict[str, dict[str, object]] = {}
+            for issue in existing_issues:
+                by_key[_require_str(issue.get("id"), "issue id")] = issue
+                by_key[_require_str(issue.get("identifier"), "issue identifier")] = issue
+            resolved_adopt: dict[str, dict[str, object]] = {}
+            for node_id, source_issue in adopt_map.items():
+                target = by_key.get(source_issue)
+                if target is None:
+                    raise IssueBackendError(
+                        f"objective node {node_id!r} adopts issue {source_issue!r}, which is not a "
+                        f"member of project {source_id!r}"
+                    )
+                resolved_adopt[node_id] = target
+
+            # --- compose the overview, preserving the original verbatim (Immutable archive) ---
+            header = objective.ObjectiveHeader(
+                run_id=run_id,
+                created=plan.now_iso(),
+                objective_comment_id=None,
+                status=status,
+                base=base,
+                adopted_from=source_id,
+            )
+            header_block = plan.render_metadata_block(
+                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+            )
+            grouped = objective.group_nodes_by_phase(nodes)
+            names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
+            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+            manifest_block = plan.render_metadata_block(
+                objective.OBJECTIVE_MANIFEST_KEY,
+                objective.render_manifest_block(nodes, manifest_names),
+                style="inline-code",
+            )
+            reconcilable = (
+                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
+                f"{prose.strip()}\n"
+                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
+            )
+            archive_note = objective.render_adopted_overview_note(original_overview)
+            composed = f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n"
+            if archive_note:
+                # The Immutable archive note lives BELOW the closing Reconcilable marker.
+                composed = f"{composed}\n{archive_note}\n"
+            overview = to_linear_markdown(composed)
+            # Adopt in place: PATCH the existing project's overview (NOT create_project).
+            overview = plan.prepend_callout(
+                overview,
+                objective.objective_callout(source_id),
+                command=f"perk objective plan {source_id}",
+            )
+            self._projects.update_project_content(source_id, overview)
+
+            # --- one milestone per phase, de-duped against the project's EXISTING milestones ---
+            known_milestones: dict[str, str] = {
+                _require_str(m["name"], "milestone name"): _require_str(m["id"], "milestone id")
+                for m in self._projects.project_milestones(source_id)
+            }
+            phase_milestone: dict[tuple[int, str], str] = {}
+            for key, _phase_nodes in grouped:
+                phase_milestone[key] = self._projects.ensure_phase_milestone(
+                    project_id=source_id, name=names[key], known=known_milestones
+                )
+
+            node_label_id, _ = self._issue_ops._ensure_label_id(
+                objective.OBJECTIVE_NODE_LABEL,
+                color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+                description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+            )
+            node_uuid: dict[str, str] = {}
+            for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
+                node_block = plan.render_metadata_block(
+                    objective.OBJECTIVE_NODE_KEY,
+                    objective.render_node_block(node),
+                    style="inline-code",
+                )
+                milestone_id = phase_milestone[objective.derive_phase(node.id)]
+                if node.id in resolved_adopt:
+                    # Mapped: stamp the node block ADDITIVELY into the existing issue (title + human
+                    # body verbatim), attach to the phase milestone, add the node label additively.
+                    target = resolved_adopt[node.id]
+                    uuid = _require_str(target.get("id"), "issue id")
+                    existing_body = _require_str(target.get("description"), "issue description")
+                    new_desc = to_linear_markdown(f"{existing_body.rstrip()}\n\n{node_block}\n")
+                    full = self._issue_ops._get_issue(
+                        uuid, "id description labels { nodes { id } }"
+                    )
+                    labels = _require_dict(full.get("labels"), "issue.labels")
+                    label_ids = [
+                        _require_str(_require_dict(raw, "label").get("id"), "label id")
+                        for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
+                    ]
+                    if node_label_id not in label_ids:
+                        label_ids = [*label_ids, node_label_id]
+                    self._issue_ops._update_issue(
+                        uuid,
+                        {"description": new_desc, "labelIds": label_ids},
+                        what="stamp objective-node block",
+                    )
+                    self._projects.attach_issue_to_milestone(
+                        issue_id=uuid, milestone_id=milestone_id
+                    )
+                    node_uuid[node.id] = uuid
+                else:
+                    # Unmapped: mint a fresh node-issue (the create_objective path).
+                    description = to_linear_markdown(node.description + "\n\n" + node_block)
+                    _ref, uuid = self._issue_ops._create_issue_raw(
+                        title=objective.node_issue_title(node),
+                        description=description,
+                        label_id=node_label_id,
+                        project_id=source_id,
+                        milestone_id=milestone_id,
+                    )
+                    node_uuid[node.id] = uuid
+
+            # --- blocking relations for EXPLICIT depends_on only (dep BLOCKS node) ---
+            for node in nodes:
+                if not node.depends_on:
+                    continue
+                for dep in node.depends_on:
+                    if dep not in node_uuid:
+                        raise IssueBackendError(
+                            f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
+                        )
+                    self._projects.create_issue_relation(
+                        issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
+                    )
+
+            return objective_store.ObjectiveRef(id=source_id, url=project_url, existed=False)
 
     def create_objective(
         self,
