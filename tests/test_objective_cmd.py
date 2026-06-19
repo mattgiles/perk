@@ -253,6 +253,155 @@ def test_create_invalid_roadmap(monkeypatch):
     assert payload["error_type"] == "invalid_roadmap"
 
 
+# --- #709 Node 3.2: objective create --adopt-from + handoff recovery --------------------------
+
+
+class _AdoptStubStore:
+    """A minimal ObjectiveStore stub that records the adoption call and returns a fresh ref."""
+
+    backend_id = "github"
+
+    def __init__(self, *, adopt_returns_none: bool = False) -> None:
+        self.adopt_kwargs: dict | None = None
+        self.created = False
+        self._adopt_returns_none = adopt_returns_none
+        from perk.backends import objective_store
+
+        self._ref_cls = objective_store.ObjectiveRef
+
+    def adopt_source_as_objective(self, **kwargs):
+        self.adopt_kwargs = kwargs
+        if self._adopt_returns_none:
+            return None
+        return self._ref_cls(id="proj-1", url="p/url", existed=False)
+
+    def create_objective(self, **kwargs):
+        self.created = True
+        return self._ref_cls(id="99", url="u/99", existed=False)
+
+    def post_status_update(self, **kwargs):
+        return False
+
+
+def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None):
+    from perk.backends import objective_stores
+    from perk.state import cache
+
+    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        bf = Path(d) / "obj.md"
+        bf.write_text(body, encoding="utf-8")
+        if write_handoff is not None:
+            run_id, blob = write_handoff
+            cache.write_handoff(Path(d), run_id, blob)
+        return runner.invoke(cli, [*args, "--body", str(bf)])
+
+
+def test_create_adopt_from_routes_to_writer(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "first", "adopt_issue": "ENG-1"},
+            {"id": "1.2", "description": "second"},
+        ]
+    )
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--adopt-from", "proj-1", "--roadmap", roadmap],
+        body="# Ship it\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.adopt_kwargs is not None and store.created is False
+    assert store.adopt_kwargs["source_id"] == "proj-1"
+    assert store.adopt_kwargs["adopt_map"] == {"1.1": "ENG-1"}
+    assert [n.id for n in store.adopt_kwargs["roadmap_nodes"]] == ["1.1", "1.2"]
+
+
+def test_create_adopt_from_handoff_recovery(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--run-id", "RID9", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+        write_handoff=("RID9", {"adopt_from": "proj-7"}),
+    )
+    assert result.exit_code == 0, result.output
+    assert store.adopt_kwargs is not None
+    assert store.adopt_kwargs["source_id"] == "proj-7"  # recovered from the handoff
+
+
+def test_create_explicit_adopt_from_wins_over_handoff(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--run-id",
+            "RID9",
+            "--adopt-from",
+            "explicit-1",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+        write_handoff=("RID9", {"adopt_from": "handoff-1"}),
+    )
+    assert result.exit_code == 0, result.output
+    assert store.adopt_kwargs is not None
+    assert store.adopt_kwargs["source_id"] == "explicit-1"
+
+
+def test_create_adopt_unsupported(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore(adopt_returns_none=True)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--adopt-from", "proj-1", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "adopt_unsupported"
+
+
+def test_create_adopt_from_dry_run_composes_without_adopting(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--dry-run",
+            "--adopt-from",
+            "proj-1",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    # dry-run falls through to the offline create_objective(dry_run=True) compose-preview
+    assert store.adopt_kwargs is None and store.created is True
+
+
 def test_show_json(monkeypatch):
     monkeypatch.setattr(
         github,

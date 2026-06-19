@@ -461,5 +461,30 @@ test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape
     "pr",
     "depends_on",
     "comment",
+    "adopt_issue",
   ]);
+});
+
+test("adopt_issue: a node carrying adopt_issue decodes + writes through verbatim (#709)", () => {
+  // The schema accepts adopt_issue (additionalProperties:false would otherwise reject it) and the
+  // decoder keeps roadmap opaque, so the field rides unchanged to the Python cold door.
+  assert.equal(
+    (ROADMAP_PARAM_SCHEMA.properties as Record<string, unknown>).adopt_issue !== undefined,
+    true,
+  );
+  const adoptRoadmap = [{ id: "1.1", description: "first", adopt_issue: "ENG-1" }];
+  const decoded = decodeObjectiveSaveParams({ prose: "p", roadmap: adoptRoadmap });
+  assert.deepEqual(decoded?.roadmap, adoptRoadmap);
+
+  const cwd = tempCwd();
+  try {
+    const branch: unknown[] = [runIdEntry("RID")];
+    const ctx = reportableCtx(cwd, branch);
+    writeObjectiveDraft(fakeSink(branch), ctx, { prose: PROSE, roadmap: adoptRoadmap });
+    const path = join(sessionDataDir(cwd, "RID"), OBJECTIVE_DRAFT_ARTIFACT);
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { roadmap: unknown };
+    assert.deepEqual(parsed.roadmap, adoptRoadmap);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

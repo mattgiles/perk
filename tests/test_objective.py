@@ -335,6 +335,65 @@ def test_objective_header_base_round_trips():
     assert "base" in o.OBJECTIVE_HEADER_FIELDS
 
 
+# --- #709 Node 3.2: adopted_from provenance + parse_adopt_mapping + archive note -----------
+
+
+def test_objective_header_adopted_from_round_trips():
+    header = o.ObjectiveHeader(run_id="01RID", created="t", adopted_from="uuid-xyz")
+    data = header.to_data()
+    assert data["adopted_from"] == "uuid-xyz"
+    rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
+    parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
+    assert parsed is not None and parsed["adopted_from"] == "uuid-xyz"
+    assert "adopted_from" in o.OBJECTIVE_HEADER_FIELDS
+
+
+def test_objective_header_adopted_from_absent_by_default():
+    data = o.ObjectiveHeader(run_id="01RID", created="t").to_data()
+    assert data["adopted_from"] is None
+
+
+def test_parse_adopt_mapping_bare_list_and_nodes_shape():
+    bare = [
+        {"id": "1.1", "description": "A", "adopt_issue": "ENG-1"},
+        {"id": "1.2", "description": "B"},
+        {"id": "1.3", "description": "C", "adopt_issue": "  "},
+    ]
+    assert o.parse_adopt_mapping(bare) == {"1.1": "ENG-1"}
+    wrapped = {"schema_version": "1", "nodes": bare}
+    assert o.parse_adopt_mapping(wrapped) == {"1.1": "ENG-1"}
+
+
+def test_parse_adopt_mapping_strips_and_skips():
+    nodes = [
+        {"id": "2.1", "description": "A", "adopt_issue": " ENG-9 "},
+        "not-a-dict",
+        {"description": "missing id", "adopt_issue": "ENG-2"},
+        {"id": "2.2", "description": "B", "adopt_issue": 42},
+    ]
+    assert o.parse_adopt_mapping(nodes) == {"2.1": "ENG-9"}
+
+
+def test_parse_adopt_mapping_non_collection_returns_empty():
+    assert o.parse_adopt_mapping(None) == {}
+    assert o.parse_adopt_mapping("x") == {}
+    assert o.parse_adopt_mapping(123) == {}
+
+
+def test_render_adopted_overview_note_empty_when_blank():
+    assert o.render_adopted_overview_note("") == ""
+    assert o.render_adopted_overview_note("   \n  ") == ""
+
+
+def test_render_adopted_overview_note_marker_and_verbatim():
+    note = o.render_adopted_overview_note("Original human overview.\n\nSecond paragraph.")
+    assert note.startswith(o.ADOPTED_OVERVIEW_MARKER)
+    assert "Original human overview." in note
+    assert "Second paragraph." in note
+    # Idempotent shape: re-rendering the same input yields identical bytes.
+    assert note == o.render_adopted_overview_note("Original human overview.\n\nSecond paragraph.")
+
+
 # --- P2.T11: nodes_for_pr + reconcilable splice + render_body_comment markers --------------
 
 
