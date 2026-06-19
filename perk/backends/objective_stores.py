@@ -43,6 +43,12 @@ from perk.backends.issues import (
     LINEAR_BACKEND_ID,
     resolve_issue_backend_id,
 )
+from perk.backends.issues import (
+    _description_edit as _gh_description_edit,
+)
+from perk.backends.issues import (
+    _engagement_comment as _gh_engagement_comment,
+)
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 from perk.substrate import config
@@ -247,17 +253,28 @@ class GitHubObjectiveStore:
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
-    # Clean empty impl: honest project-level objective reads land with their Phase-2 consumer
-    # (Node 2.3). No flow consumers in 1.2.
+    # --- human-engagement reads (Objective #682, Node 2.3) ---
+    # Honest over the objective issue itself (a GitHub objective IS a single issue): reuse the
+    # issue-tier honest reads + the shared `issues.py` mappers. `read_node_engagement` stays a
+    # clean no-op (single-issue objective — no per-node issues).
 
     def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
-        return ()
+        """Honest over the objective issue's comments (reuse `github.read_issue_comments` + the
+        shared `issues._engagement_comment` mapper)."""
+        number = _number(objective_id)
+        with _translate():
+            rows = github.read_issue_comments(issue=number, repo_root=self._repo_root)
+        return tuple(_gh_engagement_comment(row) for row in rows)
 
     def read_description_edits(
         self, *, objective_id: str
     ) -> tuple[engagement.DescriptionEdit, ...]:
-        return ()
+        """Honest over the objective issue's description edit history (reuse
+        `github.read_description_edits` + the shared `issues._description_edit` mapper)."""
+        number = _number(objective_id)
+        with _translate():
+            rows = github.read_description_edits(issue=number, repo_root=self._repo_root)
+        return tuple(_gh_description_edit(row) for row in rows)
 
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
         return engagement.EMPTY_AGENT_SESSION

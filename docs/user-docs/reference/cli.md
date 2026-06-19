@@ -225,6 +225,17 @@ sets its initial status (default `pending`); `--slug` overrides the auto-derived
 validates without writing. Used **sparingly** during reconciliation, when a genuinely-new unit of
 work emerged.
 
+### `perk objective engagement NUMBER`
+
+Read the **objective + its node-issues' human engagement** — comments + description edits on the
+objective and every roadmap node-issue — as one untrusted-DATA `<untrusted_objective_engagement>`
+block. `--json` emits the machine payload (`project_comments`, `project_description_edits`, and a
+`nodes` list of per-node `comments` / `description_edits`). Read-only; the `/objective-reconcile`
+pass uses it to weigh human feedback alongside the merged diff. **GitHub** surfaces the objective
+issue's own comments + edits (no per-node sections); **Linear** surfaces the project's comments +
+each node-issue's comments/edits (project description edits are an honest empty — node-issue edits
+carry that signal). Empty → `no human engagement on objective <N>`.
+
 ### `perk objective node-engagement NUMBER`
 
 Read a roadmap node-issue's **pre-planning human engagement** — comments + description edits left on

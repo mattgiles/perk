@@ -827,6 +827,25 @@ class _LinearProjectOps:
             for node in nodes
         ]
 
+    def _project_comments(self, project_id: str) -> list[dict[str, object]]:
+        """All comments on a project (the project-level discussion threads) with author identity +
+        ``editedAt``, sorted ascending by ``createdAt`` (oldest-first, mirroring the issue reads).
+        Author-aware selection mirroring ``_LinearIssueOps._comments_with_authors`` — feeds the
+        objective-level engagement read (Node 2.3).
+
+        (Implementer note: if ``Project.comments`` proves unavailable live in Node 4.3, fall back to
+        the top-level ``comments(filter: { project: { id: { eq: $id } } })`` form — the
+        SDK-confirmed alternative; the neutral mapping is unchanged.)
+        """
+        query = (
+            "query($id: String!, $cursor: String) { project(id: $id) "
+            f"{{ comments(first: {_PAGE_SIZE}, after: $cursor) "
+            "{ nodes { id body createdAt editedAt user { id name displayName } "
+            "botActor { id name type } } pageInfo { hasNextPage endCursor } } } }"
+        )
+        nodes = self._client.paginate(query, {"id": project_id}, "project", "comments")
+        return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
+
     def project_issues(self, project_id: str) -> list[dict[str, object]]:
         """All issues attached to a project, as ``[{id, identifier, url, description}, …]``
         (paginated). ``description`` may be ``""`` — one query then yields every node-issue body for
@@ -2707,16 +2726,28 @@ class LinearProjectObjectiveStore:
                 dry_run=False,
             )
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
-    # Empty/no-op: honest project-level objective reads (over the project's node-issues + project
-    # updates) land with their Phase-2 consumer (Node 2.3). No flow consumers in 1.2.
+    # --- human-engagement reads (Objective #682, Node 2.3) ---
+    # Honest project-level reads: project comments are the project's discussion threads;
+    # description edits stay an honest empty (no project-level edit-history primitive). The fourth
+    # flow consumer (`/objective-reconcile`) composes these with the per-node
+    # `read_node_engagement`.
 
     def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
-        return ()
+        """Honest over the Linear project's comments (project-level discussion threads), mapped
+        through the shared ``_engagement_comment`` mapper. ``ObjectiveStoreError`` on an
+        infra/auth failure (translated)."""
+        with _translate_objective():
+            return tuple(
+                _engagement_comment(node) for node in self._projects._project_comments(objective_id)
+            )
 
     def read_description_edits(
         self, *, objective_id: str
     ) -> tuple[engagement.DescriptionEdit, ...]:
+        # Honest empty: Linear projects expose no description-edit-history primitive analogous to
+        # issue `history.descriptionUpdatedBy` (the project's "edits" signal lives on its
+        # node-issues, which the per-node `read_node_engagement` sections carry). A flagged
+        # preview-grade deferral, not overpromised (Node 4.3 live gate).
         return ()
 
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:

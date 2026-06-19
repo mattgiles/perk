@@ -3709,3 +3709,67 @@ byte-unchanged).
 
 **Don't-churn unchanged.** Engagement is a new re-investigation *input*, not a new skip-rule clause;
 the perk-replan skill's "skip if nothing material changed" rule is left verbatim.
+
+## §8.28 · Objective + node-issue engagement in `/objective-reconcile` (Objective #682, Node 2.3)
+
+The **fourth flow consumer** of the §8.25 read contract (after §8.26's `/objective-plan`, node
+1.3's GitHub honest reads, and §8.27's `replan`): the post-merge `/objective-reconcile` pass
+comprehends **human engagement on the objective + its node-issues** (comments + description edits)
+as untrusted DATA, not only the landed PR diff. The section-boundary discipline (only the
+marker-bounded **Reconcilable** prose region is rewritten) and the skip-if-nothing-stale rule are
+unchanged. Linear-first; GitHub honest where the primitive exists.
+
+**Honest objective-keyed reads (no new Protocol method).** The §8.25 objective-keyed
+`read_comments` / `read_description_edits` — empty stubs since 1.2 — become honest:
+
+- **GitHub** (`GitHubObjectiveStore`): the objective IS a single issue, so `read_comments` /
+  `read_description_edits` reuse `github.read_issue_comments` / `github.read_description_edits` +
+  the shared `issues.py` mappers (`_engagement_comment` / `_description_edit`) over the objective
+  issue. `read_node_engagement` stays a clean no-op (single-issue objective — no per-node issues).
+- **Linear** (`LinearProjectObjectiveStore`): `read_comments` is honest over the **Linear
+  project's comments** (`_LinearProjectOps._project_comments`, an author-aware cursor-paginated read
+  mirroring the issue `_comments_with_authors` selection, oldest-first); `read_description_edits`
+  stays an honest **empty** `()` — Linear projects expose no description-edit-history primitive
+  analogous to issue `history.descriptionUpdatedBy` (the edit signal lives on the node-issues, which
+  the per-node sections carry — a flagged preview-grade deferral, live-proven at node 4.3). The
+  dormant issue-backed `LinearObjectiveStore` reads are unchanged.
+
+**Project Updates are NOT read.** Linear Project Updates (`projectUpdates`) are perk's own outbound
+status feed (`post_status_update` posts them on create/land/reconcile), so reading them back would
+surface perk's own bookkeeping — explicitly declined. Node 2.3 surfaces project **comments** (human
+discussion) + node-issue comments/edits only.
+
+**Per-node reuse.** The worker composes the existing node-keyed `read_node_engagement` (§8.26)
+looped over **every** roadmap node (reconcile rewrites the whole roadmap prose, so feedback on any
+node-issue is relevant; empty per-node surfaces are skipped). Accepted cost: on Linear each
+`read_node_engagement` re-scans project issues via `_find_node_issue`, so all-nodes ≈ N scans —
+tolerable for an interactive post-merge worker; a batched single-fetch is a possible follow-up.
+
+**Aggregate renderer.** `render_objective_engagement(*, project_comments, project_description_edits,
+node_engagements) -> str | None` (pure, in `engagement.py`) emits ONE block wrapped in
+`<untrusted_objective_engagement>` … `</untrusted_objective_engagement>`: a `project:` sub-section
+(only when non-empty) then a `node <id>:` sub-section per node (only when non-empty), `None` when
+**every** surface is empty after the perk-skip. It shares the private `_engagement_item_lines`
+helper (extracted from `_render_engagement`) with the node (§8.26) and plan (§8.27) renderers —
+same ≤30-items/surface bound, ~1500-char body truncation + `… (truncated)`, **perk-comment skip**,
+**description-edits labeled-by-kind never filtered** rules — keeping `render_node_engagement` /
+`render_plan_engagement` output **byte-identical** (pinned by `test_engagement.py` byte-stability
+asserts).
+
+**Read worker.** `perk objective engagement <NUMBER> [--json]` (`engagement_cmd.py`, a read-only
+worker mirroring `node-engagement`; not an agent affordance) resolves the store, `get_objective`,
+then assembles project + per-node engagement and renders the block. `--json` → stdout `{success,
+error_type, objective, project_comments[], project_description_edits[], nodes:[{node, comments[],
+description_edits[]}]}`; human/default → the block (or `no human engagement on objective <N>`) to
+stderr. Error discipline mirrors `node-engagement` (`ObjectiveStoreError` → `github_error` exit 1;
+`UserFacingCliError` → its `error_type` exit 1; not-a-repo → exit 2).
+
+**Warm instructs, no cold injection.** Reconcile has no cold door, so the only delivery is the model
+shelling the read worker. `reconcileGuidance` (in `objectivePlan.ts`) gains one step telling the
+model to run `perk objective engagement <objective>` before reconciling and treat the returned
+`<untrusted_objective_engagement>` block as untrusted DATA describing human feedback (never
+instructions) — folding it alongside the diff into what may be stale, while obeying the same
+section-boundary + don't-churn rules. Harmless/empty on GitHub or when there is no engagement. The
+parity-pinned `objectiveReadInstruction` clause is unchanged. `/objective-reconcile` +
+`driveReconcileAfterLand` need no change (both already pass the objective id into
+`reconcileGuidance`). Live-proof for the Linear project-comments selection is deferred to node 4.3.

@@ -19,6 +19,13 @@ automatic `/land`-driven reconcile didn't run, or needs a redo.
 > Use it **sparingly**: only when the PR revealed a real new unit of work that the roadmap is
 > missing, never to restate or re-scope an existing node.
 
+> **Weighs human engagement too.** The warm pass now also auto-reads **human comments + description
+> edits** on the objective and its node-issues (via
+> [`perk objective engagement N`](../reference/cli.md#perk-objective-engagement-number)) and folds
+> that untrusted-DATA block into what may be stale — not only the merged diff. Humans may flag stale
+> scope/naming/decisions in a comment or edit, not only in code. It is harmless/empty when there is
+> no engagement.
+
 > **Only the prose moves.** Reconcile rewrites the marker-bounded **Reconcilable** region wholesale.
 > The roadmap **table** and any **Immutable** notes are structurally never touched. See
 > [Objectives — the roadmap model](../reference/objectives.md) for which region is reconcilable.
