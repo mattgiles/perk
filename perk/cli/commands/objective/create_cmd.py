@@ -4,6 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -14,9 +15,34 @@ from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.state import run_id
+from perk.state import cache, run_id
 from perk.substrate.config import load_config
 from perk.substrate.output import machine_output, user_output
+
+
+def _adopt_from_handoff(
+    repo_root: Path, run_id_value: str | None, adopt_from: str | None
+) -> str | None:
+    """Default ``adopt_from`` from the run's handoff when not passed explicitly (#709, §8.30).
+
+    The ``objective author --from`` cold door stashes the source id in the handoff (key
+    ``adopt_from``) so the in-place adoption link survives the ``objective_save`` tool path (which
+    forwards only ``{prose, roadmap, title, base, run-id}``). An explicit ``--adopt-from`` always
+    wins; a missing handoff, a non-adoption handoff, or a malformed value leaves the input
+    untouched. Best-effort: a malformed handoff must never block a save. Opaque string (§8.21).
+    """
+    if adopt_from is not None or not run_id_value:
+        return adopt_from
+    try:
+        handoff = cache.read_handoff(repo_root, run_id_value)
+    except (OSError, ValueError):
+        return adopt_from
+    if not handoff:
+        return adopt_from
+    ho_adopt = handoff.get("adopt_from")
+    if ho_adopt:
+        return str(ho_adopt)
+    return adopt_from
 
 
 @alias("new")
@@ -40,6 +66,11 @@ from perk.substrate.output import machine_output, user_output
     help="Structured roadmap as a JSON array of nodes (preferred over embedding YAML in --body).",
 )
 @click.option("--run-id", "run_id_arg", help="Correlation run id (defaults to $PERK_RUN_ID).")
+@click.option(
+    "--adopt-from",
+    help="Adopt the named pre-existing source (a Linear project / GitHub issue) IN PLACE as this "
+    "objective (#709; stamps the objective metadata additively into the same source).",
+)
 @click.option("--dry-run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -51,6 +82,7 @@ def create_objective(
     base: str | None,
     roadmap_json: str | None,
     run_id_arg: str | None,
+    adopt_from: str | None,
     dry_run: bool,
     as_json: bool,
 ) -> None:
@@ -66,6 +98,7 @@ def create_objective(
         # YAML); otherwise validate any roadmap embedded in the body (the legacy cold-CLI path).
         roadmap_nodes: list[objective.ObjectiveNode] | None = None
         body_nodes: list[objective.ObjectiveNode] = []
+        raw_roadmap: Any = None
         if roadmap_json is not None:
             try:
                 raw = json.loads(roadmap_json)
@@ -73,6 +106,7 @@ def create_objective(
                 raise UserFacingCliError(
                     f"Invalid --roadmap JSON: {exc}", error_type="invalid_roadmap"
                 ) from exc
+            raw_roadmap = raw
             roadmap_nodes, errors = objective.parse_structured_roadmap(raw)
         else:
             body_nodes, errors = objective.parse_roadmap_nodes(body_text)
@@ -97,14 +131,43 @@ def create_objective(
         # default). Pinning keeps the objective self-describing for its node plans.
         resolved_base = base or load_config(repo_root).workflow_base
         store = objective_stores.resolve_objective_store(repo_root)
-        issue = store.create_objective(
-            title=resolved_title,
-            body=body_text,
-            run_id=resolved_run_id,
-            base=resolved_base,
-            roadmap_nodes=roadmap_nodes,
-            dry_run=dry_run,
-        )
+        # Recover the adoption link from the handoff (#709): the `objective author --from` cold
+        # door stashes the source id in the handoff so it survives the `objective_save` tool path
+        # (which forwards only {prose, roadmap, title, base, run-id}). An explicit --adopt-from
+        # wins.
+        adopt_from = _adopt_from_handoff(repo_root, resolved_run_id, adopt_from)
+        # In-place objective adoption (#709, §8.30): on a real save, stamp perk's metadata
+        # ADDITIVELY into the existing source instead of minting a fresh objective. The writer
+        # returns None on a dry run (resolving the source needs a network read) OR for a store that
+        # does not support adoption (`adopt_unsupported`); a dry run falls through to the offline
+        # `create_objective(dry_run=True)` compose-preview.
+        if adopt_from is not None and not dry_run:
+            adopt_from = adopt_from.strip().lstrip("#").strip()
+            adopt_map = objective.parse_adopt_mapping(raw_roadmap)
+            issue = store.adopt_source_as_objective(
+                source_id=adopt_from,
+                title=resolved_title,
+                prose=body_text,
+                run_id=resolved_run_id,
+                base=resolved_base,
+                roadmap_nodes=effective_nodes,
+                adopt_map=adopt_map,
+            )
+            if issue is None:
+                raise UserFacingCliError(
+                    f"The configured objective backend does not support in-place adoption of "
+                    f"{adopt_from!r}; author a fresh objective instead.",
+                    error_type="adopt_unsupported",
+                )
+        else:
+            issue = store.create_objective(
+                title=resolved_title,
+                body=body_text,
+                run_id=resolved_run_id,
+                base=resolved_base,
+                roadmap_nodes=roadmap_nodes,
+                dry_run=dry_run,
+            )
     except ObjectiveStoreError as exc:
         fail(
             ctx,

@@ -3835,3 +3835,119 @@ the substantive deliverable is this contract section, not a new validating check
 **Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
 is a preview-grade observation here (Mode 7 in `docs/planning/linear-smoke-gate.md`); final live
 proof is node 4.3.
+
+## §8.30 · In-place objective adoption (`objective author --from`, Objective #682, Node 3.2)
+
+The **objective-level analog of §8.29**: it adopts a **pre-existing human source** — a Linear
+**Project** (and its issues) or a GitHub **issue** — IN PLACE as a perk objective. It reads the
+human prose + existing issues as untrusted seed DATA, runs a normal read-only objective-authoring
+pass, and on save stamps perk's objective metadata **additively** into the *same* source, mapping
+existing issues to roadmap nodes where the author chose, and **never minting a second
+project/issue**. Linear is the first-class path (project + child issues); GitHub is bounded (single
+issue, no children).
+
+**Surface.** A `--from <source>` **flag on `objective author`** (not a new `objective from` verb —
+an accepted divergence from §8.29's `plan from` verb): it keeps `objective author` the single
+authoring entry point and matches the node title. When `--from` is absent the door is byte-unchanged
+(the existing authoring seed).
+
+**Provenance model (`adopted_from`).** `ObjectiveHeader` gains `adopted_from: str | None` (in
+`OBJECTIVE_HEADER_FIELDS` + `to_data()`), storing the **source ref**: a Linear project UUID
+(projects have no human identifier) or a GitHub issue ref (`"#<n>"`). Self-referential by
+construction; its **presence** is the canonical signal "this objective was adopted; the
+`Adopted-from` Immutable note holds the original human content". A normally-authored objective
+leaves it `None`.
+
+**The mapping carrier (`adopt_issue` + `parse_adopt_mapping`).** An optional per-node `adopt_issue`
+field on the structured roadmap maps a node to an **existing** project issue (its id/identifier). It
+is carried **separately** from `ObjectiveNode` (which stays pristine — used pervasively in
+rendering/manifest/drift): the pure `objective.parse_adopt_mapping(raw) -> dict[str, str]` extracts
+`{node_id: source_issue_id}` from the same raw roadmap shape `parse_structured_roadmap` accepts. The
+TS `ROADMAP_PARAM_SCHEMA` (`additionalProperties: false`, shared by `objective_save` +
+`objective_draft`) gains `adopt_issue` so the field is not rejected at the tool boundary; `roadmap`
+flows through as `unknown[]`, so the field survives unchanged to the Python cold door.
+
+**The verbatim-preservation model.** Decisions: (4) the model authors the objective's Reconcilable
+prose (the human source prose is seed DATA); (5) the source's **original** overview/body is captured
+verbatim into an `Adopted-from` **Immutable** archive note appended **below** the closing
+Reconcilable marker (`objective.render_adopted_overview_note`, a perk HTML-comment marker that
+round-trips through `to_linear_markdown` → inline-code; empty `original` → `""`), never rewritten by
+reconcile. Mapped issues' titles/bodies are independently preserved verbatim by the additive
+`objective-node` block stamp.
+
+**The adoptable-source read contract (two new `ObjectiveStore` methods + result shapes).**
+
+- `AdoptableSourceIssue` (`id`, `identifier`, `url`, `title`, `body`) — one pre-existing project
+  issue (untrusted DATA). `AdoptableObjectiveSource` (`id`, `url`, `title`, `prose`, `issues`) —
+  the source overview/body + its existing issues (`issues` empty on GitHub).
+- `read_objective_source(*, source_id) -> AdoptableObjectiveSource | None` — reads *any*
+  pre-existing source (Linear project / GitHub issue) verbatim for adoption (the objective-tier
+  twin of `IssueBackend.read_issue`). `None` when absent; raises on infra failure. Returned even
+  when CLOSED — the cold door does the not-open refusal. A store with no project-source surface
+  (the dormant issue-backed Linear store) returns `None`.
+- `adopt_source_as_objective(*, source_id, title, prose, run_id, status, base, roadmap_nodes,
+  adopt_map, dry_run) -> ObjectiveRef | None` — stamps perk's objective metadata **additively** into
+  the source IN PLACE. Returns the source's `ObjectiveRef` (`existed=True` on idempotent re-save via
+  `run_id`); returns **`None`** for a store that does not support in-place adoption (the dormant
+  issue-backed Linear store — the unambiguous "doesn't adopt" signal, mirroring `save_node_plan →
+  None`). `dry_run` returns `None` (the source read is a network op; the cold door's `--dry-run` is
+  offline). An empty roadmap raises (the storage backstop).
+
+**Backend matrix (three implementers + fakes, ty-enforced).**
+
+- **GitHub (bounded single-issue):** `read_objective_source` maps `github.read_issue` to the neutral
+  source (`prose` = issue body, `issues=()`). `adopt_source_as_objective` → `github
+  .adopt_issue_as_objective` (mirrors `create_objective_issue` + `adopt_issue_as_plan`): idempotency
+  via `find_objective_issue(run_id=)`; read the issue body verbatim; compose `<human body verbatim>`
+  + `objective-header` (`adopted_from="#<n>"`, `objective_comment_id: null`) + `objective-roadmap`
+  blocks, **add** the `perk:objective` label (never replace), title untouched; post the
+  `objective-body` comment (`render_body_comment(nodes, prose=<model prose>)` + the
+  `render_adopted_overview_note(<original body>)` below the Reconcilable markers + the
+  `perk objective plan <n>` callout prepended), backfill `objective_comment_id`. `adopt_map` is
+  ignored (no child issues).
+- **Linear project-backed (full):** `_LinearProjectOps.project_issues_for_adoption` (a sibling of
+  `project_issues` selecting `title` too; the byte-stable `project_issues` left untouched).
+  `read_objective_source` → the project overview `content` + its issues. `adopt_source_as_objective`
+  composes the new overview preserving the original verbatim (`to_linear_markdown(`
+  Reconcilable(`<model prose>`) + `objective-header`(`adopted_from=source_id`) + `objective-manifest`
+  + `render_adopted_overview_note(<original overview>)` below the markers `)`), `update_project
+  _content` (in place, NOT `create_project`), prepends the callout; one milestone per phase via
+  `ensure_phase_milestone` seeded from `project_milestones` (de-dupe against existing); for each
+  node in `node_sort_key` order a **mapped** node stamps the `objective-node` block additively into
+  the existing issue (title/body verbatim, description PATCH + `perk:objective-node` label added +
+  phase-milestone attach), an **unmapped** node mints a fresh node-issue; blocking relations per
+  explicit `depends_on`. Raises on an `adopt_issue` id not in the project (fail-loud). Idempotent on
+  `run_id`.
+- **Issue-backed Linear (dormant):** both `read_objective_source` and `adopt_source_as_objective`
+  return `None` (honest no-op; keeps `ty` green).
+
+**The cold door (`perk objective author --from <source>`).** Reads the source up front
+(`require_github`; the read-only session has no Linear/`gh`), then re-launches the
+`objective-author` stage seeded to author over the materialized source. It **refuses**:
+`adopt_not_found` (source `None`); GitHub-only `adopt_not_open` (the source issue is CLOSED, via the
+issue tier's `read_issue.state` — skipped for Linear projects, which have no OPEN/CLOSED);
+`already_an_objective` (the source prose already carries an `objective-header` block);
+`adopt_unsupported` (a `None` adoption return — in practice the resolver never returns the dormant
+store). Project-level engagement is read fail-soft (`render_adopted_engagement(comments, ())` →
+`<untrusted_adopted_issue_engagement>`; `ObjectiveStoreError` → omitted; per-issue engagement is
+Node 4.3's live concern). The source is materialized to `scratch/objective-adopt-<source_id>.md`
+(title + prose in `<untrusted_adopted_objective>` + a `<untrusted_adopted_project_issues>` listing +
+the optional engagement block). The seed instructs the model to author the prose + roadmap, mapping
+existing issues via each node's `adopt_issue`. `--dry-run` materializes + prints the seed, launches
+nothing; `--remote` is rejected (local-only, resolved up front).
+
+**The save (rides the handoff).** The door stashes `adopt_from` in the run **handoff**, so the link
+survives the `objective_save` tool path (which forwards only `{prose, roadmap, title, base,
+run-id}` — no TS tool change for `adopt_from`). `perk objective create` gains `--adopt-from
+<source>` + `_adopt_from_handoff` recovery (explicit flag wins, else the handoff key). On a real
+save it parses `adopt_map = parse_adopt_mapping(raw)` from the same `--roadmap` JSON and calls
+`adopt_source_as_objective(...)`, **skipping** `create_objective`; a `None` return →
+`adopt_unsupported`. The fail-open `post_status_update` on fresh-create still fires (adoption
+produces a fresh perk objective, `existed=False`). `--dry-run` falls through to the offline
+`create_objective(dry_run=True)` compose-preview (the writer returns `None` on dry-run). No
+mutual-exclusion guard is needed (`objective create` has no `--node-id`).
+
+**Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
+is preview-grade here (Mode 8 in `docs/planning/linear-smoke-gate.md`); final live proof is Node
+4.3 — no new config key, provider seam, or `EXPECTED_SURFACE` change (a flag, not a new
+command/verb).

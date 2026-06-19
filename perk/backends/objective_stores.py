@@ -92,6 +92,61 @@ class GitHubObjectiveStore:
             found = github.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
         return None if found is None else _objective_ref(found)
 
+    def read_objective_source(
+        self, *, source_id: str
+    ) -> objective_store.AdoptableObjectiveSource | None:
+        """Read a GitHub issue verbatim as an adoptable objective source (#709, §8.30): prose = the
+        issue body, ``issues=()`` (no child issues), id = the issue number string. Returned even
+        when CLOSED — the cold door does the not-open refusal (via
+        ``IssueBackend.read_issue.state``).
+        """
+        number = _number(source_id)
+        with _translate():
+            src = github.read_issue(number=number, repo_root=self._repo_root)
+        if src is None:
+            return None
+        return objective_store.AdoptableObjectiveSource(
+            id=str(src.number),
+            url=src.url,
+            title=src.title,
+            prose=src.body,
+            issues=(),
+        )
+
+    def adopt_source_as_objective(
+        self,
+        *,
+        source_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        adopt_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Stamp perk objective metadata additively into the GitHub issue in place (#709, §8.30).
+        ``adopt_map`` is ignored (GitHub objectives have no child issues). ``dry_run`` → ``None``
+        (the caller falls back to the offline compose-preview)."""
+        if dry_run:
+            return None
+        number = _number(source_id)
+        with _translate():
+            adopted = github.adopt_issue_as_objective(
+                number=number,
+                title=title,
+                prose=prose,
+                repo_root=self._repo_root,
+                run_id=run_id,
+                status=status,
+                base=base,
+                roadmap_nodes=roadmap_nodes,
+            )
+        return objective_store.ObjectiveRef(
+            id=str(adopted.number), url=adopted.url, existed=adopted.existed
+        )
+
     def create_objective(
         self,
         *,

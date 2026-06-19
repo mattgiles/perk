@@ -436,6 +436,49 @@ Append the run's findings to **Recorded observations** as a dated **Seventh live
 row per gate). A negative/blocked finding is valid. Record any backend defect and open a follow-up —
 do not fix substantive code at the gate.
 
+## Mode 8 — in-place objective adoption (Objective #682, Node 3.2)
+
+Validates the **in-place objective adoption** write surface the Node 3.2 contract adds
+(`read_objective_source` + `adopt_source_as_objective` + `project_issues_for_adoption`; contracts
+§8.30) — the objective-level analog of Mode 7. Offline fakes pin request *composition* + the
+additive-stamp/verbatim-preservation invariant; this live smoke is the only surface that can prove
+Linear actually accepts the composed reads/writes against a real, **human-authored** (non-perk)
+Project. Run against team `PER` with `[issues] backend = "linear"`, `team = "PER"`, and
+`LINEAR_API_KEY` exported, against a real **human-authored** Linear Project that has a written
+overview + a few issues, and that is **not** already a perk objective.
+
+### Smoke script
+
+1. **Adopt it.** `perk objective author --from <project-uuid>` — the read-only session materializes
+   the project (title + overview in `<untrusted_adopted_objective>` + the existing issues in
+   `<untrusted_adopted_project_issues>` + any project comments), authors an objective + roadmap
+   (mapping a few nodes to existing issues via `adopt_issue`), and on save adopts in place. Verify
+   in Linear:
+   - the **project overview** gains the `objective-header`(`adopted_from`=the project UUID) +
+     `objective-manifest` blocks additively, the **model-authored prose** in the Reconcilable
+     region, and the **original overview preserved verbatim** in the `Adopted-from` Immutable note
+     below the Reconcilable markers;
+   - **mapped issues** carry the `objective-node` block (title + body **verbatim**), the
+     `perk:objective-node` label (added, not replacing), and the correct phase **milestone**;
+   - **unmapped nodes** were minted as fresh node-issues attached to the project + phase milestone;
+   - **no second project** was created (adoption is in place);
+   - blocking **relations** exist for every explicit `depends_on`.
+2. **Provenance.** Read the stamped `objective-header` — `adopted_from` carries the project UUID,
+   the canonical "this is an adopted objective" signal.
+3. **Re-save idempotency.** Re-run the save and verify the objective is found by `run_id` and
+   returned **in place** (no re-archiving, no duplicate milestones/node-issues, no second project).
+4. **Refusals.** Verify `perk objective author --from` refuses a missing source
+   (`adopt_not_found`) and a source already carrying an `objective-header`
+   (`already_an_objective`); on a GitHub-backed repo, a CLOSED issue (`adopt_not_open`).
+5. **GitHub parity (optional).** Repeat step 1 against an open human-authored **GitHub** issue
+   (default backend) and verify the bounded single-issue stamp (HTML-encoded header + roadmap,
+   `perk:objective` label added, title untouched, objective-body comment with the archive note, no
+   second issue, `adopt_issue` ignored).
+
+Append the run's findings to **Recorded observations** as a dated **Eighth live run** block (one row
+per gate). A negative/blocked finding is valid. Record any backend defect and open a follow-up — do
+not fix substantive code at the gate.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
@@ -742,3 +785,27 @@ live-proven directly.
 | 2026-06-19 | 7.1 (adopt in place) | **Not run** — no `LINEAR_API_KEY` in the implement env. Offline-covered (`TestReadIssueAndAdopt.test_adopt_issue_as_plan_stamps_in_place`: additive label union, inline-code header stamp, verbatim human body, title untouched, plan-body comment). Live end-to-end stamp + no-second-object deferred. | live adoption stamp — **deferred to Node 4.3** |
 | 2026-06-19 | 7.2 (`adopted_from` provenance) | **Not run.** Offline-covered (the stamped header carries `adopted_from`; `PlanHeader.to_data()` + `PLAN_HEADER_FIELDS` pinned). Live provenance read deferred. | adoption provenance — **deferred to Node 4.3** |
 | 2026-06-19 | 7.3 (refusals) | **Not run.** Offline-covered (`tests/test_from_cmd.py`: `adopt_not_found` / `adopt_not_open` / `already_a_plan`). Live refusal behavior deferred. | adoption refusals — **deferred to Node 4.3** |
+
+> **Eighth live run: 2026-06-19** (Objective #682, Node 3.2 — **Mode 8, in-place objective
+> adoption**). **BLOCKED — not executed.** The implement environment for this node carried **no
+> `LINEAR_API_KEY`** (and the repo is not Linear-configured), so the live adoption probe could
+> **not** be run — recorded honestly rather than fabricated (consistent with the Mode 7
+> Seventh-live-run entry and nodes 1.2–3.1). The new surfaces (`read_objective_source` +
+> `adopt_source_as_objective` + `project_issues_for_adoption`; contracts §8.30) are
+> **offline-covered** on **both** backends: `tests/test_linear_backend.py` pins the project-backed
+> read + the additive in-place stamp (overview updated in place, original archived verbatim, header
+> `adopted_from`, milestones de-duped, mapped issue node-block additive + milestone attach, unmapped
+> minted, relations, idempotent on `run_id`, raises on a non-member `adopt_issue`, empty roadmap
+> raises, dry-run → `None`) and `tests/test_github.py` / `tests/test_objective_store.py` pin the
+> GitHub module + adapter twins; the cold door + create-route + handoff recovery are pinned in
+> `tests/test_objective_author_cmd.py` + `tests/test_objective_cmd.py`. **Live field selectability**
+> (does Linear's `project(id:)`/`issues` accept the adoption read selection?) and the **end-to-end
+> in-place stamp against a real human Project** remain **live-unproven**. **Node 4.3 is the
+> objective's final live-validation gate**; the Mode 8 runbook above is ready to run the moment a
+> `LINEAR_API_KEY` is available.
+
+| Date | Gate | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-19 | 8.1 (adopt in place) | **Not run** — no `LINEAR_API_KEY` in the implement env. Offline-covered (`tests/test_linear_backend.py`: overview updated in place, original archived verbatim, mapped node-block additive + milestone attach, unmapped minted, relations, no second project). Live end-to-end stamp deferred. | live objective adoption stamp — **deferred to Node 4.3** |
+| 2026-06-19 | 8.2 (`adopted_from` provenance) | **Not run.** Offline-covered (the stamped header carries `adopted_from`; `ObjectiveHeader.to_data()` + `OBJECTIVE_HEADER_FIELDS` pinned). Live provenance read deferred. | objective adoption provenance — **deferred to Node 4.3** |
+| 2026-06-19 | 8.3 (idempotency / refusals) | **Not run.** Offline-covered (idempotent re-save via `run_id`; `tests/test_objective_author_cmd.py`: `adopt_not_found` / `adopt_not_open` / `already_an_objective`). Live behavior deferred. | objective adoption idempotency/refusals — **deferred to Node 4.3** |

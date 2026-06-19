@@ -199,6 +199,18 @@ agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `
 Draft a new objective and roadmap in a read-only authoring session. Local-only
 (`cold_remote:false`); adds `--json`.
 
+With **`--from <source>`** it instead **adopts a pre-existing source IN PLACE** as the objective: a
+Linear project UUID or a GitHub issue id. perk reads the source's prose + existing issues (and any
+human discussion) as untrusted seed DATA, authors an objective + roadmap over it in a read-only
+session, and on save stamps the objective metadata **additively** into the *same* source — the
+`objective-header` block (with `adopted_from` provenance), the `objective-manifest`, the
+model-authored prose, and the original overview preserved verbatim in an `Adopted-from` Immutable
+note — **never minting a second project/issue**. On Linear, a roadmap node's optional `adopt_issue`
+field maps it to an existing project issue (reused in place, title/body verbatim); GitHub is bounded
+to a single issue (no child mapping). `--dry-run` materializes the source and prints the seed
+without launching. Refuses when the source is not found, not open (GitHub issues only), or already a
+perk objective. See [Adopt an existing project as an objective](../how-to/adopt-an-existing-project.md).
+
 ### `perk objective save`
 
 Persist the drafted objective to GitHub — the read-only → read-write objective boundary (the
@@ -217,6 +229,8 @@ Mint a `run_id` and create the perk:objective issue from authored markdown. Read
 `--base` (the target branch this objective's node plans inherit — else `[workflow] base`, else the
 GitHub default; see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)), `--run-id`,
+`--adopt-from <source>` (adopt the named pre-existing source IN PLACE rather than minting a fresh
+objective — normally set automatically via the run handoff by `objective author --from`),
 `--dry-run`, and `--json` tune the create.
 
 ### `perk objective show NUMBER` (alias `s`)

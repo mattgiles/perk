@@ -27,6 +27,9 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   against the current codebase.
 - [How to adopt an existing issue as a plan](./adopt-an-existing-issue.md) — turn a pre-existing
   human-authored issue into a perk plan in place, without minting a second object.
+- [How to adopt an existing project as an objective](./adopt-an-existing-project.md) — turn a
+  pre-existing Linear project (or GitHub issue) into a perk objective in place, mapping existing
+  issues to roadmap nodes, without minting a second object.
 - [How to target a non-default base branch](./target-a-non-default-base-branch.md) — point plans
   and objectives at a target branch other than the GitHub default.
 - [How to run CI checks in a session](./run-ci-in-session.md) — run the project's configured

@@ -31,6 +31,7 @@ from perk.github.engagement import (
     read_issue_comments,
 )
 from perk.github.objectives import (
+    ObjectiveAdoption,
     ObjectiveBodyUpdate,
     ObjectiveHeaderUpdate,
     ObjectiveIssue,
@@ -38,6 +39,7 @@ from perk.github.objectives import (
     ObjectiveNodeUpdate,
     ObjectiveState,
     add_objective_node,
+    adopt_issue_as_objective,
     create_objective_issue,
     find_objective_issue,
     get_objective,
@@ -137,6 +139,7 @@ __all__ = [
     "IssueRead",
     "Label",
     "LearnIssueSummary",
+    "ObjectiveAdoption",
     "ObjectiveBodyUpdate",
     "ObjectiveHeaderUpdate",
     "ObjectiveIssue",
@@ -165,6 +168,7 @@ __all__ = [
     "add_issue_label",
     "add_objective_node",
     "add_pr_reaction",
+    "adopt_issue_as_objective",
     "adopt_issue_as_plan",
     "cancel_workflow_run",
     "check_auth",

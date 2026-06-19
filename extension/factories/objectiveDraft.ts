@@ -74,6 +74,12 @@ export const ROADMAP_PARAM_SCHEMA = {
       description: "Optional explicit dependency node ids.",
     },
     comment: { type: "string", description: "Optional note." },
+    adopt_issue: {
+      type: "string",
+      description:
+        "Optional: the id/identifier of a pre-existing source issue this node adopts in place " +
+        "(objective author --from, Linear only).",
+    },
   },
 } as const;
 
