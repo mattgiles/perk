@@ -1,6 +1,6 @@
 ---
 title: Skill bindings — the two-plane trigger→skill delivery subsystem
-read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), or debugging double-delivered / missing binding context.
+read_when: You are working on skill-binding config (.pi/perk.toml [[bindings]]), the cold/warm delivery doors, the resolver, the worktree skill mirror (linked-worktree delivery), a description-discovered (non-stage-bound) skill + its self-contained references second-mirror, or debugging double-delivered / missing binding context.
 ---
 
 # Skill bindings
@@ -194,6 +194,27 @@ renders fine, and a new report-only check just appends to `doctor._build_checks`
 convergence* (which would duplicate the auto-generated one). A pure validation with no converge/`--fix`
 semantics has no convergence to mirror, so it lives in `_build_checks` directly. The coherence guard
 checks *capability* coverage, not an enumerated group set, so a free-form group string is fine.
+
+## Description-discovered ≠ stage-bound (the perk-expert pattern, #677)
+
+Not every skill is bound to a trigger. A skill may carry **no `[[bindings]]` row** and be invoked
+purely on frontmatter `description` match — `perk-expert` is the first such `perk-*` skill (an
+on-demand reference, not a stage orchestrator). Consequence: its **`description` is its primary
+documentation** and must enumerate the trigger surface explicitly (every "how does perk … / how do I
+configure …" angle), since nothing else routes to it.
+
+### Self-contained references because delivered skills land where `docs/user-docs/` is absent
+
+A delivered skill's reference bodies must be **self-contained** — zero cross-links escaping the skill
+dir — because the skill lands in consumer repos where `docs/user-docs/` does not exist. End each with
+a `*Canonical source: docs/user-docs/…*` breadcrumb footer.
+
+**Drift is governed by extending the "Update the user docs, don't drift" lockstep, not a generator.**
+The config/provider surface now has a **second mirror** in `skills/perk-expert/references/`: a change
+to a config key / provider / backend updates BOTH the canonical `docs/user-docs/` reference AND the
+matching `perk-expert` reference **in the same turn**. This is a **human-review discipline, not a CI
+gate** (a flagged residual). (The `PERK_SKILLS` SSOT cascade for *delivering* a new skill is in
+`init-external-cli.md` — cross-ref it, don't duplicate.)
 
 ## Cross-references
 

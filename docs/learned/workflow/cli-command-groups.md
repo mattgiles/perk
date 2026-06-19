@@ -1,6 +1,6 @@
 ---
 title: Python CLI command groups — the §8.1 group-dir template, hybrid stage/group coexistence, sectioned help
-read_when: You are adding/folding a `perk` CLI command group, resolving a stage-launcher/group name collision, touching the sectioned root `--help` taxonomy, consolidating per-group helpers, or running a structural CLI refactor and want the parity smoke + test patterns.
+read_when: You are adding/folding a `perk` CLI command group, resolving a stage-launcher/group name collision, touching the sectioned root `--help` taxonomy, consolidating per-group helpers, wrapping an upstream CLI as a pass-through-first noun-group (the `perk skills` group + the sanctioned-subprocess guard), or running a structural CLI refactor and want the parity smoke + test patterns.
 ---
 
 # CLI command groups
@@ -324,6 +324,30 @@ ERROR-severity report-only drift is a clean report** (drift was successfully *de
 maps from an **optional `error` field** on the repair-action shape (`applied` / would-apply entries
 omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECTED_SURFACE` in
 `tests/test_cli_parity_smoke.py` **alphabetically within its group** (`("doctor", ("doc",))`).
+
+## The `perk skills` group (#681) — pass-through-first architecture
+
+`perk skills` wraps an upstream skills CLI as a noun-group. The durable architecture:
+
+- **Pass-through-first.** Every verb is a thin **forward** to the substrate binary EXCEPT the verbs
+  upstream lacks — here `remove` is the single reimplementation (perk edits the manifest directly,
+  then runs `skills sync`). The pass-through runner uses **inherited stdio** (NO `capture_output`) so
+  the user sees native output, then propagates the upstream exit code **verbatim**; the reimplemented
+  verb's own sync uses `capture_output=True` (it needs stderr on rollback).
+- **Managed-source authority.** The perk manifest fragment's `sources` keys are the authoritative
+  "is this perk-managed" check (upstream errors on duplicate aliases).
+- **The sanctioned-subprocess guard (standing discipline).**
+  `tests/test_tooling.py::test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout`
+  enforces that EVERY `subprocess.run` site in `perk/` lives in an allowlisted
+  `_SANCTIONED_SUBPROCESS_WRAPPERS` set keyed by `(file_stem, func_name)` (**bare stem**, not full
+  path) and carries explicit `check=` / `timeout=`. A new site fails CI until added — budget for it
+  whenever introducing a subprocess call (dignified-python).
+- **N symmetric error/rollback arms = test ALL arms.** `remove`'s `skills sync` is guarded against
+  **four** failure arms, each restoring the original bytes; `/pr-review` flagged that only the
+  non-zero-exit arm was tested — **the structural-coverage reviewer counts arms.**
+- The multi-surface noun-group lockstep (`register_with_aliases` + `COMMAND_GROUPS` +
+  `EXPECTED_SURFACE` + the help-sections assertion + docs) is already documented above — `perk skills`
+  is one more instance.
 
 ## Warm-plane ids are decoupled from cold spellings
 

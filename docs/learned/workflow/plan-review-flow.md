@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, or changing factory/authoring guidance prose (the three-tier prose mirror).
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, changing factory/authoring guidance prose (the three-tier prose mirror), or the `PLAN_AUTHORING_CONTEXT` consult-learnings nudge seam + its three-surface lockstep.
 ---
 
 # The plan review → approval → save pipeline
@@ -96,6 +96,28 @@ contracts created drift a later repair node had to close). Facts that make the d
   generic posture lines, never by naming a repo-local skill.
 - Only the tracked `skills/<name>/` sources are editable — `.agents/skills/` is gitignored and
   resynced by `perk init`.
+
+## The `PLAN_AUTHORING_CONTEXT` nudge seam (#700)
+
+The "consult learnings before planning" nudge is a concrete instance of the authoring-guidance prose
+above. `PLAN_AUTHORING_CONTEXT` (exported in `extension/factories/planMode.ts`) is built into the
+final injection by `planContextContent(cwd)`, which appends the optional `[workflow] plan_authoring`
+config addendum. Fixed shape: `[PLAN AUTHORING]` marker → the "Gather before you plan" four-category
+list → free-form middle → "Write the plan so an executor…" → the review-first ending. **Insert new
+guidance between the gather list and the executor paragraph.**
+
+- **One seam reaches BOTH plan factories.** Interactive `perk plan` AND objective-node sessions both
+  receive it — node-planning borrows the shared `plan` stage. The foreign-provider bridge seed
+  prompts (`PLAN_ADAPTER_TOMBELL_CONTEXT` / `PLAN_ADAPTER_PLANNOTATOR_CONTEXT`) are **SEPARATE**,
+  already diverge, and have **no byte-parity test** — they need their own edit if mirrored.
+- **Lockstep for editing this constant (three surfaces move together):** the constant, its SSOT
+  mirror `skills/perk-plan/SKILL.md`, and an **additive** substring assertion in `planMode.test.ts`
+  (the `planContextContent` test) — add one new `assert.match` to pin new content.
+- **Design rationale (a soft nudge, not a gate).** The read-only bash gate was a red herring (`read`
+  on `docs/learned/*.md` is always allowed); the gap was that nothing *instructed* consulting them. A
+  structural forcing-function (a required "learnings consulted" field) was rejected as
+  weakest-guarantee-for-most-cost; the "there may be nothing relevant … does not need to be grounded"
+  sentence keeps it a **check, not a grounding mandate.**
 
 ## First-party review mechanics
 

@@ -1,6 +1,6 @@
 ---
 title: Reconciling drifted docs against the converged codebase
-read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift).
+read_when: You are reconciling a guidelines/design doc against grown reality, citing landed PRs from objective roadmaps, deciding whether to delete never-adopted forward guidance, or reconciling objective roadmap prose (the hard-count drift-magnet, the prior-node-paragraph gap, the scope-attribution drift, the Anchors-region drift magnet, the landing-narrative PR-number convention, reconciling a node landed with its original planned description).
 ---
 
 # Reconciling drifted docs against the converged codebase
@@ -68,6 +68,20 @@ Three patterns from reconciling Objective #548's prose against its landed nodes:
   only-additions** (1 line added / 0 removed), then pass the full region as `prose`. Node
   scope/naming drift still goes through the **node-description path** (re-renders the mechanical table
   while preserving status/pr) — not the prose region.
+- **The "Anchors (verified)" region is a drift magnet (#687).** When a node delivers the very thing
+  an anchor said *didn't* exist (Node 1.2 landed the human-engagement read the Anchors region said
+  "doesn't exist"), that anchor is **guaranteed-stale** — check the Anchors region **every reconcile**,
+  keep-and-annotate with italic landed-notes, don't delete.
+- **Landing-narrative PR-number convention (#696/#702/#705).** In objectives whose body is
+  header+roadmap only (**no Reconcilable prose region** — the GitHub-objective shape), the durable
+  `LANDED (PR #n)` narrative lives in the **node description** (via `objective_node` description), and
+  it cites the **plan-issue number** for sibling consistency while the roadmap `pr` field *also* holds
+  the plan issue — both legitimately differ from the actual merge PR (reinforces the `pr`-field-≠-merge-PR
+  rule).
+- **Reconcile a node landed with its ORIGINAL planned description (#711).** A node auto-marked `done`
+  may carry **no** landing narrative (unlike siblings) — reconcile must append the `LANDED (PR #n)`
+  narrative AND rewrite the phase-progress "X remains" sentence (the phase-complete claim is a drift
+  magnet — re-check the prior node's narrative + the phase-complete claim **every pass**).
 
 ## Cross-references
 

@@ -44,6 +44,21 @@ stage (`mode: read-only`, `worktree: none`, `cold_remote: false`) and seed via
   `DEDICATED_STAGES` (that set only suppresses generic same-named launchers — a factory with no
   dedicated stage needs no entry there).
 
+## Cold-injects / warm-instructs is a reusable factory pattern (#696/#702)
+
+When a factory needs to surface context it already *knows* the subject of, the delivery shape splits
+by door:
+
+- **A cold door that already knows its subject** (the node/issue is fixed at launch) reads the
+  context and **injects** it into the seed — fail-soft (`try/except → EMPTY`), dry-run-gated, and
+  **seed-byte-unchanged on the empty path**.
+- **A warm door cannot pre-fetch** (the model selects the subject in-session) → it **instructs the
+  model to run a read worker** once it knows the subject.
+
+The concrete instance is the human-engagement read subsystem (see `human-engagement-reads.md`),
+which also carries the per-consumer injection-placement rule (inline seed vs scratch-file append
+after the consumer's existing untrusted-DATA block).
+
 ## On-land bookkeeping
 
 When a learn-docs plan lands, consumed `perk:learn` issues are closed and labelled
@@ -55,3 +70,4 @@ for the canonical fail-open pattern.
 
 - `docs/learned/workflow/plan-ref-lifecycle.md` — fail-open on-land bookkeeping pattern
 - `docs/learned/pi/context-system.md` — the bash allowlist (incl. the read-only `gh` query subcommands)
+- `docs/learned/workflow/human-engagement-reads.md` — the concrete cold-injects/warm-instructs instance

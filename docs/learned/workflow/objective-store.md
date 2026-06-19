@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
+read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
 ---
 
 # The ObjectiveStore seam
@@ -271,6 +271,32 @@ explicit dependency repair, so no double-create), failing loud on a genuinely un
 **General lesson:** when repairs create nodes other repairs depend on, **split node-creation from
 edge-creation** and drive edges off the **full manifest**, not per-node.
 
+## Objective-keyed engagement reads + the node-keyed sibling (#687/#696/#705)
+
+The objective-keyed engagement reads (`read_comments` / `read_description_edits` /
+`read_agent_session`) on GitHub **reuse the issue-tier honest reads** — a GitHub objective IS a
+single issue, so cross-importing the private `issues.py` mappers into `objective_stores.py` is
+allowed (same backend tier, no import-guard violation).
+
+Linear specifics:
+
+- Linear projects expose **no description-edit-history primitive** → `read_description_edits` stays an
+  honest empty `()` (the edit signal lives on node-issues).
+- `read_comments` is **honest over project comments** — Project Updates are deliberately NOT read
+  (they are perk's own *outbound* feed).
+- The node-keyed `read_node_engagement` is honest **only on the project-backed store** (a roadmap node
+  IS a node-issue); GitHub + the dormant issue-backed store → `EMPTY_NODE_ENGAGEMENT`.
+
+**The deferral-comment-names-its-consumer rule:** when a stub carries a comment naming a future node,
+that node's plan should *consume* it (flip the stub + update the comment), not add a parallel surface.
+(See `human-engagement-reads.md` for the full subsystem.)
+
+## Adoption Protocol growth + the no-op family (#708/#711)
+
+`read_objective_source` / `adopt_source_as_objective` extend the `→None` no-op family
+(`None` = "no project surface" / "doesn't adopt"); `dry_run → None` falls through to the offline
+compose-preview. (See `in-place-adoption.md` for the full adoption story.)
+
 ## Deferred-doc staleness is intentional, tracked
 
 A code-only extraction node deliberately leaves the contract/module-docstring prose stale for the
@@ -289,3 +315,5 @@ reconcile via outcomes" discipline). The reconcile pass also disambiguated the l
 - `docs/learned/workflow/source-scan-guards.md` — the tier-guard asymmetry (which guard owns which set)
 - `docs/learned/workflow/config-tables.md` — the committed-only `[issues]` table the resolver reads
 - `docs/learned/workflow/doc-reconciliation.md` — the reassigned-removal / past-tense reconcile pattern
+- `docs/learned/workflow/human-engagement-reads.md` — the engagement read contract across both tiers
+- `docs/learned/workflow/in-place-adoption.md` — the adoption Protocol-growth + no-op family

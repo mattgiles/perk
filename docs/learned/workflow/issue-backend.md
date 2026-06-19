@@ -1,6 +1,6 @@
 ---
 title: The IssueBackend seam — protocol, GitHub adapter, and the issue-tier consumer boundary
-read_when: You are touching perk/backends/issue_backend.py, perk/backends/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, the doctor issues check, or fighting the boundary/import-direction tests.
+read_when: You are touching perk/backends/issue_backend.py, perk/backends/issues.py, an issue-tier consumer, adding a backend, the backend_id stamp discipline, opaque backend-owned ids (incl. the opaque-id validator relaxation and its consumer sweep), per-backend land closure, growing a read contract across two protocols at once, the github-native-rows→adapter mapping (incl. the import-direction docstring trap), `read_issue` as a third issue-read shape, the doctor issues check, or fighting the boundary/import-direction tests.
 ---
 
 # The IssueBackend seam
@@ -168,6 +168,29 @@ checks/capabilities).
 - **The adapter's numeric-id error message differs** from the old raw `ValueError` paths on
   fail-open edges — untested but safe (all such sites are fail-open `except Exception`).
 
+## Growing a read contract across TWO conformance-checked protocols at once (#687)
+
+Adding the three engagement reads to **both** `IssueBackend` (issue-keyed) and `ObjectiveStore`
+(objective-keyed) at once forced conformance across **7 sites**: 5 production implementers + 2 test
+fakes. The dormant `LinearObjectiveStore` and both fakes are the **easy misses** — census all 7 up
+front (whole-repo `ty check` is the oracle). (See `human-engagement-reads.md` for the full
+subsystem story.)
+
+## github-native rows → adapter mapping; the import-direction docstring trap (#690)
+
+The `perk/github/` gateway returns **github-native rows** (raw `author_login` / `author_id` /
+`author_is_bot`); the **adapter** (`perk/backends/issues.py`) maps them to the neutral `engagement.*`
+contract via `classify_author`. The gateway never imports the backend tier — and the import-direction
+guard (`tests/test_issue_backend.py::TestImportDirection`) is a **raw source-string scan over the
+whole `perk/github/` package**, so even a **docstring** that mentions the backend-tier module path
+trips it. Keep gateway prose free of the literal module path (say "the issue-backend adapter").
+
+## `read_issue` — the third issue-read shape (#708)
+
+Beside `get_plan` / `get_plan_body`, `read_issue(*, issue_id) -> AdoptableIssue | None` reads a
+*non-perk* issue's raw title+body+state (state normalized to `OPEN | CLOSED` at the adapter). It
+exists because neither sibling can read a raw human issue. (See `in-place-adoption.md`.)
+
 ## Cross-references
 
 - `perk/backends/issue_backend.py` — the protocol module
@@ -180,4 +203,6 @@ checks/capabilities).
   readiness wiring, and prompt rendering
 - `docs/learned/workflow/objective-store.md` — the parallel objective-storage tier split off the
   same monolith
+- `docs/learned/workflow/human-engagement-reads.md` — the engagement read contract across both tiers
+- `docs/learned/workflow/in-place-adoption.md` — `read_issue` and the adoption writers
 - `docs/learned/toolchain/ty.md` — ty suppression syntax + enum strictness hit during this work
