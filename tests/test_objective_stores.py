@@ -300,6 +300,67 @@ class TestGitHubDelegation:
         )
         assert result is engagement.EMPTY_NODE_ENGAGEMENT
 
+    def test_read_comments_honest_over_objective_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Honest over the objective issue itself (Node 2.3): reuse `github.read_issue_comments` +
+        # the shared `issues._engagement_comment` mapper.
+        row = github.IssueCommentRow(
+            id="c-1",
+            body="please rescope",
+            created_at="2026-03-01T10:00:00Z",
+            edited_at=None,
+            author_login="ada",
+            author_id="u-1",
+            author_is_bot=False,
+        )
+        captured: dict[str, Any] = {}
+
+        def _read(**kwargs: Any) -> list[github.IssueCommentRow]:
+            captured.update(kwargs)
+            return [row]
+
+        monkeypatch.setattr(github, "read_issue_comments", _read)
+        out = GitHubObjectiveStore(tmp_path).read_comments(objective_id="252")
+        assert captured == {"issue": 252, "repo_root": tmp_path}
+        assert [c.id for c in out] == ["c-1"]
+        assert out[0].body == "please rescope"
+        assert out[0].author.kind == "human"
+
+    def test_read_description_edits_honest_over_objective_issue(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        row = github.DescriptionEditRow(
+            edited_at="2026-03-02T11:00:00Z",
+            diff="@@ -1 +1 @@",
+            editor_login="ada",
+            editor_id="u-1",
+            editor_is_bot=False,
+        )
+        captured: dict[str, Any] = {}
+
+        def _read(**kwargs: Any) -> list[github.DescriptionEditRow]:
+            captured.update(kwargs)
+            return [row]
+
+        monkeypatch.setattr(github, "read_description_edits", _read)
+        out = GitHubObjectiveStore(tmp_path).read_description_edits(objective_id="252")
+        assert captured == {"issue": 252, "repo_root": tmp_path}
+        assert len(out) == 1
+        assert out[0].created_at == "2026-03-02T11:00:00Z"
+        assert out[0].diff == "@@ -1 +1 @@"
+        assert out[0].author.kind == "human"
+
+    def test_read_comments_wraps_github_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(**kwargs: Any) -> list[github.IssueCommentRow]:
+            raise github.GitHubError("gh exploded")
+
+        monkeypatch.setattr(github, "read_issue_comments", _boom)
+        with pytest.raises(ObjectiveStoreError, match="gh exploded"):
+            GitHubObjectiveStore(tmp_path).read_comments(objective_id="252")
+
 
 class TestErrorTranslation:
     def test_github_error_wrapped_message_verbatim_cause_chained(

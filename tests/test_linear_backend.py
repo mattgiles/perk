@@ -3675,3 +3675,58 @@ class TestReadNodeEngagement:
         ne = store.read_node_engagement(objective_id="ENG-7", node_id="2.1")
         assert ne is engagement.EMPTY_NODE_ENGAGEMENT
         assert fake.requests == []  # honest no-op: no network
+
+
+class TestReadObjectiveEngagement:
+    """`read_comments` / `read_description_edits` on the project-backed store (Objective #682,
+    Node 2.3): honest over the Linear project's comments; description edits stay an honest empty."""
+
+    def _comment_node(self, cid: str, created_at: str) -> dict[str, object]:
+        return {
+            "id": cid,
+            "body": "discuss the objective",
+            "createdAt": created_at,
+            "editedAt": None,
+            "user": {"id": "u-1", "name": "ada", "displayName": "Ada L"},
+            "botActor": None,
+        }
+
+    def test_read_comments_maps_and_orders_ascending(self) -> None:
+        store, fake = _make_project_store(
+            {
+                # _project_comments(proj-1) — returned out of order to prove the ascending sort.
+                "botActor": [
+                    {
+                        "project": {
+                            "comments": _page(
+                                [
+                                    self._comment_node("c-2", "2026-03-02"),
+                                    self._comment_node("c-1", "2026-03-01"),
+                                ]
+                            )
+                        }
+                    }
+                ]
+            }
+        )
+        comments = store.read_comments(objective_id="proj-1")
+        assert [c.id for c in comments] == ["c-1", "c-2"]
+        assert comments[0].author.kind == "human"
+        assert comments[0].author.display_name == "Ada L"
+        assert comments[0].body == "discuss the objective"
+        # The query was over the project's comment connection.
+        assert _queries(fake, "project(id: $id)")
+        assert _queries(fake, "comments(first")
+
+    def test_read_description_edits_is_honest_empty(self) -> None:
+        # Linear projects expose no description-edit-history primitive — honest () with no network.
+        store, fake = _make_project_store({})
+        assert store.read_description_edits(objective_id="proj-1") == ()
+        assert fake.requests == []
+
+    def test_infra_failure_raises_objective_store_error(self) -> None:
+        store, _ = _make_project_store(
+            {"botActor": [LinearGraphQLError("Linear GraphQL error: boom", codes=())]}
+        )
+        with pytest.raises(ObjectiveStoreError, match="boom"):
+            store.read_comments(objective_id="proj-1")
