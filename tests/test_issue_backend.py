@@ -126,6 +126,43 @@ class _FakeBackend:
             return None
         return issue.comments.get("plan-body")
 
+    # --- in-place issue adoption (#706, §8.29) ---
+
+    def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
+        issue = self._issues.get(issue_id)
+        if issue is None:
+            return None
+        return issue_backend.AdoptableIssue(
+            id=issue_id,
+            url=f"fake://issue/{issue_id}",
+            title=issue.title,
+            body=issue.body,
+            state=issue.state,
+        )
+
+    def adopt_issue_as_plan(
+        self,
+        *,
+        issue_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        callout: str,
+        command: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        from perk import plan
+
+        issue = self._issues[issue_id]
+        if not dry_run:
+            issue.labels.add(plan.PLAN_LABEL)
+            issue.body = plan.prepend_callout(
+                plan.replace_metadata_block(issue.body, plan.PLAN_HEADER_KEY, header_fields),
+                callout,
+                command=command,
+            )
+            issue.comments["plan-body"] = plan.render_plan_body(plan_markdown)
+        return issue_backend.IssueRef(id=issue_id, url=f"fake://issue/{issue_id}", existed=True)
+
     # --- learn issues ---
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:

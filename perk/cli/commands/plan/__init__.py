@@ -1,7 +1,7 @@
 """``perk plan`` — the plan-stage launcher + the plan-revision verbs (Objective #495, Node 3.2).
 
 A **hybrid default-dispatch group** (mirroring ``LearnGroup``): bare ``perk plan`` launches the
-read-only authoring stage (a primed pi session), while ``save``/``resume``/``replan`` are
+read-only authoring stage (a primed pi session), while ``save``/``resume``/``replan``/``from`` are
 registered verbs:
 
 - ``save`` — the merged launcher+worker (``MergedCommand``): the ``save``-stage launcher by
@@ -27,6 +27,7 @@ as a launcher pi-arg is unsupported via the merged command).
 import click
 
 from perk.cli.alias import AliasGroup, register_with_aliases
+from perk.cli.commands.plan.from_cmd import plan_from
 from perk.cli.commands.plan.replan_cmd import replan
 from perk.cli.commands.plan.resume_cmd import resume_cmd
 from perk.cli.commands.plan.save_cmd import plan_save
@@ -67,16 +68,18 @@ plan_group = PlanGroup(
     help=(
         "Author + revise plans. Bare `perk plan` launches the read-only plan stage (a primed pi "
         "session); `save` is the merged save boundary (the cold plan-write under --json); "
-        "`resume` and `replan` revise existing plans."
+        "`resume` and `replan` revise existing plans; `from` adopts a pre-existing issue in place."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
     context_settings={"ignore_unknown_options": True},
 )
 
-# resume/replan carry no aliases now (clean break, §11.5), so each registers under its bare name.
+# resume/replan/from carry no aliases now (clean break, §11.5), so each registers under its bare
+# name. `from` is the in-place issue-adoption cold door (#706) and a valid Click command string.
 register_with_aliases(plan_group, resume_cmd)
 register_with_aliases(plan_group, replan)
+register_with_aliases(plan_group, plan_from)
 
 # The merged `save`: the `save`-stage launcher by default, the deterministic worker under `--json`.
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the

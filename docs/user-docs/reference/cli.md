@@ -174,6 +174,19 @@ the plan issue's human engagement (comments + description edits) as untrusted DA
 (Linear-first; honest on GitHub where the primitive exists), so the rewrite can incorporate human
 feedback, not only landed PRs.
 
+### `perk plan from ISSUE`
+
+Adopt a pre-existing, human-authored issue `ISSUE` (a GitHub number or a Linear identifier like
+`PER-45`) **in place** as a perk plan: perk reads the issue's title/body (and any human discussion)
+as untrusted seed DATA, authors a plan over it in a read-only session, and on save stamps the plan
+metadata **additively** into the *same* issue — the plan-header block (with `adopted_from`
+provenance), the `perk:plan` label, the impl callout, and the plan-body comment — preserving the
+human title/body verbatim and **never minting a second object**. Local-only (`cold_remote:false`);
+`--dry-run` materializes the source issue and prints the seed without launching; `--worktree` and
+`--json` are also accepted. Refuses when the issue is not found, not open, or already a perk plan
+(use [`perk plan replan`](#perk-plan-replan-plan) for the latter). See
+[Adopt an existing issue as a plan](../how-to/adopt-an-existing-issue.md).
+
 ### `perk objective` (alias `obj`)
 
 The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,

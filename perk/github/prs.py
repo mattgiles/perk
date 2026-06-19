@@ -323,6 +323,79 @@ def update_plan_issue(
     )
 
 
+@dataclass(frozen=True)
+class PlanAdoption:
+    """The result of an in-place :func:`adopt_issue_as_plan` stamp (#706, §8.29)."""
+
+    number: int
+    url: str
+    dry_run: bool
+
+
+def adopt_issue_as_plan(
+    *,
+    number: int,
+    header_fields: dict[str, object],
+    plan_markdown: str,
+    callout: str,
+    command: str,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> PlanAdoption:
+    """Additively stamp perk plan metadata INTO a pre-existing issue — adopting it in place as a
+    perk plan (#706, §8.29), never minting a second object.
+
+    The additive stamp (the GitHub in-place writer): (a) ensure + ADD the ``perk:plan`` label
+    (never replaces the issue's labels); (b) stamp the ``plan-header`` block additively into the
+    issue body (human prose preserved verbatim, **title untouched**) and (c) prepend the
+    ``callout`` above it — one read-modify-write so both land in a single PATCH; (d) upsert the
+    ``plan-body`` comment carrying ``plan_markdown`` (the same comment-discovery as
+    :func:`update_plan_issue`, **without** the title PATCH). Idempotent on re-save. Rejects
+    unknown header keys (LBYL on the schema). Raises ``GitHubError`` on an infra failure;
+    ``dry_run`` reads only.
+    """
+    unknown = set(header_fields) - plan.PLAN_HEADER_FIELDS
+    if unknown:
+        raise _exec.GitHubError(f"unknown plan-header field(s): {sorted(unknown)}")
+    src = plans.read_issue(number=number, repo_root=repo_root)
+    if src is None:
+        raise _exec.GitHubError(f"issue #{number} not found")
+    if dry_run:
+        return PlanAdoption(number=number, url=src.url, dry_run=True)
+    # (a) ensure + additively add the perk:plan label.
+    plans.create_label(
+        plan.PLAN_LABEL,
+        color=plan.PLAN_LABEL_COLOR,
+        description=plan.PLAN_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    plans.add_issue_label(issue=number, label=plan.PLAN_LABEL, repo_root=repo_root)
+    # (b)+(c) stamp the header additively + prepend the callout in one read-modify-write (title
+    # untouched: only the issue *body* is PATCHed, never the title).
+    body = plans._get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+    new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **header_fields})
+    new_body = plan.prepend_callout(new_body, callout, command=command)
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to stamp plan-header on #{number}")
+    # (d) upsert the plan-body comment (the update_plan_issue discovery, minus the title PATCH).
+    body_comment = plan.render_plan_body(plan_markdown)
+    comment_id = _find_plan_body_comment_id(number, repo_root)
+    if comment_id is not None:
+        plans._patch_comment_body(comment_id, body_comment, repo_root)
+    else:
+        plans.add_issue_comment(issue=number, body=body_comment, repo_root=repo_root)
+    return PlanAdoption(number=number, url=src.url, dry_run=False)
+
+
 def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
     """Fetch a PR by number (REST). ``None`` if it does not exist; raises on infra failure."""
     data = _exec._run_json(

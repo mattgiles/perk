@@ -25,6 +25,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
   feedback, fix actionable items, resolve threads.
 - [How to replan an open plan](./replan-an-open-plan.md) — re-author a saved-but-not-landed plan
   against the current codebase.
+- [How to adopt an existing issue as a plan](./adopt-an-existing-issue.md) — turn a pre-existing
+  human-authored issue into a perk plan in place, without minting a second object.
 - [How to target a non-default base branch](./target-a-non-default-base-branch.md) — point plans
   and objectives at a target branch other than the GitHub default.
 - [How to run CI checks in a session](./run-ci-in-session.md) — run the project's configured

@@ -114,7 +114,7 @@ EXPECTED_SURFACE: dict[str, object] = {
     "groups": {
         "doctor": [("workflow", ())],
         "learn": [("capture", ()), ("docs", ())],
-        "plan": [("replan", ()), ("resume", ()), ("save", ())],
+        "plan": [("from", ()), ("replan", ()), ("resume", ()), ("save", ())],
         "objective": [
             ("author", ()),
             ("create", ("new",)),

@@ -812,6 +812,104 @@ class TestGetPlanBody:
         assert empty.get_plan_body(issue_id="iss-1") is None
 
 
+class TestReadIssueAndAdopt:
+    """In-place issue adoption (#706, §8.29) on the Linear backend."""
+
+    def test_read_issue_maps_neutral_shape(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u/ENG-7",
+                            "title": "Human title",
+                            "description": "do the thing",
+                            "state": {"type": "started"},
+                        }
+                    }
+                ]
+            }
+        )
+        src = backend.read_issue(issue_id="ENG-7")
+        assert src == issue_backend.AdoptableIssue(
+            id="ENG-7", url="u/ENG-7", title="Human title", body="do the thing", state="OPEN"
+        )
+
+    def test_read_issue_none_when_missing(self) -> None:
+        backend, _ = _make_backend({"issue(id": [_not_found_error()]})
+        assert backend.read_issue(issue_id="iss-gone") is None
+
+    def test_read_issue_normalizes_closed(self) -> None:
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u",
+                            "title": "t",
+                            "description": "b",
+                            "state": {"type": "canceled"},
+                        }
+                    }
+                ]
+            }
+        )
+        src = backend.read_issue(issue_id="ENG-7")
+        assert src is not None and src.state == "CLOSED"
+
+    def test_adopt_issue_as_plan_stamps_in_place(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "issueLabels(filter": [{"issueLabels": {"nodes": [{"id": "lbl-plan"}]}}],
+                "comments(first": [_comments_response([])],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+                "commentCreate(": [{"commentCreate": {"success": True}}],
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "identifier": "ENG-7",
+                            "url": "u/ENG-7",
+                            "description": "HUMAN BODY VERBATIM",
+                            "labels": {"nodes": [{"id": "lbl-existing"}]},
+                        }
+                    }
+                ],
+            }
+        )
+        header_fields = plan.PlanHeader(run_id="RID", created="t", adopted_from="ENG-7").to_data()
+        ref = backend.adopt_issue_as_plan(
+            issue_id="ENG-7",
+            header_fields=header_fields,
+            plan_markdown="# Adopted\n\nthe plan body\n",
+            callout=plan.plan_callout("ENG-7"),
+            command="perk impl ENG-7",
+        )
+        assert ref == issue_backend.IssueRef(id="ENG-7", url="u/ENG-7", existed=True)
+        updates = [_input_payload(v) for _, v in _queries(fake, "issueUpdate(")]
+        # The label add is additive: the existing label id is preserved, the plan label unioned.
+        label_update = next(u for u in updates if "labelIds" in u)
+        assert set(cast("list[str]", label_update["labelIds"])) == {"lbl-existing", "lbl-plan"}
+        # The description stamp is inline-code (Linear-safe), preserves the human body, carries the
+        # callout + the adopted_from provenance; the title is never touched.
+        desc_update = next(u for u in updates if "description" in u)
+        new_desc = cast("str", desc_update["description"])
+        assert "HUMAN BODY VERBATIM" in new_desc
+        assert "perk impl ENG-7" in new_desc
+        assert "<!--" not in new_desc  # inline-code, not lossy HTML
+        stamped = plan.find_metadata_block(new_desc, plan.PLAN_HEADER_KEY)
+        assert stamped is not None and stamped["adopted_from"] == "ENG-7"
+        assert "title" not in desc_update and "title" not in label_update
+        # The plan body is upserted as an inline-code comment.
+        [(_, create_vars)] = _queries(fake, "commentCreate(")
+        comment_body = cast("str", _input_payload(create_vars)["body"])
+        assert plan.extract_plan_body(comment_body) is not None
+
+
 class TestCommentOps:
     def test_find_comment_id_by_marker_matches_transcoded_marker_oldest_first(self) -> None:
         marker = run_report.RUN_REPORT_MARKER.format(run_id="01R")

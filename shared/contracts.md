@@ -3773,3 +3773,65 @@ section-boundary + don't-churn rules. Harmless/empty on GitHub or when there is 
 parity-pinned `objectiveReadInstruction` clause is unchanged. `/objective-reconcile` +
 `driveReconcileAfterLand` need no change (both already pass the objective id into
 `reconcileGuidance`). Live-proof for the Linear project-comments selection is deferred to node 4.3.
+
+## §8.29 · In-place issue adoption (`plan --from`, Objective #682, Node 3.1)
+
+A cold door that **adopts a pre-existing human-authored issue (Linear or GitHub) IN PLACE as a perk
+plan**: it reads the human title + body + engagement as untrusted seed DATA, runs a normal
+read-only `plan → review → save` authoring pass over it, and on save stamps perk's plan metadata
+**additively** into the *same* issue — never minting a second object. The first §8.25 consumer
+that reads a **non-perk** issue (§3.1 comment listing + the §4 provenance read of the inventory,
+`docs/planning/human-interaction-api-inventory.md`).
+
+**Provenance model (`adopted_from`).** `PlanHeader` gains `adopted_from: str | None` (in
+`PLAN_HEADER_FIELDS` + `to_data()`), storing the source issue ref (e.g. `"#123"` / `"PER-45"`).
+It is **self-referential by construction** (in-place adoption stamps the plan into the source
+issue), so its **presence** is the canonical signal "this plan was adopted; its issue body/title
+are verbatim human content". A normally-authored plan leaves it `None`.
+
+**Two new `IssueBackend` reads/writes (both backends + fakes).**
+
+- `read_issue(*, issue_id) -> AdoptableIssue | None` — reads *any* issue's raw `title`/`body`
+  (untrusted DATA) + normalized `state` (`"OPEN"|"CLOSED"`). Unlike `get_plan` (needs a header) /
+  `get_plan_body` (needs a plan-body block), it reads a non-perk human issue verbatim. `None` when
+  absent; raises `IssueBackendError` on infra failure. GitHub: `gh issue view … --json …`; Linear:
+  `issue(id:)` mapped to the neutral shape.
+- `adopt_issue_as_plan(*, issue_id, header_fields, plan_markdown, callout, command, dry_run) ->
+  IssueRef` — the in-place additive stamp (mirrors `ObjectiveStore.save_node_plan`): (a) ensure +
+  **add** the `perk:plan` label (never replaces the issue's existing labels); (b) stamp the
+  `plan-header` block additively into the issue **body** (human prose preserved verbatim, **title
+  untouched**); (c) idempotently prepend the `perk impl <id>` callout above the body; (d) upsert
+  the `plan-body` comment carrying the authored markdown. Returns `IssueRef(existed=True)`.
+  Idempotent on re-save; GitHub stamps HTML-encoded, Linear inline-code (Linear-safe).
+
+**The cold door (`perk plan from <issue>`).** A dedicated launcher verb in the `plan` hybrid group
+(mirrors `replan`/`resume`; `from` is a valid Click command string). It performs every Linear/GitHub
+read up front (the read-only plan-mode session has no `gh`/Linear access), then re-launches the
+`plan` stage seeded to author a plan over the materialized source. It **refuses** when: the issue is
+not found (`adopt_not_found`), not OPEN (`adopt_not_open`), or already a perk plan
+(`has_metadata_block(body, plan-header)` → `already_a_plan`, hinting `perk plan replan <id>`).
+Engagement is read fail-soft (`render_adopted_engagement` → `<untrusted_adopted_issue_engagement>`;
+`IssueBackendError` → omitted). The source is materialized to `scratch/adopt-<issue_id>.md` (title +
+body wrapped in `<untrusted_adopted_issue>` + the optional engagement block). A **fresh** `run_id`
+is minted (vs `replan` reusing the original); the default `binding_trigger` (`stage:plan`) fires the
+`perk-plan` nudge. `--dry-run` materializes + prints the seed, launches nothing (reads are real,
+like `replan`). `--remote` is rejected (local-only, resolved up front).
+
+**The save (rides the handoff).** The `plan from` door stashes `adopt_from` in the run **handoff**,
+so the adoption link survives **every** save surface (the `/plan-save` command, the `plan_save`
+tool, approval-driven save — all forward only `{plan, title}`). `perk plan save` gains
+`--adopt-from <issue>` + `_adopt_from_handoff` recovery (explicit flag wins, else the handoff key).
+When set on a real save, `_plan_save_impl` sets `header.adopted_from`, calls
+`adopt_issue_as_plan(...)`, **skips** `create_plan_issue` (`updated=True`, `labels=(perk:plan,)`,
+`cache.plan-ref.pr_id = adopt_from`). **Mutual exclusion:** `--adopt-from` with
+`--objective-id`/`--node-id` is rejected (`invalid_input`) — the node-unification path is the
+in-place writer for objective nodes; the two in-place semantics never mix. `--dry-run` composes +
+prints the header/body (now including `adopted_from`) without writes.
+
+**Doctor (awareness note, not a check).** An adopted plan is identified by a populated
+`adopted_from` plan-header field; `doctor` does **not** rewrite or validate the human prose/title —
+the substantive deliverable is this contract section, not a new validating check.
+
+**Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
+is a preview-grade observation here (Mode 7 in `docs/planning/linear-smoke-gate.md`); final live
+proof is node 4.3.

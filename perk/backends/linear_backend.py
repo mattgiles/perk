@@ -1344,6 +1344,87 @@ class LinearIssueBackend:
                 return body
         return None
 
+    # ------------------------------------------------------------------ in-place adoption (#706)
+
+    def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
+        issue = self._ops._issue_or_none(
+            issue_id, "id identifier url title description state { type }"
+        )
+        if issue is None:
+            return None
+        description = issue.get("description")
+        state = _require_dict(issue.get("state"), "issue.state")
+        state_type = _require_str(state.get("type"), "issue.state.type")
+        return issue_backend.AdoptableIssue(
+            id=_require_str(issue.get("identifier"), "issue identifier"),
+            url=_require_str(issue.get("url"), "issue url"),
+            title=_require_str(issue.get("title"), "issue title"),
+            body=description if isinstance(description, str) else "",
+            state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
+        )
+
+    def adopt_issue_as_plan(
+        self,
+        *,
+        issue_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        callout: str,
+        command: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        if dry_run:
+            return issue_backend.IssueRef(id=issue_id, url="(dry-run)", existed=True)
+        # (a) ensure + additively add the perk:plan label (issueUpdate's labelIds REPLACES the
+        # set, so read the existing ids and union the plan label in — never clobber them).
+        label_id, _ = self._ops._ensure_label_id(
+            plan.PLAN_LABEL,
+            color=plan.PLAN_LABEL_COLOR,
+            description=plan.PLAN_LABEL_DESCRIPTION,
+        )
+        issue = self._ops._get_issue(
+            issue_id, "id identifier url description labels { nodes { id } }"
+        )
+        labels = _require_dict(issue.get("labels"), "issue.labels")
+        existing = [
+            _require_str(_require_dict(raw, "label").get("id"), "label id")
+            for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
+        ]
+        label_ids = existing if label_id in existing else [*existing, label_id]
+        self._ops._update_issue(issue_id, {"labelIds": label_ids}, what="add perk:plan label")
+        # (b)+(c) stamp the plan-header (Linear-safe inline-code) + prepend the callout into the
+        # description (title untouched). Adoption only runs on an issue with NO plan-header (the
+        # `already_a_plan` refusal guards it), so the absent branch composes inline-code — NEVER
+        # the bare replace_metadata_block append path (it appends in lossy HTML form).
+        description = issue.get("description")
+        body = description if isinstance(description, str) else ""
+        if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
+            new_desc = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, header_fields)
+        else:
+            header_block = plan.render_metadata_block(
+                plan.PLAN_HEADER_KEY, header_fields, style="inline-code"
+            )
+            new_desc = f"{body.rstrip()}\n\n{header_block}\n"
+        new_desc = plan.prepend_callout(new_desc, callout, command=command)
+        self._ops._update_issue(issue_id, {"description": new_desc}, what="stamp plan-header")
+        # (d) upsert the plan-body comment (inline-code), title untouched.
+        body_comment = plan.render_plan_body(plan_markdown, style="inline-code")
+        existing_comment_id: str | None = None
+        for comment in self._ops._comments(issue_id):
+            comment_body = comment.get("body")
+            if isinstance(comment_body, str) and plan.extract_plan_body(comment_body):
+                existing_comment_id = _require_str(comment.get("id"), "comment id")
+                break
+        if existing_comment_id is not None:
+            self._ops._update_comment(existing_comment_id, body_comment)
+        else:
+            self._ops._create_comment(issue_id, body_comment)
+        return issue_backend.IssueRef(
+            id=_require_str(issue.get("identifier"), "issue identifier"),
+            url=_require_str(issue.get("url"), "issue url"),
+            existed=True,
+        )
+
     # ------------------------------------------------------------------ learn issues
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
