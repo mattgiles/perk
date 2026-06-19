@@ -62,6 +62,11 @@ Gather before you plan. Materialize four finding categories from real evidence:
 - Corrections: assumptions that turned out wrong, and what is actually true.
 - Codebase evidence: the specific code you verified each decision against.
 
+Check \`docs/learned/\` for relevant prior art and gotchas before you plan. The ambient routing
+index in your system prompt points into the full catalog at \`docs/learned/index.md\`; when a
+routing cue matches your change, \`read\` that doc. This is a check, not a requirement — there may
+be nothing relevant to your change, and your plan does not need to be grounded in prior learnings.
+
 Write the plan so an executor (a future session, or another engineer) with zero prior context can
 implement it without guessing. Anchor every change durably — function/class names, behavioral
 descriptions, structural locations — never line numbers. Resolve every open choice before saving;
