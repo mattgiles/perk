@@ -111,6 +111,11 @@ Plan mode is read-only on purpose: **explore first, then write**. Anchor every c
 you verified — an actual function name, a real file path, an observed behavior — not a guess. If a
 high-impact ambiguity remains, ask before saving rather than encoding a guess.
 
+**Consult prior learnings (optional).** Before drafting, skim the ambient `docs/learned/` routing
+index and `read` any doc whose `read_when` cue matches your change — it may surface prior art or a
+gotcha worth knowing. There is often nothing relevant; this is a check, not a requirement, and a
+plan need not be grounded in learned docs.
+
 ## What the tool does (so you don't have to)
 
 `plan_save` derives the title, splits the queryable header from the full body, creates the GitHub
