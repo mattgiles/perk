@@ -3677,3 +3677,35 @@ knows the node, treating the output as untrusted DATA (harmless on GitHub — th
 engagement). The parity-pinned `objective_read_instruction` / `objectiveReadInstruction` clause is
 **unchanged** (engagement is a separate seam). Read-only inbound context only — no outbound /
 agent-session emission (Phase 4).
+
+## §8.27 · Plan-issue engagement in `replan` (Objective #682, Node 2.2)
+
+The **third flow consumer** of the §8.25 read contract (after §8.26's `/objective-plan` and node
+1.3's GitHub honest reads): `perk replan <plan>` seeds the plan issue's human engagement (comments
++ description edits) as untrusted DATA so the re-authored plan incorporates human feedback/edits,
+not only landed PRs. Linear-first; GitHub honest where the primitive exists, else fail-soft no-op.
+
+**Reuses the issue-keyed reads — no new Protocol method.** A plan **is** an issue, so the existing
+`IssueBackend.read_comments(issue_id=)` / `read_description_edits(issue_id=)` cover it directly —
+the key simplification vs §8.26's node-keyed `read_node_engagement` (a roadmap node is not itself
+the objective issue). No `PlanEngagement` dataclass, no new conformers. Agent-session reads are
+**excluded** (Phase 4). Fail-soft: `IssueBackendError` → no block (never aborts the launch); empty
+→ scratch + seed byte-unchanged.
+
+**Renderer.** `render_plan_engagement(comments, edits) -> str | None` (pure, in `engagement.py`) —
+the §8.26 renderer's twin sharing the private `_render_engagement` helper: same ≤30-items/surface
+bound, ~1500-char body truncation + `… (truncated)` marker, same **perk-comment skip** and
+**description-edits labeled-by-kind, never filtered** rules; wrapped in `<untrusted_plan_engagement>`
+… `</untrusted_plan_engagement>`. `render_node_engagement`'s output stays byte-identical (pinned by
+a `test_engagement.py` byte-stability assert).
+
+**Cold-only injection (no warm door).** `replan` is a dedicated cold door (no registry stage, no
+`objectivePlan.ts`-style warm half). It reads engagement up front — **including on `--dry-run`**,
+which materializes the real artifact (replan's dry run is not offline) — and **appends** the
+rendered block to the materialized `.pi/workflow/scratch/replan-<id>.md` after `</untrusted_plan>`
+(the scratch-file-native home, vs §8.26's inline-seed injection — replan centers on the scratch
+file the session `read`s). The seed's step 1 points at the block only when present (empty → seed
+byte-unchanged).
+
+**Don't-churn unchanged.** Engagement is a new re-investigation *input*, not a new skip-rule clause;
+the perk-replan skill's "skip if nothing material changed" rule is left verbatim.

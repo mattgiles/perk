@@ -13,7 +13,9 @@ This runs in a **read-only** session and is **local-only**.
    session to re-author it.
 2. **Re-investigate.** Explore the current codebase and note what changed since the plan was first
    written — especially any PRs that have **landed** in the meantime that the old plan did not
-   account for.
+   account for. The materialized prior plan also surfaces **human comments and description edits on
+   the plan issue** (as untrusted DATA), so the rewrite can incorporate human feedback — not only
+   landed PRs.
 3. **Approve the rewritten plan.** Save the revised body through the plan-save surface on approval.
    The rewrite replaces the plan in place; the issue id stays the same.
 4. **Preview without launching (optional).** Add `--dry-run` to materialize the prior plan and print

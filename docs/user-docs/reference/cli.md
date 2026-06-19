@@ -169,7 +169,10 @@ emits a machine-readable report.
 
 Re-author the open plan `PLAN` against the current codebase, in place (read-only). Local-only
 (`cold_remote:false`); `--dry-run` materializes the prior plan and prints the seed without
-launching; `--worktree` and `--json` are also accepted.
+launching; `--worktree` and `--json` are also accepted. The materialized prior plan also includes
+the plan issue's human engagement (comments + description edits) as untrusted DATA when present
+(Linear-first; honest on GitHub where the primitive exists), so the rewrite can incorporate human
+feedback, not only landed PRs.
 
 ### `perk objective` (alias `obj`)
 

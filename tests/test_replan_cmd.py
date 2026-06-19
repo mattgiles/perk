@@ -37,13 +37,29 @@ def _plan_state(*, state: str = "OPEN", run_id: str | None = _RUN_ID) -> github.
     )
 
 
-def _stub_plan(monkeypatch, *, plan_state=None, body="EXISTING PLAN BODY") -> None:
+def _comment_row(body: str, *, is_bot: bool = False) -> github.IssueCommentRow:
+    return github.IssueCommentRow(
+        id="c1",
+        body=body,
+        created_at="2026-03-01T10:00:00Z",
+        edited_at=None,
+        author_login="ada",
+        author_id="u-1",
+        author_is_bot=is_bot,
+    )
+
+
+def _stub_plan(
+    monkeypatch, *, plan_state=None, body="EXISTING PLAN BODY", comments=None, edits=None
+) -> None:
     monkeypatch.setattr(
         github,
         "get_plan",
         lambda **k: _plan_state() if plan_state is None else plan_state,
     )
     monkeypatch.setattr(github, "get_plan_body", lambda **k: body)
+    monkeypatch.setattr(github, "read_issue_comments", lambda **k: list(comments or []))
+    monkeypatch.setattr(github, "read_description_edits", lambda **k: list(edits or []))
 
 
 def _stub_launch(monkeypatch, sink: dict) -> None:
@@ -102,6 +118,58 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
     assert _SCRATCH_REL in prompt
     assert "perk-replan" in prompt
     assert "plan_save" in prompt
+
+
+def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
+    # No comments/edits → no <untrusted_plan_engagement> block, no engagement clause in the seed.
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "<untrusted_plan_engagement>" not in text
+    assert "<untrusted_plan_engagement>" not in (launched["prompt"] or "")
+
+
+def test_with_engagement_appends_block_and_points_seed(monkeypatch):
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch, comments=[_comment_row("please rescope this plan")])
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "<untrusted_plan_engagement>" in text
+    assert "please rescope this plan" in text
+    assert "<untrusted_plan_engagement>" in (launched["prompt"] or "")
+
+
+def test_engagement_read_failure_is_fail_soft(monkeypatch):
+    # A backend hiccup on the engagement read must never abort the launch — the block is omitted.
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+
+    def boom(**k):
+        raise github.GitHubError("gh exploded")
+
+    monkeypatch.setattr(github, "read_issue_comments", boom)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _SCRATCH_REL).read_text(encoding="utf-8")
+    assert "<untrusted_plan_engagement>" not in text
 
 
 def test_refuses_non_open_plan(monkeypatch):
