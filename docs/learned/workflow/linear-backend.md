@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the worktree env-seed bridge (the gitignored `perk.local.toml` carried into a linked worktree, the widening-broke-21-fakes `*a,**k` rule), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), or the live-spike firing mechanism.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the worktree env-seed bridge (the gitignored `perk.local.toml` carried into a linked worktree, the widening-broke-21-fakes `*a,**k` rule), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), the idiomatic-backend work (attribution at the create bottleneck, workspace-scoped labels + the four→five ripple, fail-open attachments, the prose-first reorder), the byte-stable sibling selection + `_is_entity_not_found`, the `_FakeLinear` insertion-order substring footgun, or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -665,6 +665,54 @@ overview; not-found `.codes` tightening → paired predicate), that conditional 
 for `/objective-reconcile` to flip. (Terse by design; the full reconciliation pattern lives in
 `doc-reconciliation.md`.)
 
+## Idiomatic backend: attribution, labels, attachments, prose-first (#678)
+
+The Linear backend was made **idiomatic** — attribution, workspace-scoped labels, PR attachments,
+and a prose-first overview order. The durable craft:
+
+- **Attribution rides the single create bottleneck.** `assigneeId` placed once in `_create_issue_raw`
+  covers all issue creates; `leadId` + `startDate` once in `create_project` covers all projects — one
+  edit each, no per-caller threading (**the bottleneck is the leverage**). `viewer_id()` is a cached
+  resolver mirroring `team_id` memoization.
+- **Fake-init gotcha (recurring).** Both fakes subclass `LinearClient` **without** `super().__init__`,
+  so every new client cache must be seeded directly or the resolver raises `AttributeError`. The
+  coverage split: the scripted `_FakeLinear` **pre-seeds** the cache (create-path tests assert the
+  sentinel) while the stateful `FakeLinearWorkspace` leaves it `None` (exercises the real request
+  path).
+- **Workspace-scoped labels + the four→five ripple.** Dropping `teamId` from the label create input
+  makes labels workspace-scoped (safe — lookup was already unscoped). Adding a perk label is a **wide
+  ripple** (`_PERK_LABELS`, readiness count tests, doctor/init docstrings, contracts §, user docs) —
+  grep `four perk` / count-asserts before touching the label set.
+- **Attachments + fail-open seam.** `attachmentCreate` is idempotent by URL (no id to track) → safe to
+  post on every PR stamp; wired fail-open into `update_plan_header` (catches
+  `(IssueBackendError, GitHubError, ValueError)` — the `ValueError` covers `int(pr_field)`). The
+  attachment is bookkeeping; it must never fail a header stamp.
+- **Prose-first reorder: reads are position-independent, one WRITE wasn't.** Reordering compose sites
+  to prose-then-blocks is safe because every read scans by marker; the one position-dependent write
+  (the manifest backfill insert point) had to flip from **before** the Reconcilable START marker to
+  **after** the Reconcilable END marker. The deferred collapsible-toggle: an unverified
+  externally-rendered wrapper risks literal-visible-token rendering + a lossy round-trip that breaks
+  marker-matching — ship the deterministic prose-first half, record the gated half as an explicit
+  decision point (**never guess-and-ship an unverified externally-rendered form**).
+
+## Byte-stable sibling selection + `_is_entity_not_found` (#687)
+
+The honest engagement reads reaffirm the **"leave the byte-stable marker-matching selection
+untouched, add a sibling query"** rule: add `_comments_with_authors` (which selects
+`editedAt`/`user`/`botActor`) **beside** the byte-stable `_comments`, proven with a
+`git show <base>:file | sed -n` diff. The paired **INPUT_ERROR + "entity not found"** not-found
+discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; **auth failures raise**
+(fail-loud accommodates the unproven personal-key-vs-agent-token question). (See
+`human-engagement-reads.md`.)
+
+## `_FakeLinear` insertion-order substring footgun (RECONFIRMED, #711)
+
+Every `project(id` sub-query contains the `project(id` substring; in the scripted-response dict
+register the **more-specific needles** (`projectMilestones(`, `issues(first`) **BEFORE** the generic
+`project(id`, else the wrong response matches. (Reconfirms the established more-specific-needle-first
+rule.) The adoption-writer instance: the `project_issues_for_adoption` / `project_milestones` /
+`project_or_none` collision in the project-backed adoption flow.
+
 ## Still-deferred register (trimmed)
 
 The live smoke resolved the fidelity / not-found / mutation-acceptance items above; what remains
@@ -700,4 +748,6 @@ unobserved:
   (the live-smoke mergeability gotchas in #554 live there)
 - `docs/learned/workflow/doc-reconciliation.md` — the measurement-node-resolves-an-open-conditional
   reconciliation pattern
+- `docs/learned/workflow/human-engagement-reads.md` — Linear's honest engagement-read mechanics
+- `docs/learned/workflow/in-place-adoption.md` — the Linear project-backed adoption writer
 - `docs/learned/toolchain/ty.md` — the narrowing-helper family for deep untyped payloads

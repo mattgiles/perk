@@ -1,6 +1,6 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
-read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call, or designing a mutation-posting policy (failure ladders, verdict-driven artifacts).
+read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts), or fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge).
 ---
 
 # The github.py gateway
@@ -83,6 +83,48 @@ was later **reshaped** from a single posting child to a parent-driven classify-t
 Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-def delivery to
 consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
 bad-batch error. Acceptable at 0.0.1; remember it when the delivery gap closes.
+
+## gh GraphQL transport facts (#690)
+
+Extending the gateway to `gh api graphql` (for the honest engagement reads) surfaced transport facts
+that differ from REST `gh api`:
+
+- **`gh api graphql` does NOT auto-template `{owner}/{repo}`** (unlike REST `gh api`) — pass explicit
+  `owner` / `name` / `number` variables. `_owner_repo` was promoted from `reviews.py` into `_exec.py`
+  as generic repo-context infra.
+- **Cursor pagination:** only pass `-f cursor=<endCursor>` once you HAVE one — omit it on the first
+  page so the nullable `$cursor` var defaults to `null`. `-f cursor=` (empty string) is **not** the
+  same as `null`.
+- **The not-found shape differs from REST (HIGH gotcha, live-verified).** A missing node makes
+  `gh api graphql` **exit 1** with stderr `could not resolve to an Issue with the number of N` plus a
+  body carrying `"errors":[{"type":"NOT_FOUND"}]` — lowercased, that is `not_found` /
+  `could not resolve to`, which the shared `_is_not_found` REST check (`"not found"` / `"404"`) does
+  **not** match. So a mandated not-found→`()` fold **silently broke**. The fix broadens `_is_not_found`
+  to also match `not_found` and `could not resolve to`, re-fixtured against REAL output.
+- **Lesson:** extending a shared gateway helper to a NEW transport (REST→GraphQL) requires confirming
+  the error shape against **live** output (`gh api graphql -F number=<bogus>` reproduces it), not a
+  guessed fixture.
+
+## GitHub `Closes #N` autoclose fires ONLY on a default-branch merge (#694)
+
+A merge into any **non-default** base (`[workflow] base`, `objective create --base`, a pinned
+plan-header base) **silently never autocloses** — the plan issue strands open. The fix surfaces the
+PR's real `base.ref` on the `PullRequest` dataclass (trailing defaulted `base_ref: str = ""`), then at
+land **closes the github plan issue explicitly only when the base is a confirmed non-default branch**
+(default-base lands stay byte-identical, relying on autoclose — a targeted fallback, not "always
+close"). Three durable craft points:
+
+- **Match the parser's expected shape, not just the field name.** The plan said project
+  `base: .base.ref` (a string), but `_pull_request` calls `.get("ref")` on `base` — so the `--jq`
+  projection must be `base: {ref: .base.ref}` (an **object**) to stay uniform with the REST payload.
+- **Capture-before-reassign.** `merge_pr()` returns a synthetic `PullRequest` with no `base_ref`, so
+  capture `pr_base` from the **pre-merge** `find_pr_for_branch` result before the merge reassigns `pr`.
+- **Fail-open layering.** An unknown base short-circuits *without* calling `default_branch`, and a
+  `default_branch` lookup failure also returns `False` — both arms defer to autoclose, never block the
+  land.
+
+Semantics change to note: `plan_issue_closed` is now `True` on a non-default-base github land. No TS
+twin — the warm `/land` delegates to `perk pr land`, and the envelope change is purely additive.
 
 ## The resolved `dry_run` ruling (record)
 
