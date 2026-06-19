@@ -221,6 +221,56 @@ class TestDelegation:
         assert rec.kwargs == {"number": 3, "repo_root": tmp_path}
         assert result == "# the plan\n"
 
+    def test_read_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(
+            github.IssueRead(number=7, url="u7", title="Human title", body="do it", state="OPEN")
+        )
+        monkeypatch.setattr(github, "read_issue", rec)
+        result = GitHubIssueBackend(tmp_path).read_issue(issue_id="7")
+        assert rec.kwargs == {"number": 7, "repo_root": tmp_path}
+        assert result == issue_backend.AdoptableIssue(
+            id="7", url="u7", title="Human title", body="do it", state="OPEN"
+        )
+
+    def test_read_issue_none_passthrough(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(github, "read_issue", _Recorder(None))
+        assert GitHubIssueBackend(tmp_path).read_issue(issue_id="7") is None
+
+    def test_read_issue_normalizes_closed_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `gh issue view` casing is normalized into the contract's OPEN/CLOSED vocabulary.
+        monkeypatch.setattr(
+            github,
+            "read_issue",
+            _Recorder(github.IssueRead(number=7, url="u7", title="t", body="b", state="closed")),
+        )
+        result = GitHubIssueBackend(tmp_path).read_issue(issue_id="7")
+        assert result is not None and result.state == "CLOSED"
+
+    def test_adopt_issue_as_plan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(github.PlanAdoption(number=7, url="u7", dry_run=False))
+        monkeypatch.setattr(github, "adopt_issue_as_plan", rec)
+        result = GitHubIssueBackend(tmp_path).adopt_issue_as_plan(
+            issue_id="7",
+            header_fields={"run_id": "R", "adopted_from": "7"},
+            plan_markdown="# plan\n",
+            callout="CALLOUT",
+            command="perk impl 7",
+        )
+        assert rec.kwargs == {
+            "number": 7,
+            "header_fields": {"run_id": "R", "adopted_from": "7"},
+            "plan_markdown": "# plan\n",
+            "callout": "CALLOUT",
+            "command": "perk impl 7",
+            "repo_root": tmp_path,
+            "dry_run": False,
+        }
+        assert result == issue_backend.IssueRef(id="7", url="u7", existed=True)
+
     def test_find_learn_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(github.PlanIssue(number=8, url="u8", existed=True))
         monkeypatch.setattr(github, "find_learn_issue", rec)

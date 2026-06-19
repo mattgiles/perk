@@ -660,6 +660,108 @@ def test_update_plan_issue_dry_run_does_not_shell(monkeypatch):
     assert rec.calls == []
 
 
+# ----------------------------------------------------- in-place issue adoption (#706, §8.29)
+
+
+def test_read_issue_maps_fields(monkeypatch):
+    payload = json.dumps(
+        {"number": 7, "title": "Human title", "body": "do the thing", "state": "OPEN", "url": "u7"}
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("view", "number,title,body,state,url"), _Proc(0, payload))]),
+    )
+    src = github.read_issue(number=7, repo_root=ROOT)
+    assert src == github.IssueRead(
+        number=7, url="u7", title="Human title", body="do the thing", state="OPEN"
+    )
+
+
+def test_read_issue_none_when_not_found(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: _Proc(1, stderr="gh: Not Found (HTTP 404)")
+    )
+    assert github.read_issue(number=7, repo_root=ROOT) is None
+
+
+def test_add_issue_label_posts_additively(monkeypatch):
+    rec = _GhDispatch([(_has("issues/7/labels", "POST"), _Proc(0, "{}"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.add_issue_label(issue=7, label="perk:plan", repo_root=ROOT) is True
+    assert rec.method_calls("POST") == 1
+
+
+def test_add_issue_label_dry_run_does_not_shell(monkeypatch):
+    rec = _GhDispatch([])
+    monkeypatch.setattr(subprocess, "run", rec)
+    assert github.add_issue_label(issue=7, label="perk:plan", repo_root=ROOT, dry_run=True) is False
+    assert rec.calls == []
+
+
+def test_adopt_issue_as_plan_stamps_in_place(monkeypatch):
+    # The human issue has a verbatim body and NO plan-header (the cold door refuses one that does).
+    rec = _GhDispatch(
+        [
+            (
+                _has("view", "number,title,body,state,url"),
+                _Proc(
+                    0,
+                    json.dumps(
+                        {
+                            "number": 7,
+                            "title": "Human title",
+                            "body": "HUMAN BODY VERBATIM",
+                            "state": "OPEN",
+                            "url": "u7",
+                        }
+                    ),
+                ),
+            ),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),  # create_label
+            (_has("issues/7/labels", "POST"), _Proc(0, "{}")),  # additive label add
+            (_has("issues/7/comments", "POST"), _Proc(0, "{}")),  # plan-body comment POST
+            (_has("issues/7/comments"), _Proc(0, "[]")),  # comment list (no plan-body yet)
+            (_has("issues/7", ".body"), _Proc(0, "HUMAN BODY VERBATIM")),  # _get_issue_body
+            (_has("issues/7", "PATCH"), _Proc(0, "{}")),  # body PATCH (header + callout)
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    header_fields = plan.PlanHeader(run_id="RID", created="t", adopted_from="7").to_data()
+    result = github.adopt_issue_as_plan(
+        number=7,
+        header_fields=header_fields,
+        plan_markdown="# Adopted Plan\n\nthe plan body\n",
+        callout=plan.plan_callout("7"),
+        command="perk impl 7",
+        repo_root=ROOT,
+    )
+    assert result == github.PlanAdoption(number=7, url="u7", dry_run=False)
+    # The PATCHed issue body stamps the header additively, preserves the human body verbatim, and
+    # carries the impl callout — the title is NEVER PATCHed.
+    patched = rec.body_files[0]
+    assert "HUMAN BODY VERBATIM" in patched
+    assert "perk impl 7" in patched
+    stamped = plan.find_metadata_block(patched, plan.PLAN_HEADER_KEY)
+    assert stamped is not None and stamped["adopted_from"] == "7"
+    # The plan-body comment carries the authored markdown.
+    assert "the plan body" in rec.body_files[1]
+    assert not any("title=" in tok for c in rec.calls for tok in c)
+
+
+def test_adopt_issue_as_plan_rejects_unknown_header_field(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, "{}"))
+    with pytest.raises(github.GitHubError, match="unknown plan-header field"):
+        github.adopt_issue_as_plan(
+            number=7,
+            header_fields={"bogus": "x"},
+            plan_markdown="# p\n",
+            callout="C",
+            command="perk impl 7",
+            repo_root=ROOT,
+        )
+
+
 # ---------------------------------------------- marker-keyed comment upsert (Node 2.3)
 
 MARKER = "<!-- perk:run-report:RID -->"

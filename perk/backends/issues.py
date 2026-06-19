@@ -212,6 +212,46 @@ class GitHubIssueBackend:
         with _translate():
             return github.get_plan_body(number=number, repo_root=self._repo_root)
 
+    # --- in-place issue adoption (#706, §8.29) ---
+
+    def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
+        number = _number(issue_id)
+        with _translate():
+            found = github.read_issue(number=number, repo_root=self._repo_root)
+        if found is None:
+            return None
+        return issue_backend.AdoptableIssue(
+            id=str(found.number),
+            url=found.url,
+            title=found.title,
+            body=found.body,
+            # Normalize `gh issue view`'s casing into the contract's OPEN/CLOSED vocabulary.
+            state="CLOSED" if found.state.upper() == "CLOSED" else "OPEN",
+        )
+
+    def adopt_issue_as_plan(
+        self,
+        *,
+        issue_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        callout: str,
+        command: str,
+        dry_run: bool = False,
+    ) -> issue_backend.IssueRef:
+        number = _number(issue_id)
+        with _translate():
+            adoption = github.adopt_issue_as_plan(
+                number=number,
+                header_fields=header_fields,
+                plan_markdown=plan_markdown,
+                callout=callout,
+                command=command,
+                repo_root=self._repo_root,
+                dry_run=dry_run,
+            )
+        return issue_backend.IssueRef(id=str(adoption.number), url=adoption.url, existed=True)
+
     # --- learn issues ---
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:

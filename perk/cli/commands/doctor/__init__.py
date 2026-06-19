@@ -31,6 +31,11 @@ def doctor_group(ctx: click.Context, *, fix: bool, verbose: bool, as_json: bool)
     `doctor` reports a grouped health view; `--fix` re-converges drifted managed pieces (and
     seeds missing config) — it never mutates GitHub and never overwrites your config edits.
 
+    Note (#706): a plan adopted in place from a pre-existing issue (`perk plan from <issue>`) is
+    identified by a populated `adopted_from` plan-header field; its issue body/title are verbatim
+    human content. `doctor` never rewrites or validates that human prose — adoption provenance is
+    awareness-only here, not a validating check.
+
     \b
     Examples:
       perk doctor               # condensed health report

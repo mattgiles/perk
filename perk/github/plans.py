@@ -325,6 +325,69 @@ def create_plan_issue(
     return PlanIssue(number=int(data["number"]), url=str(data["url"]), existed=False)
 
 
+@dataclass(frozen=True)
+class IssueRead:
+    """A pre-existing issue read verbatim for in-place adoption (#706, §8.29).
+
+    ``title``/``body`` are untrusted human DATA; ``state`` is ``gh issue view``'s normalized
+    ``"OPEN" | "CLOSED"`` casing.
+    """
+
+    number: int
+    url: str
+    title: str
+    body: str
+    state: str
+
+
+def read_issue(*, number: int, repo_root: Path) -> IssueRead | None:
+    """Read *any* issue's raw title + body + state for in-place adoption (#706, §8.29).
+
+    Unlike :func:`get_plan` / :func:`get_plan_body` (which need a perk metadata block), this reads
+    a non-perk human issue verbatim (``gh issue view`` — ``state`` is its ``"OPEN"``/``"CLOSED"``
+    casing). ``None`` when the issue does not exist; raises ``GitHubError`` on an infra failure.
+    """
+    data = _exec._run_json(
+        ["issue", "view", str(number), "--json", "number,title,body,state,url"],
+        what=f"failed to read issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
+    return IssueRead(
+        number=int(data["number"]) if "number" in data else number,
+        url=str(data.get("url", "")),
+        title=str(data.get("title", "")),
+        body=str(data.get("body", "")),
+        state=str(data.get("state", "")),
+    )
+
+
+def add_issue_label(*, issue: int, label: str, repo_root: Path, dry_run: bool = False) -> bool:
+    """Additively ADD ``label`` to an existing issue (POST ``.../labels`` — does **not** replace
+    the issue's existing labels; mirrors :func:`close_and_label_consolidated`'s label shape).
+
+    Idempotent: re-adding an already-present label is success. Returns ``True`` on a real add,
+    ``False`` on a dry run; raises ``GitHubError`` on an infra failure.
+    """
+    if dry_run:
+        return False
+    proc = _exec._run(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{issue}/labels",
+            method="POST",
+            fields={"labels[]": label},
+        ),
+        cwd=repo_root,
+        timeout=_exec._WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to add label {label!r} to issue #{issue}")
+    return True
+
+
 def add_issue_comment(
     *, issue: int, body: str, repo_root: Path, dry_run: bool = False
 ) -> CommentResult:

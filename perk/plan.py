@@ -56,6 +56,7 @@ PLAN_HEADER_FIELDS = frozenset(
         "objective_id",
         "consumed_learn",
         "base",
+        "adopted_from",
     }
 )
 
@@ -101,6 +102,11 @@ class PlanHeader:
     # The pinned PR merge target / worktree start-point branch (#633). `None` ⇒ fall back to the
     # GitHub default branch (byte-identical to pre-#633 behavior).
     base: str | None = None
+    # In-place issue adoption (#706, §8.29): the source issue ref this plan was adopted from
+    # (e.g. `"#123"` / `"PER-45"`). Self-referential by construction (adoption stamps the plan
+    # INTO the human issue); its **presence** is the canonical "this plan was adopted; its issue
+    # body/title are verbatim human content" signal. `None` for a normally-authored plan.
+    adopted_from: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -112,6 +118,7 @@ class PlanHeader:
             "objective_id": self.objective_id,
             "consumed_learn": list(self.consumed_learn),
             "base": self.base,
+            "adopted_from": self.adopted_from,
         }
 
 

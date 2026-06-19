@@ -399,6 +399,43 @@ Append the run's findings to **Recorded observations** as a dated **Sixth live r
 per gate). A negative/blocked finding is valid. Record any backend defect and open a follow-up — do
 not fix substantive code at the gate.
 
+## Mode 7 — in-place issue adoption (Objective #682, Node 3.1)
+
+Validates the **in-place adoption** write surface the Node 3.1 contract adds (`read_issue` +
+`adopt_issue_as_plan`; contracts §8.29). Offline fakes pin request *composition* + the
+additive-stamp/verbatim-preservation invariant; this live smoke is the only surface that can prove
+Linear actually accepts the composed reads/writes against a real, **human-authored** (non-perk)
+issue. Run against team `PER` with `[issues] backend = "linear"`, `team = "PER"`, and
+`LINEAR_API_KEY` exported, against an **open** Linear issue authored by a human (a title + body +,
+ideally, a comment or two), that is **not** already a perk plan.
+
+### Smoke script
+
+1. **Adopt it.** `perk plan from PER-<n>` — the read-only session materializes the human issue
+   (title + body wrapped in `<untrusted_adopted_issue>` + any engagement), authors a plan, and on
+   approval saves. Verify in Linear:
+   - the issue gains the **`perk:plan` label** alongside its existing labels (additive — no labels
+     dropped);
+   - the issue **title is byte-unchanged** and the **human body is preserved verbatim**, with the
+     `plan-header` block (inline-code) + the `perk impl PER-<n>` callout stamped additively;
+   - the **plan-body comment** carries the authored plan markdown;
+   - **no second issue** was created (find-by-nothing: the adoption never mints).
+2. **Provenance.** Read the stamped `plan-header` — `adopted_from` carries the issue's own ref
+   (self-referential), the canonical "this is an adopted plan" signal.
+3. **Re-save idempotency.** Re-run the save (e.g. `perk plan replan PER-<n>` or a second authoring
+   pass) and verify the header is re-rendered **in place**, the callout/label are not duplicated,
+   and the title/human prose stay verbatim.
+4. **Refusals.** Verify `perk plan from` refuses a closed issue (`adopt_not_open`), a missing issue
+   (`adopt_not_found`), and an issue that is **already** a perk plan (`already_a_plan`, hinting
+   `perk plan replan`).
+5. **GitHub parity (optional).** Repeat step 1 against an open human-authored **GitHub** issue
+   (default backend) and verify the same additive stamp (HTML-encoded header, `perk:plan` label
+   added, title untouched, plan-body comment, no second issue).
+
+Append the run's findings to **Recorded observations** as a dated **Seventh live run** block (one
+row per gate). A negative/blocked finding is valid. Record any backend defect and open a follow-up —
+do not fix substantive code at the gate.
+
 ## Agent session emission (Objective #252, Node 5.1 — stretch)
 
 The opt-in Linear Agents-UI mirror of an implement run (`perk/linear_agent.py`, contracts §8.22).
@@ -684,3 +721,24 @@ live-proven directly.
 | 2026-06-18 | 6.1 (comment authors) | **Not run** — no `LINEAR_API_KEY` in the implement env. Offline-covered (`TestReadComments`: `user`/`botActor`/`editedAt` mapping + `perk` vs `human` classification). Live `botActor` population + perk's own bot-actor id deferred. | comment author selectability — **deferred to Node 4.3** |
 | 2026-06-18 | 6.2 (`descriptionUpdatedBy`) | **Not run.** Offline-covered (`TestReadDescriptionEdits`: filter to nodes carrying `descriptionUpdatedBy`, `diff=None`, author from `actor`). The single-object-vs-list shape + every-human-edit reliability (inventory §6.1) remain unproven; `_is_present` tolerates **both** shapes defensively. | description-edit reliability/shape — **deferred to Node 4.3** |
 | 2026-06-18 | 6.3 (personal-key vs agent-token) | **Not run.** Offline-covered (`TestReadAgentSession`: activity mapping, derived stop-signal, missing-session→empty, auth-failure→raises). The decisive §6.2 question (can the personal key read `agentSession.activities`, or is `LINEAR_AGENT_TOKEN` required?) is **unsettled** — the contract's fail-loud `read_agent_session` raise accommodates either outcome. | personal-key-vs-agent-token (inventory §6.2) — **deferred to Node 4.3** |
+
+> **Seventh live run: 2026-06-19** (Objective #682, Node 3.1 — **Mode 7, in-place issue adoption**).
+> **BLOCKED — not executed.** The implement environment for this node carried **no
+> `LINEAR_API_KEY`** (and the repo is not Linear-configured), so the live adoption probe could
+> **not** be run — recorded honestly rather than fabricated (consistent with the Mode 6 Sixth-live-run
+> entry and nodes 1.2–2.3). The two new surfaces (`read_issue` + `adopt_issue_as_plan`; contracts
+> §8.29) are **offline-covered** on **both** backends: `tests/test_linear_backend.py`
+> (`TestReadIssueAndAdopt`) pins the Linear neutral-shape read + the additive-stamp (inline-code
+> header, additive `labelIds` union, verbatim human body, title-untouched, plan-body comment) and
+> `tests/test_github.py` / `tests/test_issues.py` pin the GitHub module + adapter twins; the cold
+> door + save branch + handoff recovery + mutual-exclusion are pinned in `tests/test_from_cmd.py` +
+> `tests/test_plan_save.py`. **Live field selectability** (does Linear's `issue(id:)` accept the
+> adoption read selection?) and the **end-to-end in-place stamp against a real human issue** remain
+> **live-unproven**. **Node 4.3 is the objective's final live-validation gate**; the Mode 7 runbook
+> above is ready to run the moment a `LINEAR_API_KEY` is available.
+
+| Date | Gate | Observation | Feeds |
+|---|---|---|---|
+| 2026-06-19 | 7.1 (adopt in place) | **Not run** — no `LINEAR_API_KEY` in the implement env. Offline-covered (`TestReadIssueAndAdopt.test_adopt_issue_as_plan_stamps_in_place`: additive label union, inline-code header stamp, verbatim human body, title untouched, plan-body comment). Live end-to-end stamp + no-second-object deferred. | live adoption stamp — **deferred to Node 4.3** |
+| 2026-06-19 | 7.2 (`adopted_from` provenance) | **Not run.** Offline-covered (the stamped header carries `adopted_from`; `PlanHeader.to_data()` + `PLAN_HEADER_FIELDS` pinned). Live provenance read deferred. | adoption provenance — **deferred to Node 4.3** |
+| 2026-06-19 | 7.3 (refusals) | **Not run.** Offline-covered (`tests/test_from_cmd.py`: `adopt_not_found` / `adopt_not_open` / `already_a_plan`). Live refusal behavior deferred. | adoption refusals — **deferred to Node 4.3** |

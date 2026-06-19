@@ -67,6 +67,11 @@ class PlanSaveResult:
     help="Comma-separated perk:learn issue ids this docs plan consumes (hop-2; e.g. '45,50' "
     "or 'ENG-45,ENG-50').",
 )
+@click.option(
+    "--adopt-from",
+    help="Adopt the named pre-existing issue IN PLACE as this plan (#706; stamps the plan "
+    "metadata additively into that issue, mutually exclusive with --objective-id/--node-id).",
+)
 @click.option("--dry-run", is_flag=True, help="Compose and print without touching GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
@@ -79,6 +84,7 @@ def plan_save(
     objective_id: str | None,
     node_id: str | None,
     consumed_learn: str | None,
+    adopt_from: str | None,
     dry_run: bool,
     as_json: bool,
 ) -> None:
@@ -111,6 +117,10 @@ def plan_save(
         consumed_learn_ids = _consumed_learn_from_handoff(
             repo_root, resolved_run_id, _parse_consumed_learn(consumed_learn)
         )
+        # Recover the adoption link from the handoff (#706): the `plan from` cold door stashes the
+        # source `adopt_from` issue id in the handoff so it survives the `/plan-save` *command*
+        # path (which forwards only {plan, title}). An explicit --adopt-from always wins.
+        adopt_from = _adopt_from_handoff(repo_root, resolved_run_id, adopt_from)
         result = _plan_save_impl(
             repo_root=repo_root,
             plan_file=plan_file,
@@ -119,6 +129,7 @@ def plan_save(
             objective_id=objective_id,
             node_id=node_id,
             consumed_learn=consumed_learn_ids,
+            adopt_from=adopt_from,
             dry_run=dry_run,
         )
     except IssueBackendError as exc:
@@ -205,6 +216,33 @@ def _consumed_learn_from_handoff(
     return tuple(sorted(ids))
 
 
+def _adopt_from_handoff(
+    repo_root: Path,
+    run_id: str | None,
+    adopt_from: str | None,
+) -> str | None:
+    """Default ``adopt_from`` from the run's handoff when not passed explicitly (#706).
+
+    The ``plan from`` cold door stashes the source issue id in the handoff (key ``adopt_from``) so
+    the in-place adoption link survives the ``/plan-save`` *command* path (which forwards only
+    ``{plan, title}``). An explicit ``--adopt-from`` always wins; a missing handoff, a non-adoption
+    handoff (no ``adopt_from`` key), or a malformed value leaves the input untouched. Best-effort:
+    a malformed handoff must never block a save. The id is an opaque string (§8.21).
+    """
+    if adopt_from is not None or not run_id:
+        return adopt_from
+    try:
+        handoff = cache.read_handoff(repo_root, run_id)
+    except (OSError, ValueError):
+        return adopt_from
+    if not handoff:
+        return adopt_from
+    ho_adopt = handoff.get("adopt_from")
+    if ho_adopt:
+        return str(ho_adopt)
+    return adopt_from
+
+
 def _parse_consumed_learn(raw: str | None) -> tuple[str, ...]:
     """Parse a comma-separated issue-id list into a sorted unique tuple of opaque string ids
     (hop-2; GitHub ``45`` or Linear ``ENG-45``).
@@ -261,9 +299,20 @@ def _plan_save_impl(
     objective_id: str | None = None,
     node_id: str | None = None,
     consumed_learn: tuple[str, ...] = (),
+    adopt_from: str | None = None,
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
+    # In-place adoption (#706) is NOT objective-linked: the node-unification path is the in-place
+    # writer for objective nodes — refuse to mix two in-place semantics.
+    if adopt_from is not None:
+        adopt_from = adopt_from.strip().lstrip("#").strip() or None
+    if adopt_from is not None and (objective_id is not None or node_id is not None):
+        raise UserFacingCliError(
+            "--adopt-from is mutually exclusive with --objective-id/--node-id (adoption is not "
+            "objective-linked; objective nodes are unified in place via their node-issue).",
+            error_type="invalid_input",
+        )
     if plan_file is None:
         raise UserFacingCliError(
             "No plan file given\nPass --plan-file <path> to the plan markdown.",
@@ -290,6 +339,9 @@ def _plan_save_impl(
         objective_id=objective_id,
         consumed_learn=consumed_learn,
         base=resolved_base,
+        # Adoption provenance (#706): self-referential by construction (the plan is stamped INTO
+        # the source issue); its presence marks the issue body/title as verbatim human content.
+        adopted_from=adopt_from,
     )
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
@@ -308,7 +360,26 @@ def _plan_save_impl(
             plan_markdown=plan_markdown,
         )
 
-    if unified_ref is not None:
+    # In-place adoption (#706): stamp the authored plan ADDITIVELY into the existing (non-perk)
+    # issue — an in-place write into an existing object, so no second `perk:plan` issue is minted.
+    # `dry_run` falls through to the standalone compose-preview (byte-stable existing behavior).
+    adopt_ref = None
+    if not dry_run and adopt_from:
+        adopt_ref = backend.adopt_issue_as_plan(
+            issue_id=adopt_from,
+            header_fields=header.to_data(),
+            plan_markdown=plan_markdown,
+            callout=plan.plan_callout(adopt_from),
+            command=f"perk impl {adopt_from}",
+        )
+
+    if adopt_ref is not None:
+        # The human issue IS the plan issue now (an in-place additive stamp, so `updated=True`); it
+        # carries the `perk:plan` label, added (never replacing) alongside the human's own labels.
+        issue = issue_backend.IssueRef(id=adopt_ref.id, url=adopt_ref.url, existed=True)
+        updated = True
+        labels: tuple[str, ...] = (plan.PLAN_LABEL,)
+    elif unified_ref is not None:
         # Project-backed: the node-issue IS the plan issue (an in-place write into an existing
         # issue, so `updated=True`); it carries no perk:plan label (discovered by project
         # membership + the objective-node block).

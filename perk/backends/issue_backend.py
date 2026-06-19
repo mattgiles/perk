@@ -129,6 +129,23 @@ class LearnIssueSummary:
     body: str
 
 
+@dataclass(frozen=True)
+class AdoptableIssue:
+    """A pre-existing (human-authored) issue read for in-place adoption (#706, §8.29).
+
+    The neutral shape :meth:`IssueBackend.read_issue` returns for *any* issue — not just perk's
+    own plan/learn/objective issues. ``title``/``body`` are **untrusted human DATA** (the
+    adoption seed wraps them in an ``<untrusted_adopted_issue>`` block). ``state`` is the
+    normalized ``"OPEN" | "CLOSED"`` vocabulary (the contract's state discipline).
+    """
+
+    id: str
+    url: str
+    title: str
+    body: str
+    state: str
+
+
 class IssueBackend(Protocol):
     """The issue-tracking tier contract (one instance per repo; see the module docstring).
 
@@ -203,6 +220,41 @@ class IssueBackend(Protocol):
     def get_plan_body(self, *, issue_id: str) -> str | None:
         """Fetch a plan issue's verbatim plan-body block markdown, wherever the backend stores
         it. None when the issue or block is absent; raises on an infra failure."""
+        ...
+
+    # --- in-place issue adoption (#706, §8.29) ---
+
+    def read_issue(self, *, issue_id: str) -> AdoptableIssue | None:
+        """Read *any* issue's raw title + body + normalized state for in-place adoption.
+
+        Unlike :meth:`get_plan` (needs a ``plan-header``) / :meth:`get_plan_body` (needs a
+        ``plan-body`` block), this reads a **non-perk** human issue verbatim. ``title``/``body``
+        are untrusted human DATA. ``None`` when the issue does not exist; raises
+        ``IssueBackendError`` on an infra failure.
+        """
+        ...
+
+    def adopt_issue_as_plan(
+        self,
+        *,
+        issue_id: str,
+        header_fields: dict[str, object],
+        plan_markdown: str,
+        callout: str,
+        command: str,
+        dry_run: bool = False,
+    ) -> IssueRef:
+        """Stamp perk's plan metadata **additively** into a pre-existing issue — adopting it IN
+        PLACE as a perk plan (#706, §8.29), never minting a second object.
+
+        The additive stamp (mirrors the node-unification in-place writer): (a) ensure + **add**
+        the ``perk:plan`` label to the existing issue (never replaces its labels); (b) stamp the
+        ``plan-header`` block additively into the issue **body** (human prose preserved verbatim,
+        **title untouched**); (c) idempotently prepend the ``callout`` (keyed on ``command``)
+        above the body; (d) upsert the ``plan-body`` comment carrying ``plan_markdown``. Returns
+        ``IssueRef(existed=True)``. Idempotent on re-save (header re-rendered in place;
+        callout/label idempotent). ``dry_run`` validates + composes only — no backend writes.
+        """
         ...
 
     # --- learn issues ---

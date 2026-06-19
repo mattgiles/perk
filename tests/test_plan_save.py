@@ -124,6 +124,96 @@ def test_plan_save_resave_does_not_prepend_callout(monkeypatch):
     assert calls["callout"] is None
 
 
+# ----------------------------------------------------- in-place issue adoption (#706, §8.29)
+
+
+def _stub_adopt(monkeypatch) -> dict[str, object]:
+    """Stub the adoption write surface; record the adopt call + flag any second-object create."""
+    calls: dict[str, object] = {"adopt": None, "created": False}
+    monkeypatch.setattr(
+        github,
+        "read_issue",
+        lambda **k: github.IssueRead(number=7, url="u/7", title="t", body="b", state="OPEN"),
+    )
+
+    def _adopt(**k):
+        calls["adopt"] = k
+        return github.PlanAdoption(number=int(k["number"]), url="u/7", dry_run=False)
+
+    def _create(**_k):
+        calls["created"] = True  # a second perk:plan issue would be the bug
+        return github.PlanIssue(number=999, url="x", existed=False)
+
+    monkeypatch.setattr(github, "adopt_issue_as_plan", _adopt)
+    monkeypatch.setattr(github, "create_plan_issue", _create)
+    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    return calls
+
+
+def test_plan_save_adopt_from_stamps_in_place(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_adopt(monkeypatch)
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--adopt-from", "7", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["updated"] is True
+    assert payload["issue"]["id"] == "7" and payload["issue"]["existed"] is True
+    assert payload["plan_ref"]["pr_id"] == "7"
+    assert payload["plan_ref"]["labels"] == [plan.PLAN_LABEL]
+    # No second object minted; the adoption stamp carried the provenance + the impl callout.
+    assert calls["created"] is False
+    adopt = cast("dict[str, object]", calls["adopt"])
+    header_fields = cast("dict[str, object]", adopt["header_fields"])
+    assert header_fields["adopted_from"] == "7"
+    assert adopt["command"] == "perk impl 7"
+    assert "Do the thing" in cast("str", adopt["plan_markdown"])
+
+
+def test_plan_save_adopt_from_strips_hash(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_adopt(monkeypatch)
+    result = _run(monkeypatch, ["--plan-file", "plan.md", "--adopt-from", "#7", "--json"])
+    assert result.exit_code == 0, result.output
+    adopt = cast("dict[str, object]", calls["adopt"])
+    header_fields = cast("dict[str, object]", adopt["header_fields"])
+    assert adopt["number"] == 7 and header_fields["adopted_from"] == "7"
+
+
+def test_plan_save_adopt_from_mutually_exclusive_with_objective(monkeypatch):
+    _authed(monkeypatch)
+    _stub_adopt(monkeypatch)
+    result = _run(
+        monkeypatch,
+        ["--plan-file", "plan.md", "--adopt-from", "7", "--objective-id", "5", "--json"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["error_type"] == "invalid_input"
+    assert "mutually exclusive" in payload["message"]
+
+
+def test_plan_save_adopt_from_recovered_from_handoff(monkeypatch):
+    from perk.state import cache
+
+    _authed(monkeypatch)
+    calls = _stub_adopt(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
+        cache.write_handoff(Path(d), "RID7", {"stage": "plan", "adopt_from": "7"})
+        # No --adopt-from flag: the link is recovered from the run handoff.
+        result = runner.invoke(
+            plan_save,
+            ["--plan-file", "plan.md", "--run-id", "RID7", "--json"],
+            obj=PerkContext(cwd=Path(d)),
+        )
+        assert result.exit_code == 0, result.output
+    adopt = cast("dict[str, object]", calls["adopt"])
+    assert adopt["number"] == 7
+    assert calls["created"] is False
+
+
 def test_plan_save_json_shape(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
