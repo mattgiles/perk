@@ -1825,7 +1825,7 @@ literal markers are a cross-plane contract:
 - **`<!-- BEGIN perk managed -->`** — the managed `AGENTS.md` block. `perk init` (Python plane)
   writes it; Pi loads `AGENTS.md` into `contextFiles`; the extension's `/perk-selfcheck` (TS plane,
   `extension/doors/selfcheck.ts`) reads `getSystemPromptOptions().contextFiles` and confirms some file
-  carries this marker. Changing the literal in `perk/convergence/init.py` **must** update
+  carries this marker. Changing the literal in `perk/convergence/init/blocks.py` **must** update
   `MANAGED_AGENTS_MARKER` in `extension/doors/selfcheck.ts` in the same turn.
 - **`.pi/APPEND_SYSTEM.md`** — the ambient routing index (maintained by `/learn-docs`, never
   `init`). Pi joins it into `appendSystemPrompt`; selfcheck confirms the on-disk content reached the
@@ -1966,7 +1966,7 @@ silently delivered. Injection checks only user-originated skills (installed unde
 so it uses that path **only** (no self-repo fallback).
 
 **Validation (`doctor`, Node 3.1):** `perk doctor` adds one rolled-up, non-fatal **`bindings`**
-check (`perk/convergence/doctor.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
+check (`perk/convergence/doctor/checks.py::_bindings_check`) over the **full resolved set** (`resolve_bindings(user,
 defaults=load_bindings().bindings)`). It surfaces the resolver's dropped-user-binding `issues` plus,
 per delivered binding: **skill-presence** — the skill is installed under `.agents/skills/<name>/
 SKILL.md`, with a self-repo `skills/<name>/SKILL.md` *pre-sync safety net* fallback
@@ -2124,7 +2124,7 @@ when deselected); hand-adding a provider's package *without* selecting it is uns
 who wants that package selects the provider via `[providers]`. The retired `@tombell/pi-plan` /
 `@juicesharp/rpiv-todo` re-enter `packages` **only** when a selection names them.
 
-**Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/convergence/doctor.py::
+**Validation (`doctor`):** `perk doctor` adds one **`providers`** check (`perk/convergence/doctor/checks.py::
 _providers_check`). A `ProvidersError` on the *bundled* file is a `fail` (cannot occur in a healthy
 install; "Reinstall perk"); an `ERROR` shape `Issue` on the bundled file is a `fail`. The repo
 selection is resolved against the supported set and any resolver `issue` (unknown id / seam
@@ -2144,7 +2144,7 @@ camelCase `settings.json` keys: `enabled`→`enabled`, `reserve_tokens`→`reser
 `enabled` kept only if a real `bool`; the token keys kept only if `int` (not `bool`) and `> 0`;
 ill-typed/absent keys are dropped (pi fills defaults). The convergence composes inside
 `_converge_settings` (`perk/substrate/config.py::parse_compaction_table` + `load_committed_compaction`,
-`perk/convergence/init.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
+`perk/convergence/init/settings.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
 `doctor` dry-runs/fixes it for free, **no** new check. **Committed-only read** (the deliberate
 divergence from `[providers]`' overlaid `load_config` read): `[compaction]` is read from committed
 `.pi/perk.toml` **only**, never the `perk.local.toml` overlay, so the committed `settings.json`
@@ -2616,7 +2616,7 @@ remote-URL parsing); none mutate; a gh-missing/timeout raises `GitHubError`:
 - `get_repo_variable(*, name, repo_root) -> str | None` — `GET .../actions/variables/{name}`
   (`--jq .value`): value on returncode 0, `None` on 404/non-zero/empty. Used to read `PERK_ENABLED`.
 
-### The report-only `runner` check group (`perk/convergence/doctor.py::_runner_checks`)
+### The report-only `runner` check group (`perk/convergence/doctor/github_checks.py::_runner_checks`)
 
 A **report-only** check group (no `--fix` side — `_apply_fixes` is untouched), wired into
 `_build_checks` **inside the `if verify:` block** after `_github_checks` (it shells `gh`), wrapped in
@@ -3043,7 +3043,7 @@ user-owned config):
 warn), a bad `[issues]` selection hard-breaks **every** issue-touching command. Network readiness
 is *not* this offline check's job — that is the `linear` group's (below).
 
-**The verify-gated `linear` doctor group** (`perk/convergence/doctor.py::_linear_checks`; present only when
+**The verify-gated `linear` doctor group** (`perk/convergence/doctor/linear_checks.py::_linear_checks`; present only when
 `verify` AND the committed backend is `"linear"`). All warn-level on failure — network readiness
 is non-fatal, mirroring the `github` group's D3 discipline. Built from one
 `linear_backend.check_readiness(client, team_key, ensure_labels=False)` call (the shared
@@ -3079,7 +3079,7 @@ key + team are available, `check_readiness(..., ensure_labels=True)` ensures the
 created names land on `fixed` (`Linear: created label perk:plan`), failures on `fix_errors`.
 Lookup-first idempotency: a converged workspace reports nothing (the doctor idempotency rule).
 
-**The init readiness step** (`perk/convergence/init.py::_linear_readiness`, verify-gated, non-fatal — the
+**The init readiness step** (`perk/convergence/init/__init__.py::_linear_readiness`, verify-gated, non-fatal — the
 GitHub D3 mirror: file convergence already succeeded). Only when `verify` AND the committed
 backend is `"linear"`: missing key/team degrade to an errored `LinearReport`; otherwise the probe
 runs with `ensure_labels=True` (init converges the five perk labels upfront; the lazy write-time
@@ -3092,7 +3092,7 @@ when `auth_ok && team_ok`): non-fatal — it does **not** flip `LinearReport.ok`
 render adds a `⚠️` sub-line per gap (Projects read-access / missing workflow state types); a
 fully-ready project readiness prints nothing extra.
 
-**The `npm:pi-mono-linear` settings convergence** (`perk/convergence/init.py::_converge_linear_package`,
+**The `npm:pi-mono-linear` settings convergence** (`perk/convergence/init/settings.py::_converge_linear_package`,
 composed inside `_converge_settings` — it rides the `settings-wiring` managed convergence, so
 doctor dry-runs and `--fix`es it for free; no new doctor check, no new capability).
 Two-directional, mirroring `_converge_provider_packages`: `backend = "linear"` selected → the

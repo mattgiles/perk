@@ -8,7 +8,9 @@ from perk import github as gh_mod
 from perk.cli.cli import cli
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
+from perk.convergence.init import extension_clone as _ext_clone
 from perk.convergence.init import report_to_dict, run_init
+from perk.convergence.init import skills as _skills_mod
 
 
 def _git_init(path) -> None:
@@ -94,13 +96,13 @@ def test_sync_skills_reports_only_on_link_change(tmp_path, monkeypatch):
     _install_perk_skills(tmp_path)
     # Link set changes across the sync -> one change entry.
     states = iter([{}, {"perk-plan": "/cache/perk-plan"}])
-    monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: next(states))
+    monkeypatch.setattr(_skills_mod, "_skill_link_state", lambda root: next(states))
     changes: list[str] = []
     assert init_mod.sync_skills(tmp_path, changes) is None
     assert changes == [".agents/skills/: synchronized via skills update --sync"]
 
     # Link set unchanged -> no change entry (idempotent reporting).
-    monkeypatch.setattr(init_mod, "_skill_link_state", lambda root: {"perk-plan": "/cache/x"})
+    monkeypatch.setattr(_skills_mod, "_skill_link_state", lambda root: {"perk-plan": "/cache/x"})
     changes2: list[str] = []
     assert init_mod.sync_skills(tmp_path, changes2) is None
     assert changes2 == []
@@ -217,7 +219,7 @@ def test_github_error_is_non_fatal(git_repo, monkeypatch):
     # A flaky/slow/broken gh (GitHubError) must not crash init (D3 — GitHub non-fatal).
     monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: True)
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)  # no network
-    monkeypatch.setattr(init_mod, "_clone_extension_fresh", lambda clone, url: None)  # no network
+    monkeypatch.setattr(_ext_clone, "_clone_extension_fresh", lambda clone, url: None)  # no network
 
     def boom():
         raise gh_mod.GitHubError("gh timed out")

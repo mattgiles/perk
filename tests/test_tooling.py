@@ -44,7 +44,7 @@ _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("git", "_run_capture"),
     ("_exec", "_run"),
     ("env", "_node_version"),
-    ("init", "sync_skills"),
+    ("skills", "sync_skills"),
     ("run_worker", "_spawn_worker"),
     ("launch", "run_worktree_setup"),
     ("shared", "run_skills"),
