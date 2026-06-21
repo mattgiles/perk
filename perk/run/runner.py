@@ -5,7 +5,7 @@ perk ``run_id``, persist the dispatch intent as a durable ``run_id → plan`` li
 (``cache.write_dispatch``), read it back to verify it established (the §8.2 establish-before-
 consume discipline), then **trigger** a runner. This module is the runner library — the
 runner-agnostic ``Runner`` `Protocol` plus its first (and currently only) implementation,
-``GitHubActionsRunner``. No CLI, no Click here; the drive lives in ``perk/run/launch.py``.
+``GitHubActionsRunner``. No CLI, no Click here; the drive lives in ``perk/run/launch/remote.py``.
 
 The perk ``run_id`` (a ULID, ``perk/state/run_id.py``) is the canonical, runner-agnostic correlation
 key and is *itself* the run-discovery token: it is a workflow input and is embedded in the

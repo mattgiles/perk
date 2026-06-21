@@ -39,7 +39,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
 # extension/doors/prReview.ts) plus the cold
-# `binding_trigger="command:learn-docs"` override in perk/run/launch.py. Commands that ARE registry
+# `binding_trigger="command:learn-docs"` override in perk/run/launch/. Commands that ARE registry
 # stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
     {"objective-reconcile", "learn-docs", "pr-review"}
