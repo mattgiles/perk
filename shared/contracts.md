@@ -546,7 +546,7 @@ in-session — D2). What T2b adds is the in-process twin of the cold door usable
 impl worktree (same cwd): when `/implement` runs in an impl context (read-write + a linked
 `active_plan_ref`), it offers a lossless `ctx.newSession` fresh-context handoff seeded (via
 `withSession` → `sendUserMessage`) with the plan-read priming (`implementHandoffPrompt`, the
-in-session twin of `perk/run/launch.py`'s `_initial_prompt`: read the plan from its canonical source,
+in-session twin of `perk/run/launch/prompts.py`'s `_initial_prompt`: read the plan from its canonical source,
 implement, `/submit` — carry the plan forward, never summarize it). Model-visible output is capped
 (a single short confirmation; the durable state is the worktree's materialized plan-ref + the plan
 issue). Dirty-tree hygiene is gated **manually** in the handler (a `newSession` session-replace may
@@ -1203,7 +1203,7 @@ close_and_label_consolidated{ issue }               -> bool
   `unexpected payload` substring.
 
   **P2.T17 — learn is now ACTIVE (primed launch + guided warm door).** The capture mechanism above
-  is unchanged; what's added is the *driver*. The `learn` cold launch is **primed** (`launch.py`
+  is unchanged; what's added is the *driver*. The `learn` cold launch is **primed** (`launch/prompts.py`
   `_learn_prompt`): the session opens already investigating the landed change (read the plan +
   derive the merged PR from the `plan-<pr_id>` head branch) and is told to call the `learn` tool
   with synthesized learnings. The warm **bare `/learn`** (interactive) **injects `perk-learn`
@@ -1415,8 +1415,8 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > left intact per the keep-and-annotate discipline.
 
 The **objective layer's deterministic foundation** — a long-running goal that *generates* bounded
-plans (PRIOR_ART §3). The pure mechanics live in `perk/objective.py` (the `plan.py` twin, reusing
-its block engine); the GitHub writes live in `perk/github/objectives.py`; the cold-door workers are the
+plans (PRIOR_ART §3). The pure mechanics live in the `perk/objective/` package (the `plan.py` twin,
+reusing its block engine); the GitHub writes live in `perk/github/objectives.py`; the cold-door workers are the
 `perk objective` group. **No registry stage and no model-facing tools** — those are T10.
 
 **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
@@ -2077,12 +2077,12 @@ seam** (vacate-only, `adapter: null`) — see the web status note in contracts-h
 
 **`cache.plan-ref.provider` is the issue backend, not the seam id.** Despite
 `docs/design/provider-contract.md` framing the `cache.plan-ref` `provider` field as the plan
-provider id, today it is the **issue backend** (`"github"`) — `perk/run/launch.py` branches on
+provider id, today it is the **issue backend** (`"github"`) — `perk/run/launch/prompts.py` branches on
 `provider == "github"`. The stamp sites (`plan_save_cmd.py` / `resume.py`'s
 `reconstruct_plan_ref` callers) no longer hardcode the `"github"` literal: the field is stamped
 from the **resolved issue backend's `backend_id`** (§8.21) — still the issue backend, still ≠
 the seam id. That "id == provider field" equivalence is aspirational; Node 2.2 does **not**
-restamp it (restamping would break `launch.py`'s backend branching). `cache.plan-ref` is
+restamp it (restamping would break `launch`'s backend branching). `cache.plan-ref` is
 untouched by the plan-seam deferral.
 
 **Validation depth (shape-only, repo-free):** the loaders/validators check that
@@ -2201,11 +2201,11 @@ exactly as in a warm session (§8.4).
 
 | input | shape | source |
 |---|---|---|
-| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch.py`), **not** the worker (Gap 7) |
+| `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch/__init__.py`), **not** the worker (Gap 7) |
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
 | handoff / plan-ref / plan-body | files under `<worktree>/.pi/workflow/` | materialized by positioning; the worker does not re-write them |
-| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
+| `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
 | `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
 | `signal` | `AbortSignal` | external cancellation; OR'd with the budget watchdog |
@@ -2347,7 +2347,7 @@ A `--remote` launch of a drivable stage (`implement`/`address`, the `doors.cold_
 stages) is a **real drive** (it was `remote_not_driven` through P2.T8c). The Python plane mints a
 perk `run_id`, **persists the `run_id → plan` linkage**, reads it back to verify, then **triggers**
 a runner that is discovered + matched back to the `run_id`. This node builds the dispatch driver
-(`perk/run/launch.py` `_drive_remote_target`) + the runner library (`perk/run/runner.py`); the GitHub
+(`perk/run/launch/remote.py` `_drive_remote_target`) + the runner library (`perk/run/runner.py`); the GitHub
 Actions workflow YAML it triggers is **Node 2.2** (named below, built there).
 
 ### The `Runner` contract (`perk/run/runner.py`)
@@ -3102,7 +3102,7 @@ unpinned plain-string entry is appended (bundled `linear` skill accepted wholesa
 unsupported). A malformed committed TOML defers to the config check (selection treated as absent).
 
 **Backend-aware prompt rendering (Node 3.1).** Every plan-read prompt site branches on
-`cache.plan-ref.provider` via the per-plane helpers `perk/run/launch.py::_plan_read_instruction` and
+`cache.plan-ref.provider` via the per-plane helpers `perk/run/launch/prompts.py::_plan_read_instruction` and
 `extension/doors/lifecycleGates.ts::planReadInstruction` — byte-parity across planes, asserted by the
 paired parity suites (`tests/test_worker_prompt_parity.py` + `extension/worker/worker.test.ts`). The
 `linear` arm references the pi-mono-linear `linear_get_issue` + `linear_list_comments` tools (the
@@ -3404,7 +3404,7 @@ failure never breaks a merge or a node transition).
   create`, fresh-create only — skipped on the idempotent found-existing path), **a plan lands**
   (`_reconcile_objective_on_land` in `pr land`, posted once when ≥1 node was marked, isolated like
   the existing close fail-open), and **reconciliation runs** (`perk objective reconcile`, on a real
-  non-dry-run update). Bodies come from pure backend-neutral composers in `perk/objective.py`
+  non-dry-run update). Bodies come from pure backend-neutral composers in `perk/objective/render.py`
   (`objective_created_update_body` / `plan_landed_update_body` / `reconciled_update_body`) computed
   from counts the call site already holds — **no extra network reads**. There is **no** plan-save
   Project Update (out of this node's scope).
