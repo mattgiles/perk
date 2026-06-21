@@ -5,6 +5,7 @@ import pytest
 from perk import github as gh_mod
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
+from perk.convergence.init import extension_clone as _ext_clone
 
 
 @pytest.fixture
@@ -37,11 +38,11 @@ def stub_env(monkeypatch):
     # `_clone_extension_fresh` creates the clone dir (sans git/network) so a second verified init
     # sees the clone present → status `unverifiable` → a no-op (idempotency preserved).
     monkeypatch.setattr(
-        init_mod,
+        _ext_clone,
         "_clone_extension_fresh",
         lambda clone, url: clone.mkdir(parents=True, exist_ok=True),
     )
-    monkeypatch.setattr(init_mod, "_freshen_extension", lambda clone: None)
+    monkeypatch.setattr(_ext_clone, "_freshen_extension", lambda clone: None)
 
 
 @pytest.fixture

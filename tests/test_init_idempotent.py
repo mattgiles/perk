@@ -4,6 +4,7 @@ import pytest
 
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence.init import extension_clone as _ext_clone
 from perk.convergence.init import run_init
 
 
@@ -678,18 +679,16 @@ def test_reconcile_extension_clone_materializes(tmp_path, monkeypatch):
 
 
 def test_init_verify_materializes_stale_extension_clone(git_repo, stub_env, monkeypatch):
-    from perk.convergence import init as init_mod
-
     calls: list = []
     monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
+        _ext_clone, "extension_clone_status", lambda root, *, self_repo: ("stale", "HEAD a != b")
     )
 
     def _freshen(clone):
         calls.append(clone)
 
     # Materialize-in-place: a stale clone is freshened, never blown away (no shutil.rmtree).
-    monkeypatch.setattr(init_mod, "_freshen_extension", _freshen)
+    monkeypatch.setattr(_ext_clone, "_freshen_extension", _freshen)
     report = run_init(git_repo, verify=True)
     assert report.ok
     assert len(calls) == 1
@@ -740,7 +739,7 @@ def test_materialize_stale_freshens_in_place(tmp_path, monkeypatch):
     clone = init_mod.consumer_git_clone_root(tmp_path)
     clone.mkdir(parents=True)
     monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("stale", "a != b")
+        _ext_clone, "extension_clone_status", lambda root, *, self_repo: ("stale", "a != b")
     )
     fetch_calls: list = []
     reset_calls: list = []
@@ -767,7 +766,7 @@ def test_materialize_fresh_is_noop(tmp_path, monkeypatch):
     clone = init_mod.consumer_git_clone_root(tmp_path)
     clone.mkdir(parents=True)
     monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("fresh", "sha")
+        _ext_clone, "extension_clone_status", lambda root, *, self_repo: ("fresh", "sha")
     )
 
     def _boom(*a, **k):  # pragma: no cover - fresh does no git work
@@ -783,7 +782,7 @@ def test_materialize_swallows_giterror(tmp_path, monkeypatch):
     from perk.convergence import init as init_mod
 
     monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("absent", "d")
+        _ext_clone, "extension_clone_status", lambda root, *, self_repo: ("absent", "d")
     )
 
     def _boom(*a, **k):
@@ -804,7 +803,7 @@ def test_materialize_unverifiable_leaves_clone_as_is(tmp_path, monkeypatch, clon
     if clone_present:
         clone.mkdir(parents=True)
     monkeypatch.setattr(
-        init_mod, "extension_clone_status", lambda root, *, self_repo: ("unverifiable", "offline")
+        _ext_clone, "extension_clone_status", lambda root, *, self_repo: ("unverifiable", "offline")
     )
 
     def _boom(*a, **k):  # pragma: no cover - offline does no git work
