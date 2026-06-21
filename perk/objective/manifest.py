@@ -9,7 +9,7 @@ The cohesive manifest concern: the :class:`Manifest` dataclass plus its renderer
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 from perk.objective._models import (
     OBJECTIVE_MANIFEST_KEY,
@@ -65,7 +65,7 @@ def render_manifest_block(
     }
 
 
-def _validate_manifest(data: dict[str, Any]) -> tuple[Manifest | None, list[str]]:
+def _validate_manifest(data: dict[str, object]) -> tuple[Manifest | None, list[str]]:
     """Validate a parsed ``objective-manifest`` block. Returns ``(Manifest, [])`` on success, else
     ``(None, [error…])``. Mirrors :func:`validate_roadmap`'s per-node typing rules (minus
     ``status``/``pr``, which the manifest excludes) plus the ``phases`` ``{str: str}`` map."""
@@ -85,7 +85,9 @@ def _validate_manifest(data: dict[str, Any]) -> tuple[Manifest | None, list[str]
     for i, raw_item in enumerate(raw_nodes):
         if not isinstance(raw_item, dict):
             return None, [f"node {i} is not a mapping"]
-        raw = cast(dict[str, Any], raw_item)
+        # `isinstance(x, dict)` narrows an `object` to `dict[Unknown, Unknown]` (key type Never);
+        # the cast restores usable `str` keys (no `Any`). Every value is isinstance-checked below.
+        raw = cast(dict[str, object], raw_item)
         for field in ("id", "description"):
             if field not in raw:
                 return None, [f"node {i} missing required field: {field}"]
@@ -103,10 +105,12 @@ def _validate_manifest(data: dict[str, Any]) -> tuple[Manifest | None, list[str]
         if raw_depends is not None:
             if not isinstance(raw_depends, list):
                 return None, [f"node {i} field 'depends_on' must be a list or null"]
+            deps: list[str] = []
             for j, item in enumerate(raw_depends):
                 if not isinstance(item, str):
                     return None, [f"node {i} field 'depends_on' item {j} must be a string"]
-            depends_on = tuple(raw_depends)
+                deps.append(item)
+            depends_on = tuple(deps)
         nodes.append(
             ObjectiveNode(
                 id=node_id,
@@ -123,7 +127,7 @@ def _validate_manifest(data: dict[str, Any]) -> tuple[Manifest | None, list[str]
     if not isinstance(raw_phases, dict):
         return None, ["field 'phases' must be a mapping"]
     phase_names: dict[str, str] = {}
-    for key, value in cast(dict[Any, Any], raw_phases).items():
+    for key, value in cast(dict[object, object], raw_phases).items():
         if not isinstance(key, str) or not isinstance(value, str):
             return None, ["field 'phases' must be a {str: str} mapping"]
         phase_names[key] = value

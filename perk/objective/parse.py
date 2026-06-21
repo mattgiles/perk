@@ -6,7 +6,7 @@ validate the ``objective-roadmap`` block), :func:`parse_structured_roadmap` (the
 structured-roadmap path), and :func:`parse_adopt_mapping` (the in-place adoption side-map).
 """
 
-from typing import Any, cast
+from typing import cast
 
 from perk.objective._models import (
     _VALID_STATUS_VALUES,
@@ -19,7 +19,7 @@ from perk.objective._models import (
 from perk.plan import find_metadata_block
 
 
-def validate_roadmap(data: dict[str, Any]) -> tuple[list[ObjectiveNode], list[str]]:
+def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list[str]]:
     """Validate a parsed roadmap block (``{schema_version, nodes:[…]}``) against the schema.
 
     Returns ``(nodes, errors)``; on any error ``nodes`` is ``[]``. Required per-node fields:
@@ -43,7 +43,9 @@ def validate_roadmap(data: dict[str, Any]) -> tuple[list[ObjectiveNode], list[st
     for i, raw_item in enumerate(raw_nodes):
         if not isinstance(raw_item, dict):
             return [], [f"node {i} is not a mapping"]
-        raw = cast(dict[str, Any], raw_item)
+        # `isinstance(x, dict)` narrows an `object` to `dict[Unknown, Unknown]` (key type Never);
+        # the cast restores usable `str` keys (no `Any`). Every value is isinstance-checked below.
+        raw = cast(dict[str, object], raw_item)
         for field in ("id", "description", "status"):
             if field not in raw:
                 return [], [f"node {i} missing required field: {field}"]
@@ -68,10 +70,12 @@ def validate_roadmap(data: dict[str, Any]) -> tuple[list[ObjectiveNode], list[st
         if raw_depends is not None:
             if not isinstance(raw_depends, list):
                 return [], [f"node {i} field 'depends_on' must be a list or null"]
+            deps: list[str] = []
             for j, item in enumerate(raw_depends):
                 if not isinstance(item, str):
                     return [], [f"node {i} field 'depends_on' item {j} must be a string"]
-            depends_on = tuple(raw_depends)
+                deps.append(item)
+            depends_on = tuple(deps)
 
         raw_slug = raw.get("slug")
         if raw_slug is not None and not isinstance(raw_slug, str):
@@ -111,7 +115,7 @@ def parse_roadmap_nodes(issue_body: str) -> tuple[list[ObjectiveNode], list[str]
     return validate_roadmap(block)
 
 
-def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
+def parse_structured_roadmap(raw: object) -> tuple[list[ObjectiveNode], list[str]]:
     """Validate a *structured* roadmap supplied out-of-band (the ``perk objective create
     --roadmap <json>`` path / the ``objective_save`` tool) — never hand-written YAML.
 
@@ -126,9 +130,9 @@ def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
     if raw is None:
         return [], []
     if isinstance(raw, list):
-        data: dict[str, Any] = {"schema_version": OBJECTIVE_SCHEMA_VERSION, "nodes": raw}
+        data: dict[str, object] = {"schema_version": OBJECTIVE_SCHEMA_VERSION, "nodes": raw}
     elif isinstance(raw, dict):
-        data = cast(dict[str, Any], dict(raw))
+        data = cast(dict[str, object], dict(raw))
         data.setdefault("schema_version", OBJECTIVE_SCHEMA_VERSION)
     else:
         return [], ["roadmap must be a JSON array of nodes (or a {schema_version, nodes} mapping)"]
@@ -136,16 +140,19 @@ def parse_structured_roadmap(raw: Any) -> tuple[list[ObjectiveNode], list[str]]:
     # default a missing/blank status to `pending` before the shared validator runs.
     nodes_raw = data.get("nodes")
     if isinstance(nodes_raw, list):
-        data["nodes"] = [
-            {**item, "status": item.get("status") or NodeStatus.PENDING.value}
-            if isinstance(item, dict) and not item.get("status")
-            else item
-            for item in nodes_raw
-        ]
+        defaulted: list[object] = []
+        for item in nodes_raw:
+            if isinstance(item, dict):
+                node = cast(dict[str, object], item)
+                if not node.get("status"):
+                    defaulted.append({**node, "status": NodeStatus.PENDING.value})
+                    continue
+            defaulted.append(item)
+        data["nodes"] = defaulted
     return validate_roadmap(data)
 
 
-def parse_adopt_mapping(raw: Any) -> dict[str, str]:
+def parse_adopt_mapping(raw: object) -> dict[str, str]:
     """Extract the per-node ``adopt_issue`` mapping from the same raw roadmap shape
     :func:`parse_structured_roadmap` accepts (a bare list of node mappings or a
     ``{schema_version, nodes}`` mapping) — the in-place objective-adoption side-map (#709, §8.30).
@@ -158,7 +165,7 @@ def parse_adopt_mapping(raw: Any) -> dict[str, str]:
     stays pristine. Offline-pure.
     """
     if isinstance(raw, dict):
-        nodes_raw = cast(dict[str, Any], raw).get("nodes")
+        nodes_raw = cast(dict[str, object], raw).get("nodes")
     elif isinstance(raw, list):
         nodes_raw = raw
     else:
@@ -169,7 +176,7 @@ def parse_adopt_mapping(raw: Any) -> dict[str, str]:
     for item in nodes_raw:
         if not isinstance(item, dict):
             continue
-        node = cast(dict[str, Any], item)
+        node = cast(dict[str, object], item)
         node_id = node.get("id")
         adopt = node.get("adopt_issue")
         if isinstance(node_id, str) and node_id and isinstance(adopt, str) and adopt.strip():
