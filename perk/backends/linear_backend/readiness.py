@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from perk import objective, plan
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
+    _opt_dict,
+    _opt_list,
+    _opt_str,
 )
 from perk.backends.linear_backend._helpers import (
     _NODE_STATUS_STATE_TYPE,
@@ -64,10 +66,9 @@ def check_readiness(client: LinearClient, *, team_key: str, ensure_labels: bool)
         data = client.request("{ viewer { id name email } }")
     except IssueBackendError as exc:
         return LinearReadiness(auth_ok=False, user=None, team_ok=False, error=str(exc))
-    viewer = data.get("viewer")
+    viewer_dict = _opt_dict(data.get("viewer"))
     user: str | None = None
-    if isinstance(viewer, dict):
-        viewer_dict = cast("dict[str, object]", viewer)
+    if viewer_dict is not None:
         name = viewer_dict.get("name")
         email = viewer_dict.get("email")
         user = name if isinstance(name, str) and name.strip() else None
@@ -139,21 +140,22 @@ def _present_state_types(data: dict[str, object]) -> frozenset[str]:
     Skips malformed nodes rather than raising (this probe never raises): a non-dict ``team`` /
     ``states`` / node, or a non-str ``type``, is simply dropped.
     """
-    team = data.get("team")
-    if not isinstance(team, dict):
+    team = _opt_dict(data.get("team"))
+    if team is None:
         return frozenset()
-    states = cast("dict[str, object]", team).get("states")
-    if not isinstance(states, dict):
+    states = _opt_dict(team.get("states"))
+    if states is None:
         return frozenset()
-    nodes = cast("dict[str, object]", states).get("nodes")
-    if not isinstance(nodes, list):
+    nodes = _opt_list(states.get("nodes"))
+    if nodes is None:
         return frozenset()
     present: set[str] = set()
-    for raw in cast("list[object]", nodes):
-        if not isinstance(raw, dict):
+    for raw in nodes:
+        node = _opt_dict(raw)
+        if node is None:
             continue
-        node_type = cast("dict[str, object]", raw).get("type")
-        if isinstance(node_type, str):
+        node_type = _opt_str(node.get("type"))
+        if node_type is not None:
             present.add(node_type)
     return frozenset(present)
 

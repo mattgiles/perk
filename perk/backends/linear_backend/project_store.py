@@ -7,6 +7,7 @@ from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
+    _opt_str,
     _require_dict,
     _require_list,
     _require_str,
@@ -64,7 +65,7 @@ class LinearProjectObjectiveStore:
             for proj in self._projects.list_projects():
                 content = proj.get("content")
                 header = plan.find_metadata_block(
-                    content if isinstance(content, str) else "", objective.OBJECTIVE_HEADER_KEY
+                    _opt_str(content) or "", objective.OBJECTIVE_HEADER_KEY
                 )
                 if header is not None and header.get("run_id") == run_id:
                     return objective_store.ObjectiveRef(
@@ -86,7 +87,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 return None
             content = project.get("content")
-            prose = content if isinstance(content, str) else ""
+            prose = _opt_str(content) or ""
             issues = tuple(
                 objective_store.AdoptableSourceIssue(
                     id=_require_str(issue.get("id"), "issue id"),
@@ -146,7 +147,7 @@ class LinearProjectObjectiveStore:
                 raise IssueBackendError(f"Linear project {source_id!r} not found")
             project_url = _require_str(project.get("url"), "project url")
             original_overview = project.get("content")
-            original_overview = original_overview if isinstance(original_overview, str) else ""
+            original_overview = _opt_str(original_overview) or ""
 
             # Resolve each adopt_map value (an id OR human identifier) to an existing project-issue
             # record — fail-loud on an id not in the project (the author named a non-member issue).
@@ -445,7 +446,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 return None
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
             issues = self._projects.project_issues(objective_id)
 
@@ -458,7 +459,7 @@ class LinearProjectObjectiveStore:
             for issue in issues:
                 identifier = _require_str(issue.get("identifier"), "issue identifier")
                 description = issue.get("description")
-                body = description if isinstance(description, str) else ""
+                body = _opt_str(description) or ""
                 block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
                 if block is None:
                     continue
@@ -497,7 +498,7 @@ class LinearProjectObjectiveStore:
         """
         for issue in self._projects.project_issues(objective_id):
             description_raw = issue.get("description")
-            body = description_raw if isinstance(description_raw, str) else ""
+            body = _opt_str(description_raw) or ""
             candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
             if candidate is not None and candidate.get("id") == node_id:
                 return (
@@ -549,11 +550,11 @@ class LinearProjectObjectiveStore:
         )
         return objective.ObjectiveNode(
             id=node_id,
-            description=description if isinstance(description, str) else "",
+            description=_opt_str(description) or "",
             status=status,
             pr=pr,
-            slug=slug if isinstance(slug, str) else None,
-            comment=comment if isinstance(comment, str) else None,
+            slug=_opt_str(slug),
+            comment=_opt_str(comment),
         )
 
     def update_objective_node(
@@ -658,7 +659,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 raise IssueBackendError(f"objective {objective_id!r} not found")
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             spliced = objective.replace_reconcilable_section(overview, to_linear_markdown(prose))
             if spliced is None:
                 raise IssueBackendError(
@@ -691,7 +692,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 raise IssueBackendError(f"objective {objective_id!r} not found")
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
             new_overview = plan.replace_metadata_block(
                 overview, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
@@ -762,7 +763,7 @@ class LinearProjectObjectiveStore:
             # old one); `enrich_phase_names` only SEEDS the name for a brand-new phase.
             project = self._projects.project_or_none(objective_id, "content")
             overview = project.get("content") if project is not None else ""
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             phase_key = objective.derive_phase(new_id)
             manifest, _manifest_errors = objective.parse_manifest(overview)
             phase_key_str = objective.phase_key_str(new_id)
@@ -852,7 +853,7 @@ class LinearProjectObjectiveStore:
         """Update the matching manifest entry's description (structural identity sync)."""
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, _errors = objective.parse_manifest(overview)
         if manifest is None or all(n.id != node_id for n in manifest.nodes):
             return
@@ -867,7 +868,7 @@ class LinearProjectObjectiveStore:
         """Append the new node's entry to the manifest, pinning a brand-new phase's name."""
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, _errors = objective.parse_manifest(overview)
         if manifest is None:
             return  # pre-manifest objective — doctor --fix backfill is the path
@@ -918,7 +919,7 @@ class LinearProjectObjectiveStore:
         if project is None:
             raise IssueBackendError(f"objective {objective_id!r} not found")
         overview = project.get("content")
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, manifest_errors = objective.parse_manifest(overview)
         header_ok = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) is not None
         reconcilable_ok = objective.replace_reconcilable_section(overview, "") is not None
@@ -937,9 +938,9 @@ class LinearProjectObjectiveStore:
             identifier = _require_str(issue.get("identifier"), "issue identifier")
             uuid = _require_str(issue.get("id"), "issue id")
             body_raw = issue.get("description")
-            body = body_raw if isinstance(body_raw, str) else ""
+            body = _opt_str(body_raw) or ""
             milestone_raw = issue.get("milestone_name")
-            milestone_name = milestone_raw if isinstance(milestone_raw, str) else None
+            milestone_name = _opt_str(milestone_raw)
             if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
                 continue  # foreign issue — not a roadmap node
             block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
@@ -1307,7 +1308,7 @@ class LinearProjectObjectiveStore:
             phase_names.setdefault(key, objective.phase_label(objective.derive_phase(node.id)))
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         data = objective.render_manifest_block(nodes, phase_names)
         self._projects.update_project_content(
             objective_id, self._insert_or_replace_manifest(overview, data)

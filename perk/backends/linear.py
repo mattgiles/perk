@@ -57,6 +57,24 @@ def _require_str(value: object, what: str) -> str:
     return value
 
 
+# --- optional-aware (tolerant, NEVER-raise) siblings of the _require_* family ---
+# These internalize the `cast`-after-`isinstance` workaround for the ty quirk "isinstance does not
+# narrow through a subsequent __getitem__" (docs/learned/toolchain/ty.md) for the LENIENT parse
+# sites that must skip / default / return None on a malformed shape rather than fail loud.
+
+
+def _opt_dict(value: object) -> dict[str, object] | None:
+    return cast("dict[str, object]", value) if isinstance(value, dict) else None
+
+
+def _opt_list(value: object) -> list[object] | None:
+    return cast("list[object]", value) if isinstance(value, list) else None
+
+
+def _opt_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
 RATELIMITED_CODE = "RATELIMITED"
@@ -273,15 +291,15 @@ def _graphql_error(errors: list[object], *, status: int) -> LinearGraphQLError:
     messages: list[str] = []
     codes: list[str] = []
     for entry in errors:
-        if isinstance(entry, dict):
-            entry_dict = cast("dict[str, object]", entry)
+        entry_dict = _opt_dict(entry)
+        if entry_dict is not None:
             raw_message = entry_dict.get("message")
             messages.append(
                 raw_message if isinstance(raw_message, str) else "(malformed Linear error entry)"
             )
-            extensions = entry_dict.get("extensions")
-            if isinstance(extensions, dict):
-                code = cast("dict[str, object]", extensions).get("code")
+            extensions = _opt_dict(entry_dict.get("extensions"))
+            if extensions is not None:
+                code = extensions.get("code")
                 if isinstance(code, str) and code not in codes:
                     codes.append(code)
         else:
