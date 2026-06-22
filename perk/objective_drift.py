@@ -36,7 +36,7 @@ class DriftCode(StrEnum):
     OVERVIEW_MARKER_DAMAGE = "overview_marker_damage"
 
 
-class Severity(StrEnum):
+class ObjectiveDriftSeverity(StrEnum):
     """A drift condition's severity."""
 
     ERROR = "error"
@@ -82,7 +82,7 @@ class DriftCondition:
     """A single detected drift condition (a row of the §4 catalog)."""
 
     code: DriftCode
-    severity: Severity
+    severity: ObjectiveDriftSeverity
     node_id: str | None
     target: str | None
     message: str
@@ -138,7 +138,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.MANIFEST_MALFORMED,
-                severity=Severity.ERROR,
+                severity=ObjectiveDriftSeverity.ERROR,
                 node_id=None,
                 target=None,
                 message="objective-manifest block is malformed: "
@@ -152,7 +152,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.MANIFEST_ABSENT,
-                severity=Severity.INFO,
+                severity=ObjectiveDriftSeverity.INFO,
                 node_id=None,
                 target=None,
                 message="no objective-manifest block in the overview — "
@@ -175,7 +175,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.OVERVIEW_MARKER_DAMAGE,
-                severity=Severity.ERROR,
+                severity=ObjectiveDriftSeverity.ERROR,
                 node_id=None,
                 target=None,
                 message="overview marker damage: " + ", ".join(damaged) + " absent or malformed",
@@ -195,7 +195,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.MISSING_NODE_ISSUE,
-                severity=Severity.ERROR,
+                severity=ObjectiveDriftSeverity.ERROR,
                 node_id=node_id,
                 target=None,
                 message=f"manifest node {node_id!r} has no node-issue in the project",
@@ -210,7 +210,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
             conditions.append(
                 DriftCondition(
                     code=DriftCode.DUPLICATE_NODE_IDS,
-                    severity=Severity.ERROR,
+                    severity=ObjectiveDriftSeverity.ERROR,
                     node_id=node_id,
                     target=", ".join(d.identifier for d in dupes),
                     message=f"node id {node_id!r} is shared by {len(dupes)} node-issues "
@@ -225,7 +225,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
             conditions.append(
                 DriftCondition(
                     code=DriftCode.MISSING_NODE_STATUS_BLOCK,
-                    severity=Severity.WARNING,
+                    severity=ObjectiveDriftSeverity.WARNING,
                     node_id=obs.node_id,
                     target=obs.identifier,
                     message=f"node-issue {obs.identifier} has an absent or malformed "
@@ -257,7 +257,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.BLOCKING_RELATION_CYCLE,
-                severity=Severity.ERROR,
+                severity=ObjectiveDriftSeverity.ERROR,
                 node_id=None,
                 target=None,
                 message="the observed blocking-relation graph contains a cycle" + added_desc,
@@ -271,7 +271,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
             conditions.append(
                 DriftCondition(
                     code=DriftCode.UNKNOWN_BLOCKER_REFERENCE,
-                    severity=Severity.INFO,
+                    severity=ObjectiveDriftSeverity.INFO,
                     node_id=obs.node_id,
                     target=blocker,
                     message=f"node-issue {obs.identifier} is blocked by {blocker}, which is not a "
@@ -290,7 +290,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
                 conditions.append(
                     DriftCondition(
                         code=DriftCode.DEPENDENCY_MISSING_IN_LINEAR,
-                        severity=Severity.WARNING,
+                        severity=ObjectiveDriftSeverity.WARNING,
                         node_id=node.id,
                         target=dep,
                         message=f"manifest edge {dep}→{node.id} (dep {dep} blocks {node.id}) "
@@ -304,7 +304,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
         conditions.append(
             DriftCondition(
                 code=DriftCode.DEPENDENCY_EXTRA_IN_LINEAR,
-                severity=Severity.INFO,
+                severity=ObjectiveDriftSeverity.INFO,
                 node_id=node_id,
                 target=dep,
                 message=f"Linear has a blocking relation {dep}→{node_id} not in the manifest "
@@ -320,7 +320,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
             conditions.append(
                 DriftCondition(
                     code=DriftCode.DELETED_PHASE_MILESTONE,
-                    severity=Severity.ERROR,
+                    severity=ObjectiveDriftSeverity.ERROR,
                     node_id=None,
                     target=pinned_name,
                     message=f"phase {phase_key!r} milestone {pinned_name!r} is missing "
@@ -336,7 +336,7 @@ def detect_drift(snapshot: ObservedSnapshot) -> DriftReport:
             conditions.append(
                 DriftCondition(
                     code=DriftCode.RENAMED_PHASE_MILESTONE,
-                    severity=Severity.WARNING,
+                    severity=ObjectiveDriftSeverity.WARNING,
                     node_id=None,
                     target=name,
                     message=f"milestone {name!r} matches no manifest-pinned phase name "

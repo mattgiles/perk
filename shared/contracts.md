@@ -1849,7 +1849,7 @@ The **second parsed cross-plane contract**, `shared/bindings.yaml` (sibling of `
 maps a **trigger** to a **skill** plus a per-binding delivery **mode**. It is bundled automatically
 via the `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both
 planes through independent readers: **`perk/substrate/bindings.py`** (`load_bindings` / `validate`, returning
-`BindingSet`/`Binding` + the shared `Issue`/`Severity` findings, raising `BindingsError` only for
+`BindingSet`/`Binding` + the shared `Issue`/`FindingSeverity` findings, raising `BindingsError` only for
 structural failures) and **`extension/substrate/bindings.ts`** (`loadDefaultBindings`, a thin structural
 parse). The Python plane is the authoritative validator.
 
@@ -2028,10 +2028,10 @@ knows how to wire — distinct from the per-repo **selection** (a flat `[provide
 `.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
-`resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`Severity` findings,
+`resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`FindingSeverity` findings,
 raising `ProvidersError` only for structural failures) and **`extension/substrate/providers.ts`**
 (`loadProviders` + the pure `resolveProviders`, returning `ResolvedProviders { plan, todo, askuser, footer, web, issues }`
-with `issues` as **`string[]`** — the TS plane has no `Issue`/`Severity`). The Python plane is the
+with `issues` as **`string[]`** — the TS plane has no `Issue`/`FindingSeverity`). The Python plane is the
 authoritative validator. The
 design is locked in `docs/design/adapter-architecture.md` (Node 1.3), over
 `docs/design/provider-contract.md` (the seven dimensions) and `docs/design/pluggability-taxonomy.md` (the C3 behavior-preserving

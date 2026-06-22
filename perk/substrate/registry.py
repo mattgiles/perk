@@ -13,7 +13,7 @@ LBYL throughout (dignified-python): shapes are checked before use.
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 
@@ -28,7 +28,7 @@ WORKTREES: tuple[str, ...] = ("none", "reuse", "create")
 RUN_ID_POLICIES: tuple[str, ...] = ("keep", "mint")
 
 
-class Severity(Enum):
+class FindingSeverity(Enum):
     ERROR = "error"
     WARNING = "warning"
 
@@ -37,7 +37,7 @@ class Severity(Enum):
 class Issue:
     """A single validation finding, addressed to a stage (or the registry as a whole)."""
 
-    severity: Severity
+    severity: FindingSeverity
     where: str  # stage id, or "registry" for whole-file issues
     message: str
 
@@ -111,11 +111,11 @@ def load_registry(path: Path | None = None) -> Registry:
     return Registry(schema_version=schema_version, state_keys=state_keys, stages=stages, raw=data)
 
 
-def _as_list(value: Any) -> list[Any]:
+def _as_list(value: object) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
-def _flatten_state_keys(raw: Any) -> set[str]:
+def _flatten_state_keys(raw: object) -> set[str]:
     """``{github: [plan, ...], cache: [...]}`` -> ``{"github.plan", ...}``."""
     if not isinstance(raw, dict):
         return set()
@@ -126,38 +126,38 @@ def _flatten_state_keys(raw: Any) -> set[str]:
     return keys
 
 
-def _parse_stage(raw: Any) -> Stage:
+def _parse_stage(raw: object) -> Stage:
     """Coerce one raw stage mapping into a ``Stage``, tolerating absent fields.
 
     Missing/ill-typed fields become empty defaults so the *validator* (not the parser)
     reports them — that keeps all consistency findings in one place.
     """
-    raw = raw if isinstance(raw, dict) else {}
+    data: dict[str, Any] = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
     return Stage(
-        id=_str(raw.get("id")),
-        summary=_str(raw.get("summary")),
-        mode=_str(raw.get("mode")),
-        worktree=_str(raw.get("worktree")),
-        doors=_map(raw.get("doors")),
-        run_id=_map(raw.get("run_id")),
-        command=_str(raw.get("command")),
-        requires=_str_list(raw.get("requires")),
-        reads=_str_list(raw.get("reads")),
-        writes=_str_list(raw.get("writes")),
-        predecessors=_str_list(raw.get("predecessors")),
-        successors=_str_list(raw.get("successors")),
+        id=_str(data.get("id")),
+        summary=_str(data.get("summary")),
+        mode=_str(data.get("mode")),
+        worktree=_str(data.get("worktree")),
+        doors=_map(data.get("doors")),
+        run_id=_map(data.get("run_id")),
+        command=_str(data.get("command")),
+        requires=_str_list(data.get("requires")),
+        reads=_str_list(data.get("reads")),
+        writes=_str_list(data.get("writes")),
+        predecessors=_str_list(data.get("predecessors")),
+        successors=_str_list(data.get("successors")),
     )
 
 
-def _str(value: Any) -> str:
+def _str(value: object) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _map(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _map(value: object) -> dict[str, Any]:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
 
 
-def _str_list(value: Any) -> list[str]:
+def _str_list(value: object) -> list[str]:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
@@ -175,7 +175,7 @@ def validate(registry: Registry) -> list[Issue]:
 
 def _err(where: str, msg: str) -> Issue:
     """Shorthand for the validators' uniform ERROR-severity issues."""
-    return Issue(Severity.ERROR, where, msg)
+    return Issue(FindingSeverity.ERROR, where, msg)
 
 
 def _check_shapes(registry: Registry) -> list[Issue]:
