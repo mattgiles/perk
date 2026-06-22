@@ -135,7 +135,10 @@ A personal Linear API key for perk's Linear backend **and** the in-session `line
 
 An exported `LINEAR_API_KEY` env var **wins** over this (config is the fallback). When set here, perk
 seeds the launched session's environment with the key so worktree tools/workers inherit it (the file
-is gitignored, never copied into a worktree). Malformed local TOML is ignored (fail-soft).
+is gitignored, never copied into a worktree). perk also reads this key directly from the **main
+checkout's** `.pi/perk.local.toml` whenever a command runs inside a linked worktree (`/submit`,
+`/land`, …), so a single entry in the main checkout authenticates every worktree session and
+cold-door even when the env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
 ```toml
 # .pi/perk.local.toml (gitignored)

@@ -265,6 +265,20 @@ class TestConstructorAndEnv:
         client = client_from_env(env={}, repo_root=tmp_path)
         assert isinstance(client, LinearClient)
 
+    def test_client_from_env_falls_back_to_main_checkout_from_worktree(
+        self, git_repo: Path
+    ) -> None:
+        # The gitignored secret lives ONLY in the main checkout; a linked worktree must still
+        # authenticate by reading the main checkout's `.pi/perk.local.toml` (passes after the fix).
+        self._write_local_key(git_repo, "lin_api_main")
+        from perk.substrate import git as gitmod
+
+        wt = git_repo / ".worktrees" / "wt-linear"
+        gitmod.worktree_add(git_repo, wt, branch="plan-linear", create_branch=True)
+        client = client_from_env(env={}, repo_root=wt)
+        assert isinstance(client, LinearClient)
+        assert client._api_key == "lin_api_main"
+
     def test_client_from_env_env_wins_over_local_config(self, tmp_path: Path) -> None:
         self._write_local_key(tmp_path, "lin_api_local")
         client = client_from_env(env={"LINEAR_API_KEY": "lin_api_env"}, repo_root=tmp_path)
