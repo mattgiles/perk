@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from perk.substrate import git
 from perk.substrate.bindings import Binding, parse_user_bindings
 
 CONFIG_FILENAME = "perk.toml"
@@ -238,8 +239,12 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
     ``TOMLDecodeError`` (the config check maps it): a best-effort secret seed must never crash a
     command, and malformed ``perk.local.toml`` is not surfaced anywhere else today.
     """
+    # The gitignored secret lives only in the MAIN checkout's `.pi/perk.local.toml` (never copied
+    # into a linked worktree), so resolve the main worktree root first; fall back to the given root
+    # when `repo_root` is not inside a git repo (tests / non-repo callers).
+    root = git.main_worktree_root(repo_root) or repo_root
     try:
-        raw = _read_toml(repo_root / ".pi" / LOCAL_CONFIG_FILENAME)
+        raw = _read_toml(root / ".pi" / LOCAL_CONFIG_FILENAME)
     except tomllib.TOMLDecodeError:
         return None
     table = raw.get("linear")

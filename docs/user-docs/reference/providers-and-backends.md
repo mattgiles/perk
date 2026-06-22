@@ -159,6 +159,9 @@ under GitHub and Linear today.
 - **`LINEAR_API_KEY`** — a personal Linear API key (linear.app → Settings → Security & access),
   supplied as an **environment variable** or via the gitignored `.pi/perk.local.toml`
   `[linear] api_key` (an exported env var wins); **never** in a committed file (contracts §8.21).
+  perk reads this from the **main checkout's** `.pi/perk.local.toml` even when a command runs
+  inside a linked worktree (the gitignored file is never copied into worktrees), so a single entry
+  in the main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
   Setting it in `perk.local.toml` feeds both perk's Linear backend and the in-session `linear_*`
   tools.
 - The key is sent as a **plain `Authorization: <key>`** header — **not** `Bearer`-prefixed.

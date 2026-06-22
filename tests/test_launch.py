@@ -537,6 +537,36 @@ def test_launch_seeds_linear_key_from_local_config_when_env_absent(git_repo, mon
     assert env["LINEAR_API_KEY"] == "lin_api_local"
 
 
+def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_repo, monkeypatch):
+    # A `perk implement` launch rooted inside a linked worktree must still seed LINEAR_API_KEY
+    # from the MAIN checkout's gitignored `.pi/perk.local.toml` (never copied into worktrees).
+    monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+    pi = git_repo / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_main"\n', encoding="utf-8")
+    wt = git_repo / ".worktrees" / "wt-launch"
+    git_mod.worktree_add(git_repo, wt, branch="plan-launch", create_branch=True)
+
+    cache.write_plan_ref(wt, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    captured: dict[str, dict[str, str]] = {}
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr(
+        "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
+    )
+    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    launch_stage(
+        repo_root=wt,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert captured["env"]["LINEAR_API_KEY"] == "lin_api_main"
+
+
 def test_launch_exported_linear_key_wins_over_local_config(git_repo, monkeypatch):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_env")
     pi = git_repo / ".pi"

@@ -46,7 +46,10 @@ labels, identifiers, doctor groups, maturity) is the
    ```
 
    An exported env var wins over the config. Setting it in `perk.local.toml` also feeds the
-   in-session `linear_*` tools (perk seeds the launched session's environment with the key).
+   in-session `linear_*` tools (perk seeds the launched session's environment with the key). perk
+   reads this from the **main checkout's** `.pi/perk.local.toml` even when a command runs inside a
+   linked worktree (the gitignored file is never copied into worktrees), so a single entry in the
+   main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
 
 3. **Run `perk init --verify`.** This converges the borrowed Linear-tools package
    `npm:pi-mono-linear` into `.pi/settings.json` `packages`, and the readiness probe ensures the

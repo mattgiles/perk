@@ -168,7 +168,10 @@ fallback). When set here, perk seeds the launched `pi` session's environment wit
 borrowed in-session `linear_*` tools authenticate too. The key is read from your **main checkout**
 at launch — since the file is gitignored it is never copied into a worktree, so this env-seed is
 what carries the key into the worktree session and any tools/workers it spawns (they inherit the
-seeded environment). Malformed local TOML is ignored (fail-soft).
+seeded environment). perk also reads this key directly from the **main checkout's**
+`.pi/perk.local.toml` whenever a command runs inside a linked worktree (`/submit`, `/land`, …) —
+so a single entry in the main checkout authenticates every worktree session and cold-door, even
+when the launch env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
 ```toml
 # .pi/perk.local.toml (gitignored)

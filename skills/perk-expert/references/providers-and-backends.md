@@ -86,8 +86,11 @@ Linear moves where canonical plan / learn / objective state lives.
 
 - **Auth — `LINEAR_API_KEY`.** A personal Linear key (linear.app → Settings → Security & access),
   set as an **environment variable** or via the gitignored `.pi/perk.local.toml` `[linear] api_key`
-  (an exported env var wins); **never** committed. Sent as a **plain `Authorization: <key>`**
-  header — **not** `Bearer`-prefixed.
+  (an exported env var wins); **never** committed. perk reads it from the **main checkout's**
+  `.pi/perk.local.toml` even when a command runs inside a linked worktree (the gitignored file is
+  never copied into worktrees), so a single entry authenticates every worktree session and
+  cold-door (`/submit`, `/land`, …). Sent as a **plain `Authorization: <key>`** header — **not**
+  `Bearer`-prefixed.
 - **Required config — `[issues] team`** — the Linear team **key** (e.g. `"ENG"`).
 - **Converged package** — `perk init` adds `npm:pi-mono-linear` (the borrowed Linear-tools
   extension) when Linear is selected, removes it when deselected.

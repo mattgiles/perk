@@ -117,6 +117,24 @@ def repo_root(cwd: Path) -> Path | None:
     return Path(out.strip())
 
 
+def main_worktree_root(cwd: Path) -> Path | None:
+    """The MAIN working tree's root, even when ``cwd`` is inside a linked worktree.
+
+    Resolves ``git rev-parse --git-common-dir`` (the shared ``.git`` of the main checkout) and
+    returns its parent — equal to ``repo_root`` in the main checkout. ``None`` when ``cwd`` is
+    not inside a git repo. Used to locate the gitignored ``.pi/perk.local.toml`` secret, which
+    lives only in the main checkout and is never copied into a linked worktree.
+    """
+    try:
+        out = _run(["rev-parse", "--git-common-dir"], cwd=cwd)
+    except GitError:
+        return None
+    common = Path(out.strip())
+    if not common.is_absolute():
+        common = (cwd / common).resolve()
+    return common.parent
+
+
 def is_tracked(repo: Path, path: Path | str) -> bool:
     """Whether ``path`` (relative to ``repo``) is tracked in the index. Offline; never raises."""
     try:

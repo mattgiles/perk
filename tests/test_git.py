@@ -16,6 +16,22 @@ def test_repo_root_inside_and_outside(git_repo, tmp_path_factory):
     assert git.repo_root(outside) is None
 
 
+def test_main_worktree_root(git_repo, tmp_path_factory):
+    # Main checkout: resolves to its own root.
+    main = git.main_worktree_root(git_repo)
+    assert main is not None and main.resolve() == git_repo.resolve()
+
+    # Linked worktree: resolves back to the MAIN checkout root, not the worktree.
+    wt = git_repo / ".worktrees" / "wt-main-root"
+    git.worktree_add(git_repo, wt, branch="plan-x", create_branch=True)
+    from_wt = git.main_worktree_root(wt)
+    assert from_wt is not None and from_wt.resolve() == git_repo.resolve()
+
+    # Non-repo: None.
+    outside = tmp_path_factory.mktemp("not-a-repo")
+    assert git.main_worktree_root(outside) is None
+
+
 def test_worktree_lifecycle(git_repo):
     wt = git_repo / ".worktrees" / "wt1"
     git.worktree_add(git_repo, wt, branch="wt1", create_branch=True)
