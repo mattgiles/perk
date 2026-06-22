@@ -1,6 +1,6 @@
 ---
 title: Linear issue backend
-read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the worktree env-seed bridge (the gitignored `perk.local.toml` carried into a linked worktree, the widening-broke-21-fakes `*a,**k` rule), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), the idiomatic-backend work (attribution at the create bottleneck, workspace-scoped labels + the four→five ripple, fail-open attachments, the prose-first reorder), the byte-stable sibling selection + `_is_entity_not_found`, the `_FakeLinear` insertion-order substring footgun, or the live-spike firing mechanism.
+read_when: You are touching `perk/backends/linear.py` / `perk/backends/linear_backend.py`, Linear GraphQL queries, dual-encoding metadata markers, Linear readiness in init/doctor, the env-first/config-fallback `client_from_env` seam + the corrected worktree key bridge (the gitignored `perk.local.toml` now read from the **main checkout** via `main_worktree_root`, independent of the env-seed — #730; the widening-broke-21-fakes `*a,**k` rule), the Node-3.1 GraphQL type-literacy consolidation (zero `cast(` in the package, substrate-home placement of `_opt_*`/`_require_*` vs the `_helpers.py` payload mapping, the single `TypedDict` pilot — #731), backend-aware prompt rendering (incl. the third `objective_read_instruction` seam + the cold-vs-warm backend-source asymmetry), agent-session emission (`perk/backends/linear_agent.py`), the stateful `FakeLinearWorkspace` lifecycle fake, the live-smoke results (Modes 1 & 2 ran green, the paired not-found discriminator `_is_entity_not_found`, the `[issues] team` KEY-not-name gotcha), the project-backed `LinearProjectObjectiveStore` + the Projects substrate now on `LinearClient`, the Phase-4 project-objective ops (add-node, the phase→milestone seam, fail-open Project Updates, the manifest-drift design, the project readiness probe), the idiomatic-backend work (attribution at the create bottleneck, workspace-scoped labels + the four→five ripple, fail-open attachments, the prose-first reorder), the byte-stable sibling selection + `_is_entity_not_found`, the `_FakeLinear` insertion-order substring footgun, or the live-spike firing mechanism.
 ---
 
 # The Linear issue backend
@@ -122,15 +122,20 @@ in-process sites (`resolve_issue_backend`, `resolve_objective_store`, `doctor._l
 `init._linear_readiness`); a **fifth** site (`doctor._fix_linear_labels`) was intentionally left
 env-only (low impact; a future "config fallback everywhere" pass should thread it for symmetry).
 
-- **The worktree/gitignore bridge (the cross-cutting insight).** A *gitignored* local file IS
-  honored *inside worktrees* — by design, **via the env-seed, not a file copy**. `launch_stage`
-  reads `load_local_linear_api_key(repo_root)` where `repo_root` is the **main checkout**, and
-  builds the env dict **before `os.chdir(worktree)`**. The gitignored file is never copied into the
-  linked worktree, but it doesn't need to be: all worktree-resident consumers (the borrowed
-  in-session `pi-mono-linear` `linear_*` tools AND any `perk <stage> --json` cold-door worker)
-  **inherit the seeded session env**, and `client_from_env` reads env-first, so the inherited value
-  wins. The `client_from_env(repo_root=worktree)` fallback is effectively moot inside a worktree (no
-  file there) — **the env-seed carries it.**
+- **The worktree/gitignore bridge — corrected (#730).** A *gitignored* `perk.local.toml` IS honored
+  from inside a linked worktree, but the original "via the env-seed, **not** a file copy … the
+  env-seed carries it" framing was only *partially* true and masked a structural bug. Every worktree
+  cold-door funnels through `resolve_issue_backend(repo_root)` where `repo_root` is the **worktree**,
+  so `load_local_linear_api_key(worktree)` resolved a `<worktree>/.pi/perk.local.toml` that never
+  exists — the env-seed was the *only* bridge, and it does not fire on every path. The fix is a
+  **single reader correction**: `config.load_local_linear_api_key` now reads from
+  `git.main_worktree_root(repo_root) or repo_root` — i.e. directly from the **main checkout** — so
+  the gitignored Linear key is found from inside a linked worktree **independent of whether the
+  env-seed fired**. The one reader feeds both the cold-door `client_from_env` fallback *and* the
+  `launch_stage` env-seed, so both are repaired at once. The env-seed remains *a* bridge (it still
+  wins when env is set, because `client_from_env` is env-first) — it just no longer needs to be the
+  *only* one. See `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root`
+  primitive and `docs/learned/workflow/config-tables.md` for the reader shape.
 - **Gotcha — widening `client_from_env` broke 21 lifecycle tests.** Adding the `repo_root` kwarg
   broke the shared fake `monkeypatch.setattr(linear, "client_from_env", lambda: ws)` with
   `TypeError: unexpected keyword argument`. Fix: `lambda *a, **k: ws`. **Rule: when you widen a
@@ -704,6 +709,26 @@ untouched, add a sibling query"** rule: add `_comments_with_authors` (which sele
 discriminator (`_is_entity_not_found`) folds a missing issue/session → empty; **auth failures raise**
 (fail-loud accommodates the unproven personal-key-vs-agent-token question). (See
 `human-engagement-reads.md`.)
+
+## GraphQL type-literacy consolidation (Node 3.1, PR #731)
+
+The dignified-python audit's type-literacy node tightened the `linear_backend/` package to **zero
+`cast(`** — the only `cast` calls that remain are inside the four `_opt_*`/`_require_*` helper
+*definitions* in `linear.py`, which internalize the ty narrowing quirk so call sites stay cast-free.
+The durable placement decisions:
+
+- **Substrate-home placement.** The *generic* narrowing helpers (`_opt_*`/`_require_*`) live in
+  `perk/backends/linear.py` (the lower client layer). The *domain* payload mapping — the one pilot
+  `TypedDict` plus its narrowing helper — lives in the package leaf
+  `perk/backends/linear_backend/_helpers.py`, which **imports** the generics. Generic narrowing is
+  substrate; payload-shape knowledge is domain — keep them in their own tiers.
+- **The single `TypedDict` pilot.** The recurring 6-field issue selection
+  (`id identifier url title description state { type }`, shared by `backend.get_plan` /
+  `backend.read_issue`) became one `TypedDict` (`LinearIssueNode`) with a narrowing constructor that
+  runs the `_require_*` guards once. `description` stays `_opt_str` → `str | None` because Linear
+  leaves it unset on a description-less issue.
+- The generic `_opt_*`/`_require_*` detail and the disposition-matching rule live in `toolchain/ty.md`
+  (the lenient-twin section) — don't duplicate it here.
 
 ## `_FakeLinear` insertion-order substring footgun (RECONFIRMED, #711)
 

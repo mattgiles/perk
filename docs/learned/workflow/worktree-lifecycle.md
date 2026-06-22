@@ -1,6 +1,6 @@
 ---
 title: Worktree filesystem lifecycle — batch ops over plan-<N> checkouts
-read_when: You are writing a worktree-batch CLI command, matching git worktree paths, working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, or your worktree test is unexpectedly dirty.
+read_when: You are writing a worktree-batch CLI command, matching git worktree paths, working on the `[worktree] setup` hook + the `created`-flag real-run-vs-dry-run asymmetry, locating the MAIN checkout root from inside a linked worktree (the `main_worktree_root` primitive), or your worktree test is unexpectedly dirty.
 ---
 
 # Worktree filesystem lifecycle
@@ -96,6 +96,29 @@ out in a live worktree.
 returns the `CompletedProcess` (callers parse stdout/stderr on partial failure), but still raises
 `GitError` on `TimeoutExpired`. `_run` (raises on non-zero) remains the default for single ops.
 
+## The `main_worktree_root` primitive — the MAIN checkout from inside a linked worktree (#730)
+
+`git.main_worktree_root(cwd) -> Path | None` locates the **main checkout's** root from anywhere
+inside a *linked* worktree. It runs `git rev-parse --git-common-dir` (the shared `.git` of the main
+checkout) and returns its `.parent`:
+
+- **Both return forms are handled.** In the main checkout `--git-common-dir` returns a *relative*
+  `.git` — resolve it against `cwd`, then take the parent. In a linked worktree it returns the
+  *absolute* path to the main repo's `.git` — its parent is the main root directly. The
+  implementation resolves the relative form (`(cwd / common).resolve()`) before taking `.parent`,
+  so both collapse to the same answer.
+- **Contrast `repo_root` / `--show-toplevel`,** which returns the *worktree's* own root — the whole
+  reason a separate primitive exists. Use `main_worktree_root` for anything that lives canonically in
+  the main checkout **only** (gitignored secrets/config that are never copied into a worktree, e.g.
+  the `.pi/perk.local.toml` Linear key — see `config-tables.md` / `linear-backend.md`).
+- **Fail-open to `None`** (not a git repo) preserves the caller's non-repo fallback (callers use
+  `main_worktree_root(repo_root) or repo_root`, keeping `tmp_path`-rooted tests byte-identical).
+- **Test gotcha (macOS):** `tmp_path` is a `/var → /private/var` symlink and `--git-common-dir`
+  returns the realpath, so worktree-root assertions must `.resolve()` **both** sides (the same
+  `.resolve()`-both-sides rule as worktree-path matching above).
+- **Safe layering:** `config` importing `git` is fine — `git.py` imports only stdlib, so there is no
+  cycle risk.
+
 ## The `[worktree] setup` hook and the `created`-flag dry-run asymmetry (#652)
 
 `[worktree] setup` is an array of shell commands run inside a freshly created worktree before
@@ -143,4 +166,5 @@ is the sole signal under test.
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule
 - `docs/learned/workflow/cold-door-launch.md` — `run_worktree_setup`, the single canonical setup-execution path
-- `docs/learned/workflow/config-tables.md` — the overlay-aware `[worktree] setup` config key
+- `docs/learned/workflow/config-tables.md` — the overlay-aware `[worktree] setup` config key + the local-only secret reader consuming `main_worktree_root`
+- `docs/learned/workflow/linear-backend.md` — the corrected worktree Linear-key bridge (the other `main_worktree_root` consumer)

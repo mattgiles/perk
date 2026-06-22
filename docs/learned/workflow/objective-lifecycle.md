@@ -1,6 +1,6 @@
 ---
 title: Objective lifecycle — resumable-lease node states, classified selection, authoring loop
-read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile), or debugging a node stuck in planning.
+read_when: You are working on objective node status transitions, the objective-plan factory selection, the objective authoring/save loop (the review-first objective-draft JSON artifact, render-at-the-door, the draft-module-leaf rule), the deterministic perk objective run supervisor loop, the "design-only node" reframing pattern (deliverable is a design doc; mandatory post-merge reconcile; the reconcile-ready *audit* node + the audit-a-green-codebase methodology), or debugging a node stuck in planning.
 ---
 
 # Objective lifecycle
@@ -118,6 +118,22 @@ future agent should expect when a node is reframed this way:
   implementation is follow-up").
 - **The node status is correctly left `done`** — a design-only node *did* deliver its (reframed)
   deliverable; the mechanical land-mark is right, only the prose/description are stale.
+
+### Authoring a design-only *audit* node (#717, the dignified-python audit 1.1)
+
+The design-only pattern also fits an **audit** node — a node whose deliverable is a findings doc, not
+code. Two durable, reusable points from the dignified-python audit:
+
+- **Write the audit so its findings→roadmap section is reconcile-ready.** A prescriptive "roadmap
+  reconciliation notes" subsection becomes the *direct input* to the post-land
+  `/objective-reconcile` pass: on land, reconciliation is a **refinement** (sharpen node
+  descriptions, confirm boundaries) rather than a re-plan. Structure the audit output to feed the
+  reconcile, not just to inform a human.
+- **The "audit a green codebase" methodology.** When `ruff`/`ty` already pass, the value is in what
+  the checkers **cannot** see: module depth/cohesion, type-literacy beyond what the checker forces,
+  declare-close-to-use, LBYL/EAFP fit, edge correctness. Do **not** re-catalog already-enforced
+  rules. Ground every anchor against the real tree and record P-severity **honestly** — an honest
+  "no P1" beats an inflated one.
 
 ## The objective authoring loop mirrors plan → save
 
