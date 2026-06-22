@@ -3424,7 +3424,7 @@ information it has no authority to invent). GitHub + the issue-backed Linear sto
 roadmap atomically with the body — **no divergence surface** — so both new methods are empty no-ops
 there (the `save_node_plan → None` / `post_status_update → False` precedent).
 
-- **The pure drift engine** (`perk/objective_drift.py`, fully offline — no network/clock/Click): the
+- **The pure drift engine** (`perk/objective/drift.py`, fully offline — no network/clock/Click): the
   store builds an `ObservedSnapshot` (the one network step) and `detect_drift(snapshot)` returns a
   `DriftReport` of `DriftCondition`s, each carrying a stable machine `code` (`DriftCode`), a
   `severity` (error/warning/info), `node_id`/`target`, a `message`, and a **`repairable`** flag. A
