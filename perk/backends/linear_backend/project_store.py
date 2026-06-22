@@ -2,7 +2,7 @@ from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 
-from perk import objective, objective_drift, plan
+from perk import objective, plan
 from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
@@ -22,6 +22,7 @@ from perk.backends.linear_backend._helpers import (
 )
 from perk.backends.linear_backend.issue_ops import _LinearIssueOps
 from perk.backends.linear_backend.project_ops import _LinearProjectOps
+from perk.objective import drift as objective_drift
 
 # ===========================================================================
 # The project-backed objective-storage tier (Objective #548, Node 3.2):

@@ -1,11 +1,11 @@
-"""Pure-engine tests for perk/objective_drift.py (offline; no network, no fake Linear).
+"""Pure-engine tests for perk/objective/drift.py (offline; no network, no fake Linear).
 
 One case per `DriftCode` covering both the report-only and repairable classifications, plus the
 `MANIFEST_MALFORMED`/`MANIFEST_ABSENT` early-returns and the cycle manifest-enrichment.
 """
 
 from perk import objective as o
-from perk.objective_drift import (
+from perk.objective.drift import (
     DriftCode,
     ObjectiveDriftSeverity,
     ObservedNode,

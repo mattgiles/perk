@@ -16,7 +16,9 @@ report-only, because auto-repair would *invent* information perk has no authorit
 from dataclasses import dataclass
 from enum import StrEnum
 
-from perk.objective import Manifest, NodeStatus, node_sort_key
+from perk.objective._models import NodeStatus
+from perk.objective.graph import node_sort_key
+from perk.objective.manifest import Manifest
 
 
 class DriftCode(StrEnum):

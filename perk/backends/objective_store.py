@@ -46,7 +46,7 @@ from perk.backends.engagement import (
     EngagementComment,
     NodeEngagement,
 )
-from perk.objective_drift import DriftCode, DriftCondition, DriftReport
+from perk.objective.drift import DriftCode, DriftCondition, DriftReport
 
 
 class ObjectiveStoreError(Exception):
