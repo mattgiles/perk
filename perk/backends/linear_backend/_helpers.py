@@ -1,4 +1,5 @@
 import re
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TypedDict
@@ -17,6 +18,12 @@ from perk.backends.linear import (
 from perk.backends.objective_store import ObjectiveStoreError
 
 _PAGE_SIZE = 50
+
+
+def _note(message: str) -> None:
+    """One loud-but-non-fatal stderr note (the package's fail-soft reporting boundary, mirroring
+    ``linear_agent._note``)."""
+    print(f"perk linear: {message}", file=sys.stderr)
 
 
 class LinearStateNode(TypedDict):

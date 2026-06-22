@@ -10,7 +10,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # Reads are quick; writes (issue/comment create) are slower — a longer ceiling (D5).
 _READ_TIMEOUT = 15
@@ -19,6 +19,31 @@ _WRITE_TIMEOUT = 30
 
 class GitHubError(Exception):
     """The ``gh`` binary is missing or produced unparseable output."""
+
+
+def _opt_str(value: object) -> str | None:
+    """A GraphQL/JSON field read as a string, else ``None`` (tolerant -- never raises)."""
+    return value if isinstance(value, str) else None
+
+
+def _opt_int(value: object) -> int | None:
+    """A GraphQL/JSON field read as an int, else ``None`` (tolerant; ``bool`` is rejected since a
+    GraphQL ``Int`` is never a bool)."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _opt_dict(value: object) -> dict[str, object] | None:
+    """A GraphQL/JSON field read as a dict, else ``None`` (tolerant). The ``cast`` confines the
+    documented ty isinstance-narrowing quirk to this leaf (mirroring ``backends.linear._opt_dict``)
+    so the parse modules stay cast-free."""
+    return cast("dict[str, object]", value) if isinstance(value, dict) else None
+
+
+def _dicts(value: object) -> list[dict[str, object]]:
+    """The dict elements of a list payload (non-dicts skipped); ``[]`` when not a list."""
+    if not isinstance(value, list):
+        return []
+    return [cast("dict[str, object]", n) for n in value if isinstance(n, dict)]
 
 
 def _run(

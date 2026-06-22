@@ -15,6 +15,7 @@ from perk.backends.linear_backend._helpers import (
     _agent_session_read,
     _description_edit,
     _engagement_comment,
+    _note,
     _require_issue_node,
     to_linear_markdown,
 )
@@ -138,8 +139,8 @@ class LinearIssueBackend:
                 title=f"GitHub PR #{pr.number}",
                 subtitle=pr.state,
             )
-        except (IssueBackendError, GitHubError, ValueError):
-            pass
+        except (IssueBackendError, GitHubError, ValueError) as exc:
+            _note(f"PR attachment skipped (non-fatal): {exc}")
 
     def prepend_plan_callout(
         self, *, issue_id: str, callout: str, command: str, dry_run: bool = False

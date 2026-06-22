@@ -3509,7 +3509,10 @@ actor is the human user; these changes make perk's footprint read as native:
   best-effort advances the Project to `started` (`set_project_state`) when a node enters a
   `started`-type status (planning/in_progress/blocked per `_NODE_STATUS_STATE_TYPE`). Forward-only
   (it only ever writes `started`; completion is owned by `close_objective`), idempotent, and
-  fail-open (same posture as the workflow-state mirror beside it).
+  fail-open. The node-status workflow-state mirror beside it (which nudges the node-issue's Linear
+  state to match the new status) is likewise fail-open, but its failures now print one
+  loud-but-non-fatal stderr note (`perk linear: node status mirror skipped`); the project-lifecycle
+  nudge itself stays a silent `suppress` (a truly-opportunistic forward-only write).
 - **Workspace-scoped perk labels.** `_ensure_label_id` omits `teamId` on create, so the five
   `perk:*` labels are created at workspace level (Linear's cross-team-label guidance); the lookup
   is unscoped, so a pre-existing team-scoped label still counts (no duplicate).
@@ -3523,7 +3526,8 @@ actor is the human user; these changes make perk's footprint read as native:
   best-effort, **fail-open** when the stamped `pr` resolves to a GitHub PR (title `GitHub PR #N`,
   subtitle the PR state). This single seam covers both a standalone Linear plan issue and a unified
   node-issue (both stamp `pr` here). The attachment is bookkeeping — a Linear/PR-lookup failure
-  never fails the header stamp.
+  never fails the header stamp, and prints one loud-but-non-fatal stderr note
+  (`perk linear: PR attachment skipped`).
 - **Prose-first metadata composition.** Linear bodies now render the human prose **first**, the
   machine blocks after: the project overview is `Reconcilable(prose)` then `objective-header` +
   `objective-manifest`; node-issues are `description` (prose) then the `objective-node` block.
