@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
+    _opt_dict,
+    _opt_str,
     _require_dict,
     _require_str,
 )
@@ -170,7 +171,7 @@ class _LinearProjectOps:
                     "id": _require_str(node.get("id"), "issue id"),
                     "identifier": _require_str(node.get("identifier"), "issue identifier"),
                     "url": _require_str(node.get("url"), "issue url"),
-                    "description": description if isinstance(description, str) else "",
+                    "description": _opt_str(description) or "",
                 }
             )
         return result
@@ -203,8 +204,8 @@ class _LinearProjectOps:
                     "id": _require_str(node.get("id"), "issue id"),
                     "identifier": _require_str(node.get("identifier"), "issue identifier"),
                     "url": _require_str(node.get("url"), "issue url"),
-                    "title": title if isinstance(title, str) else "",
-                    "description": description if isinstance(description, str) else "",
+                    "title": _opt_str(title) or "",
+                    "description": _opt_str(description) or "",
                 }
             )
         return result
@@ -230,17 +231,16 @@ class _LinearProjectOps:
         result: list[dict[str, object]] = []
         for node in nodes:
             description = node.get("description")
-            milestone = node.get("projectMilestone")
+            milestone = _opt_dict(node.get("projectMilestone"))
             milestone_name: str | None = None
-            if isinstance(milestone, dict):
-                raw_name = cast("dict[str, object]", milestone).get("name")
-                milestone_name = raw_name if isinstance(raw_name, str) else None
+            if milestone is not None:
+                milestone_name = _opt_str(milestone.get("name"))
             result.append(
                 {
                     "id": _require_str(node.get("id"), "issue id"),
                     "identifier": _require_str(node.get("identifier"), "issue identifier"),
                     "url": _require_str(node.get("url"), "issue url"),
-                    "description": description if isinstance(description, str) else "",
+                    "description": _opt_str(description) or "",
                     "milestone_name": milestone_name,
                 }
             )
@@ -270,7 +270,7 @@ class _LinearProjectOps:
                 {
                     "id": _require_str(node.get("id"), "project id"),
                     "url": _require_str(node.get("url"), "project url"),
-                    "content": content if isinstance(content, str) else None,
+                    "content": _opt_str(content),
                 }
             )
         return result
@@ -431,7 +431,7 @@ class _LinearProjectOps:
         if document is None:
             return None
         content = _require_dict(document, "document").get("content")
-        return content if isinstance(content, str) else None
+        return _opt_str(content)
 
     # ------------------------------------------------------------------ relations (blocks)
 

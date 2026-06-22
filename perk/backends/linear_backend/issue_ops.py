@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import cast
 
 from perk import plan
 from perk.backends import issue_backend
@@ -8,6 +7,8 @@ from perk.backends.linear import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
+    _opt_dict,
+    _opt_str,
     _require_dict,
     _require_list,
     _require_str,
@@ -196,12 +197,10 @@ class _LinearIssueOps:
         issue = self._issue_or_none(issue_id, "agentSessions(first: 1) { nodes { id } }")
         if issue is None:
             return []
-        sessions = issue.get("agentSessions")
-        if not isinstance(sessions, dict):
+        sessions = _opt_dict(issue.get("agentSessions"))
+        if sessions is None:
             return []
-        session_nodes = _require_list(
-            cast("dict[str, object]", sessions).get("nodes"), "issue.agentSessions.nodes"
-        )
+        session_nodes = _require_list(sessions.get("nodes"), "issue.agentSessions.nodes")
         if not session_nodes:
             return []
         session_id = _require_str(
@@ -441,7 +440,7 @@ class _LinearIssueOps:
         if comment is None:
             return None
         body = _require_dict(comment, "comment").get("body")
-        return body if isinstance(body, str) else None
+        return _opt_str(body)
 
     def _update_comment(self, comment_id: str, body: str) -> None:
         """Patch a comment. ``body`` is already Linear-encoded (callers transcode once)."""

@@ -15,12 +15,19 @@ import pytest
 from perk import github, objective, plan
 from perk.backends import engagement, issue_backend, linear_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import LinearClient, LinearGraphQLError
+from perk.backends.linear import (
+    LinearClient,
+    LinearGraphQLError,
+    _opt_dict,
+    _opt_list,
+    _opt_str,
+)
 from perk.backends.linear_backend import (
     LinearIssueBackend,
     LinearObjectiveStore,
     to_linear_markdown,
 )
+from perk.backends.linear_backend._helpers import _require_issue_node
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 from perk.run import run_report
@@ -4089,3 +4096,83 @@ class TestReadObjectiveEngagement:
         )
         with pytest.raises(ObjectiveStoreError, match="boom"):
             store.read_comments(objective_id="proj-1")
+
+
+class TestOptionalAwareHelpers:
+    """The tolerant (never-raise) `_opt_*` siblings of the `_require_*` family (Node 3.1)."""
+
+    def test_opt_dict_returns_value_on_dict_else_none(self) -> None:
+        payload: dict[str, object] = {"a": 1}
+        assert _opt_dict(payload) is payload
+        assert _opt_dict([1, 2]) is None
+        assert _opt_dict("x") is None
+        assert _opt_dict(None) is None
+
+    def test_opt_list_returns_value_on_list_else_none(self) -> None:
+        payload: list[object] = [1, 2]
+        assert _opt_list(payload) is payload
+        assert _opt_list({"a": 1}) is None
+        assert _opt_list("x") is None
+        assert _opt_list(None) is None
+
+    def test_opt_str_returns_value_on_str_else_none(self) -> None:
+        assert _opt_str("x") == "x"
+        assert _opt_str("") == ""
+        assert _opt_str(7) is None
+        assert _opt_str(None) is None
+
+
+class TestRequireIssueNode:
+    """The pilot `LinearIssueNode` TypedDict's narrowing helper (Node 3.1, D2/D3): runs the raising
+    `_require_*` guards once, then call sites read typed fields directly."""
+
+    def test_builds_typed_record_from_well_formed_payload(self) -> None:
+        node = _require_issue_node(
+            {
+                "id": "uuid-1",
+                "identifier": "ENG-1",
+                "url": "https://linear.app/x/issue/ENG-1",
+                "title": "A title",
+                "description": "the body",
+                "state": {"type": "started"},
+            }
+        )
+        assert node["id"] == "uuid-1"
+        assert node["identifier"] == "ENG-1"
+        assert node["url"] == "https://linear.app/x/issue/ENG-1"
+        assert node["title"] == "A title"
+        assert node["description"] == "the body"
+        assert node["state"]["type"] == "started"
+
+    def test_tolerates_absent_description(self) -> None:
+        # Linear leaves `description` unset on a description-less issue: tolerant `None`.
+        node = _require_issue_node(
+            {
+                "id": "uuid-1",
+                "identifier": "ENG-1",
+                "url": "u",
+                "title": "t",
+                "description": None,
+                "state": {"type": "unstarted"},
+            }
+        )
+        assert node["description"] is None
+
+    def test_raises_on_missing_required_field(self) -> None:
+        with pytest.raises(IssueBackendError, match="issue identifier"):
+            _require_issue_node(
+                {"id": "uuid-1", "url": "u", "title": "t", "state": {"type": "unstarted"}}
+            )
+
+    def test_raises_on_malformed_state(self) -> None:
+        with pytest.raises(IssueBackendError, match=r"issue\.state"):
+            _require_issue_node(
+                {
+                    "id": "uuid-1",
+                    "identifier": "ENG-1",
+                    "url": "u",
+                    "title": "t",
+                    "description": "b",
+                    "state": None,
+                }
+            )

@@ -5,6 +5,7 @@ from perk.backends import engagement, issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
+    _opt_str,
     _require_dict,
     _require_list,
     _require_str,
@@ -14,6 +15,7 @@ from perk.backends.linear_backend._helpers import (
     _agent_session_read,
     _description_edit,
     _engagement_comment,
+    _require_issue_node,
     to_linear_markdown,
 )
 from perk.backends.linear_backend.issue_ops import _LinearIssueOps
@@ -106,7 +108,7 @@ class LinearIssueBackend:
             raise IssueBackendError(f"unknown plan-header field(s): {sorted(unknown)}")
         issue = self._ops._get_issue(issue_id, "id description")
         description = issue.get("description")
-        body = description if isinstance(description, str) else ""
+        body = _opt_str(description) or ""
         header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
         new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
         if dry_run:
@@ -144,7 +146,7 @@ class LinearIssueBackend:
     ) -> bool:
         issue = self._ops._get_issue(issue_id, "id description")
         description = issue.get("description")
-        body = description if isinstance(description, str) else ""
+        body = _opt_str(description) or ""
         new_body = plan.prepend_callout(body, callout, command=command)
         if new_body == body:
             return False
@@ -159,8 +161,8 @@ class LinearIssueBackend:
         )
         if issue is None:
             return None
-        description = issue.get("description")
-        body = description if isinstance(description, str) else ""
+        node = _require_issue_node(issue)
+        body = node["description"] or ""
         header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
         pr_field = header.get("pr")
         pr = (
@@ -168,12 +170,11 @@ class LinearIssueBackend:
             if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
             else None
         )
-        state = _require_dict(issue.get("state"), "issue.state")
-        state_type = _require_str(state.get("type"), "issue.state.type")
+        state_type = node["state"]["type"]
         return issue_backend.PlanState(
-            id=_require_str(issue.get("identifier"), "issue identifier"),
-            url=_require_str(issue.get("url"), "issue url"),
-            title=_require_str(issue.get("title"), "issue title"),
+            id=node["identifier"],
+            url=node["url"],
+            title=node["title"],
             header=header,
             pr=pr,
             state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
@@ -192,7 +193,7 @@ class LinearIssueBackend:
         if issue is None:
             return None
         description = issue.get("description")
-        candidates = [description if isinstance(description, str) else ""]
+        candidates = [_opt_str(description) or ""]
         candidates.extend(
             comment_body
             for comment in self._ops._comments(issue_id)
@@ -212,14 +213,13 @@ class LinearIssueBackend:
         )
         if issue is None:
             return None
-        description = issue.get("description")
-        state = _require_dict(issue.get("state"), "issue.state")
-        state_type = _require_str(state.get("type"), "issue.state.type")
+        node = _require_issue_node(issue)
+        state_type = node["state"]["type"]
         return issue_backend.AdoptableIssue(
-            id=_require_str(issue.get("identifier"), "issue identifier"),
-            url=_require_str(issue.get("url"), "issue url"),
-            title=_require_str(issue.get("title"), "issue title"),
-            body=description if isinstance(description, str) else "",
+            id=node["identifier"],
+            url=node["url"],
+            title=node["title"],
+            body=node["description"] or "",
             state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
         )
 
@@ -257,7 +257,7 @@ class LinearIssueBackend:
         # `already_a_plan` refusal guards it), so the absent branch composes inline-code — NEVER
         # the bare replace_metadata_block append path (it appends in lossy HTML form).
         description = issue.get("description")
-        body = description if isinstance(description, str) else ""
+        body = _opt_str(description) or ""
         if plan.has_metadata_block(body, plan.PLAN_HEADER_KEY):
             new_desc = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, header_fields)
         else:
@@ -328,7 +328,7 @@ class LinearIssueBackend:
                     id=identifier,
                     title=_require_str(node.get("title"), "issue title"),
                     url=_require_str(node.get("url"), "issue url"),
-                    body=description if isinstance(description, str) else "",
+                    body=_opt_str(description) or "",
                 )
             )
         return tuple(summaries)

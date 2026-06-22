@@ -7,6 +7,7 @@ from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
+    _opt_str,
     _require_dict,
     _require_list,
     _require_str,
@@ -64,7 +65,7 @@ class LinearProjectObjectiveStore:
             for proj in self._projects.list_projects():
                 content = proj.get("content")
                 header = plan.find_metadata_block(
-                    content if isinstance(content, str) else "", objective.OBJECTIVE_HEADER_KEY
+                    _opt_str(content) or "", objective.OBJECTIVE_HEADER_KEY
                 )
                 if header is not None and header.get("run_id") == run_id:
                     return objective_store.ObjectiveRef(
@@ -86,7 +87,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 return None
             content = project.get("content")
-            prose = content if isinstance(content, str) else ""
+            prose = _opt_str(content) or ""
             issues = tuple(
                 objective_store.AdoptableSourceIssue(
                     id=_require_str(issue.get("id"), "issue id"),
@@ -146,7 +147,7 @@ class LinearProjectObjectiveStore:
                 raise IssueBackendError(f"Linear project {source_id!r} not found")
             project_url = _require_str(project.get("url"), "project url")
             original_overview = project.get("content")
-            original_overview = original_overview if isinstance(original_overview, str) else ""
+            original_overview = _opt_str(original_overview) or ""
 
             # Resolve each adopt_map value (an id OR human identifier) to an existing project-issue
             # record — fail-loud on an id not in the project (the author named a non-member issue).
@@ -166,36 +167,18 @@ class LinearProjectObjectiveStore:
                 resolved_adopt[node_id] = target
 
             # --- compose the overview, preserving the original verbatim (Immutable archive) ---
-            header = objective.ObjectiveHeader(
-                run_id=run_id,
-                created=plan.now_iso(),
-                objective_comment_id=None,
-                status=status,
-                base=base,
-                adopted_from=source_id,
-            )
-            header_block = plan.render_metadata_block(
-                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
-            )
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
-            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
-            manifest_block = plan.render_metadata_block(
-                objective.OBJECTIVE_MANIFEST_KEY,
-                objective.render_manifest_block(nodes, manifest_names),
-                style="inline-code",
+            overview = self._compose_adopted_overview(
+                run_id=run_id,
+                status=status,
+                base=base,
+                source_id=source_id,
+                prose=prose,
+                nodes=nodes,
+                names=names,
+                original_overview=original_overview,
             )
-            reconcilable = (
-                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
-                f"{prose.strip()}\n"
-                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
-            )
-            archive_note = objective.render_adopted_overview_note(original_overview)
-            composed = f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n"
-            if archive_note:
-                # The Immutable archive note lives BELOW the closing Reconcilable marker.
-                composed = f"{composed}\n{archive_note}\n"
-            overview = to_linear_markdown(composed)
             # Adopt in place: PATCH the existing project's overview (NOT create_project).
             overview = plan.prepend_callout(
                 overview,
@@ -209,11 +192,9 @@ class LinearProjectObjectiveStore:
                 _require_str(m["name"], "milestone name"): _require_str(m["id"], "milestone id")
                 for m in self._projects.project_milestones(source_id)
             }
-            phase_milestone: dict[tuple[int, str], str] = {}
-            for key, _phase_nodes in grouped:
-                phase_milestone[key] = self._projects.ensure_phase_milestone(
-                    project_id=source_id, name=names[key], known=known_milestones
-                )
+            phase_milestone = self._resolve_phase_milestones(
+                source_id, grouped, names, known=known_milestones
+            )
 
             node_label_id, _ = self._issue_ops._ensure_label_id(
                 objective.OBJECTIVE_NODE_LABEL,
@@ -222,62 +203,26 @@ class LinearProjectObjectiveStore:
             )
             node_uuid: dict[str, str] = {}
             for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
-                node_block = plan.render_metadata_block(
-                    objective.OBJECTIVE_NODE_KEY,
-                    objective.render_node_block(node),
-                    style="inline-code",
-                )
                 milestone_id = phase_milestone[objective.derive_phase(node.id)]
                 if node.id in resolved_adopt:
                     # Mapped: stamp the node block ADDITIVELY into the existing issue (title + human
                     # body verbatim), attach to the phase milestone, add the node label additively.
-                    target = resolved_adopt[node.id]
-                    uuid = _require_str(target.get("id"), "issue id")
-                    existing_body = _require_str(target.get("description"), "issue description")
-                    new_desc = to_linear_markdown(f"{existing_body.rstrip()}\n\n{node_block}\n")
-                    full = self._issue_ops._get_issue(
-                        uuid, "id description labels { nodes { id } }"
+                    node_uuid[node.id] = self._stamp_adopted_node_issue(
+                        node,
+                        resolved_adopt[node.id],
+                        milestone_id=milestone_id,
+                        label_id=node_label_id,
                     )
-                    labels = _require_dict(full.get("labels"), "issue.labels")
-                    label_ids = [
-                        _require_str(_require_dict(raw, "label").get("id"), "label id")
-                        for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
-                    ]
-                    if node_label_id not in label_ids:
-                        label_ids = [*label_ids, node_label_id]
-                    self._issue_ops._update_issue(
-                        uuid,
-                        {"description": new_desc, "labelIds": label_ids},
-                        what="stamp objective-node block",
-                    )
-                    self._projects.attach_issue_to_milestone(
-                        issue_id=uuid, milestone_id=milestone_id
-                    )
-                    node_uuid[node.id] = uuid
                 else:
                     # Unmapped: mint a fresh node-issue (the create_objective path).
-                    description = to_linear_markdown(node.description + "\n\n" + node_block)
-                    _ref, uuid = self._issue_ops._create_issue_raw(
-                        title=objective.node_issue_title(node),
-                        description=description,
-                        label_id=node_label_id,
+                    node_uuid[node.id] = self._materialize_node_issue(
+                        node,
                         project_id=source_id,
                         milestone_id=milestone_id,
+                        label_id=node_label_id,
                     )
-                    node_uuid[node.id] = uuid
 
-            # --- blocking relations for EXPLICIT depends_on only (dep BLOCKS node) ---
-            for node in nodes:
-                if not node.depends_on:
-                    continue
-                for dep in node.depends_on:
-                    if dep not in node_uuid:
-                        raise IssueBackendError(
-                            f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
-                        )
-                    self._projects.create_issue_relation(
-                        issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
-                    )
+            self._create_dependency_relations(nodes, node_uuid)
 
             return objective_store.ObjectiveRef(id=source_id, url=project_url, existed=False)
 
@@ -317,40 +262,13 @@ class LinearProjectObjectiveStore:
                 )
 
             # --- compose the overview: header block + Reconcilable(prose); NO roadmap table ---
-            header = objective.ObjectiveHeader(
-                run_id=run_id,
-                created=plan.now_iso(),
-                objective_comment_id=None,
-                status=status,
-                base=base,
-            )
-            header_block = plan.render_metadata_block(
-                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
-            )
             # The phase names (enriched from the prose `### Phase N:` headers) seed BOTH the
             # milestone loop below and the persisted manifest's pinned `phases` map.
             grouped = objective.group_nodes_by_phase(nodes)
             names = objective.enrich_phase_names(body, [key for key, _ in grouped])
-            manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
-            # The drift baseline (#612): the `objective-manifest` block pins the intended roadmap's
-            # structural identity + the canonical phase names, between the header block and the
-            # Reconcilable region. Status/pr are excluded (live/observed state).
-            manifest_block = plan.render_metadata_block(
-                objective.OBJECTIVE_MANIFEST_KEY,
-                objective.render_manifest_block(nodes, manifest_names),
-                style="inline-code",
+            overview = self._compose_objective_overview(
+                run_id=run_id, status=status, base=base, body=body, nodes=nodes, names=names
             )
-            reconcilable = (
-                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
-                f"{body.strip()}\n"
-                f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
-            )
-            # Prose-first composition (Pillar 2): the human Reconcilable prose renders FIRST, the
-            # machine blocks (header + manifest) follow. Reads are position-independent
-            # (find_metadata_block / replace_reconcilable_section scan by marker), so only the
-            # render order changes. Transcode the whole overview so the HTML Reconcilable markers
-            # become inline-code sentinels (the reconcile splice is dual-encoding either way).
-            overview = to_linear_markdown(f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n")
             created = self._projects.create_project(name=title, content=overview)
             project_id = created["id"]
             assert isinstance(project_id, str)
@@ -376,11 +294,9 @@ class LinearProjectObjectiveStore:
             # sequence). The seam's reusable value is its `known is None` branch for a future
             # `add_node`-to-an-existing-objective path.
             known_milestones: dict[str, str] = {}
-            phase_milestone: dict[tuple[int, str], str] = {}
-            for key, _phase_nodes in grouped:
-                phase_milestone[key] = self._projects.ensure_phase_milestone(
-                    project_id=project_id, name=names[key], known=known_milestones
-                )
+            phase_milestone = self._resolve_phase_milestones(
+                project_id, grouped, names, known=known_milestones
+            )
 
             # --- one node-issue per node (node-block + description), in node_sort_key order ---
             # Each node-issue carries the workspace `perk:objective-node` label (resolved once,
@@ -392,40 +308,16 @@ class LinearProjectObjectiveStore:
             )
             node_uuid: dict[str, str] = {}
             for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
-                # Prose-first (Pillar 2): the node's prose description renders FIRST, the
-                # `objective-node` block follows (reads scan by marker, position-independent).
-                description = to_linear_markdown(
-                    node.description
-                    + "\n\n"
-                    + plan.render_metadata_block(
-                        objective.OBJECTIVE_NODE_KEY,
-                        objective.render_node_block(node),
-                        style="inline-code",
-                    )
-                )
-                _ref, uuid = self._issue_ops._create_issue_raw(
-                    title=objective.node_issue_title(node),
-                    description=description,
-                    label_id=node_label_id,
-                    project_id=project_id,
-                    milestone_id=phase_milestone[objective.derive_phase(node.id)],
-                )
                 # The issue UUID comes straight from the `issueCreate` response — no extra query.
                 # `issueRelationCreate` is only verified for UUIDs, so relations keep them.
-                node_uuid[node.id] = uuid
+                node_uuid[node.id] = self._materialize_node_issue(
+                    node,
+                    project_id=project_id,
+                    milestone_id=phase_milestone[objective.derive_phase(node.id)],
+                    label_id=node_label_id,
+                )
 
-            # --- blocking relations for EXPLICIT depends_on only (dep BLOCKS node) ---
-            for node in nodes:
-                if not node.depends_on:
-                    continue
-                for dep in node.depends_on:
-                    if dep not in node_uuid:
-                        raise IssueBackendError(
-                            f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
-                        )
-                    self._projects.create_issue_relation(
-                        issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
-                    )
+            self._create_dependency_relations(nodes, node_uuid)
 
             return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
 
@@ -445,7 +337,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 return None
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
             issues = self._projects.project_issues(objective_id)
 
@@ -458,7 +350,7 @@ class LinearProjectObjectiveStore:
             for issue in issues:
                 identifier = _require_str(issue.get("identifier"), "issue identifier")
                 description = issue.get("description")
-                body = description if isinstance(description, str) else ""
+                body = _opt_str(description) or ""
                 block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
                 if block is None:
                     continue
@@ -497,7 +389,7 @@ class LinearProjectObjectiveStore:
         """
         for issue in self._projects.project_issues(objective_id):
             description_raw = issue.get("description")
-            body = description_raw if isinstance(description_raw, str) else ""
+            body = _opt_str(description_raw) or ""
             candidate = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
             if candidate is not None and candidate.get("id") == node_id:
                 return (
@@ -549,11 +441,11 @@ class LinearProjectObjectiveStore:
         )
         return objective.ObjectiveNode(
             id=node_id,
-            description=description if isinstance(description, str) else "",
+            description=_opt_str(description) or "",
             status=status,
             pr=pr,
-            slug=slug if isinstance(slug, str) else None,
-            comment=comment if isinstance(comment, str) else None,
+            slug=_opt_str(slug),
+            comment=_opt_str(comment),
         )
 
     def update_objective_node(
@@ -658,7 +550,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 raise IssueBackendError(f"objective {objective_id!r} not found")
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             spliced = objective.replace_reconcilable_section(overview, to_linear_markdown(prose))
             if spliced is None:
                 raise IssueBackendError(
@@ -691,7 +583,7 @@ class LinearProjectObjectiveStore:
             if project is None:
                 raise IssueBackendError(f"objective {objective_id!r} not found")
             overview = project.get("content")
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
             new_overview = plan.replace_metadata_block(
                 overview, objective.OBJECTIVE_HEADER_KEY, {**header, **fields}
@@ -762,7 +654,7 @@ class LinearProjectObjectiveStore:
             # old one); `enrich_phase_names` only SEEDS the name for a brand-new phase.
             project = self._projects.project_or_none(objective_id, "content")
             overview = project.get("content") if project is not None else ""
-            overview = overview if isinstance(overview, str) else ""
+            overview = _opt_str(overview) or ""
             phase_key = objective.derive_phase(new_id)
             manifest, _manifest_errors = objective.parse_manifest(overview)
             phase_key_str = objective.phase_key_str(new_id)
@@ -781,22 +673,11 @@ class LinearProjectObjectiveStore:
                 color=objective.OBJECTIVE_NODE_LABEL_COLOR,
                 description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
             )
-            # Prose-first (Pillar 2): prose description first, then the `objective-node` block.
-            node_description = to_linear_markdown(
-                new_node.description
-                + "\n\n"
-                + plan.render_metadata_block(
-                    objective.OBJECTIVE_NODE_KEY,
-                    objective.render_node_block(new_node),
-                    style="inline-code",
-                )
-            )
-            _ref, new_uuid = self._issue_ops._create_issue_raw(
-                title=objective.node_issue_title(new_node),
-                description=node_description,
-                label_id=node_label_id,
+            new_uuid = self._materialize_node_issue(
+                new_node,
                 project_id=objective_id,
                 milestone_id=milestone_id,
+                label_id=node_label_id,
             )
 
             # Blocking relations for EXPLICIT depends_on only (dep BLOCKS the new node).
@@ -821,6 +702,198 @@ class LinearProjectObjectiveStore:
             return objective_store.ObjectiveNodeAdd(
                 objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=False
             )
+
+    # ============================================ objective-write sub-steps (Node 3.1 extraction)
+    # Behavior-preserving helpers shared by `create_objective` / `adopt_source_as_objective` /
+    # `add_objective_node`. The orchestrators keep the once-only `_ensure_label_id` resolution and
+    # pass the resolved ids + milestone map down, so the GraphQL call sequence is byte-identical.
+
+    def _compose_objective_overview(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        base: str | None,
+        body: str,
+        nodes: list[objective.ObjectiveNode],
+        names: dict[tuple[int, str], str],
+    ) -> str:
+        """Compose a fresh objective's overview (`create_objective`): Reconcilable(prose) + header
+        block + manifest block; NO roadmap table. Prose-first (Pillar 2) — the human Reconcilable
+        prose renders FIRST, the machine blocks follow (reads scan by marker, position-independent).
+        Transcoded so the HTML Reconcilable markers become inline-code sentinels.
+
+        The manifest block (#612 drift baseline) pins the intended roadmap's structural identity +
+        the canonical phase names; status/pr are excluded (live/observed state)."""
+        header = objective.ObjectiveHeader(
+            run_id=run_id,
+            created=plan.now_iso(),
+            objective_comment_id=None,
+            status=status,
+            base=base,
+        )
+        header_block = plan.render_metadata_block(
+            objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+        )
+        manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+        manifest_block = plan.render_metadata_block(
+            objective.OBJECTIVE_MANIFEST_KEY,
+            objective.render_manifest_block(nodes, manifest_names),
+            style="inline-code",
+        )
+        reconcilable = (
+            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
+            f"{body.strip()}\n"
+            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
+        )
+        return to_linear_markdown(f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n")
+
+    def _compose_adopted_overview(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        base: str | None,
+        source_id: str,
+        prose: str,
+        nodes: list[objective.ObjectiveNode],
+        names: dict[tuple[int, str], str],
+        original_overview: str,
+    ) -> str:
+        """Compose an adopted project's overview (`adopt_source_as_objective`): the same
+        Reconcilable(prose) + header(`adopted_from=source_id`) + manifest composition, plus the
+        Immutable `Adopted-from` archive note BELOW the closing Reconcilable marker (preserving the
+        project's original overview verbatim)."""
+        header = objective.ObjectiveHeader(
+            run_id=run_id,
+            created=plan.now_iso(),
+            objective_comment_id=None,
+            status=status,
+            base=base,
+            adopted_from=source_id,
+        )
+        header_block = plan.render_metadata_block(
+            objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+        )
+        manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
+        manifest_block = plan.render_metadata_block(
+            objective.OBJECTIVE_MANIFEST_KEY,
+            objective.render_manifest_block(nodes, manifest_names),
+            style="inline-code",
+        )
+        reconcilable = (
+            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
+            f"{prose.strip()}\n"
+            f"{objective.OBJECTIVE_RECONCILABLE_MARKER_END}"
+        )
+        archive_note = objective.render_adopted_overview_note(original_overview)
+        composed = f"{reconcilable}\n\n{header_block}\n\n{manifest_block}\n"
+        if archive_note:
+            # The Immutable archive note lives BELOW the closing Reconcilable marker.
+            composed = f"{composed}\n{archive_note}\n"
+        return to_linear_markdown(composed)
+
+    def _resolve_phase_milestones(
+        self,
+        project_id: str,
+        grouped: list[tuple[tuple[int, str], list[objective.ObjectiveNode]]],
+        names: dict[tuple[int, str], str],
+        *,
+        known: dict[str, str],
+    ) -> dict[tuple[int, str], str]:
+        """Resolve one milestone per phase (in grouped order) via the name-keyed
+        :meth:`ensure_phase_milestone` seam. ``known`` is the caller's seed: the project's EXISTING
+        milestones for adopt (de-dupe), an empty dict for create (every name a guaranteed miss —
+        byte-identical to the prior blind-create loop)."""
+        phase_milestone: dict[tuple[int, str], str] = {}
+        for key, _phase_nodes in grouped:
+            phase_milestone[key] = self._projects.ensure_phase_milestone(
+                project_id=project_id, name=names[key], known=known
+            )
+        return phase_milestone
+
+    def _materialize_node_issue(
+        self,
+        node: objective.ObjectiveNode,
+        *,
+        project_id: str,
+        milestone_id: str,
+        label_id: str,
+    ) -> str:
+        """Mint a fresh node-issue (prose-first: prose description, then the `objective-node` block)
+        under the phase milestone, carrying the `perk:objective-node` label; return the create-time
+        UUID (straight off `issueCreate`, no extra query). The fresh-mint path shared by
+        `create_objective`, `add_objective_node`, and adopt's unmapped branch."""
+        description = to_linear_markdown(
+            node.description
+            + "\n\n"
+            + plan.render_metadata_block(
+                objective.OBJECTIVE_NODE_KEY,
+                objective.render_node_block(node),
+                style="inline-code",
+            )
+        )
+        _ref, uuid = self._issue_ops._create_issue_raw(
+            title=objective.node_issue_title(node),
+            description=description,
+            label_id=label_id,
+            project_id=project_id,
+            milestone_id=milestone_id,
+        )
+        return uuid
+
+    def _stamp_adopted_node_issue(
+        self,
+        node: objective.ObjectiveNode,
+        target: dict[str, object],
+        *,
+        milestone_id: str,
+        label_id: str,
+    ) -> str:
+        """Adopt's MAPPED branch: stamp the `objective-node` block ADDITIVELY into the existing
+        issue (title + human body verbatim), attach it to the phase milestone, and add the node
+        label additively. Returns the issue's UUID."""
+        node_block = plan.render_metadata_block(
+            objective.OBJECTIVE_NODE_KEY,
+            objective.render_node_block(node),
+            style="inline-code",
+        )
+        uuid = _require_str(target.get("id"), "issue id")
+        existing_body = _require_str(target.get("description"), "issue description")
+        new_desc = to_linear_markdown(f"{existing_body.rstrip()}\n\n{node_block}\n")
+        full = self._issue_ops._get_issue(uuid, "id description labels { nodes { id } }")
+        labels = _require_dict(full.get("labels"), "issue.labels")
+        label_ids = [
+            _require_str(_require_dict(raw, "label").get("id"), "label id")
+            for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
+        ]
+        if label_id not in label_ids:
+            label_ids = [*label_ids, label_id]
+        self._issue_ops._update_issue(
+            uuid,
+            {"description": new_desc, "labelIds": label_ids},
+            what="stamp objective-node block",
+        )
+        self._projects.attach_issue_to_milestone(issue_id=uuid, milestone_id=milestone_id)
+        return uuid
+
+    def _create_dependency_relations(
+        self, nodes: list[objective.ObjectiveNode], node_uuid: dict[str, str]
+    ) -> None:
+        """Sweep EXPLICIT `depends_on` edges into blocking relations (the dep BLOCKS the node).
+        Shared by `create_objective` + adopt; byte-identical (`add_objective_node` uses the per-dep
+        `_find_node_issue` variant for a single new node)."""
+        for node in nodes:
+            if not node.depends_on:
+                continue
+            for dep in node.depends_on:
+                if dep not in node_uuid:
+                    raise IssueBackendError(
+                        f"objective roadmap node {node.id!r} depends on unknown node {dep!r}"
+                    )
+                self._projects.create_issue_relation(
+                    issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
+                )
 
     # ================================================================== manifest sync (#612)
     # The persisted `objective-manifest` block is the drift baseline; these keep it current on the
@@ -852,7 +925,7 @@ class LinearProjectObjectiveStore:
         """Update the matching manifest entry's description (structural identity sync)."""
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, _errors = objective.parse_manifest(overview)
         if manifest is None or all(n.id != node_id for n in manifest.nodes):
             return
@@ -867,7 +940,7 @@ class LinearProjectObjectiveStore:
         """Append the new node's entry to the manifest, pinning a brand-new phase's name."""
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, _errors = objective.parse_manifest(overview)
         if manifest is None:
             return  # pre-manifest objective — doctor --fix backfill is the path
@@ -918,7 +991,7 @@ class LinearProjectObjectiveStore:
         if project is None:
             raise IssueBackendError(f"objective {objective_id!r} not found")
         overview = project.get("content")
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         manifest, manifest_errors = objective.parse_manifest(overview)
         header_ok = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) is not None
         reconcilable_ok = objective.replace_reconcilable_section(overview, "") is not None
@@ -937,9 +1010,9 @@ class LinearProjectObjectiveStore:
             identifier = _require_str(issue.get("identifier"), "issue identifier")
             uuid = _require_str(issue.get("id"), "issue id")
             body_raw = issue.get("description")
-            body = body_raw if isinstance(body_raw, str) else ""
+            body = _opt_str(body_raw) or ""
             milestone_raw = issue.get("milestone_name")
-            milestone_name = milestone_raw if isinstance(milestone_raw, str) else None
+            milestone_name = _opt_str(milestone_raw)
             if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
                 continue  # foreign issue — not a roadmap node
             block = plan.find_metadata_block(body, objective.OBJECTIVE_NODE_KEY)
@@ -1307,7 +1380,7 @@ class LinearProjectObjectiveStore:
             phase_names.setdefault(key, objective.phase_label(objective.derive_phase(node.id)))
         project = self._projects.project_or_none(objective_id, "content")
         overview = project.get("content") if project is not None else ""
-        overview = overview if isinstance(overview, str) else ""
+        overview = _opt_str(overview) or ""
         data = objective.render_manifest_block(nodes, phase_names)
         self._projects.update_project_content(
             objective_id, self._insert_or_replace_manifest(overview, data)

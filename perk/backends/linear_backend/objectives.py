@@ -5,6 +5,7 @@ from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     LinearClient,
+    _opt_str,
     _require_str,
 )
 from perk.backends.linear_backend._helpers import (
@@ -160,7 +161,7 @@ class LinearObjectiveStore:
             if issue is None:
                 return None
             description = issue.get("description")
-            body = description if isinstance(description, str) else ""
+            body = _opt_str(description) or ""
             header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
             nodes, errors = objective.parse_roadmap_nodes(body)
             if errors:
@@ -184,7 +185,7 @@ class LinearObjectiveStore:
                 raise IssueBackendError(f"unknown objective-header field(s): {sorted(unknown)}")
             issue = self._ops._get_issue(objective_id, "id description")
             description = issue.get("description")
-            body = description if isinstance(description, str) else ""
+            body = _opt_str(description) or ""
             header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
             # Form-preserving merge: replace_metadata_block keeps the inline-code form on Linear
             # bodies.
@@ -215,7 +216,7 @@ class LinearObjectiveStore:
         with _translate_objective():
             issue = self._ops._get_issue(objective_id, "id description")
             raw_description = issue.get("description")
-            body = raw_description if isinstance(raw_description, str) else ""
+            body = _opt_str(raw_description) or ""
             nodes, errors = objective.parse_roadmap_nodes(body)
             if errors:
                 raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))
@@ -263,7 +264,7 @@ class LinearObjectiveStore:
         with _translate_objective():
             issue = self._ops._get_issue(objective_id, "id description")
             raw_description = issue.get("description")
-            body = raw_description if isinstance(raw_description, str) else ""
+            body = _opt_str(raw_description) or ""
             header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}
             comment_id = header.get("objective_comment_id")
             if not isinstance(comment_id, str | int) or not str(comment_id).strip():
@@ -308,7 +309,7 @@ class LinearObjectiveStore:
         with _translate_objective():
             issue = self._ops._get_issue(objective_id, "id description")
             raw_description = issue.get("description")
-            body = raw_description if isinstance(raw_description, str) else ""
+            body = _opt_str(raw_description) or ""
             nodes, errors = objective.parse_roadmap_nodes(body)
             if errors:
                 raise IssueBackendError("invalid objective roadmap: " + "; ".join(errors))

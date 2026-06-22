@@ -1,7 +1,7 @@
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import cast
+from typing import TypedDict
 
 from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
@@ -9,11 +9,50 @@ from perk.backends.linear import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
+    _opt_dict,
+    _opt_str,
+    _require_dict,
     _require_str,
 )
 from perk.backends.objective_store import ObjectiveStoreError
 
 _PAGE_SIZE = 50
+
+
+class LinearStateNode(TypedDict):
+    """The ``state { type }`` sub-selection of the recurring issue node."""
+
+    type: str
+
+
+class LinearIssueNode(TypedDict):
+    """The recurring 6-field issue selection ``id identifier url title description state { type }``
+    (``backend.get_plan`` / ``backend.read_issue``). The pilot ``TypedDict`` (Node 3.1): the runtime
+    shape guard runs once in :func:`_require_issue_node`, then call sites read typed fields directly
+    instead of repeating the ``_require_str`` / ``_require_dict`` narrowing."""
+
+    id: str
+    identifier: str
+    url: str
+    title: str
+    description: str | None
+    state: LinearStateNode
+
+
+def _require_issue_node(raw: dict[str, object]) -> LinearIssueNode:
+    """Narrow a raw issue payload into a :class:`LinearIssueNode`, running the existing raising
+    ``_require_*`` guards once (a malformed shape ⇒ :class:`IssueBackendError`). ``description`` is
+    tolerant (``None`` when absent/non-str — Linear leaves it unset on a description-less issue)."""
+    state = _require_dict(raw.get("state"), "issue.state")
+    return LinearIssueNode(
+        id=_require_str(raw.get("id"), "issue id"),
+        identifier=_require_str(raw.get("identifier"), "issue identifier"),
+        url=_require_str(raw.get("url"), "issue url"),
+        title=_require_str(raw.get("title"), "issue title"),
+        description=_opt_str(raw.get("description")),
+        state=LinearStateNode(type=_require_str(state.get("type"), "issue.state.type")),
+    )
+
 
 # Every perk HTML-comment marker — metadata-block delimiters AND the run-report marker —
 # rewritten generically to its inline-code sentinel.
@@ -84,9 +123,9 @@ def _actor_or_none(raw: object, *, prefer_display: bool = False) -> engagement.A
     """Map a Linear ``user``/``botActor``/``actor`` selection into a neutral :class:`Actor`, or
     ``None`` when absent. ``prefer_display`` uses ``displayName`` over ``name`` (the ``user``
     field carries both)."""
-    if not isinstance(raw, dict):
+    node = _opt_dict(raw)
+    if node is None:
         return None
-    node = cast("dict[str, object]", raw)
     raw_id = node.get("id")
     raw_name = node.get("name")
     name = raw_name if isinstance(raw_name, str) and raw_name else None
@@ -94,13 +133,13 @@ def _actor_or_none(raw: object, *, prefer_display: bool = False) -> engagement.A
         display = node.get("displayName")
         if isinstance(display, str) and display:
             name = display
-    return engagement.Actor(id=raw_id if isinstance(raw_id, str) else None, name=name)
+    return engagement.Actor(id=_opt_str(raw_id), name=name)
 
 
 def _engagement_comment(node: dict[str, object]) -> engagement.EngagementComment:
     """Map a ``_comments_with_authors`` node into an :class:`EngagementComment` (untrusted body)."""
     body = node.get("body")
-    body_text = body if isinstance(body, str) else ""
+    body_text = _opt_str(body) or ""
     edited = node.get("editedAt")
     author = engagement.classify_author(
         body=body_text,
@@ -111,7 +150,7 @@ def _engagement_comment(node: dict[str, object]) -> engagement.EngagementComment
         id=_require_str(node.get("id"), "comment id"),
         body=body_text,
         created_at=_require_str(node.get("createdAt"), "comment createdAt"),
-        edited_at=edited if isinstance(edited, str) else None,
+        edited_at=_opt_str(edited),
         author=author,
     )
 
@@ -133,22 +172,21 @@ def _agent_activity(node: dict[str, object]) -> engagement.AgentActivity:
     """Map an agent-session activity node into an :class:`AgentActivity`. ``kind`` is the content
     union ``__typename``; ``body`` (untrusted DATA) is the content's body when the variant has
     one."""
-    content = node.get("content")
+    content_dict = _opt_dict(node.get("content"))
     kind = ""
     body: str | None = None
-    if isinstance(content, dict):
-        content_dict = cast("dict[str, object]", content)
+    if content_dict is not None:
         typename = content_dict.get("__typename")
-        kind = typename if isinstance(typename, str) else ""
+        kind = _opt_str(typename) or ""
         raw_body = content_dict.get("body")
-        body = raw_body if isinstance(raw_body, str) else None
+        body = _opt_str(raw_body)
     signal = node.get("signal")
     return engagement.AgentActivity(
         id=_require_str(node.get("id"), "activity id"),
         created_at=_require_str(node.get("createdAt"), "activity createdAt"),
         kind=kind,
         body=body,
-        signal=signal if isinstance(signal, str) else None,
+        signal=_opt_str(signal),
     )
 
 
