@@ -2,7 +2,6 @@ import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from perk.github import _exec, prs
 
@@ -180,7 +179,7 @@ def _graphql(
     int_vars: dict[str, int] | None = None,
     timeout: int = _exec._READ_TIMEOUT,
     what: str,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """``_graphql_proc`` + raise-on-failure + parse (the read-op convention)."""
     proc = _graphql_proc(
         query, repo_root=repo_root, str_vars=str_vars, int_vars=int_vars, timeout=timeout
@@ -196,27 +195,41 @@ def _graphql(
     return data
 
 
-def _nodes(obj: Any, *path: str) -> list[dict[str, Any]]:
+def _login(raw: object) -> str | None:
+    """The ``login`` of a GraphQL ``Actor`` selection (None when the actor node is absent)."""
+    node = _exec._opt_dict(raw)
+    return _exec._opt_str(node.get("login")) if node is not None else None
+
+
+def _nodes(obj: object, *path: str) -> list[dict[str, object]]:
     """Walk ``obj[path...]`` (None-safe) to a ``{nodes: [...]}`` and return its node list."""
-    cur: Any = obj
+    cur = _exec._opt_dict(obj)
     for key in path:
-        cur = (cur or {}).get(key) if isinstance(cur, dict) else None
-    nodes = (cur or {}).get("nodes") if isinstance(cur, dict) else None
-    return [n for n in nodes if isinstance(n, dict)] if isinstance(nodes, list) else []
+        cur = _exec._opt_dict(cur.get(key)) if cur is not None else None
+    return _exec._dicts(cur.get("nodes")) if cur is not None else []
 
 
-def _parse_review_threads(payload: dict[str, Any]) -> tuple[ReviewThread, ...]:
-    pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+def _pr_node(payload: dict[str, object]) -> dict[str, object]:
+    """Walk ``payload.data.repository.pullRequest`` (None-safe) to the PR node (``{}`` when any
+    hop is absent/null) so the ``_nodes`` walk below starts from a dict."""
+    cur: dict[str, object] | None = payload
+    for key in ("data", "repository", "pullRequest"):
+        cur = _exec._opt_dict(cur.get(key)) if cur is not None else None
+    return cur if cur is not None else {}
+
+
+def _parse_review_threads(payload: dict[str, object]) -> tuple[ReviewThread, ...]:
+    pr = _pr_node(payload)
     threads: list[ReviewThread] = []
     for node in _nodes(pr, "reviewThreads"):
         comments = tuple(
             ReviewComment(
-                comment_id=int(c["databaseId"]) if c.get("databaseId") is not None else None,
+                comment_id=_exec._opt_int(c.get("databaseId")),
                 body=str(c.get("body", "")),
-                author=((c.get("author") or {}).get("login")),
-                path=c.get("path"),
-                line=c.get("line"),
-                created_at=c.get("createdAt"),
+                author=_login(c.get("author")),
+                path=_exec._opt_str(c.get("path")),
+                line=_exec._opt_int(c.get("line")),
+                created_at=_exec._opt_str(c.get("createdAt")),
             )
             for c in _nodes(node, "comments")
         )
@@ -225,23 +238,23 @@ def _parse_review_threads(payload: dict[str, Any]) -> tuple[ReviewThread, ...]:
                 thread_id=str(node.get("id", "")),
                 is_resolved=bool(node.get("isResolved", False)),
                 is_outdated=bool(node.get("isOutdated", False)),
-                path=node.get("path"),
-                line=node.get("line"),
+                path=_exec._opt_str(node.get("path")),
+                line=_exec._opt_int(node.get("line")),
                 comments=comments,
             )
         )
     return tuple(threads)
 
 
-def _parse_reviews(payload: dict[str, Any]) -> tuple[Review, ...]:
-    pr = ((payload.get("data") or {}).get("repository") or {}).get("pullRequest") or {}
+def _parse_reviews(payload: dict[str, object]) -> tuple[Review, ...]:
+    pr = _pr_node(payload)
     return tuple(
         Review(
             review_id=str(node.get("id", "")),
-            author=((node.get("author") or {}).get("login")),
+            author=_login(node.get("author")),
             body=str(node.get("body", "")),
             state=str(node.get("state", "")),
-            submitted_at=node.get("submittedAt"),
+            submitted_at=_exec._opt_str(node.get("submittedAt")),
         )
         for node in _nodes(pr, "reviews")
     )
@@ -330,7 +343,7 @@ def _resolve_single(*, thread_id: str, comment: str | None, repo_root: Path) -> 
 
 
 def resolve_review_threads(
-    *, batch: list[dict[str, Any]], repo_root: Path, dry_run: bool = False
+    *, batch: list[dict[str, object]], repo_root: Path, dry_run: bool = False
 ) -> BatchResolveResult:
     """Reply-then-resolve a batch of review threads. ``batch`` items are ``{thread_id, comment?}``.
     Top-level ``success`` is True only when **all** resolved. Per-item failures are captured;
@@ -348,7 +361,9 @@ def resolve_review_threads(
         return BatchResolveResult(success=True, results=results)
     results = tuple(
         _resolve_single(
-            thread_id=str(item["thread_id"]), comment=item.get("comment"), repo_root=repo_root
+            thread_id=str(item["thread_id"]),
+            comment=_exec._opt_str(item.get("comment")),
+            repo_root=repo_root,
         )
         for item in batch
     )
@@ -496,7 +511,7 @@ def post_pr_review(
             ok=True, mode="review", pr_number=pr_number, comment_count=len(comments)
         )
 
-    payload: dict[str, Any] = {
+    payload: dict[str, object] = {
         "event": "COMMENT",
         "body": summary,
         "comments": [

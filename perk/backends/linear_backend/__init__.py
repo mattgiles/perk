@@ -67,6 +67,7 @@ attribute-access import path verbatim (zero consumer/test import churn). Submodu
 
 from perk.backends.linear_backend._helpers import (
     _NODE_STATUS_STATE_TYPE,
+    _note,
     to_linear_markdown,
 )
 from perk.backends.linear_backend.backend import LinearIssueBackend
@@ -92,6 +93,7 @@ __all__ = [
     "LinearReadiness",
     "_LinearIssueOps",
     "_LinearProjectOps",
+    "_note",
     "check_project_readiness",
     "check_readiness",
     "to_linear_markdown",

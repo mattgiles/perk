@@ -16,6 +16,7 @@ from perk.backends.linear_backend._helpers import (
     _NODE_STATUS_STATE_TYPE,
     _description_edit,
     _engagement_comment,
+    _note,
     _translate_objective,
     to_linear_markdown,
 )
@@ -520,8 +521,8 @@ class LinearProjectObjectiveStore:
                         self._issue_ops._update_issue(
                             issue_uuid, {"stateId": state_id}, what="mirror node status"
                         )
-                except IssueBackendError:
-                    pass
+                except IssueBackendError as exc:
+                    _note(f"node status mirror skipped (non-fatal): {exc}")
 
                 # Project lifecycle nudge (Pillar 7): when a node enters a `started`-type status
                 # (planning/in_progress/blocked), advance the project Planned→Started so an active

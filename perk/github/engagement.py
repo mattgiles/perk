@@ -20,7 +20,6 @@ Mechanism notes (contracts.md §8.25):
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from perk.github import _exec
 
@@ -75,32 +74,32 @@ class DescriptionEditRow:
     editor_is_bot: bool
 
 
-def _actor_fields(node: Any) -> tuple[str | None, str | None, bool]:
+def _actor_fields(node: object) -> tuple[str | None, str | None, bool]:
     """Parse a GraphQL ``Actor`` selection → ``(login, id, is_bot)``. ``id`` is the stringified
     ``databaseId`` (``None`` when absent); ``is_bot`` is ``__typename == "Bot"``."""
-    if not isinstance(node, dict):
+    d = _exec._opt_dict(node)
+    if d is None:
         return None, None, False
-    login = node.get("login")
-    raw_id = node.get("databaseId")
+    raw_id = d.get("databaseId")
     actor_id = str(raw_id) if raw_id is not None else None
     return (
-        login if isinstance(login, str) else None,
+        _exec._opt_str(d.get("login")),
         actor_id,
-        node.get("__typename") == "Bot",
+        d.get("__typename") == "Bot",
     )
 
 
-def _connection(obj: Any, path: str) -> dict[str, Any] | None:
+def _connection(obj: object, path: str) -> dict[str, object] | None:
     """Walk ``obj.data.repository.issue.<path>`` (None-safe) to the connection dict (else None)."""
-    cur: Any = obj
+    cur = _exec._opt_dict(obj)
     for key in ("data", "repository", "issue", path):
-        cur = cur.get(key) if isinstance(cur, dict) else None
-    return cur if isinstance(cur, dict) else None
+        cur = _exec._opt_dict(cur.get(key)) if cur is not None else None
+    return cur
 
 
 def _graphql_nodes(
     *, query: str, issue: int, repo_root: Path, path: str, what: str
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Cursor-loop a single GraphQL connection at ``data.repository.issue.<path>``.
 
     Runs ``gh api graphql`` (string vars via ``-f``, the numeric ``number`` via ``-F``, the
@@ -110,7 +109,7 @@ def _graphql_nodes(
     yields ``[]``.
     """
     owner, name = _exec._owner_repo(repo_root)
-    nodes: list[dict[str, Any]] = []
+    nodes: list[dict[str, object]] = []
     cursor: str | None = None
     while True:
         args = [
@@ -136,11 +135,9 @@ def _graphql_nodes(
         connection = _connection(payload, path)
         if connection is None:
             return nodes
-        page = connection.get("nodes")
-        if isinstance(page, list):
-            nodes += [n for n in page if isinstance(n, dict)]
-        page_info = connection.get("pageInfo")
-        if not (isinstance(page_info, dict) and page_info.get("hasNextPage")):
+        nodes += _exec._dicts(connection.get("nodes"))
+        page_info = _exec._opt_dict(connection.get("pageInfo"))
+        if not (page_info is not None and page_info.get("hasNextPage")):
             return nodes
         end_cursor = page_info.get("endCursor")
         if not isinstance(end_cursor, str):
@@ -160,13 +157,12 @@ def read_issue_comments(*, issue: int, repo_root: Path) -> list[IssueCommentRow]
     rows: list[IssueCommentRow] = []
     for node in nodes:
         login, actor_id, is_bot = _actor_fields(node.get("author"))
-        edited = node.get("lastEditedAt")
         rows.append(
             IssueCommentRow(
                 id=str(node.get("id", "")),
                 body=str(node.get("body", "")),
                 created_at=str(node.get("createdAt", "")),
-                edited_at=edited if isinstance(edited, str) else None,
+                edited_at=_exec._opt_str(node.get("lastEditedAt")),
                 author_login=login,
                 author_id=actor_id,
                 author_is_bot=is_bot,
@@ -189,11 +185,10 @@ def read_description_edits(*, issue: int, repo_root: Path) -> list[DescriptionEd
     rows: list[DescriptionEditRow] = []
     for node in nodes:
         login, actor_id, is_bot = _actor_fields(node.get("editor"))
-        diff = node.get("diff")
         rows.append(
             DescriptionEditRow(
                 edited_at=str(node.get("editedAt", "")),
-                diff=diff if isinstance(diff, str) else None,
+                diff=_exec._opt_str(node.get("diff")),
                 editor_login=login,
                 editor_id=actor_id,
                 editor_is_bot=is_bot,

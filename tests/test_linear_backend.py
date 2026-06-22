@@ -645,6 +645,27 @@ class TestPlanUpserts:
         assert update.dry_run is False  # the header write committed
         assert not _queries(fake, "attachmentCreate(")  # no attachment posted
 
+    def test_update_plan_header_attachment_failure_reports(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The fail-open swallow now reports loud-but-non-fatal to stderr (report-don't-swallow).
+        backend, _fake = _make_backend(
+            {
+                "issue(id": [
+                    {"issue": {"id": "iss-1", "description": _inline_plan_description("01H")}}
+                ],
+                "issueUpdate(": [{"issueUpdate": {"success": True}}],
+            }
+        )
+        monkeypatch.setattr(
+            github, "get_pr", lambda **k: (_ for _ in ()).throw(GitHubError("gh exploded"))
+        )
+        update = backend.update_plan_header(issue_id="iss-1", fields={"pr": "12"})
+        assert update.dry_run is False  # the header write still committed
+        err = capsys.readouterr().err
+        assert "perk linear: PR attachment skipped" in err
+        assert "gh exploded" in err
+
     def test_update_plan_header_no_pr_posts_no_attachment(self) -> None:
         backend, fake = _make_backend(
             {
@@ -3240,6 +3261,28 @@ class TestLinearProjectObjectiveStore:
         # No raise; the description write is committed.
         assert result.dry_run is False
         assert len(_queries(fake, "issueUpdate(")) == 2
+
+    def test_update_objective_node_mirror_failure_reports(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # The fail-open mirror swallow now reports loud-but-non-fatal (report-don't-swallow).
+        node = objective.ObjectiveNode(
+            id="1.1", description="Alpha", status=objective.NodeStatus.PENDING
+        )
+        responses = self._node_issue_responses(node)
+        responses["issueUpdate("] = [
+            {"issueUpdate": {"success": True}},  # the authoritative description write
+            {"issueUpdate": {"success": False}},  # the mirror write fails → IssueBackendError
+        ]
+        responses["teams(filter"] = [_TEAM_RESPONSE]
+        responses["team(id"] = [_STATES_WITH_STARTED]
+        responses["projectUpdate("] = [{"projectUpdate": {"success": False}}]
+        store, _fake = _make_project_store(responses)
+        result = store.update_objective_node(
+            objective_id="proj-1", node_id="1.1", status=objective.NodeStatus.IN_PROGRESS
+        )
+        assert result.dry_run is False  # the node update still succeeds
+        assert "perk linear: node status mirror skipped" in capsys.readouterr().err
 
     def test_update_objective_node_pr_not_written_to_block(self) -> None:
         node = objective.ObjectiveNode(
