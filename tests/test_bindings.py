@@ -13,7 +13,7 @@ from perk.substrate.bindings import (
     DELIVERABLE_COMMAND_TARGETS,
     Binding,
     BindingsError,
-    Severity,
+    FindingSeverity,
     is_skill_installed,
     load_bindings,
     resolve_bindings,
@@ -54,7 +54,7 @@ def _write(tmp_path, text):
 
 def _messages(tmp_path, text):
     issues = validate(load_bindings(_write(tmp_path, text)))
-    assert all(i.severity is Severity.ERROR for i in issues), issues
+    assert all(i.severity is FindingSeverity.ERROR for i in issues), issues
     return " | ".join(i.message for i in issues)
 
 
@@ -172,7 +172,7 @@ def test_resolve_drops_invalid_bindings_and_reports_each_class():
     # Defaults untouched (every user binding dropped).
     assert resolved.bindings == DEFAULTS
     messages = " | ".join(i.message for i in resolved.issues)
-    assert all(i.severity is Severity.ERROR for i in resolved.issues)
+    assert all(i.severity is FindingSeverity.ERROR for i in resolved.issues)
     for fragment in ("skill", "mode", "<kind>:<id>", "kind", "empty"):
         assert fragment in messages
 

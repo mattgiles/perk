@@ -8,7 +8,7 @@ from perk.cli.alias import alias
 from perk.cli.commands.registry.shared import load_or_die
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.output import machine_output, user_output
-from perk.substrate.registry import Severity, validate
+from perk.substrate.registry import FindingSeverity, validate
 
 
 @alias("ch")
@@ -26,7 +26,7 @@ def check_registry(*, as_json: bool) -> None:
     """
     reg = load_or_die()
     issues = validate(reg)
-    errors = [i for i in issues if i.severity is Severity.ERROR]
+    errors = [i for i in issues if i.severity is FindingSeverity.ERROR]
 
     if as_json:
         machine_output(

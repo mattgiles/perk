@@ -30,7 +30,7 @@ from typing import Any
 import yaml
 
 from perk._resources import shared_dir
-from perk.substrate.registry import Issue, Severity
+from perk.substrate.registry import FindingSeverity, Issue
 
 PROVIDERS_FILENAME = "providers.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
@@ -156,13 +156,15 @@ def validate(providers: ProviderSet) -> list[Issue]:
     for provider in providers.providers:
         where = provider.id or "providers"
         if not provider.id:
-            issues.append(Issue(Severity.ERROR, "providers", "a provider is missing its `id`"))
+            issues.append(
+                Issue(FindingSeverity.ERROR, "providers", "a provider is missing its `id`")
+            )
         elif provider.id in seen:
-            issues.append(Issue(Severity.ERROR, where, "duplicate `id`"))
+            issues.append(Issue(FindingSeverity.ERROR, where, "duplicate `id`"))
         seen.add(provider.id)
 
         if provider.seam not in SEAMS:
-            issues.append(Issue(Severity.ERROR, where, f"`seam` must be one of {SEAMS}"))
+            issues.append(Issue(FindingSeverity.ERROR, where, f"`seam` must be one of {SEAMS}"))
         elif provider.default:
             default_counts[provider.seam] += 1
 
@@ -171,7 +173,7 @@ def validate(providers: ProviderSet) -> list[Issue]:
         if count != 1:
             issues.append(
                 Issue(
-                    Severity.ERROR,
+                    FindingSeverity.ERROR,
                     "providers",
                     f"seam `{seam}` must have exactly one `default: true` provider (found {count})",
                 )
@@ -224,7 +226,7 @@ def resolve_providers(
         if provider is None:
             issues.append(
                 Issue(
-                    Severity.ERROR,
+                    FindingSeverity.ERROR,
                     "providers",
                     f"`{seam}` selects unknown provider `{selected}`",
                 )
@@ -233,7 +235,7 @@ def resolve_providers(
         if provider.seam != seam:
             issues.append(
                 Issue(
-                    Severity.ERROR,
+                    FindingSeverity.ERROR,
                     "providers",
                     f"provider `{selected}` is a `{provider.seam}` provider, not `{seam}`",
                 )

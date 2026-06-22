@@ -26,7 +26,7 @@ from typing import Any
 import yaml
 
 from perk._resources import shared_dir
-from perk.substrate.registry import Issue, Severity
+from perk.substrate.registry import FindingSeverity, Issue
 
 BINDINGS_FILENAME = "bindings.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
@@ -164,20 +164,24 @@ def _binding_issues(binding: Binding) -> list[Issue]:
     where = binding.trigger or "bindings"
 
     if not binding.skill:
-        issues.append(Issue(Severity.ERROR, where, "missing `skill`"))
+        issues.append(Issue(FindingSeverity.ERROR, where, "missing `skill`"))
     if binding.mode not in MODES:
-        issues.append(Issue(Severity.ERROR, where, f"`mode` must be one of {MODES}"))
+        issues.append(Issue(FindingSeverity.ERROR, where, f"`mode` must be one of {MODES}"))
 
     if not binding.trigger:
-        issues.append(Issue(Severity.ERROR, "bindings", "a binding is missing its `trigger`"))
+        issues.append(
+            Issue(FindingSeverity.ERROR, "bindings", "a binding is missing its `trigger`")
+        )
     elif ":" not in binding.trigger:
-        issues.append(Issue(Severity.ERROR, where, "`trigger` must be of the form `<kind>:<id>`"))
+        issues.append(
+            Issue(FindingSeverity.ERROR, where, "`trigger` must be of the form `<kind>:<id>`")
+        )
     elif binding.kind not in TRIGGER_KINDS:
         issues.append(
-            Issue(Severity.ERROR, where, f"`trigger` kind must be one of {TRIGGER_KINDS}")
+            Issue(FindingSeverity.ERROR, where, f"`trigger` kind must be one of {TRIGGER_KINDS}")
         )
     elif not binding.target_id:
-        issues.append(Issue(Severity.ERROR, where, "`trigger` has an empty `<id>`"))
+        issues.append(Issue(FindingSeverity.ERROR, where, "`trigger` has an empty `<id>`"))
 
     return issues
 
@@ -194,7 +198,7 @@ def validate(bindings: BindingSet) -> list[Issue]:
         issues.extend(_binding_issues(binding))
         if binding.trigger:
             if binding.trigger in seen:
-                issues.append(Issue(Severity.ERROR, binding.trigger, "duplicate `trigger`"))
+                issues.append(Issue(FindingSeverity.ERROR, binding.trigger, "duplicate `trigger`"))
             seen.add(binding.trigger)
 
     return issues
@@ -247,7 +251,7 @@ def resolve_bindings(
             issues.extend(binding_issues)
             continue
         if binding.trigger in applied:
-            issues.append(Issue(Severity.ERROR, binding.trigger, "duplicate `trigger`"))
+            issues.append(Issue(FindingSeverity.ERROR, binding.trigger, "duplicate `trigger`"))
             continue
         applied.add(binding.trigger)
         at = index.get(binding.trigger)

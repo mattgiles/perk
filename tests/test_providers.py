@@ -10,10 +10,10 @@ import pytest
 
 from perk.substrate.providers import (
     SEAMS,
+    FindingSeverity,
     Provider,
     ProvidersError,
     ProviderSet,
-    Severity,
     load_providers,
     resolve_providers,
     validate,
@@ -63,7 +63,7 @@ def _write(tmp_path, text):
 
 def _messages(tmp_path, text):
     issues = validate(load_providers(_write(tmp_path, text)))
-    assert all(i.severity is Severity.ERROR for i in issues), issues
+    assert all(i.severity is FindingSeverity.ERROR for i in issues), issues
     return " | ".join(i.message for i in issues)
 
 

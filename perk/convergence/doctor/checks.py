@@ -115,7 +115,7 @@ def _registry_check() -> Check:
             "registry", "registry", "fail", "registry not loadable", str(exc), "Reinstall perk."
         )
     issues = registry.validate(reg)
-    errors = [i for i in issues if i.severity is registry.Severity.ERROR]
+    errors = [i for i in issues if i.severity is registry.FindingSeverity.ERROR]
     if errors:
         return Check(
             "registry",
@@ -125,7 +125,7 @@ def _registry_check() -> Check:
             "; ".join(str(i) for i in errors[:3]),
             "Reinstall perk.",
         )
-    warnings = [i for i in issues if i.severity is registry.Severity.WARNING]
+    warnings = [i for i in issues if i.severity is registry.FindingSeverity.WARNING]
     if warnings:
         return Check(
             "registry",
@@ -220,7 +220,9 @@ def _providers_check(root: Path) -> Check:
             "providers", "providers", "fail", "providers not loadable", str(exc), "Reinstall perk."
         )
 
-    errors = [i for i in providers.validate(provider_set) if i.severity is registry.Severity.ERROR]
+    errors = [
+        i for i in providers.validate(provider_set) if i.severity is registry.FindingSeverity.ERROR
+    ]
     if errors:
         return Check(
             "providers",

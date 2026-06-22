@@ -120,7 +120,7 @@ def _sweep_stale_pi_agent_locks(agent_dir: Path) -> None:
             if not lock.is_dir():
                 lock.unlink(missing_ok=True)
         except OSError:
-            pass
+            pass  # best-effort; a stale lock is surfaced by pi's own startup diagnostic
 
 
 def launch_stage(

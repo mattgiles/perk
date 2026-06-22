@@ -7,7 +7,7 @@ while the real registry's reads/writes are still empty.
 
 import pytest
 
-from perk.substrate.registry import RegistryError, Severity, load_registry, validate
+from perk.substrate.registry import FindingSeverity, RegistryError, load_registry, validate
 
 # A minimal-but-complete, valid 2-stage registry. Each negative test mutates one line.
 GOOD = """\
@@ -52,7 +52,7 @@ def _write(tmp_path, text):
 
 def _messages(tmp_path, text):
     issues = validate(load_registry(_write(tmp_path, text)))
-    assert all(i.severity is Severity.ERROR for i in issues), issues
+    assert all(i.severity is FindingSeverity.ERROR for i in issues), issues
     return " | ".join(i.message for i in issues)
 
 
