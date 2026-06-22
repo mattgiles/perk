@@ -1,6 +1,6 @@
 ---
 title: Adding a perk.toml config table — cross-plane parsing, placement, and convergence
-read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`perk.local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
+read_when: You are adding a new [table] to .pi/perk.toml (or a key under one), deciding where a knob is consumed, adding a local-only secret-fallback reader (`perk.local.toml`, fail-soft on TOMLDecodeError, NOT in the merged Config, read from the **main checkout** via `main_worktree_root`), adding an overlay-aware key like `[worktree] setup`, hitting a config value that silently vanishes, or working on change-scoped CI gating (the [[ci]] glob convention, skip-result shape, and run-all-only discipline).
 ---
 
 # Adding a `perk.toml` config table
@@ -72,7 +72,15 @@ the **"local overlay is ignored"** case — it's the whole point of the shape.
 A secret may now live in the **gitignored** `perk.local.toml` (never the committed `perk.toml`) — a
 deliberate, documented relaxation of "Linear key in the environment only." `LINEAR_API_KEY`'s
 `[linear] api_key` is read by `config.load_local_linear_api_key(repo_root)`, which reads
-`repo_root/.pi/perk.local.toml` **only** — the **inverse** of the `load_committed_*` family.
+`.pi/perk.local.toml` **only** — the **inverse** of the `load_committed_*` family.
+
+- **It resolves the MAIN checkout first (#730).** The reader reads from
+  `git.main_worktree_root(repo_root) or repo_root`, so the gitignored secret is found from inside a
+  linked worktree **without a file copy and without relying on the launch env-seed** (the
+  `perk.local.toml` lives only in the main checkout; a worktree has none). The `or repo_root`
+  fallback keeps every non-worktree / non-repo caller — including every `tmp_path`-rooted test —
+  **byte-identical** (`main_worktree_root` returns `None` outside a repo). See
+  `docs/learned/workflow/worktree-lifecycle.md` for the `main_worktree_root` primitive.
 
 - **Critical divergence:** it is **fail-soft on `tomllib.TOMLDecodeError` (returns `None`)**, unlike
   the committed readers which **propagate** it for the config check to map. Rationale: a best-effort

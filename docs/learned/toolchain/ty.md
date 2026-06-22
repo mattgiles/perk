@@ -1,6 +1,6 @@
 ---
 title: ty gotchas — narrowing untyped JSON values, suppression syntax, enum strictness in tests
-read_when: You hit a ty invalid-argument-type or no-matching-overload error while handling untyped or object-form values parsed from JSON/settings (incl. deep GraphQL payloads — the narrowing-helper family), need to suppress a ty diagnostic in a test, or ty rejects a string literal where an enum is annotated.
+read_when: You hit a ty invalid-argument-type or no-matching-overload error while handling untyped or object-form values parsed from JSON/settings (incl. deep GraphQL payloads — the narrowing-helper family), want to read a known key off an `object`-narrowed dict without a `cast` (the `.items()`-iteration idiom), hit per-element `isinstance` not refining the surrounding container, are choosing between the raising `_require_*` and the lenient `_opt_*` helper family (the disposition-matching rule), need to suppress a ty diagnostic in a test, or ty rejects a string literal where an enum is annotated.
 ---
 
 # ty narrowing of untyped / JSON-shaped dict values
@@ -19,6 +19,26 @@ After `isinstance(entry, dict)` on an untyped / `object` value, ty narrows it to
 
 This trap recurred **three more times** across the Linear GraphQL work (source and tests); the
 documented `cast` fix held every time — reach for it immediately, don't re-diagnose.
+
+### The cast-free alternative: read a known key via `.items()` iteration
+
+When you **don't want to** (or can't) `cast` an `object`-narrowed dict but need ONE known key off
+it, `.items()` iteration carries no key-type constraint, so it type-checks where every direct access
+fails. `entry.get("source")` / `entry["source"]` / `Mapping.get(...)` all fail `Expected Never` after
+the `isinstance(entry, dict)` collapse — but
+`next((v for k, v in entry.items() if k == "source"), None)` type-checks cleanly. Reach for this when
+the `cast` would be the *only* reason to introduce one (a single key read in a tolerant scan); reach
+for the documented `cast` when you read several keys or want the value typed downstream.
+
+### Per-element `isinstance` in a loop does NOT refine the container's element type
+
+An `isinstance` check *inside* a `for` loop refines the loop variable, but does **not** refine the
+surrounding container's element type — `tuple(raw)` stays `tuple[object, ...]` no matter what the
+body asserts. The behavior-preserving fix is **typed-list accumulation**: declare
+`acc: list[str] = []`, `acc.append(item)` inside the same `isinstance` guard, then `tuple(acc)`.
+Note these two idioms (`.items()` known-key read and typed-list accumulation) are **restructures**,
+not signature-only edits — they change the shape of the body, so re-run the test oracle, not just
+the type checker.
 
 Follow-on: ruff's SIM108 then prefers the ternary form over an if/else block — so the `cast` fix and
 a ruff style change usually land **together** in the same edit.
@@ -58,6 +78,23 @@ and asserts don't scale: ty does **not** narrow `assert isinstance` through a su
 for the payload. In tests, one shared cast helper (e.g. `_input_payload()` for a recorded
 GraphQL `variables["input"]`) beats per-site asserts the same way. See
 `workflow/linear-backend.md` for the originating queries.
+
+### The `_opt_*` lenient twin of `_require_*` + the disposition-matching rule
+
+The raising `_require_*` family has a lenient twin: the **`_opt_*` family**
+(`_opt_dict`/`_opt_list`/`_opt_str`), each `cast(...) if isinstance(...) else None` — it **never
+raises**, returning `None` on a malformed/absent shape. The two families exist so a parse site keeps
+its original *disposition*:
+
+- **The disposition-matching rule:** never route a tolerant / skip / default parse site through a
+  *raising* helper. Doing so silently flips tolerant parsing to fail-loud — a behavior change, not a
+  type-only edit. When replacing a former bare `cast`, match it to the helper of its **own**
+  disposition: a site that raised stays `_require_*`; a site that tolerated stays `_opt_*`.
+- `_opt_str(x) or ""` is **byte-equivalent** to the `x if isinstance(x, str) else ""` it replaces —
+  the safe mechanical swap for a tolerant string default.
+- The four `cast(` calls that remain in the Linear package live **inside the `_opt_*`/`_require_*`
+  definitions** (`perk/backends/linear.py`), internalizing the ty quirk so call sites stay cast-free.
+  See `workflow/linear-backend.md`.
 
 ## ty suppression + enum strictness in tests
 
