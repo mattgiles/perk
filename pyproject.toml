@@ -58,6 +58,10 @@ self = true
 
 [tool.ty.environment]
 python-version = "3.13"
+# `.` keeps `from perk...` resolving (the prior default root); `tests` adds bare-name
+# cross-test-module imports (e.g. `from _linear_fakes import _FakeLinear`) so ty resolves
+# them the way pytest does at runtime (prepend import mode, no `tests/__init__.py`).
+root = [".", "tests"]
 
 [tool.ty.src]
 # Only type-check perk's own code.
