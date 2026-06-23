@@ -6,7 +6,7 @@ from typing import Any
 from perk.github import _exec
 
 # ===========================================================================
-# PR lifecycle ops (P1.T5 — submit/land/resume; contracts.md §8.4).
+# PR lifecycle ops (submit/land/resume; contracts.md §8.4).
 #
 # Same conventions as the plan write: REST `gh api` over porcelain (the lone exception is
 # `mark_pr_ready` — there is no REST endpoint for draft->ready, so it shells `gh pr ready`,
@@ -29,7 +29,7 @@ class PullRequest:
 
 @dataclass(frozen=True)
 class PrBodyUpdate:
-    """The result of a PR-body re-write (P2.T8a — the create-then-update footer write)."""
+    """The result of a PR-body re-write (the create-then-update footer write)."""
 
     number: int
     dry_run: bool
@@ -152,7 +152,7 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
 
 def get_pr_body(*, number: int, repo_root: Path) -> str | None:
     """Fetch a PR's body markdown (REST). ``None`` if the PR does not exist; raises on infra
-    failure. Used by ``perk pr check`` to re-validate the live checkout footer (P2.T8a)."""
+    failure. Used by ``perk pr check`` to re-validate the live checkout footer."""
     proc = _exec._run(
         ["api", f"repos/{{owner}}/{{repo}}/pulls/{number}", "--jq", ".body"], cwd=repo_root
     )
@@ -167,7 +167,7 @@ def update_pr_body(
     *, number: int, body: str, repo_root: Path, dry_run: bool = False
 ) -> PrBodyUpdate:
     """Re-write a PR's body (REST ``PATCH .../pulls/{n}``, body via file; mirrors
-    :func:`update_plan_header`). P2.T8a's create-then-update footer write: the checkout footer
+    :func:`update_plan_header`). The create-then-update footer write: the checkout footer
     needs the **PR** number, unknown until ``create_pr`` returns. Idempotent (overwrites). The PR
     body is distinct from the issue body -- no collision with ``update_plan_header``."""
     if dry_run:
@@ -191,11 +191,11 @@ _HTML_FOOTER_RE = re.compile(r"<code>[^<]*gh pr checkout", re.IGNORECASE)
 
 
 def validate_pr_body(body: str, *, pr_number: int) -> tuple[str, ...]:
-    """Validate the PR body's checkout footer (P2.T8a, D5). Empty tuple == valid.
+    """Validate the PR body's checkout footer (D5). Empty tuple == valid.
 
     **Footer-scoped only** -- the ``<details>`` plan embed is explicitly fine; the footer must be
     a plain-backtick `` `gh pr checkout <pr_number>` `` line carrying the **PR** number (not the
-    issue number -- erk's single most common agent mistake). The three checks:
+    issue number -- the single most common agent mistake). The three checks:
 
     1. the checkout footer is present,
     2. it carries the correct PR number (word-boundary: ``#12`` != ``...checkout 123``),

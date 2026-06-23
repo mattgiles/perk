@@ -6,12 +6,11 @@ from pathlib import Path
 from perk.github import _exec
 
 # ===========================================================================
-# Workflow-dispatch ops (Node 2.1 — the remote drive; contracts.md §8.13).
+# Workflow-dispatch ops (the remote drive; contracts.md §8.13).
 #
 # Same conventions as the rest of the gateway (REST `gh api` / porcelain `gh run`, routed through
 # `_run`, mutations raise `GitHubError`). `trigger_workflow` triggers a `workflow_dispatch` and
-# then VERIFIES the run by discovering it via the perk `run_id` embedded in the run-name
-# (erk's distinct-id run-discovery pattern; the perk `run_id` unifies erk's separate distinct_id).
+# then VERIFIES the run by discovering it via the perk `run_id` embedded in the run-name.
 # The `sleep` injection + `max_attempts` keep the poll fully unit-testable with no real delay.
 # ===========================================================================
 
@@ -132,7 +131,7 @@ def rerun_workflow_run(*, run_id: str, repo_root: Path, failed_only: bool) -> No
 
 
 # ===========================================================================
-# Runner-prerequisite reads (Node 2.4 — contracts.md §8.16).
+# Runner-prerequisite reads (contracts.md §8.16).
 #
 # Verification-only pre-flight reads for the remote-runner's prerequisites (the checkout/push
 # PAT, the model credential, repo workflow-permissions). Same conventions as `check_auth` /

@@ -1,8 +1,8 @@
 """Load and validate the shared stage registry (`shared/registry.yaml`).
 
-This is the Python plane's view of the language-neutral contract both planes read
-(`Q4`/`Q6`). T4 generates `perk <stage>` subcommands from it; T6 `doctor` folds the
-validator below into its checks. The TS extension has an independent reader
+This is the Python plane's view of the language-neutral contract both planes read.
+It generates `perk <stage>` subcommands from it; `doctor` folds the validator below
+into its checks. The TS extension has an independent reader
 (`extension/substrate/registry.ts`) over the *same* bundled file.
 
 The validator returns structured ``Issue`` records (it never raises for invalid
@@ -216,7 +216,7 @@ def _check_doors_and_run_id(stage: Stage, where: str) -> list[Issue]:
         if policy not in RUN_ID_POLICIES:
             issues.append(_err(where, f"`run_id.{door}` must be one of {RUN_ID_POLICIES}"))
             continue
-        # Q2 invariant: warm keeps, cold mints.
+        # invariant: warm keeps, cold mints.
         if door == "warm" and policy != "keep":
             issues.append(_err(where, "`run_id.warm` must be `keep` (Q2)"))
         if door != "warm" and policy != "mint":

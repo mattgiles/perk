@@ -1,12 +1,11 @@
-"""Cold-door (Python-plane) delivery of the resolved skill-binding overlay (§8.9, Node 2.3).
+"""Cold-door (Python-plane) delivery of the resolved skill-binding overlay (§8.9).
 
 When `perk` launches a `pi` session, this renders the **full resolved** bindings whose trigger
 matches the launch into the session's initial prompt — `nudge` as a pointer line, `transclude`
-as the inlined skill body. The mechanism is now perk's **single delivery path** for its own
-nudges: Node 2.3 deleted the hardcoded "Follow the … skill" strings, so the shipped defaults
-are delivered here (no longer subtracted). The warm door (the TS extension) is the in-session
-twin; target-existence validation (is `stage:x` a real stage? is the skill installed?) stays
-`doctor` (Node 3.1).
+as the inlined skill body. The mechanism is perk's **single delivery path** for its own
+nudges: the shipped defaults carry no hardcoded per-skill nudge string and are delivered here.
+The warm door (the TS extension) is the in-session twin; target-existence validation (is
+`stage:x` a real stage? is the skill installed?) stays `doctor`.
 
 LBYL throughout (dignified-python): a missing/unreadable transclude target is surfaced as a
 loud-but-non-fatal warning and degrades to the nudge pointer — never raises, never blocks a
@@ -52,8 +51,8 @@ def render_cold_bindings(
 ) -> ColdBindingDelivery:
     """Render the full resolved bindings matching ``trigger`` into a prompt fragment.
 
-    The resolved set is the shipped defaults ⊕ the user overlay (Node 2.3 delivers the defaults
-    too — perk's own nudges are no longer hardcoded). Only bindings whose trigger equals
+    The resolved set is the shipped defaults ⊕ the user overlay (perk's own nudges are not
+    hardcoded — the defaults are delivered here too). Only bindings whose trigger equals
     ``trigger`` are delivered. Resolver issues and delivery warnings are collected (never raised)
     for the caller to surface loud-but-non-fatal.
     """
@@ -77,7 +76,7 @@ def render_cold_bindings(
                 f"{SKILLS_DIR}/{binding.skill}/{SKILL_FILENAME} — falling back to a pointer."
             )
         elif not is_skill_installed(repo_root, binding.skill):
-            # The nudge mirror of the transclude warning (Node 3.1, D6): a binding to a skill that
+            # The nudge mirror of the transclude warning (D6): a binding to a skill that
             # is not installed is reported loud-but-non-fatal, never silently delivered. The pointer
             # is still emitted so the model gets the nudge.
             warnings.append(
