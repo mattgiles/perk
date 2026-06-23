@@ -231,7 +231,7 @@ UI surfaces used:
 - `ctx.ui.notify(text, "info"|"warning"|"error")` — the workhorse.
 - `ctx.ui.setStatus(key, text)` / `ctx.ui.setWidget(key, cells)` — persistent status line /
   footer widgets (loop turn counter, goal budget).
-- `ctx.ui.setWorkingMessage(text)` — the "thinking" line (`whimsical.ts`).
+- `ctx.ui.setWorkingMessage(text)` — the "thinking" line (`vendor/whimsical/whimsical.ts`).
 - `ctx.ui.confirm / select / editor / input` — simple prompts.
 - **`ctx.ui.custom((tui, theme, keybindings, done) => …)`** — full custom overlays built
   from `@earendil-works/pi-tui` primitives (`Container`, `SelectList`, `Text`,

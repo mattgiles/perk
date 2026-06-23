@@ -86,13 +86,26 @@ extension/
 │   ├── planAdapterPlannotator.ts
 │   ├── planAdapterTombell.ts
 │   └── todoAdapterJuicesharp.ts
-└── worker/                       # headless stage-drive machinery
-    ├── worker.ts                 # (+ worker.test.ts, workerE2e.test.ts)
-    └── readOnlySession.ts
+├── worker/                       # headless stage-drive machinery
+│   ├── worker.ts                 # (+ worker.test.ts, workerE2e.test.ts)
+│   └── readOnlySession.ts
+└── vendor/                       # foreign-origin extensions vendored-and-adapted from upstream
+    ├── btw/
+    │   ├── btw.ts
+    │   └── core.ts
+    └── whimsical/
+        └── whimsical.ts
 ```
 
 Counts: 2 root + 15 substrate + 2 surfaces + 11 doors + 10 factories + 2 checkpoints + 3 adapters
-+ 2 worker = 47 production modules — the full census.
++ 2 worker + 3 vendor = 50 production modules — the full census. (`vendor/` was added in #752 to
+house the `btw`/`whimsical` extensions vendored from `mitsuhiko/agent-stuff` (MIT) in #625, after
+the original taxonomy was decided.)
+
+`vendor/` is a distinct stratum from `adapters/`: `adapters/` holds injection-only shims that bridge
+to foreign *npm packages* (plannotator/tombell/juicesharp) perk does **not** copy in; `vendor/`
+holds foreign *source* copied in and adapted (`btw`/`whimsical`). Future vendored-and-adapted
+extensions land in `vendor/`.
 
 ### Root (stays put) — rationale
 
@@ -103,6 +116,9 @@ Counts: 2 root + 15 substrate + 2 surfaces + 11 doors + 10 factories + 2 checkpo
 | `surfacesGuard.test.ts`, `cacheGuard.test.ts` | source-scan guards; their `import.meta.dirname` scan root must stay the package root |
 | `sessionLifecycle.test.ts`, `planRef.test.ts` | live wiring tests of `index.ts`'s registration (harness-driven) — they test the root entry, not one module |
 | `testing/` | unchanged (dev-only harness; its repo-root-is-two-levels-up comment stays true) |
+
+(`whimsical.ts` is no longer a root file and `btw/` is no longer a one-off root subdirectory — both
+moved under `vendor/` in #752.)
 
 ### Conventions
 
@@ -176,6 +192,12 @@ Node 1.3 lands tranches 2+3 as one PR with two mv+sweep commit pairs. After ever
     `extension/<file>.ts` references, but apart from `run_worker.py`'s ladder they are ALL
     docstrings/comments/prose. Likewise `docs/learned/` and `AGENTS.md`. **Out of scope for the
     move tranches; node 3.1's reconciliation scope** — this census is its input.
+11. `vendor/` move (#752) — the `btw`/`whimsical` relocation is a **pure recursive-glob path
+    sweep** needing no `tsconfig`/`biome`/`package.json`/`justfile`/guard edits: the config globs
+    are already recursive (items 1–4) and both source-scan guards' `import.meta.dirname` recursive
+    scan + leading-dot member-access patterns already cover `vendor/` (`whimsical.ts` calls
+    `setWorkingMessage(ctx, …)` as a bare function — no leading-dot member access — so the surfaces
+    guard does not flag it; neither file carries the cache guard's banned path-segment literals).
 
 ## Decision 4 — per-file split verdicts
 

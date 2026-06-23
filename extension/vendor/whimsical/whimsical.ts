@@ -9,7 +9,7 @@
 // Ships always on — no config toggle (plan decision 3).
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { setWorkingMessage } from "./surfaces/surfaces.ts";
+import { setWorkingMessage } from "../../surfaces/surfaces.ts";
 
 export const messages = [
   // Short

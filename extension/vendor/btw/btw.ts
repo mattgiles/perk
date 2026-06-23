@@ -55,8 +55,8 @@ type OverlayHandleLike = {
   isFocused(): boolean;
 };
 
-import type { ToolGating } from "../substrate/toolGating.ts";
-import { report } from "../surfaces/report.ts";
+import type { ToolGating } from "../../substrate/toolGating.ts";
+import { report } from "../../surfaces/report.ts";
 import {
   extractEventAssistantText,
   extractText,

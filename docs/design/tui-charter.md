@@ -91,9 +91,9 @@ in node 3.1.)*
 
 | Surface | Owner | Status | Note |
 |---|---|---|---|
-| `ctx.ui.custom` overlay | `btw/btw.ts` (`BtwOverlay`) | **Sanctioned exception** (§6 D6) | The **one** `ctx.ui.custom` use — `/btw`'s human-only side-chat popover. Human-invoked only, `hasUI`-gated, no model tool, not a stage/door → never machine-reachable. `ctx.ui.custom` stays **declined for all workflow surfaces**. |
-| `setWorkingMessage` | `whimsical.ts` (via the `setWorkingMessage` surfaces seam) | **Permitted** (never declined) | Text-only label on pi's existing default spinner; the new seam no-ops headless. Distinct from the still-declined `setWorkingIndicator` (D5). |
-| `ctx.ui.select` | `btw/btw.ts` close flow | Already adopted | `confirm`/`select`/`input` are charter-permitted interactive prompts (§3). |
+| `ctx.ui.custom` overlay | `vendor/btw/btw.ts` (`BtwOverlay`) | **Sanctioned exception** (§6 D6) | The **one** `ctx.ui.custom` use — `/btw`'s human-only side-chat popover. Human-invoked only, `hasUI`-gated, no model tool, not a stage/door → never machine-reachable. `ctx.ui.custom` stays **declined for all workflow surfaces**. |
+| `setWorkingMessage` | `vendor/whimsical/whimsical.ts` (via the `setWorkingMessage` surfaces seam) | **Permitted** (never declined) | Text-only label on pi's existing default spinner; the new seam no-ops headless. Distinct from the still-declined `setWorkingIndicator` (D5). |
+| `ctx.ui.select` | `vendor/btw/btw.ts` close flow | Already adopted | `confirm`/`select`/`input` are charter-permitted interactive prompts (§3). |
 
 ## §3 Surface taxonomy + placement rules
 

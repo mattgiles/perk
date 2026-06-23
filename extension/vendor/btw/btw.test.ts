@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
+import { loadPerkSession, scaffoldRepo } from "../../testing/harness.ts";
 import {
   extractEventAssistantText,
   extractText,
