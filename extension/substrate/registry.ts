@@ -1,10 +1,8 @@
 // The TS plane's reader for the shared stage registry (`shared/registry.yaml`).
 //
-// Twin of perk/substrate/registry.py: both planes parse the SAME bundled file (no codegen, Q6).
-// In Phase 0 the extension only needs to prove it can parse its bundled copy; the
-// extension drives in-session transitions from the registry in Phase 1+. The Python
-// CLI is the authoritative validator (`perk registry check`); this side does a thin
-// structural assertion.
+// Twin of perk/substrate/registry.py: both planes parse the SAME bundled file (no codegen). The
+// extension drives in-session transitions from the parsed registry. The Python CLI is the
+// authoritative validator (`perk registry check`); this side does a thin structural assertion.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

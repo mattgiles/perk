@@ -1,12 +1,12 @@
-// The one cold-door delegation seam (cf. result.ts / report.ts / branchOf — Objective #224
-// Node 1.4). Every warm door that shells out to a Python `--json` cold door funnels through
+// The one cold-door delegation seam (cf. result.ts / report.ts / branchOf). Every warm door that
+// shells out to a Python `--json` cold door funnels through
 // `runColdDoor<T>`: PERK_BIN resolution, the run-scoped scratch stdin channel (pi.exec has no
 // stdin), the envelope-aware killed/code check, the JSON boundary, the `success` envelope check,
 // and a caller-supplied validated decode. The client never reports/notifies and never throws —
 // `failFor` (result.ts) keeps owning the loud-but-soft reporting; report-only doors branch on
 // `errorType` directly.
 //
-// A door consumes it as (the Node 2.x migration shape):
+// A door consumes it as:
 //
 //   const r = await runColdDoor<SubmitOk>(pi, ctx, ["pr", "submit", "--json"], {
 //     label: "perk pr submit",

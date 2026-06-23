@@ -48,8 +48,8 @@ export function markHandoffConsumed(
 
 // --- scratch -----------------------------------------------------------------------------
 //
-// This module is the INTERIOR path-primitive seam for scratch/session-data (contracts.md §8.1,
-// Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
+// This module is the INTERIOR path-primitive seam for scratch/session-data (contracts.md §8.1):
+// production code never hand-builds the `scratch`/`runs` path segments
 // outside this module (guard-tested by cacheGuard.test.ts; the ctx-level current-run seam is
 // sessionData.ts and the exterior twin is perk/state/cache.py).
 
@@ -62,7 +62,7 @@ export function runScratchDir(cwd: string, runId: string): string {
 }
 
 /**
- * The session data dir for a run (Objective #339 Node 1.2) — a dedicated `data/` subdir so
+ * The session data dir for a run — a dedicated `data/` subdir so
  * run-scoped session artifacts never overlap perk machine records (dispatch.json,
  * events.ndjson, ci-*.md) living directly in the run dir. Pure path — created lazily by the
  * sessionData.ts write helpers.
@@ -78,9 +78,9 @@ export function ensureRunScratch(cwd: string, runId: string): string {
 }
 
 /**
- * The run-scoped structured run-event stream (Node 1.3, contracts §8.12) — an NDJSON file under the
- * gitignored run scratch dir. Co-located with the run's read-only-child scratch so a runner/Phase-3
- * reader finds all run artifacts under one dir.
+ * The run-scoped structured run-event stream (contracts §8.12) — an NDJSON file under the
+ * gitignored run scratch dir. Co-located with the run's read-only-child scratch so a runner/reader
+ * finds all run artifacts under one dir.
  */
 export function runEventsPath(cwd: string, runId: string): string {
   return join(runScratchDir(cwd, runId), "events.ndjson");
@@ -104,7 +104,7 @@ export interface PlanRef {
   url: string;
   labels: string[];
   objective_id: string | null;
-  // The pinned target branch (#633); Python-owned, parity-only on the warm plane.
+  // The pinned target branch; Python-owned, parity-only on the warm plane.
   base?: string | null;
 }
 
@@ -128,7 +128,7 @@ export function writePlanRef(cwd: string, ref: PlanRef): void {
 /**
  * The materialized plan-body cache (`cache.plan`, contracts §8.1). Written by the Python cold door
  * (`perk implement` → `launch.materialize_plan_body`) when it positions the worktree; read here so
- * in-session checkpoints (P2.T2c) seed from its `## Steps` list (inert when absent).
+ * in-session checkpoints seed from its `## Steps` list (inert when absent).
  */
 export function planBodyPath(cwd: string): string {
   return join(workflowDir(cwd), "plan.md");
@@ -142,7 +142,7 @@ export function readPlanBody(cwd: string): string | null {
 
 // --- markers (existence-only) ------------------------------------------------------------
 
-/** The land->learn semaphore (Q2/Q5); the TS twin of perk.state.cache.PENDING_LEARN. */
+/** The land->learn semaphore; the TS twin of perk.state.cache.PENDING_LEARN. */
 export const PENDING_LEARN = "pending-learn";
 
 export function markerPath(cwd: string, name: string): string {

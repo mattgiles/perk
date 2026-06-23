@@ -1,4 +1,4 @@
-// P2.T2a — the minimal TS config port (D1b). Mirrors `perk/substrate/config.py`'s overlay: read
+// The minimal TS config port. Mirrors `perk/substrate/config.py`'s overlay: read
 // `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml` (gitignored, local wins). The only
 // setting consumed today is an optional `[workflow]` plan-authoring addendum, appended into the
 // `perk:plan-context` injection (extension/factories/planMode.ts) when present.
@@ -20,7 +20,7 @@ const LOCAL_CONFIG_FILENAME = "perk.local.toml";
  * One configured CI check (a `[[ci]]` array-of-tables row). `name`/`command` are required
  * non-blank strings; an optional `glob` (a single comma-separated pattern string, e.g.
  * `"*.ts,*.tsx"`) declares which changed files the check is relevant to — the read-only CI
- * executor (P2.T5) skips it on the run-all path when no changed file (vs trunk) matches.
+ * executor skips it on the run-all path when no changed file (vs trunk) matches.
  */
 export interface CiCheck {
   name: string;
@@ -33,12 +33,12 @@ export interface PerkConfig {
   planAuthoring?: string;
   /**
    * The `[[ci]]` checks (an ordered array-of-tables, each row name/command/optional glob); the
-   * read-only CI executor (P2.T5) consumes it. Always-present ordered array (mirror of
+   * read-only CI executor consumes it. Always-present ordered array (mirror of
    * `bindings`/`providers`); absent/empty ⇒ `[]`.
    */
   ci: CiCheck[];
   /**
-   * The agent-keyed `[subagents]` table (#196): a per-agent model override for each perk-owned
+   * The agent-keyed `[subagents]` table: a per-agent model override for each perk-owned
    * project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`). Each configured
    * value is injected as a per-call inline `model` override on that agent's `subagent` spawn; when
    * a key is absent the agent's frontmatter `model` (in `.pi/agents/<name>.md`) is the default.
@@ -54,22 +54,22 @@ export interface PerkConfig {
   };
   /**
    * Optional `[objective] compact_threshold` — the context-usage fraction (0,1] that triggers
-   * threshold compaction while an objective is active (P2.T9). Because the TOML subset reads only
+   * threshold compaction while an objective is active. Because the TOML subset reads only
    * string values, it must be written as a quoted string (e.g. `compact_threshold = "0.8"`).
    */
   objectiveCompactThreshold?: number;
-  /** The `[[bindings]]` user overlay (Node 1.2), resolved against shipped defaults downstream. */
+  /** The `[[bindings]]` user overlay, resolved against shipped defaults downstream. */
   bindings: SkillBinding[];
   /**
-   * The flat `[providers]` per-seam selection (Node 2.1) — bare provider-id strings pointing into
+   * The flat `[providers]` per-seam selection — bare provider-id strings pointing into
    * `shared/providers.yaml`. Absent keys mean “use the seam default”; resolution against the
-   * supported set is a downstream concern (the TS resolver is Node 2.2/3.1, not this node).
+   * supported set is a downstream concern.
    */
   providers: { plan?: string; todo?: string; askuser?: string; footer?: string; web?: string };
   /**
    * The `[trust]` per-repo trust table. `trust.ci === true` (written `ci = "true"` — the subset
    * parser reads strings only) declares the project's `[ci]` checks trusted, so the read-only CI
-   * executor (P2.T5) runs them WITHOUT a per-session confirm on every surface, including headless
+   * executor runs them WITHOUT a per-session confirm on every surface, including headless
    * (it overrides the fail-closed refuse). Absent/"false" ⇒ unchanged (confirm with UI; refuse
    * headless). Always-present object; absent keys omitted (mirror of `providers`). The table may
    * grow further trust keys later.
@@ -318,16 +318,14 @@ export type IssueBackendId = "github" | "linear";
 export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
 
 /**
- * The fail-safe TS mirror of the issue-backend selection (Objective #252, Node 1.3).
+ * The fail-safe TS mirror of the issue-backend selection.
  *
  * Reads ONLY committed `.pi/perk.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
  * the Python committed-only read (the backend decides where canonical durable state is written;
  * a per-user `perk.local.toml` override would fragment the canonical store). Python
  * (`perk/backends/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
  * "linear"/unknown; this mirror is fail-safe (absence/unknown/any error → `"github"`) because
- * the TS plane only renders prompts — it never writes canonical issues. Ships DORMANT (no
- * consumer until Node 3.1's backend-aware prompt rendering), mirroring the providers.ts
- * Node-2.1 dormant-loader precedent.
+ * the TS plane only renders prompts — it never writes canonical issues.
  */
 export function resolveIssueBackendId(cwd: string): IssueBackendId {
   try {

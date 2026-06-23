@@ -2,7 +2,7 @@
 // contracts dir and read the lockstep version. `extension/` and `shared/` are
 // siblings in both the dev tree and the published tarball (npm `files` preserves
 // the layout), so a single `../shared` path resolves in both modes — no
-// dual-path manifest is needed (see docs/phase-0-turn-1.md §3).
+// dual-path manifest is needed.
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

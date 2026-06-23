@@ -1,7 +1,7 @@
 // The one warm-door Result seam — owns the canonical { content, details, terminate? } tool-result
 // shape and the loud-but-soft failure idiom (report + "<label> failed: <message>"), so the nine
 // cold-door-delegating doors share one discriminated union instead of ad-hoc *Result/*Details
-// pairs (cf. report.ts, branchOf — the node 1.1/1.2 seams).
+// pairs (cf. report.ts, branchOf).
 
 import { type ReportTarget, report } from "../surfaces/report.ts";
 
