@@ -245,8 +245,7 @@ Becoming a true Linear **Agent** (`actor=app`) is a separate, out-of-scope futur
 ## Known caveats & maturity
 
 The Linear backend is **validated offline (against fakes) and live-validated on 2026-06-15**
-against a real workspace. Its live-validation runbook is
-[`docs/planning/linear-smoke-gate.md`](../../planning/linear-smoke-gate.md); the **Mode 1** lifecycle
+against a real workspace. The **Mode 1** lifecycle
 (`plan → implement → submit → land → learn`) plus the issue-backed objective loop ran green
 end-to-end — string `PER-*` ids throughout, the `perk:plan`/`perk:learn` labels applied, the
 plan issue closed (Done) on land, and the node auto-marked done on the objective. See the
@@ -294,8 +293,7 @@ issue). This is **off by default**: it requires a separate **`LINEAR_AGENT_TOKEN
 fully dormant without it. The mirror is one-way (perk → Linear), and its GraphQL mutation signatures
 (`agentSessionCreateOnIssue`, `agentActivityCreate`, `agentSessionUpdate`) are **substring-pinned
 offline but unverified against a live workspace**. It is **not** part of the switch-to-linear happy
-path; see the agent-session section of [`docs/planning/linear-smoke-gate.md`](../../planning/linear-smoke-gate.md) for
-the validation script and deferral register.
+path.
 
 ## See also
 
@@ -305,8 +303,6 @@ the validation script and deferral register.
   recipe.
 - [Configuration reference — `[providers]` / `[issues]`](./configuration.md#providers) — the raw
   config keys.
-- [The Linear live smoke gate](../../planning/linear-smoke-gate.md) — the live-validation runbook (Mode 1 +
-  the objective loop validated 2026-06-15).
 
 ---
 

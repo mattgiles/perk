@@ -22,7 +22,7 @@ config, init/doctor readiness, and contracts §8.21).
 Explicit deferrals (flagged, not silently omitted):
 
 - **Retry/backoff on RATELIMITED** — *decided fail-loud* (Node 1.2). No RATELIMITED tripped at
-  the live smoke gate (``docs/planning/linear-smoke-gate.md`` gate-9, "not tripped at low
+  the live smoke gate ("not tripped at low
   volume"), so there is no observed behavior to justify backoff. ``LinearClient.request`` keeps
   raising the typed ``LinearGraphQLError`` on ``RATELIMITED_CODE``; retry/backoff stays deferred
   until a live RATELIMITED is observed at the gate.
@@ -109,8 +109,8 @@ _ENTITY_NOT_FOUND_CODE = "INPUT_ERROR"
 
 def _is_entity_not_found(exc: LinearGraphQLError) -> bool:
     """A missing-entity error: Linear returns the generic ``INPUT_ERROR`` code with an
-    ``"Entity not found: <Entity>"`` message (observed at the live smoke gate, 2026-06-15 —
-    docs/planning/linear-smoke-gate.md gate-8 row). ``INPUT_ERROR`` alone is too broad (a generic
+    ``"Entity not found: <Entity>"`` message (observed at the live smoke gate, 2026-06-15).
+    ``INPUT_ERROR`` alone is too broad (a generic
     input-error code), so pair it with the message prefix."""
     return _ENTITY_NOT_FOUND_CODE in exc.codes and "entity not found" in str(exc).lower()
 

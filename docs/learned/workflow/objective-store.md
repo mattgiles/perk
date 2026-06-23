@@ -226,7 +226,7 @@ manifest's storage shape (a visible inline-code block in the project overview).
 
 ## The manifest + drift-detection/repair design (#626)
 
-The #609 design (`docs/planning/objective-repair.md`) landed: persist an authoritative manifest,
+The #609 design landed: persist an authoritative manifest,
 detect drift = `diff(manifest, observed)`, repair only the safe/unambiguous cases.
 
 ### The manifest pattern (structural identity, not live state)

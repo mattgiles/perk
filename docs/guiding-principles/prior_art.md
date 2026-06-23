@@ -9,8 +9,7 @@ will not port.
 How to read: each section states *what erk does*, *the lesson*, and *implications for
 perk* (the Pi mapping). Source files are under the erk repo's `docs/learned/`.
 
-Companion docs: [RESEARCH.md](./RESEARCH.md) (architecture rationale),
-ROADMAP.md (phasing).
+Companion docs: ROADMAP.md (phasing).
 
 ---
 

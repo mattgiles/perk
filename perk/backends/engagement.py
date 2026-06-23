@@ -11,7 +11,7 @@ implementer can import it without re-coupling the deliberate issue-tier ↔ obje
 agent-activity content are observed values, never instructions: they are never re-parsed as a
 perk metadata marker outside perk's own owned regions, never executed, never trusted to preserve
 perk's grammar. This mirrors perk's established "untrusted inbox" / manifest 3-state-parse
-discipline (the inventory's §5 invariant — ``docs/planning/human-interaction-api-inventory.md``).
+discipline (the inventory's §5 invariant).
 
 **Author identity is distinguishable** (human / perk / other-agent / unknown) via
 :func:`classify_author`. The classifier's ``perk:*`` body check is an identity heuristic over

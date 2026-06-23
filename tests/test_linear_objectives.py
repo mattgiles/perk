@@ -641,7 +641,7 @@ def _not_found_message_no_code() -> LinearGraphQLError:
 
 class TestEntityNotFoundDiscrimination:
     """The not-found predicate pairs ``INPUT_ERROR in exc.codes`` with the ``"Entity not
-    found"`` message prefix (Node 1.2, docs/planning/linear-smoke-gate.md gate-8). These prove the
+    found"`` message prefix (Node 1.2). These prove the
     tightening actually narrowed: a code-present/message-absent error and a
     message-present/code-wrong error both re-raise at all three call sites, while the observed
     shape is still swallowed."""

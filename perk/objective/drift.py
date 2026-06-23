@@ -10,7 +10,7 @@ clock, no Click). The store builds the :class:`ObservedSnapshot` (network) and c
 Each :class:`DriftCondition` carries a stable machine ``code``, a ``severity``, and a ``repairable``
 flag. ``--fix`` only converges the **safe, unambiguous** (``repairable``) cases — everything else is
 report-only, because auto-repair would *invent* information perk has no authority to invent
-(``docs/planning/objective-repair.md`` §4, the never-silently-reinterpret principle).
+(the never-silently-reinterpret principle).
 """
 
 from dataclasses import dataclass

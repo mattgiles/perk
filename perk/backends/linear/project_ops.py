@@ -20,7 +20,7 @@ from perk.backends.linear.client import (
 class _LinearProjectOps:
     """The dormant Linear *Projects* substrate (Objective #548, Node 3.1) — the GraphQL ops the
     not-yet-built ``LinearProjectObjectiveStore`` (Nodes 3.2-3.4) will consume, exactly the shapes
-    proven live at the Node 1.4 spike (``docs/planning/linear-smoke-gate.md``, "Mode 3").
+    proven live at the Node 1.4 spike ("Mode 3").
 
     **Client-only** (correction §3b): it registers the :class:`LinearClient` and reaches all
     GraphQL machinery (``team_id``/``paginate``) through ``self._client`` — it does
