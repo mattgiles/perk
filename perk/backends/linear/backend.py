@@ -206,7 +206,7 @@ class LinearIssueBackend:
                 return body
         return None
 
-    # ------------------------------------------------------------------ in-place adoption (#706)
+    # ------------------------------------------------------------------ in-place adoption
 
     def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
         issue = self._ops._issue_or_none(
@@ -395,8 +395,8 @@ class LinearIssueBackend:
         return issue_backend.CommentResult(posted=True)
 
     # ------------------------------------------------------------------ human-engagement reads
-    # The honest READ surface (Objective #682, Node 1.2). All returned `body`/`diff`/activity
-    # `body` is untrusted DATA; author identity is distinguishable. No flow consumers in 1.2.
+    # The honest READ surface. All returned `body`/`diff`/activity
+    # `body` is untrusted DATA; author identity is distinguishable.
 
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
         return tuple(

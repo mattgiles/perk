@@ -6,13 +6,13 @@ from perk.backends.github import plans
 from perk.github import _exec
 
 # ===========================================================================
-# Objective ops (P2.T9 — objective storage + mechanics; contracts.md §8.4).
+# Objective ops (objective storage + mechanics; contracts.md §8.4).
 #
 # Mirrors the plan/learn idempotency + two-step create exactly: REST `gh api`, bodies via file,
 # idempotency keyed on the header `run_id` via the LIST endpoint (label-scoped to
 # `perk:objective`), the `perk:objective` label created lazily, mutations RAISE / lookups return
 # `... | None`. The objective body holds two blocks (`objective-header` + `objective-roadmap`); the
-# first comment holds the rendered table (`objective-body`). Status is explicit-only (open #3).
+# first comment holds the rendered table (`objective-body`). Status is explicit-only.
 # ===========================================================================
 
 
@@ -56,7 +56,7 @@ class ObjectiveNodeUpdate:
 
 @dataclass(frozen=True)
 class ObjectiveBodyUpdate:
-    """The result of an ``update_objective_body`` write (the Reconcilable prose splice, P2.T11)."""
+    """The result of an ``update_objective_body`` write (the Reconcilable prose splice)."""
 
     number: int
     comment_id: int | None
@@ -76,7 +76,7 @@ class ObjectiveNodeAdd:
 
 @dataclass(frozen=True)
 class ObjectiveAdoption:
-    """The result of an in-place :func:`adopt_issue_as_objective` stamp (#709, §8.30)."""
+    """The result of an in-place :func:`adopt_issue_as_objective` stamp (§8.30)."""
 
     number: int
     url: str
@@ -204,7 +204,7 @@ def adopt_issue_as_objective(
     dry_run: bool = False,
 ) -> ObjectiveAdoption:
     """Additively stamp perk objective metadata INTO a pre-existing GitHub issue — adopting it in
-    place as a perk objective (#709, §8.30), never minting a second issue.
+    place as a perk objective (§8.30), never minting a second issue.
 
     Mirrors :func:`create_objective_issue` + :func:`perk.github.adopt_issue_as_plan`. The bounded
     single-issue path (GitHub objectives have no child issues, so the node → issue ``adopt_map`` is
@@ -476,7 +476,7 @@ def add_objective_node(
 def update_objective_body(
     *, number: int, prose: str, repo_root: Path, dry_run: bool = False
 ) -> ObjectiveBodyUpdate:
-    """Reconcile the objective-body comment's Reconcilable prose region (P2.T11).
+    """Reconcile the objective-body comment's Reconcilable prose region.
 
     Reads the issue body's ``objective-header`` for ``objective_comment_id``, fetches the
     ``objective-body`` comment, splices ``prose`` between the Reconcilable markers (the Mechanical
@@ -484,7 +484,7 @@ def update_objective_body(
     :func:`objective.replace_reconcilable_section`), and PATCHes the comment.
 
     Raises ``GitHubError`` when the objective has no body comment or the comment lacks the
-    Reconcilable region (objectives created before P2.T11). A dry run composes only (no PATCH).
+    Reconcilable region (legacy objectives lacking it). A dry run composes only (no PATCH).
     """
     body = plans._get_issue_body(number, repo_root)
     header = plan.find_metadata_block(body, objective.OBJECTIVE_HEADER_KEY) or {}

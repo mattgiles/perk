@@ -1,4 +1,4 @@
-"""The Linear GraphQL client substrate (Objective #252, Node 2.1).
+"""The Linear GraphQL client substrate.
 
 One request wrapper (``LinearClient.request``) over ``https://api.linear.app/graphql`` —
 personal-API-key auth (a **plain** ``Authorization: <API_KEY>`` header; ``Bearer`` is
@@ -7,7 +7,7 @@ backend-neutral ``IssueBackendError`` (with the structured ``LinearGraphQLError`
 GraphQL-level errors). There is no legacy Linear substrate, so this client itself IS the
 boundary: it raises ``IssueBackendError`` directly, never a private error type translated later.
 
-Errors-array-first ordering (per the Linear docs audit in plan #340): the wrapper parses the
+Errors-array-first ordering (per the Linear docs audit): the wrapper parses the
 JSON body and raises ``LinearGraphQLError`` whenever an ``errors`` array is present,
 **regardless of HTTP status** — that is how rate-limit failures actually arrive (HTTP 400 with
 ``errors[].extensions.code == "RATELIMITED"``, not HTTP 429) and how auth failures arrive.
@@ -16,12 +16,12 @@ errors. Partial success (``errors`` alongside partial ``data``) fails loud — p
 queries never want partial results.
 
 Live: the consumer exists (``perk/backends/linear/backend.py``'s ``LinearIssueBackend``) and the
-resolver in ``perk/backends/resolve.py`` constructs it on ``backend = "linear"`` (Node 2.4 wired
-config, init/doctor readiness, and contracts §8.21).
+resolver in ``perk/backends/resolve.py`` constructs it on ``backend = "linear"`` (config,
+init/doctor readiness, and contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Retry/backoff on RATELIMITED** — *decided fail-loud* (Node 1.2). No RATELIMITED tripped at
+- **Retry/backoff on RATELIMITED** — *decided fail-loud*. No RATELIMITED tripped at
   the live smoke gate ("not tripped at low
   volume"), so there is no observed behavior to justify backoff. ``LinearClient.request`` keeps
   raising the typed ``LinearGraphQLError`` on ``RATELIMITED_CODE``; retry/backoff stays deferred
@@ -95,7 +95,7 @@ class LinearGraphQLError(IssueBackendError):
     """A Linear response carried a GraphQL ``errors`` array.
 
     ``codes`` holds the de-duplicated ``extensions.code`` values (order-preserved; entries
-    without a code omitted). Consumers (Node 2.2) branch on ``.codes``, never on substrings —
+    without a code omitted). Consumers branch on ``.codes``, never on substrings —
     ``str(exc)`` keeps Linear's verbatim error messages for humans.
     """
 
@@ -139,7 +139,7 @@ class LinearClient:
         # OAuth tokens (e.g. an actor=app agent token) use the `Bearer <token>` form;
         # personal API keys keep the plain `Authorization: <API_KEY>` header byte-identically.
         self._bearer = bearer
-        # Resolved-id memoization, the natural home for the shared caches (correction §3d): a
+        # Resolved-id memoization, the natural home for the shared caches: a
         # store that owns one client and constructs both op classes over it gets a single shared
         # cache automatically — without the op classes composing each other. The client stays
         # team-agnostic at construction, so `_team_id_cache` is keyed by team key.
@@ -205,7 +205,7 @@ class LinearClient:
         return data
 
     # ------------------------------------------------------------------ shared machinery
-    # The single home for Linear GraphQL API-client logic (correction §3): team-UUID + uuid
+    # The single home for Linear GraphQL API-client logic: team-UUID + uuid
     # resolution and the generic cursor loop live on the client, so both op classes reach them
     # through ``self._client`` instead of one composing the other.
 

@@ -1,20 +1,11 @@
-"""The objective-storage tier contract (Objective #548, Node 2.1).
+"""The objective-storage tier contract.
 
-perk's objective storage is, today, fused into the issue-tracking tier: an objective is a GitHub
-issue, and the ``IssueBackend`` `Protocol` carries the objective methods alongside the plan/learn
-issue methods. Objective #548 splits the **objective-storage tier** back out into its own
-backend-neutral contract so a later node can make a Linear **Project** a canonical objective (not
-just an issue) - the issue tier and the objective tier are conceptually distinct populations even
-when one backend happens to store both as issues.
-
-This module is that tier's contract: the ``ObjectiveStore`` `Protocol`, its backend-neutral result
-dataclasses, and the one backend-neutral error type. It is deliberately **dormant** in Node 2.1 -
-no extraction, no consumers - mirroring exactly how ``issue_backend.py`` shipped the
-``IssueBackend`` contract dormant in Objective #252, Node 1.1 (Node 1.2 then extracted the GitHub
-backend behind it).
-Node 2.2 will extract ``GitHubObjectiveStore`` + ``resolve_objective_store``, remove the objective
-methods from ``IssueBackend``, and rewire every consumer - atomically, the only point at which that
-removal is CI-green.
+This module is the backend-neutral objective-storage tier: the ``ObjectiveStore`` `Protocol`, its
+backend-neutral result dataclasses, and the one backend-neutral error type. The objective tier is
+distinct from the issue-tracking tier — the two are conceptually distinct populations even when one
+backend happens to store both as issues — so an objective may be a GitHub issue **or** a Linear
+**Project** (``github/objective_store.py`` and ``linear/project_store.py`` are the two concrete
+stores).
 
 Contract disciplines (every concrete store MUST honor these):
 
@@ -70,7 +61,7 @@ class ObjectiveRef:
 
 @dataclass(frozen=True)
 class AdoptableSourceIssue:
-    """One pre-existing project issue read verbatim for in-place objective adoption (#709, §8.30).
+    """One pre-existing project issue read verbatim for in-place objective adoption (§8.30).
 
     ``title``/``body`` are untrusted human DATA. ``id`` is the backend-owned opaque id (a Linear
     issue UUID); ``identifier`` is the human ref (``ENG-N``). Empty on GitHub (single-issue
@@ -86,7 +77,7 @@ class AdoptableSourceIssue:
 
 @dataclass(frozen=True)
 class AdoptableObjectiveSource:
-    """A pre-existing human source read verbatim for in-place objective adoption (#709, §8.30).
+    """A pre-existing human source read verbatim for in-place objective adoption (§8.30).
 
     A Linear **Project** (and its issues) or a GitHub **issue**. ``prose`` is the overview/body
     (untrusted human DATA); ``issues`` are the project's existing issues (empty on GitHub). ``id``
@@ -157,7 +148,7 @@ class RepairAction:
 
 @dataclass(frozen=True)
 class RepairResult:
-    """The result of a ``repair_objective_drift`` pass (Node 4.4 / #612).
+    """The result of a ``repair_objective_drift`` pass.
 
     Fail-loud: repairs apply in a deterministic order and the **first** failed Linear write stops
     the batch (``aborted=True``, the failing condition in ``failed``); ``applied`` records what
@@ -207,7 +198,7 @@ class ObjectiveStore(Protocol):
 
     def read_objective_source(self, *, source_id: str) -> AdoptableObjectiveSource | None:
         """Read *any* pre-existing source (a Linear **Project** / a GitHub **issue**) verbatim for
-        in-place adoption (#709, §8.30) — the objective-tier twin of ``IssueBackend.read_issue``.
+        in-place adoption (§8.30) — the objective-tier twin of ``IssueBackend.read_issue``.
 
         Returns the source's prose + existing issues as untrusted human DATA (``issues`` empty on
         GitHub). ``None`` when the source is genuinely absent; **raises** ``ObjectiveStoreError`` on
@@ -231,7 +222,7 @@ class ObjectiveStore(Protocol):
         dry_run: bool = False,
     ) -> ObjectiveRef | None:
         """Stamp perk's objective metadata **additively** into a pre-existing source IN PLACE
-        (#709, §8.30), never minting a second project/issue.
+        (§8.30), never minting a second project/issue.
 
         ``prose`` is the MODEL-authored Reconcilable prose; the source's ORIGINAL overview/body is
         archived verbatim into an ``Adopted-from`` Immutable note appended below the Reconcilable
@@ -267,7 +258,7 @@ class ObjectiveStore(Protocol):
         roadmap blocks), post the objective-body comment (rendered table + prose), then backfill
         the comment id into the header. ``body`` is the authored objective prose; the roadmap comes
         from ``roadmap_nodes`` when given (the structured path), else is parsed from ``body``.
-        ``base`` is the objective's target branch (#633), persisted into the ``objective-header``
+        ``base`` is the objective's target branch, persisted into the ``objective-header``
         block; ``None`` leaves it unset (node plans fall through to ``[workflow] base`` → default).
         Idempotent on ``run_id`` (find-then-return, ``existed=True``). A dry run returns
         ``ObjectiveRef(id="0", url="(dry-run)", existed=False)`` without touching the backend. An
@@ -358,7 +349,7 @@ class ObjectiveStore(Protocol):
         ...
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
-        """Post a human-readable status update to the objective's native update surface (Node 4.3).
+        """Post a human-readable status update to the objective's native update surface.
 
         Returns ``True`` when an update was posted, ``False`` for a store with no update surface
         (``GitHubObjectiveStore`` and the issue-backed ``LinearObjectiveStore`` always return
@@ -389,7 +380,7 @@ class ObjectiveStore(Protocol):
 
     def detect_objective_drift(self, *, objective_id: str) -> DriftReport:
         """Detect drift between the persisted ``objective-manifest`` baseline and the observed
-        project state (Node 4.4 / #612).
+        project state.
 
         Only a store with an independently-editable divergence surface carries real behavior: the
         project-backed ``LinearProjectObjectiveStore`` builds the observed snapshot and runs
@@ -402,7 +393,7 @@ class ObjectiveStore(Protocol):
 
     def repair_objective_drift(self, *, objective_id: str, dry_run: bool = False) -> RepairResult:
         """Apply the **safe, unambiguous** (repairable) drift repairs in a deterministic order,
-        stopping at the first failed Linear write (fail-loud; Node 4.4 / #612).
+        stopping at the first failed Linear write (fail-loud).
 
         ``dry_run`` plans the repairs (the would-apply set) without any write. Only
         ``LinearProjectObjectiveStore`` carries real behavior; the other stores return an empty
@@ -411,12 +402,11 @@ class ObjectiveStore(Protocol):
         ``failed`` + ``aborted``)."""
         ...
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # --- human-engagement reads ---
     #
     # The objective-tier twin of the ``IssueBackend`` read contract — same untrusted-DATA +
-    # distinguishable-author discipline, keyed on ``objective_id``. Every objective store ships a
-    # clean empty/no-op impl in 1.2 (honest — no consumers); project-level honest reads land with
-    # their Phase-2 consumer (Node 2.3).
+    # distinguishable-author discipline, keyed on ``objective_id``. Stores without a surface ship a
+    # clean empty/no-op impl; the project-backed store carries honest project-level reads.
 
     def read_comments(self, *, objective_id: str) -> tuple[EngagementComment, ...]:
         """Read an objective's comments with author identity + edit flag. Oldest-first. Raises
@@ -435,13 +425,12 @@ class ObjectiveStore(Protocol):
         ...
 
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> NodeEngagement:
-        """Read a single roadmap node-issue's pre-planning human engagement (Objective #682,
-        Node 2.1).
+        """Read a single roadmap node-issue's pre-planning human engagement.
 
         The **node-keyed** read (the other reads above are keyed on the whole objective/issue): the
         node-issue's comments + description edits, with distinguishable authorship, bundled as a
         :class:`NodeEngagement`. Agent-session reads are excluded (a pre-planning node-issue has no
-        perk agent session — Phase 4). Returns the empty ``EMPTY_NODE_ENGAGEMENT`` for a store with
+        perk agent session). Returns the empty ``EMPTY_NODE_ENGAGEMENT`` for a store with
         no per-node-issue surface (GitHub single-issue objectives; the dormant issue-backed Linear
         store) or a node-issue that cannot be resolved; **raises** ``ObjectiveStoreError`` on an
         infra/auth failure (never masks infra as empty)."""

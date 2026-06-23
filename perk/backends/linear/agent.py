@@ -1,4 +1,4 @@
-"""Linear agent-session emission for implement runs (Objective #252, Node 5.1 — stretch).
+"""Linear agent-session emission for implement runs.
 
 An **opt-in, fail-soft** one-way mirror of a perk implement run into Linear's Agents UI:
 create an ``AgentSession`` on the plan issue when an implement run starts, emit
@@ -6,7 +6,7 @@ create an ``AgentSession`` on the plan issue when an implement run starts, emit
 land; an ``error`` activity on a failed remote drive), and attach the PR URL to the session.
 
 **The gate** (checked inside every emitter): emission fires only when the worktree's stamped
-``cache.plan-ref.provider == "linear"`` (the Node 3.1 rule — branch on the stamped provider,
+``cache.plan-ref.provider == "linear"`` (branch on the stamped provider,
 never config) **and** ``LINEAR_AGENT_TOKEN`` is set. Without the token, behavior is
 byte-identical to a non-emitting run ("additive only").
 

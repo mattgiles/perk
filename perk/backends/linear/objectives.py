@@ -16,9 +16,9 @@ from perk.backends.linear.client import (
 from perk.backends.linear.issue_ops import _LinearIssueOps
 
 # ===========================================================================
-# The objective-storage tier (Objective #548, Node 2.2): `LinearObjectiveStore`.
+# The objective-storage tier: `LinearObjectiveStore`.
 # The GitHub-twin objective behavior, lifted off `LinearIssueBackend` onto its own store behind
-# the Node 2.1 `ObjectiveStore` contract. Owns its own `_LinearIssueOps` substrate (the registered
+# the `ObjectiveStore` contract. Owns its own `_LinearIssueOps` substrate (the registered
 # collaborator) and maps `IssueBackendError` → `ObjectiveStoreError` at every method boundary
 # (message preserved verbatim). `objective_id` is the human Linear identifier at the boundary.
 # ===========================================================================
@@ -27,11 +27,11 @@ from perk.backends.linear.issue_ops import _LinearIssueOps
 class LinearObjectiveStore:
     """``ObjectiveStore`` over Linear issues — the GitHub-twin objective tier (two-step create +
     comment-id backfill, header LBYL, authoritative roadmap writes with best-effort comment
-    re-renders, the Reconcilable splice) behind the Node 2.1 contract. Owns its own
+    re-renders, the Reconcilable splice) behind the ``ObjectiveStore`` contract. Owns its own
     :class:`_LinearIssueOps` substrate; maps ``IssueBackendError`` → ``ObjectiveStoreError`` at
     every boundary (message verbatim).
 
-    **Dormant since Node 3.4:** the resolver's ``linear`` arm now constructs
+    **Dormant:** the resolver's ``linear`` arm now constructs
     :class:`LinearProjectObjectiveStore` (project-backed), so this issue-backed store is never
     resolver-wired in production. It is kept as a directly-constructable class with its own unit
     tests; retiring it is a later cleanup."""
@@ -55,7 +55,7 @@ class LinearObjectiveStore:
     def read_objective_source(
         self, *, source_id: str
     ) -> objective_store.AdoptableObjectiveSource | None:
-        """Dormant issue-backed store: no project-source surface — always ``None`` (#709, §8.30)."""
+        """Dormant issue-backed store: no project-source surface — always ``None`` (§8.30)."""
         return None
 
     def adopt_source_as_objective(
@@ -72,7 +72,7 @@ class LinearObjectiveStore:
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Dormant issue-backed store: does NOT support in-place adoption — always ``None`` (the
-        unambiguous "doesn't adopt" signal, mirroring ``save_node_plan → None``; #709, §8.30)."""
+        unambiguous "doesn't adopt" signal, mirroring ``save_node_plan → None``; §8.30)."""
         return None
 
     def create_objective(
@@ -385,25 +385,24 @@ class LinearObjectiveStore:
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         """The issue-backed store has no project status-update surface \u2014 always ``False``
-        (no-op; Node 4.3)."""
+        (no-op)."""
         return False
 
     def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
         """The issue-backed store edits its roadmap block atomically with the issue body — no
-        divergence surface, so the drift report is trivially empty (Node 4.4 / #612 no-op)."""
+        divergence surface, so the drift report is trivially empty (no-op)."""
         return objective_store.DriftReport()
 
     def repair_objective_drift(
         self, *, objective_id: str, dry_run: bool = False
     ) -> objective_store.RepairResult:
-        """The issue-backed store has no divergence surface — an empty no-op repair (#612)."""
+        """The issue-backed store has no divergence surface — an empty no-op repair."""
         return objective_store.RepairResult(
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
-    # Empty/no-op: honest project-level objective reads land with their Phase-2 consumer (Node
-    # 2.3). No flow consumers in 1.2.
+    # --- human-engagement reads ---
+    # Empty/no-op: the issue-backed store has no honest project-level objective-read surface.
 
     def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
         return ()

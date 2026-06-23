@@ -1,10 +1,10 @@
-"""The backend-tier resolvers (Objective #746): the issue-backend + objective-store resolvers.
+"""The backend-tier resolvers: the issue-backend + objective-store resolvers.
 
-This is the home for **both** issue-tier and objective-tier resolvers. Node 2.1 carried the
-issue-tier resolvers (``resolve_issue_backend_id`` / ``resolve_issue_backend``) and the backend-id
-constants, the only door every issue-tier consumer goes through; node 2.2 added the objective-tier
-resolvers (``resolve_objective_store_id`` / ``resolve_objective_store``), the door every
-objective-tier consumer goes through.
+This is the home for **both** issue-tier and objective-tier resolvers: the issue-tier resolvers
+(``resolve_issue_backend_id`` / ``resolve_issue_backend``) and the backend-id constants are the only
+door every issue-tier consumer goes through; the objective-tier resolvers
+(``resolve_objective_store_id`` / ``resolve_objective_store``) are the door every objective-tier
+consumer goes through.
 
 The resolver reads the **committed** ``.pi/perk.toml`` ``[issues]`` table and constructs the
 matching backend (``GitHubIssueBackend`` from perk/backends/github/backend.py, or the Linear

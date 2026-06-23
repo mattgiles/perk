@@ -22,7 +22,7 @@ from perk.backends.linear.client import (
 
 
 class _LinearIssueOps:
-    """The shared Linear issue substrate (correction §3b): the GraphQL client, the
+    """The shared Linear issue substrate: the GraphQL client, the
     constructor-bound team key, the issue-tier caches (done-state + labels), and every private
     issue-op helper. **Client-only** — it registers the :class:`LinearClient` and reaches all
     GraphQL machinery (``team_id``/``paginate``) through ``self._client``; it does
@@ -35,7 +35,7 @@ class _LinearIssueOps:
         # Public: the PR-tier ``github.get_pr`` call in ``LinearIssueBackend.get_plan`` reads it.
         self.repo_root = repo_root
         self._done_state_id_cache: str | None = None
-        # type -> lowest-position state id of that type (the Node 3.3 workflow-state mirror).
+        # type -> lowest-position state id of that type (the workflow-state mirror).
         self._states_by_type: dict[str, str] | None = None
         self._label_ids: dict[str, str] = {}
 
@@ -78,7 +78,7 @@ class _LinearIssueOps:
         and caches a type → lowest-position-id map. Kept independent of ``_done_state_id`` (its own
         cache) to leave the learn-close path byte-stable.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** the workflow-state mirror is not yet
+        **Flagged (live gate):** the workflow-state mirror is not yet
         live-proven — covered offline here.
         """
         if self._states_by_type is None:
@@ -148,7 +148,7 @@ class _LinearIssueOps:
         return sorted(nodes, key=lambda c: _require_str(c.get("createdAt"), "comment createdAt"))
 
     # ------------------------------------------------------------------ human-engagement reads
-    # The honest READ surface (Objective #682, Node 1.2). `_comments` (above) is deliberately
+    # The honest READ surface. `_comments` (above) is deliberately
     # LEFT BYTE-STABLE — it feeds the marker-matching path, whose offline tests pin the
     # `{ id body createdAt }` selection. These are NEW, author-aware selections.
 
@@ -169,7 +169,7 @@ class _LinearIssueOps:
     def _description_edits(self, issue_id: str) -> list[dict[str, object]]:
         """The issue's description-edit history nodes (those carrying a ``descriptionUpdatedBy``),
         sorted ascending by ``createdAt``. Selects fields explicitly (the SDK ``relationChanges``
-        pitfall, inventory §3.2). Linear's history exposes no inline diff — the mapping sets
+        pitfall). Linear's history exposes no inline diff — the mapping sets
         ``diff=None`` (a flagged deferral). An absent issue yields ``[]``."""
         query = (
             "query($id: String!, $cursor: String) { issue(id: $id) "
@@ -191,7 +191,7 @@ class _LinearIssueOps:
 
         Two reads: resolve the issue's session id, then page its activities. A missing issue or
         missing session reuses the ``_is_entity_not_found`` → empty pattern (returns ``[]``); every
-        other failure (notably an auth failure on the personal API key — inventory §6.2) **raises**
+        other failure (notably an auth failure on the personal API key) **raises**
         (the contract: ``read_agent_session`` raises on infra/auth failure)."""
         issue = self._issue_or_none(issue_id, "agentSessions(first: 1) { nodes { id } }")
         if issue is None:
@@ -354,7 +354,7 @@ class _LinearIssueOps:
         )
         # Conditional label/project/milestone attachment: only add the keys when set — omit,
         # never send an explicit `null`. Every plan/learn/objective caller passes a label, so the
-        # input is byte-identical for them; node-issues (Node 3.2) pass `label_id=None` (they are
+        # input is byte-identical for them; node-issues pass `label_id=None` (they are
         # discovered by project membership + the node block, so they carry no perk label).
         issue_input: dict[str, object] = {
             "teamId": self._client.team_id(self._team_key),

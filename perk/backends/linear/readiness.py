@@ -15,7 +15,7 @@ from perk.backends.linear.client import (
 )
 
 # ===========================================================================
-# Shared readiness probe (Node 2.4) — used by both `perk init` and `perk doctor`.
+# Shared readiness probe — used by both `perk init` and `perk doctor`.
 # Report-shaped (never raises): every failure mode lands in a `LinearReadiness` field,
 # mirroring `github.check_auth`'s degrade discipline. Offline-testable through a
 # `LinearClient`-subclass fake.
