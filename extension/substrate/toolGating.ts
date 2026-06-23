@@ -1,12 +1,12 @@
-// P2.T1 — the tool-gating primitive (the keystone). Structural read-only enforcement, NOT
+// The tool-gating primitive (the keystone). Structural read-only enforcement, NOT
 // prompting. Mirrors pi's authoritative `examples/extensions/plan-mode/` recipe (the
 // `setActiveTools` allowlist + `tool_call` bash sub-allowlist + `before_agent_start` injection +
 // `context` strip-when-off) and `preset.ts`'s snapshot-then-restore. The gate attaches to the
 // existing `perk:workflow-state.mode` field (`read-only`/`read-write`) — no new registry stage.
 //
-// Substrate only: T2 (perk-owned plan mode) and T5 (read-only CI executor) are the consumers of
-// the `enter`/`exit` surface; this turn ships the mechanism + wires the allowlist-restore into the
-// existing `session_start`/`session_tree` rebuild points (see docs/planning/phase-2-turn-1.md).
+// Substrate only: perk-owned plan mode and the read-only CI executor are the consumers of the
+// `enter`/`exit` surface; the allowlist-restore is wired into the existing
+// `session_start`/`session_tree` rebuild points.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { WORKFLOW_STATE_TYPE } from "./workflowState.ts";
@@ -25,15 +25,15 @@ export const READ_ONLY_TOOLS = [
   "bash",
   "ask_user_question",
   "plan_review",
-  // The Node 2.1 carve-out (#339): plan_draft is structurally limited to the one working-plan
+  // The plan_draft carve-out: plan_draft is structurally limited to the one working-plan
   // artifact in the run-scoped session data dir (gitignored scratch), so the read-only invariant
   // (worktree untouched) holds; the `tool_call` edit/write/bash blocking below is unchanged.
   "plan_draft",
-  // The #352 Node 2.1 twin of the #339 carve-out: objective_draft writes only the one
+  // The objective_draft twin of the plan_draft carve-out: objective_draft writes only the one
   // working-objective artifact in the session data dir (fixed artifact name, seam-derived
   // path); the gate's edit/write/bash blocking is unchanged.
   "objective_draft",
-  // The `web` seam providers' research tools (#529): the UNION of all known web-provider tool
+  // The `web` seam providers' research tools: the UNION of all known web-provider tool
   // names, allowlisted statically and inert when the package is absent (the plan_review precedent
   // — setActiveTools simply has nothing to enable). None mutate the repo — fetch_content's
   // GitHub-clone path writes only to its own cache outside the worktree, morally equivalent to the
@@ -48,7 +48,7 @@ export const READ_ONLY_TOOLS = [
   "ollama_web_search",
   "ollama_web_fetch",
   "web_fetch",
-  // pi-mono-linear's read-only tools (Node 3.1 — the [issues] backend = "linear" selection):
+  // pi-mono-linear's read-only tools (the [issues] backend = "linear" selection):
   // none mutate Linear or the repo. Foreign names are inert when the package is absent (the
   // pi-web-access precedent above). The mutating/sensitive tools are deliberately excluded:
   // linear_create_issue, linear_update_issue, linear_create_comment, linear_upload_file,

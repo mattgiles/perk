@@ -5,7 +5,7 @@
 // strict-append seam touches effects only through structural slices (`EntrySink`, `BranchSource`,
 // `ReportTarget`), so the whole module stays unit-testable under `node --test` with fakes. The
 // reconstruction discipline (scan getBranch on session_start AND session_tree, per-field LWW)
-// and the verified-linkage claim (Q3) live here.
+// and the verified-linkage claim live here.
 
 import { type ReportTarget, report } from "../surfaces/report.ts";
 import { listRunIds, type PlanRef, readHandoff } from "./cache.ts";
@@ -13,7 +13,7 @@ import { listRunIds, type PlanRef, readHandoff } from "./cache.ts";
 export const WORKFLOW_STATE_TYPE = "perk:workflow-state";
 
 /**
- * A session-artifact provenance pointer (Node 1.3, contracts §8.3): the session tier's proof
+ * A session-artifact provenance pointer (contracts §8.3): the session tier's proof
  * that a `scratch/runs/<run_id>/data/` file is current for THIS run. Reads validate the
  * on-disk file against the rebuilt pointer (run_id match + digest match) and refuse otherwise.
  */
@@ -38,22 +38,22 @@ export interface WorkflowState {
   active_objective?: string | null;
   last_review_batch?: unknown;
   /**
-   * The last `/pr-review` outcome posted via the `post_pr_review` warm tool (#658, §8.3):
+   * The last `/pr-review` outcome posted via the `post_pr_review` warm tool (§8.3):
    * `{pr, verdict, angles, comment_count, mode, at}`. Best-effort tier (per-field LWW in
    * `rebuildWorkflowState`, no rebuild change). The PR comment stays canonical.
    */
   last_pr_review?: unknown;
-  /** Session-artifact provenance pointers, keyed by artifact name (Node 1.3, §8.3). */
+  /** Session-artifact provenance pointers, keyed by artifact name (§8.3). */
   session_artifacts?: Record<string, SessionArtifactPointer> | null;
   /**
-   * The objective node this session has claimed `planning` (Node 2.3 of #339, §8.3) — the warm
+   * The objective node this session has claimed `planning` (§8.3) — the warm
    * node-link carrier an approval-triggered save recovers from. Written by the `objective_node`
    * tool on a successful `planning` transition; cleared on a non-planning transition for the same
    * node and after a successful node-linked plan save. Best-effort tier.
    */
   objective_node_claim?: { objective: string; node: string } | null;
   /**
-   * The bounded conflict-resolution re-drive counter (#556, §8.3). Incremented each time
+   * The bounded conflict-resolution re-drive counter (§8.3). Incremented each time
    * `/submit` drives the `perk.conflict-resolver` subagent on a definitively-unmergeable PR;
    * reset to 0 on a clean submit. Best-effort tier (cheaply reconstructable). Per-field LWW in
    * `rebuildWorkflowState` handles it with no rebuild change.
@@ -146,7 +146,7 @@ export function appendWorkflowState<K extends keyof WorkflowState>(
 }
 
 /**
- * Equality by identity (provider + pr_id) — the plan-ref dedup key (turn-2b D4). Two refs to
+ * Equality by identity (provider + pr_id) — the plan-ref dedup key. Two refs to
  * the same plan are equal even if other fields drift; absent compares equal only to absent.
  */
 export function planRefsEqual(

@@ -1,5 +1,5 @@
-// The tool-boundary decode seam — the sibling of coldDoor.ts's JSON-boundary decode (Objective
-// #224 Node 3.2). Registered tools receive their LLM-supplied `params` as `unknown` (the SDK's
+// The tool-boundary decode seam — the sibling of coldDoor.ts's JSON-boundary decode. Registered
+// tools receive their LLM-supplied `params` as `unknown` (the SDK's
 // `Static<TSchema>` default); each handler NARROWS that unknown here instead of asserting a shape
 // with `params as {…}`. The live LLM path is already schema-validated by pi's agent loop before
 // `execute`, so these helpers are type-honesty plus defense-in-depth for the unvalidated direct

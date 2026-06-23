@@ -1,4 +1,4 @@
-// The session-data accessor seam (Objective #339 Node 1.2, contracts.md §8.1).
+// The session-data accessor seam (contracts.md §8.1).
 //
 // Every run-scoped session artifact lives under `.pi/workflow/scratch/runs/<run_id>/data/`, and
 // ALL session-data paths flow through this module (interior) or `perk/state/cache.py` (exterior) — the
@@ -9,12 +9,12 @@
 // - The current run_id resolves from the rebuilt `perk:workflow-state` and degrades to `null`
 //   when the session has no identity. CONTRAST with `coldDoor.activeRunId`, which falls back to
 //   a `cold-door-<ts>` stamp for stdin-staging debuggability: a stamp here would orphan data
-//   dirs and break run_id-keyed provenance (node 1.3), so this seam never stamps.
+//   dirs and break run_id-keyed provenance, so this seam never stamps.
 // - Reads return `null` on absence (normal, branchable) and on I/O errors (with a loud stderr
 //   warning); writes return the written path or `null` on failure (with a warning). Never
 //   throws — a broken disk must not wedge a session.
 //
-// Provenance doctrine (Node 1.3, contracts §8.1/§8.3) — the pointer makes it consumable:
+// Provenance doctrine (contracts §8.1/§8.3) — the pointer makes it consumable:
 // - A session artifact is *consumable* only via its `session_artifacts` pointer
 //   ({run_id, name, path, digest, at}) in the rebuilt `perk:workflow-state`. A bare file on
 //   disk is never trusted: `writeSessionArtifact` returns a path only once BOTH the file and
@@ -30,8 +30,7 @@
 //   keying isolates dirs and pointers alike — validation never crosses run_ids.
 //
 // Imports only node builtins + cache.ts + workflowState.ts + report.ts so the module stays
-// loadable under `node --test`. Accepts a minimal structural ctx (`BranchSource & { cwd }`)
-// like other seams.
+// loadable under `node --test`; accepts a minimal structural ctx (`BranchSource & { cwd }`).
 
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -148,7 +147,7 @@ function artifactMapsEqual(
  * Returns the absolute written path only when the artifact is *fully recorded* (file written,
  * read back, digested, pointer strict-appended); `null` on any failure — the seam/module has
  * already warned, and an orphan file (pointer-append failure) is gitignored scratch for the
- * GC (node 1.4) to prune. Never throws.
+ * GC to prune. Never throws.
  */
 export function writeSessionArtifact(
   sink: EntrySink,

@@ -5,7 +5,7 @@
 // through a FIXED host-alias set (`@earendil-works/pi-*`, `typebox`) plus native `node_modules`
 // walking. The extension must therefore be SELF-CONTAINED — zero runtime npm deps: a bare
 // `import { parse } from "yaml"` would only resolve if pi's `npm install --omit=dev` happened to
-// install it, which is fragile (and since #655 perk pre-materializes the clone with a plain `git
+// install it, which is fragile (and perk pre-materializes the clone with a plain `git
 // clone` and NO `npm install` at all, so the clone has no `node_modules` to resolve against). This
 // reader replaces the lone non-host runtime import (`yaml`) with Node builtins only — NO bare npm
 // imports — so the extension loads from a bare git checkout regardless of whether any install ran.

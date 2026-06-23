@@ -1,4 +1,4 @@
-// #129 — a small, reusable structured-output substrate over `@earendil-works/pi-ai`.
+// A small, reusable structured-output substrate over `@earendil-works/pi-ai`.
 //
 // pi-ai has no dedicated JSON-mode; structured output is done via tool calling. This module wraps
 // that idiom into two pure, dependency-light, NEVER-throwing helpers:

@@ -93,7 +93,7 @@ export function parseUserBindings(rows: Array<Record<string, string>>): SkillBin
 
 /**
  * Shape issues for a *single* binding (skill/mode/trigger well-formedness). Registry-free —
- * target-existence is `doctor`'s job (Node 3.1). Duplicate-trigger detection is the caller's.
+ * target-existence is `doctor`'s job. Duplicate-trigger detection is the caller's.
  */
 function bindingIssues(binding: SkillBinding): BindingIssue[] {
   const issues: BindingIssue[] = [];
@@ -141,7 +141,7 @@ export function validateUserBindings(bindings: SkillBinding[]): BindingIssue[] {
  * re-validated). Each user binding is applied iff it is shape-valid AND its trigger was not already
  * applied by an earlier user binding; otherwise it is dropped and its issue recorded. An applied
  * binding replaces in place the default with the same trigger, or appends at a new trigger — so the
- * resolved set has unique triggers by construction. Target-existence stays `doctor` (Node 3.1).
+ * resolved set has unique triggers by construction. Target-existence stays `doctor`.
  */
 export function resolveBindings(
   userBindings: SkillBinding[],
