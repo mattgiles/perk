@@ -7,7 +7,7 @@ roadmap and creates the perk:objective issue). A thin launcher — it seeds **no
 target and exec's pi.
 
 A **dedicated** command (in ``DEDICATED_STAGES``), mirroring ``objective author`` minus the seed
-prompt. Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exits
+prompt. Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 """
 

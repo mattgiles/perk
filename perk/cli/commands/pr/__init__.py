@@ -1,4 +1,4 @@
-"""``perk pr`` — the PR lifecycle group (Objective #495, Node 3.3).
+"""``perk pr`` — the PR lifecycle group.
 
 Sections its ``--help`` (via :class:`SectionedAliasGroup`) into **Launchers** / **Workers**:
 
@@ -9,12 +9,12 @@ Sections its ``--help`` (via :class:`SectionedAliasGroup`) into **Launchers** / 
   it has a launcher half + the warm review flow but no deterministic worker.
 - **Workers** — ``check`` / ``feedback`` / ``ready`` / ``resolve-threads`` / ``review-context`` /
   ``review-post``: deterministic cold doors the warm TS doors delegate to. Each is a supervisor
-  surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exit codes
+  surface: ``--json`` → stdout, human text → stderr, stable exit codes
   (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 
 ``submit`` / ``land`` / ``address`` are also exported as the module-level command objects
 ``pr_submit_command`` / ``pr_land_command`` / ``pr_address_command`` so ``cli.py`` can register the
-flat hot-path aliases ``perk submit`` / ``perk land`` / ``perk address`` (§11.3, the same Command
+flat hot-path aliases ``perk submit`` / ``perk land`` / ``perk address`` (the same Command
 object under a flat name).
 """
 

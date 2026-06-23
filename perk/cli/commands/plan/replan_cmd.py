@@ -4,7 +4,7 @@ perk's analog of erk's ``/erk:replan`` ("recompute a plan against current codeba
 typically after another PR landed and made the open plan stale) — adapted to perk's architecture.
 The key adaptation: erk *creates a new plan and closes the old one*; perk instead **updates the
 plan in place** by re-launching the read-only ``plan`` stage with the plan's *original* ``run_id``.
-perk's ``plan_save`` is already an upsert keyed on ``run_id`` (P2.T13), so re-saving with the
+perk's ``plan_save`` is already an upsert keyed on ``run_id``, so re-saving with the
 original ``run_id`` rewrites the plan content while preserving the ``plan-header`` (the plan number,
 ``objective_id``, ``consumed_learn``, ``branch``/``pr``/``lifecycle_stage``) — keeping the
 plan→objective link and the objective node→plan backlink intact.
@@ -14,8 +14,8 @@ for launch (``mode: read-only``, ``worktree: none``) — mirroring ``learn-docs`
 plan-mode session reads the materialized prior plan via the ``read`` tool (the read-only bash
 allowlist excludes ``gh``), so this cold door performs every GitHub read up front.
 
-Single-plan only; multi-plan consolidation (erk's ``erk-consolidated`` merge) is deliberately
-deferred. Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable
+Single-plan only; multi-plan consolidation is deliberately
+deferred. Supervisor surface: ``--json`` → stdout, human text → stderr, stable
 exits (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
 """
 
@@ -62,7 +62,7 @@ def _render_existing_plan(
     """Materialize the existing plan into a scratch file: a short header + the prior plan body
     wrapped in ``<untrusted_plan>`` so the session treats it as DATA, not instructions.
 
-    When ``engagement_block`` is non-``None`` (Node 2.2), the already-self-delimited
+    When ``engagement_block`` is non-``None``, the already-self-delimited
     ``<untrusted_plan_engagement>`` block is appended after ``</untrusted_plan>``; when ``None``
     the rendered scratch is byte-unchanged."""
     lines = [
@@ -89,7 +89,7 @@ def _seed_prompt(
     """The initial prompt for the read-only replan session.
 
     When ``has_engagement`` is True, step 1 also points the session at the
-    ``<untrusted_plan_engagement>`` block (human comments/edits on the plan issue, Node 2.2);
+    ``<untrusted_plan_engagement>`` block (human comments/edits on the plan issue);
     when False the seed is byte-unchanged."""
     engagement_clause = (
         " The file also carries an <untrusted_plan_engagement> block of human comments/edits on "
@@ -189,7 +189,7 @@ def replan(
                 error_type="no_plan_body",
             )
 
-        # Read the plan issue's human engagement (Node 2.2), fail-soft: a backend hiccup must never
+        # Read the plan issue's human engagement, fail-soft: a backend hiccup must never
         # break the replan launch. Empty/None on GitHub-with-no-primitive or no engagement → the
         # scratch + seed are byte-unchanged. Read on --dry-run too (replan's dry run materializes
         # the real artifact — it is not offline).

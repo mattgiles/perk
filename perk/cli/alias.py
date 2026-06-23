@@ -1,4 +1,4 @@
-"""Command aliases for the perk CLI (adapted from erk's ``cli_alias``/``cli_group``).
+"""Command aliases for the perk CLI.
 
 perk has no shared CLI package, so the whole (small) mechanism lives here:
 
@@ -83,13 +83,12 @@ def register_flat_alias(
 ) -> None:
     """Register a group's ``subcommand`` at ``root`` under a flat name (e.g. ``perk submit``).
 
-    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.3 (the flat-top-level
-    alias). The same trick as ``register_with_aliases`` — the *same* ``Command`` object is added
+    The same trick as ``register_with_aliases`` — the *same* ``Command`` object is added
     under another name — but across the group→root boundary, so ``perk submit`` can later resolve
-    to ``perk pr submit``. Dormant in 2.1: no live flat alias is registered.
+    to ``perk pr submit``.
 
     The flat name is recorded on the ``root`` group itself (``FLAT_ALIAS_ATTR``) so
-    ``SectionedGroup`` can route its row into the launcher section (D4). Per-group state on the
+    ``SectionedGroup`` can route its row into the launcher section. Per-group state on the
     root object — not a module-level global — avoids cross-test leakage.
     """
     name = flat_name or subcommand.name
@@ -111,7 +110,7 @@ def get_flat_aliases(group: click.Group) -> set[str]:
 def mark_kind[C: click.Command](cmd: C, kind: CommandKind) -> C:
     """Mark ``cmd`` as a ``"launcher"`` or ``"worker"`` (read by ``SectionedAliasGroup``).
 
-    **Objective #495 Node 2.1**; enables SSOT §11.7-Q5 (group-internal sectioned help). Mirrors
+    Mirrors
     the ``alias``/``ALIAS_ATTR`` mechanism: a marker stashed on the ``Command`` object.
     """
     setattr(cmd, KIND_ATTR, kind)
@@ -123,13 +122,13 @@ def get_kind(cmd: click.Command) -> CommandKind | None:
     return getattr(cmd, KIND_ATTR, None)
 
 
-# Root-group section taxonomy (curated, erk-faithful). Anything live but unlisted falls into
+# Root-group section taxonomy (curated). Anything live but unlisted falls into
 # the ``Other`` catch-all (e.g. the `run-worker` worker door); ``cmd.hidden``
 # commands fall into ``Hidden`` (gated by env, see below).
 STAGE_LAUNCHERS = [
     "plan",  # the hybrid plan group still reads as the stage launcher (save/resume/replan verbs)
     "implement",
-    # submit/address/land are flat aliases (FLAT_ALIAS_ATTR), not generated launchers (Node 3.3):
+    # submit/address/land are flat aliases (FLAT_ALIAS_ATTR), not generated launchers:
     # SectionedGroup routes flat aliases into the launcher bucket before consulting this list.
     "learn",  # the hybrid learn group still reads as the stage launcher
 ]
@@ -218,8 +217,7 @@ class SectionedGroup(AliasGroup):
                     hidden.append((name, cmd))
                 continue
             if name in flat:
-                # Flat top-level aliases feed the existing launcher bucket (D4). Empty in 2.1 ⇒
-                # rendered output byte-identical.
+                # Flat top-level aliases feed the existing launcher bucket.
                 launchers.append((name, cmd))
             elif name in COMMAND_GROUPS:
                 groups.append((name, cmd))
@@ -247,12 +245,10 @@ class SectionedGroup(AliasGroup):
 class SectionedAliasGroup(AliasGroup):
     """An ``AliasGroup`` that partitions its ``--help`` into Launchers / Workers / Commands.
 
-    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.7-Q5 (group-internal
-    sectioned help). Commands marked via ``mark_kind`` render under their section: ``"launcher"``
+    Commands marked via ``mark_kind`` render under their section: ``"launcher"``
     → **Launchers**, ``"worker"`` → **Workers**; unmarked commands fall into a catch-all
     **Commands** section (so an unmarked group renders exactly like ``AliasGroup``). Sections
-    render in order Launchers, Workers, Commands; empty sections are omitted. Dormant in 2.1: no
-    live group uses this — ``pr``/``objective``/etc. stay plain ``AliasGroup``.
+    render in order Launchers, Workers, Commands; empty sections are omitted.
     """
 
     def format_commands(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:

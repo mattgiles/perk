@@ -1,5 +1,5 @@
 """``perk objective engagement <NUMBER> [--json]`` — read the objective + node-issue human
-engagement (Objective #682, Node 2.3).
+engagement.
 
 The **reconcile path's fetch surface** + a human/CI affordance: an objective (and its roadmap
 node-issues) may carry human comments / description edits made after planning landed. This read
@@ -13,7 +13,7 @@ project-level ``read_comments`` / ``read_description_edits`` plus the per-node
 objective issue's own comments + edits and no per-node sections; the dormant issue-backed Linear
 store returns the empty surfaces.
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout machine payload, human text → stderr,
+Supervisor surface: ``--json`` → stdout machine payload, human text → stderr,
 stable exits (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 """
 

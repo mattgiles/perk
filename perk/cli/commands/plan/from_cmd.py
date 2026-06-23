@@ -1,6 +1,6 @@
 """``perk plan from <issue>`` — adopt a pre-existing human-authored issue IN PLACE as a perk plan.
 
-The in-place adoption cold door (Objective #682, Node 3.1). It reads a **non-perk** human issue
+The in-place adoption cold door. It reads a **non-perk** human issue
 (Linear or GitHub) — its title/body + engagement — as untrusted seed DATA, then re-launches the
 read-only ``plan`` stage to run a normal authoring pass over it. On save the authored plan's
 metadata is stamped **additively** into the *same* issue (the ``adopted_from`` provenance):
@@ -16,7 +16,7 @@ access). It differs from ``replan`` in two ways: the source is a non-perk issue 
 reusing the original). The save link rides the run **handoff** (``adopt_from``) so it survives
 every save surface (the ``/plan-save`` command, the ``plan_save`` tool, approval-driven save).
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exits
+Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` op-failure/refusal · ``2`` not-a-repo).
 """
 

@@ -1,4 +1,4 @@
-"""`perk pr ready` — the deliberate draft→ready review gate (the cold ready door; P2.T8a, D6).
+"""`perk pr ready` — the deliberate draft→ready review gate (the cold ready door).
 
 perk deliberately does NOT auto-publish on submit (the PR stays draft). `/ready` (`perk pr ready`)
 is the explicit gesture that opens the PR for review: resolve the active plan-ref → find the PR →

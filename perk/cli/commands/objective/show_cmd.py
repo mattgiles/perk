@@ -50,7 +50,7 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
         "success": True,
         "error_type": None,
         "objective": {
-            # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+            # Opaque string id at every machine boundary (contracts §8.21).
             "id": state.id,
             "url": state.url,
             "title": state.title,

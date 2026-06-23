@@ -1,6 +1,5 @@
-"""Click context DI (python-cli-guidelines.md §1-2).
+"""Click context DI.
 
-T4 lands the first git-dependent commands, so ``PerkContext`` + ``require_*`` arrive here.
 The context is built **cheaply** (cwd only) by the root group, so non-repo commands
 (``--version``, ``init``, ``registry``, ``state``) work outside a git repo; ``require_*``
 resolves and caches lazily and raises a clean ``UserFacingCliError`` when a dependency is
@@ -91,7 +90,7 @@ def require_config(ctx: click.Context) -> Config:
 
 
 def require_github(ctx: click.Context) -> AuthStatus:
-    """Strict GitHub binding for Phase-1+ commands that *need* a working GitHub.
+    """Strict GitHub binding for commands that *need* a working GitHub.
 
     ``init``/``doctor`` instead call ``github.check_*`` directly to *report* (non-fatal).
     """

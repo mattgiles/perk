@@ -1,9 +1,9 @@
-"""`perk pr submit` — the Python/worker PR open (the cold submit door; P1.T5a).
+"""`perk pr submit` — the Python/worker PR open (the cold submit door).
 
 Pushes the active plan's branch and opens a **draft** PR linking the plan (`Closes #N`), then
-populates the staged `branch`/`pr`/`lifecycle_stage` plan-header fields. Reuses T2a's write
-conventions; the warm in-session twin is the TS `/submit` tool (delegates here via `pi.exec`).
-Supervisor surface (cli-vs-pi §3.2): `--json` to stdout + stable exit codes, human text to stderr.
+populates the staged `branch`/`pr`/`lifecycle_stage` plan-header fields. The warm in-session
+twin is the TS `/submit` tool (delegates here via `pi.exec`).
+Supervisor surface: `--json` to stdout + stable exit codes, human text to stderr.
 
 Exit codes: 0 submitted · 1 invalid input / unauthed / no saved plan / op failure · 2 not-a-repo.
 """
@@ -152,8 +152,8 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             "Commit your changes before submitting — uncommitted work isn't pushed.",
             error_type="dirty_tree",
         )
-    # Resolve the PR merge target / conflict-probe base (#633): the plan's pinned base wins
-    # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to pre-#633).
+    # Resolve the PR merge target / conflict-probe base: the plan's pinned base wins
+    # (cache.plan-ref → plan-header), else the GitHub default branch (byte-identical to before).
     # Mirror the `isinstance(...).strip()` guard the start-point resolver uses (launch.py) so all
     # three base readers treat a malformed/non-string cached value identically (ignore it), rather
     # than stringifying it into a bogus branch name.
@@ -167,9 +167,9 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     # diverge after amend/squash/rebase; a no-op on the first push.
     git.push(repo_root, branch, force=True)
 
-    # Best-effort plan embed (D3): fetch the verbatim plan markdown; None (no block / fetch
+    # Best-effort plan embed: fetch the verbatim plan markdown; None (no block / fetch
     # failure) -> no embed, no raise. The PR number is unknown until create_pr returns, so the
-    # checkout footer is appended in a second update_pr_body pass (D2 — create-then-update).
+    # checkout footer is appended in a second update_pr_body pass (create-then-update).
     plan_body = _safe_plan_body(issue=issue, repo_root=repo_root)
     pr = github.create_pr(
         head=branch,
@@ -181,7 +181,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     )
     full_body = _compose_pr_body(issue=issue, plan_body=plan_body, pr_number=pr.number)
     github.update_pr_body(number=pr.number, body=full_body, repo_root=repo_root)
-    # Post-write self-check (D5): exactly what catches the issue-numbered-footer bug.
+    # Post-write self-check: exactly what catches the issue-numbered-footer bug.
     errors = github.validate_pr_body(full_body, pr_number=pr.number)
     if errors:
         raise UserFacingCliError(
@@ -195,13 +195,13 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             "lifecycle_stage": plan.LifecycleStage.IMPL.value,
         },
     )
-    # Node 5.1 (stretch): mirror the opened PR into the Linear agent session. Gated inside the
+    # Mirror the opened PR into the Linear agent session. Gated inside the
     # emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it
     # never changes the submit result or exit code. Never reached on --dry-run (early return).
     linear_agent.emit_pr_opened(
         repo_root, pr_number=pr.number, pr_url=pr.url, branch=branch, environ=os.environ
     )
-    # Mergeability gate (#556): a deterministic local probe AFTER the PR exists. Fail-open —
+    # Mergeability gate: a deterministic local probe AFTER the PR exists. Fail-open —
     # `detect_merge_conflicts` swallows git failures and the call site is guarded so a probe
     # failure NEVER changes submit's exit code; only a definitive verdict sets mergeable.
     mergeable, conflicts = _probe_mergeability(repo_root, base=base, branch=branch)
@@ -241,7 +241,7 @@ def _probe_mergeability(
 
 
 def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
-    """Fetch the verbatim plan markdown for the `<details>` embed (D3). Best-effort: any GitHub
+    """Fetch the verbatim plan markdown for the `<details>` embed. Best-effort: any GitHub
     failure degrades to `None` (no embed) rather than sinking the submit."""
     try:
         backend = resolve.resolve_issue_backend(repo_root)
@@ -253,10 +253,10 @@ def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
 def _compose_pr_body(
     *, issue: str, plan_body: str | None = None, pr_number: int | None = None
 ) -> str:
-    """Compose the GitHub PR body (P2.T8a, D2/D3/D4): closing keyword + plan link + a best-effort
+    """Compose the GitHub PR body: closing keyword + plan link + a best-effort
     `<details>` embed of the verbatim plan + the checkout footer.
 
-    The two-target split (D4): this HTML-enhanced body goes ONLY into the GitHub PR body (the
+    The two-target split: this HTML-enhanced body goes ONLY into the GitHub PR body (the
     `<details>` embed is fine here). The **footer** (not the embed) must stay a plain-backtick line
     carrying the **PR** number `gh pr checkout <pr_number>` — the issue number fails
     `validate_pr_body` (the create-then-update fix for the latent issue-numbered-footer bug). The
@@ -282,14 +282,14 @@ def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
             "existed": result.pr.existed,
         },
         "branch": result.branch,
-        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+        # Opaque string id at every machine boundary (contracts §8.21).
         "issue": result.issue,
         "plan_header": {"fields_updated": list(result.header_update.fields_updated)},
         "plan_embedded": result.plan_embedded,
         "pr_checked": result.pr_checked,
         "dry_run": result.dry_run,
         "base": result.base,
-        # Tri-state: bool when the probe is definitive, null when undetermined (#556).
+        # Tri-state: bool when the probe is definitive, null when undetermined.
         "mergeable": result.mergeable,
         "conflicts": list(result.conflicts),
     }

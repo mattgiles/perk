@@ -1,5 +1,5 @@
 """``perk objective node-engagement <NUMBER> --node ID [--json]`` — read a node-issue's
-pre-planning human engagement (Objective #682, Node 2.1).
+pre-planning human engagement.
 
 The **warm path's fetch surface** + a human/CI affordance: a roadmap node-issue may carry human
 comments / description edits made **before** perk ever plans it. This read worker surfaces that
@@ -10,7 +10,7 @@ read worker, never a mutation affordance).
 Linear-first: GitHub single-issue objectives + the dormant issue-backed Linear store return the
 empty bundle (the block is ``None``, the human/JSON surface says "no pre-planning engagement").
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout machine payload, human text → stderr,
+Supervisor surface: ``--json`` → stdout machine payload, human text → stderr,
 stable exits (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 """
 

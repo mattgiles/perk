@@ -1,4 +1,4 @@
-"""`perk pr review-post` — submit a `/pr-review` verdict to the PR (#175).
+"""`perk pr review-post` — submit a `/pr-review` verdict to the PR.
 
 Reads a JSON review batch (`{verdict, summary, comments?, fyi?}`) from a `--batch <file>` arg
 (pi.exec has no stdin channel, so the spawned reviewer child writes a temp file and passes its path
@@ -14,7 +14,7 @@ here), resolves the active plan's PR, and branches on the **verdict**:
 The optional `fyi: string[]` carries borderline notes that are echoed in-session only — they are
 structurally never part of any GitHub payload.
 
-Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, human text to stderr, stable exit codes.
+Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / unauthed / bad batch / no plan / no PR / fail · 2 not-a-repo.
 """
 

@@ -1,4 +1,4 @@
-"""`perk pr check` — the deterministic PR-body checkout-footer validator (the cold check; P2.T8a).
+"""`perk pr check` — the deterministic PR-body checkout-footer validator (the cold check).
 
 The supervisor surface for the post-write self-check `pr submit` runs inline: resolve the active
 plan-ref → find the PR → read its body → `github.validate_pr_body` (footer-scoped). This is exactly
