@@ -18,7 +18,7 @@ import perk
 from perk import github, objective
 from perk.backends import engagement, issues, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear_backend import LinearObjectiveStore, LinearProjectObjectiveStore
+from perk.backends.linear import LinearObjectiveStore, LinearProjectObjectiveStore
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.backends.objective_stores import (
     GitHubObjectiveStore,

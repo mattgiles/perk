@@ -8,8 +8,9 @@ short-circuit ordering is preserved.
 import tomllib
 from pathlib import Path
 
-from perk.backends import issues, linear, linear_backend
+from perk.backends import issues, linear
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import client as linear_client
 from perk.convergence.doctor.data import Check
 from perk.substrate.config import load_committed_issues_backend, load_committed_issues_team
 
@@ -28,7 +29,7 @@ _LINEAR_KEY_REMEDIATION = (
 )
 
 
-def _linear_auth_check(readiness: linear_backend.LinearReadiness) -> Check:
+def _linear_auth_check(readiness: linear.LinearReadiness) -> Check:
     """The ``linear-auth`` Check from a completed probe: ``ok`` when authed, else ``warn``."""
     if not readiness.auth_ok:
         return Check(
@@ -42,7 +43,7 @@ def _linear_auth_check(readiness: linear_backend.LinearReadiness) -> Check:
     return Check("linear-auth", "linear", "ok", f"authenticated as {readiness.user or '?'}")
 
 
-def _linear_team_check(readiness: linear_backend.LinearReadiness, team: str) -> Check:
+def _linear_team_check(readiness: linear.LinearReadiness, team: str) -> Check:
     """The ``linear-team`` Check: ``ok`` when the team resolved, else ``warn``."""
     if not readiness.team_ok:
         return Check(
@@ -56,7 +57,7 @@ def _linear_team_check(readiness: linear_backend.LinearReadiness, team: str) -> 
     return Check("linear-team", "linear", "ok", f"team {team} found")
 
 
-def _linear_label_check(readiness: linear_backend.LinearReadiness) -> Check:
+def _linear_label_check(readiness: linear.LinearReadiness) -> Check:
     """The ``linear-labels`` Check: unverified ``warn`` / missing ``warn`` / present ``ok``."""
     if readiness.error:
         return Check("linear-labels", "linear", "warn", "labels not verified", readiness.error)
@@ -72,14 +73,14 @@ def _linear_label_check(readiness: linear_backend.LinearReadiness) -> Check:
     return Check("linear-labels", "linear", "ok", "perk labels present")
 
 
-def _linear_project_checks(client: linear.LinearClient, team: str) -> list[Check]:
+def _linear_project_checks(client: linear_client.LinearClient, team: str) -> list[Check]:
     """The ``linear-project-scopes`` + ``linear-workflow-states`` Checks (Projects readiness).
 
     Project-backed objective readiness (verify-gated, non-fatal). Called only on the ``team_ok``
     path — auth/team failures short-circuit before this probe. Reuses the client's cached team id
     (a cache hit after ``check_readiness``).
     """
-    project = linear_backend.check_project_readiness(client, team_key=team)
+    project = linear.check_project_readiness(client, team_key=team)
     checks: list[Check] = []
     if project.projects_ok:
         checks.append(Check("linear-project-scopes", "linear", "ok", "Linear Projects accessible"))
@@ -140,7 +141,7 @@ def _linear_checks(root: Path) -> list[Check]:
     """
     team = load_committed_issues_team(root)
     try:
-        client = linear.client_from_env(repo_root=root)
+        client = linear_client.client_from_env(repo_root=root)
     except IssueBackendError as exc:
         return [
             Check(
@@ -165,7 +166,7 @@ def _linear_checks(root: Path) -> list[Check]:
                 "Set [issues] team in .pi/perk.toml.",
             )
         ]
-    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=False)
+    readiness = linear.check_readiness(client, team_key=team, ensure_labels=False)
     auth = _linear_auth_check(readiness)
     if not readiness.auth_ok:
         return [auth]

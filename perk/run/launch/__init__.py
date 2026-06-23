@@ -43,7 +43,7 @@ import subprocess as subprocess
 from pathlib import Path
 
 from perk import github as github
-from perk.backends import linear_agent
+from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import Ensure
 from perk.convergence import init
 from perk.run import runner as runner

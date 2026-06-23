@@ -1,4 +1,4 @@
-"""Shared scripted-fake substrate for the `test_linear_backend*` suite.
+"""Shared scripted-fake substrate for the `test_linear_*` suite.
 
 The scripted `_FakeLinear` (response-keyed, distinct from the stateful `FakeLinearWorkspace`
 in `test_linear_lifecycle.py`) plus the response constants/builders, cross-tier assert helpers,
@@ -11,8 +11,8 @@ from typing import cast
 
 from perk import plan
 from perk.backends import issue_backend, objective_store
-from perk.backends.linear import LinearClient, LinearGraphQLError
-from perk.backends.linear_backend import LinearIssueBackend, LinearObjectiveStore
+from perk.backends.linear import LinearIssueBackend, LinearObjectiveStore
+from perk.backends.linear.client import LinearClient, LinearGraphQLError
 
 _TEAM_RESPONSE: dict[str, object] = {"teams": {"nodes": [{"id": "team-1"}]}}
 _STATES_RESPONSE: dict[str, object] = {

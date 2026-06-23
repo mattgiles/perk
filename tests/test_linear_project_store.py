@@ -15,12 +15,12 @@ from _linear_fakes import (
 )
 
 from perk import objective, plan
-from perk.backends import engagement, linear_backend, objective_store
+from perk.backends import engagement, linear, objective_store
 from perk.backends.linear import (
-    LinearGraphQLError,
-)
-from perk.backends.linear_backend import (
     to_linear_markdown,
+)
+from perk.backends.linear.client import (
+    LinearGraphQLError,
 )
 from perk.backends.objective_store import ObjectiveStoreError
 
@@ -33,7 +33,7 @@ def _make_project_store(
     if ``LinearProjectObjectiveStore`` drifts from the protocol — the twin of ``_make_store`` for
     the issue-backed ``LinearObjectiveStore``."""
     fake = _FakeLinear(responses)
-    store: objective_store.ObjectiveStore = linear_backend.LinearProjectObjectiveStore(
+    store: objective_store.ObjectiveStore = linear.LinearProjectObjectiveStore(
         fake, team_key="ENG", repo_root=Path("/repo")
     )
     return store, fake

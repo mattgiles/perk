@@ -33,8 +33,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from perk import github
-from perk.backends import engagement, issue_backend, linear, linear_backend
+from perk.backends import engagement, issue_backend, linear
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import client as linear_client
 from perk.github import GitHubError
 from perk.substrate import config
 
@@ -390,6 +391,6 @@ def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
                 '[issues] team is required when backend = "linear" — '
                 "set the Linear team key in .pi/perk.toml"
             )
-        client = linear.client_from_env(repo_root=repo_root)
-        return linear_backend.LinearIssueBackend(client, team_key=team, repo_root=repo_root)
+        client = linear_client.client_from_env(repo_root=repo_root)
+        return linear.LinearIssueBackend(client, team_key=team, repo_root=repo_root)
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

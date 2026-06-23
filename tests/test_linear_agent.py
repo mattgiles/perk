@@ -1,4 +1,4 @@
-"""Offline tests for the Linear agent-session emission layer (``perk/backends/linear_agent.py``).
+"""Offline tests for the Linear agent-session emission layer (``perk/backends/linear/agent.py``).
 
 Request *composition* only (Bearer header, mutation substrings, variables) over a recording
 ``httpx.MockTransport`` — exact GraphQL field signatures are verified live at the smoke gate
@@ -14,7 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from perk.backends import linear_agent
+from perk.backends.linear import agent as linear_agent
 from perk.state import cache
 
 _TOKEN_ENV = {"LINEAR_AGENT_TOKEN": "lin_oauth_agent"}

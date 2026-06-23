@@ -24,7 +24,7 @@ consumer/test import churn). The orchestrators reference the group *builders* as
 globals, so the existing ``doctor._env_checks`` / ``doctor._github_checks`` /
 ``doctor._runner_checks`` monkeypatches keep rebinding the names the orchestrators read; the
 module-attribute patches
-(``doctor_mod.linear_backend.X`` / ``doctor_mod.init.X`` / ``doctor_mod.env``) mutate the shared
+(``doctor_mod.linear.X`` / ``doctor_mod.init.X`` / ``doctor_mod.env``) mutate the shared
 imported modules and are seen regardless of which submodule the builder lives in. Submodules:
 ``data`` (the leaf ``Check``/``Status``/``DoctorReport``), ``checks``, ``github_checks``,
 ``linear_checks``, ``fixes``.
@@ -32,7 +32,7 @@ imported modules and are seen regardless of which submodule the builder lives in
 
 from pathlib import Path
 
-from perk.backends import linear_backend
+from perk.backends import linear
 from perk.convergence import env, init
 from perk.convergence.doctor.checks import (
     _bad_handoffs,
@@ -114,7 +114,7 @@ __all__ = [
     "_untrack_materialized_plan_cache",
     "env",
     "init",
-    "linear_backend",
+    "linear",
     "report_to_dict",
     "run_doctor",
     "workflow_checks",

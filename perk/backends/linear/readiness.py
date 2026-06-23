@@ -3,16 +3,16 @@ from pathlib import Path
 
 from perk import objective, plan
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear._helpers import (
+    _NODE_STATUS_STATE_TYPE,
+)
+from perk.backends.linear.backend import LinearIssueBackend
+from perk.backends.linear.client import (
     LinearClient,
     _opt_dict,
     _opt_list,
     _opt_str,
 )
-from perk.backends.linear_backend._helpers import (
-    _NODE_STATUS_STATE_TYPE,
-)
-from perk.backends.linear_backend.backend import LinearIssueBackend
 
 # ===========================================================================
 # Shared readiness probe (Node 2.4) — used by both `perk init` and `perk doctor`.

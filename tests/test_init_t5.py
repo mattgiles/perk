@@ -295,17 +295,17 @@ def test_linear_readiness_skipped_on_github_selection(git_repo, stub_env):
 def test_linear_readiness_runs_when_selected(git_repo, stub_env, monkeypatch):
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
-    ready = init_mod.linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+    ready = init_mod.linear.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
     calls = []
 
     def fake_readiness(client, *, team_key, ensure_labels):
         calls.append((team_key, ensure_labels))
         return ready
 
-    monkeypatch.setattr(init_mod.linear_backend, "check_readiness", fake_readiness)
-    project = init_mod.linear_backend.LinearProjectReadiness(projects_ok=True)
+    monkeypatch.setattr(init_mod.linear, "check_readiness", fake_readiness)
+    project = init_mod.linear.LinearProjectReadiness(projects_ok=True)
     monkeypatch.setattr(
-        init_mod.linear_backend,
+        init_mod.linear,
         "check_project_readiness",
         lambda client, *, team_key: project,
     )
@@ -328,18 +328,16 @@ def test_linear_project_readiness_gap_non_fatal(git_repo, stub_env, monkeypatch)
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        init_mod.linear_backend,
+        init_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: init_mod.linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: init_mod.linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True
         ),
     )
-    gap = init_mod.linear_backend.LinearProjectReadiness(
+    gap = init_mod.linear.LinearProjectReadiness(
         projects_ok=False, projects_error="no access", missing_state_types=("canceled",)
     )
-    monkeypatch.setattr(
-        init_mod.linear_backend, "check_project_readiness", lambda client, *, team_key: gap
-    )
+    monkeypatch.setattr(init_mod.linear, "check_project_readiness", lambda client, *, team_key: gap)
     report = run_init(git_repo, verify=True)
     # Project readiness is non-fatal: it does NOT flip LinearReport.ok.
     assert report.ok and report.linear is not None and report.linear.ok
@@ -355,9 +353,9 @@ def test_linear_project_readiness_skipped_on_auth_degrade(git_repo, stub_env, mo
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        init_mod.linear_backend,
+        init_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: init_mod.linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: init_mod.linear.LinearReadiness(
             auth_ok=False, user=None, team_ok=False, error="bad key"
         ),
     )
@@ -365,7 +363,7 @@ def test_linear_project_readiness_skipped_on_auth_degrade(git_repo, stub_env, mo
     def _boom(client, *, team_key):
         raise AssertionError("check_project_readiness must not run when auth/team failed")
 
-    monkeypatch.setattr(init_mod.linear_backend, "check_project_readiness", _boom)
+    monkeypatch.setattr(init_mod.linear, "check_project_readiness", _boom)
     report = run_init(git_repo, verify=True)
     assert report.linear is not None and report.linear.project is None
 

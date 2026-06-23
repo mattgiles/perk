@@ -34,8 +34,8 @@ def _opt_int(value: object) -> int | None:
 
 def _opt_dict(value: object) -> dict[str, object] | None:
     """A GraphQL/JSON field read as a dict, else ``None`` (tolerant). The ``cast`` confines the
-    documented ty isinstance-narrowing quirk to this leaf (mirroring ``backends.linear._opt_dict``)
-    so the parse modules stay cast-free."""
+    documented ty isinstance-narrowing quirk to this leaf (mirroring
+    ``backends.linear.client._opt_dict``) so the parse modules stay cast-free."""
     return cast("dict[str, object]", value) if isinstance(value, dict) else None
 
 

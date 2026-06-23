@@ -14,9 +14,9 @@ from _linear_fakes import (
 )
 
 from perk import objective, plan
-from perk.backends import linear_backend
+from perk.backends import linear
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear.client import (
     LinearGraphQLError,
 )
 
@@ -32,7 +32,7 @@ _LABEL_CREATED: dict[str, object] = {
 class TestCheckReadiness:
     def test_auth_failure_short_circuits(self) -> None:
         fake = _FakeLinear({"viewer": [IssueBackendError("Linear API request failed: boom")]})
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
         assert readiness.auth_ok is False
         assert readiness.team_ok is False
         assert readiness.user is None
@@ -42,7 +42,7 @@ class TestCheckReadiness:
 
     def test_team_not_found(self) -> None:
         fake = _FakeLinear({"viewer": [_VIEWER_OK], "teams(filter": [{"teams": {"nodes": []}}]})
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
         assert readiness.auth_ok is True
         assert readiness.user == "Mat"
         assert readiness.team_ok is False
@@ -58,7 +58,7 @@ class TestCheckReadiness:
                 "issueLabels(filter": [_LABEL_FOUND],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
         assert readiness.user == "m@x.io"
 
     def test_all_labels_present_lookup_only(self) -> None:
@@ -69,8 +69,8 @@ class TestCheckReadiness:
                 "issueLabels(filter": [_LABEL_FOUND],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
-        assert readiness == linear_backend.LinearReadiness(
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        assert readiness == linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True, missing_labels=(), created_labels=()
         )
         # Lookup-only: no create mutation issued under ensure_labels=False.
@@ -85,7 +85,7 @@ class TestCheckReadiness:
                 "issueLabels(filter": [_LABEL_ABSENT],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
         assert readiness.missing_labels == (
             plan.PLAN_LABEL,
             plan.LEARN_LABEL,
@@ -105,7 +105,7 @@ class TestCheckReadiness:
                 "issueLabelCreate": [_LABEL_CREATED],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=True)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=True)
         assert readiness.created_labels == (
             plan.PLAN_LABEL,
             plan.LEARN_LABEL,
@@ -125,7 +125,7 @@ class TestCheckReadiness:
                 "issueLabels(filter": [_LABEL_FOUND],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=True)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=True)
         assert readiness.created_labels == ()
         assert not _queries(fake, "issueLabelCreate")
 
@@ -137,7 +137,7 @@ class TestCheckReadiness:
                 "issueLabels(filter": [IssueBackendError("rate limited")],
             }
         )
-        readiness = linear_backend.check_readiness(fake, team_key="ENG", ensure_labels=False)
+        readiness = linear.check_readiness(fake, team_key="ENG", ensure_labels=False)
         assert readiness.auth_ok is True
         assert readiness.team_ok is True
         assert readiness.error is not None and "rate limited" in readiness.error
@@ -153,9 +153,7 @@ _PROJECTS_OK: dict[str, object] = {"team": {"projects": {"nodes": [{"id": "proj-
 
 class TestCheckProjectReadiness:
     def test_derivation_guard_in_lockstep_with_map(self) -> None:
-        assert frozenset(linear_backend._NODE_STATUS_STATE_TYPE.values()) == (
-            linear_backend._REQUIRED_STATE_TYPES
-        )
+        assert frozenset(linear._NODE_STATUS_STATE_TYPE.values()) == (linear._REQUIRED_STATE_TYPES)
 
     def test_all_ready(self) -> None:
         fake = _FakeLinear(
@@ -165,8 +163,8 @@ class TestCheckProjectReadiness:
                 "states { nodes { type }": [_states_payload(_ALL_STATE_TYPES)],
             }
         )
-        result = linear_backend.check_project_readiness(fake, team_key="ENG")
-        assert result == linear_backend.LinearProjectReadiness(
+        result = linear.check_project_readiness(fake, team_key="ENG")
+        assert result == linear.LinearProjectReadiness(
             projects_ok=True,
             projects_error=None,
             missing_state_types=(),
@@ -181,7 +179,7 @@ class TestCheckProjectReadiness:
                 "states { nodes { type }": [_states_payload(_ALL_STATE_TYPES)],
             }
         )
-        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        result = linear.check_project_readiness(fake, team_key="ENG")
         assert result.projects_ok is False
         assert result.projects_error is not None and "no project access" in result.projects_error
         # The states phase still ran (projects error does not short-circuit it).
@@ -197,7 +195,7 @@ class TestCheckProjectReadiness:
                 "states { nodes { type }": [_states_payload(["unstarted", "started", "completed"])],
             }
         )
-        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        result = linear.check_project_readiness(fake, team_key="ENG")
         assert result.projects_ok is True
         assert result.missing_state_types == ("canceled",)
 
@@ -209,7 +207,7 @@ class TestCheckProjectReadiness:
                 "states { nodes { type }": [IssueBackendError("states boom")],
             }
         )
-        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        result = linear.check_project_readiness(fake, team_key="ENG")
         assert result.states_error is not None and "states boom" in result.states_error
         assert result.missing_state_types == ()
 
@@ -233,7 +231,7 @@ class TestCheckProjectReadiness:
                 ],
             }
         )
-        result = linear_backend.check_project_readiness(fake, team_key="ENG")
+        result = linear.check_project_readiness(fake, team_key="ENG")
         assert result.missing_state_types == ()
         assert result.states_error is None
 
@@ -243,20 +241,20 @@ class TestCheckProjectReadiness:
 
 def _make_project_ops(
     responses: dict[str, list[object]] | None = None,
-) -> tuple[linear_backend._LinearProjectOps, _FakeLinear]:
+) -> tuple[linear._LinearProjectOps, _FakeLinear]:
     """Construct the dormant ``_LinearProjectOps`` client-only (the correction §3b ownership shape
     — it registers the client; the shared cache lives on the client)."""
     fake = _FakeLinear(responses)
-    ops = linear_backend._LinearProjectOps(fake, team_key="ENG", repo_root=Path("/repo"))
+    ops = linear._LinearProjectOps(fake, team_key="ENG", repo_root=Path("/repo"))
     return ops, fake
 
 
 def _make_issue_ops(
     responses: dict[str, list[object]] | None = None,
-) -> tuple[linear_backend._LinearIssueOps, _FakeLinear]:
+) -> tuple[linear._LinearIssueOps, _FakeLinear]:
     """Construct a client-only ``_LinearIssueOps`` (for the `_create_issue` substrate tests)."""
     fake = _FakeLinear(responses)
-    ops = linear_backend._LinearIssueOps(fake, team_key="ENG", repo_root=Path("/repo"))
+    ops = linear._LinearIssueOps(fake, team_key="ENG", repo_root=Path("/repo"))
     return ops, fake
 
 

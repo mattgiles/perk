@@ -6,8 +6,9 @@ Split out of the original single-file ``doctor`` module (Node 2.2) — verbatim 
 from collections.abc import Callable
 from pathlib import Path
 
-from perk.backends import linear, linear_backend
+from perk.backends import linear
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import client as linear_client
 from perk.convergence import init
 from perk.convergence.doctor.data import Check
 from perk.convergence.doctor.linear_checks import _linear_selected
@@ -96,10 +97,10 @@ def _fix_linear_labels(root: Path) -> tuple[list[str], list[str]]:
     if team is None:
         return [], []
     try:
-        client = linear.client_from_env()
+        client = linear_client.client_from_env()
     except IssueBackendError:
         return [], []
-    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)
+    readiness = linear.check_readiness(client, team_key=team, ensure_labels=True)
     fixed = [f"Linear: created label {name}" for name in readiness.created_labels]
     errors = [f"Linear: label ensure failed: {readiness.error}"] if readiness.error else []
     return fixed, errors

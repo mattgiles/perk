@@ -3,8 +3,9 @@
 
 ``LinearIssueBackend`` implements the issue-tier contract
 (``perk.backends.issue_backend.IssueBackend``) over the Node 2.1 GraphQL client substrate
-(``perk.backends.linear.LinearClient``), with team-scoped + label-scoped queries and body-marker
-idempotency matching the ``find_plan_issue`` semantics of the GitHub backend. The objective tier
+(``perk.backends.linear.client.LinearClient``), with team-scoped + label-scoped queries and
+body-marker idempotency matching the ``find_plan_issue`` semantics of the GitHub backend. The
+objective tier
 (Node 2.3) mirrors ``perk.github``'s behavior shapes
 (the two-step create with comment-id backfill, header LBYL, authoritative roadmap writes +
 best-effort comment re-renders, the Reconcilable splice).
@@ -65,17 +66,17 @@ attribute-access import path verbatim (zero consumer/test import churn). Submodu
 - ``readiness`` — the init/doctor readiness probes.
 """
 
-from perk.backends.linear_backend._helpers import (
+from perk.backends.linear._helpers import (
     _NODE_STATUS_STATE_TYPE,
     _note,
     to_linear_markdown,
 )
-from perk.backends.linear_backend.backend import LinearIssueBackend
-from perk.backends.linear_backend.issue_ops import _LinearIssueOps
-from perk.backends.linear_backend.objectives import LinearObjectiveStore
-from perk.backends.linear_backend.project_ops import _LinearProjectOps
-from perk.backends.linear_backend.project_store import LinearProjectObjectiveStore
-from perk.backends.linear_backend.readiness import (
+from perk.backends.linear.backend import LinearIssueBackend
+from perk.backends.linear.issue_ops import _LinearIssueOps
+from perk.backends.linear.objectives import LinearObjectiveStore
+from perk.backends.linear.project_ops import _LinearProjectOps
+from perk.backends.linear.project_store import LinearProjectObjectiveStore
+from perk.backends.linear.readiness import (
     _REQUIRED_STATE_TYPES,
     LinearProjectReadiness,
     LinearReadiness,

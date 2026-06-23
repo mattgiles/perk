@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 from perk import github
-from perk.backends import linear_backend
+from perk.backends import linear
 from perk.cli.commands.doctor import render
 from perk.convergence import capabilities, init
 from perk.convergence import doctor as doctor_mod
@@ -245,16 +245,16 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True
         ),
     )
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+        lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
     report = run_doctor(git_repo, verify=True)
     group = {c.name: c for c in _linear_group(report)}
@@ -275,16 +275,16 @@ def test_linear_checks_ok_with_key_from_local_config(git_repo, stub_env, monkeyp
         '[linear]\napi_key = "lin_api_local"\n', encoding="utf-8"
     )
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True
         ),
     )
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+        lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
     report = run_doctor(git_repo, verify=True)
     group = {c.name: c for c in _linear_group(report)}
@@ -308,9 +308,9 @@ def test_linear_checks_warn_on_auth_failure(git_repo, stub_env, monkeypatch):
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=False, user=None, team_ok=False, error="bad key"
         ),
     )
@@ -325,9 +325,9 @@ def test_linear_checks_warn_on_team_not_found(git_repo, stub_env, monkeypatch):
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=False, error="Linear team 'ENG' not found"
         ),
     )
@@ -343,16 +343,16 @@ def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True, missing_labels=("perk:plan",)
         ),
     )
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+        lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
     report = run_doctor(git_repo, verify=True)
     labels = next(c for c in _linear_group(report) if c.name == "linear-labels")
@@ -363,9 +363,9 @@ def test_linear_checks_warn_on_missing_labels(git_repo, stub_env, monkeypatch):
 
 def _patch_ready(monkeypatch):
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=True
         ),
     )
@@ -377,9 +377,9 @@ def test_linear_project_checks_warn_on_no_project_access(git_repo, stub_env, mon
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+        lambda client, *, team_key: linear.LinearProjectReadiness(
             projects_ok=False, projects_error="no access"
         ),
     )
@@ -399,9 +399,9 @@ def test_linear_project_checks_warn_on_missing_state_types(git_repo, stub_env, m
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+        lambda client, *, team_key: linear.LinearProjectReadiness(
             projects_ok=True, missing_state_types=("canceled",)
         ),
     )
@@ -420,9 +420,9 @@ def test_linear_project_checks_warn_on_states_probe_error(git_repo, stub_env, mo
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     _patch_ready(monkeypatch)
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(
+        lambda client, *, team_key: linear.LinearProjectReadiness(
             projects_ok=True, states_error="states boom"
         ),
     )
@@ -439,9 +439,9 @@ def test_linear_project_checks_absent_on_auth_failure(git_repo, stub_env, monkey
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=False, user=None, team_ok=False, error="bad key"
         ),
     )
@@ -449,7 +449,7 @@ def test_linear_project_checks_absent_on_auth_failure(git_repo, stub_env, monkey
     def _boom(client, *, team_key):
         raise AssertionError("check_project_readiness must not run when auth failed")
 
-    monkeypatch.setattr(doctor_mod.linear_backend, "check_project_readiness", _boom)
+    monkeypatch.setattr(doctor_mod.linear, "check_project_readiness", _boom)
     report = run_doctor(git_repo, verify=True)
     names = {c.name for c in _linear_group(report)}
     assert "linear-project-scopes" not in names
@@ -461,9 +461,9 @@ def test_linear_project_checks_absent_on_team_failure(git_repo, stub_env, monkey
     _select_linear(git_repo)
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
-        lambda client, *, team_key, ensure_labels: linear_backend.LinearReadiness(
+        lambda client, *, team_key, ensure_labels: linear.LinearReadiness(
             auth_ok=True, user="Mat", team_ok=False, error="Linear team 'ENG' not found"
         ),
     )
@@ -471,7 +471,7 @@ def test_linear_project_checks_absent_on_team_failure(git_repo, stub_env, monkey
     def _boom(client, *, team_key):
         raise AssertionError("check_project_readiness must not run when team failed")
 
-    monkeypatch.setattr(doctor_mod.linear_backend, "check_project_readiness", _boom)
+    monkeypatch.setattr(doctor_mod.linear, "check_project_readiness", _boom)
     report = run_doctor(git_repo, verify=True)
     names = {c.name for c in _linear_group(report)}
     assert "linear-project-scopes" not in names
@@ -488,16 +488,16 @@ def test_fix_creates_linear_labels(git_repo, stub_env, monkeypatch):
     def fake_readiness(client, *, team_key, ensure_labels):
         calls.append(ensure_labels)
         if ensure_labels:
-            return linear_backend.LinearReadiness(
+            return linear.LinearReadiness(
                 auth_ok=True, user="Mat", team_ok=True, created_labels=("perk:plan", "perk:learn")
             )
-        return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+        return linear.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
 
-    monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    monkeypatch.setattr(doctor_mod.linear, "check_readiness", fake_readiness)
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+        lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
     report = run_doctor(git_repo, fix=True, verify=True)
     assert "Linear: created label perk:plan" in report.fixed
@@ -512,16 +512,16 @@ def test_fix_linear_label_failure_lands_on_fix_errors(git_repo, stub_env, monkey
 
     def fake_readiness(client, *, team_key, ensure_labels):
         if ensure_labels:
-            return linear_backend.LinearReadiness(
+            return linear.LinearReadiness(
                 auth_ok=True, user="Mat", team_ok=True, error="rate limited"
             )
-        return linear_backend.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
+        return linear.LinearReadiness(auth_ok=True, user="Mat", team_ok=True)
 
-    monkeypatch.setattr(doctor_mod.linear_backend, "check_readiness", fake_readiness)
+    monkeypatch.setattr(doctor_mod.linear, "check_readiness", fake_readiness)
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_project_readiness",
-        lambda client, *, team_key: linear_backend.LinearProjectReadiness(projects_ok=True),
+        lambda client, *, team_key: linear.LinearProjectReadiness(projects_ok=True),
     )
     report = run_doctor(git_repo, fix=True, verify=True)
     assert any("rate limited" in e for e in report.fix_errors)
@@ -532,7 +532,7 @@ def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypat
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
     called = []
     monkeypatch.setattr(
-        doctor_mod.linear_backend,
+        doctor_mod.linear,
         "check_readiness",
         lambda client, *, team_key, ensure_labels: called.append(True),
     )

@@ -28,15 +28,15 @@ from perk import github, plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
+    to_linear_markdown,
+)
+from perk.backends.linear._helpers import _require_issue_node
+from perk.backends.linear.client import (
     LinearGraphQLError,
     _opt_dict,
     _opt_list,
     _opt_str,
 )
-from perk.backends.linear_backend import (
-    to_linear_markdown,
-)
-from perk.backends.linear_backend._helpers import _require_issue_node
 from perk.github import GitHubError
 from perk.run import run_report
 

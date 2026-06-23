@@ -17,13 +17,13 @@ from _linear_fakes import (
 )
 
 from perk import objective, plan
-from perk.backends import issue_backend, linear_backend, objective_store
+from perk.backends import issue_backend, linear, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
-    LinearGraphQLError,
-)
-from perk.backends.linear_backend import (
     to_linear_markdown,
+)
+from perk.backends.linear.client import (
+    LinearGraphQLError,
 )
 from perk.backends.objective_store import ObjectiveStoreError
 
@@ -727,7 +727,7 @@ class TestImportDirection:
         # would be a cycle. Mirrors the TestImportDirection substring style. linear_backend is a
         # package (Node 2.1 split) — `__file__` is `__init__.py` only, so scan every submodule
         # source under the package dir (mirrors tests/test_issues.py's rglob scan).
-        package_dir = Path(linear_backend.__file__).parent
+        package_dir = Path(linear.__file__).parent
         source = "\n".join(
             path.read_text(encoding="utf-8") for path in sorted(package_dir.glob("*.py"))
         )

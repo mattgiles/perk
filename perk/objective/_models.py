@@ -65,7 +65,7 @@ OBJECTIVE_RECONCILABLE_MARKER_END = "<!-- /perk:objective-reconcilable -->"
 # The Linear-safe inline-code rewrite of a perk HTML-comment marker (objective #252 Node 2.3).
 # Derived locally by the same rule as the Linear backend's `to_linear_markdown` transcoder
 # (`<!-- perk:x -->` → `` `perk:x` ``) — NOT imported from it: the import direction is
-# `linear_backend → objective`, never back.
+# `backends.linear → objective`, never back.
 _INLINE_MARKER_RE = re.compile(r"^<!--\s*(/?perk:.+?)\s*-->$")
 
 

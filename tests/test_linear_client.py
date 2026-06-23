@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear.client import (
     LINEAR_GRAPHQL_URL,
     RATELIMITED_CODE,
     LinearClient,
@@ -62,7 +62,7 @@ class TestRequestComposition:
 
     def test_bearer_mode_sends_the_oauth_header_form(self) -> None:
         # `bearer=True` is the OAuth (actor=app agent token) form used by
-        # perk/backends/linear_agent.py.
+        # perk/backends/linear/agent.py.
         seen: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:

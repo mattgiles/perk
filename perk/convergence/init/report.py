@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from perk.backends import linear_backend
+from perk.backends import linear
 from perk.convergence.env import EnvCheck
 from perk.github import AuthStatus, RepoAccess
 
@@ -24,10 +24,10 @@ class LinearReport:
     non-fatal either way (the GitHub D3 discipline: file convergence already succeeded).
     """
 
-    readiness: linear_backend.LinearReadiness | None
+    readiness: linear.LinearReadiness | None
     team: str | None = None
     error: str | None = None
-    project: linear_backend.LinearProjectReadiness | None = None
+    project: linear.LinearProjectReadiness | None = None
 
     @property
     def ok(self) -> bool:

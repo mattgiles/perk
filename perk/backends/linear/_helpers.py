@@ -6,7 +6,7 @@ from typing import TypedDict
 
 from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear.client import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
@@ -22,7 +22,7 @@ _PAGE_SIZE = 50
 
 def _note(message: str) -> None:
     """One loud-but-non-fatal stderr note (the package's fail-soft reporting boundary, mirroring
-    ``linear_agent._note``)."""
+    ``agent._note``)."""
     print(f"perk linear: {message}", file=sys.stderr)
 
 

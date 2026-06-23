@@ -2,7 +2,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear._helpers import (
+    _PAGE_SIZE,
+    _request_issue_mutation,
+)
+from perk.backends.linear.client import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
@@ -10,10 +14,6 @@ from perk.backends.linear import (
     _opt_str,
     _require_dict,
     _require_str,
-)
-from perk.backends.linear_backend._helpers import (
-    _PAGE_SIZE,
-    _request_issue_mutation,
 )
 
 
