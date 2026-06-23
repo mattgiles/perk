@@ -2960,7 +2960,7 @@ Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, 
 
 The issue-tracking tier (plan/learn/objective issues — `perk/backends/issue_backend.py`'s `IssueBackend`
 contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/backends/issues.py`, Node 1.2;
-the `LinearIssueBackend` over the `perk/backends/linear.py` GraphQL client, Nodes 2.1–2.3, wired live in
+the `LinearIssueBackend` over the `perk/backends/linear/client.py` GraphQL client, Nodes 2.1–2.3, wired live in
 Node 2.4) is **backend-selectable** via one committed config table:
 
 > **Note (Objective #548).** Objective storage is now its **own seam** — the objective-storage tier
@@ -3046,7 +3046,7 @@ is *not* this offline check's job — that is the `linear` group's (below).
 **The verify-gated `linear` doctor group** (`perk/convergence/doctor/linear_checks.py::_linear_checks`; present only when
 `verify` AND the committed backend is `"linear"`). All warn-level on failure — network readiness
 is non-fatal, mirroring the `github` group's D3 discipline. Built from one
-`linear_backend.check_readiness(client, team_key, ensure_labels=False)` call (the shared
+`linear.check_readiness(client, team_key, ensure_labels=False)` call (the shared
 init/doctor probe — report-shaped, never raises; phases short-circuit auth → team → labels):
 
 - `linear-auth` — ok: `authenticated as <user>`; failure (or missing `LINEAR_API_KEY`): warn,
@@ -3068,7 +3068,7 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
 
 The last two are the **project-backed objective readiness** probe (Node 4.2): both run **only
 after** `linear-auth` + `linear-team` succeed, via a separate
-`linear_backend.check_project_readiness(client, team_key)` call (report-shaped, never raises;
+`linear.check_project_readiness(client, team_key)` call (report-shaped, never raises;
 reuses the client's cached team id — no auth/team re-probe). Non-fatal like the rest of the group.
 **No `--fix` arm** — workflow states and API-token scopes are user/workspace-owned (perk cannot
 safely auto-create them).
@@ -3177,7 +3177,7 @@ everywhere — PRs are GitHub-universal. Concretely:
 ## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
 
 An **opt-in, fail-soft, one-way** mirror of an implement run into Linear's Agents UI
-(`perk/backends/linear_agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
+(`perk/backends/linear/agent.py` — Python-plane only; the warm TS doors delegate to the Python hooks, so
 there is no TS twin).
 
 - **The gate** (checked inside every emitter): the worktree's stamped
@@ -3321,7 +3321,7 @@ the concrete backend behind it):
   GitHub writes are byte-for-byte the prior behavior); `repo_root` constructor-bound; string-id
   boundary with an `int()` edge conversion; `GitHubError → ObjectiveStoreError` verbatim via
   `_translate`. Carries `backend_id = "github"`.
-- The **Linear facade refactor** (`perk/backends/linear_backend.py`): a shared `_LinearIssueOps`
+- The **Linear facade refactor** (`perk/backends/linear/`): a shared `_LinearIssueOps`
   substrate (client + caches + issue helpers); `LinearIssueBackend` as a thin facade over its
   `_ops`; and `LinearObjectiveStore` with its own `_LinearIssueOps`, the six objective methods, and
   `IssueBackendError → ObjectiveStoreError` per-method message-verbatim. Both carry

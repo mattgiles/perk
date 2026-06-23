@@ -30,8 +30,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import github
-from perk.backends import linear, linear_backend
+from perk.backends import linear
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import client as linear_client
 from perk.convergence import capabilities, env
 from perk.convergence.env import EnvCheck
 from perk.convergence.init.agents import PERK_AGENTS, _converge_subagent_agents
@@ -177,7 +178,6 @@ __all__ = [
     "git",
     "is_self_repo",
     "linear",
-    "linear_backend",
     "managed_convergences",
     "materialize_extension_clone",
     "report_to_dict",
@@ -441,11 +441,11 @@ def _linear_readiness(root: Path) -> LinearReport | None:
             "set the Linear team key in .pi/perk.toml",
         )
     try:
-        client = linear.client_from_env(repo_root=root)
+        client = linear_client.client_from_env(repo_root=root)
     except IssueBackendError as exc:
         return LinearReport(readiness=None, error=str(exc))
-    readiness = linear_backend.check_readiness(client, team_key=team, ensure_labels=True)
+    readiness = linear.check_readiness(client, team_key=team, ensure_labels=True)
     project = None
     if readiness.auth_ok and readiness.team_ok:
-        project = linear_backend.check_project_readiness(client, team_key=team)
+        project = linear.check_project_readiness(client, team_key=team)
     return LinearReport(readiness=readiness, team=team, project=project)

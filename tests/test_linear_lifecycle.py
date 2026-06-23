@@ -1,9 +1,10 @@
 """Objective #252 Node 4.1 — the end-to-end offline Linear lifecycle suite.
 
 A stateful in-memory Linear workspace (``FakeLinearWorkspace``) subclasses the GraphQL client
-(``linear.LinearClient``) and is injected via a late-bound
-``monkeypatch.setattr(linear, "client_from_env", …)`` — ``resolve_issue_backend`` resolves the
-client at call time, so the REAL ``LinearIssueBackend`` (identifier boundary ids, transcoded
+(``linear.client.LinearClient``) and is injected via a late-bound
+``monkeypatch.setattr(linear_client, "client_from_env", …)`` — ``resolve_issue_backend``
+resolves the client at call time, so the REAL ``LinearIssueBackend`` (identifier boundary ids,
+transcoded
 bodies, identifier-direct mutations) is exercised by the REAL CLI commands. Only the
 GitHub **PR tier** (which is GitHub-universal for every backend) is monkeypatched, following
 ``test_pr_land.py``'s pattern.
@@ -29,8 +30,9 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github, objective, plan
-from perk.backends import issues, linear
-from perk.backends.linear import LinearClient, LinearGraphQLError
+from perk.backends import issues
+from perk.backends.linear import client as linear_client
+from perk.backends.linear.client import LinearClient, LinearGraphQLError
 from perk.backends.objective_stores import resolve_objective_store
 from perk.cli.cli import cli
 from perk.objective.drift import DriftCode
@@ -441,8 +443,9 @@ def _scaffold_repo(root: Path) -> None:
 
 
 def _patch_linear(monkeypatch: pytest.MonkeyPatch, ws: FakeLinearWorkspace) -> None:
-    # Late-bound: resolve_issue_backend calls linear.client_from_env(repo_root=...) at call time.
-    monkeypatch.setattr(linear, "client_from_env", lambda *a, **k: ws)
+    # Late-bound: resolve_issue_backend calls linear_client.client_from_env(repo_root=...) at call
+    # time.
+    monkeypatch.setattr(linear_client, "client_from_env", lambda *a, **k: ws)
     monkeypatch.setattr(
         github, "check_auth", lambda: github.AuthStatus(True, "octocat", ("repo",), None)
     )

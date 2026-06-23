@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from perk import github, objective
-from perk.backends import engagement, linear, linear_backend, objective_store
+from perk.backends import engagement, linear, objective_store
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.issues import (
     GITHUB_BACKEND_ID,
@@ -49,6 +49,7 @@ from perk.backends.issues import (
 from perk.backends.issues import (
     _engagement_comment as _gh_engagement_comment,
 )
+from perk.backends.linear import client as linear_client
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 from perk.substrate import config
@@ -368,8 +369,6 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
                 '[issues] team is required when backend = "linear" — '
                 "set the Linear team key in .pi/perk.toml"
             )
-        client = linear.client_from_env(repo_root=repo_root)
-        return linear_backend.LinearProjectObjectiveStore(
-            client, team_key=team, repo_root=repo_root
-        )
+        client = linear_client.client_from_env(repo_root=repo_root)
+        return linear.LinearProjectObjectiveStore(client, team_key=team, repo_root=repo_root)
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

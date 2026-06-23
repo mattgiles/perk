@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from perk import github
-from perk.backends import linear_agent
+from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.run import run_report, run_worker
 from perk.state import cache

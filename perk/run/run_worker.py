@@ -18,8 +18,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk.backends import issues, linear_agent
+from perk.backends import issues
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import init
 from perk.run import launch, resume, run_report

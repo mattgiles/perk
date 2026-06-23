@@ -16,8 +16,9 @@ from pathlib import Path
 import click
 
 from perk import github, plan
-from perk.backends import issue_backend, issues, linear_agent
+from perk.backends import issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
+from perk.backends.linear import agent as linear_agent
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError

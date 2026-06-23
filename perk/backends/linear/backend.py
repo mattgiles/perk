@@ -3,14 +3,7 @@ from pathlib import Path
 from perk import github, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
-    LinearClient,
-    _opt_str,
-    _require_dict,
-    _require_list,
-    _require_str,
-)
-from perk.backends.linear_backend._helpers import (
+from perk.backends.linear._helpers import (
     _agent_activity,
     _agent_session_read,
     _description_edit,
@@ -19,7 +12,14 @@ from perk.backends.linear_backend._helpers import (
     _require_issue_node,
     to_linear_markdown,
 )
-from perk.backends.linear_backend.issue_ops import _LinearIssueOps
+from perk.backends.linear.client import (
+    LinearClient,
+    _opt_str,
+    _require_dict,
+    _require_list,
+    _require_str,
+)
+from perk.backends.linear.issue_ops import _LinearIssueOps
 from perk.github import GitHubError
 
 

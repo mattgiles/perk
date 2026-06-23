@@ -9,7 +9,7 @@ for how this quadrant fits the whole.
 
 This page is **human-reviewed for accuracy** against the provider catalog
 (`shared/providers.yaml`), the config readers (`perk/substrate/providers.py`,
-`perk/backends/issues.py`), and the Linear backend (`perk/backends/linear_backend.py`,
+`perk/backends/issues.py`), and the Linear backend (`perk/backends/linear/`,
 `perk/convergence/init.py`, `perk/convergence/doctor.py`) — provider and Linear surfaces are not
 `--help`-introspectable, so accuracy is the governing virtue, like the
 [configuration reference](./configuration.md).
@@ -179,7 +179,7 @@ under GitHub and Linear today.
 ### Ensured labels
 
 The init readiness probe (`check_readiness` / `_PERK_LABELS` in
-`perk/backends/linear_backend.py`) ensures the five perk labels exist on the workspace. They are
+`perk/backends/linear/readiness.py`) ensures the five perk labels exist on the workspace. They are
 created **workspace-scoped** (no `teamId` on create), matching Linear's cross-team-label guidance:
 
 - `perk:plan`

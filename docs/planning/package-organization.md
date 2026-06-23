@@ -136,7 +136,7 @@ files; a hard cutover (no compat shim) re-points them. No import cycle, because
 three dependencies from sibling submodules (`_models`, `graph`, `manifest`) rather than the package
 root. `ty` over the whole repo is the completeness oracle (a rename is a pure type-resolution change).
 
-### Stage B — `linear_backend/` → `backends/linear/` (+ fold `linear.py` → `client.py`, `linear_agent.py` → `agent.py`)
+### Stage B — `linear_backend/` → `backends/linear/` (+ fold `linear.py` → `client.py`, `linear_agent.py` → `agent.py`) (DONE in Node 1.1)
 
 Linear-only churn, **no `perk.github` fixture impact**. Updates every
 `from perk.backends import … linear, linear_backend`, `from perk.backends.linear import …`,

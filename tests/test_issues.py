@@ -19,7 +19,7 @@ from perk import github
 from perk.backends import engagement, issue_backend, issues
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
-from perk.backends.linear_backend import LinearIssueBackend
+from perk.backends.linear import LinearIssueBackend
 
 
 def _make_backend(repo_root: Path) -> issue_backend.IssueBackend:

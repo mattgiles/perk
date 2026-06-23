@@ -673,7 +673,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypat
     def boom(_environ):
         raise RuntimeError("agent substrate down")
 
-    monkeypatch.setattr("perk.backends.linear_agent.agent_client_from_env", boom)
+    monkeypatch.setattr("perk.backends.linear.agent.agent_client_from_env", boom)
 
     launch_stage(
         repo_root=git_repo,

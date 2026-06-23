@@ -3,17 +3,17 @@ from pathlib import Path
 from perk import objective, plan
 from perk.backends import engagement, objective_store
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
-    LinearClient,
-    _opt_str,
-    _require_str,
-)
-from perk.backends.linear_backend._helpers import (
+from perk.backends.linear._helpers import (
     _objective_ref,
     _translate_objective,
     to_linear_markdown,
 )
-from perk.backends.linear_backend.issue_ops import _LinearIssueOps
+from perk.backends.linear.client import (
+    LinearClient,
+    _opt_str,
+    _require_str,
+)
+from perk.backends.linear.issue_ops import _LinearIssueOps
 
 # ===========================================================================
 # The objective-storage tier (Objective #548, Node 2.2): `LinearObjectiveStore`.

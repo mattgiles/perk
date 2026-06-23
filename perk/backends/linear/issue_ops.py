@@ -3,7 +3,13 @@ from pathlib import Path
 from perk import plan
 from perk.backends import issue_backend
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import (
+from perk.backends.linear._helpers import (
+    _PAGE_SIZE,
+    _hex_color,
+    _is_present,
+    _request_issue_mutation,
+)
+from perk.backends.linear.client import (
     LinearClient,
     LinearGraphQLError,
     _is_entity_not_found,
@@ -12,12 +18,6 @@ from perk.backends.linear import (
     _require_dict,
     _require_list,
     _require_str,
-)
-from perk.backends.linear_backend._helpers import (
-    _PAGE_SIZE,
-    _hex_color,
-    _is_present,
-    _request_issue_mutation,
 )
 
 
