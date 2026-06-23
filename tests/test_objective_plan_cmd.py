@@ -1,6 +1,7 @@
 """P2.T10 — `perk objective plan [NUMBER] [--node ID]`: the objective plan-factory cold door.
 
-`github.get_objective` + `github.update_objective_node` + `launch.launch_stage` are stubbed (no
+`objectives.get_objective` + `objectives.update_objective_node` + `launch.launch_stage` are
+stubbed (no
 GitHub, no `exec pi`), mirroring test_implement_cmd.py / test_objective_cmd.py.
 """
 
@@ -10,6 +11,7 @@ import subprocess
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends.github import objectives
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -27,7 +29,7 @@ def _nodes():
 
 
 def _state():
-    return github.ObjectiveState(
+    return objectives.ObjectiveState(
         number=7, url="u/7", title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
     )
 
@@ -56,14 +58,14 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
 
 def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     marked: dict = {}
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
         lambda **k: (
             marked.update(k)
-            or github.ObjectiveNodeUpdate(
+            or objectives.ObjectiveNodeUpdate(
                 number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
             )
         ),
@@ -88,11 +90,11 @@ def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
     """Node 4.1: the github call site forwards `store.backend_id`/`state.url` into `_seed_prompt`
     but the github arm is empty — the seed has no linear-read fragment (no churn)."""
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -110,7 +112,7 @@ def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
 def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
     """Node 4.1: the call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
     project-backed (linear) objective seeds the backend-aware Project-URL/tools clause."""
-    from perk.backends import objective_stores
+    from perk.backends import resolve
 
     url = "https://linear.app/acme/project/objective-7"
 
@@ -118,12 +120,12 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
         backend_id = "linear"
 
         def get_objective(self, *, objective_id):
-            return github.ObjectiveState(
+            return objectives.ObjectiveState(
                 number=7, url=url, title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
             )
 
         def update_objective_node(self, **k):
-            return github.ObjectiveNodeUpdate(
+            return objectives.ObjectiveNodeUpdate(
                 number=7, node_id=k["node_id"], comment_updated=True, dry_run=False
             )
 
@@ -133,9 +135,7 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
             return EMPTY_NODE_ENGAGEMENT
 
     _authed(monkeypatch)
-    monkeypatch.setattr(
-        objective_stores, "resolve_objective_store", lambda root: _FakeLinearStore()
-    )
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _FakeLinearStore())
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()
@@ -155,19 +155,19 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
 def _engagement_store(monkeypatch, *, engagement_result, raises=None):
     """Install a fake project store whose `read_node_engagement` returns `engagement_result`
     (or raises `raises`). Returns the launch sink dict."""
-    from perk.backends import objective_stores
+    from perk.backends import resolve
     from perk.backends.objective_store import ObjectiveStoreError
 
     class _Store:
         backend_id = "linear"
 
         def get_objective(self, *, objective_id):
-            return github.ObjectiveState(
+            return objectives.ObjectiveState(
                 number=7, url="u/7", title="Ship it", header={"run_id": "01RID"}, nodes=_nodes()
             )
 
         def update_objective_node(self, **k):
-            return github.ObjectiveNodeUpdate(
+            return objectives.ObjectiveNodeUpdate(
                 number=7, node_id=k["node_id"], comment_updated=True, dry_run=False
             )
 
@@ -177,7 +177,7 @@ def _engagement_store(monkeypatch, *, engagement_result, raises=None):
             return engagement_result
 
     _authed(monkeypatch)
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _Store())
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     return launched
@@ -243,11 +243,11 @@ def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch):
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
 
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -264,14 +264,14 @@ def test_github_seed_byte_unchanged_vs_no_engagement_param(monkeypatch):
 
 def test_explicit_node_selects_it(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     marked: dict = {}
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
         lambda **k: (
             marked.update(k)
-            or github.ObjectiveNodeUpdate(
+            or objectives.ObjectiveNodeUpdate(
                 number=k["number"], node_id=k["node_id"], comment_updated=False, dry_run=False
             )
         ),
@@ -287,7 +287,7 @@ def test_explicit_node_selects_it(monkeypatch):
 
 def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
 
     def boom_update(**k):
         raise AssertionError("dry run must not mark")
@@ -295,7 +295,7 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
     def boom_launch(**k):
         raise AssertionError("dry run must not launch")
 
-    monkeypatch.setattr(github, "update_objective_node", boom_update)
+    monkeypatch.setattr(objectives, "update_objective_node", boom_update)
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
@@ -320,7 +320,7 @@ def test_objective_required_when_number_omitted(monkeypatch):
 
 def test_objective_not_found(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: None)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -331,14 +331,14 @@ def test_objective_not_found(monkeypatch):
 
 def test_no_actionable_node(monkeypatch):
     _authed(monkeypatch)
-    done_only = github.ObjectiveState(
+    done_only = objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="Done",
         header={},
         nodes=(objective.ObjectiveNode(id="1.1", description="A", status=N.DONE),),
     )
-    monkeypatch.setattr(github, "get_objective", lambda **k: done_only)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: done_only)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -355,7 +355,7 @@ def test_no_actionable_node(monkeypatch):
 def _parallel_state():
     # Node 1.1 carries a planning claim (possibly live in another terminal); 1.2 is an
     # INDEPENDENT unblocked pending node (explicit deps) -> pending-first selection takes 1.2.
-    return github.ObjectiveState(
+    return objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="Parallel",
@@ -373,14 +373,14 @@ def test_parallel_second_launch_selects_next_pending(monkeypatch):
     # The second parallel launch skips the (possibly live) claim, takes the pending node, and
     # notes the skipped claim on stderr.
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _parallel_state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _parallel_state())
     marked: dict = {}
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
         lambda **k: (
             marked.update(k)
-            or github.ObjectiveNodeUpdate(
+            or objectives.ObjectiveNodeUpdate(
                 number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
             )
         ),
@@ -400,7 +400,7 @@ def test_parallel_second_launch_selects_next_pending(monkeypatch):
 
 def test_dry_run_reports_skipped_claims(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _parallel_state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _parallel_state())
 
     def boom_update(**k):
         raise AssertionError("dry run must not mark")
@@ -408,7 +408,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
     def boom_launch(**k):
         raise AssertionError("dry run must not launch")
 
-    monkeypatch.setattr(github, "update_objective_node", boom_update)
+    monkeypatch.setattr(objectives, "update_objective_node", boom_update)
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
@@ -424,7 +424,7 @@ def test_resumes_orphaned_planning_claim(monkeypatch):
     # A `planning` head node with no pr (an abandoned claim) with 1.2 sequentially blocked
     # behind it is the ONLY plannable node -> the fallback re-selects + re-marks it planning.
     _authed(monkeypatch)
-    orphaned = github.ObjectiveState(
+    orphaned = objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="Resume",
@@ -434,14 +434,14 @@ def test_resumes_orphaned_planning_claim(monkeypatch):
             objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
         ),
     )
-    monkeypatch.setattr(github, "get_objective", lambda **k: orphaned)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: orphaned)
     marked: dict = {}
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
         lambda **k: (
             marked.update(k)
-            or github.ObjectiveNodeUpdate(
+            or objectives.ObjectiveNodeUpdate(
                 number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
             )
         ),
@@ -458,7 +458,7 @@ def test_resumes_orphaned_planning_claim(monkeypatch):
 
 
 def _in_flight_state():
-    return github.ObjectiveState(
+    return objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="In flight",
@@ -473,7 +473,7 @@ def _in_flight_state():
 def test_in_flight_node_reports_objective_in_flight(monkeypatch):
     # A head in_progress node blocks the rest: no plannable node -> objective_in_flight, no launch.
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _in_flight_state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _in_flight_state())
 
     def boom_update(**k):
         raise AssertionError("must not mark when in flight")
@@ -481,7 +481,7 @@ def test_in_flight_node_reports_objective_in_flight(monkeypatch):
     def boom_launch(**k):
         raise AssertionError("must not launch when in flight")
 
-    monkeypatch.setattr(github, "update_objective_node", boom_update)
+    monkeypatch.setattr(objectives, "update_objective_node", boom_update)
     monkeypatch.setattr(launch, "launch_stage", boom_launch)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
@@ -493,14 +493,14 @@ def test_in_flight_node_reports_objective_in_flight(monkeypatch):
 
 def test_complete_objective_reports_complete_message(monkeypatch):
     _authed(monkeypatch)
-    done_only = github.ObjectiveState(
+    done_only = objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="Done",
         header={},
         nodes=(objective.ObjectiveNode(id="1.1", description="A", status=N.DONE),),
     )
-    monkeypatch.setattr(github, "get_objective", lambda **k: done_only)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: done_only)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -513,7 +513,7 @@ def test_complete_objective_reports_complete_message(monkeypatch):
 
 def test_explicit_node_resumes_planning_claim(monkeypatch):
     _authed(monkeypatch)
-    orphaned = github.ObjectiveState(
+    orphaned = objectives.ObjectiveState(
         number=7,
         url="u/7",
         title="Resume",
@@ -523,14 +523,14 @@ def test_explicit_node_resumes_planning_claim(monkeypatch):
             objective.ObjectiveNode(id="1.2", description="B", status=N.PENDING),
         ),
     )
-    monkeypatch.setattr(github, "get_objective", lambda **k: orphaned)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: orphaned)
     marked: dict = {}
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
         lambda **k: (
             marked.update(k)
-            or github.ObjectiveNodeUpdate(
+            or objectives.ObjectiveNodeUpdate(
                 number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
             )
         ),
@@ -546,9 +546,9 @@ def test_explicit_node_resumes_planning_claim(monkeypatch):
 
 def test_explicit_in_flight_node_rejected(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _in_flight_state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _in_flight_state())
     monkeypatch.setattr(
-        github, "update_objective_node", lambda **k: AssertionError("must not mark")
+        objectives, "update_objective_node", lambda **k: AssertionError("must not mark")
     )
     _stub_launch(monkeypatch, {})
     runner = CliRunner()
@@ -561,7 +561,7 @@ def test_explicit_in_flight_node_rejected(monkeypatch):
 
 def test_remote_blocked(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)

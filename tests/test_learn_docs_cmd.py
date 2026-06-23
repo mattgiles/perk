@@ -1,6 +1,6 @@
 """hop-2 — `perk learn docs`: the learned-docs plan-factory cold door.
 
-`github.list_learn_issues` + `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring
+`plans.list_learn_issues` + `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring
 test_objective_plan_cmd.py.
 """
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -29,14 +30,14 @@ def _authed(monkeypatch) -> None:
 
 def _issues():
     return (
-        github.LearnIssueSummary(number=45, title="L45", url="u/45", body="learned forty-five"),
-        github.LearnIssueSummary(number=50, title="L50", url="u/50", body="learned fifty"),
+        plans.LearnIssueSummary(number=45, title="L45", url="u/45", body="learned forty-five"),
+        plans.LearnIssueSummary(number=50, title="L50", url="u/50", body="learned fifty"),
     )
 
 
 def _stub_list(monkeypatch, issues=None) -> None:
     monkeypatch.setattr(
-        github, "list_learn_issues", lambda **k: _issues() if issues is None else issues
+        plans, "list_learn_issues", lambda **k: _issues() if issues is None else issues
     )
 
 

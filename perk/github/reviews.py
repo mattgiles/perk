@@ -3,7 +3,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from perk.github import _exec, prs
+from perk.github import _exec
 
 # ===========================================================================
 # Review-feedback ops (P2.T7 — the `/address` loop; contracts.md §8.4).
@@ -424,11 +424,14 @@ class ReviewPostResult:
     error: str | None = None
 
 
-def get_pr_review_context(*, pr_number: int, branch: str, repo_root: Path) -> PrReviewContext:
+def get_pr_review_context(
+    *, pr_number: int, branch: str, repo_root: Path, plan_body: str | None
+) -> PrReviewContext:
     """Gather the active PR's review context (diff + PR text + plan body). Read-only; raises
     ``GitHubError`` on an infra failure. ``branch`` is the head ref (already resolved by the
-    caller). ``plan_body`` is best-effort: the materialized `cache.plan` body if present, else the
-    plan issue body, else ``None`` (the review still runs from the diff)."""
+    caller). ``plan_body`` is resolved backend-neutrally by the consumer (the cache mirror, else the
+    backend's ``get_plan_body``) and passed straight through — the gateway never reads plan/issue
+    state."""
     data = _exec._run_json(
         [
             "api",
@@ -455,32 +458,8 @@ def get_pr_review_context(*, pr_number: int, branch: str, repo_root: Path) -> Pr
         title=str(data.get("title") or ""),
         body=str(data.get("body") or ""),
         diff=diff_proc.stdout,
-        plan_body=_read_plan_body(branch=branch, repo_root=repo_root),
+        plan_body=plan_body,
     )
-
-
-def _read_plan_body(*, branch: str, repo_root: Path) -> str | None:
-    """Best-effort plan body: the materialized `cache.plan` mirror, else the plan issue body."""
-    # local import: avoid a module-load cycle (cache imports nothing of us)
-    from perk.state import cache  # noqa: PLC0415
-
-    materialized = cache.plan_body_path(repo_root)
-    if materialized.is_file():
-        try:
-            text = materialized.read_text(encoding="utf-8").strip()
-        except OSError:
-            text = ""
-        if text:
-            return text
-    plan_ref = cache.read_plan_ref(repo_root)
-    if isinstance(plan_ref, dict) and str(plan_ref.get("provider", "")) == "github":
-        pr_id = str(plan_ref.get("pr_id", "")).strip()
-        if pr_id.isdigit():
-            try:
-                return prs.get_plan_body(number=int(pr_id), repo_root=repo_root)
-            except _exec.GitHubError:
-                return None
-    return None
 
 
 def _render_review_comment(summary: str, comments: list[InlineReviewComment]) -> str:

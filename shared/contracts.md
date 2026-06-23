@@ -1255,10 +1255,13 @@ Resilience: if the inline-anchored review submission fails (e.g. a `line` not pr
 comment, so a review **always** lands on the PR:
 
 ```
-get_pr_review_context{ pr_number, branch }          -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
-    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. `plan_body` is
-    # best-effort: the materialized `cache.plan` body if present, else the plan issue body, else
-    # null (the review still runs from the diff). What the spawned child runs (`perk pr review-context`).
+get_pr_review_context{ pr_number, branch, plan_body } -> PrReviewContext{ pr_number, base_ref, head_ref, title, body, diff, plan_body }
+    # Read-only. PR meta via `gh api pulls/{n}`, diff via `gh pr diff {n}`. The gateway no longer
+    # reads plan/issue state: `plan_body` is resolved backend-neutrally by the consumer
+    # (`perk pr review-context`) — the materialized `cache.plan` mirror first, else
+    # `IssueBackend.get_plan_body` via the resolver (GitHub numeric ids AND Linear `ENG-123`) —
+    # and passed straight in (best-effort; null lets the review run from the diff). What the
+    # spawned child runs (Objective #746 Node 2.2 hoist: the gateway is pure PR/CI/auth/review).
 post_pr_review{ pr_number, summary, comments:[{path,line,body}] } -> ReviewPostResult{ ok, mode, pr_number, comment_count }
     # ONE review via POST .../pulls/{n}/reviews with event=COMMENT (hardcoded) + inline comments[]
     # (path, line, side=RIGHT). mode ∈ {"review" (inline-anchored), "comment_fallback" (discussion
@@ -1410,13 +1413,15 @@ agentic capture + a `perk:learn` label/issue is Phase 2.
 > **Forward pointer (Objective #548).** The objective methods described here as living on
 > `IssueBackend` have since been **extracted into the objective-storage tier** (`ObjectiveStore`,
 > §8.24) — the issue tier and the objective tier are now distinct seams sharing the `[issues]`
-> selection. The `perk/github/objectives.py` gateway ops listed below are unchanged: they remain
-> `GitHubObjectiveStore`'s delegation target (the equivalence lock). The historical record below is
-> left intact per the keep-and-annotate discipline.
+> selection. The objective substrate ops listed below are unchanged: they remain
+> `GitHubObjectiveStore`'s delegation target (the equivalence lock) and now live in the GitHub
+> backend package at `perk/backends/github/objectives.py` (moved out of the `perk/github/` forge
+> gateway in Objective #746, Node 2.2). The historical record below is left intact per the
+> keep-and-annotate discipline.
 
 The **objective layer's deterministic foundation** — a long-running goal that *generates* bounded
 plans (PRIOR_ART §3). The pure mechanics live in the `perk/objective/` package (the `plan.py` twin,
-reusing its block engine); the GitHub writes live in `perk/github/objectives.py`; the cold-door workers are the
+reusing its block engine); the GitHub writes live in `perk/backends/github/objectives.py`; the cold-door workers are the
 `perk objective` group. **No registry stage and no model-facing tools** — those are T10.
 
 **Storage blocks (perk-namespaced, schema 1).** An objective is an issue + first comment:
@@ -3316,8 +3321,10 @@ the concrete backend behind it):
 
 **The concrete stores + the facade refactor** (Node 2.2):
 
-- `GitHubObjectiveStore` (`perk/backends/objective_stores.py`) — **late-bound delegation** to the
-  same `perk.github` objective functions the fused `IssueBackend` used (the equivalence lock: the
+- `GitHubObjectiveStore` (`perk/backends/github/objective_store.py`) — **late-bound delegation** to
+  the GitHub objective substrate (`perk/backends/github/objectives.py`, a sibling) plus the
+  plan/issue substrate for `read_objective_source`/`close_objective` (a GitHub objective IS an
+  issue); these are the same functions the fused `IssueBackend` used (the equivalence lock: the
   GitHub writes are byte-for-byte the prior behavior); `repo_root` constructor-bound; string-id
   boundary with an `int()` edge conversion; `GitHubError → ObjectiveStoreError` verbatim via
   `_translate`. Carries `backend_id = "github"`.
@@ -3329,8 +3336,9 @@ the concrete backend behind it):
   3.4** (directly-constructable, still unit-tested) — the resolver's Linear arm now constructs the
   project-backed `LinearProjectObjectiveStore` (see the Node 3.4 amendment below).
 
-**The resolver.** `resolve_objective_store(repo_root)` (`perk/backends/objective_stores.py`)
-dispatches on the **`[issues]` selection** (§8.21): `github → GitHubObjectiveStore`; `linear →
+**The resolver.** `resolve_objective_store(repo_root)` (`perk/backends/resolve.py`, alongside the
+issue-tier `resolve_issue_backend`) dispatches on the **`[issues]` selection** (§8.21):
+`github → GitHubObjectiveStore`; `linear →
 LinearProjectObjectiveStore` (project-backed, since Node 3.4). Single-sourced:
 `resolve_objective_store_id` re-exports `resolve_issue_backend_id` rather than reading a separate
 config key, because an objective and its plan/learn issues share **one** tracker; project-vs-issue

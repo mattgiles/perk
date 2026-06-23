@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.state import cache
 
@@ -63,9 +64,9 @@ def test_list_dispatch_records_skips_corrupt(tmp_path: Path):
 # --- command -------------------------------------------------------------------------
 
 
-def _plan_with_pr() -> github.PlanState:
+def _plan_with_pr() -> plans.PlanState:
     pr = github.PullRequest(number=51, url="u/pull/51", is_draft=True, state="OPEN", existed=True)
-    return github.PlanState(number=42, url="u/issues/42", title="t", header={}, pr=pr)
+    return plans.PlanState(number=42, url="u/issues/42", title="t", header={}, pr=pr)
 
 
 def _invoke_in_repo(args, *, records=None, git=True):
@@ -79,7 +80,7 @@ def _invoke_in_repo(args, *, records=None, git=True):
 
 
 def test_json_happy_path_refreshed(monkeypatch):
-    monkeypatch.setattr(github, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
     monkeypatch.setattr(
         github,
         "get_workflow_run",
@@ -118,7 +119,7 @@ def test_no_refresh_skips_github(monkeypatch):
     def _boom(**_):
         raise AssertionError("must not be called under --no-refresh")
 
-    monkeypatch.setattr(github, "get_plan", _boom)
+    monkeypatch.setattr(plans, "get_plan", _boom)
     monkeypatch.setattr(github, "get_workflow_run", _boom)
     recs = [_record("01x", dispatched_at="2026-06-07T12:00:00Z")]
     result = _invoke_in_repo(["workflow", "run", "list", "--json", "--no-refresh"], records=recs)
@@ -137,7 +138,7 @@ def test_fail_soft_overlay(monkeypatch):
     def _raise_run(*, run_id, repo_root):
         raise github.GitHubError("nope")
 
-    monkeypatch.setattr(github, "get_plan", _raise_plan)
+    monkeypatch.setattr(plans, "get_plan", _raise_plan)
     monkeypatch.setattr(github, "get_workflow_run", _raise_run)
     recs = [_record("01x", dispatched_at="2026-06-07T12:00:00Z")]
     result = _invoke_in_repo(["workflow", "run", "list", "--json"], records=recs)
@@ -180,7 +181,7 @@ def test_not_a_repo():
 
 
 def test_human_table_smoke(monkeypatch):
-    monkeypatch.setattr(github, "get_plan", lambda *, number, repo_root: _plan_with_pr())
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_with_pr())
     monkeypatch.setattr(
         github,
         "get_workflow_run",

@@ -22,7 +22,7 @@ import json
 
 import click
 
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.engagement import render_objective_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import fail, parse_objective_id
@@ -46,7 +46,7 @@ def engagement_objective(ctx: click.Context, *, number: str, as_json: bool) -> N
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(

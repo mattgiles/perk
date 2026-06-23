@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from perk import plan
-from perk.github import _exec
+from perk.github import _exec, prs
 
 # ===========================================================================
 # Mutation operations (the first GitHub *writes*; T2a — contracts.md §8.4).
@@ -468,3 +468,326 @@ def _patch_comment_body(comment_id: int, body: str, repo_root: Path) -> None:
         )
     if proc.returncode != 0:
         raise _exec._failed(proc, f"failed to update comment #{comment_id}")
+
+
+# ===========================================================================
+# Plan-issue operations relocated from the PR gateway (Objective #746, Node 2.2).
+#
+# These are plan-issue ops, coupled to the shared REST helpers above (`_get_issue_body`,
+# `_patch_comment_body`, `add_issue_comment`, `read_issue`, `create_label`, `add_issue_label`) and
+# the `CommentResult`/`PlanUpdate` dataclasses — so they belong with the plan-issue substrate, not
+# the pure forge gateway. The lone PR-tier dependency is `get_plan` reading the linked PR via
+# `prs.get_pr` (backend→gateway, the allowed import direction).
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class PlanHeaderUpdate:
+    """The result of a staged ``plan-header`` field write."""
+
+    fields_updated: tuple[str, ...]
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class PlanState:
+    """A plan issue's observable state (for ``perk resume``): the parsed header + PR (if any)."""
+
+    number: int
+    url: str
+    title: str
+    header: dict[str, object]
+    pr: prs.PullRequest | None
+    # The issue's GitHub state (``OPEN``/``CLOSED``, uppercase as `gh issue view` returns it).
+    # ``perk replan`` requires an OPEN plan so its in-place ``run_id`` upsert re-targets the same
+    # issue rather than silently creating a new one.
+    state: str = ""
+
+
+def update_plan_header(
+    *, issue: int, fields: dict[str, object], repo_root: Path, dry_run: bool = False
+) -> PlanHeaderUpdate:
+    """Merge ``fields`` into the issue body's ``plan-header`` block and PATCH it (REST).
+
+    Rejects unknown header keys (LBYL on the schema). A dry run validates + composes only.
+    """
+    unknown = set(fields) - plan.PLAN_HEADER_FIELDS
+    if unknown:
+        raise _exec.GitHubError(f"unknown plan-header field(s): {sorted(unknown)}")
+    body = _get_issue_body(issue, repo_root)
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+    new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **fields})
+    if dry_run:
+        return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=True)
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{issue}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to update plan-header on #{issue}")
+    return PlanHeaderUpdate(fields_updated=tuple(fields), dry_run=False)
+
+
+def prepend_plan_callout(
+    *, issue: int, callout: str, command: str, repo_root: Path, dry_run: bool = False
+) -> bool:
+    """Idempotently prepend ``callout`` above the plan issue's description and PATCH it (REST).
+
+    Keyed on the literal ``command`` string (``plan.prepend_callout``): a no-op when the callout
+    is already present. Returns True when a write occurred, False when already present or on a
+    dry run.
+    """
+    body = _get_issue_body(issue, repo_root)
+    new_body = plan.prepend_callout(body, callout, command=command)
+    if new_body == body:
+        return False
+    if dry_run:
+        return False
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{issue}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to prepend plan callout on #{issue}")
+    return True
+
+
+def _find_plan_body_comment_id(issue: int, repo_root: Path) -> int | None:
+    """Find the integer id of the issue comment carrying the ``plan-body`` block (REST list).
+
+    perk does not store the plan-body comment id, so the re-save path discovers it by marker
+    (mirrors :func:`get_plan_body`). The REST list returns an **integer** ``id`` usable for the
+    comment-PATCH endpoint (the GraphQL node id from ``gh issue view`` is not). ``None`` when no
+    comment matches (legacy issue / comment missing)."""
+    raw = _exec._run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"],
+        what=f"failed to list comments on issue #{issue}",
+        source="issue comments",
+        cwd=repo_root,
+        default="[]",
+    )
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict) or "id" not in c:
+            continue
+        if plan.extract_plan_body(str(c.get("body", ""))) is not None:
+            return int(c["id"])
+    return None
+
+
+def find_comment_id_by_marker(*, issue: int, marker: str, repo_root: Path) -> int | None:
+    """Find the integer id of the first issue comment whose body contains ``marker`` (REST list).
+
+    Mirrors :func:`_find_plan_body_comment_id` (the REST list + integer-``id`` discipline — the
+    GraphQL node id from ``gh issue view`` is not usable for the comment-PATCH endpoint). Used by
+    :func:`upsert_marked_comment` to evolve a single marker-keyed comment (e.g. the per-run
+    ``run-report`` note). ``None`` when no comment matches; raises ``GitHubError`` on infra failure.
+    """
+    raw = _exec._run_json(
+        ["api", f"repos/{{owner}}/{{repo}}/issues/{issue}/comments"],
+        what=f"failed to list comments on issue #{issue}",
+        source="issue comments",
+        cwd=repo_root,
+        default="[]",
+    )
+    for c in raw if isinstance(raw, list) else []:
+        if not isinstance(c, dict) or "id" not in c:
+            continue
+        if marker in str(c.get("body", "")):
+            return int(c["id"])
+    return None
+
+
+def upsert_marked_comment(
+    *, issue: int, marker: str, body: str, repo_root: Path, dry_run: bool = False
+) -> CommentResult:
+    """Post-or-update a single marker-keyed issue comment (idempotent on ``marker``).
+
+    ``find_comment_id_by_marker`` -> PATCH the existing comment (``_patch_comment_body``) when
+    found, else POST a fresh one (``add_issue_comment``). ``body`` MUST already embed ``marker``
+    (the caller's responsibility) so the next upsert can find it. Lets a single comment evolve in
+    place (started -> terminal) rather than spamming the issue. Returns the existing
+    :class:`CommentResult` (``posted=False`` on dry run); raises ``GitHubError`` on infra failure.
+    """
+    if dry_run:
+        return CommentResult(posted=False)
+    comment_id = find_comment_id_by_marker(issue=issue, marker=marker, repo_root=repo_root)
+    if comment_id is not None:
+        _patch_comment_body(comment_id, body, repo_root)
+        return CommentResult(posted=True)
+    return add_issue_comment(issue=issue, body=body, repo_root=repo_root)
+
+
+def update_plan_issue(
+    *,
+    number: int,
+    title: str,
+    body_comment: str,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> PlanUpdate:
+    """Upsert an existing plan issue in place (the idempotent re-save path; contracts.md §8.4).
+
+    PATCHes the ``plan-body`` comment with the revised markdown and PATCHes the issue title from
+    the (possibly revised) plan H1. The anti-duplicate guarantee stays in ``create_plan_issue``;
+    this only rewrites the existing issue's content. Legacy issues missing the ``plan-body``
+    comment get a fresh comment POSTed (``body_updated`` False) so the plan body is never stranded.
+    """
+    if dry_run:
+        return PlanUpdate(number=number, body_updated=False, title_updated=False, dry_run=True)
+
+    comment_id = _find_plan_body_comment_id(number, repo_root)
+    if comment_id is not None:
+        _patch_comment_body(comment_id, body_comment, repo_root)
+        body_updated = True
+    else:
+        add_issue_comment(issue=number, body=body_comment, repo_root=repo_root)
+        body_updated = False
+
+    proc = _exec._run(
+        _exec._rest_args(
+            f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", fields={"title": title}
+        ),
+        cwd=repo_root,
+        timeout=_exec._WRITE_TIMEOUT,
+    )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to update plan issue #{number} title")
+    return PlanUpdate(number=number, body_updated=body_updated, title_updated=True, dry_run=False)
+
+
+@dataclass(frozen=True)
+class PlanAdoption:
+    """The result of an in-place :func:`adopt_issue_as_plan` stamp (#706, §8.29)."""
+
+    number: int
+    url: str
+    dry_run: bool
+
+
+def adopt_issue_as_plan(
+    *,
+    number: int,
+    header_fields: dict[str, object],
+    plan_markdown: str,
+    callout: str,
+    command: str,
+    repo_root: Path,
+    dry_run: bool = False,
+) -> PlanAdoption:
+    """Additively stamp perk plan metadata INTO a pre-existing issue — adopting it in place as a
+    perk plan (#706, §8.29), never minting a second object.
+
+    The additive stamp (the GitHub in-place writer): (a) ensure + ADD the ``perk:plan`` label
+    (never replaces the issue's labels); (b) stamp the ``plan-header`` block additively into the
+    issue body (human prose preserved verbatim, **title untouched**) and (c) prepend the
+    ``callout`` above it — one read-modify-write so both land in a single PATCH; (d) upsert the
+    ``plan-body`` comment carrying ``plan_markdown`` (the same comment-discovery as
+    :func:`update_plan_issue`, **without** the title PATCH). Idempotent on re-save. Rejects
+    unknown header keys (LBYL on the schema). Raises ``GitHubError`` on an infra failure;
+    ``dry_run`` reads only.
+    """
+    unknown = set(header_fields) - plan.PLAN_HEADER_FIELDS
+    if unknown:
+        raise _exec.GitHubError(f"unknown plan-header field(s): {sorted(unknown)}")
+    src = read_issue(number=number, repo_root=repo_root)
+    if src is None:
+        raise _exec.GitHubError(f"issue #{number} not found")
+    if dry_run:
+        return PlanAdoption(number=number, url=src.url, dry_run=True)
+    # (a) ensure + additively add the perk:plan label.
+    create_label(
+        plan.PLAN_LABEL,
+        color=plan.PLAN_LABEL_COLOR,
+        description=plan.PLAN_LABEL_DESCRIPTION,
+        repo_root=repo_root,
+    )
+    add_issue_label(issue=number, label=plan.PLAN_LABEL, repo_root=repo_root)
+    # (b)+(c) stamp the header additively + prepend the callout in one read-modify-write (title
+    # untouched: only the issue *body* is PATCHed, never the title).
+    body = _get_issue_body(number, repo_root)
+    header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
+    new_body = plan.replace_metadata_block(body, plan.PLAN_HEADER_KEY, {**header, **header_fields})
+    new_body = plan.prepend_callout(new_body, callout, command=command)
+    with _exec._body_file(new_body) as body_path:
+        proc = _exec._run(
+            _exec._rest_args(
+                f"repos/{{owner}}/{{repo}}/issues/{number}", method="PATCH", body_path=body_path
+            ),
+            cwd=repo_root,
+            timeout=_exec._WRITE_TIMEOUT,
+        )
+    if proc.returncode != 0:
+        raise _exec._failed(proc, f"failed to stamp plan-header on #{number}")
+    # (d) upsert the plan-body comment (the update_plan_issue discovery, minus the title PATCH).
+    body_comment = plan.render_plan_body(plan_markdown)
+    comment_id = _find_plan_body_comment_id(number, repo_root)
+    if comment_id is not None:
+        _patch_comment_body(comment_id, body_comment, repo_root)
+    else:
+        add_issue_comment(issue=number, body=body_comment, repo_root=repo_root)
+    return PlanAdoption(number=number, url=src.url, dry_run=False)
+
+
+def get_plan(*, number: int, repo_root: Path) -> PlanState | None:
+    """Read a plan issue's observable state (header + PR) for ``perk resume``.
+
+    ``None`` when the issue does not exist; raises ``GitHubError`` on an infra failure.
+    """
+    data = _exec._run_json(
+        ["issue", "view", str(number), "--json", "number,title,body,state,url"],
+        what=f"failed to read plan issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
+    header = plan.find_metadata_block(str(data.get("body", "")), plan.PLAN_HEADER_KEY) or {}
+    pr_field = header.get("pr")
+    pr = (
+        prs.get_pr(number=int(pr_field), repo_root=repo_root)
+        if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
+        else None
+    )
+    return PlanState(
+        number=int(data["number"]) if "number" in data else number,
+        url=str(data.get("url", "")),
+        title=str(data.get("title", "")),
+        header=header,
+        pr=pr,
+        state=str(data.get("state", "")),
+    )
+
+
+def get_plan_body(*, number: int, repo_root: Path) -> str | None:
+    """Fetch a plan issue's verbatim plan markdown (the ``plan-body`` block lives in the first
+    comment; the issue body holds only the header). ``None`` when the issue or block is absent;
+    raises ``GitHubError`` on an infra failure. Used to materialize the plan body for in-session
+    checkpoints (P2.T2c).
+    """
+    data = _exec._run_json(
+        ["issue", "view", str(number), "--json", "body,comments"],
+        what=f"failed to read plan issue #{number}",
+        source="`gh issue view`",
+        cwd=repo_root,
+        none_on_not_found=True,
+    )
+    if data is None:
+        return None
+    candidates = [str(data.get("body", ""))]
+    comments = data.get("comments")
+    if isinstance(comments, list):
+        candidates.extend(str(c.get("body", "")) for c in comments if isinstance(c, dict))
+    for text in candidates:
+        body = plan.extract_plan_body(text)
+        if body:
+            return body
+    return None

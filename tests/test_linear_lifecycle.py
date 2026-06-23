@@ -33,7 +33,7 @@ from perk import github, objective, plan
 from perk.backends import resolve
 from perk.backends.linear import client as linear_client
 from perk.backends.linear.client import LinearClient, LinearGraphQLError
-from perk.backends.objective_stores import resolve_objective_store
+from perk.backends.resolve import resolve_objective_store
 from perk.cli.cli import cli
 from perk.objective.drift import DriftCode
 from perk.run import run_report

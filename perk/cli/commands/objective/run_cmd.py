@@ -17,7 +17,7 @@ from typing import Any
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, objective_stores, resolve
+from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
@@ -278,7 +278,7 @@ def _run_impl(
     config = require_config(ctx)
     if not dry_run:
         require_github(ctx)
-    store = objective_stores.resolve_objective_store(repo_root)
+    store = resolve.resolve_objective_store(repo_root)
     state = store.get_objective(objective_id=number)
     if state is None:
         raise UserFacingCliError(f"Objective #{number} not found", error_type="objective_not_found")

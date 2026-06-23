@@ -22,7 +22,7 @@ import json
 import click
 
 from perk import objective
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.engagement import EMPTY_NODE_ENGAGEMENT, render_node_engagement
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import (
@@ -183,7 +183,7 @@ def plan_objective(
         if not dry_run:
             require_github(ctx)
 
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(

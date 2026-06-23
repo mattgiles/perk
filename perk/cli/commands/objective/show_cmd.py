@@ -5,7 +5,7 @@ import json
 import click
 
 from perk import objective
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, node_to_dict, parse_objective_id
@@ -24,9 +24,7 @@ def show_objective(ctx: click.Context, *, number: str, as_json: bool) -> None:
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        state = objective_stores.resolve_objective_store(repo_root).get_objective(
-            objective_id=number
-        )
+        state = resolve.resolve_objective_store(repo_root).get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(
                 f"Objective #{number} not found", error_type="objective_not_found"

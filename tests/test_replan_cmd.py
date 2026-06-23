@@ -1,6 +1,6 @@
 """`perk replan <plan>`: the in-place plan re-authoring cold door.
 
-`github.get_plan`, `github.get_plan_body`, and `launch.launch_stage` are stubbed (no GitHub, no
+`plans.get_plan`, `plans.get_plan_body`, and `launch.launch_stage` are stubbed (no GitHub, no
 `exec pi`), mirroring test_learn_docs_cmd.py.
 """
 
@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from perk import github
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -29,11 +30,11 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _plan_state(*, state: str = "OPEN", run_id: str | None = _RUN_ID) -> github.PlanState:
+def _plan_state(*, state: str = "OPEN", run_id: str | None = _RUN_ID) -> plans.PlanState:
     header: dict[str, object] = {}
     if run_id is not None:
         header["run_id"] = run_id
-    return github.PlanState(
+    return plans.PlanState(
         number=42, url="u/42", title="The plan", header=header, pr=None, state=state
     )
 
@@ -54,11 +55,11 @@ def _stub_plan(
     monkeypatch, *, plan_state=None, body="EXISTING PLAN BODY", comments=None, edits=None
 ) -> None:
     monkeypatch.setattr(
-        github,
+        plans,
         "get_plan",
         lambda **k: _plan_state() if plan_state is None else plan_state,
     )
-    monkeypatch.setattr(github, "get_plan_body", lambda **k: body)
+    monkeypatch.setattr(plans, "get_plan_body", lambda **k: body)
     monkeypatch.setattr(gh_engagement, "read_issue_comments", lambda **k: list(comments or []))
     monkeypatch.setattr(gh_engagement, "read_description_edits", lambda **k: list(edits or []))
 
@@ -186,7 +187,7 @@ def test_refuses_non_open_plan(monkeypatch):
 
 def test_refuses_missing_plan(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)

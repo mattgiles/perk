@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from perk import objective, plan
-from perk.github import _exec, plans
+from perk.backends.github import plans
+from perk.github import _exec
 
 # ===========================================================================
 # Objective ops (P2.T9 — objective storage + mechanics; contracts.md §8.4).

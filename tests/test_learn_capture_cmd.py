@@ -5,6 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.state import cache
 
@@ -30,23 +31,23 @@ def _authed(monkeypatch) -> None:
 def _stub(monkeypatch, *, run_id: str = "01RID") -> dict[str, object]:
     calls: dict[str, object] = {"created": None, "commented": False}
     monkeypatch.setattr(
-        github,
+        plans,
         "get_plan",
-        lambda **k: github.PlanState(
+        lambda **k: plans.PlanState(
             number=7, url="u/7", title="My Feature", header={"run_id": run_id}, pr=None
         ),
     )
 
     def _create(**k):
         calls["created"] = {"run_id": k["run_id"], "plan_number": k["plan_number"]}
-        return github.PlanIssue(number=99, url="u/99", existed=False)
+        return plans.PlanIssue(number=99, url="u/99", existed=False)
 
     def _comment(**k):
         calls["commented"] = True
-        return github.CommentResult(posted=True)
+        return plans.CommentResult(posted=True)
 
-    monkeypatch.setattr(github, "create_learn_issue", _create)
-    monkeypatch.setattr(github, "add_issue_comment", _comment)
+    monkeypatch.setattr(plans, "create_learn_issue", _create)
+    monkeypatch.setattr(plans, "add_issue_comment", _comment)
     return calls
 
 

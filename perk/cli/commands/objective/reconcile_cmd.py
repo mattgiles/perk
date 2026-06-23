@@ -7,7 +7,7 @@ from pathlib import Path
 import click
 
 from perk import objective
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail, parse_objective_id
@@ -44,7 +44,7 @@ def reconcile_objective(
         if not dry_run:
             require_github(ctx)
         prose = body_path.read_text(encoding="utf-8")
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         result = store.update_objective_body(objective_id=number, prose=prose, dry_run=dry_run)
     except ObjectiveStoreError as exc:
         message = str(exc)

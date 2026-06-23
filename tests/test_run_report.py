@@ -5,6 +5,7 @@ import json
 import pytest
 
 from perk import github
+from perk.backends.github import plans
 from perk.run import run_report
 from perk.state import cache
 
@@ -218,9 +219,9 @@ def test_report_started_upserts_marker_comment(tmp_path, monkeypatch):
 
     def fake_upsert(*, issue, marker, body, repo_root, dry_run=False):
         calls.update(issue=issue, marker=marker, body=body)
-        return github.CommentResult(posted=True)
+        return plans.CommentResult(posted=True)
 
-    monkeypatch.setattr(github, "upsert_marked_comment", fake_upsert)
+    monkeypatch.setattr(plans, "upsert_marked_comment", fake_upsert)
     run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
     assert calls["issue"] == 42
     assert calls["marker"] == "<!-- perk:run-report:RID -->"
@@ -231,7 +232,7 @@ def test_report_started_swallows_github_error(tmp_path, monkeypatch):
     def boom(**_):
         raise github.GitHubError("nope")
 
-    monkeypatch.setattr(github, "upsert_marked_comment", boom)
+    monkeypatch.setattr(plans, "upsert_marked_comment", boom)
     # Fail-soft: must not raise.
     run_report.report_started(tmp_path, run_id="RID", stage="implement", plan="42", environ={})
 
@@ -250,10 +251,10 @@ def test_report_terminal_upserts_and_appends_step_summary(tmp_path, monkeypatch)
     )
     bodies = []
     monkeypatch.setattr(
-        github,
+        plans,
         "upsert_marked_comment",
         lambda *, issue, marker, body, repo_root, dry_run=False: (
-            bodies.append(body) or github.CommentResult(posted=True)
+            bodies.append(body) or plans.CommentResult(posted=True)
         ),
     )
     summary_file = tmp_path / "summary.md"
@@ -277,9 +278,9 @@ def test_report_terminal_skips_summary_when_env_unset(tmp_path, monkeypatch):
         json.dumps({"kind": "run_finished", "seq": 0, "outcome": _outcome()}),
     )
     monkeypatch.setattr(
-        github,
+        plans,
         "upsert_marked_comment",
-        lambda **_: github.CommentResult(posted=True),
+        lambda **_: plans.CommentResult(posted=True),
     )
     # No GITHUB_STEP_SUMMARY -> no file write, no raise.
     run_report.report_terminal(
@@ -291,7 +292,7 @@ def test_report_terminal_swallows_github_error(tmp_path, monkeypatch):
     def boom(**_):
         raise github.GitHubError("nope")
 
-    monkeypatch.setattr(github, "upsert_marked_comment", boom)
+    monkeypatch.setattr(plans, "upsert_marked_comment", boom)
     run_report.report_terminal(
         tmp_path, run_id="RID", stage="implement", plan="42", exit_code=1, environ={}
     )

@@ -1,7 +1,8 @@
 """Tests for the GitHub issue backend adapter (Objective #746, Node 2.1).
 
-Covers: static protocol conformance (ty-checked), per-method delegation onto ``perk.github``'s
-issue-tier functions (constructor-bound ``repo_root``, ``dry_run`` passthrough, str-id results),
+Covers: static protocol conformance (ty-checked), per-method delegation onto the GitHub substrate's
+issue-tier functions in ``perk.backends.github.plans`` (constructor-bound ``repo_root``,
+``dry_run`` passthrough, str-id results),
 ``GitHubError`` → ``IssueBackendError`` translation (message verbatim, cause chained), the
 non-numeric-id guard, the late-binding monkeypatch-interception guarantee, and the honest
 human-engagement reads (the github-native rows from ``perk.backends.github.engagement`` mapped to
@@ -17,6 +18,7 @@ import pytest
 from perk import github
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import plans
 from perk.backends.github.backend import GitHubIssueBackend
 
 
@@ -53,8 +55,8 @@ class TestDelegation:
     """Each method delegates with the bound repo_root, converts ids, and passes dry_run."""
 
     def test_ensure_label(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.Label(name="perk:plan", created=True))
-        monkeypatch.setattr(github, "create_label", rec)
+        rec = _Recorder(plans.Label(name="perk:plan", created=True))
+        monkeypatch.setattr(plans, "create_label", rec)
         result = GitHubIssueBackend(tmp_path).ensure_label(
             "perk:plan", color="ababab", description="d", dry_run=True
         )
@@ -68,8 +70,8 @@ class TestDelegation:
         assert result == issue_backend.Label(name="perk:plan", created=True)
 
     def test_find_plan_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanIssue(number=7, url="u7", existed=True))
-        monkeypatch.setattr(github, "find_plan_issue", rec)
+        rec = _Recorder(plans.PlanIssue(number=7, url="u7", existed=True))
+        monkeypatch.setattr(plans, "find_plan_issue", rec)
         result = GitHubIssueBackend(tmp_path).find_plan_issue(run_id="RUN1")
         assert rec.kwargs == {"run_id": "RUN1", "repo_root": tmp_path}
         assert result == issue_backend.IssueRef(id="7", url="u7", existed=True)
@@ -77,12 +79,12 @@ class TestDelegation:
     def test_find_plan_issue_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(github, "find_plan_issue", _Recorder(None))
+        monkeypatch.setattr(plans, "find_plan_issue", _Recorder(None))
         assert GitHubIssueBackend(tmp_path).find_plan_issue(run_id="RUN1") is None
 
     def test_create_plan_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanIssue(number=12, url="u12", existed=False))
-        monkeypatch.setattr(github, "create_plan_issue", rec)
+        rec = _Recorder(plans.PlanIssue(number=12, url="u12", existed=False))
+        monkeypatch.setattr(plans, "create_plan_issue", rec)
         result = GitHubIssueBackend(tmp_path).create_plan_issue(title="t", body="b", run_id="RUN1")
         assert rec.kwargs == {
             "title": "t",
@@ -95,9 +97,9 @@ class TestDelegation:
 
     def test_update_plan_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
-            github.PlanUpdate(number=12, body_updated=True, title_updated=True, dry_run=False)
+            plans.PlanUpdate(number=12, body_updated=True, title_updated=True, dry_run=False)
         )
-        monkeypatch.setattr(github, "update_plan_issue", rec)
+        monkeypatch.setattr(plans, "update_plan_issue", rec)
         result = GitHubIssueBackend(tmp_path).update_plan_issue(
             issue_id="12", title="t", body_comment="bc"
         )
@@ -113,8 +115,8 @@ class TestDelegation:
         )
 
     def test_update_plan_header(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanHeaderUpdate(fields_updated=("stage",), dry_run=True))
-        monkeypatch.setattr(github, "update_plan_header", rec)
+        rec = _Recorder(plans.PlanHeaderUpdate(fields_updated=("stage",), dry_run=True))
+        monkeypatch.setattr(plans, "update_plan_header", rec)
         result = GitHubIssueBackend(tmp_path).update_plan_header(
             issue_id="3", fields={"stage": "implement"}, dry_run=True
         )
@@ -129,11 +131,11 @@ class TestDelegation:
     def test_get_plan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         pr = github.PullRequest(number=9, url="pu", is_draft=True, state="OPEN", existed=True)
         rec = _Recorder(
-            github.PlanState(
+            plans.PlanState(
                 number=3, url="u3", title="t", header={"stage": "implement"}, pr=pr, state="OPEN"
             )
         )
-        monkeypatch.setattr(github, "get_plan", rec)
+        monkeypatch.setattr(plans, "get_plan", rec)
         result = GitHubIssueBackend(tmp_path).get_plan(issue_id="3")
         assert rec.kwargs == {"number": 3, "repo_root": tmp_path}
         assert result == issue_backend.PlanState(
@@ -143,21 +145,21 @@ class TestDelegation:
     def test_get_plan_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(github, "get_plan", _Recorder(None))
+        monkeypatch.setattr(plans, "get_plan", _Recorder(None))
         assert GitHubIssueBackend(tmp_path).get_plan(issue_id="3") is None
 
     def test_get_plan_body(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder("# the plan\n")
-        monkeypatch.setattr(github, "get_plan_body", rec)
+        monkeypatch.setattr(plans, "get_plan_body", rec)
         result = GitHubIssueBackend(tmp_path).get_plan_body(issue_id="3")
         assert rec.kwargs == {"number": 3, "repo_root": tmp_path}
         assert result == "# the plan\n"
 
     def test_read_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(
-            github.IssueRead(number=7, url="u7", title="Human title", body="do it", state="OPEN")
+            plans.IssueRead(number=7, url="u7", title="Human title", body="do it", state="OPEN")
         )
-        monkeypatch.setattr(github, "read_issue", rec)
+        monkeypatch.setattr(plans, "read_issue", rec)
         result = GitHubIssueBackend(tmp_path).read_issue(issue_id="7")
         assert rec.kwargs == {"number": 7, "repo_root": tmp_path}
         assert result == issue_backend.AdoptableIssue(
@@ -167,7 +169,7 @@ class TestDelegation:
     def test_read_issue_none_passthrough(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(github, "read_issue", _Recorder(None))
+        monkeypatch.setattr(plans, "read_issue", _Recorder(None))
         assert GitHubIssueBackend(tmp_path).read_issue(issue_id="7") is None
 
     def test_read_issue_normalizes_closed_state(
@@ -175,16 +177,16 @@ class TestDelegation:
     ) -> None:
         # `gh issue view` casing is normalized into the contract's OPEN/CLOSED vocabulary.
         monkeypatch.setattr(
-            github,
+            plans,
             "read_issue",
-            _Recorder(github.IssueRead(number=7, url="u7", title="t", body="b", state="closed")),
+            _Recorder(plans.IssueRead(number=7, url="u7", title="t", body="b", state="closed")),
         )
         result = GitHubIssueBackend(tmp_path).read_issue(issue_id="7")
         assert result is not None and result.state == "CLOSED"
 
     def test_adopt_issue_as_plan(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanAdoption(number=7, url="u7", dry_run=False))
-        monkeypatch.setattr(github, "adopt_issue_as_plan", rec)
+        rec = _Recorder(plans.PlanAdoption(number=7, url="u7", dry_run=False))
+        monkeypatch.setattr(plans, "adopt_issue_as_plan", rec)
         result = GitHubIssueBackend(tmp_path).adopt_issue_as_plan(
             issue_id="7",
             header_fields={"run_id": "R", "adopted_from": "7"},
@@ -204,15 +206,15 @@ class TestDelegation:
         assert result == issue_backend.IssueRef(id="7", url="u7", existed=True)
 
     def test_find_learn_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanIssue(number=8, url="u8", existed=True))
-        monkeypatch.setattr(github, "find_learn_issue", rec)
+        rec = _Recorder(plans.PlanIssue(number=8, url="u8", existed=True))
+        monkeypatch.setattr(plans, "find_learn_issue", rec)
         result = GitHubIssueBackend(tmp_path).find_learn_issue(run_id="RUN1")
         assert rec.kwargs == {"run_id": "RUN1", "repo_root": tmp_path}
         assert result == issue_backend.IssueRef(id="8", url="u8", existed=True)
 
     def test_create_learn_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.PlanIssue(number=14, url="u14", existed=False))
-        monkeypatch.setattr(github, "create_learn_issue", rec)
+        rec = _Recorder(plans.PlanIssue(number=14, url="u14", existed=False))
+        monkeypatch.setattr(plans, "create_learn_issue", rec)
         result = GitHubIssueBackend(tmp_path).create_learn_issue(
             title="t", body="b", run_id="RUN1", plan_id="12", dry_run=True
         )
@@ -227,8 +229,8 @@ class TestDelegation:
         assert result == issue_backend.IssueRef(id="14", url="u14", existed=False)
 
     def test_list_learn_issues(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder((github.LearnIssueSummary(number=5, title="t5", url="u5", body="b5"),))
-        monkeypatch.setattr(github, "list_learn_issues", rec)
+        rec = _Recorder((plans.LearnIssueSummary(number=5, title="t5", url="u5", body="b5"),))
+        monkeypatch.setattr(plans, "list_learn_issues", rec)
         result = GitHubIssueBackend(tmp_path).list_learn_issues()
         assert rec.kwargs == {"repo_root": tmp_path}
         assert result == (issue_backend.LearnIssueSummary(id="5", title="t5", url="u5", body="b5"),)
@@ -237,19 +239,19 @@ class TestDelegation:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rec = _Recorder(True)
-        monkeypatch.setattr(github, "close_and_label_consolidated", rec)
+        monkeypatch.setattr(plans, "close_and_label_consolidated", rec)
         assert GitHubIssueBackend(tmp_path).close_and_label_consolidated(issue_id="5") is True
         assert rec.kwargs == {"issue": 5, "repo_root": tmp_path, "dry_run": False}
 
     def test_close_issue(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         rec = _Recorder(True)
-        monkeypatch.setattr(github, "close_issue", rec)
+        monkeypatch.setattr(plans, "close_issue", rec)
         assert GitHubIssueBackend(tmp_path).close_issue(issue_id="5", dry_run=True) is True
         assert rec.kwargs == {"number": 5, "repo_root": tmp_path, "dry_run": True}
 
     def test_add_issue_comment(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.CommentResult(posted=True))
-        monkeypatch.setattr(github, "add_issue_comment", rec)
+        rec = _Recorder(plans.CommentResult(posted=True))
+        monkeypatch.setattr(plans, "add_issue_comment", rec)
         result = GitHubIssueBackend(tmp_path).add_issue_comment(issue_id="5", body="hi")
         assert rec.kwargs == {"issue": 5, "body": "hi", "repo_root": tmp_path, "dry_run": False}
         assert result == issue_backend.CommentResult(posted=True)
@@ -258,7 +260,7 @@ class TestDelegation:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rec = _Recorder(98765)
-        monkeypatch.setattr(github, "find_comment_id_by_marker", rec)
+        monkeypatch.setattr(plans, "find_comment_id_by_marker", rec)
         result = GitHubIssueBackend(tmp_path).find_comment_id_by_marker(
             issue_id="5", marker="<!-- m -->"
         )
@@ -268,13 +270,13 @@ class TestDelegation:
     def test_find_comment_id_by_marker_none(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(github, "find_comment_id_by_marker", _Recorder(None))
+        monkeypatch.setattr(plans, "find_comment_id_by_marker", _Recorder(None))
         backend = GitHubIssueBackend(tmp_path)
         assert backend.find_comment_id_by_marker(issue_id="5", marker="m") is None
 
     def test_upsert_marked_comment(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        rec = _Recorder(github.CommentResult(posted=False))
-        monkeypatch.setattr(github, "upsert_marked_comment", rec)
+        rec = _Recorder(plans.CommentResult(posted=False))
+        monkeypatch.setattr(plans, "upsert_marked_comment", rec)
         result = GitHubIssueBackend(tmp_path).upsert_marked_comment(
             issue_id="5", marker="m", body="b", dry_run=True
         )
@@ -409,7 +411,7 @@ class TestErrorTranslation:
         def boom(**kwargs: Any) -> None:
             raise original
 
-        monkeypatch.setattr(github, "get_plan", boom)
+        monkeypatch.setattr(plans, "get_plan", boom)
         with pytest.raises(issue_backend.IssueBackendError) as excinfo:
             GitHubIssueBackend(tmp_path).get_plan(issue_id="252")
         assert str(excinfo.value) == "objective node '9.9' not found on #252"
@@ -432,9 +434,9 @@ class TestLateBinding:
         # backend was constructed is still seen.
         backend = GitHubIssueBackend(tmp_path)
         rec = _Recorder(
-            github.PlanState(number=1, url="u", title="t", header={}, pr=None, state="OPEN")
+            plans.PlanState(number=1, url="u", title="t", header={}, pr=None, state="OPEN")
         )
-        monkeypatch.setattr(github, "get_plan", rec)
+        monkeypatch.setattr(plans, "get_plan", rec)
         result = backend.get_plan(issue_id="1")
         assert result is not None
         assert result.id == "1"

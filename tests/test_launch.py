@@ -631,7 +631,7 @@ def _sha(repo, ref="HEAD"):
 def _no_exec(monkeypatch):
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
 
 def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote, monkeypatch):
