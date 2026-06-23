@@ -10,7 +10,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerPlanAdapterPlannotator } from "./adapters/planAdapterPlannotator.ts";
 import { registerPlanAdapterTombell } from "./adapters/planAdapterTombell.ts";
 import { registerTodoAdapterJuicesharp } from "./adapters/todoAdapterJuicesharp.ts";
-import { registerBtw } from "./btw/btw.ts";
 import { registerCheckpoints } from "./checkpoints/checkpoints.ts";
 import { registerAddress } from "./doors/address.ts";
 import { registerAskUser } from "./doors/askUser.ts";
@@ -57,7 +56,8 @@ import {
 import { isPerkFooterReferenceSelected } from "./surfaces/footerProvider.ts";
 import { report } from "./surfaces/report.ts";
 import { createPerkStatus, installPerkFooter } from "./surfaces/surfaces.ts";
-import { registerWhimsical } from "./whimsical.ts";
+import { registerBtw } from "./vendor/btw/btw.ts";
+import { registerWhimsical } from "./vendor/whimsical/whimsical.ts";
 
 // Cross-plane proof marker (TS writes via cache.ts; the Python helper reads it — gate check 3).
 const T3_MARKER = "t3-extension-cache-write";
