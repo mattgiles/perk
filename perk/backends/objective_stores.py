@@ -14,10 +14,11 @@ issue-backed ``LinearObjectiveStore`` is kept dormant (directly-constructable, s
 retiring it is a later cleanup.
 
 The ``[issues]`` selection is single-sourced: ``resolve_objective_store_id`` re-exports
-``perk.backends.issues.resolve_issue_backend_id`` (an objective and its plan/learn issues share one
-backend selection — both populations live in the same tracker), so the dispatch never forks.
+``perk/backends/resolve.py``'s ``resolve_issue_backend_id`` (an objective and its plan/learn issues
+share one backend selection — both populations live in the same tracker), so the dispatch never
+forks.
 
-Adapter disciplines (mirroring ``perk.backends.issues``):
+Adapter disciplines (mirroring ``perk/backends/github/backend.py``):
 
 - **Late-bound delegation.** ``GitHubObjectiveStore`` resolves each delegate via attribute access on
   the ``github`` module object at call time, so existing ``monkeypatch.setattr(github, ...)``
@@ -37,20 +38,21 @@ from pathlib import Path
 
 from perk import github, objective
 from perk.backends import engagement, linear, objective_store
+from perk.backends.github import engagement as gh_engagement
+from perk.backends.github.backend import (
+    _description_edit as _gh_description_edit,
+)
+from perk.backends.github.backend import (
+    _engagement_comment as _gh_engagement_comment,
+)
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.issues import (
+from perk.backends.linear import client as linear_client
+from perk.backends.objective_store import ObjectiveStoreError
+from perk.backends.resolve import (
     GITHUB_BACKEND_ID,
     LINEAR_BACKEND_ID,
     resolve_issue_backend_id,
 )
-from perk.backends.issues import (
-    _description_edit as _gh_description_edit,
-)
-from perk.backends.issues import (
-    _engagement_comment as _gh_engagement_comment,
-)
-from perk.backends.linear import client as linear_client
-from perk.backends.objective_store import ObjectiveStoreError
 from perk.github import GitHubError
 from perk.substrate import config
 
@@ -311,25 +313,26 @@ class GitHubObjectiveStore:
 
     # --- human-engagement reads (Objective #682, Node 2.3) ---
     # Honest over the objective issue itself (a GitHub objective IS a single issue): reuse the
-    # issue-tier honest reads + the shared `issues.py` mappers. `read_node_engagement` stays a
-    # clean no-op (single-issue objective — no per-node issues).
+    # issue-tier honest engagement reads (perk/backends/github/engagement.py) + the shared mappers
+    # from perk/backends/github/backend.py. `read_node_engagement` stays a clean no-op
+    # (single-issue objective — no per-node issues).
 
     def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
-        """Honest over the objective issue's comments (reuse `github.read_issue_comments` + the
-        shared `issues._engagement_comment` mapper)."""
+        """Honest over the objective issue's comments (reuse `gh_engagement.read_issue_comments` +
+        the shared `backend._engagement_comment` mapper)."""
         number = _number(objective_id)
         with _translate():
-            rows = github.read_issue_comments(issue=number, repo_root=self._repo_root)
+            rows = gh_engagement.read_issue_comments(issue=number, repo_root=self._repo_root)
         return tuple(_gh_engagement_comment(row) for row in rows)
 
     def read_description_edits(
         self, *, objective_id: str
     ) -> tuple[engagement.DescriptionEdit, ...]:
         """Honest over the objective issue's description edit history (reuse
-        `github.read_description_edits` + the shared `issues._description_edit` mapper)."""
+        `gh_engagement.read_description_edits` + the shared `backend._description_edit` mapper)."""
         number = _number(objective_id)
         with _translate():
-            rows = github.read_description_edits(issue=number, repo_root=self._repo_root)
+            rows = gh_engagement.read_description_edits(issue=number, repo_root=self._repo_root)
         return tuple(_gh_description_edit(row) for row in rows)
 
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:

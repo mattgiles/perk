@@ -23,7 +23,7 @@ from pathlib import Path
 
 import click
 
-from perk.backends import issues as issues_mod
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError, LearnIssueSummary
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_config, require_github, require_repo
@@ -92,7 +92,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
 
     Raises ``UserFacingCliError`` (``no_learn_issues``) when there is nothing to consolidate.
     """
-    issues = issues_mod.resolve_issue_backend(repo_root).list_learn_issues()
+    issues = resolve.resolve_issue_backend(repo_root).list_learn_issues()
     if not issues:
         raise UserFacingCliError(
             "No open perk:learn issues to consolidate.\n"

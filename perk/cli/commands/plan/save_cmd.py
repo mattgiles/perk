@@ -16,7 +16,7 @@ from pathlib import Path
 import click
 
 from perk import objective, plan
-from perk.backends import issue_backend, issues, objective_store, objective_stores
+from perk.backends import issue_backend, objective_store, objective_stores, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -325,7 +325,7 @@ def _plan_save_impl(
         raise UserFacingCliError(f"Plan file is empty: {plan_file}", error_type="invalid_input")
 
     resolved_title = title or plan.derive_title(plan_markdown)
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     store = objective_stores.resolve_objective_store(repo_root)
 
     # Resolve + pin the plan's base (#633): the objective's own base wins (it is the source of

@@ -16,7 +16,7 @@ from pathlib import Path
 import click
 
 from perk import github, plan
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.commands.pr.shared import fail
@@ -142,7 +142,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             conflicts=(),
         )
 
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     state = backend.get_plan(issue_id=issue)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")
@@ -244,7 +244,7 @@ def _safe_plan_body(*, issue: str, repo_root: Path) -> str | None:
     """Fetch the verbatim plan markdown for the `<details>` embed (D3). Best-effort: any GitHub
     failure degrades to `None` (no embed) rather than sinking the submit."""
     try:
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         return backend.get_plan_body(issue_id=issue)
     except IssueBackendError:
         return None

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import click
 
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
@@ -102,7 +102,7 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
             dry_run=True,
         )
 
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     state = backend.get_plan(issue_id=issue)
     if state is None:
         raise UserFacingCliError(f"Plan issue #{issue} not found", error_type="plan_not_found")

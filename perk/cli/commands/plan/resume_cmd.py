@@ -14,7 +14,7 @@ import json
 
 import click
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -61,7 +61,7 @@ def resume_cmd(
         require_github(ctx)  # resume always reads GitHub (the dry run resolves via a read)
         config = require_config(ctx)
         plan_id = parse_plan_id(plan)
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

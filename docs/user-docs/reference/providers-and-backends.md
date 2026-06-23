@@ -9,7 +9,7 @@ for how this quadrant fits the whole.
 
 This page is **human-reviewed for accuracy** against the provider catalog
 (`shared/providers.yaml`), the config readers (`perk/substrate/providers.py`,
-`perk/backends/issues.py`), and the Linear backend (`perk/backends/linear/`,
+`perk/backends/resolve.py`), and the Linear backend (`perk/backends/linear/`,
 `perk/convergence/init.py`, `perk/convergence/doctor.py`) — provider and Linear surfaces are not
 `--help`-introspectable, so accuracy is the governing virtue, like the
 [configuration reference](./configuration.md).
@@ -144,7 +144,7 @@ Selection lives in the flat `[providers]` table and is resolved by `resolve_prov
 ## Issue backend — Linear reference
 
 The `[issues] backend` vocabulary is `"github"` (default) or `"linear"`
-(`perk/backends/issues.py`), read **committed-only** from `.pi/perk.toml` — a
+(`perk/backends/resolve.py`), read **committed-only** from `.pi/perk.toml` — a
 `.pi/perk.local.toml` value is silently ignored (this keeps the canonical issue store
 deterministic). Switching to Linear changes where canonical plan / learn / objective issues live.
 

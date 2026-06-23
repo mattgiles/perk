@@ -11,9 +11,14 @@ The TS extension authors the *same* operation names + payload shapes in Phase 1,
 Issue tier demotion (Objective #252, Node 1.2): the issue-tracking tier functions here
 (``create_label`` … ``update_objective_body`` — plan/learn/objective issues, marked comments,
 labels) are now the **implementation substrate** of the GitHub issue backend. Production code
-must reach the issue tier through the resolver in the issues module — never by calling these
-module functions directly (enforced by the source-scan regression test in
-``tests/test_issues.py``). PR/CI/auth tier functions remain the direct surface for all backends.
+must reach the issue tier through the resolver in perk/backends/resolve.py — never by calling
+these module functions directly (enforced by the source-scan regression test in
+``tests/test_resolve.py``). PR/CI/auth tier functions remain the direct surface for all backends.
+
+This package is the pure GitHub gateway: it never imports the backend tier (the one-way import
+guard scans this package for any backend-tier import). The issue human-engagement substrate
+(the read-only ``gh api graphql`` comment/description-edit reads) now lives in the backend tier at
+perk/backends/github/engagement.py.
 """
 
 from perk.github import _exec
@@ -23,12 +28,6 @@ from perk.github.auth import (
     RepoAccess,
     check_auth,
     check_repo_access,
-)
-from perk.github.engagement import (
-    DescriptionEditRow,
-    IssueCommentRow,
-    read_description_edits,
-    read_issue_comments,
 )
 from perk.github.objectives import (
     ObjectiveAdoption,
@@ -131,11 +130,9 @@ __all__ = [
     "AuthStatus",
     "BatchResolveResult",
     "CommentResult",
-    "DescriptionEditRow",
     "DiscussionComment",
     "GitHubError",
     "InlineReviewComment",
-    "IssueCommentRow",
     "IssueRead",
     "Label",
     "LearnIssueSummary",
@@ -201,9 +198,7 @@ __all__ = [
     "merge_pr",
     "post_pr_review",
     "prepend_plan_callout",
-    "read_description_edits",
     "read_issue",
-    "read_issue_comments",
     "rerun_workflow_run",
     "resolve_review_threads",
     "secret_exists",

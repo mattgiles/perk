@@ -1,22 +1,21 @@
-"""The issue-tracking tier seam (Objective #252, Node 1.2): the GitHub backend + the resolver.
+"""``GitHubIssueBackend`` — the issue-tier adapter over ``perk.github`` (Objective #746, Node 2.1).
 
 Node 1.1 (``perk/backends/issue_backend.py``) shipped the issue-tier **contract** — the
 ``IssueBackend`` ``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``.
-This module makes it live: ``GitHubIssueBackend`` is a thin delegation adapter over
+This module makes the GitHub backend live: ``GitHubIssueBackend`` is a thin delegation adapter over
 ``perk.github``'s issue-tier module functions (which remain the GitHub backend's private
-implementation substrate), and ``resolve_issue_backend`` is the resolver every issue-tier
-consumer goes through.
+implementation substrate). The resolver every issue-tier consumer goes through lives in
+``perk/backends/resolve.py``.
 
-This is deliberately the only module that imports both ``perk.github`` and
-``perk.backends.issue_backend`` (preserving Node 1.1's one-way import guard: ``perk/github/``
-never references the contract).
+This module imports both ``perk.github`` and ``perk.backends.issue_backend`` (preserving Node 1.1's
+one-way import guard: ``perk/github/`` never references the backend tier).
 
 Adapter disciplines:
 
 - **Late-bound delegation.** Every method resolves its delegate via attribute access on the
-  ``github`` module object at call time (``github.get_plan(...)``), so existing
-  ``monkeypatch.setattr(github, ...)`` test fixtures keep intercepting unchanged — even when the
-  patch lands after backend construction.
+  ``github`` module object (and, for the engagement reads, the ``gh_engagement`` module object) at
+  call time, so existing ``monkeypatch.setattr(...)`` test fixtures keep intercepting unchanged —
+  even when the patch lands after backend construction.
 - **Constructor-bound repo context.** ``repo_root`` is bound once at construction and threaded
   into every delegate call; methods take no repo parameter (the contract discipline).
 - **String ids at the boundary.** GitHub's int issue/comment numbers are stringified on the way
@@ -27,24 +26,15 @@ Adapter disciplines:
   substrings, and tests assert messages).
 """
 
-import tomllib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 from perk import github
-from perk.backends import engagement, issue_backend, linear
+from perk.backends import engagement, issue_backend
+from perk.backends.github import engagement as gh_engagement
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import client as linear_client
 from perk.github import GitHubError
-from perk.substrate import config
-
-# The `[issues] backend` vocabulary (contracts.md §8.21). Both "github" (default) and "linear"
-# are live selections; "linear" additionally requires a committed `[issues] team` and the
-# `LINEAR_API_KEY` env var (resolved in `resolve_issue_backend`).
-GITHUB_BACKEND_ID = "github"
-LINEAR_BACKEND_ID = "linear"
-KNOWN_ISSUE_BACKENDS = (GITHUB_BACKEND_ID, LINEAR_BACKEND_ID)
 
 
 @contextmanager
@@ -77,7 +67,7 @@ def _actor(name: str | None, actor_id: str | None) -> engagement.Actor | None:
     return engagement.Actor(id=actor_id, name=name)
 
 
-def _engagement_comment(row: github.IssueCommentRow) -> engagement.EngagementComment:
+def _engagement_comment(row: gh_engagement.IssueCommentRow) -> engagement.EngagementComment:
     """Map a github-native comment row into an :class:`EngagementComment` (untrusted body). The
     author is classified via :func:`engagement.classify_author`: a bot row routes to ``bot_actor``,
     a human row to ``user``; the body feeds the ``perk:*`` sentinel heuristic."""
@@ -96,7 +86,7 @@ def _engagement_comment(row: github.IssueCommentRow) -> engagement.EngagementCom
     )
 
 
-def _description_edit(row: github.DescriptionEditRow) -> engagement.DescriptionEdit:
+def _description_edit(row: gh_engagement.DescriptionEditRow) -> engagement.DescriptionEdit:
     """Map a github-native description-edit row into a :class:`DescriptionEdit`. ``diff`` is passed
     through best-effort (``None`` when GitHub returned null); author keyed on the editor."""
     actor = _actor(row.editor_login, row.editor_id)
@@ -113,7 +103,7 @@ class GitHubIssueBackend:
     functions (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
     ``IssueBackendError``)."""
 
-    backend_id = GITHUB_BACKEND_ID
+    backend_id = "github"
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
@@ -333,64 +323,15 @@ class GitHubIssueBackend:
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
         number = _number(issue_id)
         with _translate():
-            rows = github.read_issue_comments(issue=number, repo_root=self._repo_root)
+            rows = gh_engagement.read_issue_comments(issue=number, repo_root=self._repo_root)
         return tuple(_engagement_comment(row) for row in rows)
 
     def read_description_edits(self, *, issue_id: str) -> tuple[engagement.DescriptionEdit, ...]:
         number = _number(issue_id)
         with _translate():
-            rows = github.read_description_edits(issue=number, repo_root=self._repo_root)
+            rows = gh_engagement.read_description_edits(issue=number, repo_root=self._repo_root)
         return tuple(_description_edit(row) for row in rows)
 
     def read_agent_session(self, *, issue_id: str) -> engagement.AgentSessionRead:
         # GitHub has no agent-session surface (the Linear-only no-op).
         return engagement.EMPTY_AGENT_SESSION
-
-
-def resolve_issue_backend_id(repo_root: Path) -> str:
-    """Resolve the repo's `[issues] backend` selection to a known backend id — or raise.
-
-    Reads the **committed** `.pi/perk.toml` only (``load_committed_issues_backend``; the local
-    overlay is deliberately never read — the backend decides where canonical durable state is
-    written). Absent or ``"github"`` → ``GITHUB_BACKEND_ID``; ``"linear"`` → ``LINEAR_BACKEND_ID``.
-    Unknown values **raise** ``IssueBackendError`` (falling back silently would write canonical
-    issues to the wrong tracker); a malformed committed TOML is mapped into ``IssueBackendError``
-    too.
-    """
-    try:
-        selected = config.load_committed_issues_backend(repo_root)
-    except tomllib.TOMLDecodeError as exc:
-        raise IssueBackendError(
-            f".pi/perk.toml is not valid TOML ({exc}); run `perk doctor`"
-        ) from exc
-    if selected is None or selected == GITHUB_BACKEND_ID:
-        return GITHUB_BACKEND_ID
-    if selected == LINEAR_BACKEND_ID:
-        return LINEAR_BACKEND_ID
-    known = ", ".join(KNOWN_ISSUE_BACKENDS)
-    raise IssueBackendError(f"unknown issue backend {selected!r} (known: {known})")
-
-
-def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
-    """Resolve the repo's issue backend from the committed `[issues]` config table.
-
-    Config-driven selection is live: ``resolve_issue_backend_id`` validates the selection (raising
-    ``IssueBackendError`` on unknown/malformed config — every caller's existing error boundary
-    handles it) and this constructs the matching backend. The Linear arm additionally requires a
-    committed ``[issues] team`` (the Linear team key) and the ``LINEAR_API_KEY`` env var; either
-    missing raises a hinted ``IssueBackendError``. Construction is lazy (no network): the team
-    UUID is resolved on first use.
-    """
-    backend_id = resolve_issue_backend_id(repo_root)
-    if backend_id == GITHUB_BACKEND_ID:
-        return GitHubIssueBackend(repo_root)
-    if backend_id == LINEAR_BACKEND_ID:
-        team = config.load_committed_issues_team(repo_root)
-        if team is None:
-            raise IssueBackendError(
-                '[issues] team is required when backend = "linear" — '
-                "set the Linear team key in .pi/perk.toml"
-            )
-        client = linear_client.client_from_env(repo_root=repo_root)
-        return linear.LinearIssueBackend(client, team_key=team, repo_root=repo_root)
-    raise IssueBackendError(f"no backend implementation for {backend_id!r}")

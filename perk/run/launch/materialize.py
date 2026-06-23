@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
@@ -82,7 +82,7 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, A
     if not pr_id:
         return
     try:
-        body = issues.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
+        body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
     except (GitHubError, IssueBackendError) as exc:
         user_output(f"  (checkpoints: could not fetch plan #{pr_id} body — {exc})")
         return

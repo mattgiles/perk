@@ -225,7 +225,7 @@ def test_real_land_unknown_base_is_fail_open(monkeypatch):
 def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, capsys):
     """A close failure on a non-default github base is fail-open: returns False, warns on stderr,
     never raises (so the land result is unchanged)."""
-    from perk.backends import issues
+    from perk.backends.github import GitHubIssueBackend
 
     monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
 
@@ -233,7 +233,7 @@ def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, cap
         raise github.GitHubError("gh exploded")
 
     monkeypatch.setattr(github, "close_issue", _boom)
-    backend = issues.GitHubIssueBackend(repo_root=Path())
+    backend = GitHubIssueBackend(repo_root=Path())
     out = land_cmd._close_plan_issue_on_land(
         backend, issue="7", repo_root=Path(), pr_base="release"
     )

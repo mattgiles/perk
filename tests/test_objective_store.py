@@ -369,12 +369,12 @@ class TestErrorType:
 
 
 class TestImportDirection:
-    def test_objective_store_module_never_imports_issues(self) -> None:
+    def test_objective_store_module_never_imports_the_resolver(self) -> None:
         # The contract stays implementation-free: the protocol module never references the
-        # concrete backend/resolver module.
+        # concrete backend/resolver modules.
         source = Path(objective_store.__file__).read_text(encoding="utf-8")
-        assert "perk.backends.issues" not in source
-        assert "import issues" not in source
+        assert "perk.backends.resolve" not in source
+        assert "perk.backends.github" not in source
 
     def test_objective_store_module_never_imports_github(self) -> None:
         # No PR field on any objective value type → no `perk.github` import (unlike issue_backend,

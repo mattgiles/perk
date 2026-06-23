@@ -2,9 +2,10 @@
 
 Two read-only ``gh api graphql`` queries — issue comments and issue description edit history —
 each a single cursor-paginated GraphQL connection. github-native result rows
-(:class:`IssueCommentRow` / :class:`DescriptionEditRow`) carry raw author fields; the
-backend-tier mapping to the neutral engagement contract lives in the issue-backend adapter (this
-package never imports the backend tier — the one-way import guard).
+(:class:`IssueCommentRow` / :class:`DescriptionEditRow`) carry raw author fields; the mapping to
+the neutral engagement contract lives beside this substrate in the adapter
+(``perk/backends/github/backend.py``). This substrate imports only the downward ``perk.github``
+gateway (``_exec``) — never the issue-tier contract (the one-way import guard).
 
 Mechanism notes (contracts.md §8.25):
 

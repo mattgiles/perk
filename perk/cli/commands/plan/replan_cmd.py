@@ -24,7 +24,7 @@ from pathlib import Path
 
 import click
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.engagement import render_plan_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
@@ -164,7 +164,7 @@ def replan(
         # any side effect (mirrors learn-docs/objective-plan; plan is cold_remote:false).
         launch.resolve_target(stage, remote)
 
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

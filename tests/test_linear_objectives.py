@@ -723,16 +723,15 @@ class TestEntityNotFoundDiscrimination:
 
 class TestImportDirection:
     def test_linear_backend_never_imports_the_resolver_module(self) -> None:
-        # The resolver module will import us at wiring time (Nodes 2.3/2.4); importing it back
-        # would be a cycle. Mirrors the TestImportDirection substring style. linear_backend is a
-        # package (Node 2.1 split) — `__file__` is `__init__.py` only, so scan every submodule
-        # source under the package dir (mirrors tests/test_issues.py's rglob scan).
+        # The resolver module (perk/backends/resolve.py) imports us at wiring time; importing it
+        # back would be a cycle. Mirrors the TestImportDirection substring style. linear_backend is
+        # a package (Node 2.1 split) — `__file__` is `__init__.py` only, so scan every submodule
+        # source under the package dir (mirrors tests/test_resolve.py's rglob scan).
         package_dir = Path(linear.__file__).parent
         source = "\n".join(
             path.read_text(encoding="utf-8") for path in sorted(package_dir.glob("*.py"))
         )
-        assert "perk.backends.issues" not in source
-        assert "import issues" not in source
+        assert "perk.backends.resolve" not in source
 
 
 class TestValueShapes:

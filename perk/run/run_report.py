@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.state import cache
 from perk.substrate.output import user_output
 
@@ -185,7 +185,7 @@ def report_started(
     try:
         run_url = run_url_from_env(environ)
         body = format_started(run_id=run_id, stage=stage, plan=plan, run_url=run_url)
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         backend.upsert_marked_comment(
             issue_id=str(plan),
             marker=RUN_REPORT_MARKER.format(run_id=run_id),
@@ -217,7 +217,7 @@ def report_terminal(
             outcome=outcome,
             exit_code=exit_code,
         )
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         backend.upsert_marked_comment(
             issue_id=str(plan),
             marker=RUN_REPORT_MARKER.format(run_id=run_id),

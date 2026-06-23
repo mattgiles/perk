@@ -4,7 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence import capabilities, env, init
@@ -268,7 +268,7 @@ def _providers_check(root: Path) -> Check:
 def _issues_check(root: Path) -> Check:
     """Validate the committed `[issues]` selection (contracts.md §8.21).
 
-    Maps ``issues.resolve_issue_backend_id``'s outcomes (never duplicates the vocabulary):
+    Maps ``resolve.resolve_issue_backend_id``'s outcomes (never duplicates the vocabulary):
     absent/``"github"`` → ``ok``; ``"linear"`` **with** a committed team → ``ok``; ``"linear"``
     **without** a team → ``fail`` (offline-decidable, hard-breaks every issue-touching command);
     unknown → ``fail`` — unlike `[providers]` (which falls back gracefully and only warns), a bad
@@ -288,7 +288,7 @@ def _issues_check(root: Path) -> Check:
             "selection not evaluated — config invalid; see the config check",
         )
     try:
-        backend_id = issues.resolve_issue_backend_id(root)
+        backend_id = resolve.resolve_issue_backend_id(root)
     except IssueBackendError as exc:
         return Check(
             "issues-backend",
@@ -298,7 +298,7 @@ def _issues_check(root: Path) -> Check:
             "",
             'Fix .pi/perk.toml [issues] — backend must be "github" or "linear".',
         )
-    if backend_id == issues.LINEAR_BACKEND_ID:
+    if backend_id == resolve.LINEAR_BACKEND_ID:
         team = load_committed_issues_team(root)
         if team is None:
             return Check(

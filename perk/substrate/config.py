@@ -172,8 +172,8 @@ def parse_issues_backend(raw: Any) -> str | None:
     LBYL silent-omit (mirrors ``parse_compaction_table``): a non-dict/absent table or an
     absent/ill-typed/blank ``backend`` yields ``None`` (the resolver falls back to the
     default backend). Vocabulary validation happens in
-    ``perk.backends.issues.resolve_issue_backend_id`` — this parser only answers "what did the
-    user write?".
+    ``perk/backends/resolve.py``'s ``resolve_issue_backend_id`` — this parser only answers "what
+    did the user write?".
     """
     table = raw if isinstance(raw, dict) else {}
     value = table.get("backend")

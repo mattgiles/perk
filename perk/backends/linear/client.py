@@ -16,7 +16,7 @@ errors. Partial success (``errors`` alongside partial ``data``) fails loud — p
 queries never want partial results.
 
 Live: the consumer exists (``perk/backends/linear/backend.py``'s ``LinearIssueBackend``) and the
-resolver in ``perk/backends/issues.py`` constructs it on ``backend = "linear"`` (Node 2.4 wired
+resolver in ``perk/backends/resolve.py`` constructs it on ``backend = "linear"`` (Node 2.4 wired
 config, init/doctor readiness, and contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):

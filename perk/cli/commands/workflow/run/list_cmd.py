@@ -7,7 +7,7 @@ from typing import Any
 import click
 
 from perk import github
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, resolve
 from perk.cli.alias import alias
 from perk.cli.commands.workflow.run.shared import fail
 from perk.cli.context import require_repo
@@ -107,7 +107,7 @@ def _overlay(
             plan_state = plan_cache[pr_id]
         else:
             try:
-                backend = issues.resolve_issue_backend(repo_root)
+                backend = resolve.resolve_issue_backend(repo_root)
                 plan_state = backend.get_plan(issue_id=pr_id)
             except issue_backend.IssueBackendError as exc:
                 user_output(f"note: plan #{pr_id} unavailable: {exc}")

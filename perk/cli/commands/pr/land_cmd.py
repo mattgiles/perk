@@ -18,7 +18,7 @@ from typing import cast
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, issues, objective_store, objective_stores
+from perk.backends import issue_backend, objective_store, objective_stores, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.commands.pr.shared import fail
@@ -149,7 +149,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             learn=LearnConsumeUpdate((), "dry_run"),
         )
 
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     pr = github.find_pr_for_branch(branch=branch, repo_root=repo_root)
     if pr is None:
         raise UserFacingCliError(
@@ -377,7 +377,7 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
     # transient infra error) does NOT strand the rest — the #89-residual that made the accumulated
     # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
     # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     closed: list[str] = []
     failed: list[str] = []
     for learn_id in ids:
@@ -408,7 +408,7 @@ def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: 
     """
     footer = f"Closes #{issue}" if backend_id == "github" else f"Plan: {issue} — {url}"
     try:
-        state = issues.resolve_issue_backend(repo_root).get_plan(issue_id=issue)
+        state = resolve.resolve_issue_backend(repo_root).get_plan(issue_id=issue)
     except (GitHubError, IssueBackendError):
         return footer
     title = state.title.strip() if state is not None else ""

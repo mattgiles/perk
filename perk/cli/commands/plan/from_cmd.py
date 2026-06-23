@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 
 from perk import plan
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
@@ -167,7 +167,7 @@ def plan_from(
         # any side effect (mirrors replan; plan is cold_remote:false).
         launch.resolve_target(stage, remote)
 
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         src = backend.read_issue(issue_id=issue_id)
         if src is None:
             raise UserFacingCliError(

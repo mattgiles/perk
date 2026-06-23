@@ -5,6 +5,7 @@ import pytest
 from _github_fakes import ROOT, _GhDispatch, _has, _Proc
 
 from perk import github
+from perk.backends.github import engagement as gh_engagement
 
 # --- human-engagement reads (Objective #682, Node 1.3) --------------------------------------
 
@@ -78,7 +79,7 @@ def test_read_issue_comments_parses_and_orders(monkeypatch):
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)
-    rows = github.read_issue_comments(issue=42, repo_root=ROOT)
+    rows = gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
     assert [r.id for r in rows] == ["IC_1", "IC_2", "IC_3"]  # ascending createdAt
     assert rows[0].edited_at is None and rows[0].author_is_bot is False
     assert rows[0].author_login == "bob" and rows[0].author_id == "22"
@@ -123,7 +124,7 @@ def test_read_issue_comments_paginates(monkeypatch):
 
     rec = _GhDispatch([])
     monkeypatch.setattr(subprocess, "run", dispatch)
-    rows = github.read_issue_comments(issue=42, repo_root=ROOT)
+    rows = gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
     assert [r.id for r in rows] == ["IC_1", "IC_2"]
     # the second graphql call carried the cursor
     assert any(any("cursor=CUR2" in tok for tok in c) for c in rec.calls)
@@ -149,7 +150,7 @@ def test_read_description_edits_parses_diff_passthrough_and_orders(monkeypatch):
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)
-    rows = github.read_description_edits(issue=42, repo_root=ROOT)
+    rows = gh_engagement.read_description_edits(issue=42, repo_root=ROOT)
     assert [r.edited_at for r in rows] == [
         "2026-04-01T00:00:00Z",
         "2026-04-02T00:00:00Z",
@@ -175,8 +176,8 @@ def test_engagement_reads_not_found_fold_to_empty(monkeypatch):
         ]
     )
     monkeypatch.setattr(subprocess, "run", rec)
-    assert github.read_issue_comments(issue=999, repo_root=ROOT) == []
-    assert github.read_description_edits(issue=999, repo_root=ROOT) == []
+    assert gh_engagement.read_issue_comments(issue=999, repo_root=ROOT) == []
+    assert gh_engagement.read_description_edits(issue=999, repo_root=ROOT) == []
 
 
 def test_engagement_reads_infra_failure_raises(monkeypatch):
@@ -188,6 +189,6 @@ def test_engagement_reads_infra_failure_raises(monkeypatch):
     )
     monkeypatch.setattr(subprocess, "run", rec)
     with pytest.raises(github.GitHubError):
-        github.read_issue_comments(issue=42, repo_root=ROOT)
+        gh_engagement.read_issue_comments(issue=42, repo_root=ROOT)
     with pytest.raises(github.GitHubError):
-        github.read_description_edits(issue=42, repo_root=ROOT)
+        gh_engagement.read_description_edits(issue=42, repo_root=ROOT)

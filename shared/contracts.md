@@ -2959,7 +2959,7 @@ Error types + exits: `not_a_repo` → 2; `objective_not_found`, `github_error`, 
 ## §8.21 · The issue-backend selection (`[issues]`, Objective #252 Nodes 1.3 + 2.4)
 
 The issue-tracking tier (plan/learn/objective issues — `perk/backends/issue_backend.py`'s `IssueBackend`
-contract, Node 1.1; the `GitHubIssueBackend` adapter + resolver in `perk/backends/issues.py`, Node 1.2;
+contract, Node 1.1; the `GitHubIssueBackend` adapter in `perk/backends/github/backend.py` + the resolver in `perk/backends/resolve.py`, Node 1.2;
 the `LinearIssueBackend` over the `perk/backends/linear/client.py` GraphQL client, Nodes 2.1–2.3, wired live in
 Node 2.4) is **backend-selectable** via one committed config table:
 
@@ -2997,7 +2997,7 @@ env, never from a `perk.local.toml` in the worktree. This is a deliberate, docum
 version-controlled one. **Python-plane-only** — the TS plane reads no Linear key, so there is no
 cross-plane TS mirror (the `launch_stage` env-seed is what carries the key into the TS session).
 
-**Python is the authoritative validator** (`perk/backends/issues.py::resolve_issue_backend_id`):
+**Python is the authoritative validator** (`perk/backends/resolve.py::resolve_issue_backend_id`):
 
 - absent / `"github"` → `"github"` (the default backend);
 - `"linear"` → `"linear"` (a live selection);
