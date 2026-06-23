@@ -5,7 +5,7 @@ import json
 import click
 
 from perk import objective
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.commands.objective.shared import fail, parse_objective_id
 from perk.cli.context import require_github, require_repo
@@ -43,7 +43,7 @@ def node_objective(
         number = parse_objective_id(number)
         if not dry_run:
             require_github(ctx)
-        result = objective_stores.resolve_objective_store(repo_root).update_objective_node(
+        result = resolve.resolve_objective_store(repo_root).update_objective_node(
             objective_id=number,
             node_id=node_id,
             status=objective.NodeStatus(status) if status else None,

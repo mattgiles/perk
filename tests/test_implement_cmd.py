@@ -1,7 +1,7 @@
 """P1.T4c — `perk implement [PLAN]`: the dedicated implement cold door.
 
 Covers Bug 2 (the optional plan positional + active-ref fallback) at the CLI boundary. The
-priming prompt (Bug 1) is covered in test_launch.py. `github.get_plan` + `launch.launch_stage`
+priming prompt (Bug 1) is covered in test_launch.py. `plans.get_plan` + `launch.launch_stage`
 are stubbed (no GitHub, no `exec pi`), mirroring test_resume.py.
 """
 
@@ -12,6 +12,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 from perk.state import cache
@@ -27,8 +28,8 @@ _PLAN_REF = {
 }
 
 
-def _state() -> github.PlanState:
-    return github.PlanState(number=7, url="https://gh/o/r/issues/7", title="T", header={}, pr=None)
+def _state() -> plans.PlanState:
+    return plans.PlanState(number=7, url="https://gh/o/r/issues/7", title="T", header={}, pr=None)
 
 
 def _git_init(path: str) -> None:
@@ -43,7 +44,7 @@ def _authed(monkeypatch) -> None:
 
 def test_implement_with_plan_writes_active_ref_and_launches(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _state())
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state())
     launched: dict[str, object] = {}
     monkeypatch.setattr(launch, "launch_stage", lambda **k: launched.update(stage=k["stage"].id))
     runner = CliRunner()
@@ -58,7 +59,7 @@ def test_implement_with_plan_writes_active_ref_and_launches(monkeypatch):
 
 def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _state())
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state())
 
     def boom(**k):
         raise AssertionError("dry run must not launch")
@@ -78,7 +79,7 @@ def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):
 
 def test_implement_plan_not_found_exits_1(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -93,7 +94,7 @@ def test_implement_no_plan_uses_active_ref_without_github(monkeypatch):
     def no_github(**k):
         raise AssertionError("implement of the active plan must not read GitHub")
 
-    monkeypatch.setattr(github, "get_plan", no_github)
+    monkeypatch.setattr(plans, "get_plan", no_github)
     launched: dict[str, object] = {}
     monkeypatch.setattr(launch, "launch_stage", lambda **k: launched.update(stage=k["stage"].id))
     runner = CliRunner()

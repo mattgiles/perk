@@ -1,9 +1,10 @@
-"""The backend-tier resolvers (Objective #746, Node 2.1): the issue-backend resolver + constants.
+"""The backend-tier resolvers (Objective #746): the issue-backend + objective-store resolvers.
 
-This is the home for **both** issue-tier and objective-tier resolvers; this node carries the
+This is the home for **both** issue-tier and objective-tier resolvers. Node 2.1 carried the
 issue-tier resolvers (``resolve_issue_backend_id`` / ``resolve_issue_backend``) and the backend-id
-constants, the only door every issue-tier consumer goes through. The objective resolvers join it in
-node 2.2 (the module is named generically so 2.2 only adds to it).
+constants, the only door every issue-tier consumer goes through; node 2.2 added the objective-tier
+resolvers (``resolve_objective_store_id`` / ``resolve_objective_store``), the door every
+objective-tier consumer goes through.
 
 The resolver reads the **committed** ``.pi/perk.toml`` ``[issues]`` table and constructs the
 matching backend (``GitHubIssueBackend`` from perk/backends/github/backend.py, or the Linear
@@ -14,8 +15,9 @@ durable state is written, so the local overlay is never consulted.
 import tomllib
 from pathlib import Path
 
-from perk.backends import issue_backend, linear
+from perk.backends import issue_backend, linear, objective_store
 from perk.backends.github.backend import GitHubIssueBackend
+from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
 from perk.substrate import config
@@ -74,4 +76,38 @@ def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
             )
         client = linear_client.client_from_env(repo_root=repo_root)
         return linear.LinearIssueBackend(client, team_key=team, repo_root=repo_root)
+    raise IssueBackendError(f"no backend implementation for {backend_id!r}")
+
+
+def resolve_objective_store_id(repo_root: Path) -> str:
+    """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.
+
+    An objective and its plan/learn issues share one backend selection (both populations live in the
+    same tracker), so this re-exports ``resolve_issue_backend_id`` rather than reading a separate
+    config key. Unknown/malformed config raises ``IssueBackendError`` (every caller's existing error
+    boundary handles it).
+    """
+    return resolve_issue_backend_id(repo_root)
+
+
+def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
+    """Resolve the repo's objective store from the committed ``[issues]`` config table.
+
+    Mirrors ``resolve_issue_backend``: ``resolve_objective_store_id`` validates the selection and
+    this constructs the matching store. The Linear arm requires a committed ``[issues] team`` and
+    the ``LINEAR_API_KEY`` env var (either missing raises the same hinted ``IssueBackendError``
+    ``resolve_issue_backend`` raises). Construction is lazy (no network).
+    """
+    backend_id = resolve_objective_store_id(repo_root)
+    if backend_id == GITHUB_BACKEND_ID:
+        return GitHubObjectiveStore(repo_root)
+    if backend_id == LINEAR_BACKEND_ID:
+        team = config.load_committed_issues_team(repo_root)
+        if team is None:
+            raise IssueBackendError(
+                '[issues] team is required when backend = "linear" — '
+                "set the Linear team key in .pi/perk.toml"
+            )
+        client = linear_client.client_from_env(repo_root=repo_root)
+        return linear.LinearProjectObjectiveStore(client, team_key=team, repo_root=repo_root)
     raise IssueBackendError(f"no backend implementation for {backend_id!r}")

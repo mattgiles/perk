@@ -5,6 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
@@ -53,11 +54,11 @@ def _stub_gh(
         "probed": False,
     }
     monkeypatch.setattr(
-        github,
+        plans,
         "get_plan",
-        lambda **k: github.PlanState(number=7, url="u/7", title="My Feature", header={}, pr=None),
+        lambda **k: plans.PlanState(number=7, url="u/7", title="My Feature", header={}, pr=None),
     )
-    monkeypatch.setattr(github, "get_plan_body", lambda **k: plan_body)
+    monkeypatch.setattr(plans, "get_plan_body", lambda **k: plan_body)
     monkeypatch.setattr(github, "default_branch", lambda root: "main")
     monkeypatch.setattr(
         github,
@@ -69,7 +70,7 @@ def _stub_gh(
 
     def _update(**k):
         calls["header"] = k["fields"]
-        return github.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
+        return plans.PlanHeaderUpdate(fields_updated=tuple(k["fields"]), dry_run=False)
 
     def _update_body(**k):
         calls["pr_body"] = k["body"]
@@ -85,7 +86,7 @@ def _stub_gh(
             raise git.GitError("probe boom")
         return probe
 
-    monkeypatch.setattr(github, "update_plan_header", _update)
+    monkeypatch.setattr(plans, "update_plan_header", _update)
     monkeypatch.setattr(github, "update_pr_body", _update_body)
     monkeypatch.setattr(git, "push", _push)
     monkeypatch.setattr(git, "is_dirty", lambda root: False)
@@ -188,9 +189,9 @@ def test_submit_falls_back_to_header_then_default_base(monkeypatch):
     captured: dict[str, object] = {}
     _stub_gh(monkeypatch)
     monkeypatch.setattr(
-        github,
+        plans,
         "get_plan",
-        lambda **k: github.PlanState(
+        lambda **k: plans.PlanState(
             number=7, url="u/7", title="My Feature", header={"base": "release"}, pr=None
         ),
     )
@@ -265,7 +266,7 @@ def test_real_submit_idempotent_existing_pr(monkeypatch):
 def test_real_submit_plan_not_found_exits_1(monkeypatch):
     _authed(monkeypatch)
     _stub_gh(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "plan_not_found"

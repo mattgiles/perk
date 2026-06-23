@@ -9,7 +9,7 @@ from typing import Any
 import click
 
 from perk import objective, plan
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
 from perk.cli.commands.objective.shared import fail
@@ -130,7 +130,7 @@ def create_objective(
         # `[workflow] base` default, else None (node plans then fall through to the GitHub
         # default). Pinning keeps the objective self-describing for its node plans.
         resolved_base = base or load_config(repo_root).workflow_base
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         # Recover the adoption link from the handoff (#709): the `objective author --from` cold
         # door stashes the source id in the handoff so it survives the `objective_save` tool path
         # (which forwards only {prose, roadmap, title, base, run-id}). An explicit --adopt-from

@@ -27,7 +27,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append((f, list(a))))
     # Don't shell gh in this real-git integration test (the plan-body fetch is its own test).
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     def _run() -> None:
         launch_stage(
@@ -68,7 +68,7 @@ def test_launch_warms_extension_clone_before_exec(git_repo, monkeypatch):
     config = Config(worktree_root=git_repo / ".worktrees")
     events: list[object] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch.init,
         "ensure_extension_clone_present",
@@ -117,7 +117,7 @@ def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
     monkeypatch.setattr(
         "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
     )
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     launch_stage(
         repo_root=git_repo,
         config=config,
@@ -156,7 +156,7 @@ def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_
     monkeypatch.setattr(
         "perk.run.launch.os.execvpe", lambda _f, _a, e: captured.update(env=dict(e))
     )
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     launch_stage(
         repo_root=wt,
         config=config,
@@ -303,7 +303,7 @@ def test_launch_runs_setup_before_exec_on_fresh_create(git_repo, monkeypatch):
     events: list = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append(("exec", f)))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch, "run_worktree_setup", lambda wt, cmds: events.append(("setup", wt, cmds))
     )
@@ -329,7 +329,7 @@ def test_launch_setup_failure_aborts_before_exec(git_repo, monkeypatch):
     execs: list = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     def _boom(_wt, _cmds):
         raise UserFacingCliError("nope", error_type="worktree_setup_failed")
@@ -355,7 +355,7 @@ def test_launch_resume_does_not_run_setup(git_repo, monkeypatch):
     setup_calls: list = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     monkeypatch.setattr(
         launch, "run_worktree_setup", lambda wt, cmds: setup_calls.append((wt, cmds))
     )
@@ -407,7 +407,7 @@ def _launch_and_capture_env(git_repo, monkeypatch) -> dict[str, str]:
     envs: list[dict[str, str]] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: envs.append(dict(e)))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     launch_stage(
         repo_root=git_repo,
@@ -454,7 +454,7 @@ def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
     monkeypatch.setattr("perk.run.launch._pi_agent_dir", lambda: agent_dir)
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     launch_stage(
         repo_root=git_repo,
@@ -477,7 +477,7 @@ def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch)
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
     markdown = "# Add retry\n\n## Steps\n1. Add helper\n2. Wire it in\n"
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: markdown)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: markdown)
 
     launch_stage(
         repo_root=git_repo,
@@ -505,7 +505,7 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     def boom(**_k):
         raise GitHubError("gh unreachable")
 
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", boom)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", boom)
     launch_stage(
         repo_root=git_repo,
         config=config,
@@ -537,7 +537,7 @@ def _drive_implement(git_repo, monkeypatch) -> tuple[Path, list[str]]:
     execs: list[str] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     launch_stage(
         repo_root=git_repo,
         config=config,
@@ -610,7 +610,7 @@ def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):
     execs: list[str] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     calls: list[tuple[Path, dict]] = []
     monkeypatch.setattr(
         "perk.run.launch.linear_agent.emit_run_started",
@@ -641,7 +641,7 @@ def test_non_implement_stage_skips_linear_agent_emission(git_repo, monkeypatch):
     (config.worktree_root / "plan-42").mkdir(parents=True)  # address reuses an existing worktree
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
     calls: list[object] = []
     monkeypatch.setattr(
         "perk.run.launch.linear_agent.emit_run_started", lambda *a, **kw: calls.append(a)
@@ -668,7 +668,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypat
     execs: list[str] = []
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
     monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
-    monkeypatch.setattr("perk.run.launch.github.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
 
     def boom(_environ):
         raise RuntimeError("agent substrate down")

@@ -4,6 +4,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.cli.commands.worktree.wipe_cmd import _classify_worktree
 from perk.cli.context import PerkContext
@@ -18,8 +19,8 @@ def _ctx(repo: Path) -> PerkContext:
     )
 
 
-def _plan_state(state: str) -> github.PlanState:
-    return github.PlanState(
+def _plan_state(state: str) -> plans.PlanState:
+    return plans.PlanState(
         number=1,
         url="https://gh/o/r/issues/1",
         title="t",
@@ -92,10 +93,10 @@ def test_wipe_happy_path(git_repo, monkeypatch):
     _add_plan_wt(git_repo, 1)
     _add_plan_wt(git_repo, 2)
 
-    def fake_get_plan(*, number: int, repo_root: Path) -> github.PlanState:
+    def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
         return _plan_state("MERGED" if number == 1 else "OPEN")
 
-    monkeypatch.setattr(github, "get_plan", fake_get_plan)
+    monkeypatch.setattr(plans, "get_plan", fake_get_plan)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert not (git_repo / ".worktrees" / "plan-1").exists()
@@ -111,7 +112,7 @@ def test_wipe_happy_path(git_repo, monkeypatch):
 
 def test_wipe_dry_run(git_repo, monkeypatch):
     _add_plan_wt(git_repo, 1)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     result = CliRunner().invoke(cli, ["worktree", "wipe", "--dry-run"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert (git_repo / ".worktrees" / "plan-1").exists()
@@ -125,7 +126,7 @@ def test_wipe_dry_run(git_repo, monkeypatch):
 def test_wipe_dirty_guard(git_repo, monkeypatch):
     wt = _add_plan_wt(git_repo, 1)
     (wt / "dirty.txt").write_text("x\n", encoding="utf-8")
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     skipped = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert (git_repo / ".worktrees" / "plan-1").exists()
     assert "uncommitted changes" in skipped.output
@@ -140,7 +141,7 @@ def test_wipe_pending_learn_guard(git_repo, monkeypatch):
     (git_repo / ".git" / "info" / "exclude").write_text(".pi/\n", encoding="utf-8")
     wt = _add_plan_wt(git_repo, 1)
     cache.set_marker(wt, cache.PENDING_LEARN)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     skipped = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert (git_repo / ".worktrees" / "plan-1").exists()
     assert "pending-learn" in skipped.output
@@ -156,7 +157,7 @@ def test_wipe_undeterminable_skips(git_repo, monkeypatch):
     def boom(**k):
         raise github.GitHubError("offline")
 
-    monkeypatch.setattr(github, "get_plan", boom)
+    monkeypatch.setattr(plans, "get_plan", boom)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert (git_repo / ".worktrees" / "plan-1").exists()
@@ -167,7 +168,7 @@ def test_wipe_ignores_non_plan_worktrees(git_repo, monkeypatch):
     git.worktree_add(
         git_repo, git_repo / ".worktrees" / "feature-x", branch="feature-x", create_branch=True
     )
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert (git_repo / ".worktrees" / "feature-x").exists()
@@ -183,11 +184,11 @@ def test_wipe_gathers_concurrently(git_repo, monkeypatch):
     _add_plan_wt(git_repo, 2)
     barrier = threading.Barrier(2, timeout=10)
 
-    def fake_get_plan(*, number: int, repo_root: Path) -> github.PlanState:
+    def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
         barrier.wait()  # times out (BrokenBarrierError) if gathering were sequential
         return _plan_state("MERGED")
 
-    monkeypatch.setattr(github, "get_plan", fake_get_plan)
+    monkeypatch.setattr(plans, "get_plan", fake_get_plan)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert not (git_repo / ".worktrees" / "plan-1").exists()
@@ -201,10 +202,10 @@ def test_wipe_output_in_candidate_order(git_repo, monkeypatch):
         _add_plan_wt(git_repo, n)
     states = {1: "MERGED", 2: "OPEN", 3: "MERGED"}
 
-    def fake_get_plan(*, number: int, repo_root: Path) -> github.PlanState:
+    def fake_get_plan(*, number: int, repo_root: Path) -> plans.PlanState:
         return _plan_state(states[number])
 
-    monkeypatch.setattr(github, "get_plan", fake_get_plan)
+    monkeypatch.setattr(plans, "get_plan", fake_get_plan)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     positions = [result.output.index(f"plan-{n}") for n in (1, 2, 3)]
@@ -236,7 +237,7 @@ def test_wipe_removes_worktrees_concurrently(git_repo, monkeypatch):
 
     _add_plan_wt(git_repo, 1)
     _add_plan_wt(git_repo, 2)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
 
     barrier = threading.Barrier(2, timeout=10)
     real_remove = git.worktree_remove
@@ -261,7 +262,7 @@ def test_wipe_removal_failure_isolation(git_repo, monkeypatch):
     """One worktree's removal failure is isolated: the other still wipes, its branch deletes."""
     _add_plan_wt(git_repo, 1)
     _add_plan_wt(git_repo, 2)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
 
     real_remove = git.worktree_remove
 
@@ -293,7 +294,7 @@ def test_wipe_force_deletes_branch_ahead_of_trunk(git_repo, monkeypatch):
     subprocess.run(
         ["git", "commit", "-qm", "ahead of trunk"], cwd=wt, check=True, capture_output=True
     )
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert not (git_repo / ".worktrees" / "plan-1").exists()
@@ -339,7 +340,7 @@ def test_wipe_deletes_remote_branches(git_repo_with_remote, monkeypatch):
     _add_plan_wt(clone, 2)
     _push_plan_branch(clone, 1)
     _push_plan_branch(clone, 2)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx_remote(clone))
     assert result.exit_code == 0, result.output
     heads = _remote_heads(clone)
@@ -354,7 +355,7 @@ def test_wipe_remote_blind_batch_tolerates_already_gone(git_repo_with_remote, mo
     _add_plan_wt(clone, 1)
     _add_plan_wt(clone, 2)
     _push_plan_branch(clone, 1)  # plan-2 never pushed → already "gone" on origin
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state("MERGED"))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx_remote(clone))
     assert result.exit_code == 0, result.output
     heads = _remote_heads(clone)

@@ -5,6 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends.github import objectives
 from perk.cli.cli import cli
 
 N = objective.NodeStatus
@@ -45,9 +46,9 @@ def test_create_json(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=42, url="u/42", existed=False)
+        return objectives.ObjectiveIssue(number=42, url="u/42", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
@@ -65,7 +66,7 @@ def test_create_empty_roadmap_rejected(monkeypatch):
     def _must_not_create(**k):
         raise AssertionError("create_objective_issue must not be called for an empty roadmap")
 
-    monkeypatch.setattr(github, "create_objective_issue", _must_not_create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _must_not_create)
     result = _invoke(["objective", "create", "--json"], body="# Obj\n\nprose")
     assert result.exit_code == 1
     payload = json.loads(result.output)
@@ -79,7 +80,7 @@ def test_create_structured_empty_roadmap_rejected(monkeypatch):
     def _must_not_create(**k):
         raise AssertionError("create_objective_issue must not be called for an empty roadmap")
 
-    monkeypatch.setattr(github, "create_objective_issue", _must_not_create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _must_not_create)
     result = _invoke(["objective", "create", "--json", "--roadmap", "[]"], body="# Obj\n\nprose")
     assert result.exit_code == 1
     payload = json.loads(result.output)
@@ -94,9 +95,9 @@ def test_create_structured_roadmap_passes_nodes(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+        return objectives.ObjectiveIssue(number=7, url="u/7", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps(
         [
             {"id": "1.1", "description": "first"},
@@ -131,9 +132,9 @@ def test_create_base_flag_stored(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+        return objectives.ObjectiveIssue(number=7, url="u/7", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke(
         ["objective", "create", "--json", "--base", "develop", "--roadmap", roadmap],
@@ -150,9 +151,9 @@ def test_create_base_from_config(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+        return objectives.ObjectiveIssue(number=7, url="u/7", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke_with_config(
         ["objective", "create", "--json", "--roadmap", roadmap],
@@ -170,9 +171,9 @@ def test_create_base_flag_wins_over_config(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+        return objectives.ObjectiveIssue(number=7, url="u/7", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke_with_config(
         ["objective", "create", "--json", "--base", "develop", "--roadmap", roadmap],
@@ -190,9 +191,9 @@ def test_create_base_none_when_unset(monkeypatch):
 
     def _create(**k):
         captured.update(k)
-        return github.ObjectiveIssue(number=7, url="u/7", existed=False)
+        return objectives.ObjectiveIssue(number=7, url="u/7", existed=False)
 
-    monkeypatch.setattr(github, "create_objective_issue", _create)
+    monkeypatch.setattr(objectives, "create_objective_issue", _create)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
@@ -205,9 +206,9 @@ def test_create_structured_roadmap_invalid(monkeypatch):
     # A structurally invalid --roadmap node is rejected as invalid_roadmap before any write.
     _authed(monkeypatch)
     monkeypatch.setattr(
-        github,
+        objectives,
         "create_objective_issue",
-        lambda **k: github.ObjectiveIssue(number=1, url="u/1", existed=False),
+        lambda **k: objectives.ObjectiveIssue(number=1, url="u/1", existed=False),
     )
     bad = json.dumps([{"id": "1.1", "description": "x", "status": "bogus"}])
     result = _invoke(["objective", "create", "--json", "--roadmap", bad], body="# Obj\n\nprose")
@@ -219,9 +220,9 @@ def test_create_structured_roadmap_invalid(monkeypatch):
 def test_create_malformed_roadmap_json(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(
-        github,
+        objectives,
         "create_objective_issue",
-        lambda **k: github.ObjectiveIssue(number=1, url="u/1", existed=False),
+        lambda **k: objectives.ObjectiveIssue(number=1, url="u/1", existed=False),
     )
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", "{not json"], body="# Obj\n\nprose"
@@ -284,10 +285,10 @@ class _AdoptStubStore:
 
 
 def _invoke_adopt(args, *, body, monkeypatch, store, write_handoff=None):
-    from perk.backends import objective_stores
+    from perk.backends import resolve
     from perk.state import cache
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -404,9 +405,9 @@ def test_create_adopt_from_dry_run_composes_without_adopting(monkeypatch):
 
 def test_show_json(monkeypatch):
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
-        lambda **k: github.ObjectiveState(
+        lambda **k: objectives.ObjectiveState(
             number=42, url="u/42", title="Obj", header={"run_id": "01RID"}, nodes=_nodes()
         ),
     )
@@ -422,9 +423,9 @@ def test_show_json(monkeypatch):
 def test_show_json_reports_resumable_claims(monkeypatch):
     # An unblocked planning-no-pr claim is surfaced for multi-terminal coordination.
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
-        lambda **k: github.ObjectiveState(
+        lambda **k: objectives.ObjectiveState(
             number=42,
             url="u/42",
             title="Obj",
@@ -450,7 +451,7 @@ def test_show_json_reports_resumable_claims(monkeypatch):
 
 
 def test_show_not_found(monkeypatch):
-    monkeypatch.setattr(github, "get_objective", lambda **k: None)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
     result = _invoke(["objective", "show", "99", "--json"])
     assert result.exit_code == 1
     payload = json.loads(result.output)
@@ -463,11 +464,11 @@ def test_node_json(monkeypatch):
 
     def _update(**k):
         captured.update(k)
-        return github.ObjectiveNodeUpdate(
+        return objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "update_objective_node", _update)
+    monkeypatch.setattr(objectives, "update_objective_node", _update)
     result = _invoke(
         [
             "objective",
@@ -494,7 +495,7 @@ def test_node_not_found_maps_error(monkeypatch):
     def _update(**k):
         raise github.GitHubError("objective node '9.9' not found on #42")
 
-    monkeypatch.setattr(github, "update_objective_node", _update)
+    monkeypatch.setattr(objectives, "update_objective_node", _update)
     result = _invoke(["objective", "node", "42", "--node", "9.9", "--status", "done", "--json"])
     assert result.exit_code == 1
     payload = json.loads(result.output)
@@ -507,11 +508,11 @@ def test_node_add_json(monkeypatch):
 
     def _add(**k):
         captured.update(k)
-        return github.ObjectiveNodeAdd(
+        return objectives.ObjectiveNodeAdd(
             number=k["number"], node_id="2.3", comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "add_objective_node", _add)
+    monkeypatch.setattr(objectives, "add_objective_node", _add)
     result = _invoke(
         [
             "objective",
@@ -543,11 +544,11 @@ def test_node_add_dry_run_does_not_require_github(monkeypatch):
 
     def _add(**k):
         captured.update(k)
-        return github.ObjectiveNodeAdd(
+        return objectives.ObjectiveNodeAdd(
             number=k["number"], node_id="1.3", comment_updated=False, dry_run=True
         )
 
-    monkeypatch.setattr(github, "add_objective_node", _add)
+    monkeypatch.setattr(objectives, "add_objective_node", _add)
     result = _invoke(
         ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--dry-run", "--json"]
     )
@@ -563,7 +564,7 @@ def test_node_add_collision_maps_to_invalid_input(monkeypatch):
     def _add(**k):
         raise github.GitHubError("could not add node to phase 1 on #42 (id collision)")
 
-    monkeypatch.setattr(github, "add_objective_node", _add)
+    monkeypatch.setattr(objectives, "add_objective_node", _add)
     result = _invoke(
         ["objective", "node-add", "42", "--phase", "1", "--description", "X", "--json"]
     )
@@ -585,9 +586,9 @@ def test_node_add_not_a_repo_exit_2():
 
 def test_next_json(monkeypatch):
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
-        lambda **k: github.ObjectiveState(
+        lambda **k: objectives.ObjectiveState(
             number=42, url="u/42", title="Obj", header={}, nodes=_nodes()
         ),
     )
@@ -614,11 +615,11 @@ def test_reconcile_dry_run_composes_without_writing(monkeypatch):
 
     def _update(**k):
         captured.update(k)
-        return github.ObjectiveBodyUpdate(
+        return objectives.ObjectiveBodyUpdate(
             number=k["number"], comment_id=99, updated=False, dry_run=True
         )
 
-    monkeypatch.setattr(github, "update_objective_body", _update)
+    monkeypatch.setattr(objectives, "update_objective_body", _update)
     result = _invoke(["objective", "reconcile", "5", "--dry-run", "--json"], body="New prose.")
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -633,7 +634,7 @@ def test_reconcile_missing_target_maps_to_reconcile_target_missing(monkeypatch):
     def _update(**k):
         raise github.GitHubError("objective #5 has no body comment")
 
-    monkeypatch.setattr(github, "update_objective_body", _update)
+    monkeypatch.setattr(objectives, "update_objective_body", _update)
     result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "reconcile_target_missing"
@@ -645,7 +646,7 @@ def test_reconcile_no_region_maps_to_reconcile_target_missing(monkeypatch):
     def _update(**k):
         raise github.GitHubError("objective #5 body comment has no reconcilable region")
 
-    monkeypatch.setattr(github, "update_objective_body", _update)
+    monkeypatch.setattr(objectives, "update_objective_body", _update)
     result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "reconcile_target_missing"
@@ -657,7 +658,7 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
     def _update(**k):
         raise github.GitHubError("gh timed out")
 
-    monkeypatch.setattr(github, "update_objective_body", _update)
+    monkeypatch.setattr(objectives, "update_objective_body", _update)
     result = _invoke(["objective", "reconcile", "5", "--json"], body="x")
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"
@@ -665,7 +666,7 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
 
 # --- Node 4.3: fail-open Project Updates on the Linear project-backed path -------------------
 
-from perk.backends import objective_store, objective_stores  # noqa: E402
+from perk.backends import objective_store, resolve  # noqa: E402
 
 
 class _FakeStore:
@@ -701,7 +702,7 @@ class _FakeStore:
 def test_create_posts_status_update_on_linear_path(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore()
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}, {"id": "2.1", "description": "y"}])
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
@@ -715,7 +716,7 @@ def test_create_posts_status_update_on_linear_path(monkeypatch):
 def test_create_does_not_post_on_found_existing(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore(existed=True)
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
@@ -727,7 +728,7 @@ def test_create_does_not_post_on_found_existing(monkeypatch):
 def test_create_status_update_failure_is_fail_open(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore(post_raises=True)
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     roadmap = json.dumps([{"id": "1.1", "description": "x"}])
     result = _invoke(
         ["objective", "create", "--json", "--roadmap", roadmap], body="# Ship it\n\nprose"
@@ -741,7 +742,7 @@ def test_create_status_update_failure_is_fail_open(monkeypatch):
 def test_reconcile_posts_status_update_on_linear_path(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore(updated=True)
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     result = _invoke(["objective", "reconcile", "proj-1", "--json"], body="New prose.")
     assert result.exit_code == 0
     assert len(store.posts) == 1
@@ -753,7 +754,7 @@ def test_reconcile_posts_status_update_on_linear_path(monkeypatch):
 def test_reconcile_status_update_failure_is_fail_open(monkeypatch):
     _authed(monkeypatch)
     store = _FakeStore(updated=True, post_raises=True)
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
     result = _invoke(["objective", "reconcile", "proj-1", "--json"], body="New prose.")
     assert result.exit_code == 0
     assert json.loads(result.stdout)["success"] is True

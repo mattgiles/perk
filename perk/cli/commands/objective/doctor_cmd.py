@@ -15,7 +15,7 @@ import json
 
 import click
 
-from perk.backends import objective_stores
+from perk.backends import resolve
 from perk.backends.objective_store import (
     DriftCondition,
     ObjectiveStoreError,
@@ -71,7 +71,7 @@ def doctor_objective(
     try:
         repo_root = require_repo(ctx)
         number = parse_objective_id(number)
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         report = store.detect_objective_drift(objective_id=number)
         fix_result: RepairResult | None = None
         if fix:

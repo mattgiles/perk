@@ -6,7 +6,8 @@ from typing import cast
 from click.testing import CliRunner
 
 from perk import github, plan
-from perk.backends import issue_backend, objective_store, objective_stores, resolve
+from perk.backends import issue_backend, objective_store, resolve
+from perk.backends.github import objectives, plans
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.context import PerkContext
 
@@ -30,35 +31,35 @@ def _stub_writes(monkeypatch, *, existed: bool = False) -> dict[str, object]:
         "header": None,
         "callout": None,
     }
-    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
     monkeypatch.setattr(
-        github,
+        plans,
         "create_plan_issue",
-        lambda **k: github.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=existed),
+        lambda **k: plans.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=existed),
     )
 
     def _comment(**_k):
         calls["commented"] = True
-        return github.CommentResult(posted=True)
+        return plans.CommentResult(posted=True)
 
     def _update(**k):
         calls["updated"] = k
-        return github.PlanUpdate(
+        return plans.PlanUpdate(
             number=k["number"], body_updated=True, title_updated=True, dry_run=False
         )
 
     def _update_header(**k):
         calls["header"] = k
-        return github.PlanHeaderUpdate(fields_updated=tuple(k.get("fields", {})), dry_run=False)
+        return plans.PlanHeaderUpdate(fields_updated=tuple(k.get("fields", {})), dry_run=False)
 
     def _callout(**k):
         calls["callout"] = k
         return True
 
-    monkeypatch.setattr(github, "add_issue_comment", _comment)
-    monkeypatch.setattr(github, "update_plan_issue", _update)
-    monkeypatch.setattr(github, "update_plan_header", _update_header)
-    monkeypatch.setattr(github, "prepend_plan_callout", _callout)
+    monkeypatch.setattr(plans, "add_issue_comment", _comment)
+    monkeypatch.setattr(plans, "update_plan_issue", _update)
+    monkeypatch.setattr(plans, "update_plan_header", _update_header)
+    monkeypatch.setattr(plans, "prepend_plan_callout", _callout)
     return calls
 
 
@@ -131,22 +132,22 @@ def _stub_adopt(monkeypatch) -> dict[str, object]:
     """Stub the adoption write surface; record the adopt call + flag any second-object create."""
     calls: dict[str, object] = {"adopt": None, "created": False}
     monkeypatch.setattr(
-        github,
+        plans,
         "read_issue",
-        lambda **k: github.IssueRead(number=7, url="u/7", title="t", body="b", state="OPEN"),
+        lambda **k: plans.IssueRead(number=7, url="u/7", title="t", body="b", state="OPEN"),
     )
 
     def _adopt(**k):
         calls["adopt"] = k
-        return github.PlanAdoption(number=int(k["number"]), url="u/7", dry_run=False)
+        return plans.PlanAdoption(number=int(k["number"]), url="u/7", dry_run=False)
 
     def _create(**_k):
         calls["created"] = True  # a second perk:plan issue would be the bug
-        return github.PlanIssue(number=999, url="x", existed=False)
+        return plans.PlanIssue(number=999, url="x", existed=False)
 
-    monkeypatch.setattr(github, "adopt_issue_as_plan", _adopt)
-    monkeypatch.setattr(github, "create_plan_issue", _create)
-    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    monkeypatch.setattr(plans, "adopt_issue_as_plan", _adopt)
+    monkeypatch.setattr(plans, "create_plan_issue", _create)
+    monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
     return calls
 
 
@@ -289,15 +290,15 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
     # P2.T10: --objective-id populates the plan header block AND the cache.plan-ref.
     _authed(monkeypatch)
     captured: dict[str, str] = {}
-    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
 
     def _create(**k):
         captured["body"] = k["body"]
-        return github.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
+        return plans.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
 
-    monkeypatch.setattr(github, "create_plan_issue", _create)
-    monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
-    monkeypatch.setattr(github, "prepend_plan_callout", lambda **k: True)
+    monkeypatch.setattr(plans, "create_plan_issue", _create)
+    monkeypatch.setattr(plans, "add_issue_comment", lambda **k: plans.CommentResult(posted=True))
+    monkeypatch.setattr(plans, "prepend_plan_callout", lambda **k: True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -321,11 +322,11 @@ def test_plan_save_node_id_commits_objective_node(monkeypatch):
 
     def _update_node(**k):
         captured.update(k)
-        return github.ObjectiveNodeUpdate(
+        return objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    monkeypatch.setattr(objectives, "update_objective_node", _update_node)
     result = _run(
         monkeypatch,
         [
@@ -362,7 +363,7 @@ def test_plan_save_node_link_failure_is_non_fatal(monkeypatch):
     def _boom(**_k):
         raise github.GitHubError("node 1.1 not found on #7")
 
-    monkeypatch.setattr(github, "update_objective_node", _boom)
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
     result = _run(
         monkeypatch,
         [
@@ -391,7 +392,7 @@ def test_plan_save_without_node_id_skips_objective_node(monkeypatch):
     def _boom(**_k):
         raise AssertionError("must not link a node without --node-id")
 
-    monkeypatch.setattr(github, "update_objective_node", _boom)
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
     result = _run(monkeypatch, ["--plan-file", "plan.md", "--objective-id", "7", "--json"])
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["objective_node"] is None
@@ -421,11 +422,11 @@ def test_plan_save_recovers_objective_link_from_handoff(monkeypatch):
 
     def _update_node(**k):
         captured.update(k)
-        return github.ObjectiveNodeUpdate(
+        return objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    monkeypatch.setattr(objectives, "update_objective_node", _update_node)
     result = _run_with_handoff(
         monkeypatch,
         ["--plan-file", "plan.md", "--json"],
@@ -451,11 +452,11 @@ def test_plan_save_explicit_flags_override_handoff(monkeypatch):
 
     def _update_node(**k):
         captured.update(k)
-        return github.ObjectiveNodeUpdate(
+        return objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "update_objective_node", _update_node)
+    monkeypatch.setattr(objectives, "update_objective_node", _update_node)
     result = _run_with_handoff(
         monkeypatch,
         [
@@ -483,7 +484,7 @@ def test_plan_save_handoff_without_objective_is_unlinked(monkeypatch):
     def _boom(**_k):
         raise AssertionError("must not link a node from a non-objective handoff")
 
-    monkeypatch.setattr(github, "update_objective_node", _boom)
+    monkeypatch.setattr(objectives, "update_objective_node", _boom)
     result = _run_with_handoff(
         monkeypatch,
         ["--plan-file", "plan.md", "--json"],
@@ -559,15 +560,15 @@ def test_plan_save_pins_base_from_config(monkeypatch):
     # the cache.plan-ref.
     _authed(monkeypatch)
     captured: dict[str, str] = {}
-    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
 
     def _create(**k):
         captured["body"] = k["body"]
-        return github.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
+        return plans.PlanIssue(number=123, url="https://gh/o/r/issues/123", existed=False)
 
-    monkeypatch.setattr(github, "create_plan_issue", _create)
-    monkeypatch.setattr(github, "add_issue_comment", lambda **k: github.CommentResult(posted=True))
-    monkeypatch.setattr(github, "prepend_plan_callout", lambda **k: True)
+    monkeypatch.setattr(plans, "create_plan_issue", _create)
+    monkeypatch.setattr(plans, "add_issue_comment", lambda **k: plans.CommentResult(posted=True))
+    monkeypatch.setattr(plans, "prepend_plan_callout", lambda **k: True)
     result, ref = _run_with_config(
         monkeypatch, ["--plan-file", "plan.md"], config='[workflow]\nbase = "develop"\n'
     )
@@ -582,16 +583,16 @@ def test_plan_save_inherits_objective_base(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
-        lambda **k: github.ObjectiveState(
+        lambda **k: objectives.ObjectiveState(
             number=7, url="u/7", title="t", header={"base": "release"}, nodes=()
         ),
     )
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -610,14 +611,14 @@ def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
-        lambda **k: github.ObjectiveState(number=7, url="u/7", title="t", header={}, nodes=()),
+        lambda **k: objectives.ObjectiveState(number=7, url="u/7", title="t", header={}, nodes=()),
     )
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -638,11 +639,11 @@ def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
     def _boom(**_k):
         raise github.GitHubError("boom")
 
-    monkeypatch.setattr(github, "get_objective", _boom)
+    monkeypatch.setattr(objectives, "get_objective", _boom)
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -744,12 +745,12 @@ def test_plan_save_dry_run_offline(monkeypatch):
 
 def test_plan_save_github_error_exit_1(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "create_label", lambda *a, **k: github.Label("perk:plan", False))
+    monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
 
     def _boom(**_k):
         raise github.GitHubError("403 forbidden")
 
-    monkeypatch.setattr(github, "create_plan_issue", _boom)
+    monkeypatch.setattr(plans, "create_plan_issue", _boom)
     result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "github_error"
@@ -863,7 +864,7 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
         def create_plan_issue(self, **k):
             raise AssertionError("create_plan_issue must not run on the unified path")
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _UnifyingStore())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _UnifyingStore())
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
@@ -912,7 +913,7 @@ def test_plan_save_dry_run_keeps_offline_preview_for_unifying_store(monkeypatch)
         def update_objective_node(self, **k):
             raise AssertionError("no link-commit on --dry-run")
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
     result = _run(
         monkeypatch,
         [

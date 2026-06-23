@@ -1,6 +1,7 @@
 """Node 3.4 — `perk objective run`: the deterministic capstone supervisor loop (§8.20).
 
-`github.get_objective`/`get_plan`/`get_pr_feedback`/`close_issue`, `cache.list_dispatch_records`,
+`objectives.get_objective`/`get_plan`/`get_pr_feedback`/`close_issue`,
+`cache.list_dispatch_records`,
 `run_report.read_outcome`, `runner.select_runner`, and `launch.launch_stage` are all stubbed (no
 GitHub, no `exec pi`, no real runner) — the supervisor's control flow is exercised purely.
 """
@@ -11,6 +12,7 @@ import subprocess
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends.github import objectives, plans
 from perk.cli.cli import cli
 from perk.cli.commands.objective import run_cmd
 from perk.run import launch, run_report, runner
@@ -33,13 +35,13 @@ def _authed(monkeypatch) -> None:
 
 
 def _state(nodes):
-    return github.ObjectiveState(
+    return objectives.ObjectiveState(
         number=137, url="u/137", title="Ship it", header={"run_id": "01RID"}, nodes=tuple(nodes)
     )
 
 
 def _plan_state(pr):
-    return github.PlanState(number=7, url="u/7", title="Plan", header={}, pr=pr)
+    return plans.PlanState(number=7, url="u/7", title="Plan", header={}, pr=pr)
 
 
 def _pr(*, state="OPEN", is_draft=False, number=99):
@@ -70,7 +72,7 @@ def _review(author, state, submitted_at):
 
 
 def _invoke(monkeypatch, args, *, objective_state, stub_no_records=True):
-    monkeypatch.setattr(github, "get_objective", lambda **k: objective_state)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: objective_state)
     if stub_no_records:
         monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [])
     cli_runner = CliRunner()
@@ -138,7 +140,7 @@ def test_in_flight_no_pr_dispatches_implement_remotely(monkeypatch):
     _authed(monkeypatch)
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(None))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert result.exit_code == 0
     payload = _payload(result)
@@ -151,7 +153,7 @@ def test_in_flight_draft_pr_is_ready_for_review_not_redispatch(monkeypatch):
     _authed(monkeypatch)
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(_pr(is_draft=True)))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(_pr(is_draft=True)))
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert result.exit_code == 0
     payload = _payload(result)
@@ -163,7 +165,7 @@ def test_in_flight_open_pr_unresolved_thread_dispatches_address(monkeypatch):
     _authed(monkeypatch)
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(_pr()))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(_pr()))
     monkeypatch.setattr(github, "get_pr_feedback", lambda **k: _feedback(threads=(_thread(False),)))
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert result.exit_code == 0
@@ -176,7 +178,7 @@ def test_in_flight_open_pr_only_approved_awaits_review(monkeypatch):
     _authed(monkeypatch)
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(_pr()))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(_pr()))
     monkeypatch.setattr(
         github,
         "get_pr_feedback",
@@ -191,7 +193,7 @@ def test_in_flight_open_pr_only_approved_awaits_review(monkeypatch):
 def test_in_flight_merged_pr_is_pending_reconcile(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(_pr(state="MERGED")))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(_pr(state="MERGED")))
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_in_flight_nodes()))
     assert _payload(result)["action"] == "merged_pending_reconcile"
 
@@ -240,7 +242,7 @@ def _complete_nodes():
 def test_complete_audits_and_closes(monkeypatch):
     _authed(monkeypatch)
     closed: dict = {}
-    monkeypatch.setattr(github, "close_issue", lambda **k: closed.update(k) or True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.update(k) or True)
     result = _invoke(monkeypatch, ["137", "--json"], objective_state=_state(_complete_nodes()))
     assert result.exit_code == 0
     payload = _payload(result)
@@ -260,7 +262,7 @@ def test_complete_dry_run_does_not_close(monkeypatch):
         # Faithful to the real helper's dry-run contract: return False without shelling.
         return not k["dry_run"]
 
-    monkeypatch.setattr(github, "close_issue", _close)
+    monkeypatch.setattr(plans, "close_issue", _close)
     result = _invoke(
         monkeypatch, ["137", "--dry-run", "--json"], objective_state=_state(_complete_nodes())
     )
@@ -329,7 +331,7 @@ def test_active_run_with_wait_polls_then_reevaluates(monkeypatch):
     monkeypatch.setattr(run_report, "read_outcome", lambda root, rid: None)
     monkeypatch.setattr("time.sleep", lambda _s: None)
     # After the run completes, the node still resolves (pr None → dispatch implement).
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(None))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
     result = _invoke(
@@ -354,9 +356,9 @@ def test_active_run_with_wait_refetches_objective_state(monkeypatch):
     # First get_objective returns the in-flight snapshot; the post-poll re-fetch returns a state
     # whose node has advanced to a terminal roll-up (complete) — proving a re-fetch happened.
     states = iter([_state(_in_flight_nodes()), _state(_complete_nodes())])
-    monkeypatch.setattr(github, "get_objective", lambda **k: next(states))
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: next(states))
     monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [_record()])
-    monkeypatch.setattr(github, "close_issue", lambda **k: True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: True)
     cli_runner = CliRunner()
     with cli_runner.isolated_filesystem() as d:
         _git_init(d)
@@ -393,7 +395,7 @@ def test_in_flight_opaque_pr_id_is_passed_to_the_backend(monkeypatch):
         seen.append(k["number"])
         return _plan_state(pr=_pr(state="MERGED"))
 
-    monkeypatch.setattr(github, "get_plan", _get_plan)
+    monkeypatch.setattr(plans, "get_plan", _get_plan)
     nodes = [
         objective.ObjectiveNode(
             id="1.1", description="A", status=N.IN_PROGRESS, pr="#7", depends_on=()
@@ -441,7 +443,7 @@ def test_cumulative_budget_sums_this_objective_only(monkeypatch):
         return {"budget": {"turns": 3, "tokens": 1000, "elapsed_ms": 60000}}
 
     monkeypatch.setattr(run_report, "read_outcome", _outcome)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(None))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
     result = _invoke(
@@ -461,7 +463,7 @@ def test_cumulative_budget_sums_this_objective_only(monkeypatch):
 def test_dry_run_dispatch_writes_nothing_and_skips_launch(monkeypatch):
     sink: dict = {}
     _stub_launch(monkeypatch, sink)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _plan_state(None))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state(None))
     result = _invoke(
         monkeypatch, ["137", "--dry-run", "--json"], objective_state=_state(_in_flight_nodes())
     )

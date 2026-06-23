@@ -96,3 +96,43 @@ def test_context_github_error_exits_1(monkeypatch):
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"
+
+
+def test_resolve_plan_body_prefers_cache_mirror(monkeypatch, tmp_path):
+    # The primary path: the worktree cache mirror is read first (backend-neutral), no backend hit.
+    from perk.cli.commands.pr.review_context_cmd import _resolve_plan_body
+
+    mirror = cache.plan_body_path(tmp_path)
+    mirror.parent.mkdir(parents=True, exist_ok=True)
+    mirror.write_text("# Mirror plan\n\nbody", encoding="utf-8")
+
+    def _no_backend(_root):
+        raise AssertionError("must not resolve a backend when the mirror is present")
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _no_backend
+    )
+    body = _resolve_plan_body(tmp_path, dict(_REF))
+    assert body is not None and body.startswith("# Mirror plan")
+
+
+def test_resolve_plan_body_falls_back_to_resolver_for_linear_id(monkeypatch, tmp_path):
+    # The fallback path: no mirror → fetch via the resolved backend, which owns the id shape
+    # (a non-github Linear-shaped `pr_id` like `ENG-123` flows straight through — the §G hoist
+    # drops the old `provider == "github"` / `pr_id.isdigit()` gate).
+    from perk.cli.commands.pr.review_context_cmd import _resolve_plan_body
+
+    seen: dict[str, str] = {}
+
+    class _Backend:
+        def get_plan_body(self, *, issue_id: str) -> str:
+            seen["issue_id"] = issue_id
+            return "# Linear plan body"
+
+    monkeypatch.setattr(
+        "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
+        lambda _root: _Backend(),
+    )
+    ref = {**_REF, "provider": "linear", "pr_id": "ENG-123"}
+    assert _resolve_plan_body(tmp_path, ref) == "# Linear plan body"
+    assert seen["issue_id"] == "ENG-123"

@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 
 from perk import plan
-from perk.backends import objective_stores, resolve
+from perk.backends import resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveStoreError
 from perk.cli.commands.objective.shared import fail
@@ -263,7 +263,7 @@ def _author_from(
         # any side effect (mirrors plan from; objective author is cold_remote:false).
         launch.resolve_target(stage, remote)
 
-        store = objective_stores.resolve_objective_store(repo_root)
+        store = resolve.resolve_objective_store(repo_root)
         src = store.read_objective_source(source_id=source_id)
         if src is None:
             raise UserFacingCliError(

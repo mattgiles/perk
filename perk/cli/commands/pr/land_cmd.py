@@ -18,7 +18,7 @@ from typing import cast
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, objective_store, objective_stores, resolve
+from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.commands.pr.shared import fail
@@ -267,7 +267,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
     objective_id = str(raw).lstrip("#").strip()
     if not objective_id:
         return ObjectiveLandUpdate(None, (), "bad_objective_id")
-    store = objective_stores.resolve_objective_store(repo_root)
+    store = resolve.resolve_objective_store(repo_root)
     try:
         state = store.get_objective(objective_id=objective_id)
         if state is None:

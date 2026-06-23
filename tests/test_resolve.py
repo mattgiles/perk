@@ -1,13 +1,14 @@
-"""Tests for the issue-backend resolver + the consumer-boundary scan (Objective #746, Node 2.1).
+"""Tests for the backend-tier resolvers + the consumer-boundary scans (Objective #746).
 
-The resolver (``perk/backends/resolve.py``) is the only door every issue-tier consumer goes
-through: ``resolve_issue_backend`` validates the committed ``[issues]`` selection and constructs the
-matching backend (``GitHubIssueBackend`` / ``LinearIssueBackend``); the local overlay is never read.
-``TestConsumerBoundary`` is the source-scan companion proving no production module reaches the
-``perk/github/`` issue-tier functions directly — both express "the resolver is the only door".
+The resolver (``perk/backends/resolve.py``) is the only door every backend consumer goes through:
+``resolve_issue_backend`` / ``resolve_objective_store`` validate the committed ``[issues]``
+selection and construct the matching backend; the local overlay is never read. The
+``TestConsumerBoundary`` scans are the source-scan companions proving no production module reaches
+the GitHub substrate modules (``perk/backends/github/{plans,objectives}.py``) directly — both
+express "the resolver is the only door". (The objective-store tests folded in here from the
+retired ``test_objective_stores.py``.)
 """
 
-import re
 from pathlib import Path
 
 import pytest
@@ -15,9 +16,15 @@ import pytest
 import perk
 from perk.backends import resolve
 from perk.backends.github.backend import GitHubIssueBackend
+from perk.backends.github.objective_store import GitHubObjectiveStore
 from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import LinearIssueBackend
-from perk.backends.resolve import resolve_issue_backend, resolve_issue_backend_id
+from perk.backends.linear import LinearIssueBackend, LinearProjectObjectiveStore
+from perk.backends.resolve import (
+    resolve_issue_backend,
+    resolve_issue_backend_id,
+    resolve_objective_store,
+    resolve_objective_store_id,
+)
 
 
 def _write_config(repo_root: Path, name: str, text: str) -> None:
@@ -86,56 +93,91 @@ class TestResolver:
         assert resolve_issue_backend_id(tmp_path) == resolve.GITHUB_BACKEND_ID
 
 
-# The 15 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
-# Production code must reach them through perk.backends.resolve.resolve_issue_backend, never
-# directly. The objective-tier functions have their own scan in tests/test_objective_stores.py.
-ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
-    "create_label",
-    "find_plan_issue",
-    "create_plan_issue",
-    "update_plan_issue",
-    "update_plan_header",
-    "get_plan",
-    "get_plan_body",
-    "find_learn_issue",
-    "create_learn_issue",
-    "list_learn_issues",
-    "close_and_label_consolidated",
-    "close_issue",
-    "add_issue_comment",
-    "find_comment_id_by_marker",
-    "upsert_marked_comment",
+class TestObjectiveResolver:
+    """The objective-store resolver pair (folded in from the retired test_objective_stores.py)."""
+
+    def test_default_returns_github_store_bound_to_root(self, tmp_path: Path) -> None:
+        store = resolve_objective_store(tmp_path)
+        assert isinstance(store, GitHubObjectiveStore)
+        assert store._repo_root == tmp_path
+
+    def test_explicit_github_selection_returns_github_store(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "github"\n')
+        assert isinstance(resolve_objective_store(tmp_path), GitHubObjectiveStore)
+
+    def test_resolve_id_single_sources_off_issue_backend(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
+        assert resolve_objective_store_id(tmp_path) == resolve.LINEAR_BACKEND_ID
+
+    def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
+        assert resolve_objective_store_id(tmp_path) == resolve.GITHUB_BACKEND_ID
+
+    def test_linear_selection_returns_project_store(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Node 3.4: the linear arm is project-backed (LinearProjectObjectiveStore), not the
+        # dormant issue-backed LinearObjectiveStore.
+        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
+        store = resolve_objective_store(tmp_path)
+        assert isinstance(store, LinearProjectObjectiveStore)
+        assert store.backend_id == "linear"
+        # Construction is lazy — the team key is bound on the shared ops, no network call issued.
+        assert store._issue_ops._team_key == "ENG"
+        assert store._projects._team_key == "ENG"
+
+    def test_linear_selection_missing_team_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
+        with pytest.raises(IssueBackendError, match=r"\[issues\] team is required"):
+            resolve_objective_store(tmp_path)
+
+    def test_linear_selection_missing_api_key_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
+        with pytest.raises(IssueBackendError, match="LINEAR_API_KEY"):
+            resolve_objective_store(tmp_path)
+
+    def test_unknown_selection_raises(self, tmp_path: Path) -> None:
+        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "jira"\n')
+        with pytest.raises(IssueBackendError, match="unknown issue backend"):
+            resolve_objective_store(tmp_path)
+
+
+# The GitHub plan/issue + objective substrate modules. Production code must reach them through the
+# resolvers in perk.backends.resolve (resolve_issue_backend / resolve_objective_store), never by
+# importing the substrate module directly. The only legitimate importers are the GitHub backend
+# package's own modules (the adapters + the sibling substrate) under perk/backends/github/.
+SUBSTRATE_MODULES: tuple[str, ...] = (
+    "perk.backends.github.plans",
+    "perk.backends.github.objectives",
 )
 
 
 class TestConsumerBoundary:
-    def test_no_production_module_calls_issue_tier_directly(self) -> None:
-        """Source scan: outside perk/backends/github/backend.py (the adapter) and the perk/github/
-        package itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call.
-
-        `objective_stores.py` is also allowed: `GitHubObjectiveStore.close_objective` (Node 3.4)
-        deliberately reaches the issue-tier close primitive (`github.close_issue`) to retire a
-        GitHub objective issue — a GitHub objective IS an issue, so its close is byte-identical to
-        the issue close, and routing it through the objective adapter (not the issue backend) is the
-        point of moving the close onto the `ObjectiveStore`."""
+    def test_no_production_module_imports_the_substrate_directly(self) -> None:
+        """Source scan: no module under perk/ OUTSIDE the GitHub backend package
+        (perk/backends/github/) may import the substrate modules
+        perk.backends.github.{plans,objectives} directly — production reaches plan/issue and
+        objective ops through resolve.resolve_issue_backend(...) / resolve.resolve_objective_store(
+        ...). The adapters (backend.py, objective_store.py) and the sibling substrate
+        (objectives.py importing plans) legitimately import it, so the whole perk/backends/github/
+        package is allowed."""
         perk_dir = Path(perk.__file__).parent
-        allowed = {
-            perk_dir / "backends" / "github" / "backend.py",
-            perk_dir / "backends" / "objective_stores.py",
-        }
-        github_pkg_dir = perk_dir / "github"
-        pattern = re.compile(
-            r"github\.(" + "|".join(re.escape(fn) for fn in ISSUE_TIER_FUNCTIONS) + r")\("
-        )
+        github_backend_dir = perk_dir / "backends" / "github"
         offenders: list[str] = []
         for path in sorted(perk_dir.rglob("*.py")):
-            if path in allowed or path.is_relative_to(github_pkg_dir):
+            if path.is_relative_to(github_backend_dir):
                 continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if pattern.search(line):
+                if any(mod in line for mod in SUBSTRATE_MODULES):
                     offenders.append(
                         f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
                     )
         assert not offenders, (
-            "issue-tier calls must go through perk.backends.resolve:\n" + "\n".join(offenders)
+            "substrate imports must go through perk.backends.resolve:\n" + "\n".join(offenders)
         )

@@ -6,8 +6,9 @@ import subprocess
 
 from click.testing import CliRunner
 
-from perk import github, objective
-from perk.backends import engagement, objective_stores
+from perk import objective
+from perk.backends import engagement, resolve
+from perk.backends.github import objectives
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.cli import cli
 
@@ -26,7 +27,7 @@ def _nodes():
 
 
 def _state():
-    return github.ObjectiveState(
+    return objectives.ObjectiveState(
         number=7, url="u/7", title="Obj", header={"run_id": "01RID"}, nodes=_nodes()
     )
 
@@ -76,7 +77,7 @@ def _install_store(
                 return node_engagement
             return engagement.EMPTY_NODE_ENGAGEMENT
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _Store())
 
 
 def _invoke(args):
@@ -148,7 +149,7 @@ def test_objective_not_found(monkeypatch):
         def get_objective(self, *, objective_id):
             return None
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda root: _Store())
     result = _invoke(["objective", "engagement", "99", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.stdout)["error_type"] == "objective_not_found"

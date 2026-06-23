@@ -1,28 +1,17 @@
-"""The objective-storage tier seam (Objective #548, Node 2.2): the concrete stores + the resolver.
+"""``GitHubObjectiveStore`` — the objective-tier adapter over the GitHub substrate (Node 2.2).
 
 Node 2.1 (``perk/backends/objective_store.py``) shipped the objective-tier **contract** — the
-``ObjectiveStore`` ``Protocol``, the result dataclasses, and ``ObjectiveStoreError``.
-This module makes it live: ``GitHubObjectiveStore`` is a thin delegation adapter over
-``perk.github``'s objective-tier module functions (the same functions ``GitHubIssueBackend`` used to
-delegate to — the equivalence lock for the move) and ``resolve_objective_store`` is the resolver
-every objective-tier consumer goes through.
-
-**The Linear arm is project-backed** (Objective #548, Node 3.4): ``resolve_objective_store``
-constructs ``LinearProjectObjectiveStore`` (a Linear **Project** is the objective; the roadmap is
-materialised as one node-issue per node), so every Linear objective consumer is project-backed. The
-issue-backed ``LinearObjectiveStore`` is kept dormant (directly-constructable, still unit-tested);
-retiring it is a later cleanup.
-
-The ``[issues]`` selection is single-sourced: ``resolve_objective_store_id`` re-exports
-``perk/backends/resolve.py``'s ``resolve_issue_backend_id`` (an objective and its plan/learn issues
-share one backend selection — both populations live in the same tracker), so the dispatch never
-forks.
+``ObjectiveStore`` ``Protocol``, the result dataclasses, and ``ObjectiveStoreError``. This module
+makes the GitHub objective store live: ``GitHubObjectiveStore`` is a thin delegation adapter over
+the sibling objective/plan substrate (``perk.backends.github.objectives`` and
+``perk.backends.github.plans``). The resolver every objective-tier consumer goes through lives in
+``perk/backends/resolve.py`` (mirroring the issue tier).
 
 Adapter disciplines (mirroring ``perk/backends/github/backend.py``):
 
-- **Late-bound delegation.** ``GitHubObjectiveStore`` resolves each delegate via attribute access on
-  the ``github`` module object at call time, so existing ``monkeypatch.setattr(github, ...)``
-  fixtures keep intercepting unchanged.
+- **Late-bound delegation.** Each delegate is resolved via attribute access on the substrate
+  **module object** at call time, so existing ``monkeypatch.setattr(<module>, ...)`` fixtures keep
+  intercepting unchanged.
 - **Constructor-bound repo context.** ``repo_root`` is bound once at construction; methods take no
   repo parameter (the contract discipline).
 - **String ids at the boundary.** GitHub's int issue/comment numbers are stringified on the way out;
@@ -30,31 +19,30 @@ Adapter disciplines (mirroring ``perk/backends/github/backend.py``):
   ``ObjectiveStoreError``.
 - **Error mapping at the boundary.** Every delegate call wraps ``GitHubError`` into
   ``ObjectiveStoreError(str(exc)) from exc`` — message text preserved verbatim.
+
+The ``read_issue``/``close_issue`` delegates reach the plan/issue substrate (``plans``): a GitHub
+objective **is** a single issue, so reading it for adoption and closing it on completion are
+plan-tier ops. ``backend_id`` is a module-level literal (``"github"``, exactly as
+``GitHubIssueBackend.backend_id``) so this module imports nothing from ``resolve.py`` — the resolver
+imports this class, and a back-import would be circular.
 """
 
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import github, objective
-from perk.backends import engagement, linear, objective_store
+from perk import objective
+from perk.backends import engagement, objective_store
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import objectives, plans
 from perk.backends.github.backend import (
     _description_edit as _gh_description_edit,
 )
 from perk.backends.github.backend import (
     _engagement_comment as _gh_engagement_comment,
 )
-from perk.backends.issue_backend import IssueBackendError
-from perk.backends.linear import client as linear_client
 from perk.backends.objective_store import ObjectiveStoreError
-from perk.backends.resolve import (
-    GITHUB_BACKEND_ID,
-    LINEAR_BACKEND_ID,
-    resolve_issue_backend_id,
-)
 from perk.github import GitHubError
-from perk.substrate import config
 
 
 @contextmanager
@@ -76,23 +64,23 @@ def _number(objective_id: str) -> int:
         ) from exc
 
 
-def _objective_ref(found: github.ObjectiveIssue) -> objective_store.ObjectiveRef:
+def _objective_ref(found: objectives.ObjectiveIssue) -> objective_store.ObjectiveRef:
     return objective_store.ObjectiveRef(id=str(found.number), url=found.url, existed=found.existed)
 
 
 class GitHubObjectiveStore:
-    """``ObjectiveStore`` over GitHub Issues — a thin adapter over ``perk.github``'s objective-tier
-    functions (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
+    """``ObjectiveStore`` over GitHub Issues — a thin adapter over the GitHub objective/plan
+    substrate (constructor-bound ``repo_root``; str ids at the boundary; ``GitHubError`` →
     ``ObjectiveStoreError``). A verbatim move of ``GitHubIssueBackend``'s objective methods."""
 
-    backend_id = GITHUB_BACKEND_ID
+    backend_id = "github"
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
 
     def find_objective(self, *, run_id: str) -> objective_store.ObjectiveRef | None:
         with _translate():
-            found = github.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
+            found = objectives.find_objective_issue(run_id=run_id, repo_root=self._repo_root)
         return None if found is None else _objective_ref(found)
 
     def read_objective_source(
@@ -105,7 +93,7 @@ class GitHubObjectiveStore:
         """
         number = _number(source_id)
         with _translate():
-            src = github.read_issue(number=number, repo_root=self._repo_root)
+            src = plans.read_issue(number=number, repo_root=self._repo_root)
         if src is None:
             return None
         return objective_store.AdoptableObjectiveSource(
@@ -136,7 +124,7 @@ class GitHubObjectiveStore:
             return None
         number = _number(source_id)
         with _translate():
-            adopted = github.adopt_issue_as_objective(
+            adopted = objectives.adopt_issue_as_objective(
                 number=number,
                 title=title,
                 prose=prose,
@@ -162,7 +150,7 @@ class GitHubObjectiveStore:
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef:
         with _translate():
-            created = github.create_objective_issue(
+            created = objectives.create_objective_issue(
                 title=title,
                 body=body,
                 repo_root=self._repo_root,
@@ -177,7 +165,7 @@ class GitHubObjectiveStore:
     def get_objective(self, *, objective_id: str) -> objective_store.ObjectiveState | None:
         number = _number(objective_id)
         with _translate():
-            state = github.get_objective(number=number, repo_root=self._repo_root)
+            state = objectives.get_objective(number=number, repo_root=self._repo_root)
         if state is None:
             return None
         return objective_store.ObjectiveState(
@@ -193,7 +181,7 @@ class GitHubObjectiveStore:
     ) -> objective_store.ObjectiveHeaderUpdate:
         number = _number(objective_id)
         with _translate():
-            updated = github.update_objective_header(
+            updated = objectives.update_objective_header(
                 number=number, fields=fields, repo_root=self._repo_root, dry_run=dry_run
             )
         return objective_store.ObjectiveHeaderUpdate(
@@ -212,7 +200,7 @@ class GitHubObjectiveStore:
     ) -> objective_store.ObjectiveNodeUpdate:
         number = _number(objective_id)
         with _translate():
-            updated = github.update_objective_node(
+            updated = objectives.update_objective_node(
                 number=number,
                 node_id=node_id,
                 status=status,
@@ -233,7 +221,7 @@ class GitHubObjectiveStore:
     ) -> objective_store.ObjectiveBodyUpdate:
         number = _number(objective_id)
         with _translate():
-            updated = github.update_objective_body(
+            updated = objectives.update_objective_body(
                 number=number, prose=prose, repo_root=self._repo_root, dry_run=dry_run
             )
         return objective_store.ObjectiveBodyUpdate(
@@ -257,7 +245,7 @@ class GitHubObjectiveStore:
     ) -> objective_store.ObjectiveNodeAdd:
         number = _number(objective_id)
         with _translate():
-            added = github.add_objective_node(
+            added = objectives.add_objective_node(
                 number=number,
                 phase=phase,
                 description=description,
@@ -292,7 +280,7 @@ class GitHubObjectiveStore:
         """Close the GitHub objective issue (byte-identical to the issue tier's prior close)."""
         number = _number(objective_id)
         with _translate():
-            return github.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
+            return plans.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
         """GitHub has no Project Updates surface — always ``False`` (no-op; Node 4.3)."""
@@ -341,37 +329,3 @@ class GitHubObjectiveStore:
     def read_node_engagement(self, *, objective_id: str, node_id: str) -> engagement.NodeEngagement:
         # GitHub objectives are one issue with no per-node issues — honest no-op (Linear-first).
         return engagement.EMPTY_NODE_ENGAGEMENT
-
-
-def resolve_objective_store_id(repo_root: Path) -> str:
-    """Resolve the repo's objective-store selection — single-sourced off the ``[issues]`` table.
-
-    An objective and its plan/learn issues share one backend selection (both populations live in the
-    same tracker), so this re-exports ``resolve_issue_backend_id`` rather than reading a separate
-    config key. Unknown/malformed config raises ``IssueBackendError`` (every caller's existing error
-    boundary handles it).
-    """
-    return resolve_issue_backend_id(repo_root)
-
-
-def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
-    """Resolve the repo's objective store from the committed ``[issues]`` config table.
-
-    Mirrors ``resolve_issue_backend``: ``resolve_objective_store_id`` validates the selection and
-    this constructs the matching store. The Linear arm requires a committed ``[issues] team`` and
-    the ``LINEAR_API_KEY`` env var (either missing raises the same hinted ``IssueBackendError``
-    ``resolve_issue_backend`` raises). Construction is lazy (no network).
-    """
-    backend_id = resolve_objective_store_id(repo_root)
-    if backend_id == GITHUB_BACKEND_ID:
-        return GitHubObjectiveStore(repo_root)
-    if backend_id == LINEAR_BACKEND_ID:
-        team = config.load_committed_issues_team(repo_root)
-        if team is None:
-            raise IssueBackendError(
-                '[issues] team is required when backend = "linear" — '
-                "set the Linear team key in .pi/perk.toml"
-            )
-        client = linear_client.client_from_env(repo_root=repo_root)
-        return linear.LinearProjectObjectiveStore(client, team_key=team, repo_root=repo_root)
-    raise IssueBackendError(f"no backend implementation for {backend_id!r}")

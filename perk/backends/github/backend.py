@@ -1,19 +1,20 @@
-"""``GitHubIssueBackend`` — the issue-tier adapter over ``perk.github`` (Objective #746, Node 2.1).
+"""``GitHubIssueBackend`` — the issue-tier adapter over the GitHub substrate (Objective #746).
 
 Node 1.1 (``perk/backends/issue_backend.py``) shipped the issue-tier **contract** — the
 ``IssueBackend`` ``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``.
 This module makes the GitHub backend live: ``GitHubIssueBackend`` is a thin delegation adapter over
-``perk.github``'s issue-tier module functions (which remain the GitHub backend's private
-implementation substrate). The resolver every issue-tier consumer goes through lives in
+the plan/issue substrate ``perk.backends.github.plans`` (the GitHub backend's private implementation
+substrate, a sibling in this package). The resolver every issue-tier consumer goes through lives in
 ``perk/backends/resolve.py``.
 
-This module imports both ``perk.github`` and ``perk.backends.issue_backend`` (preserving Node 1.1's
-one-way import guard: ``perk/github/`` never references the backend tier).
+This module imports the substrate (``perk.backends.github.plans``) and the contract
+(``perk.backends.issue_backend``); the pure forge gateway ``perk/github/`` never references the
+backend tier (Node 1.1's one-way import guard).
 
 Adapter disciplines:
 
 - **Late-bound delegation.** Every method resolves its delegate via attribute access on the
-  ``github`` module object (and, for the engagement reads, the ``gh_engagement`` module object) at
+  ``plans`` module object (and, for the engagement reads, the ``gh_engagement`` module object) at
   call time, so existing ``monkeypatch.setattr(...)`` test fixtures keep intercepting unchanged —
   even when the patch lands after backend construction.
 - **Constructor-bound repo context.** ``repo_root`` is bound once at construction and threaded
@@ -30,9 +31,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-from perk import github
 from perk.backends import engagement, issue_backend
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import plans
 from perk.backends.issue_backend import IssueBackendError
 from perk.github import GitHubError
 
@@ -54,7 +55,7 @@ def _number(issue_id: str) -> int:
         raise IssueBackendError(f"GitHub issue ids are numeric; got {issue_id!r}") from exc
 
 
-def _issue_ref(found: github.PlanIssue) -> issue_backend.IssueRef:
+def _issue_ref(found: plans.PlanIssue) -> issue_backend.IssueRef:
     return issue_backend.IssueRef(id=str(found.number), url=found.url, existed=found.existed)
 
 
@@ -114,7 +115,7 @@ class GitHubIssueBackend:
         self, name: str, *, color: str, description: str, dry_run: bool = False
     ) -> issue_backend.Label:
         with _translate():
-            label = github.create_label(
+            label = plans.create_label(
                 name,
                 color=color,
                 description=description,
@@ -127,14 +128,14 @@ class GitHubIssueBackend:
 
     def find_plan_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
         with _translate():
-            found = github.find_plan_issue(run_id=run_id, repo_root=self._repo_root)
+            found = plans.find_plan_issue(run_id=run_id, repo_root=self._repo_root)
         return None if found is None else _issue_ref(found)
 
     def create_plan_issue(
         self, *, title: str, body: str, run_id: str | None, dry_run: bool = False
     ) -> issue_backend.IssueRef:
         with _translate():
-            created = github.create_plan_issue(
+            created = plans.create_plan_issue(
                 title=title, body=body, repo_root=self._repo_root, run_id=run_id, dry_run=dry_run
             )
         return _issue_ref(created)
@@ -144,7 +145,7 @@ class GitHubIssueBackend:
     ) -> issue_backend.PlanUpdate:
         number = _number(issue_id)
         with _translate():
-            updated = github.update_plan_issue(
+            updated = plans.update_plan_issue(
                 number=number,
                 title=title,
                 body_comment=body_comment,
@@ -163,7 +164,7 @@ class GitHubIssueBackend:
     ) -> issue_backend.PlanHeaderUpdate:
         number = _number(issue_id)
         with _translate():
-            updated = github.update_plan_header(
+            updated = plans.update_plan_header(
                 issue=number, fields=fields, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.PlanHeaderUpdate(
@@ -175,7 +176,7 @@ class GitHubIssueBackend:
     ) -> bool:
         number = _number(issue_id)
         with _translate():
-            return github.prepend_plan_callout(
+            return plans.prepend_plan_callout(
                 issue=number,
                 callout=callout,
                 command=command,
@@ -186,7 +187,7 @@ class GitHubIssueBackend:
     def get_plan(self, *, issue_id: str) -> issue_backend.PlanState | None:
         number = _number(issue_id)
         with _translate():
-            state = github.get_plan(number=number, repo_root=self._repo_root)
+            state = plans.get_plan(number=number, repo_root=self._repo_root)
         if state is None:
             return None
         return issue_backend.PlanState(
@@ -201,14 +202,14 @@ class GitHubIssueBackend:
     def get_plan_body(self, *, issue_id: str) -> str | None:
         number = _number(issue_id)
         with _translate():
-            return github.get_plan_body(number=number, repo_root=self._repo_root)
+            return plans.get_plan_body(number=number, repo_root=self._repo_root)
 
     # --- in-place issue adoption (#706, §8.29) ---
 
     def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
         number = _number(issue_id)
         with _translate():
-            found = github.read_issue(number=number, repo_root=self._repo_root)
+            found = plans.read_issue(number=number, repo_root=self._repo_root)
         if found is None:
             return None
         return issue_backend.AdoptableIssue(
@@ -232,7 +233,7 @@ class GitHubIssueBackend:
     ) -> issue_backend.IssueRef:
         number = _number(issue_id)
         with _translate():
-            adoption = github.adopt_issue_as_plan(
+            adoption = plans.adopt_issue_as_plan(
                 number=number,
                 header_fields=header_fields,
                 plan_markdown=plan_markdown,
@@ -247,7 +248,7 @@ class GitHubIssueBackend:
 
     def find_learn_issue(self, *, run_id: str) -> issue_backend.IssueRef | None:
         with _translate():
-            found = github.find_learn_issue(run_id=run_id, repo_root=self._repo_root)
+            found = plans.find_learn_issue(run_id=run_id, repo_root=self._repo_root)
         return None if found is None else _issue_ref(found)
 
     def create_learn_issue(
@@ -255,7 +256,7 @@ class GitHubIssueBackend:
     ) -> issue_backend.IssueRef:
         plan_number = _number(plan_id)
         with _translate():
-            created = github.create_learn_issue(
+            created = plans.create_learn_issue(
                 title=title,
                 body=body,
                 repo_root=self._repo_root,
@@ -267,7 +268,7 @@ class GitHubIssueBackend:
 
     def list_learn_issues(self) -> tuple[issue_backend.LearnIssueSummary, ...]:
         with _translate():
-            summaries = github.list_learn_issues(repo_root=self._repo_root)
+            summaries = plans.list_learn_issues(repo_root=self._repo_root)
         return tuple(
             issue_backend.LearnIssueSummary(id=str(s.number), title=s.title, url=s.url, body=s.body)
             for s in summaries
@@ -276,7 +277,7 @@ class GitHubIssueBackend:
     def close_and_label_consolidated(self, *, issue_id: str, dry_run: bool = False) -> bool:
         number = _number(issue_id)
         with _translate():
-            return github.close_and_label_consolidated(
+            return plans.close_and_label_consolidated(
                 issue=number, repo_root=self._repo_root, dry_run=dry_run
             )
 
@@ -285,14 +286,14 @@ class GitHubIssueBackend:
     def close_issue(self, *, issue_id: str, dry_run: bool = False) -> bool:
         number = _number(issue_id)
         with _translate():
-            return github.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
+            return plans.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
 
     def add_issue_comment(
         self, *, issue_id: str, body: str, dry_run: bool = False
     ) -> issue_backend.CommentResult:
         number = _number(issue_id)
         with _translate():
-            result = github.add_issue_comment(
+            result = plans.add_issue_comment(
                 issue=number, body=body, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.CommentResult(posted=result.posted)
@@ -300,7 +301,7 @@ class GitHubIssueBackend:
     def find_comment_id_by_marker(self, *, issue_id: str, marker: str) -> str | None:
         number = _number(issue_id)
         with _translate():
-            comment_id = github.find_comment_id_by_marker(
+            comment_id = plans.find_comment_id_by_marker(
                 issue=number, marker=marker, repo_root=self._repo_root
             )
         return None if comment_id is None else str(comment_id)
@@ -310,7 +311,7 @@ class GitHubIssueBackend:
     ) -> issue_backend.CommentResult:
         number = _number(issue_id)
         with _translate():
-            result = github.upsert_marked_comment(
+            result = plans.upsert_marked_comment(
                 issue=number, marker=marker, body=body, repo_root=self._repo_root, dry_run=dry_run
             )
         return issue_backend.CommentResult(posted=result.posted)

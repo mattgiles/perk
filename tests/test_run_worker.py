@@ -5,15 +5,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from perk import github
+from perk.backends.github import plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
 from perk.run import run_report, run_worker
 from perk.state import cache
 
 
-def _plan_state(number: int = 42) -> github.PlanState:
-    return github.PlanState(
+def _plan_state(number: int = 42) -> plans.PlanState:
+    return plans.PlanState(
         number=number,
         url=f"https://gh/o/r/issues/{number}",
         title="A plan",
@@ -25,8 +25,8 @@ def _plan_state(number: int = 42) -> github.PlanState:
 
 @pytest.fixture
 def fake_github(monkeypatch):
-    monkeypatch.setattr(github, "get_plan", lambda *, number, repo_root: _plan_state(number))
-    monkeypatch.setattr(github, "get_plan_body", lambda *, number, repo_root: "# plan body\n")
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: _plan_state(number))
+    monkeypatch.setattr(plans, "get_plan_body", lambda *, number, repo_root: "# plan body\n")
 
 
 def _make_entry(repo_root: Path) -> Path:
@@ -223,7 +223,7 @@ def test_linear_agent_emission_failure_is_exit_code_neutral(tmp_path, fake_githu
 
 def test_plan_not_found_is_loud(tmp_path, monkeypatch):
     _make_entry(tmp_path)
-    monkeypatch.setattr(github, "get_plan", lambda *, number, repo_root: None)
+    monkeypatch.setattr(plans, "get_plan", lambda *, number, repo_root: None)
     with pytest.raises(UserFacingCliError) as exc:
         run_worker.run_worker(
             repo_root=tmp_path,

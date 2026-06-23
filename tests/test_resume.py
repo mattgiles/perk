@@ -7,6 +7,7 @@ from click.testing import CliRunner
 
 from perk import github
 from perk.backends import issue_backend
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch, resume
 from perk.state import cache
@@ -25,9 +26,9 @@ def _neutral_state(
     )
 
 
-def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) -> github.PlanState:
-    """The github-native shape returned by monkeypatched ``github.get_plan`` fakes."""
-    return github.PlanState(
+def _state(*, header: dict | None = None, pr: github.PullRequest | None = None) -> plans.PlanState:
+    """The github-native shape returned by monkeypatched ``plans.get_plan`` fakes."""
+    return plans.PlanState(
         number=7, url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr
     )
 
@@ -87,7 +88,7 @@ def _authed(monkeypatch) -> None:
 def test_dry_run_resolves_stage_without_launching(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(
-        github, "get_plan", lambda **k: _state(header={"lifecycle_stage": "planned"})
+        plans, "get_plan", lambda **k: _state(header={"lifecycle_stage": "planned"})
     )
 
     def boom(**k):
@@ -108,7 +109,7 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
 
 def test_real_resume_writes_ref_and_launches(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("OPEN")))
     launched: dict[str, object] = {}
 
     def _launch(**k):
@@ -127,7 +128,7 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
 
 def test_nothing_to_resume_exits_0(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: _state(pr=_pr("MERGED")))
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _state(pr=_pr("MERGED")))
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -138,7 +139,7 @@ def test_nothing_to_resume_exits_0(monkeypatch):
 
 def test_plan_not_found_exits_1(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "get_plan", lambda **k: None)
+    monkeypatch.setattr(plans, "get_plan", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)

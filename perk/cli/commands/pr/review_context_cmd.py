@@ -12,10 +12,13 @@ Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-re
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import click
 
 from perk import github
+from perk.backends import resolve
+from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -79,8 +82,34 @@ def _impl(*, repo_root: Path) -> PrReviewContextResult:
         raise UserFacingCliError(
             f"No PR found for branch {branch!r}\nRun /submit first.", error_type="no_pr"
         )
-    context = github.get_pr_review_context(pr_number=pr.number, branch=branch, repo_root=repo_root)
+    context = github.get_pr_review_context(
+        pr_number=pr.number,
+        branch=branch,
+        repo_root=repo_root,
+        plan_body=_resolve_plan_body(repo_root, plan_ref),
+    )
     return PrReviewContextResult(context=context, branch=branch)
+
+
+def _resolve_plan_body(repo_root: Path, plan_ref: dict[str, Any]) -> str | None:
+    """Resolve the plan body backend-neutrally (mirrors ``materialize_plan_body``): the worktree
+    cache mirror first, else fetch via the resolved issue backend (GitHub numeric ids, Linear
+    ``ENG-123`` — the resolver owns the id shape). ``None`` when neither is available."""
+    mirror = cache.plan_body_path(repo_root)  # primary: the worktree mirror (backend-neutral)
+    if mirror.is_file():
+        try:
+            text = mirror.read_text(encoding="utf-8").strip()
+        except OSError:
+            text = ""
+        if text:
+            return text
+    pr_id = str(plan_ref.get("pr_id", "")).strip()  # fallback: fetch via the resolver (BOTH)
+    if not pr_id:
+        return None
+    try:
+        return resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
+    except (GitHubError, IssueBackendError):
+        return None
 
 
 def _result_to_dict(result: PrReviewContextResult) -> dict[str, object]:

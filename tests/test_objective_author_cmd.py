@@ -1,6 +1,6 @@
 """`perk objective author --from <source>`: the in-place objective-adoption cold door (#709, §8.30).
 
-`objective_stores.resolve_objective_store`, `resolve.resolve_issue_backend`, and
+`resolve.resolve_objective_store`, `resolve.resolve_issue_backend`, and
 `launch.launch_stage` are stubbed (no Linear/GitHub, no `exec pi`), mirroring test_from_cmd.py.
 """
 
@@ -11,8 +11,9 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective, plan
-from perk.backends import objective_store, objective_stores, resolve
+from perk.backends import objective_store, resolve
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -64,11 +65,11 @@ class _FakeStore:
 
 
 def _stub(monkeypatch, *, store, sink: dict | None = None, issue_state="OPEN"):
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: store)
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: store)
 
     class _Backend:
         def read_issue(self, *, issue_id):
-            return github.IssueRead(number=1, url="u", title="t", body="b", state=issue_state)
+            return plans.IssueRead(number=1, url="u", title="t", body="b", state=issue_state)
 
     monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     if sink is not None:

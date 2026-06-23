@@ -8,17 +8,16 @@ their stage handlers.
 The TS extension authors the *same* operation names + payload shapes in Phase 1, so
 ``doctor`` can verify both planes and either can later swap ``gh``-shell → API-backed.
 
-Issue tier demotion (Objective #252, Node 1.2): the issue-tracking tier functions here
-(``create_label`` … ``update_objective_body`` — plan/learn/objective issues, marked comments,
-labels) are now the **implementation substrate** of the GitHub issue backend. Production code
-must reach the issue tier through the resolver in perk/backends/resolve.py — never by calling
-these module functions directly (enforced by the source-scan regression test in
-``tests/test_resolve.py``). PR/CI/auth tier functions remain the direct surface for all backends.
+Issue/objective tier demotion (Objectives #252/#746): the issue/objective substrate now lives in
+the backend tier at perk/backends/github/{plans,objectives,engagement}.py — plan/learn/objective
+issues, marked comments, labels, and the read-only ``gh api graphql`` engagement reads. Production
+code reaches that substrate only through the resolvers in perk/backends/resolve.py — never by
+calling those module functions directly (enforced by the source-scan regression tests in
+``tests/test_resolve.py``). The PR/CI/auth/review tier here remains the direct forge surface for all
+backends.
 
-This package is the pure GitHub gateway: it never imports the backend tier (the one-way import
-guard scans this package for any backend-tier import). The issue human-engagement substrate
-(the read-only ``gh api graphql`` comment/description-edit reads) now lives in the backend tier at
-perk/backends/github/engagement.py.
+This package is the **pure GitHub gateway** (PR/CI/auth/review only): it never imports the backend
+tier (the one-way import guard scans this package for any backend-tier import).
 """
 
 from perk.github import _exec
@@ -29,64 +28,17 @@ from perk.github.auth import (
     check_auth,
     check_repo_access,
 )
-from perk.github.objectives import (
-    ObjectiveAdoption,
-    ObjectiveBodyUpdate,
-    ObjectiveHeaderUpdate,
-    ObjectiveIssue,
-    ObjectiveNodeAdd,
-    ObjectiveNodeUpdate,
-    ObjectiveState,
-    add_objective_node,
-    adopt_issue_as_objective,
-    create_objective_issue,
-    find_objective_issue,
-    get_objective,
-    update_objective_body,
-    update_objective_header,
-    update_objective_node,
-)
-from perk.github.plans import (
-    CommentResult,
-    IssueRead,
-    Label,
-    LearnIssueSummary,
-    PlanIssue,
-    PlanUpdate,
-    add_issue_comment,
-    add_issue_label,
-    close_and_label_consolidated,
-    close_issue,
-    create_label,
-    create_learn_issue,
-    create_plan_issue,
-    find_learn_issue,
-    find_plan_issue,
-    list_learn_issues,
-    read_issue,
-)
 from perk.github.prs import (
-    PlanAdoption,
-    PlanHeaderUpdate,
-    PlanState,
     PrBodyUpdate,
     PullRequest,
-    adopt_issue_as_plan,
     create_pr,
     default_branch,
-    find_comment_id_by_marker,
     find_pr_for_branch,
-    get_plan,
-    get_plan_body,
     get_pr,
     get_pr_body,
     mark_pr_ready,
     merge_pr,
-    prepend_plan_callout,
-    update_plan_header,
-    update_plan_issue,
     update_pr_body,
-    upsert_marked_comment,
     validate_pr_body,
 )
 from perk.github.reviews import (
@@ -129,25 +81,9 @@ __all__ = [
     "RESOLVE_REVIEW_THREAD_MUTATION",
     "AuthStatus",
     "BatchResolveResult",
-    "CommentResult",
     "DiscussionComment",
     "GitHubError",
     "InlineReviewComment",
-    "IssueRead",
-    "Label",
-    "LearnIssueSummary",
-    "ObjectiveAdoption",
-    "ObjectiveBodyUpdate",
-    "ObjectiveHeaderUpdate",
-    "ObjectiveIssue",
-    "ObjectiveNodeAdd",
-    "ObjectiveNodeUpdate",
-    "ObjectiveState",
-    "PlanAdoption",
-    "PlanHeaderUpdate",
-    "PlanIssue",
-    "PlanState",
-    "PlanUpdate",
     "PrBodyUpdate",
     "PrFeedback",
     "PrReviewContext",
@@ -161,31 +97,13 @@ __all__ = [
     "WorkflowPermissions",
     "WorkflowRun",
     "_exec",
-    "add_issue_comment",
-    "add_issue_label",
-    "add_objective_node",
     "add_pr_reaction",
-    "adopt_issue_as_objective",
-    "adopt_issue_as_plan",
     "cancel_workflow_run",
     "check_auth",
     "check_repo_access",
-    "close_and_label_consolidated",
-    "close_issue",
-    "create_label",
-    "create_learn_issue",
-    "create_objective_issue",
-    "create_plan_issue",
     "create_pr",
     "default_branch",
-    "find_comment_id_by_marker",
-    "find_learn_issue",
-    "find_objective_issue",
-    "find_plan_issue",
     "find_pr_for_branch",
-    "get_objective",
-    "get_plan",
-    "get_plan_body",
     "get_pr",
     "get_pr_body",
     "get_pr_feedback",
@@ -193,22 +111,13 @@ __all__ = [
     "get_repo_variable",
     "get_workflow_permissions",
     "get_workflow_run",
-    "list_learn_issues",
     "mark_pr_ready",
     "merge_pr",
     "post_pr_review",
-    "prepend_plan_callout",
-    "read_issue",
     "rerun_workflow_run",
     "resolve_review_threads",
     "secret_exists",
     "trigger_workflow",
-    "update_objective_body",
-    "update_objective_header",
-    "update_objective_node",
-    "update_plan_header",
-    "update_plan_issue",
     "update_pr_body",
-    "upsert_marked_comment",
     "validate_pr_body",
 ]

@@ -1,6 +1,6 @@
 """`perk plan from <issue>`: the in-place issue-adoption cold door (#706, §8.29).
 
-`github.read_issue`, `gh_engagement.read_issue_comments`, `gh_engagement.read_description_edits`,
+`plans.read_issue`, `gh_engagement.read_issue_comments`, `gh_engagement.read_description_edits`,
 and `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring test_replan_cmd.py.
 """
 
@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from perk import github, plan
 from perk.backends.github import engagement as gh_engagement
+from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -28,8 +29,8 @@ def _authed(monkeypatch) -> None:
     )
 
 
-def _issue(*, state: str = "OPEN", body: str = "do the thing") -> github.IssueRead:
-    return github.IssueRead(number=7, url="u/7", title="Human title", body=body, state=state)
+def _issue(*, state: str = "OPEN", body: str = "do the thing") -> plans.IssueRead:
+    return plans.IssueRead(number=7, url="u/7", title="Human title", body=body, state=state)
 
 
 def _comment_row(body: str, *, is_bot: bool = False) -> gh_engagement.IssueCommentRow:
@@ -45,7 +46,7 @@ def _comment_row(body: str, *, is_bot: bool = False) -> gh_engagement.IssueComme
 
 
 def _stub_issue(monkeypatch, *, issue=None, comments=None, edits=None) -> None:
-    monkeypatch.setattr(github, "read_issue", lambda **k: _issue() if issue is None else issue)
+    monkeypatch.setattr(plans, "read_issue", lambda **k: _issue() if issue is None else issue)
     monkeypatch.setattr(gh_engagement, "read_issue_comments", lambda **k: list(comments or []))
     monkeypatch.setattr(gh_engagement, "read_description_edits", lambda **k: list(edits or []))
 
@@ -173,7 +174,7 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch):
 
 def test_refuses_not_found(monkeypatch):
     _authed(monkeypatch)
-    monkeypatch.setattr(github, "read_issue", lambda **k: None)
+    monkeypatch.setattr(plans, "read_issue", lambda **k: None)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)

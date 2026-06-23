@@ -5,6 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective
+from perk.backends.github import objectives, plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import land_cmd
@@ -52,9 +53,9 @@ def _stub_land(
         ),
     )
     monkeypatch.setattr(
-        github,
+        plans,
         "get_plan",
-        lambda **k: github.PlanState(number=7, url="u/7", title=title, header={}, pr=None),
+        lambda **k: plans.PlanState(number=7, url="u/7", title=title, header={}, pr=None),
     )
 
     def _ready(**k):
@@ -173,7 +174,7 @@ def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
     _authed(monkeypatch)
     monkeypatch.setattr(github, "default_branch", lambda repo_root: "main")
     closed: list[int] = []
-    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -193,7 +194,7 @@ def test_real_land_default_base_keeps_autoclose(monkeypatch):
     def _boom(**k):
         raise AssertionError("close_issue must not be called on a default-base land")
 
-    monkeypatch.setattr(github, "close_issue", _boom)
+    monkeypatch.setattr(plans, "close_issue", _boom)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -232,7 +233,7 @@ def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, cap
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
-    monkeypatch.setattr(github, "close_issue", _boom)
+    monkeypatch.setattr(plans, "close_issue", _boom)
     backend = GitHubIssueBackend(repo_root=Path())
     out = land_cmd._close_plan_issue_on_land(
         backend, issue="7", repo_root=Path(), pr_base="release"
@@ -244,8 +245,10 @@ def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, cap
 # --- P2.T11a: mechanical auto-on-merge node-done --------------------------------------------
 
 
-def _objective_state(nodes: list[objective.ObjectiveNode]) -> github.ObjectiveState:
-    return github.ObjectiveState(number=5, url="u/5", title="Obj", header={}, nodes=tuple(nodes))
+def _objective_state(nodes: list[objective.ObjectiveNode]) -> objectives.ObjectiveState:
+    return objectives.ObjectiveState(
+        number=5, url="u/5", title="Obj", header={}, nodes=tuple(nodes)
+    )
 
 
 def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
@@ -327,7 +330,7 @@ def test_reconcile_on_land_bad_objective_id():
 
 
 def test_reconcile_on_land_objective_not_found(monkeypatch):
-    monkeypatch.setattr(github, "get_objective", lambda **k: None)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
@@ -336,7 +339,7 @@ def test_reconcile_on_land_objective_not_found(monkeypatch):
 
 def test_reconcile_on_land_no_linked_node(monkeypatch):
     monkeypatch.setattr(
-        github, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
+        objectives, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
     )
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
@@ -347,7 +350,7 @@ def test_reconcile_on_land_no_linked_node(monkeypatch):
 def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
     marked: list[str] = []
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
         lambda **k: _objective_state([_node("1.1", pr="#7"), _node("1.2", pr="#99")]),
     )
@@ -355,13 +358,13 @@ def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
     def _update(**k):
         assert k["status"] == objective.NodeStatus.DONE
         marked.append(k["node_id"])
-        return github.ObjectiveNodeUpdate(
+        return objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         )
 
-    monkeypatch.setattr(github, "update_objective_node", _update)
+    monkeypatch.setattr(objectives, "update_objective_node", _update)
     closed: list[int] = []
-    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path()
     )
@@ -376,12 +379,12 @@ def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
     # Re-land idempotency: the target is already done and the graph is complete — the close still
     # runs (idempotent convergence) even though zero nodes were marked.
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
         lambda **k: _objective_state([_node("1.1", pr="#7", status=objective.NodeStatus.DONE)]),
     )
     closed: list[int] = []
-    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
@@ -392,7 +395,7 @@ def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
 def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatch):
     # Landing the final non-terminal node → every node terminal → the objective issue is closed.
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
         lambda **k: _objective_state(
             [
@@ -403,14 +406,14 @@ def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatc
         ),
     )
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
     closed: list[int] = []
-    monkeypatch.setattr(github, "close_issue", lambda **k: closed.append(k["number"]) or True)
+    monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
@@ -422,14 +425,14 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
     # A close failure must NOT discard the already-marked node ids (isolated fail-open) and must
     # never affect the land result.
     monkeypatch.setattr(
-        github,
+        objectives,
         "get_objective",
         lambda **k: _objective_state([_node("1.1", pr="#7")]),
     )
     monkeypatch.setattr(
-        github,
+        objectives,
         "update_objective_node",
-        lambda **k: github.ObjectiveNodeUpdate(
+        lambda **k: objectives.ObjectiveNodeUpdate(
             number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
         ),
     )
@@ -437,7 +440,7 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
-    monkeypatch.setattr(github, "close_issue", _boom)
+    monkeypatch.setattr(plans, "close_issue", _boom)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
@@ -450,7 +453,7 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
 def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
     # Node 3.4: completion closes through the OBJECTIVE STORE (store.close_objective), not the issue
     # tier (backend.close_issue). Inject a fake store and assert it owns the close.
-    from perk.backends import objective_store, objective_stores
+    from perk.backends import objective_store, resolve
 
     calls: dict[str, object] = {}
     marked: list[str] = []
@@ -485,10 +488,10 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
             posts.append({"objective_id": objective_id, "body": body})
             return True
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
     # If the close reached the issue tier, this would fire — it must NOT.
     monkeypatch.setattr(
-        github, "close_issue", lambda **k: (_ for _ in ()).throw(AssertionError("issue-tier close"))
+        plans, "close_issue", lambda **k: (_ for _ in ()).throw(AssertionError("issue-tier close"))
     )
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
@@ -506,7 +509,7 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
 def test_reconcile_on_land_posts_update_incomplete_and_fail_open(monkeypatch, capsys):
     # The incomplete branch posts a "plan landed" update (no "Objective complete."), and a post
     # failure is fail-open: the land result is byte-unchanged and a non-fatal line hits stderr.
-    from perk.backends import objective_store, objective_stores
+    from perk.backends import objective_store, resolve
 
     class _Store:
         backend_id = "linear"
@@ -531,7 +534,7 @@ def test_reconcile_on_land_posts_update_incomplete_and_fail_open(monkeypatch, ca
         def post_status_update(self, *, objective_id, body, dry_run=False):
             raise objective_store.ObjectiveStoreError("linear update boom")
 
-    monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _Store())
+    monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
     )
@@ -544,7 +547,7 @@ def test_reconcile_on_land_is_fail_open(monkeypatch):
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
-    monkeypatch.setattr(github, "get_objective", _boom)
+    monkeypatch.setattr(objectives, "get_objective", _boom)
     out = _reconcile_objective_on_land(
         plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
     )
@@ -613,7 +616,7 @@ def test_consume_learn_on_land_no_consumed():
 def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
     closed: list[int] = []
     monkeypatch.setattr(
-        github,
+        plans,
         "close_and_label_consolidated",
         lambda *, issue, repo_root, **k: closed.append(issue) or True,
     )
@@ -629,7 +632,7 @@ def test_consume_learn_on_land_is_fail_open(monkeypatch):
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
-    monkeypatch.setattr(github, "close_and_label_consolidated", _boom)
+    monkeypatch.setattr(plans, "close_and_label_consolidated", _boom)
     out = _consume_learn_on_land(plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path())
     assert out.closed == ()
     assert out.skipped_reason == "failed: #45"
@@ -646,7 +649,7 @@ def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
         closed.append(issue)
         return True
 
-    monkeypatch.setattr(github, "close_and_label_consolidated", _close)
+    monkeypatch.setattr(plans, "close_and_label_consolidated", _close)
     out = _consume_learn_on_land(
         plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path()
     )
