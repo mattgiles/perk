@@ -1,4 +1,4 @@
-"""Providers loader + validator + resolver tests (Node 2.1 selection substrate).
+"""Providers loader + validator + resolver tests (the selection substrate).
 
 The real bundled `providers.yaml` must load + validate; the validator must *reject* each class of
 authoring error (zero/double default per seam, duplicate/empty id, bad seam). The resolver mirrors
@@ -157,7 +157,7 @@ def test_real_providers_load_the_entries():
     assert tombell.package == "npm:@tombell/pi-plan"
     assert tombell.adapter == "planAdapterTombell"
     assert tombell.default is False
-    # Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
+    # The real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
     # nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`; omitting it loads all).
     assert tombell.package_filter is None
     # plannotator-plan: a REAL plan provider with the AUGMENT posture (planAdapterPlannotator
@@ -169,7 +169,7 @@ def test_real_providers_load_the_entries():
     assert plannotator.default is False
     # No `package_filter` (`pi.extensions: ["./"]` — the sole extension is the package root).
     assert plannotator.package_filter is None
-    # Node 3.2: `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it).
+    # `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it).
     juicesharp = by_id["juicesharp-todo"]
     assert juicesharp.seam == "todo"
     assert juicesharp.package == "npm:@juicesharp/rpiv-todo"

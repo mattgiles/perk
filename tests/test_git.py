@@ -174,7 +174,7 @@ def test_worktree_add_with_base(git_repo_with_remote):
 
 def test_run_disables_git_terminal_prompt(monkeypatch):
     """`git._run` injects GIT_TERMINAL_PROMPT=0 (credential prompts fail fast instead of
-    hanging to the timeout — Node 4.2) while inheriting the ambient environment."""
+    hanging to the timeout) while inheriting the ambient environment."""
     captured: dict = {}
 
     def fake_run(args, **kwargs):
@@ -317,7 +317,7 @@ def test_parse_merge_conflicts_unparseable_nonzero_yields_empty():
 def test_detect_merge_conflicts_unparseable_conflict_is_still_unmergeable(
     git_repo_with_remote, monkeypatch
 ):
-    # Regression (#559 review): a conflict EXIT (returncode 1) whose conflicted paths fail to parse
+    # Regression (review): a conflict EXIT (returncode 1) whose conflicted paths fail to parse
     # must still report `mergeable=False` from the exit code — never falsely clean because the
     # path tuple came back empty. mergeable is taken from the exit code, NOT len(conflicts) == 0.
     clone, _remote, _advance = git_repo_with_remote
@@ -332,7 +332,7 @@ def test_detect_merge_conflicts_unparseable_conflict_is_still_unmergeable(
     assert probe.conflicts == ()
 
 
-# --- read-only SHA helpers (#642) -----------------------------------------------------------
+# --- read-only SHA helpers -----------------------------------------------------------
 
 
 def test_head_sha_returns_head_and_none_off_repo(git_repo, tmp_path_factory):

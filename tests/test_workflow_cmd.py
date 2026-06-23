@@ -1,4 +1,4 @@
-"""Tests for ``perk workflow run list`` — the supervisor read surface (Node 3.1)."""
+"""Tests for ``perk workflow run list`` — the supervisor read surface."""
 
 import json
 import subprocess
@@ -211,7 +211,7 @@ def test_aliases_resolve(args):
     assert json.loads(result.stdout)["success"] is True
 
 
-# --- cancel / retry (control surface, Node 3.2) ---------------------------------------
+# --- cancel / retry (control surface) ---------------------------------------
 
 from perk.run import runner as _runner  # noqa: E402
 

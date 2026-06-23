@@ -1,4 +1,4 @@
-"""Structural surface fingerprint of the canonical CLI taxonomy (Objective #495).
+"""Structural surface fingerprint of the canonical CLI taxonomy.
 
 This module fingerprints the live ``perk`` command surface structurally — the verb set of the root
 + every subgroup, plus each visible root command's section bucket — and asserts it equals a literal

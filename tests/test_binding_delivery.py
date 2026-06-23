@@ -1,4 +1,4 @@
-"""Node 2.1: cold-door delivery of user-originated skill bindings
+"""Cold-door delivery of user-originated skill bindings
 (`perk/substrate/binding_delivery.py`).
 
 The shipped defaults are passed explicitly so the tests are independent of the bundled
@@ -45,7 +45,7 @@ def test_nudge_at_new_trigger_renders_pointer(tmp_path):
 
 
 def test_nudge_to_missing_skill_warns_loud_but_non_fatal(tmp_path):
-    # Node 3.1, D6: a nudge to an uninstalled skill still emits the pointer, but warns (the nudge
+    # D6: a nudge to an uninstalled skill still emits the pointer, but warns (the nudge
     # mirror of the transclude warning) — never silently delivered, never blocks.
     user = [_user("stage:save", "ghost-skill", "nudge")]
     delivery = render_cold_bindings(user, tmp_path, "stage:save", defaults=_DEFAULTS)
@@ -81,7 +81,7 @@ def test_missing_transclude_target_warns_and_falls_back_to_nudge(tmp_path):
 
 
 def test_shipped_default_is_delivered(tmp_path):
-    # Node 2.3: the shipped default IS now delivered (perk no longer hardcodes the nudge), so an
+    # The shipped default IS now delivered (perk no longer hardcodes the nudge), so an
     # unbound launch at stage:implement renders the default pointer — the single delivery path.
     delivery = render_cold_bindings([], tmp_path, "stage:implement", defaults=_DEFAULTS)
     assert delivery.text is not None
@@ -115,7 +115,7 @@ def test_only_matching_trigger_is_rendered(tmp_path):
 
 def test_default_resolution_uses_bundled_bindings(tmp_path):
     # When defaults is omitted, the bundled shipped set is used: stage:implement is a default,
-    # so an unbound launch delivers that default's pointer (Node 2.3 — defaults are delivered).
+    # so an unbound launch delivers that default's pointer (defaults are delivered).
     assert load_bindings().bindings  # sanity: the bundled set loads
     delivery = render_cold_bindings([], tmp_path, "stage:implement")
     assert delivery.text is not None

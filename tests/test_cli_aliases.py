@@ -138,7 +138,7 @@ def _flat_root() -> SectionedGroup:
 
 
 def test_register_flat_alias_resolves_to_same_object():
-    # The flat alias registers the *same* Command object at root (Node 2.1, SSOT §11.3).
+    # The flat alias registers the *same* Command object at root (SSOT §11.3).
     root = _flat_root()
     pr_group = root.commands["pr"]
     assert isinstance(pr_group, click.Group)
@@ -166,7 +166,7 @@ def test_get_flat_aliases_empty_by_default():
 
 
 def test_objective_run_and_alias_resolve():
-    """`perk objective run` and `perk obj r` resolve to the supervisor command (Node 3.4)."""
+    """`perk objective run` and `perk obj r` resolve to the supervisor command."""
     objective_group = cli.commands["objective"]
     assert isinstance(objective_group, click.Group)
     assert "run" in objective_group.commands

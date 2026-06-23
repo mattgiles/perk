@@ -1,4 +1,4 @@
-"""Registry loader + validator tests (T2 thin seam).
+"""Registry loader + validator tests (the thin seam).
 
 The real bundled registry must validate; the validator must *reject* each class of
 authoring error. Negative fixtures are what exercise the shape/graph/vocabulary checks
@@ -75,7 +75,7 @@ def test_real_registry_is_valid():
 
 
 def test_objective_author_is_the_single_initial():
-    # P3.T2: objective-author -> objective-save -> objective-plan -> plan (the new single initial;
+    # objective-author -> objective-save -> objective-plan -> plan (the new single initial;
     # learn stays the single terminal).
     registry = load_registry()
     by_id = {s.id: s for s in registry.stages}
@@ -93,14 +93,14 @@ def test_objective_author_is_the_single_initial():
     assert auth.mode == "read-only" and auth.worktree == "none"
     assert auth.doors == {"warm": True, "cold_local": True, "cold_remote": False}
     assert auth.requires == [] and auth.reads == []
-    # #352 Node 2.1: objective_draft adds cache.session-data to the authoring stage's writes.
+    # objective_draft adds cache.session-data to the authoring stage's writes.
     assert auth.writes == ["session.workflow-state", "cache.session-data"]
     assert save.mode == "read-write" and save.worktree == "none"
     assert save.writes == ["github.objective", "session.workflow-state"]
 
 
 def test_address_is_linear_between_submit_and_land():
-    # P2.T7: submit -> address -> land (single initial, single terminal, symmetric edges).
+    # submit -> address -> land (single initial, single terminal, symmetric edges).
     registry = load_registry()
     by_id = {s.id: s for s in registry.stages}
     assert by_id["submit"].successors == ["address"]
@@ -111,7 +111,7 @@ def test_address_is_linear_between_submit_and_land():
 
 
 def test_land_io_includes_github_objective():
-    # P2.T11a: the mechanical auto-on-merge node-done reads + writes github.objective.
+    # The mechanical auto-on-merge node-done reads + writes github.objective.
     registry = load_registry()
     land = {s.id: s for s in registry.stages}["land"]
     assert "github.objective" in land.reads
@@ -152,11 +152,11 @@ def test_stage_io_contract():
     assert cold_remote == {"implement", "address"}
 
     assert "github.learn" in registry.state_keys
-    # #339 Node 2.1: the session-data vocabulary key, declared in writes by both authoring stages.
+    # The session-data vocabulary key, declared in writes by both authoring stages.
     assert "cache.session-data" in registry.state_keys
     assert "cache.session-data" in by_id["plan"].writes
     assert "cache.session-data" in by_id["objective-plan"].writes
-    # #352 Node 2.1: objective_draft writes the objective-draft artifact during objective-author.
+    # objective_draft writes the objective-draft artifact during objective-author.
     assert "cache.session-data" in by_id["objective-author"].writes
 
 
@@ -189,7 +189,7 @@ def test_rejects_bad_mode_enum(tmp_path):
 
 
 def test_rejects_bad_run_id_invariant(tmp_path):
-    # warm must be `keep` (Q2).
+    # warm must be `keep`.
     bad = GOOD.replace(
         "run_id: { warm: keep, cold_local: mint, cold_remote: mint }",
         "run_id: { warm: mint, cold_local: mint, cold_remote: mint }",

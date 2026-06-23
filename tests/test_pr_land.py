@@ -122,7 +122,7 @@ def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
         data = json.loads(result.output)
         assert data["pr"]["state"] == "MERGED" and data["pending_learn"] is True
         assert calls["readied"] is True and calls["merged"] is True
-        # P2.T8b: the squash commit is plain `title + Closes #N` (no HTML leaks into git log).
+        # The squash commit is plain `title + Closes #N` (no HTML leaks into git log).
         assert calls["commit_message"] == "My Feature\n\nCloses #7"
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
 
@@ -166,7 +166,7 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
         assert cache.has_marker(Path(d), cache.PENDING_LEARN)
 
 
-# --- #691: explicit plan-issue close on a non-default-base github land -----------------------
+# --- explicit plan-issue close on a non-default-base github land -----------------------
 
 
 def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
@@ -242,7 +242,7 @@ def test_close_plan_issue_non_default_base_failure_is_fail_open(monkeypatch, cap
     assert "plan issue close skipped (non-fatal)" in capsys.readouterr().err
 
 
-# --- P2.T11a: mechanical auto-on-merge node-done --------------------------------------------
+# --- mechanical auto-on-merge node-done --------------------------------------------
 
 
 def _objective_state(nodes: list[objective.ObjectiveNode]) -> objectives.ObjectiveState:
@@ -256,7 +256,7 @@ def _node(node_id: str, *, pr: str | None, status=objective.NodeStatus.PENDING):
 
 
 def test_real_land_calls_linear_agent_landed(monkeypatch):
-    """Node 5.1: the land hook fires after the merge + learn consume, with the PR number and the
+    """The land hook fires after the merge + learn consume, with the PR number and the
     objective-node summary (the emitter itself gates on the stamped provider + token)."""
     _authed(monkeypatch)
     _stub_land(monkeypatch, draft=True)
@@ -451,7 +451,7 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
 
 
 def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
-    # Node 3.4: completion closes through the OBJECTIVE STORE (store.close_objective), not the issue
+    # Completion closes through the OBJECTIVE STORE (store.close_objective), not the issue
     # tier (backend.close_issue). Inject a fake store and assert it owns the close.
     from perk.backends import objective_store, resolve
 
@@ -498,7 +498,7 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
     )
     assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None, closed=True)
     assert calls["closed"] == "proj-1"
-    # Node 4.3: a "plan landed" Project Update is posted once on completion (complete branch).
+    # A "plan landed" Project Update is posted once on completion (complete branch).
     assert len(posts) == 1
     assert posts[0]["objective_id"] == "proj-1"
     assert posts[0]["body"] == (
@@ -566,7 +566,7 @@ def test_result_to_dict_carries_objective():
         learn=LearnConsumeUpdate(("45", "50"), None),
     )
     data = _result_to_dict(result)
-    # Opaque string ids at the machine boundary (contracts §8.21; Node 4.1).
+    # Opaque string ids at the machine boundary (contracts §8.21).
     assert data["issue"] == "7"
     assert data["plan_issue_closed"] is False
     assert data["objective"] == {
@@ -591,7 +591,7 @@ def _land_result(learn: LearnConsumeUpdate) -> PrLandResult:
 
 
 def test_render_human_surfaces_non_benign_learn_skip(capsys):
-    # #102: a non-benign skip (a partial `failed: …`) is surfaced, not silent.
+    # A non-benign skip (a partial `failed: …`) is surfaced, not silent.
     _render_human(_land_result(LearnConsumeUpdate(("45",), "failed: #50")))
     out = capsys.readouterr().err
     assert "consolidated learn issue(s) #45" in out
@@ -599,7 +599,7 @@ def test_render_human_surfaces_non_benign_learn_skip(capsys):
 
 
 def test_render_human_quiet_on_benign_learn_skip(capsys):
-    # #102: `no_consumed_learn` is the ordinary non-factory case — stay quiet.
+    # `no_consumed_learn` is the ordinary non-factory case — stay quiet.
     _render_human(_land_result(LearnConsumeUpdate((), "no_consumed_learn")))
     out = capsys.readouterr().err
     assert "learn consume incomplete" not in out
@@ -628,7 +628,7 @@ def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
 
 
 def test_consume_learn_on_land_is_fail_open(monkeypatch):
-    # #102: a fully-failing close is fail-open (never raises) and the failure is recorded per-issue.
+    # A fully-failing close is fail-open (never raises) and the failure is recorded per-issue.
     def _boom(**k):
         raise github.GitHubError("gh exploded")
 
@@ -639,7 +639,7 @@ def test_consume_learn_on_land_is_fail_open(monkeypatch):
 
 
 def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
-    # #102: one bad issue must not strand the rest — the good closes still land, the failure is
+    # One bad issue must not strand the rest — the good closes still land, the failure is
     # rolled into `failed: #N` while the result stays fail-open.
     closed: list[int] = []
 

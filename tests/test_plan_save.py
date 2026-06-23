@@ -125,7 +125,7 @@ def test_plan_save_resave_does_not_prepend_callout(monkeypatch):
     assert calls["callout"] is None
 
 
-# ----------------------------------------------------- in-place issue adoption (#706, §8.29)
+# ----------------------------------------------------- in-place issue adoption (§8.29)
 
 
 def _stub_adopt(monkeypatch) -> dict[str, object]:
@@ -234,7 +234,7 @@ def test_plan_save_json_shape(monkeypatch):
 
 
 def test_plan_save_writes_cache_plan_ref(monkeypatch):
-    # A real save persists the cache.plan-ref pointer (turn-2b §7).
+    # A real save persists the cache.plan-ref pointer.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     runner = CliRunner()
@@ -287,7 +287,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
 
 
 def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
-    # P2.T10: --objective-id populates the plan header block AND the cache.plan-ref.
+    # --objective-id populates the plan header block AND the cache.plan-ref.
     _authed(monkeypatch)
     captured: dict[str, str] = {}
     monkeypatch.setattr(plans, "create_label", lambda *a, **k: plans.Label("perk:plan", False))
@@ -315,7 +315,7 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
 
 
 def test_plan_save_node_id_commits_objective_node(monkeypatch):
-    # P2.T10: --objective-id + --node-id flips the node to in_progress with the pr backlink.
+    # --objective-id + --node-id flips the node to in_progress with the pr backlink.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     captured: dict[str, object] = {}
@@ -497,7 +497,7 @@ def test_plan_save_handoff_without_objective_is_unlinked(monkeypatch):
 
 
 def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
-    # #102: a /plan-save command path (no --consumed-learn) recovers the gathered perk:learn
+    # A /plan-save command path (no --consumed-learn) recovers the gathered perk:learn
     # numbers the learn-docs factory stashed in the handoff, persisting them in the plan-ref +
     # header so the on-land consume can close them.
     _authed(monkeypatch)
@@ -513,7 +513,7 @@ def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
 
 
 def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
-    # #102: an explicit --consumed-learn always wins over the handoff's numbers.
+    # An explicit --consumed-learn always wins over the handoff's numbers.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     result = _run_with_handoff(
@@ -526,7 +526,7 @@ def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
 
 
 def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
-    # #102: a non-factory handoff carries no consumed_learn key, so the save stays empty.
+    # A non-factory handoff carries no consumed_learn key, so the save stays empty.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     result = _run_with_handoff(
@@ -539,7 +539,7 @@ def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
 
 
 def _run_with_config(monkeypatch, args, *, config):
-    """Run plan-save in an isolated repo seeded with a committed `.pi/perk.toml` (#633 base)."""
+    """Run plan-save in an isolated repo seeded with a committed `.pi/perk.toml` (base)."""
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -556,7 +556,7 @@ def _run_with_config(monkeypatch, args, *, config):
 
 
 def test_plan_save_pins_base_from_config(monkeypatch):
-    # #633: a standalone save with [workflow] base set pins it into BOTH the plan-header body and
+    # A standalone save with [workflow] base set pins it into BOTH the plan-header body and
     # the cache.plan-ref.
     _authed(monkeypatch)
     captured: dict[str, str] = {}
@@ -578,7 +578,7 @@ def test_plan_save_pins_base_from_config(monkeypatch):
 
 
 def test_plan_save_inherits_objective_base(monkeypatch):
-    # #633: an objective-linked save reads the objective's own base (objective-header) and pins it
+    # An objective-linked save reads the objective's own base (objective-header) and pins it
     # into the plan-header + plan-ref, winning over the config default.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
@@ -607,7 +607,7 @@ def test_plan_save_inherits_objective_base(monkeypatch):
 
 
 def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
-    # #633: an objective whose header carries NO base falls through fail-soft to [workflow] base.
+    # An objective whose header carries NO base falls through fail-soft to [workflow] base.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     monkeypatch.setattr(
@@ -632,7 +632,7 @@ def test_plan_save_objective_without_base_falls_through_to_config(monkeypatch):
 
 
 def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
-    # #633: a failing get_objective must be fail-soft — fall through to config base, never block.
+    # A failing get_objective must be fail-soft — fall through to config base, never block.
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
 
@@ -657,7 +657,7 @@ def test_plan_save_get_objective_failure_falls_through_to_config(monkeypatch):
 
 
 def test_plan_save_no_base_anywhere_is_none(monkeypatch):
-    # #633: neither an objective base nor [workflow] base → base stays None (default-branch path).
+    # Neither an objective base nor [workflow] base → base stays None (default-branch path).
     _authed(monkeypatch)
     _stub_writes(monkeypatch)
     result = _run(monkeypatch, ["--plan-file", "plan.md", "--json"])
@@ -666,7 +666,7 @@ def test_plan_save_no_base_anywhere_is_none(monkeypatch):
 
 
 def test_plan_save_resave_preserves_base(monkeypatch):
-    # #633: an idempotent re-save merges base back into the existing plan-header (never drops it).
+    # An idempotent re-save merges base back into the existing plan-header (never drops it).
     _authed(monkeypatch)
     calls = _stub_writes(monkeypatch, existed=True)
     result, _ref = _run_with_config(
@@ -829,7 +829,7 @@ def test_plan_save_fresh_create_reports_not_updated(monkeypatch):
 
 
 def test_plan_save_unified_node_issue_path(monkeypatch):
-    # Node 3.4: an objective-linked save into a UNIFYING store (save_node_plan returns a node-issue
+    # An objective-linked save into a UNIFYING store (save_node_plan returns a node-issue
     # ref) writes the plan INTO the node-issue — NO create_plan_issue/ensure_label — and stamps
     # cache.plan-ref at that node-issue id (no perk:plan label), reporting updated=True +
     # objective_node.linked=True.

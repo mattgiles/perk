@@ -1,4 +1,4 @@
-"""`perk doctor workflow` — the workflow-focused diagnostic subgroup (Node 3.3; §8.19)."""
+"""`perk doctor workflow` — the workflow-focused diagnostic subgroup (§8.19)."""
 
 import json
 import subprocess

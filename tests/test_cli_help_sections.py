@@ -86,7 +86,7 @@ def test_workers_render_under_other():
     assert result.exit_code == 0
     other_slice = _between(result.output, "Other:", None)
     assert "run-worker" in other_slice
-    # `plan-save` is gone (folded into the `plan` group as `perk plan save`, Node 3.2).
+    # `plan-save` is gone (folded into the `plan` group as `perk plan save`).
     assert "plan-save" not in other_slice
 
 
@@ -190,7 +190,7 @@ def _kinded_group() -> SectionedAliasGroup:
 
 
 def test_sectioned_alias_group_renders_launchers_and_workers():
-    # SSOT §11.7-Q5 (labels landed in node 2.1): marked commands render under "Launchers:" /
+    # SSOT §11.7-Q5: marked commands render under "Launchers:" /
     # "Workers:", with unmarked verbs under the catch-all "Commands:".
     result = CliRunner().invoke(_kinded_group(), ["--help"])
     assert result.exit_code == 0
@@ -228,7 +228,7 @@ def test_sectioned_alias_group_omits_empty_sections():
 
 
 def test_objective_group_renders_launchers_and_workers():
-    # The live `objective` group sections its folded launchers/workers (SSOT §11.7-Q5; node 3.1).
+    # The live `objective` group sections its folded launchers/workers (SSOT §11.7-Q5).
     result = CliRunner().invoke(cli, ["objective", "--help"])
     assert result.exit_code == 0
     assert "Launchers:" in result.output

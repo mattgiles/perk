@@ -39,7 +39,7 @@ def test_plan_header_to_data_shape():
     assert data["lifecycle_stage"] == "planned"  # StrEnum -> value
     assert data["branch"] is None and data["pr"] is None and data["objective_id"] is None
     assert data["consumed_learn"] == []  # hop-2: empty by default, serialized as a list
-    assert data["base"] is None  # #633: absent by default
+    assert data["base"] is None  # absent by default
 
 
 def test_plan_header_consumed_learn_round_trips():
@@ -141,7 +141,7 @@ def test_derive_title_uses_first_heading_else_fallback():
 
 
 def test_derive_title_ignores_hash_inside_code_fence():
-    # The P1.T6 dogfood failure: a TOML `# comment` inside a ```toml block became the title.
+    # The dogfood failure: a TOML `# comment` inside a ```toml block became the title.
     md = (
         "Here is the plan.\n\n"
         "```toml\n"
@@ -161,7 +161,7 @@ def test_derive_title_ignores_indented_code_hash():
     assert plan.derive_title("    # four-space code, not a heading\n") == "perk plan"
 
 
-# --------------------------------------------------------------- dual encoding (Node 2.2)
+# --------------------------------------------------------------- dual encoding
 
 
 def test_render_metadata_block_inline_code_golden_shape():
