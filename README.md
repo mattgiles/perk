@@ -1,15 +1,14 @@
 # perk
 
 A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the session
-*exterior*) plus a TypeScript Pi extension (the session *interior*), sequenced so that
-**perk bootstraps itself**.
+*exterior*) plus a TypeScript Pi extension (the session *interior*).
 
-> perk is in active development, dogfooded on its own repo. **Using perk on your own repo?**
 > Start at [`docs/user-docs/`](docs/user-docs/index.md).
+> Based heavily on prior art `erk` (RIP) by [dagster](https://github.com/dagster-io/dagster)
 
 ## What perk is
 
-perk ports the plan-oriented engineering workflow (explore read-only → save a plan →
+perk implements a plan-oriented engineering workflow (explore read-only → save a plan →
 implement on a branch → submit → land → learn) to [Pi](https://github.com/earendil-works),
 split across **two planes**:
 
