@@ -15,7 +15,7 @@ def parse_objective_id(raw: str) -> str:
     """Validate an opaque objective issue id (``7``, ``#7``, or Linear's ``ENG-7``).
 
     The single shared parse for every ``perk objective`` verb — a thin alias of the re-typed
-    :func:`perk.cli.commands.plan.resume_cmd.parse_plan_id` (one definition, no duplication; D5).
+    :func:`perk.cli.commands.plan.resume_cmd.parse_plan_id` (one definition, no duplication).
     """
     return parse_plan_id(raw, what="objective")
 
@@ -29,8 +29,8 @@ def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) ->
 
 
 def objective_read_instruction(backend: str, objective_id: str, url: str) -> str:
-    """Backend-aware supplemental clause for the objective-read step of the factory prompts
-    (Node 4.1). Byte-identical to extension/factories/objectivePlan.ts::objectiveReadInstruction
+    """Backend-aware supplemental clause for the objective-read step of the factory prompts.
+    Byte-identical to extension/factories/objectivePlan.ts::objectiveReadInstruction
     (the TS twin); drift in either plane fails the paired parity suites. github (and any non-linear)
     → "" (the `perk objective show` step already covers it); linear → the Project URL + the
     linear_get_issue/linear_list_comments tools (an `open <url>` fallback when the url is known)."""

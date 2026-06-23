@@ -1,21 +1,21 @@
-"""``perk objective author`` — the objective-authoring cold door (P3.T2).
+"""``perk objective author`` — the objective-authoring cold door.
 
 Opens a **read-only** plan-mode session seeded to draft a *new* objective + roadmap, the mirror
 of the ``plan`` stage for objectives. Unlike ``objective plan`` (which plans one node of an
 *existing* objective) this stage **creates** the objective — so it takes no objective number and
 requires no GitHub auth up front (the later ``objective_save`` write is the first mutation).
 
-With ``--from <source>`` it instead **adopts a pre-existing human source IN PLACE** (#709, §8.30):
+With ``--from <source>`` it instead **adopts a pre-existing human source IN PLACE** (§8.30):
 a Linear **Project** (and its issues) or a GitHub **issue**, read verbatim as untrusted seed DATA,
 turned into a perk objective whose metadata is stamped **additively** into the *same* source on
-save (the objective-level analog of ``plan from`` / Node 3.1). Every source read happens up front
+save (the objective-level analog of ``plan from``). Every source read happens up front
 (the read-only session has no Linear/``gh``); the adoption link rides the run **handoff**
 (``adopt_from``) so it survives every save surface.
 
 A **dedicated** command (in ``DEDICATED_STAGES``), not the generic registry launcher, so it can
 seed the authoring prompt. Mirrors ``objective/plan_cmd`` / ``implement_cmd``.
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exits
+Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` invalid/op-failure/refusal · ``2`` not-a-repo). The judgment (what makes a good
 objective + roadmap) lives in the ``perk-objective-author`` skill.
 """
@@ -121,7 +121,7 @@ def _render_source(src: AdoptableObjectiveSource, *, engagement_block: str | Non
 def _adopt_seed_prompt(
     scratch_path: Path, src: AdoptableObjectiveSource, *, has_issues: bool, has_engagement: bool
 ) -> str:
-    """The initial prompt for the read-only objective-adoption session (#709, §8.30)."""
+    """The initial prompt for the read-only objective-adoption session (§8.30)."""
     mapping_clause = (
         " The file also lists the source project's existing issues in an "
         "<untrusted_adopted_project_issues> block — map a roadmap node to one of those EXISTING "
@@ -164,7 +164,7 @@ def _adopt_seed_prompt(
     "from_source",
     default=None,
     help="Adopt the named pre-existing source (a Linear project / GitHub issue) IN PLACE as the "
-    "objective (#709; reads it as seed DATA, stamps perk's metadata additively on save).",
+    "objective (reads it as seed DATA, stamps perk's metadata additively on save).",
 )
 @click.option("--worktree", help="Worktree to position (objective author runs at repo root).")
 @click.option("--dry-run", is_flag=True, help="Resolve + print; launch nothing.")
@@ -249,7 +249,7 @@ def _author_from(
     as_json: bool,
     pi_args: tuple[str, ...],
 ) -> None:
-    """``objective author --from`` — adopt a pre-existing source in place (#709, §8.30)."""
+    """``objective author --from`` — adopt a pre-existing source in place (§8.30)."""
     try:
         repo_root = require_repo(ctx)
         config = require_config(ctx)

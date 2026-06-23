@@ -1,12 +1,12 @@
-"""``perk plan`` — the plan-stage launcher + the plan-revision verbs (Objective #495, Node 3.2).
+"""``perk plan`` — the plan-stage launcher + the plan-revision verbs.
 
 A **hybrid default-dispatch group** (mirroring ``LearnGroup``): bare ``perk plan`` launches the
 read-only authoring stage (a primed pi session), while ``save``/``resume``/``replan``/``from`` are
 registered verbs:
 
 - ``save`` — the merged launcher+worker (``MergedCommand``): the ``save``-stage launcher by
-  default, the deterministic worker (the GitHub plan-write) under ``--json`` (SSOT §11.2). The
-  worker keeps the **full** flag set (§11.7-Q3).
+  default, the deterministic worker (the GitHub plan-write) under ``--json``. The
+  worker keeps the **full** flag set.
 - ``resume PLAN`` — today's flat ``resume`` (launcher-only).
 - ``replan PLAN`` — today's flat ``replan`` (launcher-only).
 
@@ -75,8 +75,8 @@ plan_group = PlanGroup(
     context_settings={"ignore_unknown_options": True},
 )
 
-# resume/replan/from carry no aliases now (clean break, §11.5), so each registers under its bare
-# name. `from` is the in-place issue-adoption cold door (#706) and a valid Click command string.
+# resume/replan/from carry no aliases now (clean break), so each registers under its bare
+# name. `from` is the in-place issue-adoption cold door and a valid Click command string.
 register_with_aliases(plan_group, resume_cmd)
 register_with_aliases(plan_group, replan)
 register_with_aliases(plan_group, plan_from)

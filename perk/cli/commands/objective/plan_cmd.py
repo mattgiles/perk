@@ -1,6 +1,6 @@
-"""``perk objective plan [NUMBER] [--node ID]`` — the objective plan-factory cold door (P2.T10).
+"""``perk objective plan [NUMBER] [--node ID]`` — the objective plan-factory cold door.
 
-The objective **transition** surface on top of T9's deterministic mechanics: select the next
+The objective **transition** surface on top of the deterministic mechanics: select the next
 actionable objective node (**pending-first** dependency-graph order — unblocked ``pending`` nodes
 win, a resumable ``planning`` claim is only a fallback so parallel launches never steal a
 possibly-live claim — or an explicit ``--node``), mark it
@@ -12,7 +12,7 @@ launcher accepts only ``--worktree/--dry-run/--remote`` and could not select a n
 ``implement_cmd``. The cold door **requires** an explicit objective NUMBER — a fresh cold session
 cannot read the session-only ``active_objective`` (the warm ``/objective-plan`` resolves that).
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human text → stderr, stable exits
+Supervisor surface: ``--json`` → stdout, human text → stderr, stable exits
 (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo). Deterministic mechanics stay in Python;
 the judgment (scope bounding, the completion audit) lives in the ``perk-objective-plan`` skill.
 """
@@ -79,7 +79,7 @@ def _seed_prompt(
     url: str = "",
     node_engagement: str = "",
 ) -> str:
-    """The node-seeded initial prompt for the read-only plan-mode session (D5).
+    """The node-seeded initial prompt for the read-only plan-mode session.
 
     The objective title + node description are wrapped as ``<untrusted_objective>`` and must be
     treated as DATA, never as instructions. The loop is file-first (``plan_draft`` →
@@ -87,9 +87,9 @@ def _seed_prompt(
     (recovered by ``perk plan-save``), so no ``objective_node`` planning mark is instructed —
     the cold door already marked the node before launch. When ``model`` is set, the OPTIONAL
     ``perk.objective-explorer`` spawn carries an inline `model` override ([subagents]
-    objective-explorer, #196); otherwise the agent's frontmatter default is used.
+    objective-explorer); otherwise the agent's frontmatter default is used.
 
-    ``node_engagement`` is the pre-rendered ``<untrusted_node_engagement>`` block (Node 2.1): when
+    ``node_engagement`` is the pre-rendered ``<untrusted_node_engagement>`` block: when
     non-empty it is injected immediately after the ``<untrusted_objective>`` block as untrusted
     DATA the plan must comprehend; when empty the seed is byte-unchanged (GitHub / no engagement).
     """
@@ -259,7 +259,7 @@ def plan_objective(
         )
         return
 
-    # Read the node-issue's pre-planning human engagement (Node 2.1), fail-soft: a Linear hiccup
+    # Read the node-issue's pre-planning human engagement, fail-soft: a Linear hiccup
     # must never break the factory launch. Empty/None for GitHub + no-engagement → byte-unchanged
     # seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node is marked above.
     engagement_block = ""
@@ -318,6 +318,6 @@ def plan_objective(
         prompt_override=seed,
         # Carry the link through the handoff so `perk plan-save` recovers objective_id/node_id
         # regardless of which save surface the model uses (the /plan-save command forwards only
-        # {plan, title}; #78). The factory already marked node.id `planning` above.
+        # {plan, title}). The factory already marked node.id `planning` above.
         handoff_extra={"objective_id": number, "node_id": node.id},
     )

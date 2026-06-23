@@ -1,8 +1,8 @@
 """`perk plan save` — the Python/worker GitHub plan-write (the cold save door).
 
-The first `require_github` consumer and the first GitHub *mutation* (contracts.md §8.4;
-T2a). The warm in-session twin is the TS `/plan-save` tool (T3). Supervisor surface
-(cli-vs-pi §3.2): `--json` to stdout + stable exit codes, human text to stderr.
+The first `require_github` consumer and the first GitHub *mutation* (contracts.md §8.4).
+The warm in-session twin is the TS `/plan-save` tool. Supervisor surface:
+`--json` to stdout + stable exit codes, human text to stderr.
 
 Exit codes: 0 saved · 1 invalid input / unauthed / op failure · 2 not-a-repo.
 """
@@ -37,7 +37,7 @@ class PlanSaveResult:
     dry_run: bool
     cached: bool  # the plan-ref was written to .pi/workflow/plan-ref.json (real save only)
     updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
-    # The objective-node commit (P2.T10): `linked` true iff the node→plan backlink + in_progress
+    # The objective-node commit: `linked` true iff the node→plan backlink + in_progress
     # advance succeeded; `node`/`status` describe it; `error` carries a non-fatal link failure.
     # `None` when no objective node link was requested (no --node-id).
     objective_node: dict[str, object] | None = None
@@ -55,7 +55,7 @@ class PlanSaveResult:
 @click.option("--title", help="Issue title (defaults to the plan's first heading).")
 @click.option(
     "--objective-id",
-    help="Link the plan to an objective (the plan→objective direction; P2.T10).",
+    help="Link the plan to an objective (the plan→objective direction).",
 )
 @click.option(
     "--node-id",
@@ -64,12 +64,12 @@ class PlanSaveResult:
 )
 @click.option(
     "--consumed-learn",
-    help="Comma-separated perk:learn issue ids this docs plan consumes (hop-2; e.g. '45,50' "
+    help="Comma-separated perk:learn issue ids this docs plan consumes (e.g. '45,50' "
     "or 'ENG-45,ENG-50').",
 )
 @click.option(
     "--adopt-from",
-    help="Adopt the named pre-existing issue IN PLACE as this plan (#706; stamps the plan "
+    help="Adopt the named pre-existing issue IN PLACE as this plan (stamps the plan "
     "metadata additively into that issue, mutually exclusive with --objective-id/--node-id).",
 )
 @click.option("--dry-run", is_flag=True, help="Compose and print without touching GitHub.")
@@ -102,14 +102,14 @@ def plan_save(
         if not dry_run:
             require_github(ctx)
         resolved_run_id = run_id if run_id is not None else os.environ.get("PERK_RUN_ID")
-        # Recover the objective link from the handoff (#78): the `/plan-save` command forwards only
+        # Recover the objective link from the handoff: the `/plan-save` command forwards only
         # {plan, title}, so an objective-plan factory session would otherwise drop the link the
         # `objective-plan` command stashed in the handoff. Explicit flags always win; a non-
         # objective run (handoff without `objective_id`) is unaffected.
         objective_id, node_id = _link_from_handoff(
             repo_root, resolved_run_id, objective_id, node_id
         )
-        # Recover `consumed_learn` from the handoff (#102): the learn-docs factory is read-only, so
+        # Recover `consumed_learn` from the handoff: the learn-docs factory is read-only, so
         # the model saves via the `/plan-save` *command* (forwards only {plan, title}) rather than
         # the gated-out `plan_save` *tool*. The learn-docs cold door stashes the gathered ids in
         # the handoff; recover them here so the save surface is irrelevant. An explicit
@@ -117,7 +117,7 @@ def plan_save(
         consumed_learn_ids = _consumed_learn_from_handoff(
             repo_root, resolved_run_id, _parse_consumed_learn(consumed_learn)
         )
-        # Recover the adoption link from the handoff (#706): the `plan from` cold door stashes the
+        # Recover the adoption link from the handoff: the `plan from` cold door stashes the
         # source `adopt_from` issue id in the handoff so it survives the `/plan-save` *command*
         # path (which forwards only {plan, title}). An explicit --adopt-from always wins.
         adopt_from = _adopt_from_handoff(repo_root, resolved_run_id, adopt_from)
@@ -161,7 +161,7 @@ def _link_from_handoff(
     objective_id: str | None,
     node_id: str | None,
 ) -> tuple[str | None, str | None]:
-    """Default ``objective_id``/``node_id`` from the run's handoff when not passed explicitly (#78).
+    """Default ``objective_id``/``node_id`` from the run's handoff when not passed explicitly.
 
     The ``objective-plan`` factory stashes ``objective_id``/``node_id`` in the handoff so the link
     survives the ``/plan-save`` *command* path (which forwards only ``{plan, title}``). Explicit
@@ -190,7 +190,7 @@ def _consumed_learn_from_handoff(
     run_id: str | None,
     consumed_learn: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Default ``consumed_learn`` from the run's handoff when not passed explicitly (#102).
+    """Default ``consumed_learn`` from the run's handoff when not passed explicitly.
 
     The ``learn-docs`` factory stashes the gathered ``perk:learn`` ids in the handoff so they
     survive the ``/plan-save`` *command* path (which forwards only ``{plan, title}``, dropping the
@@ -221,7 +221,7 @@ def _adopt_from_handoff(
     run_id: str | None,
     adopt_from: str | None,
 ) -> str | None:
-    """Default ``adopt_from`` from the run's handoff when not passed explicitly (#706).
+    """Default ``adopt_from`` from the run's handoff when not passed explicitly.
 
     The ``plan from`` cold door stashes the source issue id in the handoff (key ``adopt_from``) so
     the in-place adoption link survives the ``/plan-save`` *command* path (which forwards only
@@ -245,7 +245,7 @@ def _adopt_from_handoff(
 
 def _parse_consumed_learn(raw: str | None) -> tuple[str, ...]:
     """Parse a comma-separated issue-id list into a sorted unique tuple of opaque string ids
-    (hop-2; GitHub ``45`` or Linear ``ENG-45``).
+    (GitHub ``45`` or Linear ``ENG-45``).
 
     ``None``/empty → ``()``. Tokens are stripped of ``#``/whitespace; only empty tokens are
     skipped — ids are otherwise opaque (no int parse; contracts §8.21).
@@ -265,7 +265,7 @@ def _resolve_plan_base(
     store: objective_store.ObjectiveStore,
     objective_id: str | None,
 ) -> str | None:
-    """Resolve the plan's pinned base (#633): the linked objective's own ``base`` wins (it is the
+    """Resolve the plan's pinned base: the linked objective's own ``base`` wins (it is the
     source of truth for its node plans), else the repo's ``[workflow] base``, else ``None``.
 
     Fail-soft on the objective read: a ``None``/missing objective, a header without ``base``, or any
@@ -303,7 +303,7 @@ def _plan_save_impl(
     dry_run: bool,
 ) -> PlanSaveResult:
     """Pure-ish logic (no Click). Composes the header/body and performs the GitHub write."""
-    # In-place adoption (#706) is NOT objective-linked: the node-unification path is the in-place
+    # In-place adoption is NOT objective-linked: the node-unification path is the in-place
     # writer for objective nodes — refuse to mix two in-place semantics.
     if adopt_from is not None:
         adopt_from = adopt_from.strip().lstrip("#").strip() or None
@@ -328,7 +328,7 @@ def _plan_save_impl(
     backend = resolve.resolve_issue_backend(repo_root)
     store = resolve.resolve_objective_store(repo_root)
 
-    # Resolve + pin the plan's base (#633): the objective's own base wins (it is the source of
+    # Resolve + pin the plan's base: the objective's own base wins (it is the source of
     # truth for its node plans), else the repo's `[workflow] base`, else None (submit/start-point
     # fall back to the GitHub default branch). Pinned once here into BOTH the plan-header and the
     # cache.plan-ref so a later config change never retargets this plan.
@@ -339,14 +339,14 @@ def _plan_save_impl(
         objective_id=objective_id,
         consumed_learn=consumed_learn,
         base=resolved_base,
-        # Adoption provenance (#706): self-referential by construction (the plan is stamped INTO
+        # Adoption provenance: self-referential by construction (the plan is stamped INTO
         # the source issue); its presence marks the issue body/title as verbatim human content.
         adopted_from=adopt_from,
     )
     issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.to_data())
     body_comment = plan.render_plan_body(plan_markdown)
 
-    # Node 3.4 unification: an objective-linked REAL save writes the plan INTO the existing
+    # Unification: an objective-linked REAL save writes the plan INTO the existing
     # node-issue (project-backed stores) instead of minting a second perk:plan issue. The store's
     # `save_node_plan` returns the node-issue ref for a unifying store, and `None` otherwise (and
     # on a dry run — resolving the node-issue needs a network read). `None` means "take the
@@ -360,7 +360,7 @@ def _plan_save_impl(
             plan_markdown=plan_markdown,
         )
 
-    # In-place adoption (#706): stamp the authored plan ADDITIVELY into the existing (non-perk)
+    # In-place adoption: stamp the authored plan ADDITIVELY into the existing (non-perk)
     # issue — an in-place write into an existing object, so no second `perk:plan` issue is minted.
     # `dry_run` falls through to the standalone compose-preview (byte-stable existing behavior).
     adopt_ref = None
@@ -454,12 +454,12 @@ def _plan_save_impl(
         consumed_learn=consumed_learn,
         base=resolved_base,
     )
-    # Persist the ref as the cache.plan-ref pointer (turn-2b §7): the next session's
+    # Persist the ref as the cache.plan-ref pointer: the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.
     if not dry_run:
         cache.write_plan_ref(repo_root, plan_ref.to_data())
 
-    # Commit the objective-node claim atomically (P2.T10): set the node→plan backlink AND advance
+    # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
     # (the plan already exists — never raise here; mirror pr_land._reconcile_objective_on_land).
     objective_node_result: dict[str, object] | None = None
@@ -507,10 +507,10 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "issue": {
-            # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+            # Opaque string id at every machine boundary (contracts §8.21).
             "id": result.issue.id,
             "url": result.issue.url,
-            "existed": result.issue.existed,  # warm /plan-save surfaces this in details (T3)
+            "existed": result.issue.existed,  # warm /plan-save surfaces this in details
         },
         "plan_ref": result.plan_ref.to_data(),
         "cached": result.cached,

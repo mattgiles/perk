@@ -1,8 +1,8 @@
-"""`perk pr land` — the Python/worker PR merge (the cold land door; P1.T5b).
+"""`perk pr land` — the Python/worker PR merge (the cold land door).
 
 Finds the active plan's PR, marks it ready (if draft), squash-merges it (the `Closes #N` in the
 PR body closes the plan issue), and sets the `pending-learn` semaphore. Idempotent: an already
-merged PR is success. Reuses T2a's write conventions; the warm in-session twin is the TS `/land`
+merged PR is success. The warm in-session twin is the TS `/land`
 tool (delegates here via `pi.exec`, then mirrors the marker for the in-session path).
 
 Exit codes: 0 landed · 1 invalid input / unauthed / no plan / no PR / op failure · 2 not-a-repo.
@@ -31,13 +31,13 @@ from perk.substrate.output import machine_output, user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 # `consumed_learn` (so `no_consumed_learn` is expected) and a dry run early-returns `dry_run`.
-# Anything else is surfaced (#102).
+# Anything else is surfaced.
 _BENIGN_LEARN_SKIPS = frozenset({"no_consumed_learn", "dry_run"})
 
 
 @dataclass(frozen=True)
 class ObjectiveLandUpdate:
-    """The mechanical auto-on-merge node-done outcome (P2.T11a).
+    """The mechanical auto-on-merge node-done outcome.
 
     ``objective`` is the linked objective id (``None`` when no link / unparseable).
     ``nodes_marked`` is the ids the merge marked ``done``. ``skipped_reason`` records why nothing
@@ -54,7 +54,7 @@ class ObjectiveLandUpdate:
 
 @dataclass(frozen=True)
 class LearnConsumeUpdate:
-    """The hop-2 on-land consume outcome: the ``perk:learn`` issues this docs plan consumed are
+    """The on-land consume outcome: the ``perk:learn`` issues this docs plan consumed are
     closed + labelled ``perk:consolidated``.
 
     ``closed`` is the issue ids successfully consolidated. ``skipped_reason`` records why
@@ -177,7 +177,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
     )
     obj_update = _reconcile_objective_on_land(plan_ref=plan_ref, repo_root=repo_root)
     learn_update = _consume_learn_on_land(plan_ref=plan_ref, repo_root=repo_root)
-    # Node 5.1 (stretch): mirror the land into the Linear agent session. Gated inside the emitter
+    # Mirror the land into the Linear agent session. Gated inside the emitter
     # (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it never
     # changes the land result or exit code. Never reached on --dry-run (early return).
     linear_agent.emit_landed(
@@ -199,7 +199,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
 
 
 def _landed_summary(obj_update: ObjectiveLandUpdate) -> str:
-    """The one-line land summary for the agent-session ``response`` activity (Node 5.1):
+    """The one-line land summary for the agent-session ``response`` activity:
     the objective nodes the merge marked done, when any; empty otherwise (the emitter
     supplies the "PR #n squash-merged." base line itself)."""
     if not obj_update.nodes_marked:
@@ -253,7 +253,7 @@ def _close_plan_issue_on_land(
 
 
 def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> ObjectiveLandUpdate:
-    """Mechanical auto-on-merge node-done (P2.T11a): mark the objective node(s) backlinked to the
+    """Mechanical auto-on-merge node-done: mark the objective node(s) backlinked to the
     just-merged plan ``done``.
 
     **Fail-open + non-audited by design.** The merge already succeeded; objective tracking is
@@ -336,7 +336,7 @@ def _post_landed_update(
     pr: object,
     complete: bool,
 ) -> None:
-    """Post the fail-open "plan landed" Project Update (Node 4.3).
+    """Post the fail-open "plan landed" Project Update.
 
     Isolated like the close fail-open: a failure is logged loud-but-non-fatal and NEVER discards
     the already-marked node result. Linear project store posts; GitHub + the issue-backed Linear
@@ -357,7 +357,7 @@ def _post_landed_update(
 
 
 def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUpdate:
-    """Consume the ``perk:learn`` issues a learned-docs plan consolidated (hop-2): close each +
+    """Consume the ``perk:learn`` issues a learned-docs plan consolidated: close each +
     label it ``perk:consolidated``.
 
     **Fail-open + non-fatal by design** (mirrors :func:`_reconcile_objective_on_land`). The merge
@@ -373,8 +373,8 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
     ids = [cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())]
     if not ids:
         return LearnConsumeUpdate((), "bad_consumed_learn")
-    # Per-issue isolation (#102): close each issue independently so one bad issue (already-deleted,
-    # transient infra error) does NOT strand the rest — the #89-residual that made the accumulated
+    # Per-issue isolation: close each issue independently so one bad issue (already-deleted,
+    # transient infra error) does NOT strand the rest — the residual that made the accumulated
     # backlog cleanup unreliable. Failures are logged loud-but-non-fatal and rolled into a
     # `failed: #a, #b` skipped_reason; the closes that succeeded still land. Never raises.
     backend = resolve.resolve_issue_backend(repo_root)
@@ -395,14 +395,14 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
 
 
 def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: Path) -> str:
-    """The deepened squash commit message (P2.T8b, D8): plain ``"<plan title>\\n\\n<footer>"``.
+    """The deepened squash commit message: plain ``"<plan title>\\n\\n<footer>"``.
 
-    The footer branches per backend (D4): GitHub keeps ``Closes #N`` (the autoclose target —
+    The footer branches per backend: GitHub keeps ``Closes #N`` (the autoclose target —
     byte-identical to the pre-Linear shape); non-github backends get a plain
     ``Plan: <id> — <url>`` reference line — NO commit magic words (Linear's commit-linking needs
     a non-assumable extra webhook; perk closes the plan issue explicitly at land instead).
 
-    This is the second of the two PR targets (the GitHub HTML body is the other, T8a) — plain text
+    This is the second of the two PR targets (the GitHub HTML body is the other) — plain text
     only, so no HTML leaks into ``git log``. Best-effort title fetch: a missing/empty title (or any
     backend read failure) falls back to the bare footer.
     """
@@ -422,7 +422,7 @@ def _result_to_dict(result: PrLandResult) -> dict[str, object]:
         "message": None,
         "pr": {"number": result.pr.number, "state": result.pr.state},
         "branch": result.branch,
-        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+        # Opaque string id at every machine boundary (contracts §8.21).
         "issue": result.issue,
         "pending_learn": result.pending_learn,
         "plan_issue_closed": result.plan_issue_closed,
@@ -464,7 +464,7 @@ def _render_human(result: PrLandResult) -> None:
     if result.learn.closed:
         closed = ", ".join(f"#{n}" for n in result.learn.closed)
         user_output(f"  consolidated learn issue(s) {closed} into docs/learned")
-    # Surface a non-benign learn-consume skip (#102): `no_consumed_learn` is the ordinary
+    # Surface a non-benign learn-consume skip: `no_consumed_learn` is the ordinary
     # non-factory case (and dry-run early-returns), so stay quiet on those; a real failure
     # (`failed: …`, `bad_consumed_learn`, `error: …`) must be visible, not silent.
     if result.learn.skipped_reason and result.learn.skipped_reason not in _BENIGN_LEARN_SKIPS:

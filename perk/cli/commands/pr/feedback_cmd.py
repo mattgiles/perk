@@ -1,11 +1,11 @@
-"""`perk pr feedback` — the read-only PR-feedback fetch (the classify child runs this; P2.T7).
+"""`perk pr feedback` — the read-only PR-feedback fetch (the classify child runs this).
 
 Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr land` does), fetches
 its reviewer feedback (review threads + PR-level reviews via GraphQL, discussion comments via REST),
 and emits `--json`. Read-only — no GitHub mutation; the verbose payload is consumed by the spawned
 `perk.review-classifier` child so it never transits the parent session (route-don't-relay).
 
-Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, human text to stderr, stable exit codes.
+Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
 """
 

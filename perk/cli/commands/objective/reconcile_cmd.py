@@ -32,7 +32,7 @@ from perk.substrate.output import machine_output, user_output
 def reconcile_objective(
     ctx: click.Context, *, number: str, body_path: Path, dry_run: bool, as_json: bool
 ) -> None:
-    """Reconcile an objective's Reconcilable prose region against the merged diff (P2.T11b).
+    """Reconcile an objective's Reconcilable prose region against the merged diff.
 
     Rewrites ONLY the marker-bounded Reconcilable region of the objective-body comment — the
     Mechanical roadmap table and any Immutable notes are never touched. Node-description
@@ -64,7 +64,7 @@ def reconcile_objective(
         )
         return
 
-    # Fail-open Project Update (Node 4.3): post on a real (non-dry-run) update only. Linear project
+    # Fail-open Project Update: post on a real (non-dry-run) update only. Linear project
     # store posts; GitHub + the issue-backed Linear store no-op. A failure is logged
     # loud-but-non-fatal and NEVER changes the reconcile result.
     if not dry_run and result.updated:
@@ -79,7 +79,7 @@ def reconcile_objective(
     payload = {
         "success": True,
         "error_type": None,
-        # Opaque string ids at every machine boundary (contracts §8.21; Node 4.1).
+        # Opaque string ids at every machine boundary (contracts §8.21).
         "objective": result.objective_id,
         "comment_id": result.comment_id,
         "updated": result.updated,

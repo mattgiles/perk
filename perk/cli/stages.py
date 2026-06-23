@@ -1,4 +1,4 @@
-"""Generate one ``perk <stage>`` launcher per registry stage (cli-vs-pi §4.2).
+"""Generate one ``perk <stage>`` launcher per registry stage.
 
 The registry is the single source of truth for which stage commands exist, so the two
 entry planes (CLI launchers / extension transitions) cannot drift. Generation is
@@ -16,18 +16,18 @@ from perk.substrate.registry import RegistryError, Stage, load_registry
 DEDICATED_STAGES: frozenset[str] = frozenset(
     {
         "implement",  # perk/cli/commands/implement_cmd.py
-        "learn",  # perk/cli/commands/learn/__init__.py (hybrid group; hidden launcher, Node 2.2)
-        "objective-author",  # perk/cli/commands/objective/author_cmd.py (P3.T2)
-        "objective-save",  # perk/cli/commands/objective/save_cmd.py (Node 3.1)
-        "objective-plan",  # perk/cli/commands/objective/plan_cmd.py (P2.T10)
-        # Objective #495 Node 3.3 (the pr group): submit/land are merged launcher+worker commands
+        "learn",  # perk/cli/commands/learn/__init__.py (hybrid group; hidden launcher)
+        "objective-author",  # perk/cli/commands/objective/author_cmd.py
+        "objective-save",  # perk/cli/commands/objective/save_cmd.py
+        "objective-plan",  # perk/cli/commands/objective/plan_cmd.py
+        # The pr group: submit/land are merged launcher+worker commands
         # and address is the launcher-only door, all under `perk pr` + flat aliases — so the
         # generic generator must not also build the flat `perk submit`/`address`/`land` launchers.
         "submit",
         "address",
         "land",
-        "plan",  # perk/cli/commands/plan/__init__.py (hybrid group; hidden launcher, Node 3.2)
-        "save",  # perk/cli/commands/plan/__init__.py (merged save verb, Node 3.2)
+        "plan",  # perk/cli/commands/plan/__init__.py (hybrid group; hidden launcher)
+        "save",  # perk/cli/commands/plan/__init__.py (merged save verb)
     }
 )
 
@@ -87,10 +87,6 @@ def make_stage_launcher(stage: Stage) -> click.Command:
 
 class MergedCommand(click.Command):
     """One command that fronts a launcher half and a deterministic worker half.
-
-    **Objective #495 Node 2.1** (`enabling-substrate`); enables SSOT §11.2 (the merged
-    launcher+worker command). Dormant in 2.1 — no live command is built with this; node 3.x
-    folds the real ``submit``/``land`` pairs.
 
     A ``MergedCommand`` holds two intact ``click.Command`` halves built elsewhere:
 
@@ -152,9 +148,9 @@ def make_merged_command(
 ) -> MergedCommand:
     """Build a :class:`MergedCommand` over ``stage``'s launcher and an existing ``worker``.
 
-    **Objective #495 Node 2.1**; enables SSOT §11.2. The launcher half is
+    The launcher half is
     ``make_stage_launcher(stage)`` (reused intact); the worker half is the caller's deterministic
-    ``click.Command``. Dormant in 2.1 (no live command is wired with this).
+    ``click.Command``.
     """
     launcher = make_stage_launcher(stage)
     merged_help = (

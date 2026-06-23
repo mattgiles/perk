@@ -1,4 +1,4 @@
-"""`perk objective run` — the capstone supervisor loop (Node 3.4, §8.20).
+"""`perk objective run` — the capstone supervisor loop (§8.20).
 
 A deterministic, no-agentic-reasoning scheduler: report cumulative budget, then advance the
 objective's backlog ONE safe step (dispatch the next ready agentic stage remotely, or pause at a
@@ -31,7 +31,7 @@ from perk.substrate.config import Config
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
-# The `--wait` polling cadence (D4). Local to this module by design (do not import from
+# The `--wait` polling cadence. Local to this module by design (do not import from
 # workflow_smoke) — same *values*, independent lifecycle. A timeout is inconclusive, not unhealthy.
 POLL_INTERVAL_S = 15
 POLL_TIMEOUT_S = 600
@@ -52,7 +52,7 @@ def _fmt_elapsed(ms: int) -> str:
 
 
 def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
-    """Sum the budget across every dispatch record for this objective (D3; report-only)."""
+    """Sum the budget across every dispatch record for this objective (report-only)."""
     target = number
     runs = turns = tokens = elapsed = 0
     for record in cache.list_dispatch_records(repo_root):
@@ -75,7 +75,7 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
 def _in_flight_record(
     repo_root: Path, number: str
 ) -> tuple[dict[str, Any], runner.RunHandle, runner.Runner] | None:
-    """The newest in-flight dispatch for this objective (D4), or ``None``.
+    """The newest in-flight dispatch for this objective, or ``None``.
 
     A record is in-flight when its ``run_handle`` is present and a live ``observe`` returns
     ``queued``/``in_progress``. Each observe is fail-soft — a runner/GitHub error treats that
@@ -107,7 +107,7 @@ def _poll_to_completion(
     *,
     sleep: Any = None,
 ) -> runner.RunObservation | None:
-    """Poll a run to completion (D4). ``None`` on timeout (inconclusive) or a fail-soft observe."""
+    """Poll a run to completion. ``None`` on timeout (inconclusive) or a fail-soft observe."""
     do_sleep = sleep or time.sleep
     elapsed = 0
     while elapsed < POLL_TIMEOUT_S:
@@ -124,7 +124,7 @@ def _poll_to_completion(
 
 
 def needs_address(feedback: github.PrFeedback) -> bool:
-    """True when an OPEN non-draft PR has actionable review feedback (D10; pure, offline-testable).
+    """True when an OPEN non-draft PR has actionable review feedback (pure, offline-testable).
 
     True when either any review thread is unresolved, or the **latest review per author**
     (max ``submitted_at``, ISO-8601 string compare; ``None`` sorts oldest) is
@@ -150,7 +150,7 @@ def _stage_by_id(stage_id: str) -> Stage:
 
 
 def _parse_run_id(captured: str) -> str | None:
-    """Extract the ``run_id`` from launch_stage's captured machine-output JSON (D9)."""
+    """Extract the ``run_id`` from launch_stage's captured machine-output JSON."""
     for line in captured.splitlines():
         line = line.strip()
         if not line:
@@ -173,7 +173,7 @@ def _dispatch_stage_remote(
     remote: str,
     dry_run: bool,
 ) -> str | None:
-    """Dispatch ``implement``/``address`` to the remote runner for an in-flight node (D9).
+    """Dispatch ``implement``/``address`` to the remote runner for an in-flight node.
 
     Reconstructs the node's plan-ref (preserving ``objective_id`` so the eventual human land
     reconciles the node), writes it to the repo-root ``cache.plan-ref`` (the seam
@@ -217,7 +217,7 @@ def _resolve_in_flight_stage(
     remote: str,
     dry_run: bool,
 ) -> dict[str, Any]:
-    """Resolve the action for an in-flight node by inspecting its linked plan's PR state (D7)."""
+    """Resolve the action for an in-flight node by inspecting its linked plan's PR state."""
     remediation = f"perk objective plan {number} --node {node.id}"
     # The node's `pr` backlink carries the PLAN id — an opaque string (GitHub "42", Linear
     # "ENG-123"; contracts §8.21): any non-empty value IS the plan id (the resolved backend is
@@ -271,7 +271,7 @@ def _resolve_in_flight_stage(
 def _run_impl(
     ctx: click.Context, *, number: str, remote: str, wait: bool, dry_run: bool
 ) -> dict[str, Any]:
-    """The deterministic single-pass control flow (D2). Returns the structured payload to render;
+    """The deterministic single-pass control flow. Returns the structured payload to render;
     raises ``UserFacingCliError``/``IssueBackendError``/``GitHubError`` for the command's ``fail``
     boundary."""
     repo_root = require_repo(ctx)
@@ -298,7 +298,7 @@ def _run_impl(
         "dry_run": dry_run,
     }
 
-    # Active-run gate (D4). Skipped under --dry-run to stay fully offline-safe (D11).
+    # Active-run gate. Skipped under --dry-run to stay fully offline-safe.
     if not dry_run:
         in_flight = _in_flight_record(repo_root, number)
         if in_flight is not None:

@@ -1,9 +1,4 @@
-"""The ``perk`` CLI root group (the session *exterior*).
-
-T1 ships ``--version`` and a minimal, idempotent ``init``. Stage subcommands are
-generated from the stage registry (foundational #3) in a later turn; worktrees,
-launch, and ``doctor`` follow.
-"""
+"""The ``perk`` CLI root group (the session *exterior*)."""
 
 from pathlib import Path
 
@@ -47,12 +42,12 @@ def cli(ctx: click.Context) -> None:
 
 cli.add_command(init_perk)
 cli.add_command(plan_group)
-# The `plan` group is hybrid (Node 3.2): bare `perk plan` default-dispatches to the hidden
+# The `plan` group is hybrid: bare `perk plan` default-dispatches to the hidden
 # plan-stage launcher, while `save` (merged launcher+worker under --json), `resume`, and `replan`
 # are registered verbs. `plan` + `save` are in DEDICATED_STAGES, so register_stage_commands skips
 # generating flat `perk plan` / `perk save` launchers.
 cli.add_command(pr_group)
-# Flat hot-path aliases (Objective #495 Node 3.3, §11.3): the SAME command objects registered at
+# Flat hot-path aliases: the SAME command objects registered at
 # the root under a flat name, so `perk submit` resolves to the merged `pr submit`, etc. `ready` is
 # worker-only (no `ready` registry stage) and gains only the flat alias. register_flat_alias
 # records each in FLAT_ALIAS_ATTR so SectionedGroup routes their rows into the launcher section.
@@ -61,9 +56,9 @@ register_flat_alias(cli, pr_land_command, "land")
 register_flat_alias(cli, pr_address_command, "address")
 register_flat_alias(cli, ready_pr, "ready")
 cli.add_command(learn_group)
-# The `learn` group is hybrid (Node 2.2): bare `perk learn` default-dispatches to the hidden
+# The `learn` group is hybrid: bare `perk learn` default-dispatches to the hidden
 # stage launcher, while `capture` and `docs` are the cold workers. `docs` is a dedicated cold
-# door but NOT a registry stage (hop-2): it borrows the `plan` stage to launch.
+# door but NOT a registry stage: it borrows the `plan` stage to launch.
 register_with_aliases(cli, implement)
 cli.add_command(doctor_group)
 # implement is registered above; register_stage_commands skips it (DEDICATED_STAGES).
@@ -76,7 +71,7 @@ register_with_aliases(cli, objective_group)
 register_with_aliases(cli, workflow_group)
 register_with_aliases(cli, skills_group)
 cli.add_command(run_worker_cmd)
-# `resume` and `replan` now live under the `plan` group (Node 3.2). `replan` is still a dedicated
+# `resume` and `replan` now live under the `plan` group. `replan` is still a dedicated
 # cold door, not a registry stage: it borrows `plan` to re-launch with the target plan's original
 # run_id (in-place upsert).
 register_stage_commands(cli)

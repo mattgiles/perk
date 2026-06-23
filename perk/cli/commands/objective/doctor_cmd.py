@@ -1,4 +1,4 @@
-"""`perk objective doctor` — detect (and optionally repair) objective drift (Node 4.4 / #612).
+"""`perk objective doctor` — detect (and optionally repair) objective drift.
 
 Detect mode (default) builds the observed snapshot, diffs it against the persisted
 ``objective-manifest`` baseline, and reports every drift condition. ``--fix`` additionally applies
@@ -7,7 +7,7 @@ failed Linear write (fail-loud). ``--dry-run`` plans the repairs (the would-appl
 write. GitHub objectives (and the issue-backed Linear store) have no divergence surface, so the
 report is trivially empty — the worker is a Linear-Project-objective surface.
 
-Supervisor surface (cli-vs-pi §3.2): ``--json`` → stdout, human → stderr; exit ``0`` ran / ``1``
+Supervisor surface: ``--json`` → stdout, human → stderr; exit ``0`` ran / ``1``
 op-failure or an aborted repair / ``2`` not-a-repo.
 """
 

@@ -1,11 +1,11 @@
-"""`perk pr review-context` — the read-only PR-review context fetch (#175).
+"""`perk pr review-context` — the read-only PR-review context fetch.
 
 Resolves the active plan's PR (from the local `cache.plan-ref`, exactly as `pr feedback` does),
 gathers everything the fresh-context `perk.pr-reviewer` child needs to review it (the diff, the PR
 title/body, and the plan body), and emits `--json`. Read-only — no GitHub mutation; the verbose
 payload is consumed by the spawned reviewer child so it never transits the parent session.
 
-Supervisor surface (cli-vs-pi §3.2): `--json` to stdout, human text to stderr, stable exit codes.
+Supervisor surface: `--json` to stdout, human text to stderr, stable exit codes.
 Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-repo.
 """
 

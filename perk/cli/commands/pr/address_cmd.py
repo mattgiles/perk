@@ -1,10 +1,10 @@
-"""``perk pr address`` — the launcher-only address door (Objective #495, Node 3.3).
+"""``perk pr address`` — the launcher-only address door.
 
 ``address`` has **both** a launcher half (opens a primed pi session that runs the classify→fix→
 resolve loop) and the warm ``/address`` review flow, but **no deterministic worker** — so it is
 **launcher-only (L)**, not a :class:`~perk.cli.stages.MergedCommand`. This dedicated launcher
 mirrors ``make_stage_launcher``'s option set (``--worktree`` / ``--dry-run`` / ``--remote`` /
-``pi_args``) **plus** a new cold ``--preview`` flag (§11.7 Correction 2 — previously warm-only).
+``pi_args``) **plus** a new cold ``--preview`` flag (previously warm-only).
 
 ``--preview`` is a **local-launch concept**: it shapes the cold seed prompt only (the warm
 ``/address --preview`` gesture). On ``--remote`` (address is ``cold_remote: true``) the dispatch

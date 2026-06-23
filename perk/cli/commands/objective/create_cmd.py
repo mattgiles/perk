@@ -23,7 +23,7 @@ from perk.substrate.output import machine_output, user_output
 def _adopt_from_handoff(
     repo_root: Path, run_id_value: str | None, adopt_from: str | None
 ) -> str | None:
-    """Default ``adopt_from`` from the run's handoff when not passed explicitly (#709, §8.30).
+    """Default ``adopt_from`` from the run's handoff when not passed explicitly (§8.30).
 
     The ``objective author --from`` cold door stashes the source id in the handoff (key
     ``adopt_from``) so the in-place adoption link survives the ``objective_save`` tool path (which
@@ -69,7 +69,7 @@ def _adopt_from_handoff(
 @click.option(
     "--adopt-from",
     help="Adopt the named pre-existing source (a Linear project / GitHub issue) IN PLACE as this "
-    "objective (#709; stamps the objective metadata additively into the same source).",
+    "objective (stamps the objective metadata additively into the same source).",
 )
 @click.option("--dry-run", is_flag=True, help="Compose without creating an issue.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
@@ -131,12 +131,12 @@ def create_objective(
         # default). Pinning keeps the objective self-describing for its node plans.
         resolved_base = base or load_config(repo_root).workflow_base
         store = resolve.resolve_objective_store(repo_root)
-        # Recover the adoption link from the handoff (#709): the `objective author --from` cold
+        # Recover the adoption link from the handoff: the `objective author --from` cold
         # door stashes the source id in the handoff so it survives the `objective_save` tool path
         # (which forwards only {prose, roadmap, title, base, run-id}). An explicit --adopt-from
         # wins.
         adopt_from = _adopt_from_handoff(repo_root, resolved_run_id, adopt_from)
-        # In-place objective adoption (#709, §8.30): on a real save, stamp perk's metadata
+        # In-place objective adoption (§8.30): on a real save, stamp perk's metadata
         # ADDITIVELY into the existing source instead of minting a fresh objective. The writer
         # returns None on a dry run (resolving the source needs a network read) OR for a store that
         # does not support adoption (`adopt_unsupported`); a dry run falls through to the offline
@@ -185,7 +185,7 @@ def create_objective(
         )
         return
 
-    # Fail-open Project Update (Node 4.3): post a status update on a fresh create only (skip the
+    # Fail-open Project Update: post a status update on a fresh create only (skip the
     # idempotent found-existing path and any dry run). Linear project store posts; GitHub + the
     # issue-backed Linear store no-op (return False). A failure is logged loud-but-non-fatal and
     # NEVER changes the create result.
@@ -208,7 +208,7 @@ def create_objective(
     payload = {
         "success": True,
         "error_type": None,
-        # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+        # Opaque string id at every machine boundary (contracts §8.21).
         "objective": {"id": issue.id, "url": issue.url, "existed": issue.existed},
         "dry_run": dry_run,
     }

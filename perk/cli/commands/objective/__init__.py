@@ -2,14 +2,14 @@
 
 Folds the three objective **launchers** (`author`/`save`/`plan` — each opens a primed pi session)
 beside the deterministic **workers** (`create`/`show`/`node`/`next`/`reconcile`/`run`). The workers
-are a developer / CI / T10 surface (like ``perk state`` / ``perk registry``), **not** an agent
-affordance: the model drives objectives through the extension's bounded transition tools (T10),
-never by shelling them. Each subcommand is a supervisor surface (cli-vs-pi §3.2): ``--json`` →
+are a developer / CI surface (like ``perk state`` / ``perk registry``), **not** an agent
+affordance: the model drives objectives through the extension's bounded transition tools,
+never by shelling them. Each subcommand is a supervisor surface: ``--json`` →
 stdout, human text → stderr, stable exit codes (``0`` ok · ``1`` invalid/op-failure · ``2``
 not-a-repo), ``UserFacingCliError`` with a stable ``error_type``.
 
-Help renders **Launchers** + **Workers** sections via ``SectionedAliasGroup`` + ``mark_kind``
-(SSOT §11.7-Q5). Bare ``perk objective`` stays group help — no hybrid bare-launch (SSOT §11.7-Q4).
+Help renders **Launchers** + **Workers** sections via ``SectionedAliasGroup`` + ``mark_kind``.
+Bare ``perk objective`` stays group help — no hybrid bare-launch.
 """
 
 import click
@@ -41,7 +41,7 @@ register_with_aliases(objective_group, mark_kind(author_objective, "launcher"))
 register_with_aliases(objective_group, mark_kind(save_objective, "launcher"))
 register_with_aliases(objective_group, mark_kind(plan_objective, "launcher"))
 
-# Workers (deterministic dev/CI/T10 surface).
+# Workers (deterministic dev/CI surface).
 register_with_aliases(objective_group, mark_kind(create_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(show_objective, "worker"))
 register_with_aliases(objective_group, mark_kind(node_objective, "worker"))

@@ -1,12 +1,11 @@
-"""Error vocabulary for the CLI (python-cli-guidelines.md §5).
+"""Error vocabulary for the CLI.
 
 ``UserFacingCliError`` is for *expected*, user-triggerable failures — Click intercepts
 it at every level, prints ``Error: …`` in red, and exits 1. Use ``RuntimeError`` only
 for impossible states / bugs.
 
 ``Ensure`` provides LBYL precondition checks that all raise ``UserFacingCliError`` with
-an actionable message. (Domain-specific checks that depend on git/GitHub state are added
-as those gateways land in later turns.)
+an actionable message.
 """
 
 from pathlib import Path
@@ -22,7 +21,7 @@ class UserFacingCliError(click.ClickException):
 
     Click intercepts it at every command level and exits 1; we override ``show`` only to
     style the ``Error:`` prefix in red. The optional ``error_type`` is a stable code for the
-    supervisor ``--json`` surface (cli-vs-pi.md §3.2); human output ignores it.
+    supervisor ``--json`` surface; human output ignores it.
     """
 
     def __init__(self, message: str, *, error_type: str | None = None) -> None:
