@@ -1,4 +1,4 @@
-"""Objective body/table/update-composer rendering (Node 2.3 module->package split).
+"""Objective body/table/update-composer rendering.
 
 The byte-stable renderers relocated verbatim from the pre-split ``perk/objective.py``: the roadmap
 storage block (:func:`render_roadmap_block`), the node-issue block (:func:`render_node_block`), the
@@ -30,7 +30,7 @@ from perk.plan import render_command_callout
 
 def render_adopted_overview_note(original: str) -> str:
     """Render the Immutable archive note holding the adopted source's ORIGINAL overview/body
-    verbatim (#709, §8.30), appended below the closing Reconcilable marker (Immutable).
+    verbatim (§8.30), appended below the closing Reconcilable marker (Immutable).
 
     Empty/blank ``original`` → ``""`` (nothing to archive). Both backends call this single helper so
     the archived shape is identical across GitHub + Linear and unit-testable.
@@ -49,8 +49,7 @@ def render_adopted_overview_note(original: str) -> str:
 def render_roadmap_block(nodes: list[ObjectiveNode]) -> dict[str, object]:
     """Build the data dict for ``render_metadata_block(OBJECTIVE_ROADMAP_KEY, …)``.
 
-    ``depends_on``/``comment`` columns are omitted unless some node specifies them (matching
-    erk's compact serialization).
+    ``depends_on``/``comment`` columns are omitted unless some node specifies them.
     """
     any_depends = any(n.depends_on is not None for n in nodes)
     any_comment = any(n.comment is not None for n in nodes)
@@ -179,11 +178,11 @@ def render_body_comment(nodes: list[ObjectiveNode], *, prose: str = "") -> str:
 def replace_reconcilable_section(comment_body: str, new_prose: str) -> str | None:
     """Splice ``new_prose`` between the Reconcilable markers in an ``objective-body`` comment,
     preserving everything outside (the Mechanical table block above, any Immutable notes below).
-    Returns the updated comment, or ``None`` if the Reconcilable markers are absent (objectives
-    created before P2.T11).
+    Returns the updated comment, or ``None`` if the Reconcilable markers are absent (older
+    objectives that predate the Reconcilable markers).
 
     Pure + offline. Structurally Immutable-safe: only the marker-bounded region is rewritten.
-    Dual-encoding + form-preserving (Node 2.3): the HTML markers are tried first (the GitHub
+    Dual-encoding + form-preserving: the HTML markers are tried first (the GitHub
     path, byte-identical behavior), then the Linear-safe inline-code forms — whichever was found
     is re-emitted.
     """
@@ -207,7 +206,7 @@ def replace_reconcilable_section(comment_body: str, new_prose: str) -> str | Non
 def rerender_body_table(comment_body: str, nodes: list[ObjectiveNode]) -> str | None:
     """Re-render the marker-bounded table inside an existing ``objective-body`` comment from the
     authoritative ``nodes``. Returns the updated comment, or ``None`` if no markers are found.
-    Dual-encoding + form-preserving (Node 2.3): re-emits whichever marker form was found."""
+    Dual-encoding + form-preserving: re-emits whichever marker form was found."""
     found = _find_marker_pair(comment_body, ROADMAP_TABLE_MARKER_START, ROADMAP_TABLE_MARKER_END)
     if found is None:
         return None

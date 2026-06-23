@@ -1,7 +1,7 @@
-"""Remote-runner dispatch for the cold-door launch (Node 2.3 module->package split).
+"""Remote-runner dispatch for the cold-door launch.
 
-:func:`_drive_remote_target` — the ``--remote`` drive of a drivable stage (Node 2.1,
-contracts.md §8.13) — relocated verbatim from the pre-split ``perk/run/launch.py``. It positions
+:func:`_drive_remote_target` — the ``--remote`` drive of a drivable stage (contracts.md
+§8.13). It positions
 nothing locally; it persists + verifies the ``run_id→plan`` linkage (establish-before-consume,
 §8.2) and triggers the runner via :mod:`perk.run.runner`.
 """
@@ -21,10 +21,10 @@ from perk.substrate.registry import Stage
 
 
 def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_run: bool) -> None:
-    """Drive a ``--remote`` launch of a drivable stage (Node 2.1, contracts.md §8.13).
+    """Drive a ``--remote`` launch of a drivable stage (contracts.md §8.13).
 
     Unlike the cold-local door, a remote dispatch positions **nothing** on the dispatcher's
-    machine (no worktree, no handoff) — the Node 2.2 workflow checks out the branch and positions
+    machine (no worktree, no handoff) — the workflow checks out the branch and positions
     the worker in CI. Here we only: resolve the plan, mint the ``run_id``, **persist the
     ``run_id→plan`` linkage and read it back to verify** (the establish-before-consume gate,
     §8.2), then **trigger** the runner and record the verified handle. A ``--dry-run`` is a
@@ -39,7 +39,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     rid = run_id.mint()  # a cold dispatch is a cold launch => mints (registry policy)
     runner_ref = target.runner or ""
     selected = runner.select_runner(runner_ref)
-    # Prefer the plan's pinned base (#633) so the runner input carries the real target; fall back
+    # Prefer the plan's pinned base so the runner input carries the real target; fall back
     # to the GitHub default branch. (run_worker still treats `base` as informational — this keeps
     # the §8.13 input honest.)
     plan_base = plan_ref.get("base")
@@ -84,7 +84,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
         return
 
     # Persist the intent (the verified linkage), then read it back and assert the round-trip
-    # established before consuming — the establish-before-consume gate (§8.2 / PRIOR_ART §8).
+    # established before consuming — the establish-before-consume gate (§8.2).
     record = runner.DispatchRecord(
         run_id=rid,
         stage=stage.id,

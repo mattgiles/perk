@@ -1,6 +1,6 @@
-"""Worktree materialization helpers for the cold-door launch (Node 2.3 module->package split).
+"""Worktree materialization helpers for the cold-door launch.
 
-The canonical materialization paths relocated verbatim from the pre-split ``perk/run/launch.py``:
+The canonical materialization paths:
 the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body cache
 (:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), and the
 per-skill symlink mirror (:func:`materialize_skills`). ``_WORKTREE_SETUP_TIMEOUT_S`` (the
@@ -67,7 +67,7 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
 
 
 def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: dict[str, Any] | None) -> None:
-    """Fetch the plan body from its canonical source and cache it into the worktree (P2.T2c).
+    """Fetch the plan body from its canonical source and cache it into the worktree.
 
     Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for
     plan-body materialization, §1.10).

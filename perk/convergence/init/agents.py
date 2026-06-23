@@ -1,4 +1,4 @@
-"""The perk-owned subagent agent-definition convergence (Node 2.2 split — verbatim)."""
+"""The perk-owned subagent agent-definition convergence."""
 
 from pathlib import Path
 

@@ -1,6 +1,6 @@
-"""Worktree + run-target resolution for the cold-door launch (Node 2.3 module->package split).
+"""Worktree + run-target resolution for the cold-door launch.
 
-The pure-ish resolution layer relocated verbatim from the pre-split ``perk/run/launch.py``: the
+The pure-ish resolution layer: the
 :class:`ResolvedWorktree` / :class:`Target` value types, the target resolver
 (:func:`resolve_target`), the deterministic worktree-name derivation
 (:func:`resolve_plan_worktree_name`), the origin-aware base resolution (:func:`resolve_base` /
@@ -35,7 +35,7 @@ class ResolvedWorktree:
 
 @dataclass(frozen=True)
 class Target:
-    """Where a stage runs (P2.T8c): local (exec ``pi`` here) or a remote runner. The output of the
+    """Where a stage runs: local (exec ``pi`` here) or a remote runner. The output of the
     pure :func:`resolve_target` step."""
 
     is_remote: bool
@@ -43,13 +43,13 @@ class Target:
 
 
 def resolve_target(stage: Stage, remote: str | None) -> Target:
-    """Resolve a stage's run target (P2.T8c, D12). Pure + unit-testable.
+    """Resolve a stage's run target (D12). Pure + unit-testable.
 
     - ``remote is None`` → **local** (today's behavior).
     - ``remote`` set on a ``cold_remote:false`` stage → ``UserFacingCliError`` (``remote_blocked``).
     - ``remote`` set on a ``cold_remote:true`` stage → a remote ``Target`` that
       :func:`launch_stage` drives: persist the ``run_id→plan`` linkage, then trigger the runner
-      (Node 2.1, contracts.md §8.13).
+      (contracts.md §8.13).
     """
     if remote is None:
         return Target(is_remote=False)
@@ -86,7 +86,7 @@ def resolve_base(
     Precedence: an explicit ``--base`` wins verbatim (deliberate stacking, even on a non-origin
     ref); else track an existing ``origin/<name>`` (resumed/remote plan); else base off
     ``origin/<trunk>`` when it exists; else ``None`` (no usable origin ref — fall back to local
-    HEAD, e.g. no remote). ``plan_base`` (the plan's pinned target branch, #633) replaces the
+    HEAD, e.g. no remote). ``plan_base`` (the plan's pinned target branch) replaces the
     detected trunk as the trunk source when set, so a plan declaring a non-default base cuts its
     worktree from that branch.
     """
@@ -141,8 +141,8 @@ def resolve_worktree(
         base_ref = plan_ref
     else:
         # Explicit --worktree NAME: best-effort recover the active plan-ref for the pinned base
-        # (#633) ONLY — it drives the start-point but is NOT returned as `plan_ref` (which stays
-        # None on this path, as before #633, so a reuse-stage run never clobbers the named
+        # ONLY — it drives the start-point but is NOT returned as `plan_ref` (which stays
+        # None on this path, so a reuse-stage run never clobbers the named
         # worktree's own cache.plan-ref). A missing ref simply leaves plan_base=None.
         base_ref = cache.read_plan_ref(repo_root)
 

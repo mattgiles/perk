@@ -1,7 +1,4 @@
-"""Init's committed TOML templates, the post-init handoff, and the config scaffold.
-
-Split out of the original single-file ``init`` module (Node 2.2) — verbatim relocation.
-"""
+"""Init's committed TOML templates, the post-init handoff, and the config scaffold."""
 
 from pathlib import Path
 
@@ -134,7 +131,7 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 # api_key = "lin_api_…"
 """
 
-# The post-init handoff — an agent-readable markdown on-ramp (distinct from the T3/T4
+# The post-init handoff — an agent-readable markdown on-ramp (distinct from the
 # machine run-handoff JSON). Regenerated each init; kept true to what's built.
 POST_INIT_TEMPLATE = """\
 # perk is initialized ({mode})

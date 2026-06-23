@@ -1,4 +1,4 @@
-"""Stream remote run status back into GitHub from the runner (Node 2.3; contracts.md §8.15).
+"""Stream remote run status back into GitHub from the runner (contracts.md §8.15).
 
 The **runner-side** consumer of the §8.12 structured run-event stream + the §8.11 ``RunOutcome``.
 When ``perk run-worker`` drives a stage remotely it posts a **started** note before the worker

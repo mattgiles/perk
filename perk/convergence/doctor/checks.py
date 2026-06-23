@@ -1,4 +1,4 @@
-"""The config/registry/managed/state group builders (Node 2.2 split — verbatim relocation)."""
+"""The config/registry/managed/state group builders."""
 
 import json
 import tomllib
@@ -314,13 +314,13 @@ def _issues_check(root: Path) -> Check:
 
 
 def _subagent_engine_check(root: Path) -> Check:
-    """Informational pointer for the borrowed spawned-delegation seam (P2.T6).
+    """Informational pointer for the borrowed spawned-delegation seam.
 
     Enumerates the perk-owned agent defs delivered into `.pi/agents/perk/*.md` for the detail —
     package/dir drift itself is owned by `settings-wiring` (the `npm:pi-subagents` entry) and
     `subagent-agents` (which materializes + drift-repairs `.pi/agents/perk/`). Status `ok` keeps a
-    healthy repo's summary clean; the detail carries the honesty note that the live-spawn smoke is a
-    Phase-3 deferral.
+    healthy repo's summary clean; the detail carries the honesty note that the live-spawn smoke is
+    deferred.
     """
     perk_dir = root / ".pi" / "agents" / "perk"
     names = sorted(p.stem for p in perk_dir.glob("*.md")) if perk_dir.is_dir() else []
@@ -372,7 +372,7 @@ def _extension_clone_check(root: Path, self_repo: bool) -> Check:
 
 
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
-    """The fail-level skills-delivery substrate check (#289 — skills delivery is load-bearing).
+    """The fail-level skills-delivery substrate check (skills delivery is load-bearing).
 
     perk's own skills reach sessions only through the `skills` CLI-managed `.agents/skills/`
     symlinks, so a broken delivery substrate is a **fail** (unlike `_bindings_check`, which owns

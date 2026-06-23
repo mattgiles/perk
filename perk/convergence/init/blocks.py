@@ -1,7 +1,4 @@
-"""The managed ``.gitignore`` + ``AGENTS.md`` blocks and the generic block applier.
-
-Split out of the original single-file ``init`` module (Node 2.2) — verbatim relocation.
-"""
+"""The managed ``.gitignore`` + ``AGENTS.md`` blocks and the generic block applier."""
 
 from pathlib import Path
 

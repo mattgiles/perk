@@ -1,9 +1,9 @@
-"""Objective dependency graph + node mechanics (Node 2.3 module->package split).
+"""Objective dependency graph + node mechanics.
 
 The phase-derivation / sort / grouping helpers, the explicit-status-only node mutation
 (:func:`update_node` / :func:`add_node`), the node↔PR matchers (:func:`canonical_pr` /
 :func:`nodes_for_pr`), and the dependency-graph constructors (:func:`build_graph` /
-:func:`_graph_from_sequential`) — all relocated verbatim from the pre-split ``perk/objective.py``.
+:func:`_graph_from_sequential`).
 The :class:`DependencyGraph` / :class:`PlanSelection` dataclasses themselves live in
 :mod:`perk.objective._models` (the type leaf); their constructors live here.
 """

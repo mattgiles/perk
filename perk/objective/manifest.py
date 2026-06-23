@@ -1,5 +1,4 @@
-"""Objective manifest — the project-overview drift baseline (Node 4.4 / #612), relocated verbatim
-in the Node 2.3 module->package split.
+"""Objective manifest — the project-overview drift baseline.
 
 The cohesive manifest concern: the :class:`Manifest` dataclass plus its renderer
 (:func:`render_manifest_block`), parser (:func:`parse_manifest`), and validator
@@ -23,7 +22,7 @@ from perk.plan import find_metadata_block
 
 @dataclass(frozen=True)
 class Manifest:
-    """The persisted drift baseline of an objective's intended roadmap (Node 4.4 / #612).
+    """The persisted drift baseline of an objective's intended roadmap.
 
     Structural identity only: ``nodes`` reuse :class:`ObjectiveNode` but only their
     ``id``/``slug``/``description``/``depends_on`` are meaningful (``status``/``pr`` are left at
@@ -41,7 +40,7 @@ class Manifest:
 def render_manifest_block(
     nodes: list[ObjectiveNode], phase_names: Mapping[str, str]
 ) -> dict[str, object]:
-    """Build the data dict for ``render_metadata_block(OBJECTIVE_MANIFEST_KEY, …)`` (Node 4.4).
+    """Build the data dict for ``render_metadata_block(OBJECTIVE_MANIFEST_KEY, …)``.
 
     Captures only the **structural identity** of each node — ``id``/``slug``/``description`` plus
     the explicit ``depends_on`` edge set (always emitted as a list, ``[]`` when none).
@@ -138,7 +137,7 @@ def _validate_manifest(data: dict[str, object]) -> tuple[Manifest | None, list[s
 
 
 def parse_manifest(overview: str) -> tuple[Manifest | None, list[str]]:
-    """Read + validate the ``objective-manifest`` block from a project overview (Node 4.4).
+    """Read + validate the ``objective-manifest`` block from a project overview.
 
     Three cases, with an explicit **absent vs malformed** distinction: **no block** → ``(None, [])``
     (a valid backfill target — a pre-manifest objective); **block present but malformed/invalid** →

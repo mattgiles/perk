@@ -1,20 +1,19 @@
 """The cold-door launch primitive (cli-vs-pi §4.1): position the environment, then
 ``exec pi`` primed for a stage, and hand off (§2.3).
 
-T4 (P1) makes positioning **plan-ref-aware**: for ``create``/``reuse`` stages, when no
+Positioning is **plan-ref-aware**: for ``create``/``reuse`` stages, when no
 explicit ``--worktree`` is given, the worktree/branch name is **derived** from the active
 ``cache.plan-ref`` (``plan-<pr_id>``, D1) and the plan-ref + handoff are **materialized into
 the worktree** (D5) so the launched ``pi`` links ``active_plan_ref`` on ``session_start``.
 ``create`` is **idempotent** (D4): an existing worktree is reused (resume), not re-created.
-Arbitrary plan-``#N`` resolution is ``perk resume`` (T5c); here the *active* ref is used (D2).
+Arbitrary plan-``#N`` resolution is ``perk resume``; here the *active* ref is used (D2).
 
 A ``--remote`` launch of a drivable stage (``implement``/``address``) is a **real drive**
-(Node 2.1, contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
+(contracts.md §8.13): :func:`_drive_remote_target` persists the ``run_id→plan``
 linkage, verifies it, then triggers the runner via :mod:`perk.run.runner` (it positions nothing
-locally — the Node 2.2 workflow positions the worker in CI).
+locally — the workflow positions the worker in CI).
 
-**Package layout (Node 2.3 module->package split).** The single-file ``launch`` module was
-decomposed into a package along its natural seams — a pure verbatim relocation (no logic edits).
+**Package layout.**
 This ``__init__`` keeps the orchestrator (:func:`launch_stage`), the ``--dry-run`` preview
 (:func:`_emit_dry_run_preview`), the agent-lock helpers (:func:`_pi_agent_dir` /
 :func:`_sweep_stale_pi_agent_locks`), and the module constants used here
@@ -141,12 +140,12 @@ def launch_stage(
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
-    ``prompt_override`` (P2.T10): when given, it is the seeded initial prompt instead of the
+    ``prompt_override``: when given, it is the seeded initial prompt instead of the
     stage-derived ``_initial_prompt`` — the dedicated ``perk objective plan`` command supplies a
     node-seeded prompt (objective-plan has no plan-ref, so ``_initial_prompt`` returns ``None``).
     All existing callers pass ``None`` and are unaffected.
 
-    ``handoff_extra`` (#78): extra keys merged into the handoff blob so a stage can carry context
+    ``handoff_extra``: extra keys merged into the handoff blob so a stage can carry context
     that must survive *which save surface the model uses*. ``objective-plan`` passes the
     ``objective_id``/``node_id`` it just marked ``planning`` so a later ``perk plan-save`` recovers
     the link from the handoff even when the model saved via the ``/plan-save`` *command* (which
@@ -154,7 +153,7 @@ def launch_stage(
     interface already carries arbitrary keys (``[key: string]: unknown``), so no TS change is
     needed to ferry it.
 
-    ``binding_trigger`` (Node 2.3): the trigger whose resolved skill bindings (defaults ⊕ the user
+    ``binding_trigger``: the trigger whose resolved skill bindings (defaults ⊕ the user
     overlay) are appended to the initial prompt **only when there is one to augment** (an idle
     launch stays idle); it defaults to ``f"stage:{stage.id}"``. The ``learn-docs`` cold door (which
     borrows the ``plan`` stage) overrides it to its ``command:learn-docs`` trigger so it does not
@@ -167,7 +166,7 @@ def launch_stage(
     (preserving its ``plan-header`` and objective link). Every other caller passes ``None`` and
     mints as before.
 
-    ``preview`` (Node 3.3): the cold ``perk pr address --preview`` flag — shapes the ``address``
+    ``preview``: the cold ``perk pr address --preview`` flag — shapes the ``address``
     seed prompt to classify-only (take no action). Local-launch only: the remote dispatch path
     builds no seed prompt, so ``preview`` is inert on ``--remote``. Every other caller defaults
     ``False`` and is unaffected.
@@ -223,13 +222,13 @@ def launch_stage(
     cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
     if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
         cache.write_plan_ref(wt, resolved.plan_ref)
-    # P2.T2c: materialize the plan body into the worktree so in-session checkpoints can seed from
+    # Materialize the plan body into the worktree so in-session checkpoints can seed from
     # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
     if stage.worktree != "none":
         materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
         materialize_skills(repo_root, wt)
-    # Node 5.1 (stretch): mirror the implement-run start into Linear's Agents UI. Gated inside
+    # Mirror the implement-run start into Linear's Agents UI. Gated inside
     # the emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
     # it can never block the exec below. Not reached on --dry-run or --remote (early returns).
     if stage.id == "implement":
@@ -255,11 +254,11 @@ def launch_stage(
         local_linear_key = load_local_linear_api_key(repo_root)
         if local_linear_key is not None:
             env["LINEAR_API_KEY"] = local_linear_key
-    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning (#40)
+    _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
     # Warm pi's git-package clone before exec so the perk extension always loads from a COMPLETE
     # clone. pi clones a missing `git:` package lazily and unlocked, so a missing-clone window +
     # parallel launches let a second process collect resources from a half-created clone and drop
-    # the perk extension (#655). `ensure_extension_clone_present` clones-on-absent under a
+    # the perk extension. `ensure_extension_clone_present` clones-on-absent under a
     # cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and best-effort
     # + non-fatal internally. Targets the repo-root clone (`worktree: none` stages load from
     # there). Not reached on --dry-run / --remote (both early-returned above).

@@ -1,14 +1,14 @@
-"""``perk run-worker`` — the runner-side positioning + headless drive (Node 2.2; contracts §8.14).
+"""``perk run-worker`` — the runner-side positioning + headless drive (contracts §8.14).
 
 The CI entrypoint the managed ``perk-run.yml`` workflow invokes after it checks out the plan
-branch. It is the runner's positioning job (Gap 7): reconstruct the ``cache.plan-ref`` from the
+branch. It is the runner's positioning job: reconstruct the ``cache.plan-ref`` from the
 plan's GitHub state, materialize the handoff/plan-ref/plan-body into the checkout's
-``.pi/workflow/``, then spawn the Node headless worker (``extension/workerMain.ts``, Node 1.2) for
+``.pi/workflow/``, then spawn the Node headless worker (``extension/workerMain.ts``) for
 the dispatched stage with ``PERK_RUN_ID`` in the env. The worker inherits the prepared worktree and
 never re-mints.
 
 Deterministic exterior command (no agentic reasoning): it positions and drives. Model/auth
-resolution is the Node worker's job (env-var key resolution, Gap 5). The worker owns stdout (its
+resolution is the Node worker's job (env-var key resolution). The worker owns stdout (its
 structured ``RunOutcome`` JSON) + the exit code; this command only reports positioning progress to
 stderr and forwards the worker's exit code.
 """
@@ -181,7 +181,7 @@ def run_worker(
     entry = resolve_worker_entry(repo_root, environ)
     user_output(f"run-worker: worker entry={entry.path} ({entry.source})")
     run_report.report_started(repo_root, run_id=run_id, stage=stage.id, plan=plan, environ=environ)
-    # Node 5.1 (stretch): mirror the remote run into Linear's Agents UI. Gated inside the
+    # Mirror the remote run into Linear's Agents UI. Gated inside the
     # emitters (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
     # emission can never change the forwarded worker exit code.
     run_url = run_report.run_url_from_env(environ)

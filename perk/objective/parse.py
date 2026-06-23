@@ -1,6 +1,6 @@
-"""Objective roadmap parsing + validation (Node 2.3 module->package split).
+"""Objective roadmap parsing + validation.
 
-The roadmap-block readers/validators relocated verbatim from the pre-split ``perk/objective.py``:
+The roadmap-block readers/validators:
 :func:`validate_roadmap` (the shared per-node schema gate), :func:`parse_roadmap_nodes` (read +
 validate the ``objective-roadmap`` block), :func:`parse_structured_roadmap` (the out-of-band
 structured-roadmap path), and :func:`parse_adopt_mapping` (the in-place adoption side-map).
@@ -155,7 +155,7 @@ def parse_structured_roadmap(raw: object) -> tuple[list[ObjectiveNode], list[str
 def parse_adopt_mapping(raw: object) -> dict[str, str]:
     """Extract the per-node ``adopt_issue`` mapping from the same raw roadmap shape
     :func:`parse_structured_roadmap` accepts (a bare list of node mappings or a
-    ``{schema_version, nodes}`` mapping) — the in-place objective-adoption side-map (#709, §8.30).
+    ``{schema_version, nodes}`` mapping) — the in-place objective-adoption side-map (§8.30).
 
     Returns ``{node_id: source_issue_id}`` for every node carrying a non-blank string
     ``adopt_issue`` (the id/identifier of a pre-existing source issue the node adopts in place).

@@ -1,22 +1,14 @@
-"""Minimal, idempotent ``perk init`` — the init spine begins here (T1).
+"""Minimal, idempotent ``perk init`` — the init spine.
 
 `init` is **declarative and convergent**: it edits files toward a desired state and
 is safe to re-run (re-running on a converged repo is a no-op). It owns *all* Pi
 wiring from the first turn (the init-spine principle).
 
-T1 scope: wire ``.pi/settings.json`` (perk's own extension + the borrowed default
-set), create the base ``.pi/workflow/`` dir, manage ``.gitignore``, and write a
-managed ``AGENTS.md`` block. Env/GitHub verification, capability tracking, flags,
-``--json``, and the post-init handoff are T5; the TOML config scaffold is T4.
-
-**Package layout (Node 2.2 module->package split).** The single-file ``init`` module was
-decomposed into a package along its natural seams — a pure verbatim relocation (no logic edits,
-beyond the audit §4.2 ``cast``->``isinstance`` cleanup in ``settings``), following the
-``perk/backends/linear_backend`` precedent (Node 2.1). This ``__init__`` keeps the orchestration
+**Package layout.** This ``__init__`` keeps the orchestration
 (``run_init``, ``managed_convergences``, ``_reconcile_extension_clone``, ``_linear_readiness``,
 ``_converge_workflow_dir``, ``_write_post_init``, ``is_self_repo``) and re-exports every submodule
-symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path
-verbatim (zero consumer/test import churn). The orchestrators reference the moved helpers as
+symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
+The orchestrators reference the moved helpers as
 facade globals, so the existing ``init_mod.sync_skills`` / ``init_mod.materialize_extension_clone``
 monkeypatches keep working. Submodules: ``templates``, ``report``, ``blocks``, ``settings``,
 ``agents``, ``skills``, ``extension_clone``.
@@ -355,7 +347,7 @@ def run_init(
     # path in both self-repo and consumer trees (the Pi package no longer declares `pi.skills`,
     # so Pi discovers `perk-*` only through `.agents/skills/`).
     # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
-    # Load-bearing (#289): a sync failure is fatal (exit 2) — but convergence already happened,
+    # Load-bearing: a sync failure is fatal (exit 2) — but convergence already happened,
     # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
     if verify:
         sync_error = sync_skills(root, changes, self_repo=self_repo)

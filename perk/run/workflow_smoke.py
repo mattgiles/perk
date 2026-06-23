@@ -1,4 +1,4 @@
-"""The `perk doctor workflow smoke-test` core logic (Objective #137 Node 3.3; contracts.md §8.19).
+"""The `perk doctor workflow smoke-test` core logic (contracts.md §8.19).
 
 A Click-free, testable module that dispatches a throwaway CI run to prove the genuinely CI-only
 prerequisites a static check cannot: that the managed workflow is dispatchable, the runner actually
@@ -6,7 +6,7 @@ starts a job, and the secrets are readable **in the Actions context**. It trigge
 ``perk-run.yml`` **directly** with a ``smoke=true`` short-circuit (the workflow validates secrets,
 echoes a smoke-ok line, then exits success — no plan checkout, no composite setup, no worker drive,
 no model spend), persisting **no** ``DispatchRecord`` and creating **no** GitHub artifacts (no
-branch/PR/issue). So `perk workflow run list` (Node 3.1) is unaffected, and there is no ``cleanup``
+branch/PR/issue). So `perk workflow run list` is unaffected, and there is no ``cleanup``
 command to write (perk's smoke leaves nothing durable) — the only real leftover is an in-flight run
 on a poll timeout, which ``smoke-test --wait`` self-cancels.
 """
@@ -28,7 +28,7 @@ from perk.substrate.output import user_output
 SMOKE_STAGE = "smoke"
 SMOKE_PLAN = "smoke"
 
-# Poll cadence (erk parity): give the throwaway run up to 10 minutes, polling every 15s.
+# Poll cadence: give the throwaway run up to 10 minutes, polling every 15s.
 POLL_TIMEOUT_S = 600
 POLL_INTERVAL_S = 15
 
