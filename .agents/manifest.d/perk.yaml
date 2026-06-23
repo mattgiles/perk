@@ -34,6 +34,8 @@ skills:
   - source: perk
     name: perk-address
   - source: perk
+    name: perk-expert
+  - source: perk
     name: perk-implement
   - source: perk
     name: perk-learn
