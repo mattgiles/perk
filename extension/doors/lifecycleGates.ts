@@ -1,12 +1,11 @@
-// P1.T4b — session-lifecycle gates (the interior safety primitive; cli-vs-pi §4.1, pi
-// best-practices §7). One reusable dirty-repo guard on session_before_switch / session_before_fork
-// that returns { cancel: true } when an *active perk workflow* has uncommitted changes — so a stage
-// transition never silently orphans work. Plus the guard-only `/implement` command that *enforces*
-// the implement stage's `warm: false` legality (the plan→implement jump requires fresh context;
-// that is the cold door `perk implement`, T4a).
+// Session-lifecycle gates (the interior safety primitive). One reusable dirty-repo guard on
+// session_before_switch / session_before_fork that returns { cancel: true } when an *active perk
+// workflow* has uncommitted changes — so a stage transition never silently orphans work. Plus the
+// guard-only `/implement` command that *enforces* the implement stage's `warm: false` legality (the
+// plan→implement jump requires fresh context; that is the cold door `perk implement`).
 //
-// Spike S-B (turn-4 §3.5) verified: pi.on("session_before_fork"/"...switch") handlers are fired by
-// extensionRunner.emit({type,...}) and their { cancel } result round-trips; the handler's
+// pi.on("session_before_fork"/"...switch") handlers are fired by extensionRunner.emit({type,...})
+// and their { cancel } result round-trips; the handler's
 // pi.exec("git",["status","--porcelain"],{cwd}) resolves the session cwd.
 
 import type {
@@ -24,7 +23,7 @@ const HANDOFF_DIRTY_MESSAGE =
   "only artifact that crosses the boundary).";
 
 /**
- * Pure gate policy (D6): cancel a transition only inside an active perk workflow whose tree is
+ * Pure gate policy: cancel a transition only inside an active perk workflow whose tree is
  * dirty. Kept separate from the `pi.exec` effect so the matrix is unit-testable offline.
  */
 export function gateDecision(inputs: { active: boolean; dirty: boolean }): { cancel: boolean } {
@@ -55,13 +54,12 @@ async function guardTransition(
 }
 
 /**
- * The plan-read priming seed for a fresh implement session (P2.T2b). The in-session twin of
+ * The plan-read priming seed for a fresh implement session. The in-session twin of
  * `perk/run/launch.py`'s `_initial_prompt`: carry the plan FORWARD (read it from its canonical source),
- * never summarize it — the plan is the only artifact that crosses the boundary (erk
- * context-preservation-prompting / impl-context). Pure → unit-testable offline.
+ * never summarize it — the plan is the only artifact that crosses the boundary. Pure → unit-testable offline.
  */
 /**
- * The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the saved
+ * The per-backend plan-read instruction — the prompt SSOT for "how do I read the saved
  * plan". Byte-identical to `perk/run/launch.py::_plan_read_instruction` (the Python twin); drift in
  * either plane fails the paired parity suites. `github` reads via `gh`; `linear` points at the
  * pi-mono-linear tools with an `open <url>` fallback; any other provider falls back to opening
@@ -90,14 +88,14 @@ export function implementHandoffPrompt(ref: PlanRef): string {
 }
 
 /**
- * The warm `/implement` (D7 + P2.T2b). It still NEVER performs the cross-worktree plan→implement
+ * The warm `/implement`. It still NEVER performs the cross-worktree plan→implement
  * transition (that is structurally the Python cold door's job — no extension session API can change
- * cwd; D2). Outside an impl context it refuses and points at `perk implement`. INSIDE an active
+ * cwd). Outside an impl context it refuses and points at `perk implement`. INSIDE an active
  * impl worktree (read-write + a linked plan-ref) it offers the in-process twin of the cold door: a
  * lossless `ctx.newSession` fresh-context handoff seeded with the plan-read priming (the plan, and
  * the worktree's materialized plan-ref, are the durable state — model-visible output stays capped).
  * Dirty-tree hygiene is gated manually here (belt-and-suspenders: `newSession` is a session-replace,
- * not a fork/switch, so it may bypass the P1.T4b `session_before_*` gate — we refuse on a dirty tree
+ * not a fork/switch, so it may bypass the `session_before_*` gate — we refuse on a dirty tree
  * either way), fail-safe-headless.
  */
 function registerImplementGuard(pi: ExtensionAPI): void {

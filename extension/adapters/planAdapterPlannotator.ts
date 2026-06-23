@@ -4,12 +4,11 @@
 // flow. perk's `/plan` mode, authoring injection, and read-only gate STAY (planMode skips only the
 // `--plan` flag + `Ctrl+Alt+P` shortcut — the two real registration collisions).
 //
-// INJECTION + BRIDGE ONLY (Node 2.5 split): as of Node 2.5 the `plan_review` TOOL lives in
-// `extension/factories/planReview.ts` — perk's backend-neutral review door — and this module is back to
-// the injection-only adapter shape: it owns (1) the plannotator review-step authoring context
-// (injected while the gate is active AND plannotator is selected — TWO content flavors, one
-// customType: the plan bridge context, or the objective flavor when the stage is
-// `objective-author`, #352 Node 2.2) and (2) the pure event-bus bridge
+// INJECTION + BRIDGE ONLY: the `plan_review` TOOL lives in `extension/factories/planReview.ts`
+// (perk's backend-neutral review door); this module is the injection-only adapter shape. It owns
+// (1) the plannotator review-step authoring context (injected while the gate is active AND
+// plannotator is selected — TWO content flavors, one customType: the plan bridge context, or the
+// objective flavor when the stage is `objective-author`) and (2) the pure event-bus bridge
 // (`createPlannotatorBridge`) that planReview.ts dispatches to when plannotator is the
 // selected plan provider. The bridge speaks plannotator's published `plannotator:request` event
 // API (in-process `pi.events` bus).
@@ -79,7 +78,7 @@ read-only exactly as the plan-authoring contract describes; then add one review 
   the complete plan to the user; the human runs /plan-save (the manual failsafe).`;
 
 /**
- * The objective flavor of the bridge prompt (#352 Nodes 2.2 + 2.3), injected in an
+ * The objective flavor of the bridge prompt, injected in an
  * `objective-author` session instead of the plan flavor. An APPROVED review auto-saves the
  * objective via the `objectiveApprovalSave` seam; `/objective-save` is the manual failsafe on
  * the skipped/unavailable arms.
@@ -222,7 +221,7 @@ export function createPlannotatorBridge(bus: PlannotatorBus): {
 export function registerPlanAdapterPlannotator(pi: ExtensionAPI): void {
   // Inject the bridge context while the read-only gate is active AND plannotator is selected.
   // Two content flavors, one customType: an objective-author session (also read-only) gets the
-  // objective flavor (the review surface renders the objective draft — #352 Node 2.2); any other
+  // objective flavor (the review surface renders the objective draft); any other
   // gated stage gets the plan flavor. The gate-active check reads the persisted
   // `perk:workflow-state.mode` (the gate's state twin) — never the gate itself.
   pi.on("before_agent_start", async (_event, ctx) => {

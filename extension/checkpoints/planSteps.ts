@@ -1,4 +1,4 @@
-// #342 — generated checkpoint TODOs for prose plans: the second consumer of the structured-output
+// Generated checkpoint TODOs for prose plans: the second consumer of the structured-output
 // substrate (the `planTitle.ts` idiom). When an implement session starts on a plan body that lacks
 // a usable `## Steps` numbered list, checkpoints ask the session model for a bounded, ordered
 // implementation checklist via a single structured tool call. Every failure mode (the offline

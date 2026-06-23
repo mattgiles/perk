@@ -1,5 +1,5 @@
-// P1.T5b — the warm `/land` door (turn-5 §7). The in-session twin of the Python cold door
-// (`perk pr land`): a terminating tool + command that DELEGATE the GitHub merge (D1 — mutations
+// The warm `/land` door. The in-session twin of the Python cold door
+// (`perk pr land`): a terminating tool + command that DELEGATE the GitHub merge (mutations
 // canonical in Python), then set the `pending-learn` marker for the in-session path (the worker
 // sets it too on the cold path; the marker is an idempotent existence-semaphore). Never throws.
 
@@ -18,7 +18,7 @@ import {
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
 
-// Learn-consume skip reasons that are ordinary, not failures (#102): non-factory plans carry no
+// Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
 // `consumed_learn` (`no_consumed_learn`), and a dry run reports `dry_run`. Anything else surfaces.
 const BENIGN_LEARN_SKIPS = new Set(["no_consumed_learn", "dry_run"]);
 
@@ -149,7 +149,7 @@ export async function landPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<L
         .join(", ")}) into docs/learned.`,
     );
   }
-  // Surface a non-benign learn-consume skip (#102): `no_consumed_learn` is the ordinary
+  // Surface a non-benign learn-consume skip: `no_consumed_learn` is the ordinary
   // non-factory case, so stay quiet on it; a real failure must be visible, not silent.
   if (learn?.skipped_reason && !BENIGN_LEARN_SKIPS.has(learn.skipped_reason)) {
     lines.push(`Warning: learn consume incomplete — ${learn.skipped_reason}.`);

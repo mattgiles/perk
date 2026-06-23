@@ -1,10 +1,10 @@
-// P1.T5a — the warm `/submit` door (turn-5 §7). The in-session twin of the Python cold door
+// The warm `/submit` door. The in-session twin of the Python cold door
 // (`perk pr submit`): a deterministic, terminating tool + command that DELEGATE the GitHub write —
-// they do NOT reimplement it (D1: GitHub mutations are canonical in the Python gateway). Mirrors
+// they do NOT reimplement it (GitHub mutations are canonical in the Python gateway). Mirrors
 // `planSave.ts`: write nothing, delegate to `perk pr submit --json` via `pi.exec`, surface the
 // structured result, never throw (failures are loud-but-non-fatal via `details.ok = false`).
 //
-// #556 — mergeability gate: `perk pr submit` probes the PR's mergeability against the base branch
+// Mergeability gate: `perk pr submit` probes the PR's mergeability against the base branch
 // (a deterministic local `git merge-tree` probe). When it reports a definitively-unmergeable PR
 // (`mergeable === false` + conflicts), the warm door drives a fresh-context, write-capable
 // `perk.conflict-resolver` subagent (mirroring `/pr-review`'s dispatch and `/land`'s reconcile
@@ -26,7 +26,7 @@ import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 
-/** The bounded conflict-resolution re-drive cap (#556): drive the resolver at most this many times. */
+/** The bounded conflict-resolution re-drive cap: drive the resolver at most this many times. */
 export const CONFLICT_RESOLUTION_ATTEMPT_CAP = 2;
 
 /** The ok-arm fields — the structured `details` surface doubles as branch-safe persisted state. */

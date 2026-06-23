@@ -1,4 +1,4 @@
-// Node 2.3 — the FIRST 3rd-party plan adapter. A perk-owned, injection-only bridge that re-enables
+// The FIRST 3rd-party plan adapter. A perk-owned, injection-only bridge that re-enables
 // `@tombell/pi-plan` as a REAL, selectable plan provider: it bridges that package's free-form prose
 // `/plan` surface to perk's canonical produced contract (`plan_save` → `cache.plan-ref`).
 //
@@ -10,7 +10,7 @@
 // WHAT IT DOES (and does NOT do):
 //   - It injects a hidden (`display:false`) `perk:plan-adapter-tombell` context that tells the model
 //     the foreign `/plan` surface authors a FREE-FORM PROSE plan, and directs it through perk's
-//     review-first discipline (Node 2.6): keep the draft current with `plan_draft`, then call
+//     review-first discipline: keep the draft current with `plan_draft`, then call
 //     `plan_review` — which (for any non-plannotator selection, tombell included) runs the
 //     first-party in-TUI editor review, and whose APPROVED outcome auto-saves via the
 //     `approvalSave` seam. The injection is CONDITIONED: it fires only when perk's read-only gate

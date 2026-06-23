@@ -1,4 +1,4 @@
-// P2.T5 — the perk-owned, read-only CI executor (the Run→Report half of Run→Report→Fix→Verify).
+// The perk-owned, read-only CI executor (the Run→Report half of Run→Report→Fix→Verify).
 //
 // A deterministic, in-process check runner: it runs the project's configured `[ci]` named checks
 // via `pi.exec` and REPORTS pass/fail + failure output — it never edits, fixes, or loops. The
@@ -7,14 +7,14 @@
 // `devrun` discipline: "run and report", never "run and fix").
 //
 // "Read-only" here is a property of THIS MODULE and its OUTPUT, not a sandbox (see the threat
-// model below). The executor reuses T4's handoff machinery — `capForModel` + scratch +
-// double-delivery + fail-closed — but NOT its session runner: a configured command is mechanics,
+// model below). The executor reuses the handoff machinery — `capForModel` + scratch +
+// double-delivery + fail-closed — but NOT the session runner: a configured command is mechanics,
 // not judgment, so there is no LLM turn in this path (that would inject nondeterminism). It also
 // does NOT call `runReadOnlyChild` (whose `success` means "ran", carrying no exit code).
 //
 // Threat model & the safety boundary (read first):
 //   `pi.exec("bash", ["-lc", cmd])` runs whatever the `[ci]` command string says, with full
-//   filesystem/network access, OUTSIDE T1's tool gate. The defenses, in order, are:
+//   filesystem/network access, OUTSIDE perk's tool gate. The defenses, in order, are:
 //     1. The model never authors the command — it picks a configured NAME (a persuaded model
 //        cannot run `rm -rf` because it cannot supply a command).
 //     2. Untrusted-config scope gate (`decideCiScope`) — running a project-supplied command at
@@ -545,7 +545,7 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // Tool-boundary decode (Node 3.2): absent → undefined (run all); mistyped → a bad_input
+      // Tool-boundary decode: absent → undefined (run all); mistyped → a bad_input
       // CiReport refusal in the executor's native vocabulary (mirrors the unknown_check shape).
       const p = paramsOf(params);
       const check = p === null ? undefined : stringParam(p, "check");

@@ -1,6 +1,6 @@
-// P2.T8a — the warm `/ready` door (D6): the deliberate draft→ready review gate. The in-session twin
+// The warm `/ready` door: the deliberate draft→ready review gate. The in-session twin
 // of the Python cold door (`perk pr ready`): a terminating tool + command that DELEGATE the GitHub
-// mark-ready (D1 — mutations canonical in Python). perk deliberately does NOT auto-publish on
+// mark-ready (mutations canonical in Python). perk deliberately does NOT auto-publish on
 // submit; `/ready` is the explicit gesture that opens the PR for review. Mirrors `submit.ts`: write
 // nothing, delegate via `pi.exec`, surface the structured result, never throw.
 

@@ -39,7 +39,7 @@ function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
 
 /**
  * The seed guidance the warm `/learn-docs` injects to start the factory loop (the perk-learn-docs
- * skill pointer rides the skill-binding suffix — Node 2.3 — not hardcoded here). Pure + exported
+ * skill pointer rides the skill-binding suffix — not hardcoded here). Pure + exported
  * for offline tests.
  */
 export function learnDocsGuidance(inboxPath: string, learnNumbers: string[]): string {

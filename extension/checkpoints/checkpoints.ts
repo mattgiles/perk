@@ -1,33 +1,30 @@
-// P2.T2c — perk-owned checkpoints. The implement-session progress tracker: seed an ordered step
-// list from the plan body's `## Steps` numbered list, then advance it as the model emits `[DONE:n]`
-// markers in its turns. State lives in a dedicated `perk:checkpoint` session entry (D3) — kept OFF
-// the shared `perk:workflow-state` record (progress is high-churn; this avoids LWW-append smell).
+// perk-owned checkpoints. The implement-session progress tracker: seed an ordered step list from
+// the plan body's `## Steps` numbered list, then advance it as the model emits `[DONE:n]` markers
+// in its turns. State lives in a dedicated `perk:checkpoint` session entry — kept OFF the shared
+// `perk:workflow-state` record (progress is high-churn; this avoids LWW-append smell).
 //
-// Opt-in + inert-by-default (D4): perk plans are prose, so when no `## Steps` list is present the
+// Opt-in + inert-by-default: perk plans are prose, so when no `## Steps` list is present the
 // checkpoint degrades to inert (no crash, no nagging). The `perk-plan` skill documents the optional
 // `## Steps` section as the forward path.
 //
 // The pure helpers (extractDoneSteps / markCompletedSteps + the step extractor) are perk-owned
-// copies of pi's official `examples/extensions/plan-mode/utils.ts` (as T1 copied the regex tables),
-// adapted to key off `## Steps` rather than plan-mode's `Plan:` header. Progress is surfaced
-// headless-safe as the checkpoints segment of the composed `perk` status (node 2.3 — a
-// `📋 done/total · ▸n` segment published through the shared `PerkStatusHandle`) plus a themed
-// `belowEditor` widget factory via `setStandingWidget` (charter D3/D4/D10 — stateless render,
-// lines windowed to ≤4 steps per D1 and width-truncated per D9); `/checkpoints` notifies a
-// one-line summary (D8).
-// Accepted trade-off: pi's RPC mode drops factory widgets — the status chip + `/checkpoints`
-// remain the RPC-visible surfaces (recorded in shared/contracts.md P2.T2c).
+// copies of pi's official `examples/extensions/plan-mode/utils.ts`, adapted to key off `## Steps`
+// rather than plan-mode's `Plan:` header. Progress is surfaced headless-safe as the checkpoints
+// segment of the composed `perk` status (a `📋 done/total · ▸n` segment published through the shared
+// `PerkStatusHandle`) plus a themed `belowEditor` widget factory via `setStandingWidget` (stateless
+// render, lines windowed to ≤4 steps and width-truncated); `/checkpoints` notifies a one-line
+// summary. Accepted trade-off: pi's RPC mode drops factory widgets — the status chip +
+// `/checkpoints` remain the RPC-visible surfaces (recorded in shared/contracts.md).
 //
-// TODO-PROVIDER DEFERRAL (Node 3.1). perk's checkpoints are the *reference* todo provider
-// (`perk-checkpoints`). They now *consume* the resolved `[providers] todo` selection and **step the
-// progress surface aside** when a foreign todo provider is selected — the todo-seam mirror of
-// planMode.ts's plan-seam deferral (Node 2.2). The four runtime surfaces guard on
-// `isPerkCheckpointsReferenceSelected(ctx.cwd)` (read fresh per-event, fail-safe to the reference):
-// `session_start`/`session_tree`/`turn_end` early-return **silently** (no seed, no advance, no
-// render) so the foreign todo provider owns the progress surface uncontested; `/checkpoints`
-// **announces** the deferral headless-safe. Runtime deferral only — registration-time vacating is
-// the concrete foreign todo adapter's concern (Node 3.2). Fail-safe: any config-read error → treated
-// as the reference → behavior-preserving, zero change on the default selection.
+// TODO-PROVIDER DEFERRAL. perk's checkpoints are the *reference* todo provider (`perk-checkpoints`).
+// They consume the resolved `[providers] todo` selection and **step the progress surface aside**
+// when a foreign todo provider is selected — the todo-seam mirror of planMode.ts's plan-seam
+// deferral. The four runtime surfaces guard on `isPerkCheckpointsReferenceSelected(ctx.cwd)` (read
+// fresh per-event, fail-safe to the reference): `session_start`/`session_tree`/`turn_end`
+// early-return **silently** (no seed, no advance, no render) so the foreign todo provider owns the
+// surface uncontested; `/checkpoints` **announces** the deferral headless-safe. Runtime deferral
+// only — registration-time vacating is the concrete foreign todo adapter's concern. Fail-safe: any
+// config-read error → treated as the reference → zero change on the default selection.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
@@ -57,13 +54,13 @@ import {
 } from "../surfaces/surfaces.ts";
 import { generatePlanSteps } from "./planSteps.ts";
 
-/** The dedicated checkpoint session entry type (D3). */
+/** The dedicated checkpoint session entry type. */
 export const CHECKPOINT_TYPE = "perk:checkpoint";
 
-/** The once-only generated-checklist context injection's custom message type (#342). */
+/** The once-only generated-checklist context injection's custom message type. */
 export const STEPS_CONTEXT_TYPE = "perk:steps-context";
 
-/** The generated-steps session artifact (written via the #339 accessor seam, node 1.2/1.3). */
+/** The generated-steps session artifact (written via the accessor seam). */
 export const STEPS_ARTIFACT_NAME = "plan-steps.json";
 
 /**
@@ -163,7 +160,7 @@ export function computeCurrent(steps: CheckpointStep[], preferred: number | null
 
 /**
  * Parse the plan body's `## Steps` numbered list into checkpoint steps. Returns `[]` when there is
- * no `## Steps` section (the inert path, D4). Only a recognizable `<n>. text` / `<n>) text` list
+ * no `## Steps` section (the inert path). Only a recognizable `<n>. text` / `<n>) text` list
  * under the header is parsed; the section ends at the next `## ` heading.
  */
 export function extractSteps(planBody: string | null | undefined): CheckpointStep[] {
@@ -214,7 +211,7 @@ function isAssistantText(entry: {
  * Rebuild checkpoint state from the branch. The latest `perk:checkpoint` entry is the **marker**
  * (its `steps` carry completion persisted on prior turns); we then re-fold `[DONE:n]` from assistant
  * messages **after** that marker only — so stale `[DONE:n]` from a previous execution can't
- * resurrect a step (the subtlety pi best-practices §4 flags). No checkpoint entry ⟹ inert.
+ * resurrect a step (a subtlety: stale `[DONE:n]` must not resurrect a step). No checkpoint entry ⟹ inert.
  */
 export function rebuildCheckpoint(branch: readonly BranchEntry[]): CheckpointState {
   let markerIdx = -1;
@@ -243,7 +240,7 @@ export function rebuildCheckpoint(branch: readonly BranchEntry[]): CheckpointSta
   return { steps: seed, current };
 }
 
-// --- generated steps (#342) ----------------------------------------------------------------------
+// --- generated steps -----------------------------------------------------------------------------
 
 /**
  * Recomputed (never stored) generated-ness: a checkpoint state is "generated" iff it is non-inert
@@ -260,7 +257,7 @@ function toCheckpointSteps(texts: string[]): CheckpointStep[] {
 }
 
 /**
- * Read the generated-steps artifact through the #339 accessor seam (provenance-pointer validated)
+ * Read the generated-steps artifact through the accessor seam (provenance-pointer validated)
  * and return its steps — but only when its stored `plan_body_digest` matches the CURRENT plan
  * body (a replan/rematerialized body invalidates the cache). `null` on any refusal: no pointer,
  * digest mismatch (file or plan body), unparseable JSON, or an unusable steps shape.
@@ -357,8 +354,8 @@ function renderStatus(
     }
     return;
   }
-  // Themed component factory (D3/D10): lines are computed inside render() per call — never cached
-  // — over the freshly-rebuilt state snapshot; windowed (D1) + width-truncated (D9) in surfaces.ts.
+  // Themed component factory: lines are computed inside render() per call — never cached — over
+  // the freshly-rebuilt state snapshot; windowed + width-truncated in surfaces.ts.
   const snapshot = state;
   status.set(ctx, "checkpoints", `${MARK_CHECKPOINTS} ${progressLine(state)}`);
   setStandingWidget(
@@ -380,8 +377,8 @@ function renderStatus(
 export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle): void {
   pi.on("session_start", async (_event, ctx) => {
     try {
-      // Todo-provider deferral (Node 3.1): when a foreign `[providers] todo` is selected, step the
-      // progress surface aside silently (no seed, no render) — the foreign provider owns it.
+      // Todo-provider deferral: when a foreign `[providers] todo` is selected, step the progress
+      // surface aside silently (no seed, no render) — the foreign provider owns it.
       if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) return;
       const branch = branchOf(ctx);
       const existing = rebuildCheckpoint(branch);
@@ -392,10 +389,10 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
         const active = wf.active_plan_ref != null;
         const planBody = active ? readPlanBody(ctx.cwd) : null;
         let steps = active ? extractSteps(planBody) : [];
-        // Generation branch (#342): an active IMPLEMENT session over a prose plan body (no usable
+        // Generation branch: an active IMPLEMENT session over a prose plan body (no usable
         // `## Steps` — the extractor already maps malformed sections to []) asks the session model
-        // for a bounded checklist. Artifact reuse first (the #339 pointer-validated cache, keyed on
-        // the plan-body digest); every failure falls through to the coarse fallback unchanged.
+        // for a bounded checklist. Artifact reuse first (the pointer-validated cache, keyed on the
+        // plan-body digest); every failure falls through to the coarse fallback unchanged.
         if (steps.length === 0 && planBody !== null && wf.active_plan_ref != null) {
           const stageRaw = wf.run_id != null ? readHandoff(ctx.cwd, wf.run_id)?.stage : undefined;
           if (stageRaw === "implement") {
@@ -494,7 +491,7 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
     }
   });
 
-  // #342 — the once-only generated-checklist injection: when the seeded checkpoints are
+  // The once-only generated-checklist injection: when the seeded checkpoints are
   // LLM-generated (recomputed: non-inert over a prose plan body), inject the numbered list as a
   // hidden context message so `[WIP:n]`/`[DONE:n]` markers use exactly these numbers. Injected
   // custom messages persist to the branch, so the branch-carries-it guard makes this once-only
@@ -522,7 +519,7 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
   pi.registerCommand("checkpoints", {
     description: "Show perk implementation checkpoints (read-only).",
     handler: async (_args, ctx) => {
-      // Todo-provider deferral (Node 3.1): announce the deferral headless-safe and step aside when a
+      // Todo-provider deferral: announce the deferral headless-safe and step aside when a
       // foreign `[providers] todo` is selected (the surface-facing mirror of the silent handlers).
       if (!isPerkCheckpointsReferenceSelected(ctx.cwd)) {
         const deferral = `checkpoints deferred — a foreign todo provider (\`${resolvedTodoProviderId(
@@ -532,7 +529,7 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
         return;
       }
       const state = rebuildCheckpoint(branchOf(ctx));
-      // One line (charter D8): `done/total · ▸n <current step text>`; the tail drops when no
+      // One line: `done/total · ▸n <current step text>`; the tail drops when no
       // step is current (all complete).
       const current = state.steps.find((s) => s.step === state.current);
       const generated = !isInert(state) && isGeneratedState(ctx.cwd, state) ? " (generated)" : "";

@@ -1,12 +1,12 @@
-// P2.T7 — the warm `/address` door (the review loop). Classify-then-act: a spawned read-only child
+// The warm `/address` door (the review loop). Classify-then-act: a spawned read-only child
 // (the borrowed `pi-subagents` engine running perk's `perk.review-classifier` agent) fetches +
 // classifies the PR feedback in ISOLATION, so the verbose GitHub JSON never enters this session;
 // the PARENT applies fixes (judgment + edits stay here) and resolves the threads through this
 // deterministic batched op.
 //
 // `resolve_review_threads` is the mechanical half: it DELEGATES the GitHub mutation to the Python
-// cold door (`perk pr resolve-threads`, D1 — mutations canonical in Python) via the shared
-// cold-door client (`runColdDoor`, Node 1.4 — the batch rides the run-scratch stdin channel), then
+// cold door (`perk pr resolve-threads` — mutations canonical in Python) via the shared cold-door
+// client (`runColdDoor` — the batch rides the run-scratch stdin channel), then
 // appends `last_review_batch` to `perk:workflow-state`. Never throws (soft `details.ok`, mirrors
 // submitPr).
 
@@ -68,7 +68,7 @@ function decodeCounts(p: ToolParams): ResolveCounts | undefined | null {
 }
 
 /**
- * Decode unknown tool-call params into `ResolveParams` (the tool-boundary seam — Node 3.2).
+ * Decode unknown tool-call params into `ResolveParams` (the tool-boundary seam).
  * `threads` absent or non-array decodes to `[]` (so the existing empty-batch `bad_input` arm
  * fires); any malformed ROW → null — whole-batch refusal, since resolving a guessed subset of
  * threads is a durable GitHub mutation. `pr`/`counts` mistyped → null (recorded state).
@@ -229,7 +229,7 @@ const TOOL_GUIDELINES = [
 ];
 
 /** Inject the address-workflow guidance the model follows (the perk-address skill pointer is
- * delivered by the skill-binding suffix — Node 2.3 — not hardcoded here). When `model` is set, the
+ * delivered by the skill-binding suffix — not hardcoded here). When `model` is set, the
  * `perk.review-classifier` spawn carries an inline `model` override ([subagents] review-classifier);
  * otherwise the agent's frontmatter default is used. */
 export function addressGuidance(preview: boolean, model?: string): string {
@@ -329,7 +329,7 @@ export function registerAddress(pi: ExtensionAPI): void {
       );
       // Inject the address-workflow guidance as a user message so the model starts the loop.
       // `pi.sendUserMessage` always triggers a turn (the warm entry to the review loop). The
-      // perk-address pointer rides the skill-binding suffix (Node 2.3, D5).
+      // perk-address pointer rides the skill-binding suffix.
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "stage:address"));
     },
   });

@@ -1,7 +1,7 @@
-// P2.T8b — the deepened warm `/learn` door (D10). Graduates the Phase-1 thin marker-clear into a
-// real knowledge-capture pass: when a `summary` is given, DELEGATE to `perk learn capture --json`
-// via the shared cold-door client (`runColdDoor`, Node 1.4 — the body rides the run-scratch stdin
-// channel; D1 — GitHub writes canonical in Python), which creates a `perk:learn` issue + clears
+// The deepened warm `/learn` door. Graduates the thin marker-clear into a real knowledge-capture
+// pass: when a `summary` is given, DELEGATE to `perk learn capture --json` via the shared cold-door
+// client (`runColdDoor` — the body rides the run-scratch stdin channel; GitHub writes canonical in
+// Python), which creates a `perk:learn` issue + clears
 // `pending-learn`; then mirror the marker-clear in-session (idempotent). With no `summary`, stay
 // the thin TS-only marker-clear (graceful — no empty issue). Never throws (soft `details.ok`);
 // the capture decode is fully LENIENT — a `success: true` envelope always yields the captured-ok
@@ -50,8 +50,8 @@ interface LearnCapturePayload {
  * `docs/learned/workflow/cold-door-client.md`). `learn_issue` is render-only — it feeds only the
  * success message text and `details` — and the `success: true` envelope is the cold door's
  * authoritative statement that the capture mutation completed and the on-disk `pending-learn`
- * marker was already cleared. So any miss on the sub-object (absent key, the legacy pre-#387
- * `number` shape, mistyped fields — e.g. under CLI↔extension version skew) yields
+ * marker was already cleared. So any miss on the sub-object (absent key, a legacy `number` shape,
+ * mistyped fields — e.g. under CLI↔extension version skew) yields
  * `{ learn_issue: undefined }`, never null: the warm report must survive an undecodable payload,
  * and the `bad_output` arm is deliberately unreachable for this door. `pending_cleared` is
  * unconsumed.
@@ -144,14 +144,14 @@ function activePlanRef(ctx: ExtensionContext): PlanRef | null {
 
 /**
  * Inject the learn-workflow guidance the model follows (the perk-learn skill pointer rides the
- * skill-binding suffix — Node 2.3 — not hardcoded here). When a plan-ref is known, derive the
+ * skill-binding suffix — not hardcoded here). When a plan-ref is known, derive the
  * merged PR from its `plan-<pr_id>` head branch.
  */
 export function learnGuidance(planRef: PlanRef | null): string {
   const lines = ["perk /learn — the knowledge-capture pass."];
   if (planRef) {
     const branch = `plan-${planRef.pr_id}`;
-    // The plan-read clause is backend-aware (Node 3.1); the merged-PR derivation stays `gh`
+    // The plan-read clause is backend-aware; the merged-PR derivation stays `gh`
     // under every issue backend — PRs are GitHub-universal.
     let readClause: string;
     if (planRef.provider === "github") {
@@ -210,7 +210,7 @@ export function registerLearn(pi: ExtensionAPI): void {
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // Tool-boundary decode (Node 3.2): absent → undefined (the marker-clear path); mistyped →
+      // Tool-boundary decode: absent → undefined (the marker-clear path); mistyped →
       // strict-fail — never silently clear the pending-learn marker on uncertainty.
       const p = paramsOf(params);
       const summary = p === null ? undefined : stringParam(p, "summary");
