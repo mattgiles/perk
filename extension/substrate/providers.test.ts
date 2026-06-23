@@ -1,6 +1,6 @@
-// Node 2.1 — loadProviders against the REAL bundled providers.yaml. The shipped supported set is
+// loadProviders against the REAL bundled providers.yaml. The shipped supported set is
 // the two reference entries (perk-plan, perk-checkpoints — both default) plus one REAL foreign
-// entry per seam (tombell-plan, Node 2.3; juicesharp-todo, Node 3.2). The Python plane
+// entry per seam (tombell-plan; juicesharp-todo). The Python plane
 // (tests/test_providers.py) is the authoritative validator; this is the thin TS-side structural
 // parse (mirror of extension/substrate/bindings.test.ts).
 
@@ -119,7 +119,7 @@ test("loadProviders: reference provider has null package/adapter and no filter",
 });
 
 test("loadProviders: the real tombell-plan entry carries adapter + NO package_filter", () => {
-  // Node 2.3: the real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
+  // The real entry drops `package_filter` (the illustrative `extensions/*.ts` matched
   // nothing — `@tombell/pi-plan`'s sole extension is root `index.ts`). Omitting it loads all.
   const tombell = loadProviders().find((p) => p.id === "tombell-plan");
   assert.equal(tombell?.adapter, "planAdapterTombell");
@@ -142,7 +142,7 @@ test("loadProviders: the real plannotator-plan entry carries adapter + NO packag
 });
 
 test("loadProviders: the real juicesharp-todo entry carries adapter + NO package_filter", () => {
-  // Node 3.2: `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it). No
+  // `juicesharp-todo` is now a REAL todo provider (todoAdapterJuicesharp bridges it). No
   // `package_filter` (single-concern checklist overlay) — mirrors the tombell case.
   const juicesharp = loadProviders().find((p) => p.id === "juicesharp-todo");
   assert.equal(juicesharp?.adapter, "todoAdapterJuicesharp");

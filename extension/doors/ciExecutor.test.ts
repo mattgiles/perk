@@ -1,4 +1,4 @@
-// P2.T5 — fully-offline coverage for the read-only CI executor: the pure scope gate, the
+// Fully-offline coverage for the read-only CI executor: the pure scope gate, the
 // deterministic check runner (injected `exec`, no `pi.exec`/network), the route-don't-relay +
 // scratch + fail-closed handoff, and the harness wiring (the `run_ci` tool + `/ci` command).
 // See ciExecutor.ts.
@@ -588,7 +588,7 @@ test("harness: globbed [[ci]] skips end-to-end when only non-matching files chan
 });
 
 test("harness: run_ci with a mistyped check → bad_input, no check executed", async () => {
-  // Node 3.2: tool-boundary decode. A configured check exists but is never run.
+  // Tool-boundary decode. A configured check exists but is never run.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".pi"), { recursive: true });
   writeFileSync(join(cwd, ".pi", "perk.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");

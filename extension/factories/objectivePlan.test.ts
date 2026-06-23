@@ -1,4 +1,4 @@
-// P2.T10 — live warm-door tests for the objective plan factory's `objective_node` tool. Drive a
+// Live warm-door tests for the objective plan factory's `objective_node` tool. Drive a
 // REAL bound AgentSession via the T1 harness and prove the delegation + the two arg shapes + the
 // structural completion-audit refusal, OFFLINE: a fake `perk` (PERK_BIN) stands in for the GitHub
 // mutation (and captures its argv), so no LLM / network / gh / Python is invoked. Pure helpers are
@@ -19,7 +19,7 @@ import {
 } from "./objectivePlan.ts";
 
 // Keep in lockstep with OBJECTIVE_LINEAR_SUBSTRINGS in tests/test_objective_prompt_parity.py —
-// the literal fragments of the shared linear arm (Node 4.1 cross-plane parity invariant).
+// the literal fragments of the shared linear arm (cross-plane parity invariant).
 const OBJECTIVE_LINEAR_SUBSTRINGS = [
   "Linear Project",
   "linear_get_issue",
@@ -117,7 +117,7 @@ test("factoryGuidance instructs the file-first loop (draft → review → approv
 });
 
 test("factoryGuidance instructs the node-engagement fetch (backend-neutral, both backends)", () => {
-  // Node 2.1: the warm seed instructs the model to fetch the node-issue's pre-planning engagement
+  // The warm seed instructs the model to fetch the node-issue's pre-planning engagement
   // once it knows the node. The instruction is backend-neutral (harmless on github) so it appears
   // for both linear and github seeds.
   const linear = factoryGuidance("7", "1.2", undefined, "linear", LINEAR_URL);
@@ -399,7 +399,7 @@ test("tool: add_objective_node with a non-integer phase → bad_input, no exec",
 });
 
 test("tool: objective_node — a success:false envelope at non-zero exit surfaces the structured error", async () => {
-  // The envelope-aware regression (Node 2.4): the Python plane prints a structured failure
+  // The envelope-aware regression: the Python plane prints a structured failure
   // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const envelope = JSON.stringify({
@@ -420,7 +420,7 @@ test("tool: objective_node — a success:false envelope at non-zero exit surface
   }
 });
 
-// --- Node 4.1: the warm handlers fetch the url only for linear, fail-open to the indirect form ---
+// --- the warm handlers fetch the url only for linear, fail-open to the indirect form ---
 
 /** Write a committed `.pi/perk.toml` selecting the issue backend (resolveIssueBackendId reads it). */
 function writeBackend(cwd: string, backend: string): void {
@@ -522,7 +522,7 @@ test("/objective-plan registers and is headless-safe", async () => {
   }
 });
 
-// --- Objective #352 Node 1.2: /objective-plan enters the read-only gate -------------------
+// --- /objective-plan enters the read-only gate -------------------
 
 /**
  * Spy on the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`) — the
@@ -633,7 +633,7 @@ test("buildObjectiveNodeArgs: shapes", () => {
   assert.equal(buildObjectiveNodeArgs({ objective: "7", node: "1.2" }), null);
 });
 
-test("buildObjectiveNodeArgs: description alone is valid (P2.T11)", () => {
+test("buildObjectiveNodeArgs: description alone is valid", () => {
   assert.deepEqual(
     buildObjectiveNodeArgs({ objective: "7", node: "1.2", description: "reconciled scope" }),
     ["objective", "node", "7", "--node", "1.2", "--description", "reconciled scope", "--json"],

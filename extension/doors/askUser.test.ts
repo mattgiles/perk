@@ -1,4 +1,4 @@
-// #187 — fully-offline coverage for the `ask_user_question` pure core. Mirrors ciExecutor.test.ts:
+// Fully-offline coverage for the `ask_user_question` pure core. Mirrors ciExecutor.test.ts:
 // a pure core over an injected fake UI (no network, no real dialogs). See askUser.ts.
 
 import assert from "node:assert/strict";
@@ -149,7 +149,7 @@ test("signal propagation: select and input receive the passed signal in opts", a
   assert.equal(at(calls, 1).opts?.signal, controller.signal);
 });
 
-// --- Node 3.2: tool-boundary decode (native graceful vocabulary) ---------------------------
+// --- tool-boundary decode (native graceful vocabulary) ---------------------------
 
 test("decodeAskUserParams: mistyped options advisory-drop to the free-text path", async () => {
   const decoded = decodeAskUserParams({ question: "Which?", options: "x" });

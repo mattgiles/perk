@@ -1,5 +1,5 @@
-// P2.T1 — the tool-gating primitive: pure policy matrix + a live read-only round-trip driven
-// through a REAL bound AgentSession via the P1.T1 harness (fully offline). See toolGating.ts.
+// The tool-gating primitive: pure policy matrix + a live read-only round-trip driven
+// through a REAL bound AgentSession via the harness (fully offline). See toolGating.ts.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -11,15 +11,15 @@ test("READ_ONLY_TOOLS: contains plan_review (the review door is callable in plan
   assert.ok(READ_ONLY_TOOLS.includes("plan_review"));
 });
 
-test("READ_ONLY_TOOLS: contains plan_draft (the #339 Node 2.1 session-data carve-out)", () => {
+test("READ_ONLY_TOOLS: contains plan_draft (the session-data carve-out)", () => {
   assert.ok(READ_ONLY_TOOLS.includes("plan_draft"));
 });
 
-test("READ_ONLY_TOOLS: contains objective_draft (the #352 Node 2.1 twin of the carve-out)", () => {
+test("READ_ONLY_TOOLS: contains objective_draft (the twin of the carve-out)", () => {
   assert.ok(READ_ONLY_TOOLS.includes("objective_draft"));
 });
 
-test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research tools (#529)", () => {
+test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research tools", () => {
   // perk does not normalize names — the allowlist carries every known web provider's tool names
   // (pi-web-access + @ollama/pi-web-search + @juicesharp/rpiv-web-tools), inert when absent.
   for (const tool of [
@@ -35,7 +35,7 @@ test("READ_ONLY_TOOLS: contains the UNION of all web-seam providers' research to
   }
 });
 
-test("READ_ONLY_TOOLS: contains the read-only linear_* tools, never the mutating ones (Node 3.1)", () => {
+test("READ_ONLY_TOOLS: contains the read-only linear_* tools, never the mutating ones", () => {
   for (const tool of [
     "linear_get_issue",
     "linear_list_comments",

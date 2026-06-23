@@ -1,4 +1,4 @@
-// Node 2.3 + 2.6 — the tombell plan adapter shim: review-first injection under a `tombell-plan`
+// The tombell plan adapter shim: review-first injection under a `tombell-plan`
 // selection when a plan authoring mode is on (perk gate read-only OR tombell's own persisted
 // `plan-mode-state`; objective-author excepted), inert (+ stale-marker strip) under the default
 // selection. Driven through a REAL bound AgentSession (offline) via the shared harness. See

@@ -1,4 +1,4 @@
-// P1.T3 — live warm-door tests (turn-3 §10). Drive a REAL bound AgentSession via the T1 harness
+// Live warm-door tests. Drive a REAL bound AgentSession via the T1 harness
 // and prove the cache.plan-ref delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
 // for the GitHub write, so no LLM / network / gh / Python is invoked. The pure extractPlanMarkdown
 // twin is unit-tested separately below.
@@ -131,7 +131,7 @@ test("tool: plan_save delegates, links the session, and terminates", async () =>
   }
 });
 
-test("tool: plan_save carries plan_ref.base into active_plan_ref (#633 parity)", async () => {
+test("tool: plan_save carries plan_ref.base into active_plan_ref (parity)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const withBase = JSON.stringify({
     success: true,
@@ -163,7 +163,7 @@ test("tool: plan_save carries plan_ref.base into active_plan_ref (#633 parity)",
 });
 
 test("tool: plan_save tolerates a legacy plan_ref with no base (still links, base absent)", async () => {
-  // #633 lenient decode: a pre-#633 cold-door payload whose plan_ref lacks `base` must still
+  // Lenient decode: a legacy cold-door payload whose plan_ref lacks `base` must still
   // decode + link (never bad_output); active_plan_ref simply carries no base.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, { stdout: PLAN_JSON }); // PLAN_JSON's plan_ref has no `base`
@@ -180,7 +180,7 @@ test("tool: plan_save tolerates a legacy plan_ref with no base (still links, bas
 });
 
 test("tool: plan_save drops a mistyped plan_ref.base (lenient parity, still links)", async () => {
-  // #633 lenient decode: a non-string/non-null `base` is omitted (never a decode failure).
+  // Lenient decode: a non-string/non-null `base` is omitted (never a decode failure).
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const mistyped = JSON.stringify({
     success: true,
@@ -211,7 +211,7 @@ test("tool: plan_save drops a mistyped plan_ref.base (lenient parity, still link
   }
 });
 
-test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)", async () => {
+test("tool: plan_save threads objective_id into the perk plan-save args", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
@@ -228,7 +228,7 @@ test("tool: plan_save threads objective_id into the perk plan-save args (P2.T10)
   }
 });
 
-test("tool: plan_save threads node_id into --node-id next to --objective-id (P2.T10)", async () => {
+test("tool: plan_save threads node_id into --node-id next to --objective-id", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
@@ -260,7 +260,7 @@ test("tool: plan_save without node_id omits --node-id", async () => {
   }
 });
 
-test("tool: plan_save threads consumed_learn into --consumed-learn (hop-2)", async () => {
+test("tool: plan_save threads consumed_learn into --consumed-learn", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
@@ -305,7 +305,7 @@ test("tool: plan_save without objective_id omits --objective-id", async () => {
   }
 });
 
-test("tool: plan_save forwards an explicit title into --title (#129 dropped-title fix)", async () => {
+test("tool: plan_save forwards an explicit title into --title (dropped-title fix)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = join(cwd, "argv.txt");
   const bin = fakePerk(cwd, { stdout: PLAN_JSON, argvFile });
@@ -322,7 +322,7 @@ test("tool: plan_save forwards an explicit title into --title (#129 dropped-titl
   }
 });
 
-test("tool: plan_save with no title and the LLM gate on omits --title (#129)", async () => {
+test("tool: plan_save with no title and the LLM gate on omits --title", async () => {
   // The harness sets PERK_NO_LLM=1 by default, so no model call fires and the cold door's
   // derive_title stays in control — proven by the absence of --title.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -407,7 +407,7 @@ test("tool: a missing perk binary fails loud, appends no linkage", async () => {
 });
 
 test("tool: a success:false envelope at non-zero exit surfaces the structured error", async () => {
-  // The envelope-aware regression (Node 2.2): the Python plane prints a structured failure
+  // The envelope-aware regression: the Python plane prints a structured failure
   // envelope to stdout before exiting non-zero — the door must surface it, not the stderr tail.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const envelope = JSON.stringify({
@@ -460,8 +460,8 @@ test("tool: success:true with a malformed plan_ref fails as bad_output, no linka
   }
 });
 
-test("tool: a legacy pre-#387 issue shape (number, no id) still saves — derived from plan_ref", async () => {
-  // The #390 incident regression (the #391 sibling): a version-skewed CLI emitting a different
+test("tool: a legacy issue shape (number, no id) still saves — derived from plan_ref", async () => {
+  // A version-skew incident regression: a version-skewed CLI emitting a different
   // `issue` sub-object shape must NOT fail a save that already succeeded — the rendered issue
   // id/url are derived from the strict plan_ref (byte-identical by construction in the cold door).
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -469,7 +469,7 @@ test("tool: a legacy pre-#387 issue shape (number, no id) still saves — derive
     success: true,
     error_type: null,
     message: null,
-    issue: { number: 390, url: "https://gh/o/r/issues/390", existed: false }, // pre-#387 shape
+    issue: { number: 390, url: "https://gh/o/r/issues/390", existed: false }, // legacy shape
     plan_ref: {
       provider: "github",
       pr_id: "390",
@@ -622,7 +622,7 @@ test("command: /plan-save saves while read-only, then auto-exits the gate (D1a)"
   }
 });
 
-// --- objective node-link outcome surfacing (#124 silent-partial-failure fix) -----------
+// --- objective node-link outcome surfacing (silent-partial-failure fix) -----------
 
 test("command: /plan-save surfaces a failed objective-node advance as a warning", async () => {
   const cwd = scaffoldRepo();

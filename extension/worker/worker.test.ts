@@ -1,4 +1,4 @@
-// Node 1.2 — fully-offline coverage for the headless stage-drive primitive: the pure helpers
+// Fully-offline coverage for the headless stage-drive primitive: the pure helpers
 // (evaluateTerminal/assembleOutcome/applyEvent/initialPromptFor), the budget/abort watchdog and the
 // happy-path drive via an INJECTED runtime (no model turn / network ever), the bind/rebind
 // structural contract, the cross-plane prompt-parity invariant (reciprocal of
@@ -46,7 +46,7 @@ const IMPLEMENT_SUBSTRINGS = [
   "perk may inject a generated checklist as a context message",
   "otherwise don't invent step numbers",
 ];
-// The Node 3.1 linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
+// The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 // tests/test_worker_prompt_parity.py (the literal fragments of the shared linear arm).
 const LINEAR_READ_SUBSTRINGS = [
   "use the `linear_get_issue` tool",
@@ -87,7 +87,7 @@ test("evaluateTerminal: implement with a successful submit → completed/submit_
   assert.equal(v.errorMessage, null);
 });
 
-test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_incomplete (#556)", () => {
+test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_incomplete", () => {
   const v = evaluateTerminal({
     stage: "implement",
     submitDetails: { ok: true, pr: { number: 7, url: "https://x/pr/7" }, mergeable: false },
@@ -101,7 +101,7 @@ test("evaluateTerminal: implement with an unmergeable PR → failed/agent_idle_i
   assert.match(v.errorMessage ?? "", /unmergeable PR \(merge conflicts unresolved\)/);
 });
 
-test("evaluateTerminal: implement with mergeable true/null/absent → completed (#556)", () => {
+test("evaluateTerminal: implement with mergeable true/null/absent → completed", () => {
   for (const mergeable of [true, null, undefined]) {
     const v = evaluateTerminal({
       stage: "implement",
@@ -528,7 +528,7 @@ test("initialPromptFor: address output carries the cross-plane invariant substri
   for (const s of ADDRESS_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
 });
 
-// The review-classifier model clause (#196) — the parity literal shared with
+// The review-classifier model clause — the parity literal shared with
 // tests/test_worker_prompt_parity.py (`_address_prompt(_PLAN_REF, "test/model")`).
 const ADDRESS_MODEL_CLAUSE =
   ', passing `model: "test/model"` on that call (the configured [subagents] review-classifier model)';
@@ -582,7 +582,7 @@ test("Gap-4: a bound perk session registers the worker's terminal tools and clai
   }
 });
 
-// --- Node 1.3: structured run-event stream ------------------------------------------------------
+// --- structured run-event stream ------------------------------------------------------
 
 // --- pure: extractStepMarkers -------------------------------------------------------------------
 

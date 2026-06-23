@@ -1,7 +1,7 @@
-// The plannotator plan adapter (augment posture, injection + bridge only as of Node 2.5):
+// The plannotator plan adapter (augment posture, injection + bridge only):
 // injection only when (gate active AND plannotator-plan selected) — two content flavors, one
-// customType (the plan bridge context; the objective flavor in an objective-author session,
-// #352 Node 2.2) — stale-marker strip on deselect (both flavors), and the pure event-bus bridge core — the bounded handshake
+// customType (the plan bridge context; the objective flavor in an objective-author session) —
+// stale-marker strip on deselect (both flavors), and the pure event-bus bridge core — the bounded handshake
 // (timeout / unavailable), the human decision (approved / denied + feedback), and the turn-abort
 // path. Fully offline: the fake plannotator is a test listener on an event bus that calls
 // `respond(...)` and emits `plannotator:review-result`. The `plan_review` TOOL (dispatch, soft
@@ -124,7 +124,7 @@ test("objective-author session: the OBJECTIVE-flavored bridge context is injecte
     assert.equal(content, OBJECTIVE_ADAPTER_PLANNOTATOR_CONTEXT);
     assert.ok(content.includes("[OBJECTIVE ADAPTER: PLANNOTATOR]"), "the objective marker");
     assert.ok(content.includes("objective_draft"), "directs the objective_draft rewrite loop");
-    // #352 Node 2.3: approval auto-saves; the failsafe arms keep the /objective-save mention.
+    // Approval auto-saves; the failsafe arms keep the /objective-save mention.
     assert.equal(content.includes("nothing is saved yet"), false, "the interim posture is gone");
     assert.ok(content.includes("relay the save outcome"), "approval relays the save outcome");
     assert.ok(content.includes("/objective-save"), "the failsafe arms direct /objective-save");

@@ -1,4 +1,4 @@
-// Scratch-path construction regression guard (Objective #339 Node 1.2, contracts.md §8.1).
+// Scratch-path construction regression guard (contracts.md §8.1).
 // Production extension code may build the `scratch`/`runs` path segments only inside the
 // cache seam (substrate/cache.ts); everything else goes through its helpers (`scratchDir`,
 // `runScratchDir`, `sessionDataDir`, `ensureRunScratch`, `listRunIds`) or the ctx-level

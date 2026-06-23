@@ -1,4 +1,4 @@
-// P2.T2a — the minimal config port (D1b): the narrow TOML-subset reader + the perk.toml/local
+// The minimal config port (D1b): the narrow TOML-subset reader + the perk.toml/local
 // overlay. Pure, offline, no network. See config.ts.
 
 import assert from "node:assert/strict";
@@ -122,7 +122,7 @@ test("loadPerkConfig: blank/whitespace addendum is treated as absent", () => {
   assert.equal(loadPerkConfig(cwd).planAuthoring, undefined);
 });
 
-// --- [subagents] selection (#196) ---
+// --- [subagents] selection ---
 
 test("loadPerkConfig: [subagents] absent -> empty object", () => {
   const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "x"\n' });
@@ -161,7 +161,7 @@ test("loadPerkConfig: perk.local.toml [subagents] overlays perk.toml (local wins
   assert.equal(loadPerkConfig(cwd).subagents["pr-reviewer"], "local/model");
 });
 
-// --- [[ci]] selection (#490) ---
+// --- [[ci]] selection ---
 
 test("loadPerkConfig: [[ci]] absent -> empty array", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
@@ -204,7 +204,7 @@ test("loadPerkConfig: perk.local.toml [[ci]] replaces perk.toml wholesale (local
   assert.deepEqual(loadPerkConfig(cwd).ci, [{ name: "b", command: "B" }]);
 });
 
-// --- [providers] selection (Node 2.1) ---
+// --- [providers] selection ---
 
 test("loadPerkConfig: [providers] absent -> empty selection", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
@@ -233,7 +233,7 @@ test("loadPerkConfig: perk.local.toml [providers] overlays perk.toml (local wins
   assert.equal(loadPerkConfig(cwd).providers.plan, "tombell-plan");
 });
 
-// --- [trust] selection (#214) ---
+// --- [trust] selection ---
 
 test("loadPerkConfig: [trust] absent -> empty selection", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
@@ -258,7 +258,7 @@ test("loadPerkConfig: perk.local.toml [trust] overlays perk.toml (local wins)", 
   assert.equal(loadPerkConfig(cwd).trust.ci, true);
 });
 
-// --- resolveIssueBackendId (Objective #252, Node 1.3 — fail-safe, committed-only) ------------
+// --- resolveIssueBackendId (fail-safe, committed-only) ------------
 
 test("resolveIssueBackendId: absent config falls safe to github", () => {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));

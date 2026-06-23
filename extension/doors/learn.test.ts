@@ -1,4 +1,4 @@
-// P1.T5b — live warm-door tests for `/learn` (turn-5 §10). TS-only: no delegation, no gh — `/learn`
+// Live warm-door tests for `/learn`. TS-only: no delegation, no gh — `/learn`
 // clears the pending-learn semaphore. Driven through a REAL bound AgentSession via the T1 harness.
 
 import assert from "node:assert/strict";
@@ -107,7 +107,7 @@ test("/learn (bare, interactive): injects guidance and keeps the marker", async 
 
 test("learnGuidance derives the head branch from the plan-ref (skill pointer is suffix-delivered)", () => {
   const withRef = learnGuidance(PLAN_REF);
-  // Node 2.3: the perk-learn skill pointer is no longer hardcoded — it rides the binding suffix.
+  // The perk-learn skill pointer is no longer hardcoded — it rides the binding suffix.
   assert.doesNotMatch(withRef, /Follow the perk-learn skill/);
   assert.match(withRef, /plan-42/);
   assert.match(withRef, /gh pr list --head plan-42/);
@@ -120,7 +120,7 @@ test("learnGuidance derives the head branch from the plan-ref (skill pointer is 
 });
 
 test("learnGuidance: a linear plan-ref reads via the linear tools but keeps the gh PR derivation", () => {
-  // Node 3.1: PRs are GitHub-universal under every issue backend.
+  // PRs are GitHub-universal under every issue backend.
   const linear = learnGuidance({ ...PLAN_REF, provider: "linear" });
   assert.match(linear, /linear_get_issue/);
   assert.match(linear, /linear_list_comments/);
@@ -187,7 +187,7 @@ test("tool: malformed learn_issue + success envelope → captured-ok, marker cle
   }
 });
 
-test("tool: legacy pre-#387 learn_issue shape (number, no id) → captured-ok (the skew regression)", async () => {
+test("tool: legacy learn_issue shape (number, no id) → captured-ok (the skew regression)", async () => {
   // The exact cold/warm version-skew payload pair that produced the false 'learn failed':
   // a success envelope whose learn_issue carries the legacy `number` field instead of `id`.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -232,7 +232,7 @@ test("tool: learn with a summary but a failing worker fails soft (no terminate, 
   }
 });
 
-// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: learn with a mistyped summary → bad_input AND the marker is NOT cleared", async () => {
   const cwd = scaffoldRepo();

@@ -1,4 +1,4 @@
-// #129 — offline tests for the plan-title consumer: pure `sanitizeTitle`/`llmTitlesEnabled`, plus
+// Offline tests for the plan-title consumer: pure `sanitizeTitle`/`llmTitlesEnabled`, plus
 // `generatePlanTitle` driven by a faux pi-ai provider (happy path, gate-on, no-auth).
 
 import assert from "node:assert/strict";

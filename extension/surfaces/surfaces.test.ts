@@ -1,4 +1,4 @@
-// Tests for the perk surfaces module (Objective #251, nodes 2.1/2.2/2.3): pins the charter-law
+// Tests for the perk surfaces module: pins the charter-law
 // vocabulary (slot keys, marks, glyphs, height bounds — `docs/design/tui-charter.md` §4/§5),
 // unit-tests the composed `createPerkStatus` handle (D2 segment order + two-space join + headless
 // no-op) and the `setStandingWidget` headless-safe setter (string[] + factory + placement forms),
@@ -92,7 +92,7 @@ test("setWorkingMessage no-ops headlessly (never touches rich UI)", () => {
   assert.deepEqual(calls, []);
 });
 
-// --- createPerkStatus (the composed `perk` status, node 2.3 / D2) ---------------------------------
+// --- createPerkStatus (the composed `perk` status, D2) ---------------------------------
 
 interface Call {
   kind: "status" | "widget";
@@ -201,7 +201,7 @@ test("setStandingWidget (headless): a no-op — never touches the UI", () => {
   assert.deepEqual(calls, []);
 });
 
-// --- createPerkStatus get/subscribe (node 3.1) ----------------------------------------------------
+// --- createPerkStatus get/subscribe ----------------------------------------------------
 
 test("createPerkStatus: get returns the current segment text (undefined when unset)", () => {
   const { target } = fakeTarget(true);
@@ -233,7 +233,7 @@ test("createPerkStatus: subscribe fires per headful set; never on headless; unsu
   assert.equal(fired, 2);
 });
 
-// --- composeFooterLine (node 3.1 / charter D2/D9) -------------------------------------------------
+// --- composeFooterLine (charter D2/D9) -------------------------------------------------
 
 /** Passthrough theme for width math (no ANSI / tags). */
 const plainTheme: ThemeLike = { fg: (_color, text) => text };
@@ -355,7 +355,7 @@ test("composeFooterLine: always exactly one line (no newlines), FOOTER_MAX_LINES
   }
 });
 
-// --- perkFooter / installPerkFooter (node 3.1 / D2 reactivity) ------------------------------------
+// --- perkFooter / installPerkFooter (D2 reactivity) ------------------------------------
 
 function fakeFooterData(
   opts: { branch?: string | null; statuses?: Map<string, string> } = {},

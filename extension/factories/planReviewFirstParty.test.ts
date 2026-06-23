@@ -196,7 +196,7 @@ test("execute: no draft + no param NEVER reviews the transcript -> skipped/no_pl
   assert.match(String(result.content[0]?.text), /plan_draft/);
 });
 
-// --------------------------------- the plannotator execute path (byte-stable from Node 2.4)
+// --------------------------------- the plannotator execute path (byte-stable)
 
 test("execute: the artifact wins over a differing param; the ignored param is flagged", async () => {
   await withNoLlm(async () => {

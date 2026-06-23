@@ -1,4 +1,4 @@
-// P2.T7 — live warm-door tests for the `/address` review loop. Drive a REAL bound AgentSession via
+// Live warm-door tests for the `/address` review loop. Drive a REAL bound AgentSession via
 // the T1 harness and prove the `resolve_review_threads` delegation end-to-end, OFFLINE: a fake
 // `perk` (PERK_BIN) stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked.
 
@@ -154,7 +154,7 @@ test("/address and /address --preview register and are headless-safe", async () 
   }
 });
 
-// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: a row missing thread_id → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });

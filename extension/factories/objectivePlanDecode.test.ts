@@ -1,5 +1,5 @@
 // Split from objectivePlan.test.ts: the reconcile_objective tool + /objective-reconcile
-// path, the tool-boundary decode (Node 3.2), the warm node-link carrier (Node 2.3), and the
+// path, the tool-boundary decode, the warm node-link carrier, and the
 // nodeClaimsEqual / readNodeClaim pure units. A sibling file for cross-file parallelism.
 
 import assert from "node:assert/strict";
@@ -35,7 +35,7 @@ function readArgv(path: string): string[] {
   return readFileSync(path, "utf8").trimEnd().split("\n");
 }
 
-// --- P2.T11b: reconcile_objective tool + /objective-reconcile -----------------------------
+// --- reconcile_objective tool + /objective-reconcile -----------------------------
 
 const RECONCILE_OK = JSON.stringify({
   success: true,
@@ -175,7 +175,7 @@ test("reconcileGuidance: names the objective and carries the reconcile cues (no 
   assert.doesNotMatch(g, /Follow the/);
 });
 
-// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: objective_node with a mistyped objective → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -272,7 +272,7 @@ test("decodeReconcileParams: tri-state strict-fail shapes", () => {
   assert.equal(decodeReconcileParams({ objective: 5 }), null);
 });
 
-// --- Node 2.3 (#339): the warm node-link carrier (objective_node_claim) --------------------
+// --- the warm node-link carrier (objective_node_claim) --------------------
 
 const NODE_FAIL_JSON = JSON.stringify({
   success: false,

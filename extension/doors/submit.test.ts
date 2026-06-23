@@ -1,4 +1,4 @@
-// #556 — tests for the warm `/submit` mergeability gate. The pure `conflictResolutionGuidance` is
+// Tests for the warm `/submit` mergeability gate. The pure `conflictResolutionGuidance` is
 // pinned directly; `submitPr`'s advisory decode leniency is exercised against a faked cold door;
 // `driveConflictResolution` (decision + cap + increment + reset) runs against in-memory fakes (the
 // spy-pi + fake-branch recipe). OFFLINE — no LLM / network / gh / Python.

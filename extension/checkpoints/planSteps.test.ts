@@ -1,4 +1,4 @@
-// #342 — offline tests for the plan-steps consumer: pure `sanitizeSteps`/`llmStepsEnabled`, plus
+// Offline tests for the plan-steps consumer: pure `sanitizeSteps`/`llmStepsEnabled`, plus
 // `generatePlanSteps` driven by a faux pi-ai provider (happy path, gate-on, schema-invalid).
 
 import assert from "node:assert/strict";

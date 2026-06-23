@@ -1,4 +1,4 @@
-// #43 — stageConsumesPlanRef against the REAL bundled registry. The worktree binding stages
+// stageConsumesPlanRef against the REAL bundled registry. The worktree binding stages
 // (implement/submit/address/land/learn) list `cache.plan-ref` in requires/reads and so consume
 // the selector; the root `worktree: none` stages (plan/objective-plan/save) and unknown ids do
 // not. This is the contract that gates session_start plan-ref reconciliation (extension/index.ts).

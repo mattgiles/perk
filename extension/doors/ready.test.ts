@@ -1,4 +1,4 @@
-// P2.T8a — live warm-door tests for `/ready` (the draft→ready review gate). Drive a REAL bound
+// Live warm-door tests for `/ready` (the draft→ready review gate). Drive a REAL bound
 // AgentSession via the T1 harness and prove the `perk pr ready` delegation end-to-end, OFFLINE: a
 // fake `perk` (PERK_BIN) stands in for the GitHub mark-ready, so no LLM / network / gh is invoked.
 

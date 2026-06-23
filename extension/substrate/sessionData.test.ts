@@ -174,7 +174,7 @@ test("write failure (read-only parent) returns null without throwing", () => {
   }
 });
 
-// --- provenance pointers (Node 1.3) -------------------------------------------------------------
+// --- provenance pointers -------------------------------------------------------------
 
 test("artifact round-trip: pointer recorded, read returns content + derived path", () => {
   const cwd = tempCwd();
@@ -348,7 +348,7 @@ test("pointer-append failure (dropping sink) ⇒ writer returns null though the 
     });
     assert.equal(written, null);
     assert.ok(warnings.some((line) => line.includes("session_artifacts pointer read-back failed")));
-    // The orphan file exists on disk (gitignored scratch; node 1.4's GC prunes it)…
+    // The orphan file exists on disk (gitignored scratch; the GC prunes it)…
     assert.ok(existsSync(join(sessionDataDir(cwd, "RID"), "draft.md")));
     // …but it is not consumable: no pointer landed.
     assert.equal(readSessionArtifact(ctx, "draft.md"), null);

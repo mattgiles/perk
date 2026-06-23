@@ -1,4 +1,4 @@
-// Objective #339 Node 2.1 — `plan_draft` tests: the pure decode, the offline core (fakes over a
+// `plan_draft` tests: the pure decode, the offline core (fakes over a
 // live branch array, mirroring sessionData.test.ts), and the live harness path proving the tool
 // is callable UNDER the read-only gate (the carve-out) with the artifact + pointer landing.
 

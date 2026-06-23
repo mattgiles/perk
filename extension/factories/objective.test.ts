@@ -1,4 +1,4 @@
-// P2.T9 — objective substrate: pure budget/threshold helpers + the live `/objective` round-trip
+// Objective substrate: pure budget/threshold helpers + the live `/objective` round-trip
 // (set/clear active_objective + seed the budget marker). Fully offline. See objective.ts.
 
 import assert from "node:assert/strict";
@@ -136,7 +136,7 @@ test("activation renders the 🎯 segment in the composed `perk` status; no obje
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {
     await h.invokeCommand("objective", "251");
-    // The objective segment renders under the single composed `perk` status slot (node 2.3).
+    // The objective segment renders under the single composed `perk` status slot.
     const last = h.statuses.filter((s) => s.slot === "perk").at(-1);
     assert.ok(last?.value?.includes("🎯 251"), `composed status carries 🎯 251: ${last?.value}`);
     // The `perk-objective` widget is retired — nothing is EVER set under that slot.

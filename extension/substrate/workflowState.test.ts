@@ -95,7 +95,7 @@ test("rebuild: undefined does not clobber, explicit null wins", () => {
   assert.equal(state.active_plan_ref, null);
 });
 
-test("rebuild: session_artifacts participates in per-field LWW like any field (Node 1.3)", () => {
+test("rebuild: session_artifacts participates in per-field LWW like any field", () => {
   const v1 = { run_id: "A", name: "draft.md", path: "p", digest: "sha256:1", at: "t1" };
   const v2 = { run_id: "A", name: "draft.md", path: "p", digest: "sha256:2", at: "t2" };
   const state = rebuildWorkflowState([

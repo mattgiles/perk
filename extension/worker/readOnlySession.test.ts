@@ -1,4 +1,4 @@
-// P2.T4 — fully-offline coverage for the in-process read-only child session: the pure cap/extract
+// Fully-offline coverage for the in-process read-only child session: the pure cap/extract
 // helpers, the SDK-level read-only guarantee proven STRUCTURALLY via getActiveToolNames() with no
 // prompt (and with API-key envs unset, to prove the no* flags keep loader resolution offline), and
 // the handoff contract (double-delivery, route-don't-relay, write→verify→pass-path, fail-closed)

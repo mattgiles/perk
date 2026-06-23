@@ -1,5 +1,5 @@
 // Split from checkpoints.test.ts: the harness-heavy live session round-trip (seed from
-// `## Steps`, advance on turn_end) and the generated-steps-for-prose-plans (#342) section.
+// `## Steps`, advance on turn_end) and the generated-steps-for-prose-plans section.
 // A sibling file so Node's --test cross-file parallelism runs it as its own child process.
 
 import assert from "node:assert/strict";
@@ -243,7 +243,7 @@ test("/checkpoints headless: uses console (no rich-UI throw)", async () => {
   }
 });
 
-// --- generated steps for prose plans (#342) ----------------------------------------------
+// --- generated steps for prose plans ----------------------------------------------
 
 const PROSE_PLAN = "# T\n\n## Summary\nProse only.\n";
 
@@ -328,7 +328,7 @@ test("prose implement plan: faux model generates the seed + once-only injection"
       ],
       "seeded from the sanitized generated steps",
     );
-    // The artifact + provenance pointer landed (the #339 reuse cache).
+    // The artifact + provenance pointer landed (the reuse cache).
     const pointer = h.workflowState().session_artifacts?.[STEPS_ARTIFACT_NAME];
     assert.equal(pointer?.run_id, "01RID", "provenance pointer recorded");
     // The injection teaches the exact numbering...

@@ -1,4 +1,4 @@
-// Split from planReview.test.ts: the objective review arm (#352 Node 2.2) plus the
+// Split from planReview.test.ts: the objective review arm plus the
 // objectiveReviewOutcomeResult / approvedObjectiveSaveResult pure mappers. A sibling
 // file so Node's --test cross-file parallelism runs it as its own child process.
 
@@ -155,7 +155,7 @@ const DENIED: ReviewOutcome = {
   feedback: "needs work",
 };
 
-// ------------------------------------------------ the objective review arm (#352 Node 2.2)
+// ------------------------------------------------ the objective review arm
 
 const OBJECTIVE_APPROVE = "Approve — auto-save to GitHub";
 const OBJECTIVE_DENY = "Deny — send feedback for revision";
@@ -260,7 +260,7 @@ test("objective arm: default selection -> first-party VIEW-ONLY; approval auto-s
     OBJECTIVE_PAYLOAD,
     "view-only: the edited editor return is NEVER written back to the artifact",
   );
-  // Approved wires into the objectiveApprovalSave seam (#352 Node 2.3): the STRUCTURED artifact
+  // Approved wires into the objectiveApprovalSave seam: the STRUCTURED artifact
   // is the save source (never the editor's view-only return, never the rendered markdown).
   assert.equal(result.terminate, true, "a saved approval terminates the turn");
   const argv = argvs[0] ?? [];

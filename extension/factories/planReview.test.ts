@@ -1,4 +1,4 @@
-// The backend-neutral `plan_review` review door (Node 2.5): the tool-boundary soft skips
+// The backend-neutral `plan_review` review door: the tool-boundary soft skips
 // (bad_input / objective-author / headless / no_plan), the file-first resolution (artifact →
 // param, NEVER transcript), the backend DISPATCH (plannotator-selected → the event-bus bridge;
 // ANY other selection → the first-party in-TUI editor review), the first-party flow (display →

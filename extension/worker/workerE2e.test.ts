@@ -1,12 +1,12 @@
-// Node 4.1 — end-to-end worker tests: drive a FULL stage headlessly via the REAL runtime factory.
+// End-to-end worker tests: drive a FULL stage headlessly via the REAL runtime factory.
 //
 // Unlike `worker.test.ts` (which injects a hand-rolled `FakeSession` via `deps.createRuntime`), this
 // tier drives a full `implement`/`address` stage through the production `defaultCreateRuntime` —
 // real Pi session, the real `@perk/pi` extension loaded from a temp worktree's `.pi/settings.json`,
 // the real bind/subscribe loop — driven by a FAUX pi-ai model that scripts the terminating tool
 // calls, with NO live GitHub (the terminating tools' Python delegation is stubbed via PERK_BIN).
-// Asserts both the structured run-event stream (Node 1.3, §8.12) and the terminal `RunOutcome`
-// (Node 1.2, §8.11). Test-only: no worker/Python/contract change. See docs/planning + issue #216.
+// Asserts both the structured run-event stream (§8.12) and the terminal `RunOutcome`
+// (§8.11). Test-only: no worker/Python/contract change.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -28,7 +28,7 @@ import {
 } from "../testing/harness.ts";
 import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 
-// Deviation from plan Discovery #1 (recorded in docs/planning/phase-2-turn-*-outcomes): the production
+// The production
 // `defaultCreateRuntime` builds its session with `SettingsManager.inMemory({compaction,retry})`, which
 // does NOT read the worktree's on-disk `.pi/settings.json` `packages` — so disk-package discovery can
 // never load `@perk/pi` (a runtime, not a test, fact). The extension is therefore delivered through the
@@ -198,7 +198,7 @@ test("e2e: address HAPPY — resolve_review_threads ok → completed/address_res
     stage: "address",
     routes: {
       "pr resolve-threads": {
-        // The full per-row contract shape — the Node 2.3 decode is strict on comment_added.
+        // The full per-row contract shape — the decode is strict on comment_added.
         json: {
           success: true,
           results: [{ thread_id: "T1", success: true, comment_added: true, error: null }],

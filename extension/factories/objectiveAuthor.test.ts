@@ -1,4 +1,4 @@
-// P3.T2 — the objective-authoring context injection + the planMode coupling break, driven through
+// The objective-authoring context injection + the planMode coupling break, driven through
 // a REAL bound AgentSession (offline). An objective-author session is read-only AND carries
 // `stage: objective-author`; objectiveAuthor injects its own context there and planMode DEFERS, so
 // exactly one authoring context is present. A normal plan read-only session is unaffected.
@@ -34,13 +34,13 @@ test("objectiveAuthoringContextContent: carries the authoring contract; appends 
   assert.match(withAddendum, /House rule: cite a file path per change\./);
 });
 
-test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline (#352 Node 2.2)", () => {
+test("OBJECTIVE_AUTHORING_CONTEXT speaks the review-first discipline", () => {
   // The draft + review loop replaced the structurally-broken `/plan` off → objective_save ending
   // (the model cannot run /plan; objective_save is hidden while the gate is on).
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /objective_draft/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /call the plan_review tool/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /rendered objective \(the prose \+ a roadmap table\)/);
-  // #352 Node 2.3: approval auto-saves — the failsafe arms keep the /objective-save mention.
+  // Approval auto-saves — the failsafe arms keep the /objective-save mention.
   assert.doesNotMatch(OBJECTIVE_AUTHORING_CONTEXT, /nothing auto-saves yet/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /relay the save outcome instead/);
   assert.match(OBJECTIVE_AUTHORING_CONTEXT, /`\/objective-save` \(the manual failsafe\)/);
