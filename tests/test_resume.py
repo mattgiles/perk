@@ -20,7 +20,7 @@ def _pr(state: str) -> github.PullRequest:
 def _neutral_state(
     *, header: dict | None = None, pr: github.PullRequest | None = None
 ) -> issue_backend.PlanState:
-    """The backend-neutral shape consumed by the pure resolution functions (Node 1.2)."""
+    """The backend-neutral shape consumed by the pure resolution functions."""
     return issue_backend.PlanState(
         id="7", url="https://gh/o/r/issues/7", title="T", header=header or {}, pr=pr, state="OPEN"
     )
@@ -67,7 +67,7 @@ def test_reconstruct_plan_ref():
 
 
 def test_reconstruct_plan_ref_carries_base():
-    # #633: the pinned base is recovered from the canonical plan-header.
+    # The pinned base is recovered from the canonical plan-header.
     ref = resume.reconstruct_plan_ref(_neutral_state(header={"base": "develop"}), provider="github")
     assert ref["base"] == "develop"
 

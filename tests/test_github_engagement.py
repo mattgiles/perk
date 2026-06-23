@@ -7,7 +7,7 @@ from _github_fakes import ROOT, _GhDispatch, _has, _Proc
 from perk import github
 from perk.backends.github import engagement as gh_engagement
 
-# --- human-engagement reads (Objective #682, Node 1.3) --------------------------------------
+# --- human-engagement reads --------------------------------------
 
 
 def _actor_node(*, login, database_id, typename="User"):

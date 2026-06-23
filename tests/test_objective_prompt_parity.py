@@ -1,11 +1,11 @@
-"""Cross-plane objective-prompt parity invariant (Node 4.1).
+"""Cross-plane objective-prompt parity invariant.
 
 The objective seed prompts are backend-aware via a single shared helper per plane:
 ``perk/cli/commands/objective/shared.py::objective_read_instruction`` (cold) and its byte-identical
 TS twin ``extension/factories/objectivePlan.ts::objectiveReadInstruction`` (warm). These substrings
 are the shared invariant — the SAME literals are asserted from the TS side in
 ``extension/factories/objectivePlan.test.ts`` (``OBJECTIVE_LINEAR_SUBSTRINGS``), so a drift in
-EITHER plane fails CI here or there. Mirrors ``tests/test_worker_prompt_parity.py`` (Node 3.1).
+EITHER plane fails CI here or there. Mirrors ``tests/test_worker_prompt_parity.py``.
 """
 
 from perk import objective

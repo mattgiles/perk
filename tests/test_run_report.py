@@ -1,4 +1,4 @@
-"""`perk run_report` — runner-side run reporting back into GitHub (Node 2.3, contracts §8.15)."""
+"""`perk run_report` — runner-side run reporting back into GitHub (contracts §8.15)."""
 
 import json
 

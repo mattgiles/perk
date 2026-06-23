@@ -1,4 +1,4 @@
-"""Tests for the backend-neutral human-engagement contract (Objective #682, Node 1.2).
+"""Tests for the backend-neutral human-engagement contract.
 
 Pure unit tests for the author-identity classifier + the result dataclass invariants. No network,
 no backend — ``engagement.py`` imports nothing from the backend tiers.

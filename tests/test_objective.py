@@ -322,7 +322,7 @@ def test_objective_header_to_data():
         and data["objective_comment_id"] == 5
         and data["status"] == "active"
     )
-    assert data["base"] is None  # #633: absent by default
+    assert data["base"] is None  # absent by default
 
 
 def test_objective_header_base_round_trips():
@@ -335,7 +335,7 @@ def test_objective_header_base_round_trips():
     assert "base" in o.OBJECTIVE_HEADER_FIELDS
 
 
-# --- #709 Node 3.2: adopted_from provenance + parse_adopt_mapping + archive note -----------
+# --- adopted_from provenance + parse_adopt_mapping + archive note -----------
 
 
 def test_objective_header_adopted_from_round_trips():
@@ -394,7 +394,7 @@ def test_render_adopted_overview_note_marker_and_verbatim():
     assert note == o.render_adopted_overview_note("Original human overview.\n\nSecond paragraph.")
 
 
-# --- P2.T11: nodes_for_pr + reconcilable splice + render_body_comment markers --------------
+# --- nodes_for_pr + reconcilable splice + render_body_comment markers --------------
 
 
 def test_nodes_for_pr_matches_canonical_forms():
@@ -442,7 +442,7 @@ def test_replace_reconcilable_section_none_when_markers_absent():
     assert o.replace_reconcilable_section("no markers here", "x") is None
 
 
-# --- Node 2.3 (objective #252): dual-encoding marker awareness --------------------------------
+# --- dual-encoding marker awareness --------------------------------
 
 
 def test_replace_reconcilable_section_preserves_inline_code_form():
@@ -541,7 +541,7 @@ def test_render_node_block_required_and_optional_fields():
     }
 
 
-# --- Node 4.4 (#612): the objective-manifest drift baseline ----------------------------------
+# --- the objective-manifest drift baseline ----------------------------------
 
 
 def _manifest_nodes() -> list[o.ObjectiveNode]:
@@ -633,7 +633,7 @@ def test_node_issue_title_slug_vs_truncated_description():
     assert o.node_issue_title(longish, max_len=10) == "2.3: " + "x" * 10 + "…"
 
 
-# --- Node 4.3: project-update body composers -------------------------------------------------
+# --- project-update body composers -------------------------------------------------
 
 
 def test_objective_created_update_body():

@@ -88,7 +88,7 @@ def test_create_structured_empty_roadmap_rejected(monkeypatch):
 
 
 def test_create_structured_roadmap_passes_nodes(monkeypatch):
-    # P3.T2: --roadmap <json> is parsed into ObjectiveNodes and handed to create_objective_issue;
+    # --roadmap <json> is parsed into ObjectiveNodes and handed to create_objective_issue;
     # the agent never hand-writes roadmap YAML in the body.
     _authed(monkeypatch)
     captured = {}
@@ -126,7 +126,7 @@ def _invoke_with_config(args, *, body, config):
 
 
 def test_create_base_flag_stored(monkeypatch):
-    # #633: --base develop pins the objective's base into create_objective(base=...).
+    # --base develop pins the objective's base into create_objective(base=...).
     _authed(monkeypatch)
     captured = {}
 
@@ -145,7 +145,7 @@ def test_create_base_flag_stored(monkeypatch):
 
 
 def test_create_base_from_config(monkeypatch):
-    # #633: with no --base, the repo's [workflow] base is pinned at create time.
+    # With no --base, the repo's [workflow] base is pinned at create time.
     _authed(monkeypatch)
     captured = {}
 
@@ -165,7 +165,7 @@ def test_create_base_from_config(monkeypatch):
 
 
 def test_create_base_flag_wins_over_config(monkeypatch):
-    # #633: an explicit --base wins over the [workflow] base config.
+    # An explicit --base wins over the [workflow] base config.
     _authed(monkeypatch)
     captured = {}
 
@@ -185,7 +185,7 @@ def test_create_base_flag_wins_over_config(monkeypatch):
 
 
 def test_create_base_none_when_unset(monkeypatch):
-    # #633: neither --base nor [workflow] base → base=None (default-branch behavior).
+    # Neither --base nor [workflow] base → base=None (default-branch behavior).
     _authed(monkeypatch)
     captured = {}
 
@@ -254,7 +254,7 @@ def test_create_invalid_roadmap(monkeypatch):
     assert payload["error_type"] == "invalid_roadmap"
 
 
-# --- #709 Node 3.2: objective create --adopt-from + handoff recovery --------------------------
+# --- objective create --adopt-from + handoff recovery --------------------------
 
 
 class _AdoptStubStore:
@@ -607,7 +607,7 @@ def test_not_a_repo_exit_2(monkeypatch):
     assert payload["error_type"] == "not_a_repo"
 
 
-# --- P2.T11b: objective reconcile worker ---------------------------------------------------
+# --- objective reconcile worker ---------------------------------------------------
 
 
 def test_reconcile_dry_run_composes_without_writing(monkeypatch):
@@ -664,7 +664,7 @@ def test_reconcile_infra_error_maps_to_github_error(monkeypatch):
     assert json.loads(result.output)["error_type"] == "github_error"
 
 
-# --- Node 4.3: fail-open Project Updates on the Linear project-backed path -------------------
+# --- fail-open Project Updates on the Linear project-backed path -------------------
 
 from perk.backends import objective_store, resolve  # noqa: E402
 

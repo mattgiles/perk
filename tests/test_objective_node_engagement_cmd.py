@@ -1,5 +1,5 @@
 """`perk objective node-engagement <NUMBER> --node ID [--json]` — the node-issue engagement read
-worker (Objective #682, Node 2.1). Stubs the resolved store (no network)."""
+worker. Stubs the resolved store (no network)."""
 
 import json
 import subprocess

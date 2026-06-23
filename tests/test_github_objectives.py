@@ -7,7 +7,7 @@ from _github_fakes import ROOT, _GhDispatch, _GhRecorder, _has, _Proc
 from perk import github, objective, plan
 from perk.backends.github import objectives
 
-# --------------------------------------------------------------- objective ops (P2.T9)
+# --------------------------------------------------------------- objective ops
 
 
 def _obj_header(run_id: str, comment_id=None) -> str:

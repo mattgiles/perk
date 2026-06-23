@@ -1,4 +1,4 @@
-"""Node 3.4 — `perk objective run`: the deterministic capstone supervisor loop (§8.20).
+"""`perk objective run`: the deterministic capstone supervisor loop (§8.20).
 
 `objectives.get_objective`/`get_plan`/`get_pr_feedback`/`close_issue`,
 `cache.list_dispatch_records`,
@@ -385,7 +385,7 @@ def test_in_flight_missing_pr_id_falls_back_to_plan_required(monkeypatch):
 
 
 def test_in_flight_opaque_pr_id_is_passed_to_the_backend(monkeypatch):
-    """Node 4.1: any non-empty `pr` backlink IS the plan id — passed to the backend verbatim
+    """Any non-empty `pr` backlink IS the plan id — passed to the backend verbatim
     (the Linear `#ENG-N` shape resolves; the backend is the authority on junk ids)."""
     _authed(monkeypatch)
     monkeypatch.setattr(launch, "launch_stage", lambda **k: None)

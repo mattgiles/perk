@@ -1,4 +1,4 @@
-"""Cross-plane prompt-parity invariant (Node 1.2).
+"""Cross-plane prompt-parity invariant.
 
 The headless worker (`extension/worker/worker.ts` `initialPromptFor`) re-derives the
 `implement`/`address` initial prompts in TypeScript, and MUST stay textually in lockstep with the
@@ -22,7 +22,7 @@ IMPLEMENT_SUBSTRINGS = [
     "perk may inject a generated checklist as a context message",
     "otherwise don't invent step numbers",
 ]
-# The Node 3.1 linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
+# The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 # extension/worker/worker.test.ts (the literal fragments of the shared linear arm).
 LINEAR_READ_SUBSTRINGS = [
     "use the `linear_get_issue` tool",
@@ -59,7 +59,7 @@ def test_address_prompt_carries_invariant_substrings() -> None:
         assert needle in prompt, f"address prompt drifted — missing: {needle!r}"
 
 
-# The review-classifier model clause (#196) — byte-identical to ADDRESS_MODEL_CLAUSE in
+# The review-classifier model clause — byte-identical to ADDRESS_MODEL_CLAUSE in
 # extension/worker/worker.test.ts. Drift in either plane fails the paired suites.
 _ADDRESS_MODEL_CLAUSE = (
     ', passing `model: "test/model"` on that call '
@@ -89,7 +89,7 @@ _LINEAR_PLAN_REF = {
 
 
 def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
-    """Node 3.1: the linear arm of the implement prompt — the same literals are asserted from
+    """The linear arm of the implement prompt — the same literals are asserted from
     the TS side (LINEAR_READ_SUBSTRINGS in extension/worker/worker.test.ts)."""
     prompt = _implement_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
@@ -100,7 +100,7 @@ def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
 
 
 def test_learn_prompt_linear_reads_via_tools_and_keeps_gh_pr_derivation() -> None:
-    """Node 3.1: the linear learn prompt reads the plan via the linear tools but keeps the
+    """The linear learn prompt reads the plan via the linear tools but keeps the
     merged-PR derivation on `gh` — PRs are GitHub-universal under every issue backend."""
     prompt = _learn_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
