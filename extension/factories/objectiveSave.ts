@@ -1,12 +1,12 @@
-// P3.T2 — the warm `objective_save` door, the objective mirror of planSave.ts. The in-session twin
+// The warm `objective_save` door, the objective mirror of planSave.ts. The in-session twin
 // of the Python cold door (`perk objective create`): a deterministic, terminating tool + command
 // that WRAP the existing storage — they do NOT reimplement the GitHub write. `saveObjective()`
 // passes the STRUCTURED roadmap as `--roadmap <json>` (the agent never hand-writes roadmap YAML)
 // and delegates to `perk objective create --json` via the shared cold-door client (`runColdDoor`,
-// Node 1.4 — the prose rides the run-scratch stdin channel), then links the live session: `active_objective` + a fresh `perk:objective-budget` activation marker
+// the prose rides the run-scratch stdin channel), then links the live session: `active_objective` + a fresh `perk:objective-budget` activation marker
 // (mirrors the `/objective <id>` activation in objective.ts). Failures are loud-but-non-fatal.
 //
-// APPROVAL→SAVE ORCHESTRATION (#352 Node 2.3, mirroring planSave.ts's `approvalSave`). The
+// APPROVAL→SAVE ORCHESTRATION (mirroring planSave.ts's `approvalSave`). The
 // exported `objectiveApprovalSave` seam is the shared APPROVED-review → save flow: re-read the
 // STRUCTURED artifact (`readObjectiveDraft` — never the rendered markdown, never the transcript)
 // → `saveObjective` → D1a gate exit on a successful save (snapshot `gating.isActive()` BEFORE the
@@ -126,13 +126,13 @@ export async function saveObjective(
   );
 }
 
-/** The approval→save orchestration outcome (#352 Node 2.3 — the objective `ApprovalSaveOutcome`). */
+/** The approval→save orchestration outcome (the objective `ApprovalSaveOutcome`). */
 export type ObjectiveApprovalSaveOutcome =
   | { status: "no-draft" }
   | { status: "saved" | "save-failed"; result: ObjectiveSaveResult; gateExited: boolean };
 
 /**
- * The shared approval→save orchestration seam (#352 Node 2.3, the objective sibling of
+ * The shared approval→save orchestration seam (the objective sibling of
  * planSave.ts's `approvalSave`): an APPROVED objective review (`plan_review`'s objective arm)
  * and the manual `/objective-save` failsafe both run THIS. Flow: re-read the STRUCTURED draft
  * artifact at save time (`readObjectiveDraft` — never the rendered markdown, never in-hand
@@ -176,7 +176,7 @@ const TOOL_GUIDELINES = [
 
 /**
  * The seed guidance the warm `/objective-save` injects to drive the structured save (the
- * perk-objective-author skill pointer rides the skill-binding suffix — Node 2.3 — not hardcoded
+ * perk-objective-author skill pointer rides the skill-binding suffix — not hardcoded
  * here). Pure + exported for offline tests.
  */
 export function objectiveSaveGuidance(title?: string): string {
@@ -256,7 +256,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
       "flow (artifact-first; drives the structured save only when no draft exists).",
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
-      // #352 Node 2.3: the artifact-first manual-failsafe invocation of the shared approval→save
+      // The artifact-first manual-failsafe invocation of the shared approval→save
       // seam (the D1a gate exit lives in the seam). The legacy drive-the-session behavior is kept
       // as the NO-DRAFT fallback — objectives have no transcript scrape by design, so a draftless
       // session still needs a working save path.
@@ -267,7 +267,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
         // /objective-plan).
         if (gating.isActive()) gating.exit(ctx);
         report(ctx, "objective-save", "info", "handing the structured save to the session");
-        // The perk-objective-author pointer rides the skill-binding suffix (Node 2.3, D5) since a
+        // The perk-objective-author pointer rides the skill-binding suffix (D5) since a
         // warm /objective-save outside a stage:objective-author session gets none from Mechanism A.
         pi.sendUserMessage(
           objectiveSaveGuidance(title) + bindingSuffix(ctx.cwd, "stage:objective-author"),

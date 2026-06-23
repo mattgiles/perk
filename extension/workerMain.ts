@@ -1,4 +1,4 @@
-// Node 1.2 — the runnable entrypoint shim for the headless stage-drive worker.
+// The runnable entrypoint shim for the headless stage-drive worker.
 //
 // A THIN CLI over `driveStage`. It does NO positioning, dispatch, or model fiction — positioning is
 // the cold-door/runner's job (Gap 7): this shim consumes a PREPARED worktree (handoff/plan-ref/plan-
@@ -132,7 +132,7 @@ async function main(): Promise<number> {
 
   stdout.write(`${JSON.stringify(outcome)}\n`);
   stderr.write(summarize(outcome));
-  // Breadcrumb: where the structured run-event stream (Node 1.3) landed (cache-tier NDJSON).
+  // Breadcrumb: where the structured run-event stream landed (cache-tier NDJSON).
   stderr.write(
     `perk worker: run events → ${runEventsPath(parsed.worktree, env.PERK_RUN_ID ?? "")}\n`,
   );

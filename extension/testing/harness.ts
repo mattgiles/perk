@@ -1,4 +1,4 @@
-// P1.T1 — the command/extension test harness (dev-only; excluded from the published tarball).
+// The command/extension test harness (dev-only; excluded from the published tarball).
 //
 // Drives a REAL `pi` AgentSession with the perk extension bound, so later turns can verify the
 // interior end-to-end instead of only as isolated pure functions. Everything here runs OFFLINE:
@@ -281,7 +281,7 @@ export function fakePerk(
 }
 
 /**
- * Scaffold a temp worktree that loads the REAL `@perk/pi` extension end-to-end (Node 4.1). The
+ * Scaffold a temp worktree that loads the REAL `@perk/pi` extension end-to-end. The
  * worktree's `.pi/settings.json` references the live checkout by ABSOLUTE path (offline, no install),
  * so pi reads `<repoRoot>/package.json` `pi.extensions` and binds the real extension. Plants the
  * handoff + plan-ref + PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor

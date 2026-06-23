@@ -1,4 +1,4 @@
-// Objective #339 Node 2.1 — the `plan_draft` file tool: the first session-data PRODUCER and the
+// The `plan_draft` file tool: the first session-data PRODUCER and the
 // narrow structural read-only-gate carve-out (session data dir only).
 //
 // Carve-out doctrine: the tool takes NO path/name parameter — the artifact name is the fixed
@@ -9,7 +9,7 @@
 // worktree stays untouched) holds, and the gate's `tool_call` edit/write/bash blocking logic is
 // UNCHANGED. Full rewrite per call, non-terminating; NOT a save — `plan_save`/`/plan-save` still
 // persist to GitHub. Consumers read the draft only via `readSessionArtifact` (digest-validated,
-// fail-open); the artifact is consumed by `resolvePlanSource` (planSave.ts, Node 2.2) — both save
+// fail-open); the artifact is consumed by `resolvePlanSource` (planSave.ts) — both save
 // surfaces prefer it over an explicit param and over the transcript scrape.
 //
 // Imports stay node builtins + sibling seams (sessionData.ts, toolParams.ts, result.ts) so the
@@ -102,7 +102,7 @@ const TOOL_GUIDELINES = [
   "plan_draft never saves to GitHub and never ends the turn — plan_save//plan-save remain the canonical save surface.",
 ];
 
-/** Register the `plan_draft` tool (the Node 2.1 carve-out producer; interior-only). */
+/** Register the `plan_draft` tool (the carve-out producer; interior-only). */
 export function registerPlanDraft(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "plan_draft",

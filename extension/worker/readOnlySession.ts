@@ -1,16 +1,16 @@
-// P2.T4 — the perk-owned, in-process read-only child session (context-isolation primitive #1).
+// The perk-owned, in-process read-only child session (context-isolation primitive #1).
 //
 // A deterministic, fully-isolated read-only child spun at the SDK level via `createAgentSession`,
-// plus the handoff contract both context-isolation primitives honor (T4 in-process here; T6 the
+// plus the handoff contract both context-isolation primitives honor (the in-process one here; the
 // spawned shape later): cap the model-visible output, keep the FULL result in a verified scratch
 // file + a structured block, and return DOUBLE-DELIVERY (compact prose for the human + a structured
 // block for the orchestrator). Route-don't-relay is enforced structurally — the raw child output
 // never enters the parent; only a path/summary does. This is substrate only; its consumer is the
-// read-only CI executor (T5). No registry stage, no door change, no cross-CLI behavior.
+// read-only CI executor. No registry stage, no door change, no cross-CLI behavior.
 //
-// Relationship to T1 (extension/substrate/toolGating.ts): T1's READ_ONLY_TOOLS is the *in-session* allowlist
-// and includes a sub-allowlisted `bash`. T4's SDK-level set is the STRICTER ["read","grep","find",
-// "ls"] (no bash) — a separate constant, not a reuse. T5 composes its own allowlist when it needs a
+// Relationship to the in-session gate (extension/substrate/toolGating.ts): its READ_ONLY_TOOLS is the *in-session* allowlist
+// and includes a sub-allowlisted `bash`. This SDK-level set is the STRICTER ["read","grep","find",
+// "ls"] (no bash) — a separate constant, not a reuse. The CI executor composes its own allowlist when it needs a
 // gated test-runner command; that is not authored here.
 //
 // Isolation comes from the DefaultResourceLoader `no*` flags + the tools allowlist — NOT from
@@ -33,7 +33,7 @@ import {
 import { runScratchDir, scratchDir } from "../substrate/cache.ts";
 
 /**
- * The SDK-level read-only allowlist (no `bash`; stricter than T1's in-session READ_ONLY_TOOLS).
+ * The SDK-level read-only allowlist (no `bash`; stricter than the in-session READ_ONLY_TOOLS).
  * Mirrors pi's read-only recipe (examples/sdk/05-tools.ts).
  */
 export const SDK_READ_ONLY_TOOLS = ["read", "grep", "find", "ls"];
@@ -102,8 +102,8 @@ export function capForModel(
 }
 
 /**
- * The structured half of the double-delivery handoff — the block the orchestrator parses (and T5
- * will place in a tool's forking-safe `details`).
+ * The structured half of the double-delivery handoff — the block the orchestrator parses (and the
+ * CI executor will place in a tool's forking-safe `details`).
  */
 export interface ChildStructured {
   success: boolean;
@@ -229,7 +229,7 @@ function failure(prose: string, error: string): ChildHandoff {
 /**
  * One-shot read-only child orchestrator implementing the handoff contract: create the read-only
  * session, run the task, write the full raw output to a scratch file and VERIFY it
- * (write→verify→pass-path, erk §6), cap the model-visible output into prose, and return
+ * (write→verify→pass-path), cap the model-visible output into prose, and return
  * double-delivery. Fail loud + fail closed: NEVER throws to the parent — on any error it returns
  * `{ success:false, scratchPath:null }` with the error in both `prose` and `structured.error`.
  */

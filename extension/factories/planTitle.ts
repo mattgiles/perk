@@ -1,4 +1,4 @@
-// #129 — the first consumer of the structured-output substrate: a best-effort, fail-safe
+// The first consumer of the structured-output substrate: a best-effort, fail-safe
 // LLM-generated GitHub issue title for a perk plan. When a plan is saved WITHOUT an explicit title,
 // the warm door asks the session model for a structured `{ title, category }` object and forwards
 // the sanitized title to `perk plan save --title`. Every failure mode (no model, unresolved auth,

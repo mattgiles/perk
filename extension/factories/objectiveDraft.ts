@@ -1,5 +1,5 @@
-// Objective #352 Node 2.1 — the `objective_draft` file tool: the objective-flavored twin of the
-// `plan_draft` carve-out (#339 Node 2.1, planDraft.ts).
+// The `objective_draft` file tool: the objective-flavored twin of the
+// `plan_draft` carve-out (planDraft.ts).
 //
 // Carve-out doctrine: the tool takes NO path/name parameter — the artifact name is the fixed
 // constant `OBJECTIVE_DRAFT_ARTIFACT` and the path is derived exclusively through the session-data
@@ -13,13 +13,13 @@
 // Format doctrine: JSON is the storage/transport format, NEVER the human review surface. The
 // artifact carries `{schema_version, title?, prose, roadmap}` — the structured roadmap rides
 // verbatim (node-shape validation stays with the Python plane at save time, the
-// `parse_structured_roadmap` path). The review surface (node 2.2, landed) reads the draft via
+// `parse_structured_roadmap` path). The review surface reads the draft via
 // `readObjectiveDraft` (over `readSessionArtifact` — digest-validated, fail-open) and renders
 // markdown via `renderObjectiveDraft` (the prose + a roadmap table) — never raw JSON; the
-// approval→`objective_save` orchestration (node 2.3, forthcoming) feeds the recovered roadmap
+// approval→`objective_save` orchestration feeds the recovered roadmap
 // back as structured JSON.
 //
-// Vocabulary ownership (#352 Node 2.3): this module owns the shared draft/save param vocabulary
+// Vocabulary ownership: this module owns the shared draft/save param vocabulary
 // (`ObjectiveSaveParams`, `decodeObjectiveSaveParams`, `ROADMAP_PARAM_SCHEMA`) — objectiveDraft is
 // the LEAF (mirroring planDraft←planSave's direction); objectiveSave.ts consumes it, so it may
 // value-import `readObjectiveDraft` cycle-free for the approval→save orchestration.
@@ -41,18 +41,18 @@ import { arrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import type { EntrySink } from "../substrate/workflowState.ts";
 import type { ReportTarget } from "../surfaces/report.ts";
 
-/** The decoded `objective_save` tool params (shared with `objective_draft` — #352 Node 2.1). */
+/** The decoded `objective_save` tool params (shared with `objective_draft`). */
 export interface ObjectiveSaveParams {
   prose: string;
   title?: string;
   roadmap?: unknown[];
-  // The objective's target branch (#633); omitted to use the repo default.
+  // The objective's target branch; omitted to use the repo default.
   base?: string;
 }
 
 /**
  * The roadmap-node items JSON schema, shared between `objective_save` and `objective_draft`
- * (#352 Node 2.1) so the two tools' roadmap contracts cannot drift.
+ * so the two tools' roadmap contracts cannot drift.
  */
 export const ROADMAP_PARAM_SCHEMA = {
   type: "object",
@@ -84,7 +84,7 @@ export const ROADMAP_PARAM_SCHEMA = {
 } as const;
 
 /**
- * Decode unknown `objective_save` tool-call params (the tool-boundary seam — Node 3.2). `prose`
+ * Decode unknown `objective_save` tool-call params (the tool-boundary seam). `prose`
  * absent decodes to `""` (so `saveObjective`'s "no objective prose to save" `invalid_input` arm
  * keeps owning that message) but present-but-mistyped → null (strict-fail). `roadmap` stays
  * `unknown[]` — the Python cold door owns node-shape validation.
@@ -179,7 +179,7 @@ export interface ObjectiveDraft {
   title?: string;
   prose: string;
   roadmap: unknown[];
-  // The objective's target branch (#633); kept only when a non-blank string in the artifact.
+  // The objective's target branch; kept only when a non-blank string in the artifact.
   base?: string;
 }
 
@@ -284,7 +284,7 @@ const TOOL_GUIDELINES = [
   "Pass `base` only to target a non-default branch; omit it to use the repo default.",
 ];
 
-/** Register the `objective_draft` tool (the #352 Node 2.1 carve-out producer; interior-only). */
+/** Register the `objective_draft` tool (the carve-out producer; interior-only). */
 export function registerObjectiveDraft(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "objective_draft",

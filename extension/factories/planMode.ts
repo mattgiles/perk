@@ -1,21 +1,21 @@
-// P2.T2a — perk-owned plan mode. The first consumer of T1's tool-gating primitive
-// (extension/substrate/toolGating.ts). This is the *toggle surface* on top of T1's structural gate: a
+// perk-owned plan mode. The first consumer of the tool-gating primitive
+// (extension/substrate/toolGating.ts). This is the *toggle surface* on top of that structural gate: a
 // `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating.enter`/`exit`.
-// perk owns NO parallel enforcement here — T1 is the single read-only authority.
+// perk owns NO parallel enforcement here — the gate is the single read-only authority.
 //
-// It also injects the cooperative *plan-authoring* prompt layer (the gather-then-plan contract,
-// erk context-preservation-prompting) under its own `perk:plan-context` customType (display:false),
-// keyed directly off the read-only gate (read-only ⟹ plan in the Phase-2 main session). The
-// content is stripped from `context` when the gate is off — the same hygiene T1 applies to its
+// It also injects the cooperative *plan-authoring* prompt layer (the gather-then-plan contract)
+// under its own `perk:plan-context` customType (display:false),
+// keyed directly off the read-only gate (read-only ⟹ plan in the main session). The
+// content is stripped from `context` when the gate is off — the same hygiene the gate applies to its
 // `perk:mode-context`. An optional `[workflow] plan_authoring` config addendum (extension/substrate/config.ts)
 // is appended when present.
 //
 // Grounded in pi's official `examples/extensions/plan-mode/` recipe, but perk adopts ONLY the
 // read-only authoring half: there is no in-session "execution mode" flip — perk separates plan
 // (read-only session) from implement (cold-door fresh worktree session), and `[DONE:n]` tracking
-// lives in the implement session (T2c).
+// lives in the implement session.
 //
-// REGISTRATION-TIME DEFERRAL (Node 2.3), now THREE-TIER. `registerPlanMode` resolves the plan
+// REGISTRATION-TIME DEFERRAL, now THREE-TIER. `registerPlanMode` resolves the plan
 // provider id once at factory time and branches:
 //   - `perk-plan` (and the fail-safe error path) → register EVERYTHING (the default path is the
 //     hard guarantee, zero behavior change).
@@ -43,12 +43,12 @@ import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
 import { OBJECTIVE_AUTHOR_STAGE } from "./objectiveAuthor.ts";
 
-/** The plan-authoring context customType (distinct from T1's `perk:mode-context`). */
+/** The plan-authoring context customType (distinct from the gate's `perk:mode-context`). */
 export const PLAN_CONTEXT_TYPE = "perk:plan-context";
 const PLAN_MARKER = "[PLAN AUTHORING]";
 
 /**
- * The cooperative gather-then-plan contract. This is prompting, NOT enforcement (T1's gate is the
+ * The cooperative gather-then-plan contract. This is prompting, NOT enforcement (the gate is the
  * enforcement). It never leaks internal policy text — it tells the model how to materialize a
  * decision-complete plan an executor with zero prior context can follow (mirrors
  * skills/perk-plan/SKILL.md). Durable anchors only, no line numbers.
@@ -114,7 +114,7 @@ export function isPerkPlanReferenceSelected(cwd: string): boolean {
 }
 
 /**
- * Register the perk-owned plan-mode toggle surface over T1's gate. Idempotent enter/exit (the gate
+ * Register the perk-owned plan-mode toggle surface over the read-only gate. Idempotent enter/exit (the gate
  * tracks its own on/off transition), fail-safe-headless (notify when UI, else stderr).
  */
 export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {

@@ -1,10 +1,10 @@
-// P3.T2 — objective-authoring context injection (the objective mirror of planMode's plan-authoring
+// Objective-authoring context injection (the objective mirror of planMode's plan-authoring
 // half). A `perk objective author` cold launch opens a READ-ONLY session whose handoff `stage` is
 // `objective-author`; this module injects the objective-authoring contract under its own
 // `perk:objective-author-context` customType, keyed off (read-only gate AND stage ===
 // objective-author), optionally extended by the same `[workflow] plan_authoring` addendum the
 // plan-authoring injection consumes (verbatim reuse, read per-event via loadPerkConfig). planMode.ts defers when the stage is objective-author, so exactly one
-// authoring context is injected — the coupling break (#58): plan-authoring is no longer keyed off
+// authoring context is injected — the coupling break: plan-authoring is no longer keyed off
 // the bare read-only gate.
 //
 // The `objective_save` warm door (the tool + `/objective-save` command) lives in objectiveSave.ts,
@@ -23,8 +23,8 @@ export const OBJECTIVE_AUTHOR_CONTEXT_TYPE = "perk:objective-author-context";
 const OBJECTIVE_AUTHOR_MARKER = "[OBJECTIVE AUTHORING]";
 
 /**
- * The cooperative gather-then-author contract for objectives. Prompting, NOT enforcement (T1's gate
- * is the enforcement). Mirrors skills/perk-objective-author/SKILL.md: clarify the goal, explore
+ * The cooperative gather-then-author contract for objectives. Prompting, NOT enforcement (the tool
+ * gate is the enforcement). Mirrors skills/perk-objective-author/SKILL.md: clarify the goal, explore
  * read-only, structure a roadmap, keep the draft current with `objective_draft`, review via
  * `plan_review`, approval auto-saves — never hand-write roadmap YAML.
  */
