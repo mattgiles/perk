@@ -1,4 +1,4 @@
-"""The pure objective drift engine (Objective #548, Node 4.4 / #612).
+"""The pure objective drift engine.
 
 Drift detection is ``diff(manifest, observed)``: the persisted ``objective-manifest`` (the intended
 roadmap's structural identity — :class:`perk.objective.Manifest`) is the **expected** baseline; the

@@ -1,4 +1,4 @@
-"""GitHub readiness + remote-runner prereq group builders (Node 2.2 split — verbatim)."""
+"""GitHub readiness + remote-runner prereq group builders."""
 
 from pathlib import Path
 
@@ -179,13 +179,13 @@ def _runner_permissions_check(root: Path) -> Check:
 
 
 def _runner_checks(root: Path, self_repo: bool) -> list[Check]:
-    """Pre-flight health-checks for the remote-runner's prerequisites (§8.16, Node 2.4).
+    """Pre-flight health-checks for the remote-runner's prerequisites (§8.16).
 
     Report-only and **non-fatal** (never ``fail``): present → ``ok``; actionable-absent → ``warn``;
     unverifiable → ``info``. A ``warn`` keeps exit 0 (``report.healthy`` keys off ``fail`` only),
-    matching erk's always-passes posture and §8.6's GitHub-non-fatal rule. Shells ``gh``, so it
+    matching the always-passes posture and §8.6's GitHub-non-fatal rule. Shells ``gh``, so it
     runs only under ``verify=True``; a ``GitHubError`` is degraded by ``_build_checks`` to a single
-    ``info``. Kept a free function so Node 3.3's ``perk doctor workflow`` can compose it directly.
+    ``info``. Kept a free function so ``perk doctor workflow`` can compose it directly.
     """
     # D6 — same check set for both repo kinds (the runner-workflow capability is scope="both");
     # only the `detail` wording adapts.

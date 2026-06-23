@@ -1,7 +1,4 @@
-"""Skills-delivery cluster: the manifest fragment, conflict probe, and ``skills`` CLI sync.
-
-Split out of the original single-file ``init`` module (Node 2.2) — verbatim relocation.
-"""
+"""Skills-delivery cluster: the manifest fragment, conflict probe, and ``skills`` CLI sync."""
 
 import shutil
 import subprocess
@@ -182,7 +179,7 @@ def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> s
     every ``perk-*`` skill reaches a session only through the CLI-managed ``.agents/skills/``
     symlinks. Runs for both self-repo and consumers under ``verify``.
 
-    **Load-bearing** (#289 — supersedes the old best-effort/D3 posture for skills specifically):
+    **Load-bearing** (supersedes the old best-effort/D3 posture for skills specifically):
     returns ``None`` on success, else a failure message naming the failing command plus its
     stderr (or the ``OSError``/timeout text). After a successful sync, every ``MANAGED_SKILL_NAMES``
     name (perk-authored + the required external skills) must be installed

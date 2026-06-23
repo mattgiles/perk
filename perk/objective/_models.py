@@ -1,12 +1,11 @@
 """Objective data leaf — module constants + markers, status enum/sets, the core dataclasses,
-and the marker helpers (Node 2.3 module->package split).
+and the marker helpers.
 
 The type leaf of the ``perk/objective/`` package (no intra-package imports; mirrors the
 ``doctor`` package's ``data.py`` leaf precedent). Holds the storage-block keys/markers, the
 :class:`NodeStatus` enum + its category sets, the :class:`ObjectiveNode` / :class:`ObjectiveHeader`
 / :class:`PlanSelection` / :class:`DependencyGraph` dataclasses, and the dual-encoding marker
-helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``). Every symbol is a verbatim
-relocation from the pre-split ``perk/objective.py`` single module.
+helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``).
 """
 
 import re
@@ -28,7 +27,7 @@ OBJECTIVE_NODE_LABEL_DESCRIPTION = "A perk objective roadmap node (managed by pe
 
 OBJECTIVE_HEADER_KEY = "objective-header"
 OBJECTIVE_ROADMAP_KEY = "objective-roadmap"
-# The project-overview drift baseline (Node 4.4 / #612): an authoritative manifest of the intended
+# The project-overview drift baseline: an authoritative manifest of the intended
 # roadmap's STRUCTURAL identity (id/slug/description/depends_on per node + a pinned phase-name map),
 # persisted beside `objective-header`. Status/pr are deliberately excluded — they are live/observed
 # state, never part of the manifest, which is what makes recreation safe (it copies a persisted
@@ -36,12 +35,12 @@ OBJECTIVE_ROADMAP_KEY = "objective-roadmap"
 # surface; GitHub's roadmap block is its own atomic manifest (its drift report is trivially empty).
 OBJECTIVE_MANIFEST_KEY = "objective-manifest"
 OBJECTIVE_BODY_KEY = "objective-body"
-# The per-node-issue metadata block key (Node 3.2 project-backed store): each node-issue carries an
+# The per-node-issue metadata block key (project-backed store): each node-issue carries an
 # `objective-node` block (the node's id/status/description) so a project-backed objective derives
 # its roadmap live from node-issue membership, not from a stored roadmap table.
 OBJECTIVE_NODE_KEY = "objective-node"
 
-# perk starts its OWN objective schema at 1 — it does not inherit erk's "2"/"3"/"4".
+# perk starts its OWN objective schema at 1.
 OBJECTIVE_SCHEMA_VERSION = "1"
 
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
@@ -54,7 +53,7 @@ OBJECTIVE_HEADER_FIELDS = frozenset(
 ROADMAP_TABLE_MARKER_START = "<!-- perk:roadmap-table -->"
 ROADMAP_TABLE_MARKER_END = "<!-- /perk:roadmap-table -->"
 
-# The Reconcilable-prose markers (P2.T11). The objective-body comment is three section types:
+# The Reconcilable-prose markers. The objective-body comment is three section types:
 # Mechanical (the marker-bounded roadmap table, re-rendered from frontmatter), Reconcilable (the
 # prose inside THESE markers — the only region post-merge reconciliation rewrites), and Immutable
 # (anything below the closing marker — historical notes, never touched). The Reconcilable region is
@@ -62,7 +61,7 @@ ROADMAP_TABLE_MARKER_END = "<!-- /perk:roadmap-table -->"
 OBJECTIVE_RECONCILABLE_MARKER_START = "<!-- perk:objective-reconcilable -->"
 OBJECTIVE_RECONCILABLE_MARKER_END = "<!-- /perk:objective-reconcilable -->"
 
-# The Linear-safe inline-code rewrite of a perk HTML-comment marker (objective #252 Node 2.3).
+# The Linear-safe inline-code rewrite of a perk HTML-comment marker.
 # Derived locally by the same rule as the Linear backend's `to_linear_markdown` transcoder
 # (`<!-- perk:x -->` → `` `perk:x` ``) — NOT imported from it: the import direction is
 # `backends.linear → objective`, never back.
@@ -79,7 +78,7 @@ def _inline_marker(html_marker: str) -> str:
 def _find_marker_pair(
     text: str, start_marker: str, end_marker: str
 ) -> tuple[int, int, str, str] | None:
-    """Locate a marker-bounded region in either encoding (form-preservation, Node 2.3).
+    """Locate a marker-bounded region in either encoding (form-preservation).
 
     ``start_marker``/``end_marker`` are the canonical HTML forms; the HTML scan runs first (the
     unchanged GitHub path), then the Linear-safe inline-code forms derived by the same rewrite
@@ -115,7 +114,7 @@ class NodeStatus(StrEnum):
 # The terminal statuses (a dependency is "satisfied" only when terminal).
 TERMINAL: frozenset[NodeStatus] = frozenset({NodeStatus.DONE, NodeStatus.SKIPPED})
 
-# Lifecycle categories for factory selection (P2.T10 — the resumable-lease model). `planning` is a
+# Lifecycle categories for factory selection (the resumable-lease model). `planning` is a
 # resumable CLAIM (re-selectable until a plan is committed); `in_progress` is a COMMITTED plan (a
 # plan was saved and the node↔plan backlink set atomically by `plan-save`). A `planning` node IS
 # plannable, but only while it carries no `pr` backlink (see `plannable_nodes`) — and implicit
@@ -156,10 +155,10 @@ class ObjectiveHeader:
     # Backend-owned opaque value: GitHub stores its numeric comment id, Linear its string UUID.
     objective_comment_id: int | str | None = None
     status: str = "active"
-    # The objective's target branch (#633); inherited by every node plan. `None` ⇒ no override
+    # The objective's target branch; inherited by every node plan. `None` ⇒ no override
     # (node plans fall through to `[workflow] base` → the GitHub default branch).
     base: str | None = None
-    # In-place objective adoption (#709, §8.30): the source ref this objective was adopted from
+    # In-place objective adoption (§8.30): the source ref this objective was adopted from
     # (a Linear project UUID — projects have no human identifier — or a GitHub issue ref `"#<n>"`).
     # Self-referential by construction (adoption stamps perk's metadata INTO the same source); its
     # **presence** is the canonical "this objective was adopted; the `Adopted-from` Immutable note
@@ -183,7 +182,7 @@ def _has_block(text: str, key: str) -> bool:
     return has_metadata_block(text, key)
 
 
-# The Immutable archive-note marker (#709, §8.30): the source's ORIGINAL overview/body, preserved
+# The Immutable archive-note marker (§8.30): the source's ORIGINAL overview/body, preserved
 # verbatim below the closing Reconcilable marker (Immutable by construction). A perk HTML-comment
 # marker so it round-trips through `to_linear_markdown` (→ inline-code) on the Linear path and is
 # recognizable/idempotent.

@@ -1,12 +1,12 @@
 """The capability inventory — the single declared list of what ``perk init`` manages.
 
-A **lightweight, code-level** port of erk's capability system (PRIOR_ART §9): Pi's package
+A **lightweight, code-level** capability system: Pi's package
 model already covers most of "capabilities", so perk keeps only the load-bearing core — a
 declared inventory with a required-vs-optional split and a self-vs-consumer scope. ``init``
-reports against this list; **T6 ``doctor`` reuses the same tuple** and adds a ``verify()``
+reports against this list; **``doctor`` reuses the same tuple** and adds a ``verify()``
 side (the registry-as-SSOT value, minus the ABC/lifecycle machinery).
 
-Phase 0 deliberately ships an all-``required``, all-``scope="both"`` set: the ``required`` /
+The set deliberately ships all-``required``, all-``scope="both"``: the ``required`` /
 ``scope`` fields are the rail that optional capabilities + consumer-only pieces ride later.
 The installed-optional **state file**, the ``Capability`` ABC, and a ``capability
 add/remove`` CLI are **deferred** until the first *optional* capability exists.
@@ -63,9 +63,8 @@ CAPABILITIES: tuple[Capability, ...] = (
 def applicable(self_repo: bool) -> tuple[Capability, ...]:
     """Capabilities that apply to this repo kind (self-vs-consumer filter).
 
-    Mirrors capability-system.md's ``None``-vs-frozenset filter. Phase 0 returns the full
-    set either way (every capability is ``scope="both"``); the filter is the rail for
-    future ``scope="self"`` / ``scope="consumer"`` pieces.
+    Returns the full set either way (every capability is ``scope="both"``); the filter is the
+    rail for future ``scope="self"`` / ``scope="consumer"`` pieces.
     """
     wanted: tuple[Scope, ...] = ("both", "self") if self_repo else ("both", "consumer")
     return tuple(cap for cap in CAPABILITIES if cap.scope in wanted)

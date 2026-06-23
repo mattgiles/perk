@@ -1,7 +1,4 @@
-"""pi's git-package extension-clone lifecycle: status, lock, and in-place materialize.
-
-Split out of the original single-file ``init`` module (Node 2.2) — verbatim relocation.
-"""
+"""pi's git-package extension-clone lifecycle: status, lock, and in-place materialize."""
 
 import contextlib
 from collections.abc import Iterator

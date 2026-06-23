@@ -1,4 +1,4 @@
-"""Init-time report dataclasses + the ``--json`` serialization (Node 2.2 split — verbatim)."""
+"""Init-time report dataclasses + the ``--json`` serialization."""
 
 from dataclasses import dataclass
 

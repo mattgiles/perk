@@ -1,7 +1,7 @@
-"""Objective storage + mechanics — the plan factory's deterministic foundation (P2.T9).
+"""Objective storage + mechanics — the plan factory's deterministic foundation.
 
 An **objective** is a long-running goal that *generates* bounded plans rather than being
-implemented directly (PRIOR_ART §3). This package is the **deterministic mechanics only**: a
+implemented directly. This package is the **deterministic mechanics only**: a
 pure storage-block engine + roadmap frontmatter parser + dependency-graph next-node selection
 + surgical node mutation. The `objective-plan` registry stage, the plan factory, and the
 model-facing bounded transition tools are **T10** — not built here.
@@ -12,7 +12,7 @@ The metadata-block engine is reused verbatim from :mod:`perk.plan`
 functions are already generic, so the objective header *and* roadmap blocks reuse them
 directly; only the roadmap node validation/serialization and the rendered table are new.
 
-Storage shape (PRIOR_ART §3, erk's objective storage-format, perk-namespaced + schema 1):
+Storage shape (perk-namespaced + schema 1):
 
 - **Issue body** holds two blocks: ``objective-header`` (compact, queryable run/status) and
   ``objective-roadmap`` (the canonical flat-node YAML frontmatter — the source of truth).
@@ -20,15 +20,12 @@ Storage shape (PRIOR_ART §3, erk's objective storage-format, perk-namespaced + 
   (deterministically re-rendered from the frontmatter) plus prose.
 
 **Explicit-status-only** (foundation open #3): a node's status is *never* inferred from a PR
-column. Setting ``pr`` never changes ``status`` — the departure from erk's two-tier
-infer-from-PR model.
+column. Setting ``pr`` never changes ``status``.
 
-**Package layout (Node 2.3 module->package split).** The single-file ``objective`` module was
-decomposed into a package along its natural seams — a pure verbatim relocation (no logic edits,
-beyond the bounded parse-layer ``Any``→``object`` tightening assigned to this node). This
+**Package layout.** This
 ``__init__`` re-exports every public symbol plus the test-reached privates behind a sorted
-``__all__``, preserving the ``objective.X`` attribute-access import path verbatim (zero
-consumer/test import churn). ``add_node`` is a facade global so the
+``__all__``, preserving the ``objective.X`` attribute-access import path. ``add_node`` is a
+facade global so the
 ``monkeypatch.setattr(objective, "add_node", …)`` site in ``test_github`` rebinds the name the
 lone caller (``perk.github.objectives``) reads through the facade. Submodules:
 

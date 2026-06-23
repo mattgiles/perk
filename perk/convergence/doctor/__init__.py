@@ -7,20 +7,17 @@ the same helpers with `apply=True`. Everything downstream of the group *builders
 over a `list[Check]` (report / exit-code / json / render), so that layer tests without any
 monkeypatch.
 
-Principles (T6, from the erk prior-art pass):
+Principles:
 - **No silent pass:** a check that cannot be evaluated reports `warn`/`info` *with the reason*,
   never a silent `ok`.
 - **GitHub is non-fatal** (D3): unauthed / no-access / `gh` errored ⇒ `warn`, never `fail`.
 - **Report, don't refuse** (D5): a missing required tool is a failing check (exit 1); only
   `not_a_repo` blocks (exit 2).
 
-**Package layout (Node 2.2 module->package split).** The single-file ``doctor`` module was
-decomposed into a package along its natural seams — a pure verbatim relocation (no logic edits,
-beyond the audit decomposition of ``_linear_checks`` into per-phase sub-builders in
-``linear_checks``). This ``__init__`` keeps the orchestration (``_build_checks``,
+**Package layout.** This ``__init__`` keeps the orchestration (``_build_checks``,
 ``workflow_checks``, ``run_doctor``, ``report_to_dict``) and re-exports every submodule symbol
-behind a sorted ``__all__``, preserving the ``doctor.X`` attribute-access path verbatim (zero
-consumer/test import churn). The orchestrators reference the group *builders* as bare facade
+behind a sorted ``__all__``, preserving the ``doctor.X`` attribute-access path.
+The orchestrators reference the group *builders* as bare facade
 globals, so the existing ``doctor._env_checks`` / ``doctor._github_checks`` /
 ``doctor._runner_checks`` monkeypatches keep rebinding the names the orchestrators read; the
 module-attribute patches
@@ -122,7 +119,7 @@ __all__ = [
 
 
 def workflow_checks(root: Path, self_repo: bool, *, verify: bool = True) -> list[Check]:
-    """The workflow-focused static layer for ``perk doctor workflow`` (Node 3.3, §8.19).
+    """The workflow-focused static layer for ``perk doctor workflow`` (§8.19).
 
     Reuses the same builders as bare ``perk doctor`` (doctor's SSOT): the GitHub readiness +
     remote-runner prereq checks (under ``verify``) ⊕ the ``runner-workflow``
@@ -192,7 +189,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     if fix:
         fixed, fix_errors = _apply_fixes(root, self_repo, checks)
         # Materialize skills under the covers (the repair gesture) via the `skills` CLI —
-        # load-bearing (#289): a failure is carried loudly on `fix_errors` (rendered by the
+        # load-bearing: a failure is carried loudly on `fix_errors` (rendered by the
         # command + serialized in --json), and the post-fix re-verify below then also shows the
         # failing `skills-delivery` check, so the exit code reflects the still-broken state.
         # Gated on `verify` so the external shell runs on real `--fix` runs but not in unit

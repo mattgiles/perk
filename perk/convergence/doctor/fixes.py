@@ -1,7 +1,4 @@
-"""The ``--fix`` repair layer: config re-seed, Linear labels, and the migration seam.
-
-Split out of the original single-file ``doctor`` module (Node 2.2) — verbatim relocation.
-"""
+"""The ``--fix`` repair layer: config re-seed, Linear labels, and the migration seam."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -67,7 +64,7 @@ def _untrack_materialized_plan_cache(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
-# The legacy/one-off migration seam (erk's `init --upgrade` repairs, perk's home for them).
+# The legacy/one-off migration seam.
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
 # cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
 # returns `(changes, errors)` so failures land loudly on `fix_errors`.

@@ -1,9 +1,9 @@
-"""Cross-stage resume resolution (P1.T5c) — pure, deterministic, no Click/subprocess/network.
+"""Cross-stage resume resolution — pure, deterministic, no Click/subprocess/network.
 
 `perk resume <plan>` reads a plan's observable issue-backend state (``IssueBackend.get_plan``)
 and uses
 this module to (1) reconstruct the provider-agnostic `cache.plan-ref` and (2) derive the **current
-actionable stage**. The launcher then materializes the ref + launches that stage (reusing T4a's
+actionable stage**. The launcher then materializes the ref + launches that stage (reusing
 `launch_stage`). Keeping the decision pure is what makes the resolution matrix unit-testable.
 """
 
@@ -49,7 +49,7 @@ def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) 
         "labels": [plan.PLAN_LABEL],
         "objective_id": plan_state.header.get("objective_id"),
         "consumed_learn": plan_state.header.get("consumed_learn") or [],
-        # The pinned base (#633): recovered from the canonical `plan-header` so implement/resume/
+        # The pinned base: recovered from the canonical `plan-header` so implement/resume/
         # the remote run-worker base off it even when the local cache.plan-ref is absent.
         "base": plan_state.header.get("base"),
     }

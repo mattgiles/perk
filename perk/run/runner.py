@@ -1,4 +1,4 @@
-"""The runner-agnostic dispatch contract (Node 2.1; contracts.md §8.13).
+"""The runner-agnostic dispatch contract (contracts.md §8.13).
 
 A `--remote` launch of a drivable stage (`implement`/`address`) is a **real drive**: mint a
 perk ``run_id``, persist the dispatch intent as a durable ``run_id → plan`` linkage record
@@ -20,7 +20,7 @@ from typing import Any, Protocol
 
 from perk import github
 
-# The workflow filename the Node 2.2 artifact MUST be named (locked here, built there). The
+# The workflow filename the artifact MUST be named (locked here, built there). The
 # GitHub Actions runner triggers this workflow; its `run-name` must embed `${{ inputs.run_id }}`
 # so the dispatcher can verify the run by discovery (contracts.md §8.13).
 GITHUB_ACTIONS_WORKFLOW = "perk-run.yml"
@@ -73,7 +73,7 @@ class RunObservation:
 @dataclass(frozen=True)
 class DispatchRecord:
     """The durable ``run_id → plan`` linkage persisted under ``.pi/workflow/`` (contracts.md
-    §8.13). The supervisor (Node 3.1) enumerates these to correlate ``run_id ↔ plan ↔ PR``."""
+    §8.13). The supervisor enumerates these to correlate ``run_id ↔ plan ↔ PR``."""
 
     run_id: str  # the perk ULID (canonical correlation key)
     stage: str

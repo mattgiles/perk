@@ -1,8 +1,7 @@
 """Doctor's pure data layer: ``Status``/``Check``/``DoctorReport`` + the managed-group map.
 
 A leaf module (imports nothing from the ``doctor`` package) so the check submodules can construct
-``Check`` without a circular import. Split out of the original single-file ``doctor`` module
-(Node 2.2) — verbatim relocation; re-exported by the package facade.
+``Check`` without a circular import. Re-exported by the package facade.
 """
 
 from dataclasses import dataclass, field

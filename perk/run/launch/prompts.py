@@ -1,6 +1,6 @@
-"""Cold-door seed-prompt builders (Node 2.3 module->package split).
+"""Cold-door seed-prompt builders.
 
-The worker-prompt-parity twins relocated verbatim from the pre-split ``perk/run/launch.py``: the
+The worker-prompt-parity twins: the
 stage dispatcher (:func:`_initial_prompt`), the per-backend plan-read instruction
 (:func:`_plan_read_instruction`), the implement/address/learn primers, and the prompt assembler
 (:func:`_resolve_prompt`) that appends the resolved skill bindings. Each builder is byte-identical
@@ -26,11 +26,11 @@ def _initial_prompt(
     preview: bool = False,
 ) -> str | None:
     """The first message ``pi`` is launched with, so the session *starts working* rather than
-    opening idle (P1.T4c, Bug 1). ``implement`` (Phase 1), ``address`` (P2.T7), and ``learn``
-    (P2.T17) are primed; ``None`` (no prompt) for other stages — e.g. ``plan`` is user-driven.
+    opening idle. ``implement``, ``address``, and ``learn``
+    are primed; ``None`` (no prompt) for other stages — e.g. ``plan`` is user-driven.
 
     ``config`` carries the `[subagents]` selection so the address prompt can inject the configured
-    ``review-classifier`` model (#196); ``None`` falls back to the agent's frontmatter default."""
+    ``review-classifier`` model; ``None`` falls back to the agent's frontmatter default."""
     if plan_ref is None:
         return None
     if stage.id == "implement":
@@ -44,7 +44,7 @@ def _initial_prompt(
 
 
 def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
-    """The per-backend plan-read instruction (Node 3.1) — the prompt SSOT for "how do I read the
+    """The per-backend plan-read instruction — the prompt SSOT for "how do I read the
     saved plan". Byte-identical to `extension/doors/lifecycleGates.ts::planReadInstruction` (the TS
     twin); drift in either plane fails the paired parity suites. ``github`` reads via `gh`;
     ``linear`` points at the pi-mono-linear tools with an `open <url>` fallback; any other
@@ -83,11 +83,11 @@ def _address_prompt(
     plan_ref: dict[str, Any], model: str | None = None, preview: bool = False
 ) -> str:
     """Prime the address stage: classify feedback in an isolated child, fix only actionable items,
-    then resolve the threads (P2.T7). The perk-address skill (the judgment layer) is delivered by
-    the skill-binding mechanism (Node 2.3), not hardcoded here.
+    then resolve the threads. The perk-address skill (the judgment layer) is delivered by
+    the skill-binding mechanism, not hardcoded here.
 
     When ``model`` is set, the `perk.review-classifier` spawn carries an inline `model` override
-    ([subagents] review-classifier, #196) — byte-identical to `worker.ts`'s `initialPromptFor`
+    ([subagents] review-classifier) — byte-identical to `worker.ts`'s `initialPromptFor`
     parity twin; otherwise the agent's frontmatter default is used.
 
     When ``preview`` is set (the cold ``perk pr address --preview`` flag, mirroring the warm
@@ -130,9 +130,9 @@ def _address_prompt(
 
 
 def _learn_prompt(plan_ref: dict[str, Any]) -> str:
-    """Prime the learn stage: investigate the just-landed change and capture durable learnings
-    (P2.T17). The perk-learn skill (the judgment layer) is delivered by the skill-binding
-    mechanism (Node 2.3), not hardcoded here.
+    """Prime the learn stage: investigate the just-landed change and capture durable learnings.
+    The perk-learn skill (the judgment layer) is delivered by the skill-binding
+    mechanism, not hardcoded here.
 
     ``pr_id`` is the **plan-issue** number, not the PR; by the time learn runs the PR is merged
     and is discoverable via its head branch ``plan-<pr_id>``.
@@ -185,17 +185,16 @@ def _resolve_prompt(
 ) -> str | None:
     """Assemble the initial prompt for a cold-local launch (prompt + skill bindings).
 
-    Extracted verbatim from :func:`launch_stage`'s body — see its docstring for the
-    ``prompt_override``/``binding_trigger`` semantics.
+    See :func:`launch_stage`'s docstring for the ``prompt_override``/``binding_trigger`` semantics.
     """
-    # Prime the session (Bug 1): when --worktree is given the derived ref is absent, so fall back
-    # to the repo-root active ref for the prompt. A `prompt_override` (P2.T10) wins outright.
+    # Prime the session: when --worktree is given the derived ref is absent, so fall back
+    # to the repo-root active ref for the prompt. A `prompt_override` wins outright.
     prompt = prompt_override
     if prompt is None:
         prompt = _initial_prompt(
             stage, resolved.plan_ref or cache.read_plan_ref(repo_root), config, preview=preview
         )
-    # Node 2.3: append the resolved skill bindings (defaults ⊕ user overlay) for this launch's
+    # Append the resolved skill bindings (defaults ⊕ user overlay) for this launch's
     # trigger — the single delivery path for perk's own nudges. Resolver issues + delivery warnings
     # are surfaced loud-but-non-fatal and never block a launch. Delivery AUGMENTS an existing
     # prompt only (D2): an idle launch (no _initial_prompt) stays idle — the warm door's Mechanism A

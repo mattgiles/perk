@@ -1,6 +1,6 @@
-"""The GitHub Actions runner artifact (Objective #137 Node 2.2; contracts.md §8.14).
+"""The GitHub Actions runner artifact (contracts.md §8.14).
 
-A `--remote` launch of a drivable stage is a real drive (Node 2.1, §8.13): the Python plane mints a
+A `--remote` launch of a drivable stage is a real drive (§8.13): the Python plane mints a
 perk ``run_id``, persists the ``run_id → plan`` linkage, verifies it, then triggers a
 ``workflow_dispatch`` for the workflow file ``perk-run.yml`` (``runner.GITHUB_ACTIONS_WORKFLOW``),
 verifying the run by matching the ``run_id`` embedded in the run-name. *This* module is the runner
@@ -10,7 +10,7 @@ by ``perk doctor --fix`` (a ``ManagedConvergence`` in
 
 The workflow checks out the plan branch, installs perk + pi (the composite action), then runs
 ``perk run-worker`` (the CI positioning + drive entrypoint, :mod:`perk.run.run_worker`) which
-materializes the worktree and spawns the Node headless worker (Node 1.2).
+materializes the worktree and spawns the Node headless worker.
 
 The templates are authored as code (string constants), not packaged data — writing them is a pure
 file convergence, so there is no wheel-data surface to guard. The workflow file MUST honor §8.13's
@@ -27,12 +27,12 @@ from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 RUNNER_WORKFLOW_PATH = f".github/workflows/{GITHUB_ACTIONS_WORKFLOW}"
 REMOTE_SETUP_ACTION_PATH = ".github/actions/perk-remote-setup/action.yml"
 
-# The PAT secret the runner checks out + reports with (Node 2.4 health-checks it; named here so the
-# workflow and the future doctor check agree). Model credentials are resolved by the Node worker's
-# env-var key resolution (Gap 5) — passed through but not perk-managed here.
+# The PAT secret the runner checks out + reports with (a doctor readiness check verifies it; named
+# here so the workflow and that check agree). Model credentials are resolved by the Node worker's
+# env-var key resolution — passed through but not perk-managed here.
 RUNNER_PAT_SECRET = "PERK_GH_PAT"
 
-# The opt-out repo variable (mirrors erk's `CLAUDE_ENABLED`): set `PERK_ENABLED=false` to disable
+# The opt-out repo variable: set `PERK_ENABLED=false` to disable
 # the runner without removing the managed workflow.
 RUNNER_ENABLED_VAR = "PERK_ENABLED"
 
@@ -143,7 +143,7 @@ jobs:
 
 # The `perk` install command differs by repo kind: the perk self-repo dogfoods the code under test
 # (`--from .`); a consumer installs the published distribution by name. The consumer install + its
-# version pinning is Node 2.4's prereq concern (named here so the artifact is honest, not fiction).
+# version pinning is a prereq concern (named here so the artifact is honest, not fiction).
 _PERK_INSTALL_SELF = "uv tool install --from . perk"
 _PERK_INSTALL_CONSUMER = "uv tool install git+https://github.com/mattgiles/perk@main"
 
@@ -151,7 +151,7 @@ _PERK_INSTALL_CONSUMER = "uv tool install git+https://github.com/mattgiles/perk@
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout has no
 # worker clone (`.pi/git` + `.pi/npm` are gitignored, and nothing in the composite runs `pi` to
 # trigger pi's git-package `npm install`), so consumer remote drive genuinely cannot run end-to-end
-# until Node 2.4 wires worker-clone reconciliation + dep resolution. Until then the consumer step is
+# until worker-clone reconciliation + dep resolution are wired. Until then the consumer step is
 # a loud, explicit deferral instead of a silently-broken `npm ci`.
 _WORKER_DEPS_SELF = "npm ci"
 _WORKER_DEPS_CONSUMER = (

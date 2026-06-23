@@ -1,8 +1,8 @@
-"""The Linear readiness group builder + its per-phase sub-builders (Node 2.2 split).
+"""The Linear readiness group builder + its per-phase sub-builders.
 
-``_linear_checks`` was decomposed into cohesive per-phase sub-builders (audit "reduce indentation
-depth"); every emitted ``Check`` (name/group/status/message/detail/remediation) and the phase
-short-circuit ordering is preserved.
+Cohesive per-phase sub-builders; every emitted ``Check``
+(name/group/status/message/detail/remediation) and the phase short-circuit ordering is
+load-bearing.
 """
 
 import tomllib

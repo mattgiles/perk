@@ -1,8 +1,4 @@
-"""Package + settings convergence: the static/provider/linear package wiring + identity helpers.
-
-Split out of the original single-file ``init`` module (Node 2.2). The package-list ``cast`` sites
-were replaced with ``isinstance``-guarded narrowing (audit §4.2).
-"""
+"""Package + settings convergence: the static/provider/linear package wiring + identity helpers."""
 
 import json
 import tomllib
@@ -20,23 +16,23 @@ from perk.substrate.providers import ProviderSet, load_providers, resolve_provid
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
 
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
-# auto-installs them on the next launch. `@tombell/pi-plan` was retired in P2.T2a
+# auto-installs them on the next launch. `@tombell/pi-plan` was retired
 # (perk now owns plan mode end-to-end via the tool-gating primitive + `/plan`).
-# `@juicesharp/rpiv-todo` was retired in P2.T12 (perk now owns implement-progress via
-# perk-owned checkpoints, the `perk:checkpoint` entry seeded from the plan body, T2c).
-# `pi-subagents` is the borrowed *spawned delegation engine* (P2.T6): perk takes the
+# `@juicesharp/rpiv-todo` was retired (perk now owns implement-progress via
+# perk-owned checkpoints, the `perk:checkpoint` entry seeded from the plan body).
+# `pi-subagents` is the borrowed *spawned delegation engine*: perk takes the
 # engine (the `subagent` tool + spawn/handoff machinery) and owns the workflow-specific
 # agent definitions itself (in `.pi/agents/`, scaffolded by init); the engine is
 # `ctx.hasUI`-clean (children run `--mode json -p`).
-# `pi-web-access` is NO LONGER borrowed: it became the `web` seam's `default: true` provider
-# (#529). It is now converged via the PROVIDER path (`_converge_provider_packages`), not this
+# `pi-web-access` is NO LONGER borrowed: it became the `web` seam's `default: true` provider.
+# It is now converged via the PROVIDER path (`_converge_provider_packages`), not this
 # static borrowed set — the novelty being that this is the first seam whose reference/default
 # provider has a NON-NULL `package` (perk owns no native web-research implementation, so the
 # behavior-preserving default is itself a foreign npm package). The committed `.pi/settings.json`
 # `npm:pi-web-access` entry is UNCHANGED but RECLASSIFIED from borrowed to provider-managed: a
 # default-config repo still installs it (via the provider path), and deselecting `web` away from
 # `pi-web-access` now REMOVES it like any other provider package (two-directional convergence).
-# `@tombell/pi-status` was retired post-node-3.1 — pi's `setFooter` is a single last-wins
+# `@tombell/pi-status` was retired — pi's `setFooter` is a single last-wins
 # slot, and pi-status's `session_start` footer replaced perk's charter-D2 footer (perk owns
 # the footer wholesale).
 BORROWED_PACKAGES = [
@@ -187,13 +183,13 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
 
     packages, added, updated = _merge_static_packages(packages, _desired_packages(self_repo))
 
-    # Provider-driven two-directional wiring (Node 2.1). Composes on top of the static layer
+    # Provider-driven two-directional wiring. Composes on top of the static layer
     # within this same body, so it stays inside the `settings-wiring` ManagedConvergence (D5 SSOT
     # — doctor dry-runs/fixes it for free). perk's own package is never filtered (Invariant 2).
     packages, provider_changes = _converge_provider_packages(root, packages)
     added.extend(provider_changes.added)
 
-    # Linear-selection two-directional wiring (Node 2.4). Composes within this same body, so it
+    # Linear-selection two-directional wiring. Composes within this same body, so it
     # rides the `settings-wiring` ManagedConvergence — doctor dry-runs/fixes it for free.
     packages, linear_changes = _converge_linear_package(root, packages)
     added.extend(linear_changes.added)
