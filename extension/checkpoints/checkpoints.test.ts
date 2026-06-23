@@ -1,4 +1,4 @@
-// P2.T2c — perk-owned checkpoints: pure step/`[DONE:n]` helpers + the scan-after-marker rebuild +
+// perk-owned checkpoints: pure step/`[DONE:n]` helpers + the scan-after-marker rebuild +
 // the live session round-trip (seed from `## Steps`, advance on turn_end, inert on prose plans,
 // headless-safe). Fully offline. See checkpoints.ts.
 
@@ -154,7 +154,7 @@ test("rebuildCheckpoint: scan-after-marker ignores stale [DONE:n] before the see
   assert.equal(built.steps[1]?.completed, false, "stale step 2 (before marker) NOT completed");
 });
 
-// --- todo-provider deferral (Node 3.1) --------------------------------------------------
+// --- todo-provider deferral --------------------------------------------------
 
 /** Write a `[providers]` selection into `cwd`'s `.pi/perk.toml`. */
 function writeProvidersSelection(cwd: string, body: string): void {

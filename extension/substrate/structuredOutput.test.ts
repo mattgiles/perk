@@ -1,4 +1,4 @@
-// #129 — offline tests for the structured-output substrate. A faux pi-ai provider scripts
+// Offline tests for the structured-output substrate. A faux pi-ai provider scripts
 // deterministic assistant messages (tool calls / text) so `completeStructured` is exercised with no
 // network. `resolveModelAuth` is unit-tested with fake contexts.
 

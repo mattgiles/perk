@@ -1,4 +1,4 @@
-// P2.T2a — perk-owned plan mode: the `/plan` toggle round-trip + `--plan` cold start + the
+// perk-owned plan mode: the `/plan` toggle round-trip + `--plan` cold start + the
 // plan-authoring context injection/strip, driven through a REAL bound AgentSession (offline).
 // See planMode.ts.
 
@@ -17,7 +17,7 @@ test("planContextContent: carries the gather-then-plan contract; appends the con
   assert.match(base, /Discoveries/);
   assert.match(base, /never line numbers/);
   assert.match(base, /docs\/learned/);
-  // Node 2.5: the review-first ending — plan_review when decision-complete; /plan-save is the
+  // The review-first ending — plan_review when decision-complete; /plan-save is the
   // manual failsafe when the review reports skipped/unavailable.
   assert.match(base, /plan_review/);
   assert.match(base, /plan_draft/);
@@ -96,7 +96,7 @@ test("deferral: a foreign [providers] plan selection makes perk NOT register the
     sessionManager: SessionManager.inMemory(cwd),
   });
   try {
-    // Node 2.3 registration-time deferral: the `/plan` command is not registered at all.
+    // Registration-time deferral: the `/plan` command is not registered at all.
     assert.equal(
       h.registeredCommands().includes("plan"),
       false,

@@ -1,4 +1,4 @@
-// P1.T2b — live plan-ref linkage tests (turn-2b §9). These drive a REAL bound AgentSession via
+// Live plan-ref linkage tests. These drive a REAL bound AgentSession via
 // the T1 harness and prove the cache.plan-ref -> active_plan_ref reconciliation end-to-end,
 // OFFLINE (no LLM, no network, no gh). The pure dedup twin is planRefsEqual in
 // workflowState.test.ts; here we prove the wiring on session_start / reload / session_tree / fork.
@@ -84,7 +84,7 @@ test("session_tree: branch navigation preserves active_plan_ref via the LWW rebu
   }
 });
 
-// Regression (#43): the root `cache.plan-ref` *selector* must NOT leak into a fresh planning
+// Regression: the root `cache.plan-ref` *selector* must NOT leak into a fresh planning
 // session. The root `worktree: none` stages (plan/objective-plan/save) do not consume the ref
 // (registry `requires`/`reads`), so session_start must not reconcile it into active_plan_ref.
 for (const stage of ["plan", "objective-plan", "save"]) {

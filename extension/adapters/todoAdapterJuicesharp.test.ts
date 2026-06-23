@@ -1,4 +1,4 @@
-// Node 3.2 — the juicesharp todo adapter shim: injection under a `juicesharp-todo` selection + an
+// The juicesharp todo adapter shim: injection under a `juicesharp-todo` selection + an
 // active workflow, inert otherwise (default selection or inactive workflow), plus a stale-marker
 // strip under the default selection. Driven through a REAL bound AgentSession (offline) via the
 // shared harness. See todoAdapterJuicesharp.ts.

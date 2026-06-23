@@ -1,4 +1,4 @@
-// Node 2.2 — warm-door binding delivery. Pure render/suffix cases mirror tests/test_binding_delivery.py
+// Warm-door binding delivery. Pure render/suffix cases mirror tests/test_binding_delivery.py
 // (the cold twin), plus harness-driven Mechanism-A injection, the cold↔warm dedup, and the
 // stale-context strip, driven through a REAL bound AgentSession (offline). See bindingDelivery.ts.
 
@@ -61,7 +61,7 @@ test("nudge at a new trigger renders a pointer under the header", () => {
   assert.deepEqual(warnings, []);
 });
 
-test("a nudge to an uninstalled skill warns loud-but-non-fatal (Node 3.1, D6)", () => {
+test("a nudge to an uninstalled skill warns loud-but-non-fatal (D6)", () => {
   const cwd = scaffoldRepo();
   writeBindings(cwd, [{ trigger: "stage:save", skill: "ghost-skill", mode: "nudge" }]);
   const { text, warnings } = renderBindings(cwd, "stage:save");
@@ -98,7 +98,7 @@ test("a missing transclude target warns and falls back to the nudge pointer", ()
   assert.match(warnings[0] as string, /ghost-skill/);
 });
 
-test("a shipped default IS delivered (the single delivery path — Node 2.3)", () => {
+test("a shipped default IS delivered (the single delivery path)", () => {
   const cwd = scaffoldRepo(); // no user overlay
   const { text } = renderBindings(cwd, "stage:implement");
   assert.ok(text !== null);
@@ -137,7 +137,7 @@ test("a shape-invalid user binding is dropped (renders nothing, no warm issue su
 
 test("bindingSuffix: empty when no binding matches; prefixed (with the default) when it does", () => {
   const cwd = scaffoldRepo();
-  // A shipped command default IS now delivered (Node 2.3) — the suffix carries its pointer.
+  // A shipped command default IS now delivered — the suffix carries its pointer.
   const def = bindingSuffix(cwd, "command:objective-reconcile");
   assert.ok(def.startsWith("\n\n"));
   assert.match(def, /Follow the `perk-objective-reconcile` skill\./);
@@ -176,7 +176,7 @@ test("Mechanism A injects the launched stage's resolved bindings as hidden conte
   }
 });
 
-test("Mechanism A injects the stage:plan DEFAULT pointer with no user overlay (Node 2.3, D6)", async () => {
+test("Mechanism A injects the stage:plan DEFAULT pointer with no user overlay (D6)", async () => {
   const cwd = scaffoldRepo(); // no user overlay → only the shipped defaults
   const file = plantSession(cwd, [{ run_id: "01RID", mode: "read-only", stage: "plan" }]);
   const h = await loadPerkSession({

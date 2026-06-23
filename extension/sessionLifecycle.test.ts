@@ -1,5 +1,5 @@
-// P1.T1 — live session-lifecycle tests (turn-1 §7). These drive a REAL bound AgentSession through
-// the harness and prove the Phase-0 T3 perk:workflow-state wiring end-to-end, OFFLINE (no LLM, no
+// Live session-lifecycle tests. These drive a REAL bound AgentSession through
+// the harness and prove the perk:workflow-state wiring end-to-end, OFFLINE (no LLM, no
 // network). Each case has a pure-function twin in workflowState.test.ts; here we prove the wiring.
 
 import assert from "node:assert/strict";
@@ -18,7 +18,7 @@ test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () 
     assert.equal(s?.source, "env");
     assert.equal(s?.run_id, "01RID");
     assert.equal(h.workflowState().run_id, "01RID");
-    // node 3.1: the `v<version> loaded` toast is retired — identity is a standing footer segment
+    // The `v<version> loaded` toast is retired — identity is a standing footer segment
     assert.ok(!h.notifies.some((m) => m.includes("loaded")));
     assert.ok(h.footerFactory() !== null, "the perk footer factory was installed");
     const footer = h.renderFooter(80);
@@ -26,7 +26,7 @@ test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () 
     assert.ok((footer[0] as string).includes("perk v"), footer[0]);
     // D5 rescinded: perk never touches the working indicator
     assert.equal(h.workingIndicators.length, 0);
-    // handoff was consumed (Q3 establish-before-consume)
+    // handoff was consumed (establish-before-consume)
     const handoff = JSON.parse(
       readFileSync(join(workflowDir(cwd), "handoff", "01RID.json"), "utf8"),
     );
@@ -154,7 +154,7 @@ test("headless fail-safe: a missing handoff is reported, not thrown", async () =
     assert.equal(h.workflowState().run_id, undefined);
     assert.equal(h.notifies.length, 0);
     assert.equal(h.sentinel()?.source, "env"); // decision was a claim attempt that failed to verify
-    // node 3.1: headless installs no footer and never touches the working indicator
+    // Headless installs no footer and never touches the working indicator
     assert.equal(h.footerFactory(), null);
     assert.equal(h.workingIndicators.length, 0);
   } finally {

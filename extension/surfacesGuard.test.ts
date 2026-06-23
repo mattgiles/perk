@@ -1,4 +1,4 @@
-// Rich-UI call-site regression guard — Objective #251, node 4.1 (`docs/design/tui-charter.md` §7).
+// Rich-UI call-site regression guard (`docs/design/tui-charter.md` §7).
 // Production extension code may reach the rich UI only inside the surfaces module
 // (surfaces/surfaces.ts + surfaces/report.ts); everything else goes through the seams (`report()`,
 // `createPerkStatus`, `setStandingWidget`, `installPerkFooter`). `setWorkingIndicator` is never

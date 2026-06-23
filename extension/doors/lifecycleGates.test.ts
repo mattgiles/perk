@@ -1,6 +1,6 @@
-// P1.T4b — lifecycle-gate tests (turn-4 §10). The pure gateDecision matrix as units; the dirty-repo
+// Lifecycle-gate tests. The pure gateDecision matrix as units; the dirty-repo
 // gate + the guard-only `/implement` driven through a REAL bound offline session (T1 harness) over a
-// REAL git repo (gitInit). No LLM / network. Mirrors spike S-B (turn-4 §3.5).
+// REAL git repo (gitInit). No LLM / network.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -138,7 +138,7 @@ test("implementHandoffPrompt: carries the plan forward (read it; never summarize
   // A non-github provider falls back to opening the url.
   const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
   assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
-  // A linear ref renders the pi-mono-linear read recipe (Node 3.1).
+  // A linear ref renders the pi-mono-linear read recipe.
   const linear = implementHandoffPrompt({ ...REF, provider: "linear" });
   assert.match(linear, /linear_get_issue/);
   assert.match(linear, /linear_list_comments/);

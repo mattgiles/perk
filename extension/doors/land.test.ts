@@ -1,4 +1,4 @@
-// P1.T5b — live warm-door tests for `/land` (turn-5 §10). Drive a REAL bound AgentSession via the
+// Live warm-door tests for `/land`. Drive a REAL bound AgentSession via the
 // T1 harness; the `perk pr land` merge is faked via PERK_BIN, so no LLM / network / gh / Python.
 // The warm door's own effect (setting pending-learn for the in-session path) is verified on disk.
 
@@ -237,7 +237,7 @@ test("tool: land with a skipped objective adds no nudge", async () => {
 });
 
 test("tool: land surfaces a non-benign learn-consume skip", async () => {
-  // #102: a partial `failed: …` close is a real failure — surface it, do not stay silent.
+  // A partial `failed: …` close is a real failure — surface it, do not stay silent.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const partial = JSON.stringify({
     success: true,
@@ -263,7 +263,7 @@ test("tool: land surfaces a non-benign learn-consume skip", async () => {
 });
 
 test("tool: land stays quiet on a benign learn-consume skip", async () => {
-  // #102: `no_consumed_learn` is the ordinary non-factory case — no warning.
+  // `no_consumed_learn` is the ordinary non-factory case — no warning.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const benign = JSON.stringify({
     success: true,

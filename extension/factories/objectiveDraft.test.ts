@@ -1,4 +1,4 @@
-// Objective #352 Node 2.1 — `objective_draft` tests: the shared-decode smoke, the offline core
+// `objective_draft` tests: the shared-decode smoke, the offline core
 // (fakes over a live branch array, mirroring planDraft.test.ts), and the live harness path proving
 // the tool is callable UNDER the read-only gate (the carve-out) with the artifact + pointer
 // landing.
@@ -99,7 +99,7 @@ test("decode smoke: absent prose decodes to empty string (the core owns invalid_
   });
 });
 
-test("decode: base is decoded when a string, refused when mistyped (#633)", () => {
+test("decode: base is decoded when a string, refused when mistyped", () => {
   const decoded = decodeObjectiveSaveParams({ prose: "p", base: "develop" });
   assert.equal(decoded?.base, "develop");
   assert.equal(decodeObjectiveSaveParams({ prose: "p", base: 7 }), null);
@@ -201,7 +201,7 @@ test("core: title omitted from the JSON when not passed; absent roadmap serializ
   }
 });
 
-test("core: base persists through write/read; omitted when absent (#633)", () => {
+test("core: base persists through write/read; omitted when absent", () => {
   const cwd = tempCwd();
   try {
     const branch: unknown[] = [runIdEntry("RID")];
@@ -432,7 +432,7 @@ test("harness: mistyped params ⇒ bad_input", async () => {
   }
 });
 
-// --- the shared draft/save param vocabulary (moved in with its module — #352 Node 2.3) ----------
+// --- the shared draft/save param vocabulary (moved in with its module) ----------
 
 test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
   assert.deepEqual(decodeObjectiveSaveParams({ prose: "p", roadmap: [{ id: "1.1" }] }), {
@@ -449,7 +449,7 @@ test("decodeObjectiveSaveParams: tri-state strict-fail shapes", () => {
   assert.equal(decodeObjectiveSaveParams({ prose: "p", roadmap: "x" }), null);
 });
 
-test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape (#352 Node 2.1)", () => {
+test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape", () => {
   assert.equal(ROADMAP_PARAM_SCHEMA.type, "object");
   assert.equal(ROADMAP_PARAM_SCHEMA.additionalProperties, false);
   assert.deepEqual([...ROADMAP_PARAM_SCHEMA.required], ["id", "description"]);
@@ -465,7 +465,7 @@ test("ROADMAP_PARAM_SCHEMA: the shared roadmap-items schema keeps its node shape
   ]);
 });
 
-test("adopt_issue: a node carrying adopt_issue decodes + writes through verbatim (#709)", () => {
+test("adopt_issue: a node carrying adopt_issue decodes + writes through verbatim", () => {
   // The schema accepts adopt_issue (additionalProperties:false would otherwise reject it) and the
   // decoder keeps roadmap opaque, so the field rides unchanged to the Python cold door.
   assert.equal(

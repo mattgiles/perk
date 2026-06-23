@@ -1,8 +1,8 @@
-// P3.T2 — live warm-door tests for the `objective_save` tool + `/objective-save` command. Drive a
+// Live warm-door tests for the `objective_save` tool + `/objective-save` command. Drive a
 // REAL bound AgentSession via the harness and prove the `perk objective create` delegation +
 // session linkage (active_objective + budget marker) end-to-end, OFFLINE: a fake `perk` (PERK_BIN)
 // stands in for the GitHub write. The pure objectiveSaveGuidance twin is unit-tested below.
-// #352 Node 2.3: the `objectiveApprovalSave` seam (pure fakes, the planSave.test.ts recipe) and
+// The `objectiveApprovalSave` seam (pure fakes, the planSave.test.ts recipe) and
 // the artifact-first `/objective-save` command (seam-first; legacy drive as the no-draft fallback).
 
 import assert from "node:assert/strict";
@@ -53,7 +53,7 @@ test("tool: objective_save delegates, links active_objective + seeds budget mark
     assert.equal(result.terminate, true);
     // active_objective linked on the live session.
     assert.equal(h.workflowState().active_objective, "7");
-    // a fresh budget activation marker was seeded for #7.
+    // a fresh budget activation marker was seeded.
     const entries = h.session.sessionManager.getEntries() as unknown as BudgetEntry[];
     const marker = entries.find((e) => e.customType === OBJECTIVE_BUDGET_TYPE);
     assert.ok(marker, "budget marker seeded");
@@ -85,7 +85,7 @@ test("tool: objective_save passes the structured roadmap as --roadmap <json>", a
   }
 });
 
-test("tool: objective_save passes --base when supplied, omits it otherwise (#633)", async () => {
+test("tool: objective_save passes --base when supplied, omits it otherwise", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const argvFile = `${cwd}/argv.txt`;
   const bin = fakePerk(cwd, { stdout: CREATE_JSON, argvFile });
@@ -101,7 +101,7 @@ test("tool: objective_save passes --base when supplied, omits it otherwise (#633
 });
 
 test("tool: a success:false envelope at non-zero exit surfaces the structured error (no linkage)", async () => {
-  // The envelope-aware regression (Node 2.2): the Python plane prints a structured failure
+  // The envelope-aware regression: the Python plane prints a structured failure
   // envelope to stdout before exiting non-zero — the door surfaces it, not the stderr tail.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   const bin = fakePerk(cwd, {
@@ -192,11 +192,11 @@ test("objectiveSaveGuidance: with a title argument, names that title", () => {
 });
 
 test("objectiveSaveGuidance: does not hardcode the perk-objective-author skill pointer", () => {
-  // The skill pointer rides the binding suffix (Node 2.3), never the guidance body.
+  // The skill pointer rides the binding suffix, never the guidance body.
   assert.doesNotMatch(objectiveSaveGuidance(), /perk-objective-author/);
 });
 
-// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: objective_save with a mistyped roadmap → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -217,7 +217,7 @@ test("tool: objective_save with a mistyped roadmap → bad_input, no exec", asyn
   }
 });
 
-// --- #352 Node 2.3: the objectiveApprovalSave seam (pure fakes, offline) --------------------
+// --- the objectiveApprovalSave seam (pure fakes, offline) --------------------
 
 const DRAFT_ROADMAP = [{ id: "1.1", description: "first" }];
 const DRAFT_PAYLOAD = `${JSON.stringify({
@@ -334,7 +334,7 @@ test("objectiveApprovalSave: happy path — artifact saved, gate exited once, se
   );
 });
 
-test("objectiveApprovalSave: a draft base rides --base; absent draft base omits it (#633)", async () => {
+test("objectiveApprovalSave: a draft base rides --base; absent draft base omits it", async () => {
   const cwd = scaffoldRepo();
   const branch: unknown[] = [stateEntry({ run_id: "RID", mode: "read-only" })];
   const ctx = reportableCtx(cwd, branch);
@@ -408,7 +408,7 @@ test("objectiveApprovalSave: a successful save while already read-write never ex
   assert.equal(gating.exits, 0, "no gating.exit call");
 });
 
-// --- #352 Node 2.3: the artifact-first /objective-save command --------------------------------
+// --- the artifact-first /objective-save command --------------------------------
 
 /** Spy + record the live session's `sendUserMessage` (the delegate behind `pi.sendUserMessage`). */
 function spySends(h: Awaited<ReturnType<typeof loadPerkSession>>): string[] {

@@ -1,4 +1,4 @@
-// #175 / #658 — tests for the warm `/pr-review` door. The pure `prReviewGuidance` + `decodePostParams`
+// Tests for the warm `/pr-review` door. The pure `prReviewGuidance` + `decodePostParams`
 // are pinned directly; the `post_pr_review` delegation + the command/tool registration + headless
 // safety are exercised against a REAL bound session via the T1 harness, OFFLINE (a fake `perk`
 // stands in for the GitHub mutation, so no LLM / network / gh / Python is invoked).

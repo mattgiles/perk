@@ -1,6 +1,6 @@
-// hop-2 — tests for the warm `/learn-docs` factory door: the pure `learnDocsGuidance` seed plus
+// Tests for the warm `/learn-docs` factory door: the pure `learnDocsGuidance` seed plus
 // door-level delegation tests (a fake `perk` via PERK_BIN — offline, no gh/Python). The skill
-// pointer is no longer in the pure guidance — Node 2.3 delivers it via the skill-binding suffix
+// pointer is no longer in the pure guidance — the skill-binding suffix delivers it
 // (command:learn-docs).
 
 import assert from "node:assert/strict";
@@ -18,7 +18,7 @@ test("learnDocsGuidance carries the consumed learn numbers", () => {
   assert.match(text, /consumed_learn: \[45, 50\]/);
 });
 
-test("learnDocsGuidance no longer hardcodes the perk-learn-docs skill pointer (Node 2.3)", () => {
+test("learnDocsGuidance no longer hardcodes the perk-learn-docs skill pointer", () => {
   const text = learnDocsGuidance("inbox.md", ["45"]);
   assert.doesNotMatch(text, /Follow the perk-learn-docs skill/);
 });

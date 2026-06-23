@@ -1,4 +1,4 @@
-// #75 — loadDefaultBindings against the REAL bundled bindings.yaml. The shipped default set
+// loadDefaultBindings against the REAL bundled bindings.yaml. The shipped default set
 // is the 8 perk skills (all nudge); spot-check the trigger parse for one stage: and one
 // command: trigger. The Python plane (tests/test_bindings.py) is the authoritative validator;
 // this is the thin TS-side structural parse.
@@ -49,7 +49,7 @@ test("loadDefaultBindings: splits a command: trigger into kind/targetId", () => 
   });
 });
 
-// --- resolveBindings (Node 1.2) — mirror of tests/test_bindings.py resolver cases ---
+// --- resolveBindings — mirror of tests/test_bindings.py resolver cases ---
 
 function b(trigger: string, skill: string, mode: string): SkillBinding {
   const idx = trigger.indexOf(":");

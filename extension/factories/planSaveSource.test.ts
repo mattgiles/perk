@@ -3,7 +3,7 @@
 // tool-boundary decode, warm node-link recovery, approvalSave). Kept in a sibling file so
 // Node's --test cross-file parallelism runs it as its own child process.
 
-// P1.T3 — live warm-door tests (turn-3 §10). Drive a REAL bound AgentSession via the T1 harness
+// Live warm-door tests. Drive a REAL bound AgentSession via the T1 harness
 // and prove the cache.plan-ref delegation end-to-end, OFFLINE: a fake `perk` (PERK_BIN) stands in
 // for the GitHub write, so no LLM / network / gh / Python is invoked. The pure extractPlanMarkdown
 // twin is unit-tested separately below.
@@ -112,7 +112,7 @@ test("extractPlanMarkdown: the whole latest assistant text; null when absent", (
   assert.equal(extractPlanMarkdown([]), null);
 });
 
-// --- Node 2.2: resolvePlanSource (pure, offline fakes — the planDraft.test.ts recipe) ------
+// --- resolvePlanSource (pure, offline fakes — the planDraft.test.ts recipe) ------
 
 /** A `SessionDataCtx & ReportTarget` over a live branch array (headless, notify is a no-op). */
 function reportableCtx(cwd: string, branch: unknown[]): SessionDataCtx & ReportTarget {
@@ -209,7 +209,7 @@ test("resolvePlanSource: transcript when neither; null when everything misses", 
   });
 });
 
-// --- Node 2.2: file-first save surfaces (harness) ------------------------------------------
+// --- file-first save surfaces (harness) ------------------------------------------
 
 const DRAFT_MD = "# Draft plan\n\n## Summary\nThe validated working draft.\n";
 
@@ -344,7 +344,7 @@ test("command: a tampered artifact fails open to the transcript (digest mismatch
   }
 });
 
-// --- Node 3.2: tool-boundary decode (strict-fail on mistyped params) -----------------------
+// --- tool-boundary decode (strict-fail on mistyped params) -----------------------
 
 test("tool: plan_save with a mistyped consumed_learn → bad_input, no exec", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
@@ -372,7 +372,7 @@ test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
     node_id: undefined,
     consumed_learn: ["1", "2"],
   });
-  // plan absent decodes to undefined (Node 2.2: resolvePlanSource owns the fallback chain).
+  // plan absent decodes to undefined (resolvePlanSource owns the fallback chain).
   assert.equal(decodePlanSaveParams({})?.plan, undefined);
   assert.equal(decodePlanSaveParams(undefined), null);
   assert.equal(decodePlanSaveParams({ plan: 5 }), null);
@@ -388,7 +388,7 @@ test("decodePlanSaveParams: tri-state strict-fail shapes", () => {
   assert.equal(decodePlanSaveParams({ plan: "p", consumed_learn: [true] }), null);
 });
 
-// --- Node 2.3 (#339): warm node-link recovery (the objective_node_claim carrier) -----------
+// --- warm node-link recovery (the objective_node_claim carrier) -----------
 
 const CLAIM = { objective: "115", node: "1.2" };
 
@@ -496,7 +496,7 @@ test("tool: a failed save keeps the claim", async () => {
   }
 });
 
-// --- Node 2.3 (#339): the approvalSave orchestration seam (pure fakes, offline) -------------
+// --- the approvalSave orchestration seam (pure fakes, offline) -------------
 
 const FAIL_ENVELOPE = JSON.stringify({
   success: false,
