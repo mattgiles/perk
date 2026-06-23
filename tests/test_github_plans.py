@@ -1,8 +1,8 @@
 """Tests for the GitHub plan/issue substrate (``perk/backends/github/plans.py``).
 
-The plan/issue-tier ops relocated out of the gateway in Objective #746, Node 2.2 (plan/learn
+The plan/issue-tier ops relocated out of the gateway (plan/learn
 issues, labels, marked comments, in-place adoption, plan reads). Split out of ``test_github.py``
-so each test file matches its module home (mirrors the 2.1 backend/resolve split).
+so each test file matches its module home (mirrors the backend/resolve split).
 """
 
 import json
@@ -101,7 +101,7 @@ def test_find_plan_issue_match_and_no_match(monkeypatch):
     assert plans.find_plan_issue(run_id="01RID", repo_root=ROOT) is None
 
 
-# --- learn issue (P2.T8b) -------------------------------------------------------------------
+# --- learn issue -------------------------------------------------------------------
 
 
 def _learn_header(run_id: str, plan_number: int = 7) -> str:
@@ -262,7 +262,7 @@ def test_update_plan_header_rejects_unknown_field(monkeypatch):
         plans.update_plan_header(issue=123, fields={"bogus": "x"}, repo_root=ROOT)
 
 
-# ---------------------------------------------------- plan upsert (re-save, P2.T13)
+# ---------------------------------------------------- plan upsert (re-save)
 
 
 def _comment_list(*bodies: str) -> str:
@@ -332,7 +332,7 @@ def test_update_plan_issue_dry_run_does_not_shell(monkeypatch):
     assert rec.calls == []
 
 
-# ----------------------------------------------------- in-place issue adoption (#706, §8.29)
+# ----------------------------------------------------- in-place issue adoption (§8.29)
 
 
 def test_read_issue_maps_fields(monkeypatch):
@@ -434,7 +434,7 @@ def test_adopt_issue_as_plan_rejects_unknown_header_field(monkeypatch):
         )
 
 
-# ---------------------------------------------- marker-keyed comment upsert (Node 2.3)
+# ---------------------------------------------- marker-keyed comment upsert
 
 MARKER = "<!-- perk:run-report:RID -->"
 
@@ -581,4 +581,4 @@ def test_get_plan_body_infra_failure_raises(monkeypatch):
         plans.get_plan_body(number=42, repo_root=ROOT)
 
 
-# --- PR body craft (P2.T8a) -----------------------------------------------------------------
+# --- PR body craft -----------------------------------------------------------------

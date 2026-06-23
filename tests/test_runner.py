@@ -1,4 +1,4 @@
-"""Tests for the runner-agnostic dispatch contract (Node 2.1; contracts.md §8.13)."""
+"""Tests for the runner-agnostic dispatch contract (contracts.md §8.13)."""
 
 import json
 import subprocess
@@ -85,7 +85,7 @@ def test_dispatch_builds_argv_and_returns_discovered_handle(monkeypatch):
 
 
 def test_dispatch_wraps_github_error_as_runner_error(monkeypatch):
-    # A trigger/discovery failure (e.g. workflow not found until Node 2.2) surfaces as RunnerError.
+    # A trigger/discovery failure (e.g. workflow not found) surfaces as RunnerError.
     def boom(**_k):
         raise github.GitHubError("workflow perk-run.yml not found")
 

@@ -1,4 +1,4 @@
-"""`perk run-worker` — the runner-side positioning + drive (Objective #137 Node 2.2)."""
+"""`perk run-worker` — the runner-side positioning + drive."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -125,7 +125,7 @@ def test_reporting_brackets_the_spawn_and_is_exit_code_neutral(tmp_path, fake_gi
 
 
 def test_linear_agent_hooks_bracket_the_spawn(tmp_path, fake_github, monkeypatch):
-    """Node 5.1: run-started is emitted beside report_started (with the Actions run URL when the
+    """Run-started is emitted beside report_started (with the Actions run URL when the
     env carries one) and run-failed beside report_terminal on a nonzero worker exit."""
     _make_entry(tmp_path)
     monkeypatch.setattr(run_worker.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=5))

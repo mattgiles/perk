@@ -177,7 +177,7 @@ class TestGraphQLErrors:
             client.request("q")
 
     def test_graphql_error_is_an_issue_backend_error(self) -> None:
-        # The backend-neutral guarantee Node 2.2 relies on.
+        # The backend-neutral guarantee callers rely on.
         client, _ = _client_with_response(status=400, body={"errors": [{"message": "x"}]})
         with pytest.raises(IssueBackendError) as excinfo:
             client.request("q")

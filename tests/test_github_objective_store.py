@@ -288,13 +288,13 @@ class TestGitHubDelegation:
         assert result is False
 
     def test_post_status_update_is_noop_false(self, tmp_path: Path) -> None:
-        # GitHub has no Project Updates surface (Node 4.3) — always False, never raises, no `gh`.
+        # GitHub has no Project Updates surface — always False, never raises, no `gh`.
         store = GitHubObjectiveStore(tmp_path)
         assert store.post_status_update(objective_id="252", body="x") is False
         assert store.post_status_update(objective_id="252", body="x", dry_run=True) is False
 
     def test_read_node_engagement_is_empty(self, tmp_path: Path) -> None:
-        # GitHub single-issue objectives have no per-node issues — honest empty no-op (Node 2.1).
+        # GitHub single-issue objectives have no per-node issues — honest empty no-op.
         result = GitHubObjectiveStore(tmp_path).read_node_engagement(
             objective_id="252", node_id="1.1"
         )
@@ -303,7 +303,7 @@ class TestGitHubDelegation:
     def test_read_comments_honest_over_objective_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Honest over the objective issue itself (Node 2.3): reuse
+        # Honest over the objective issue itself: reuse
         # `gh_engagement.read_issue_comments` + the shared `backend._engagement_comment` mapper.
         row = gh_engagement.IssueCommentRow(
             id="c-1",

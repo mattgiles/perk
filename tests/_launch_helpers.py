@@ -24,7 +24,7 @@ _PLAN_REF = {
 
 @pytest.fixture(autouse=True)
 def _no_network_clone_warm(monkeypatch):
-    """Stub the pre-exec clone warming (#655) so launch_stage tests never `git clone` the network.
+    """Stub the pre-exec clone warming so launch_stage tests never `git clone` the network.
 
     `launch_stage` warms pi's git-package clone before exec; in a throwaway `git_repo` (not the
     self-repo, clone absent) that would shell a real `git clone`. The dedicated call-site test

@@ -63,7 +63,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
 
 
 def test_launch_warms_extension_clone_before_exec(git_repo, monkeypatch):
-    # #655: ensure_extension_clone_present is invoked before os.execvpe on the local consumer path.
+    # ensure_extension_clone_present is invoked before os.execvpe on the local consumer path.
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     events: list[object] = []
@@ -470,7 +470,7 @@ def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
 
 
 def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch):
-    """P2.T2c: the cold door caches the plan body into the worktree so in-session checkpoints can
+    """The cold door caches the plan body into the worktree so in-session checkpoints can
     seed from its `## Steps` list."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
@@ -603,7 +603,7 @@ def test_skills_mirror_never_clobbers_real_dir(tmp_path):
 
 
 def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):
-    """Node 5.1: the cold-local implement launch calls the (internally gated) Linear agent
+    """The cold-local implement launch calls the (internally gated) Linear agent
     run-started emitter exactly once, with the worktree + plan-ref + minted run_id."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
@@ -689,7 +689,7 @@ def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypat
 
 
 def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
-    """#78: launch_stage merges handoff_extra into the handoff blob (objective-plan ferries the
+    """launch_stage merges handoff_extra into the handoff blob (objective-plan ferries the
     objective_id/node_id link this way so a later plan-save recovers it)."""
     config = Config(worktree_root=git_repo / ".worktrees")
     captured: dict[str, dict[str, object]] = {}

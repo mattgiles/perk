@@ -34,7 +34,7 @@ def stub_env(monkeypatch):
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
     # The extension-clone materialize primitives shell `git clone`/`fetch` over the network
     # (init/doctor now materialize the clone in place); stub them so verified inits never reach
-    # the network. Dedicated #655 tests override these to assert the materialize branching.
+    # the network. Dedicated tests override these to assert the materialize branching.
     # `_clone_extension_fresh` creates the clone dir (sans git/network) so a second verified init
     # sees the clone present → status `unverifiable` → a no-op (idempotency preserved).
     monkeypatch.setattr(

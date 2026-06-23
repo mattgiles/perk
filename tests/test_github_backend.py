@@ -1,4 +1,4 @@
-"""Tests for the GitHub issue backend adapter (Objective #746, Node 2.1).
+"""Tests for the GitHub issue backend adapter.
 
 Covers: static protocol conformance (ty-checked), per-method delegation onto the GitHub substrate's
 issue-tier functions in ``perk.backends.github.plans`` (constructor-bound ``repo_root``,
@@ -291,7 +291,7 @@ class TestDelegation:
 
 
 class TestEngagementReads:
-    """The honest GitHub reads (Node 1.3): github-native rows → neutral engagement contract."""
+    """The honest GitHub reads: github-native rows → neutral engagement contract."""
 
     def test_read_comments_maps_authors(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

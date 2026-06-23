@@ -7,7 +7,7 @@ from _github_fakes import ROOT, _GhDispatch, _has, _Proc
 from perk import github
 from perk.github import _exec, reviews
 
-# --- review feedback (P2.T7) ----------------------------------------------------------------
+# --- review feedback ----------------------------------------------------------------
 
 _THREADS_PAYLOAD = json.dumps(
     {
@@ -174,7 +174,7 @@ def test_resolve_review_threads_dry_run_does_not_shell(monkeypatch):
     assert result.success is True and result.results[0].comment_added is True
 
 
-# ---------------------------------------------------- GraphQL parse-layer narrowing (Node 4.1)
+# ---------------------------------------------------- GraphQL parse-layer narrowing
 
 
 def test_opt_str_narrows():

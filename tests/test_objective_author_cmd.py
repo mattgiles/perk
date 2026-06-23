@@ -1,4 +1,4 @@
-"""`perk objective author --from <source>`: the in-place objective-adoption cold door (#709, §8.30).
+"""`perk objective author --from <source>`: the in-place objective-adoption cold door (§8.30).
 
 `resolve.resolve_objective_store`, `resolve.resolve_issue_backend`, and
 `launch.launch_stage` are stubbed (no Linear/GitHub, no `exec pi`), mirroring test_from_cmd.py.

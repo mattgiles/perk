@@ -1,4 +1,4 @@
-"""Tests for the ``ObjectiveStore`` protocol module (Objective #548, Node 2.1).
+"""Tests for the ``ObjectiveStore`` protocol module.
 
 The real conformance check is **static**: ``_FakeObjectiveStore`` is assigned to an
 ``objective_store.ObjectiveStore``-annotated binding, so ty fails the suite if the fake and the
@@ -183,11 +183,11 @@ class _FakeObjectiveStore:
         return True
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
-        # The minimal fake has no status-update surface (Node 4.3).
+        # The minimal fake has no status-update surface.
         return False
 
     def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
-        # The minimal fake has no divergence surface (Node 4.4).
+        # The minimal fake has no divergence surface.
         return objective_store.DriftReport()
 
     def repair_objective_drift(
@@ -197,7 +197,7 @@ class _FakeObjectiveStore:
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # --- human-engagement reads ---
 
     def read_comments(self, *, objective_id: str) -> tuple[engagement.EngagementComment, ...]:
         return ()
@@ -282,7 +282,7 @@ class TestFakeStoreConformance:
         assert [n.id for n in state.nodes] == ["1.1"]
 
     def test_adoption_no_op_signals(self) -> None:
-        # A store with no project-source surface returns None for both adoption methods (#709).
+        # A store with no project-source surface returns None for both adoption methods.
         store = _make_store()
         assert store.read_objective_source(source_id="anything") is None
         assert (
@@ -350,7 +350,7 @@ class TestValueTypes:
             update.updated = False  # ty: ignore[invalid-assignment]
 
     def test_objective_body_update_string_comment_id(self) -> None:
-        # Moved from tests/test_issue_backend.py with the objective tier's extraction (Node 2.2):
+        # Moved from tests/test_issue_backend.py with the objective tier's extraction:
         # the comment id is a string at the boundary (backend-owned opaque value).
         update = objective_store.ObjectiveBodyUpdate(
             objective_id="9", comment_id="123", updated=True, dry_run=False

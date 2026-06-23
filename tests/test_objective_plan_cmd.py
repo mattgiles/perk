@@ -1,4 +1,4 @@
-"""P2.T10 — `perk objective plan [NUMBER] [--node ID]`: the objective plan-factory cold door.
+"""`perk objective plan [NUMBER] [--node ID]`: the objective plan-factory cold door.
 
 `objectives.get_objective` + `objectives.update_objective_node` + `launch.launch_stage` are
 stubbed (no
@@ -81,13 +81,13 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
     assert "1.2" in (launched["prompt"] or "") and "objective_id" in (launched["prompt"] or "")
-    # #78: the objective link is also ferried through the handoff so plan-save recovers it even
+    # The objective link is also ferried through the handoff so plan-save recovers it even
     # when the model saves via the /plan-save command (which forwards only {plan, title}).
     assert launched["handoff_extra"] == {"objective_id": "7", "node_id": "1.2"}
 
 
 def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
-    """Node 4.1: the github call site forwards `store.backend_id`/`state.url` into `_seed_prompt`
+    """The github call site forwards `store.backend_id`/`state.url` into `_seed_prompt`
     but the github arm is empty — the seed has no linear-read fragment (no churn)."""
     _authed(monkeypatch)
     monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
@@ -110,7 +110,7 @@ def test_github_call_site_seeds_no_linear_fragments(monkeypatch):
 
 
 def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
-    """Node 4.1: the call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
+    """The call site forwards `store.backend_id` + `state.url` into `_seed_prompt`, so a
     project-backed (linear) objective seeds the backend-aware Project-URL/tools clause."""
     from perk.backends import resolve
 
@@ -149,7 +149,7 @@ def test_linear_call_site_forwards_backend_id_and_url(monkeypatch):
     assert "linear_get_issue" in prompt and "linear_list_comments" in prompt
 
 
-# --- Node 2.1: cold seed injects node-issue engagement (fail-soft) ----------------------------
+# --- cold seed injects node-issue engagement (fail-soft) ----------------------------
 
 
 def _engagement_store(monkeypatch, *, engagement_result, raises=None):
@@ -578,7 +578,7 @@ def test_not_a_repo_exit_2():
         assert json.loads(result.output)["error_type"] == "not_a_repo"
 
 
-# --- _seed_prompt model injection (#196) ----------------------------------------------------
+# --- _seed_prompt model injection ----------------------------------------------------
 
 
 def test_seed_prompt_injects_objective_explorer_model_when_configured():
@@ -598,7 +598,7 @@ def test_seed_prompt_omits_model_when_unset():
 
 
 def test_seed_prompt_instructs_the_file_first_loop():
-    """Node 3.1: the cold seed prompt mirrors the warm file-first loop (draft → review →
+    """The cold seed prompt mirrors the warm file-first loop (draft → review →
     approval-driven save), with the cold link carrier (handoff recovery, no planning mark)."""
     from perk.cli.commands.objective.plan_cmd import _seed_prompt
 

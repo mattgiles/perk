@@ -1,4 +1,4 @@
-"""Objective #252 Node 4.1 — the end-to-end offline Linear lifecycle suite.
+"""The end-to-end offline Linear lifecycle suite.
 
 A stateful in-memory Linear workspace (``FakeLinearWorkspace``) subclasses the GraphQL client
 (``linear.client.LinearClient``) and is injected via a late-bound
@@ -539,7 +539,7 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         )
         objective_payload = cast("dict[str, object]", payload["objective"])
         obj_id = str(objective_payload["id"])
-        # Node 3.4: the objective is a Linear PROJECT — its id is the opaque Project UUID, never an
+        # The objective is a Linear PROJECT — its id is the opaque Project UUID, never an
         # ENG-* issue identifier; the roadmap is materialized as node-issues (1.1 → ENG-1).
         assert obj_id in ws.projects
         project = ws.project_by_id(obj_id)
@@ -579,7 +579,7 @@ def test_full_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
             ],
         )
         issue_payload = cast("dict[str, object]", payload["issue"])
-        # Node 3.4 unification: the plan is written INTO the node-issue — no second perk:plan issue.
+        # Node/plan unification writes the plan INTO the node-issue — no second perk:plan issue.
         assert issue_payload["id"] == "ENG-1"
         ref = cast("dict[str, object]", payload["plan_ref"])
         assert ref["provider"] == "linear" and ref["pr_id"] == "ENG-1"
@@ -793,7 +793,7 @@ def test_objective_run_resolves_in_flight_over_an_eng_backlink(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The Step-3 supervisor fix: a non-numeric `pr` backlink (the node-issue `#ENG-1`) IS the
-    plan id — now self-referential under the Node 3.4 node↔plan unification."""
+    plan id — now self-referential under the node↔plan unification."""
     ws = FakeLinearWorkspace()
     _patch_linear(monkeypatch, ws)
     monkeypatch.setattr(cache, "list_dispatch_records", lambda root: [])
@@ -886,7 +886,7 @@ def test_foreign_linkback_comment_does_not_perturb_marker_scans(
         assert len(foreign) == 1 and "done" not in str(foreign[0]["body"])
 
 
-# ----------------------------------------------------------------------- manifest + drift (#612)
+# ----------------------------------------------------------------------- manifest + drift
 
 
 def _manifest_of(ws: FakeLinearWorkspace, obj_id: str) -> objective.Manifest | None:

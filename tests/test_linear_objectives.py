@@ -234,7 +234,7 @@ class TestCreateObjectiveIssue:
         assert backfilled["objective_comment_id"] == "cmt-uuid-1"
 
     def test_create_persists_base_into_objective_header(self) -> None:
-        # #633: the issue-backed store threads `base` into the composed inline-code
+        # The issue-backed store threads `base` into the composed inline-code
         # objective-header block; absent `base` leaves it null.
         store, fake = _make_store(
             {
@@ -545,7 +545,7 @@ class TestUpdateObjectiveBody:
 
 
 class TestIssueBackedStoreNode34Methods:
-    """The dormant issue-backed `LinearObjectiveStore`'s Node 3.4 methods: it does NOT unify node +
+    """The dormant issue-backed `LinearObjectiveStore`'s methods: it does NOT unify node +
     plan (`save_node_plan` → None) and `close_objective` moves the objective issue to Done."""
 
     def test_save_node_plan_returns_none(self) -> None:
@@ -576,7 +576,7 @@ class TestIssueBackedStoreNode34Methods:
         assert fake.requests == []
 
     def test_post_status_update_is_noop_false(self) -> None:
-        # The issue-backed store has no project status-update surface (Node 4.3) — always False,
+        # The issue-backed store has no project status-update surface — always False,
         # never raises, no request.
         store, fake = _make_store()
         assert store.post_status_update(objective_id="obj-1", body="x") is False
@@ -641,7 +641,7 @@ def _not_found_message_no_code() -> LinearGraphQLError:
 
 class TestEntityNotFoundDiscrimination:
     """The not-found predicate pairs ``INPUT_ERROR in exc.codes`` with the ``"Entity not
-    found"`` message prefix (Node 1.2). These prove the
+    found"`` message prefix. These prove the
     tightening actually narrowed: a code-present/message-absent error and a
     message-present/code-wrong error both re-raise at all three call sites, while the observed
     shape is still swallowed."""
@@ -725,7 +725,7 @@ class TestImportDirection:
     def test_linear_backend_never_imports_the_resolver_module(self) -> None:
         # The resolver module (perk/backends/resolve.py) imports us at wiring time; importing it
         # back would be a cycle. Mirrors the TestImportDirection substring style. linear_backend is
-        # a package (Node 2.1 split) — `__file__` is `__init__.py` only, so scan every submodule
+        # a package (split) — `__file__` is `__init__.py` only, so scan every submodule
         # source under the package dir (mirrors tests/test_resolve.py's rglob scan).
         package_dir = Path(linear.__file__).parent
         source = "\n".join(

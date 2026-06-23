@@ -1,4 +1,4 @@
-"""Tests for the ``IssueBackend`` protocol module (Objective #252, Node 1.1).
+"""Tests for the ``IssueBackend`` protocol module.
 
 The real conformance check is **static**: ``_FakeBackend`` is assigned to an
 ``issue_backend.IssueBackend``-annotated binding, so ty fails the suite if the fake and the
@@ -26,7 +26,7 @@ class _FakeIssue:
 
 
 class _FakeBackend:
-    """A minimal in-memory ``IssueBackend`` (the seed of the Node 4.1 Fake layer)."""
+    """A minimal in-memory ``IssueBackend`` (the seed of the Fake layer)."""
 
     backend_id = "fake"
 
@@ -126,7 +126,7 @@ class _FakeBackend:
             return None
         return issue.comments.get("plan-body")
 
-    # --- in-place issue adoption (#706, §8.29) ---
+    # --- in-place issue adoption (§8.29) ---
 
     def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
         issue = self._issues.get(issue_id)
@@ -231,7 +231,7 @@ class _FakeBackend:
             return issue_backend.CommentResult(posted=True)
         return self.add_issue_comment(issue_id=issue_id, body=body)
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # --- human-engagement reads ---
 
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:
         return ()
@@ -355,7 +355,7 @@ def _github_package_source() -> str:
 class TestImportDirection:
     def test_github_module_never_imports_issue_backend(self) -> None:
         # The one-way import decision: issue_backend imports github (PullRequest), never the
-        # reverse — Node 1.2 must not invert the dependency from inside the github package.
+        # reverse — must not invert the dependency from inside the github package.
         source = _github_package_source()
         assert "issue_backend" not in source
 

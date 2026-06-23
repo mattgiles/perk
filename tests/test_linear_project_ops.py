@@ -236,7 +236,7 @@ class TestCheckProjectReadiness:
         assert result.states_error is None
 
 
-# ---------------------------------------------------------------------- project ops (Node 3.1)
+# ---------------------------------------------------------------------- project ops
 
 
 def _make_project_ops(
@@ -268,7 +268,7 @@ def _relation_validation_error() -> LinearGraphQLError:
 
 
 class TestLinearProjectOps:
-    """The dormant Linear Projects substrate (Node 3.1): the ten ops + the `_create_issue`
+    """The dormant Linear Projects substrate: the ten ops + the `_create_issue`
     create-in-project extension, all offline through the `_FakeLinear` `GraphQLClient`."""
 
     def test_create_project_resolves_team_and_returns_id_url(self) -> None:
@@ -362,7 +362,7 @@ class TestLinearProjectOps:
             }
         }
         ops, _ = _make_project_ops({"issues(first": [page1, page2]})
-        # `url` is selected + returned (Node 3.4: save_node_plan returns the node-issue ref).
+        # `url` is selected + returned (save_node_plan returns the node-issue ref).
         assert ops.project_issues("p-1") == [
             {"id": "i-1", "identifier": "ENG-1", "url": "u/1", "description": "body-1"},
             {"id": "i-2", "identifier": "ENG-2", "url": "u/2", "description": ""},
@@ -398,7 +398,7 @@ class TestLinearProjectOps:
         payload = _input_payload(variables)
         assert payload == {"projectId": "p-1", "name": "Phase 1"}
 
-    # --- ensure_phase_milestone: name-keyed lookup-or-create (Node 4.3) ---
+    # --- ensure_phase_milestone: name-keyed lookup-or-create ---
 
     def test_ensure_phase_milestone_known_hit_reuses_id_no_network(self) -> None:
         ops, fake = _make_project_ops()
@@ -443,7 +443,7 @@ class TestLinearProjectOps:
         [(_, variables)] = _queries(fake, "projectMilestoneCreate(")
         assert _input_payload(variables) == {"projectId": "p-1", "name": "Phase 2"}
 
-    # --- create_project_update: projectUpdateCreate (Node 4.3) ---
+    # --- create_project_update: projectUpdateCreate ---
 
     def test_create_project_update_returns_id(self) -> None:
         ops, fake = _make_project_ops(

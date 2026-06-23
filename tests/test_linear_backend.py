@@ -1,4 +1,4 @@
-"""Tests for ``LinearIssueBackend`` (Objective #252, Node 2.2) — offline, scripted fake client.
+"""Tests for ``LinearIssueBackend`` — offline, scripted fake client.
 
 The static conformance check is one annotated binding (``_make_backend``): ty fails the suite if
 ``LinearIssueBackend`` and the ``IssueBackend`` protocol drift. The runtime tests pin the
@@ -752,7 +752,7 @@ class TestGetPlanBody:
 
 
 class TestReadIssueAndAdopt:
-    """In-place issue adoption (#706, §8.29) on the Linear backend."""
+    """In-place issue adoption (§8.29) on the Linear backend."""
 
     def test_read_issue_maps_neutral_shape(self) -> None:
         backend, _ = _make_backend(
@@ -1190,7 +1190,7 @@ class TestReadAgentSession:
 
 
 class TestOptionalAwareHelpers:
-    """The tolerant (never-raise) `_opt_*` siblings of the `_require_*` family (Node 3.1)."""
+    """The tolerant (never-raise) `_opt_*` siblings of the `_require_*` family."""
 
     def test_opt_dict_returns_value_on_dict_else_none(self) -> None:
         payload: dict[str, object] = {"a": 1}
@@ -1214,7 +1214,7 @@ class TestOptionalAwareHelpers:
 
 
 class TestRequireIssueNode:
-    """The pilot `LinearIssueNode` TypedDict's narrowing helper (Node 3.1, D2/D3): runs the raising
+    """The pilot `LinearIssueNode` TypedDict's narrowing helper (D2/D3): runs the raising
     `_require_*` guards once, then call sites read typed fields directly."""
 
     def test_builds_typed_record_from_well_formed_payload(self) -> None:

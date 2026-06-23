@@ -1,6 +1,6 @@
 """Tests for the pure GitHub forge gateway (``perk/github/``): auth + workflows + the
 PR-tier ``prs`` ops. The plan/issue substrate tests live in ``tests/test_github_plans.py``;
-the objective substrate in ``tests/test_github_objectives.py`` (Objective #746, Node 2.2).
+the objective substrate in ``tests/test_github_objectives.py``.
 """
 
 import json
@@ -95,7 +95,7 @@ def test_require_github_returns_status_when_authed(monkeypatch):
     assert require_github(ctx).user == "octocat"
 
 
-# --------------------------------------------------------- runner-prerequisite reads (Node 2.4)
+# --------------------------------------------------------- runner-prerequisite reads
 
 
 def test_secret_exists_present(monkeypatch):
@@ -112,7 +112,7 @@ def test_secret_exists_absent_404(monkeypatch):
 
 def test_secret_exists_not_found_without_404(monkeypatch):
     """A "Not Found" stderr with no literal 404 is a lookup miss (the sanctioned
-    ``_is_not_found`` lowercase fold, Node 4.2)."""
+    ``_is_not_found`` lowercase fold)."""
     monkeypatch.setattr(subprocess, "run", lambda args, **_: _Proc(1, "", "gh: Not Found"))
     assert github.secret_exists(name="PERK_GH_PAT", repo_root=ROOT) is False
 
@@ -209,7 +209,7 @@ def test_find_pr_for_branch_prefers_open(monkeypatch):
 
 
 def test_find_pr_for_branch_carries_base_ref(monkeypatch):
-    # #691: the PR's actual base.ref is surfaced on the dataclass (the land-time autoclose
+    # The PR's actual base.ref is surfaced on the dataclass (the land-time autoclose
     # determinant); a payload without `base` defaults to "".
     pulls = [
         {
@@ -411,7 +411,7 @@ def test_validate_pr_body_html_details_embed_is_fine():
     assert github.validate_pr_body(body, pr_number=42) == ()
 
 
-# --- workflow dispatch (Node 2.1 — contracts.md §8.13) --------------------------------
+# --- workflow dispatch (contracts.md §8.13) --------------------------------
 
 
 def test_trigger_workflow_matches_on_a_later_attempt(monkeypatch):

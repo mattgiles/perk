@@ -89,7 +89,7 @@ def test_resolve_worktree_none_is_repo_root(tmp_path):
     assert resolved.plan_ref is None
 
 
-# --- #633: plan_base drives the start-point ---------------------------------------------
+# --- plan_base drives the start-point ---------------------------------------------
 
 
 def test_resolve_base_uses_plan_base_as_trunk(monkeypatch, tmp_path):
@@ -180,7 +180,7 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     assert data["stage"] == "implement"
     assert data["worktree"].endswith("/plan-42")
     assert data["plan_ref"] == _PLAN_REF
-    # Bug 1 (P1.T4c): the implement launch is primed — argv carries the initial prompt.
+    # The implement launch is primed — argv carries the initial prompt.
     assert data["argv"][0] == "pi"
     assert len(data["argv"]) == 3
     assert "gh issue view 42 --comments" in data["argv"][-1]
@@ -224,7 +224,7 @@ def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, cap
 
 
 def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
-    # Node 2.1: a user override of the stage:implement trigger is delivered ADDITIVELY — it
+    # A user override of the stage:implement trigger is delivered ADDITIVELY — it
     # appears appended to the hardcoded implement prompt (which is unchanged).
     cache.write_plan_ref(tmp_path, _PLAN_REF)
     launch_stage(
@@ -243,7 +243,7 @@ def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):
 
 
 def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
-    # Node 2.3 (D2): cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
+    # (D2): cold delivery AUGMENTS an existing prompt only — it never synthesizes one. The
     # `save` stage has no _initial_prompt, so even a user binding at stage:save does NOT become the
     # launch prompt: argv stays a no-prompt argv (length 1). The warm Mechanism A delivers it there.
     launch_stage(
@@ -261,7 +261,7 @@ def test_idle_launch_does_not_synthesize_binding_prompt(tmp_path, capsys):
 
 
 def test_shipped_default_delivered_once_to_initial_prompt(tmp_path, capsys):
-    # Node 2.3: with no user bindings, the shipped default stage:implement nudge IS now delivered
+    # With no user bindings, the shipped default stage:implement nudge IS now delivered
     # (perk no longer hardcodes it) — appended once to the implement initial prompt.
     cache.write_plan_ref(tmp_path, _PLAN_REF)
     launch_stage(
@@ -279,7 +279,7 @@ def test_shipped_default_delivered_once_to_initial_prompt(tmp_path, capsys):
 
 
 def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
-    # P2.T10: prompt_override wins over _initial_prompt (objective-plan has no plan-ref, so
+    # prompt_override wins over _initial_prompt (objective-plan has no plan-ref, so
     # _initial_prompt would be None). The seeded prompt lands as the launch argv.
     launch_stage(
         repo_root=tmp_path,
@@ -294,18 +294,18 @@ def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["stage"] == "objective-plan"
     assert data["argv"][0] == "pi"
-    # The seed wins over _initial_prompt; Node 2.3 appends the stage:objective-plan default binding
+    # The seed wins over _initial_prompt; the stage:objective-plan default binding is appended
     # (perk no longer hardcodes the pointer in the seed) additively after it.
     assert data["argv"][-1].startswith("SEED PROMPT for node 2.3")
     assert "Follow the `perk-objective-plan` skill." in data["argv"][-1]
 
 
 def test_initial_prompt_primes_implement_and_address():
-    """P1.T4c Bug 1 + P2.T7: implement and address are primed; other stages launch unprimed."""
+    """Implement and address are primed; other stages launch unprimed."""
     impl = _initial_prompt(_stage("implement"), _PLAN_REF)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
     # The implement prompt teaches the marker protocol; the perk-implement skill pointer is NOT
-    # hardcoded here anymore (Node 2.3 — it rides the skill-binding mechanism).
+    # hardcoded here anymore (it rides the skill-binding mechanism).
     assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" not in impl
     addr = _initial_prompt(_stage("address"), _PLAN_REF)
     assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
@@ -317,7 +317,7 @@ def test_initial_prompt_primes_implement_and_address():
 
 
 def test_address_prompt_preview_is_classification_only():
-    """Node 3.3: the cold `--preview` flag shapes the address seed to classify-only (no action),
+    """The cold `--preview` flag shapes the address seed to classify-only (no action),
     mirroring the warm `addressGuidance(preview=true)` shape; non-preview body is unchanged."""
     preview = _address_prompt(_PLAN_REF, preview=True)
     assert "PREVIEWING" in preview
@@ -332,7 +332,7 @@ def test_address_prompt_preview_is_classification_only():
 
 
 def test_initial_prompt_injects_classifier_model_from_config():
-    """#196: a configured `[subagents] review-classifier` model is injected into the address
+    """A configured `[subagents] review-classifier` model is injected into the address
     prompt's spawn clause; an absent key (or no config) leaves it unset."""
     config = Config(worktree_root=Path("/tmp/x"), subagents={"review-classifier": "test/model"})
     primed = _initial_prompt(_stage("address"), _PLAN_REF, config)
@@ -342,12 +342,12 @@ def test_initial_prompt_injects_classifier_model_from_config():
 
 
 def test_initial_prompt_primes_learn():
-    """P2.T17: the learn stage is primed — it derives the merged PR from the plan-<pr_id> head
+    """The learn stage is primed — it derives the merged PR from the plan-<pr_id> head
     branch and stays unprimed without a plan-ref (the perk-learn pointer rides the binding
-    mechanism — Node 2.3 — not the hardcoded prompt)."""
+    mechanism — not the hardcoded prompt)."""
     learn = _initial_prompt(_stage("learn"), _PLAN_REF)
     assert learn is not None
-    assert "perk-learn" not in learn  # Node 2.3 — the skill pointer rides the binding mechanism
+    assert "perk-learn" not in learn  # the skill pointer rides the binding mechanism
     assert "plan-42" in learn  # the derived head branch (pr_id is the plan-issue number)
     assert "gh pr list --head plan-42" in learn
     assert "learn` tool" in learn  # drives the durable capture path
@@ -363,7 +363,7 @@ _LINEAR_PLAN_REF = {
 
 
 def test_implement_prompt_linear_uses_linear_tools_with_url_fallback():
-    """Node 3.1: a linear plan-ref renders the pi-mono-linear read recipe (not `gh issue view`),
+    """A linear plan-ref renders the pi-mono-linear read recipe (not `gh issue view`),
     with `open <url>` as the in-prompt fallback."""
     prompt = _initial_prompt(_stage("implement"), _LINEAR_PLAN_REF)
     assert prompt is not None
@@ -374,7 +374,7 @@ def test_implement_prompt_linear_uses_linear_tools_with_url_fallback():
 
 
 def test_learn_prompt_linear_keeps_gh_pr_derivation():
-    """Node 3.1: the linear learn prompt reads the plan via the linear tools, but the merged-PR
+    """The linear learn prompt reads the plan via the linear tools, but the merged-PR
     derivation stays `gh` — PRs are GitHub-universal under every issue backend."""
     prompt = _initial_prompt(_stage("learn"), _LINEAR_PLAN_REF)
     assert prompt is not None
@@ -448,7 +448,7 @@ def test_resolve_target_remote_on_local_only_stage_is_blocked():
 
 @pytest.mark.parametrize("stage_id", ["implement", "address"])
 def test_resolve_target_remote_on_drivable_stage_resolves(stage_id):
-    # implement + address are cold_remote:true (P2.T8c) -> a remote Target (no raise).
+    # implement + address are cold_remote:true -> a remote Target (no raise).
     target = resolve_target(_stage(stage_id), "ci-large")
     assert target.is_remote is True and target.runner == "ci-large"
 
@@ -555,7 +555,7 @@ def test_remote_drive_persists_verified_linkage_and_surfaces_handle(tmp_path, ca
 
 
 def test_remote_drive_prefers_pinned_plan_base(tmp_path, capsys, monkeypatch):
-    # #633: a base-carrying plan-ref makes the runner input target the pinned base, NOT the
+    # A base-carrying plan-ref makes the runner input target the pinned base, NOT the
     # GitHub default branch (which must not even be consulted).
     from perk.run import runner
 
@@ -776,7 +776,7 @@ def _push_origin_branch(clone, name: str) -> None:
 
 
 def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
-    # #633: a plan-ref carrying `base` cuts the worktree from origin/<base>, not the trunk.
+    # A plan-ref carrying `base` cuts the worktree from origin/<base>, not the trunk.
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
     cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})
@@ -804,9 +804,9 @@ def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
 def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
     git_repo_with_remote, monkeypatch
 ):
-    # #633 regression guard: an explicit --worktree NAME recovers the active plan-ref's pinned
+    # Regression guard: an explicit --worktree NAME recovers the active plan-ref's pinned
     # base for the start-point, but must NOT write that ref into the named worktree (the returned
-    # ResolvedWorktree.plan_ref stays None on this path, as before #633).
+    # ResolvedWorktree.plan_ref stays None on this path).
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
     cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})

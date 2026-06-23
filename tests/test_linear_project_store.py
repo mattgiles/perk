@@ -29,7 +29,7 @@ def _make_project_store(
     responses: dict[str, list[object]] | None = None,
 ) -> tuple[objective_store.ObjectiveStore, _FakeLinear]:
     """Construct the project-backed objective store over a fake `LinearClient`. The explicit
-    ``ObjectiveStore`` annotation is the static conformance binding (Node 3.3): ty fails the suite
+    ``ObjectiveStore`` annotation is the static conformance binding: ty fails the suite
     if ``LinearProjectObjectiveStore`` drifts from the protocol — the twin of ``_make_store`` for
     the issue-backed ``LinearObjectiveStore``."""
     fake = _FakeLinear(responses)
@@ -100,7 +100,7 @@ _STATES_WITH_STARTED: dict[str, object] = {
 
 def _node_block_desc(node: objective.ObjectiveNode, *, pr: str | None = None) -> str:
     """A node-issue description: the inline-code ``objective-node`` block, optionally a
-    ``plan-header`` block carrying ``pr`` (the Node 3.4 backlink), then the prose description."""
+    ``plan-header`` block carrying ``pr`` (the backlink), then the prose description."""
     parts = [
         plan.render_metadata_block(
             objective.OBJECTIVE_NODE_KEY,
@@ -157,7 +157,7 @@ def _overview_with_region(run_id: str, prose: str) -> str:
 
 
 class TestLinearProjectObjectiveStore:
-    """The dormant project-backed objective store (Node 3.2): `find_objective` + `create_objective`,
+    """The dormant project-backed objective store: `find_objective` + `create_objective`,
     all offline through the `_FakeLinear` `LinearClient` subclass."""
 
     def _create_responses(self) -> dict[str, list[object]]:
@@ -212,7 +212,7 @@ class TestLinearProjectObjectiveStore:
         mvars = [_input_payload(v) for _, v in _queries(fake, "projectMilestoneCreate(")]
         assert [m["name"] for m in mvars] == ["Foundations", "Build"]
         assert all(m["projectId"] == "proj-1" for m in mvars)
-        # Node 4.3: routing through `ensure_phase_milestone` with a seeded-empty `known` keeps the
+        # Routing through `ensure_phase_milestone` with a seeded-empty `known` keeps the
         # create path's network calls byte-identical — NO extra `project_milestones` read.
         assert not _queries(fake, "projectMilestones(")
 
@@ -241,7 +241,7 @@ class TestLinearProjectObjectiveStore:
         assert not _queries(fake, "UuidForIssue")
 
     def test_create_objective_persists_base_into_overview_header(self) -> None:
-        # #633: the project-backed overview header composer (header.to_data()) carries `base`.
+        # The project-backed overview header composer (header.to_data()) carries `base`.
         store, fake = _make_project_store(self._create_responses())
         store.create_objective(
             title="Big Objective",
@@ -446,7 +446,7 @@ class TestLinearProjectObjectiveStore:
         assert [n.depends_on for n in state.nodes] == [None, ("1.1",), ("1.2",)]
 
     def test_get_objective_pr_is_node_issue_identifier(self) -> None:
-        # Node 3.4 (D4): the backlink is the node-issue's OWN identifier whenever it carries a
+        # (D4): the backlink is the node-issue's OWN identifier whenever it carries a
         # plan-header block (a plan was saved into it) — self-referential by the unification model,
         # and stable across submit clobbering plan-header.pr with the GitHub PR number. The value
         # stored in plan-header.pr (here "#42") is intentionally NOT used.
@@ -888,7 +888,7 @@ class TestLinearProjectObjectiveStore:
         assert result.dry_run is True
         assert not _queries(fake, "projectUpdate(")
 
-    # ----------------------------------------------------------------- save_node_plan (Node 3.4)
+    # ----------------------------------------------------------------- save_node_plan
 
     def _save_node_responses(
         self,
@@ -1038,7 +1038,7 @@ class TestLinearProjectObjectiveStore:
         assert ref is None
         assert fake.requests == []
 
-    # ----------------------------------------------------------------- close_objective (Node 3.4)
+    # ----------------------------------------------------------------- close_objective
 
     def test_close_objective_marks_project_complete(self) -> None:
         store, fake = _make_project_store(
@@ -1087,7 +1087,7 @@ class TestLinearProjectObjectiveStore:
 
 
 class TestLinearProjectAdoption:
-    """In-place objective adoption on the project-backed store (#709, Node 3.2):
+    """In-place objective adoption on the project-backed store:
     `read_objective_source` + `adopt_source_as_objective`, all offline through `_FakeLinear`.
     """
 
@@ -1343,7 +1343,7 @@ class TestLinearProjectAdoption:
 
 
 class TestReadNodeEngagement:
-    """`read_node_engagement` (Objective #682, Node 2.1): node-keyed engagement over the project
+    """`read_node_engagement`: node-keyed engagement over the project
     store (honest) + the empty no-ops on the issue-backed store."""
 
     def _node(self) -> objective.ObjectiveNode:
@@ -1439,8 +1439,8 @@ class TestReadNodeEngagement:
 
 
 class TestReadObjectiveEngagement:
-    """`read_comments` / `read_description_edits` on the project-backed store (Objective #682,
-    Node 2.3): honest over the Linear project's comments; description edits stay an honest empty."""
+    """`read_comments` / `read_description_edits` on the project-backed store:
+    honest over the Linear project's comments; description edits stay an honest empty."""
 
     def _comment_node(self, cid: str, created_at: str) -> dict[str, object]:
         return {
