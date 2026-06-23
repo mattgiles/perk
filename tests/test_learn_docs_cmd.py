@@ -107,16 +107,16 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 0, result.output
     assert launched["stage"] == "plan"  # borrows the plan stage to launch
-    # Node 2.1: learn-docs borrows `plan` but overrides the binding trigger to its command — so a
+    # learn-docs borrows `plan` but overrides the binding trigger to its command — so a
     # stage:plan user binding does NOT bleed into the learn-docs launch.
     assert launched["binding_trigger"] == "command:learn-docs"
-    # #102: the gathered perk:learn numbers ride the handoff so `perk plan-save` recovers
+    # The gathered perk:learn numbers ride the handoff so `perk plan-save` recovers
     # `consumed_learn` even when the read-only factory saves via the /plan-save command.
     assert launched["handoff_extra"] == {"consumed_learn": ["45", "50"]}
     prompt = launched["prompt"] or ""
     assert _INBOX_REL in prompt
     assert "consumed_learn: [45, 50]" in prompt
-    # Node 2.3: the perk-learn-docs skill pointer is no longer hardcoded in the seed — it rides the
+    # The perk-learn-docs skill pointer is no longer hardcoded in the seed — it rides the
     # skill-binding mechanism (command:learn-docs).
     assert "perk-learn-docs" not in prompt
 

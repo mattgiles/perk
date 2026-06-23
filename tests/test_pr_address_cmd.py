@@ -1,4 +1,4 @@
-"""``perk pr address`` — the launcher-only address door + its flat alias (Objective #495 Node 3.3).
+"""``perk pr address`` — the launcher-only address door + its flat alias.
 
 ``address`` has a launcher half + the warm review flow but no deterministic worker, so it is a
 dedicated launcher (not a ``MergedCommand``) carrying the new cold ``--preview`` flag. These tests

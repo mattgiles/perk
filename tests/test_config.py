@@ -144,7 +144,7 @@ def test_local_bindings_replace_committed_array(tmp_path):
     assert [(b.trigger, b.skill) for b in bindings] == [("stage:implement", "local")]
 
 
-# --- [providers] selection (Node 2.1) -------------------------------------------------------
+# --- [providers] selection -------------------------------------------------------
 
 
 def test_providers_selection_absent_is_empty(tmp_path):
@@ -179,7 +179,7 @@ def test_providers_selection_ignores_non_string_values(tmp_path):
     assert load_config(tmp_path).providers == {"plan": "perk-plan"}
 
 
-# --- [subagents] selection (#196) -----------------------------------------------------------
+# --- [subagents] selection -----------------------------------------------------------
 
 
 def test_subagents_selection_absent_is_empty(tmp_path):
@@ -217,7 +217,7 @@ def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
     assert load_config(tmp_path).subagents == {}
 
 
-# --- [compaction] committed-only read (#206) ------------------------------------------------
+# --- [compaction] committed-only read ------------------------------------------------
 
 
 def test_compaction_absent_is_empty(tmp_path):
@@ -266,7 +266,7 @@ def test_compaction_is_committed_only_ignores_local_overlay(tmp_path):
     assert load_committed_compaction(tmp_path) == {"enabled": True}
 
 
-# --- [issues] committed-only read (objective #252 node 1.3) ----------------------------------
+# --- [issues] committed-only read ----------------------------------
 
 
 def test_issues_backend_absent_file_is_none(tmp_path):

@@ -43,7 +43,7 @@ def _stub_gh(
 ) -> dict[str, object]:
     """Stub the whole submit gateway path; record what the worker did.
 
-    ``probe`` stubs the local merge-conflict probe (#556): a ``MergeProbe`` is returned verbatim;
+    ``probe`` stubs the local merge-conflict probe: a ``MergeProbe`` is returned verbatim;
     ``None`` makes the probe raise ``GitError`` (the fail-open path). The probe call is recorded.
     """
     calls: dict[str, object] = {
@@ -112,7 +112,7 @@ def test_dry_run_is_offline_and_well_formed(monkeypatch):
     assert data["branch"] == "plan-7" and data["issue"] == "7"
     assert data["pr"]["number"] == 0  # stub (no PR opened on a dry run)
     assert data["plan_header"]["fields_updated"] == ["branch", "pr", "lifecycle_stage"]
-    # Dry run stays fully offline: no probe, mergeability unknown (#556).
+    # Dry run stays fully offline: no probe, mergeability unknown.
     assert data["base"] == "" and data["mergeable"] is None and data["conflicts"] == []
 
 
@@ -143,14 +143,14 @@ def test_real_submit_opens_pr_and_updates_header(monkeypatch):
     assert "`gh pr checkout 42`" in str(calls["pr_body"])
     assert "`gh pr checkout 7`" not in str(calls["pr_body"])
     assert data["pr_checked"] is True and data["plan_embedded"] is False
-    # Mergeability surfaced (#556): clean probe -> base/mergeable/conflicts present.
+    # Mergeability surfaced: clean probe -> base/mergeable/conflicts present.
     assert data["base"] == "main"
     assert data["mergeable"] is True and data["conflicts"] == []
     assert calls["probed"] is True
 
 
 def test_submit_targets_pinned_base_from_plan_ref(monkeypatch):
-    # #633: a plan-ref carrying `base` retargets create_pr + the mergeability probe (over the
+    # A plan-ref carrying `base` retargets create_pr + the mergeability probe (over the
     # GitHub default branch).
     _authed(monkeypatch)
     captured: dict[str, object] = {}
@@ -184,7 +184,7 @@ def test_submit_targets_pinned_base_from_plan_ref(monkeypatch):
 
 
 def test_submit_falls_back_to_header_then_default_base(monkeypatch):
-    # #633: with no plan-ref base, submit resolves base from the plan-header, else default_branch.
+    # With no plan-ref base, submit resolves base from the plan-header, else default_branch.
     _authed(monkeypatch)
     captured: dict[str, object] = {}
     _stub_gh(monkeypatch)
@@ -273,7 +273,7 @@ def test_real_submit_plan_not_found_exits_1(monkeypatch):
 
 
 def test_real_submit_calls_linear_agent_pr_opened(monkeypatch):
-    """Node 5.1: the submit hook fires after the header update with the PR fields (the emitter
+    """The submit hook fires after the header update with the PR fields (the emitter
     itself gates on the stamped provider + LINEAR_AGENT_TOKEN)."""
     _authed(monkeypatch)
     _stub_gh(monkeypatch)

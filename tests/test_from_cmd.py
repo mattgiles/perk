@@ -1,4 +1,4 @@
-"""`perk plan from <issue>`: the in-place issue-adoption cold door (#706, §8.29).
+"""`perk plan from <issue>`: the in-place issue-adoption cold door (§8.29).
 
 `plans.read_issue`, `gh_engagement.read_issue_comments`, `gh_engagement.read_description_edits`,
 and `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring test_replan_cmd.py.

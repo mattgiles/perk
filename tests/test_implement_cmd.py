@@ -1,4 +1,4 @@
-"""P1.T4c — `perk implement [PLAN]`: the dedicated implement cold door.
+"""`perk implement [PLAN]`: the dedicated implement cold door.
 
 Covers Bug 2 (the optional plan positional + active-ref fallback) at the CLI boundary. The
 priming prompt (Bug 1) is covered in test_launch.py. `plans.get_plan` + `launch.launch_stage`

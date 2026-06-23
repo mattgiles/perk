@@ -1,10 +1,10 @@
-"""Bindings loader + validator tests (Node 1.1 thin seam).
+"""Bindings loader + validator tests (the thin seam).
 
 The real bundled bindings must validate; the validator must *reject* each class of
 authoring error. Negative fixtures (a GOOD constant + per-test single-line mutation,
 mirroring test_registry.py) exercise the shape checks. A test also asserts the shipped
 `stage:` triggers are real registry stages, to catch a typo in the shipped file — while
-the loader itself stays registry-free (target-existence is doctor's job, Node 3.1).
+the loader itself stays registry-free (target-existence is doctor's job).
 """
 
 import pytest
@@ -198,7 +198,7 @@ def test_resolve_defaults_to_shipped_when_omitted():
     assert resolved.issues == []
 
 
-# --- target-existence primitives (Node 3.1, doctor) -----------------------------------------
+# --- target-existence primitives (doctor) -----------------------------------------
 
 
 def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():

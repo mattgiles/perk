@@ -139,7 +139,7 @@ def test_sync_skills_fails_on_nonzero_skills_update(tmp_path, monkeypatch):
 
 
 def test_sync_skills_fails_on_subprocess_error(tmp_path, monkeypatch):
-    # No longer silent (#289): OSError/timeout are failure messages.
+    # No longer silent: OSError/timeout are failure messages.
     monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/skills")
 
     def boom(*a, **k):
@@ -170,7 +170,7 @@ def test_sync_skills_fails_when_delivery_missing(tmp_path, monkeypatch):
 
 
 def test_tracked_skills_conflict_short_circuits_init(git_repo, stub_env):
-    # #289: committed content under a skills-CLI managed path fails init BEFORE convergence.
+    # Committed content under a skills-CLI managed path fails init BEFORE convergence.
     skill = git_repo / ".claude" / "skills" / "x" / "SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("# x\n", encoding="utf-8")

@@ -28,9 +28,9 @@ def test_all_stages_are_generated():
 
 
 def test_objective_plan_is_dedicated_not_generic():
-    # P2.T10: objective-plan is a dedicated command (in DEDICATED_STAGES), skipped by the generic
+    # objective-plan is a dedicated command (in DEDICATED_STAGES), skipped by the generic
     # generator — so it carries its own positional NUMBER arg, not the generic launcher shape.
-    # Node 3.1: it now lives inside the `objective` group as `objective plan`.
+    # It now lives inside the `objective` group as `objective plan`.
     from perk.cli.stages import DEDICATED_STAGES
 
     assert "objective-plan" in DEDICATED_STAGES
@@ -41,8 +41,8 @@ def test_objective_plan_is_dedicated_not_generic():
 
 
 def test_objective_author_is_dedicated_and_local_only(git_repo):
-    # P3.T2: objective author is a dedicated seeded launcher (no positional number); local-only.
-    # Node 3.1: it now lives inside the `objective` group as `objective author`.
+    # objective author is a dedicated seeded launcher (no positional number); local-only.
+    # It now lives inside the `objective` group as `objective author`.
     from perk.cli.stages import DEDICATED_STAGES
 
     assert "objective-author" in DEDICATED_STAGES
@@ -59,7 +59,7 @@ def test_objective_author_is_dedicated_and_local_only(git_repo):
 
 
 def test_learn_is_dedicated_hybrid_group(git_repo):
-    # Node 2.2: `learn` is a hand-written hybrid group — bare invocation default-dispatches to the
+    # `learn` is a hand-written hybrid group — bare invocation default-dispatches to the
     # hidden stage launcher (byte-identical to the generated launcher); `capture`/`docs` are verbs.
     from perk.cli.stages import DEDICATED_STAGES
 
@@ -89,7 +89,7 @@ def test_learn_is_dedicated_hybrid_group(git_repo):
 
 
 def test_plan_is_dedicated_hybrid_group(git_repo):
-    # Node 3.2: `plan` is a hand-written hybrid group mirroring `learn` — bare invocation
+    # `plan` is a hand-written hybrid group mirroring `learn` — bare invocation
     # default-dispatches to the hidden stage launcher; `save`/`resume`/`replan` are verbs.
     from perk.cli.stages import DEDICATED_STAGES
 
@@ -100,7 +100,7 @@ def test_plan_is_dedicated_hybrid_group(git_repo):
     dry = CliRunner().invoke(cli, ["plan", "--dry-run"], obj=_ctx(git_repo))
     assert dry.exit_code == 0, dry.output
     assert "would launch stage 'plan'" in dry.output
-    # plan is cold_remote:false (P2.T8c) -> local-only, even through the hidden launcher.
+    # plan is cold_remote:false -> local-only, even through the hidden launcher.
     remote = CliRunner().invoke(cli, ["plan", "--remote"], obj=_ctx(git_repo))
     assert remote.exit_code == 1
     assert "local-only" in remote.output
@@ -131,7 +131,7 @@ def test_plan_is_dedicated_hybrid_group(git_repo):
 
 
 def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
-    # implement is cold_remote:true (Node 2.1): --remote --dry-run is a side-effect-free dispatch
+    # implement is cold_remote:true: --remote --dry-run is a side-effect-free dispatch
     # PREVIEW (success:true), not the retired not-driven error exit.
     import json
 
@@ -155,7 +155,7 @@ def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
 
 
 def test_plan_save_merged_launcher_default(git_repo):
-    # Node 3.2: `perk plan save` with NO --json hits the launcher half (a session), end-to-end
+    # `perk plan save` with NO --json hits the launcher half (a session), end-to-end
     # through the registered `cli` (not an unregistered factory build).
     (git_repo / ".worktrees" / "wt1").mkdir(parents=True)  # save reuses an existing worktree
     result = CliRunner().invoke(
@@ -166,7 +166,7 @@ def test_plan_save_merged_launcher_default(git_repo):
 
 
 def test_plan_save_merged_json_routes_to_worker(git_repo):
-    # Node 3.2: `perk plan save --json` routes to the deterministic worker (machine output).
+    # `perk plan save --json` routes to the deterministic worker (machine output).
     import json
 
     plan_file = git_repo / "plan.md"
@@ -183,7 +183,7 @@ def test_plan_save_merged_json_routes_to_worker(git_repo):
 
 
 def test_implement_requires_plan_ref():
-    # T4a: implement derives the worktree from the active plan-ref; with none, it asks for a plan.
+    # implement derives the worktree from the active plan-ref; with none, it asks for a plan.
     result = CliRunner().invoke(cli, ["implement"], obj=_ctx(Path("/repo")))
     assert result.exit_code == 1
     assert "needs a saved plan" in result.output
@@ -191,7 +191,7 @@ def test_implement_requires_plan_ref():
 
 def _submit_merged_command():
     # Build an *unregistered* MergedCommand over the real `submit` stage + the `submit_pr` worker
-    # (Node 2.1, D1/D2): no live command is folded — this proves the factory in isolation.
+    # (D1/D2): no live command is folded — this proves the factory in isolation.
     from perk.cli.commands.pr.submit_cmd import submit_pr
     from perk.cli.stages import make_merged_command
     from perk.substrate.registry import load_registry

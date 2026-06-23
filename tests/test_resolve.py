@@ -1,4 +1,4 @@
-"""Tests for the backend-tier resolvers + the consumer-boundary scans (Objective #746).
+"""Tests for the backend-tier resolvers + the consumer-boundary scans.
 
 The resolver (``perk/backends/resolve.py``) is the only door every backend consumer goes through:
 ``resolve_issue_backend`` / ``resolve_objective_store`` validate the committed ``[issues]``
@@ -115,7 +115,7 @@ class TestObjectiveResolver:
     def test_linear_selection_returns_project_store(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Node 3.4: the linear arm is project-backed (LinearProjectObjectiveStore), not the
+        # The linear arm is project-backed (LinearProjectObjectiveStore), not the
         # dormant issue-backed LinearObjectiveStore.
         monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')

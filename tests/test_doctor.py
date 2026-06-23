@@ -1,6 +1,6 @@
-"""T6 — `perk doctor`.
+"""`perk doctor`.
 
-Three layers (phase-0-turn-6 §6.f / §10.7):
+Three layers:
 - **pure** (no monkeypatch): synthetic `Check` lists exercise exit-code / healthy / json / render;
 - **engine** (verify=False): groups, the `--fix` round-trip, self/consumer, no-silent-pass;
 - **coherence guard**: every required capability has a doctor check (the D2 SSOT, on coverage).
@@ -541,7 +541,7 @@ def test_fix_skips_linear_repair_without_selection(git_repo, stub_env, monkeypat
 
 
 def test_subagent_engine_signal_and_defs_dir(git_repo):
-    # P2.T6: the constant informational pointer is `ok`, and the defs-dir convergence is `ok`
+    # The constant informational pointer is `ok`, and the defs-dir convergence is `ok`
     # on a freshly-converged repo. The informational detail lists the delivered defs.
     _scaffold(git_repo)
     report = run_doctor(git_repo, verify=False)
@@ -723,7 +723,7 @@ def test_no_silent_pass_on_unverifiable_check(git_repo):
 
 
 def test_compaction_drift_detected_and_fixed(git_repo):
-    # #206: `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
+    # `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
     # free. Select a compaction policy that diverges from settings.json → drift → `--fix` repairs.
     _scaffold(git_repo)
     (git_repo / ".pi" / "perk.toml").write_text(
@@ -787,7 +787,7 @@ def test_plain_doctor_does_not_sync(git_repo, monkeypatch, stub_env):
     assert called == []
 
 
-# --- skills-delivery check (#289 — load-bearing delivery substrate) -------------------------
+# --- skills-delivery check (load-bearing delivery substrate) -------------------------
 
 
 def _delivery_check(report):
@@ -888,7 +888,7 @@ def test_render_fix_errors(capsys):
     assert "Fix failures" in err and "skills delivery failed: boom" in err
 
 
-# --- bindings check (Node 3.1) --------------------------------------------------------------
+# --- bindings check --------------------------------------------------------------
 
 
 def _install_default_skills(root, subdir=".agents/skills"):
@@ -963,7 +963,7 @@ def test_self_vs_consumer_dual_mode(git_repo):
     assert run_doctor(git_repo, verify=False).self_repo is True
 
 
-# --- runner-prerequisite checks (Node 2.4, §8.16) -------------------------------------------
+# --- runner-prerequisite checks (§8.16) -------------------------------------------
 
 
 def _runner_env(monkeypatch, *, authed=True, enabled=None, pat=True, models=None, perms=True):
@@ -1126,7 +1126,7 @@ def test_every_required_capability_has_a_doctor_check(git_repo):
     assert applicable <= covered  # no required capability is left unverified
 
 
-# --- workflow_checks (Node 3.3, §8.19 static layer) -----------------------------------------
+# --- workflow_checks (§8.19 static layer) -----------------------------------------
 
 
 def test_workflow_checks_verify_false_only_managed(git_repo):
@@ -1180,11 +1180,11 @@ def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
     assert len(runner_checks) == 1 and runner_checks[0].status == "info"
 
 
-# --- init perk-package ref reconcile (#635) -------------------------------------------------
+# --- init perk-package ref reconcile -------------------------------------------------
 
 
 def test_ref_drift_detected_and_fixed(git_repo):
-    # #635: a stale pinned perk ref surfaces as a settings-wiring fail; --fix reconciles to @main.
+    # A stale pinned perk ref surfaces as a settings-wiring fail; --fix reconciles to @main.
     import json as _json
 
     _scaffold(git_repo)
@@ -1206,7 +1206,7 @@ def test_ref_drift_detected_and_fixed(git_repo):
     assert "git:github.com/mattgiles/perk@v0.0.1" not in packages
 
 
-# --- the verify-gated `extension-clone` check (#642) -----------------------------------------
+# --- the verify-gated `extension-clone` check -----------------------------------------
 
 
 def _clone_check(report):

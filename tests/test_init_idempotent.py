@@ -25,11 +25,11 @@ def test_init_converges_and_is_idempotent(tmp_path):
     packages = settings["packages"]
     assert "git:github.com/mattgiles/perk@main" in packages
     assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
-    assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict with node 3.1
-    assert "npm:@tombell/pi-plan" not in packages  # P2.T2a: perk owns plan mode now
-    assert "npm:@juicesharp/rpiv-todo" not in packages  # P2.T12: perk owns checkpoints now
-    assert "npm:pi-subagents" in packages  # P2.T6: borrowed spawned-delegation engine
-    # #529: pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
+    assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict
+    assert "npm:@tombell/pi-plan" not in packages  # perk owns plan mode now
+    assert "npm:@juicesharp/rpiv-todo" not in packages  # perk owns checkpoints now
+    assert "npm:pi-subagents" in packages  # borrowed spawned-delegation engine
+    # pi-web-access is no longer borrowed — it is the `web` seam's default provider, converged
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)
 
@@ -43,13 +43,13 @@ def test_init_converges_and_is_idempotent(tmp_path):
         assert (tmp_path / ".pi" / "agents" / "perk" / f"{name}.md").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
-    assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror (T2b)
+    assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror
     assert "/.pi/workflow/plan.md" in gitignore  # cache.plan materialized body (transient, #43)
     agents_md = (tmp_path / "AGENTS.md").read_text()
     assert "perk conventions" in agents_md
-    # The managed block carries the ambient gh guidance (#416).
+    # The managed block carries the ambient gh guidance.
     assert "GitHub access goes through the `gh` CLI" in agents_md
-    # ...and the ambient ast-grep code-search steer (#611).
+    # ...and the ambient ast-grep code-search steer.
     assert "Prefer ast-grep for code search" in agents_md
 
     # ast-grep is a registered perk skill (SSOT for the manifest + delivery).
@@ -78,7 +78,7 @@ def _identities(packages):
 def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):
     # The zero-config default: the plan/todo/askuser/footer seams resolve to `package: null`
     # reference providers, so no foreign package is added for them. The `web` seam is the novel
-    # exception (#529): its default `pi-web-access` carries a non-null package, so the default path
+    # exception: its default `pi-web-access` carries a non-null package, so the default path
     # DOES converge `npm:pi-web-access` via the provider path (object form on a fresh init).
     assert run_init(tmp_path, verify=False).ok
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
@@ -106,7 +106,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    # The foreign package is wired in OBJECT form. Node 2.3: the real tombell-plan entry has no
+    # The foreign package is wired in OBJECT form. The real tombell-plan entry has no
     # `package_filter`, so the object carries `source` only (no merged extensions/skills keys).
     entry = next(
         p for p in packages if isinstance(p, dict) and p.get("source") == "npm:@tombell/pi-plan"
@@ -164,7 +164,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
 
 
 def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path):
-    # The todo-seam analogue (Node 3.2): the init wiring is already seam-generic, so selecting the
+    # The todo-seam analogue: the init wiring is already seam-generic, so selecting the
     # real `juicesharp-todo` provider wires `npm:@juicesharp/rpiv-todo` (object form, no filter) and
     # deselecting removes it — locking the generic behavior for the todo seam too.
     pi_dir = tmp_path / ".pi"
@@ -272,7 +272,7 @@ def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_pat
 
 
 def test_init_governs_pi_status_and_pi_default_footers(tmp_path):
-    # #670: the footer is governed EXCLUSIVELY by `[providers] footer` — no footer outcome ever
+    # The footer is governed EXCLUSIVELY by `[providers] footer` — no footer outcome ever
     # needs a manual `packages` edit. Four cases prove the two new providers + the managed-identity
     # "revert the manual edit" guarantee for `npm:@tombell/pi-status`.
     pi_dir = tmp_path / ".pi"
@@ -321,7 +321,7 @@ def test_init_governs_pi_status_and_pi_default_footers(tmp_path):
 
 
 def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
-    # The web-seam two-directional swap (#529): selecting the foreign `ollama-web-search` provider
+    # The web-seam two-directional swap: selecting the foreign `ollama-web-search` provider
     # REMOVES the default `npm:pi-web-access` (also provider-managed) and ADDS
     # `npm:@ollama/pi-web-search` (object form, no filter); reverting swaps back.
     pi_dir = tmp_path / ".pi"
@@ -503,7 +503,7 @@ def test_init_migrates_legacy_npm_perk_entry(tmp_path):
 
 
 def test_init_reconciles_stale_perk_ref(tmp_path):
-    # #635: a consumer pinned to a stale tag must be reconciled forward to @main (ref-aware
+    # A consumer pinned to a stale tag must be reconciled forward to @main (ref-aware
     # convergence), preserving list position and the user's unrelated packages.
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
@@ -525,7 +525,7 @@ def test_init_reconciles_stale_perk_ref(tmp_path):
 
 
 def test_init_reconciles_noref_perk_entry(tmp_path):
-    # #635: a no-ref perk entry reconciles to @main too (identity matches, spec differs).
+    # A no-ref perk entry reconciles to @main too (identity matches, spec differs).
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(
@@ -540,7 +540,7 @@ def test_init_reconciles_noref_perk_entry(tmp_path):
 
 
 def test_init_preserves_unrelated_git_package(tmp_path):
-    # #635: a user's *unrelated* git: package with its own ref is never reconciled (only perk's
+    # A user's *unrelated* git: package with its own ref is never reconciled (only perk's
     # own identity is ever in the desired set).
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
@@ -556,7 +556,7 @@ def test_init_preserves_unrelated_git_package(tmp_path):
 
 
 def test_init_dedups_duplicate_perk_entries(tmp_path):
-    # #635: a pathological repo with two perk git entries converges to a single @main entry
+    # A pathological repo with two perk git entries converges to a single @main entry
     # (rewrite the first, drop the rest) rather than producing duplicate @main entries.
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
@@ -581,7 +581,7 @@ def test_init_dedups_duplicate_perk_entries(tmp_path):
 
 
 def test_init_ref_reconcile_is_idempotent(tmp_path):
-    # #635: once at @main, a re-run is a no-op (spec equals desired → no change).
+    # Once at @main, a re-run is a no-op (spec equals desired → no change).
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     run_init(tmp_path, verify=False)
@@ -657,7 +657,7 @@ def test_init_preserves_user_skills_manifest(tmp_path):
     assert (agents / "manifest.d" / "perk.yaml").is_file()  # fragment still written alongside
 
 
-# --- forward-reconcile of pi's git-package clone (#642) --------------------------------------
+# --- forward-reconcile of pi's git-package clone --------------------------------------
 
 
 def test_reconcile_extension_clone_materializes(tmp_path, monkeypatch):
@@ -695,7 +695,7 @@ def test_init_verify_materializes_stale_extension_clone(git_repo, stub_env, monk
     assert any("freshened to origin/main in place" in line for line in report.changes)
 
 
-# --- perk-owned in-place clone materialization (#655) ----------------------------------------
+# --- perk-owned in-place clone materialization ----------------------------------------
 
 
 def test_extension_clone_url_derived_from_git_package():
