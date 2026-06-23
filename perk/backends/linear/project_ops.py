@@ -18,19 +18,17 @@ from perk.backends.linear.client import (
 
 
 class _LinearProjectOps:
-    """The dormant Linear *Projects* substrate (Objective #548, Node 3.1) — the GraphQL ops the
-    not-yet-built ``LinearProjectObjectiveStore`` (Nodes 3.2-3.4) will consume, exactly the shapes
-    proven live at the Node 1.4 spike ("Mode 3").
+    """The Linear *Projects* substrate — the GraphQL ops the ``LinearProjectObjectiveStore``
+    consumes, exactly the shapes proven live at the Mode 3 spike.
 
-    **Client-only** (correction §3b): it registers the :class:`LinearClient` and reaches all
+    **Client-only**: it registers the :class:`LinearClient` and reaches all
     GraphQL machinery (``team_id``/``paginate``) through ``self._client`` — it does
     NOT compose an ``_LinearIssueOps``. The single shared ``_team_id_cache`` is the client's: a
     consuming store owns one client and constructs both op
     classes over it, so the cache is shared automatically.
 
     Methods return parsed primitives/dicts — the ``ObjectiveRef``/``ObjectiveState`` mapping lives
-    in the consuming store (Node 3.2), not here. **Dormant**: no production caller constructs this
-    yet (only the offline tests do), so there is no cross-plane behavior change in this node.
+    in the consuming store, not here.
     """
 
     def __init__(self, client: LinearClient, *, team_key: str, repo_root: Path) -> None:
@@ -87,8 +85,8 @@ class _LinearProjectOps:
         """Set a project's ``state`` (e.g. ``"completed"`` to mark the objective complete on land).
         Project ids are opaque UUIDs (no human identifier).
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** ``projectUpdate(input:{state})`` is NOT yet
-        live-proven — the 1.4 spike covered create/overview/milestone/attach/relation, not project
+        **Flagged (live gate):** ``projectUpdate(input:{state})`` is NOT yet
+        live-proven — the spike covered create/overview/milestone/attach/relation, not project
         state. Covered offline here; verify live before relying on it.
         """
         mutation = (
@@ -137,9 +135,9 @@ class _LinearProjectOps:
         """All comments on a project (the project-level discussion threads) with author identity +
         ``editedAt``, sorted ascending by ``createdAt`` (oldest-first, mirroring the issue reads).
         Author-aware selection mirroring ``_LinearIssueOps._comments_with_authors`` — feeds the
-        objective-level engagement read (Node 2.3).
+        objective-level engagement read.
 
-        (Implementer note: if ``Project.comments`` proves unavailable live in Node 4.3, fall back to
+        (Implementer note: if ``Project.comments`` proves unavailable live, fall back to
         the top-level ``comments(filter: { project: { id: { eq: $id } } })`` form — the
         SDK-confirmed alternative; the neutral mapping is unchanged.)
         """
@@ -180,13 +178,13 @@ class _LinearProjectOps:
         """All issues attached to a project **with titles**, as
         ``[{id, identifier, url, title, description}, …]`` (paginated). A **sibling** of
         :meth:`project_issues` (in-place objective adoption needs each existing issue's title to
-        seed the authoring DATA and to preserve it verbatim on the mapped-issue stamp; #709,
-        §8.30); the byte-stable ``project_issues`` query is deliberately left untouched (mirrors
+        seed the authoring DATA and to preserve it verbatim on the mapped-issue stamp; §8.30);
+        the byte-stable ``project_issues`` query is deliberately left untouched (mirrors
         the ``project_issues_with_milestones`` sibling precedent). ``description``/``title`` may be
         ``""``.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** this title-bearing selection is NOT yet
-        live-proven for adoption — covered offline here; verify live at Node 4.3.
+        **Flagged (live gate):** this title-bearing selection is NOT yet
+        live-proven for adoption — covered offline here; verify live.
         """
         query = (
             "query($id: String!, $cursor: String) { project(id: $id) "
@@ -217,8 +215,8 @@ class _LinearProjectOps:
         byte-stable ``project_issues`` query is deliberately left untouched. ``milestone_name`` is
         ``None`` when the issue is attached to no milestone.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** this milestone-join selection is NOT yet
-        live-proven — #619's Mode 4 gate proved create/milestone/attach/relation, not this query.
+        **Flagged (live gate):** this milestone-join selection is NOT yet
+        live-proven — the Mode 4 gate proved create/milestone/attach/relation, not this query.
         Covered offline here; verify live before relying on it.
         """
         query = (
@@ -251,8 +249,8 @@ class _LinearProjectOps:
         ``None``) — the find-by-run-id scan source for the project-backed objective store. Team-
         scoped + paginated over ``("team", "projects")``.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** this projects-list query shape is NOT yet
-        live-proven — the 1.4 spike covered create/overview/milestone/attach/relation, not
+        **Flagged (live gate):** this projects-list query shape is NOT yet
+        live-proven — the spike covered create/overview/milestone/attach/relation, not
         list-projects. Covered offline here; verify live before relying on it.
         """
         query = (
@@ -294,9 +292,9 @@ class _LinearProjectOps:
     def ensure_phase_milestone(
         self, *, project_id: str, name: str, known: dict[str, str] | None = None
     ) -> str:
-        """Name-keyed lookup-or-create for a phase milestone; returns its id (Node 4.3).
+        """Name-keyed lookup-or-create for a phase milestone; returns its id.
 
-        **Name is the deterministic key** — milestone order is NOT insertion order (the 1.4
+        **Name is the deterministic key** — milestone order is NOT insertion order (the
         smoke-gate finding), so a phase is matched by its enriched ``### Phase N: …`` name, never
         list position. When ``known`` (a prefetched ``{name: id}`` map) is supplied it is used as
         the lookup table (and updated in place with any freshly-created id), amortizing the
@@ -309,7 +307,7 @@ class _LinearProjectOps:
         stay byte-identical to the blind-create predecessor), and a future ``add_node``-to-an-
         existing-objective reuses the same primitive with ``known=None`` to reuse a phase's
         milestone or mint one for a brand-new phase. The phase-header-text-drift duplicate-milestone
-        edge is Node 4.4's repair concern.
+        edge is a separate repair concern.
         """
         table: dict[str, str] = (
             {
@@ -327,13 +325,13 @@ class _LinearProjectOps:
         return created
 
     def create_project_update(self, *, project_id: str, body: str) -> str:
-        """Post a Project **Update** (the status-report feed) and return its id (Node 4.3).
+        """Post a Project **Update** (the status-report feed) and return its id.
 
-        ``input = {projectId, body}`` only — the optional ``health`` field is deliberately omitted
-        (D3). Raises ``IssueBackendError`` on ``success != True``.
+        ``input = {projectId, body}`` only — the optional ``health`` field is deliberately omitted.
+        Raises ``IssueBackendError`` on ``success != True``.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** ``projectUpdateCreate`` is NOT yet live-proven
-        \u2014 the 1.4 spike covered create/overview/milestone/attach/relation, not project updates.
+        **Flagged (live gate):** ``projectUpdateCreate`` is NOT yet live-proven
+        \u2014 the spike covered create/overview/milestone/attach/relation, not project updates.
         Covered offline here; verify live before relying on it (mirrors ``set_project_state`` /
         ``list_projects``).
         """
@@ -375,12 +373,12 @@ class _LinearProjectOps:
 
         Sends ``issueUpdate(id:$id, input:{projectMilestoneId})`` with the **bare boundary
         identifier** routed through :func:`_request_issue_mutation` (the same not-found mapping the
-        post-#622 :meth:`attach_issue_to_project` uses) — decoupling over DRY, exactly mirroring
-        that sibling's inline mutation. No identifier→UUID resolution (``uuid_for`` was deleted in
-        #622). Checks ``success``.
+        :meth:`attach_issue_to_project` uses) — decoupling over DRY, exactly mirroring
+        that sibling's inline mutation. No identifier→UUID resolution (``uuid_for`` was deleted).
+        Checks ``success``.
 
-        **Flagged (Phase-5 / Node 5.1 live gate):** ``issueUpdate(input:{projectMilestoneId})`` is
-        NOT yet live-proven — #619's Mode 4 gate proved create/milestone/attach/relation, not this
+        **Flagged (live gate):** ``issueUpdate(input:{projectMilestoneId})`` is
+        NOT yet live-proven — the Mode 4 gate proved create/milestone/attach/relation, not this
         mutation. Covered offline here; verify live before relying on it.
         """
         mutation = (

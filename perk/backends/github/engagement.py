@@ -1,4 +1,4 @@
-"""Honest human-engagement reads for the GitHub issue backend (Objective #682, Node 1.3).
+"""Honest human-engagement reads for the GitHub issue backend.
 
 Two read-only ``gh api graphql`` queries — issue comments and issue description edit history —
 each a single cursor-paginated GraphQL connection. github-native result rows

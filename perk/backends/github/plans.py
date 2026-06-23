@@ -6,9 +6,9 @@ from perk import plan
 from perk.github import _exec, prs
 
 # ===========================================================================
-# Mutation operations (the first GitHub *writes*; T2a — contracts.md §8.4).
+# Mutation operations (the first GitHub *writes*; contracts.md §8.4).
 #
-# Conventions established here and reused by submit/land (D3):
+# Conventions established here and reused by submit/land:
 #   * REST `gh api` over porcelain (porcelain uses GraphQL -> a separate, often-exhausted
 #     rate-limit quota; github-api-rate-limits).
 #   * Large bodies via `-F body=@<file>`, never inline (ARG_MAX + abuse detection).
@@ -117,7 +117,7 @@ def find_plan_issue(
     Uses the **list** endpoint (not the eventually-consistent search index). Returns None for
     no match; raises ``GitHubError`` on an infra/query failure (never masks the error as None).
 
-    Parameterized by ``label``/``header_key`` (P2.T8b): the defaults find the ``perk:plan`` issue
+    Parameterized by ``label``/``header_key``: the defaults find the ``perk:plan`` issue
     (``plan-header``); ``find_learn_issue`` passes ``perk:learn``/``learn-header`` so the learn
     lookup is **label-scoped** and cannot match the plan issue (which shares the same ``run_id``).
     """
@@ -212,7 +212,7 @@ def close_and_label_consolidated(*, issue: int, repo_root: Path, dry_run: bool =
 
 
 def close_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
-    """Close an issue (PATCH ``state=closed``) — the supervisor's completion-audit auto-close (D8).
+    """Close an issue (PATCH ``state=closed``) — the supervisor's completion-audit auto-close.
 
     Mirrors :func:`close_and_label_consolidated`'s REST PATCH shape (minus the labelling). Unlike
     the post-merge bookkeeping path, this is **fail-loud**: a user-invoked completion close raises
@@ -234,7 +234,7 @@ def close_issue(*, number: int, repo_root: Path, dry_run: bool = False) -> bool:
 
 
 def find_learn_issue(*, run_id: str, repo_root: Path) -> PlanIssue | None:
-    """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches (P2.T8b).
+    """Find an open ``perk:learn`` issue whose ``learn-header`` ``run_id`` matches.
 
     The label-scoped twin of ``find_plan_issue``: scoped to ``perk:learn`` + the ``learn-header``
     block so it never returns the plan issue (which shares the plan's ``run_id`` under the
@@ -257,7 +257,7 @@ def create_learn_issue(
     plan_number: int,
     dry_run: bool = False,
 ) -> PlanIssue:
-    """Create the ``perk:learn`` knowledge-capture issue (P2.T8b, D10). Mirrors
+    """Create the ``perk:learn`` knowledge-capture issue. Mirrors
     ``create_plan_issue`` but: lazily creates the ``perk:learn`` label, is **idempotent via
     ``find_learn_issue``** (not ``find_plan_issue``), and renders a ``learn-header`` block into the
     body so the finder can match. Raises ``GitHubError`` on failure."""
@@ -327,7 +327,7 @@ def create_plan_issue(
 
 @dataclass(frozen=True)
 class IssueRead:
-    """A pre-existing issue read verbatim for in-place adoption (#706, §8.29).
+    """A pre-existing issue read verbatim for in-place adoption (§8.29).
 
     ``title``/``body`` are untrusted human DATA; ``state`` is ``gh issue view``'s normalized
     ``"OPEN" | "CLOSED"`` casing.
@@ -341,7 +341,7 @@ class IssueRead:
 
 
 def read_issue(*, number: int, repo_root: Path) -> IssueRead | None:
-    """Read *any* issue's raw title + body + state for in-place adoption (#706, §8.29).
+    """Read *any* issue's raw title + body + state for in-place adoption (§8.29).
 
     Unlike :func:`get_plan` / :func:`get_plan_body` (which need a perk metadata block), this reads
     a non-perk human issue verbatim (``gh issue view`` — ``state`` is its ``"OPEN"``/``"CLOSED"``
@@ -411,7 +411,7 @@ def add_issue_comment(
 
 # The four generic issue/comment REST helpers below are shared plumbing for the
 # objective and PR modules (relocated here to keep the intra-package import DAG
-# acyclic — see docs/planning/objective-349-perk-layout.md, D3 deviation).
+# acyclic).
 
 
 def _get_issue_body(issue: int, repo_root: Path) -> str:
@@ -471,7 +471,7 @@ def _patch_comment_body(comment_id: int, body: str, repo_root: Path) -> None:
 
 
 # ===========================================================================
-# Plan-issue operations relocated from the PR gateway (Objective #746, Node 2.2).
+# Plan-issue operations relocated from the PR gateway.
 #
 # These are plan-issue ops, coupled to the shared REST helpers above (`_get_issue_body`,
 # `_patch_comment_body`, `add_issue_comment`, `read_issue`, `create_label`, `add_issue_label`) and
@@ -665,7 +665,7 @@ def update_plan_issue(
 
 @dataclass(frozen=True)
 class PlanAdoption:
-    """The result of an in-place :func:`adopt_issue_as_plan` stamp (#706, §8.29)."""
+    """The result of an in-place :func:`adopt_issue_as_plan` stamp (§8.29)."""
 
     number: int
     url: str
@@ -683,7 +683,7 @@ def adopt_issue_as_plan(
     dry_run: bool = False,
 ) -> PlanAdoption:
     """Additively stamp perk plan metadata INTO a pre-existing issue — adopting it in place as a
-    perk plan (#706, §8.29), never minting a second object.
+    perk plan (§8.29), never minting a second object.
 
     The additive stamp (the GitHub in-place writer): (a) ensure + ADD the ``perk:plan`` label
     (never replaces the issue's labels); (b) stamp the ``plan-header`` block additively into the
@@ -771,7 +771,7 @@ def get_plan_body(*, number: int, repo_root: Path) -> str | None:
     """Fetch a plan issue's verbatim plan markdown (the ``plan-body`` block lives in the first
     comment; the issue body holds only the header). ``None`` when the issue or block is absent;
     raises ``GitHubError`` on an infra failure. Used to materialize the plan body for in-session
-    checkpoints (P2.T2c).
+    checkpoints.
     """
     data = _exec._run_json(
         ["issue", "view", str(number), "--json", "body,comments"],

@@ -1,4 +1,4 @@
-"""The GitHub issue backend (Objective #746, Node 2.1): the adapter + its engagement substrate.
+"""The GitHub issue backend: the adapter + its engagement substrate.
 
 ``GitHubIssueBackend`` (in ``.backend``) is the late-bound delegation adapter over
 ``perk.github``'s issue-tier module functions; the human-engagement substrate (the read-only

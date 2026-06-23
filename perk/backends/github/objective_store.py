@@ -1,6 +1,6 @@
-"""``GitHubObjectiveStore`` — the objective-tier adapter over the GitHub substrate (Node 2.2).
+"""``GitHubObjectiveStore`` — the objective-tier adapter over the GitHub substrate.
 
-Node 2.1 (``perk/backends/objective_store.py``) shipped the objective-tier **contract** — the
+The objective-tier **contract** (``perk/backends/objective_store.py``) defines the
 ``ObjectiveStore`` ``Protocol``, the result dataclasses, and ``ObjectiveStoreError``. This module
 makes the GitHub objective store live: ``GitHubObjectiveStore`` is a thin delegation adapter over
 the sibling objective/plan substrate (``perk.backends.github.objectives`` and
@@ -86,7 +86,7 @@ class GitHubObjectiveStore:
     def read_objective_source(
         self, *, source_id: str
     ) -> objective_store.AdoptableObjectiveSource | None:
-        """Read a GitHub issue verbatim as an adoptable objective source (#709, §8.30): prose = the
+        """Read a GitHub issue verbatim as an adoptable objective source (§8.30): prose = the
         issue body, ``issues=()`` (no child issues), id = the issue number string. Returned even
         when CLOSED — the cold door does the not-open refusal (via
         ``IssueBackend.read_issue.state``).
@@ -117,7 +117,7 @@ class GitHubObjectiveStore:
         adopt_map: dict[str, str],
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
-        """Stamp perk objective metadata additively into the GitHub issue in place (#709, §8.30).
+        """Stamp perk objective metadata additively into the GitHub issue in place (§8.30).
         ``adopt_map`` is ignored (GitHub objectives have no child issues). ``dry_run`` → ``None``
         (the caller falls back to the offline compose-preview)."""
         if dry_run:
@@ -283,23 +283,23 @@ class GitHubObjectiveStore:
             return plans.close_issue(number=number, repo_root=self._repo_root, dry_run=dry_run)
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
-        """GitHub has no Project Updates surface — always ``False`` (no-op; Node 4.3)."""
+        """GitHub has no Project Updates surface — always ``False`` (no-op)."""
         return False
 
     def detect_objective_drift(self, *, objective_id: str) -> objective_store.DriftReport:
         """GitHub's roadmap block is edited atomically with the issue body — no divergence surface,
-        so the drift report is trivially empty (Node 4.4 / #612 no-op precedent)."""
+        so the drift report is trivially empty (the no-op precedent)."""
         return objective_store.DriftReport()
 
     def repair_objective_drift(
         self, *, objective_id: str, dry_run: bool = False
     ) -> objective_store.RepairResult:
-        """GitHub has no divergence surface — an empty no-op repair (Node 4.4 / #612)."""
+        """GitHub has no divergence surface — an empty no-op repair."""
         return objective_store.RepairResult(
             applied=(), failed=None, remaining=(), aborted=False, dry_run=dry_run
         )
 
-    # --- human-engagement reads (Objective #682, Node 2.3) ---
+    # --- human-engagement reads ---
     # Honest over the objective issue itself (a GitHub objective IS a single issue): reuse the
     # issue-tier honest engagement reads (perk/backends/github/engagement.py) + the shared mappers
     # from perk/backends/github/backend.py. `read_node_engagement` stays a clean no-op

@@ -1,14 +1,13 @@
-"""The issue-tracking tier contract (Objective #252, Node 1.1).
+"""The issue-tracking tier contract.
 
 perk's GitHub gateway (the ``perk/github/`` package) fuses four tiers: issue tracking
 (plan/learn/objective issues, marked comments, labels), PRs, CI/workflow, and auth. Only the
 **issue-tracking tier** is backend-selectable (GitHub Issues today; Linear later) — PRs, CI, and
 auth stay in ``perk/github/`` for **all** backends (PRs are GitHub-universal even under a Linear
 issue backend). This module is that tier's contract: the ``IssueBackend`` `Protocol`, the
-backend-neutral result dataclasses, and the one backend-neutral error type. It is deliberately
-dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracted the GitHub backend behind
-it and Node 1.3 added the ``[issues]`` config table + config-driven resolver
-(``perk/backends/resolve.py``).
+backend-neutral result dataclasses, and the one backend-neutral error type. The issue-tracking
+tier is backend-selectable behind this contract: the GitHub backend lives behind it today and the
+``[issues]`` config table drives a config-driven resolver (``perk/backends/resolve.py``).
 
 Contract disciplines (every concrete backend MUST honor these):
 
@@ -29,12 +28,6 @@ Contract disciplines (every concrete backend MUST honor these):
 - **Backend-owned header values.** The ``header`` dicts are opaque ``dict[str, object]``;
   header-embedded comment ids (e.g. ``objective_comment_id``) are backend-owned values a caller
   must never interpret.
-
-Provenance: the erk prior art (``integrations/linear-erk-mapping.md``) proposed exactly this
-split — an issue-tracker interface with GitHub/Linear implementations selected by config, with
-PRs/worktrees staying GitHub/git regardless — and its gateway-decomposition lessons
-(``architecture/gateway-decomposition-phases.md``: breaking changes over shims; keep the
-interface to one tier, not a 40-method monolith) shaped this surface.
 """
 
 from dataclasses import dataclass
@@ -131,7 +124,7 @@ class LearnIssueSummary:
 
 @dataclass(frozen=True)
 class AdoptableIssue:
-    """A pre-existing (human-authored) issue read for in-place adoption (#706, §8.29).
+    """A pre-existing (human-authored) issue read for in-place adoption (§8.29).
 
     The neutral shape :meth:`IssueBackend.read_issue` returns for *any* issue — not just perk's
     own plan/learn/objective issues. ``title``/``body`` are **untrusted human DATA** (the
@@ -222,7 +215,7 @@ class IssueBackend(Protocol):
         it. None when the issue or block is absent; raises on an infra failure."""
         ...
 
-    # --- in-place issue adoption (#706, §8.29) ---
+    # --- in-place issue adoption (§8.29) ---
 
     def read_issue(self, *, issue_id: str) -> AdoptableIssue | None:
         """Read *any* issue's raw title + body + normalized state for in-place adoption.
@@ -245,7 +238,7 @@ class IssueBackend(Protocol):
         dry_run: bool = False,
     ) -> IssueRef:
         """Stamp perk's plan metadata **additively** into a pre-existing issue — adopting it IN
-        PLACE as a perk plan (#706, §8.29), never minting a second object.
+        PLACE as a perk plan (§8.29), never minting a second object.
 
         The additive stamp (mirrors the node-unification in-place writer): (a) ensure + **add**
         the ``perk:plan`` label to the existing issue (never replaces its labels); (b) stamp the
@@ -316,14 +309,13 @@ class IssueBackend(Protocol):
         raises on an infra failure."""
         ...
 
-    # --- human-engagement reads (Objective #682, Node 1.2) ---
+    # --- human-engagement reads ---
     #
     # All returned content (`body`/`diff`/activity `body`) is **untrusted DATA**: never re-parsed
     # as a perk marker outside perk's own owned regions, never executed as instructions. Author
     # identity (human/perk/other-agent/unknown) is distinguishable (see
-    # ``perk.backends.engagement.classify_author``). Honest on ``LinearIssueBackend`` today;
-    # ``GitHubIssueBackend`` ships a clean empty impl (honest reads = Node 1.3). No flow consumers
-    # wire these in 1.2.
+    # ``perk.backends.engagement.classify_author``). Honest on ``LinearIssueBackend``;
+    # ``GitHubIssueBackend`` ships a clean empty impl.
 
     def read_comments(self, *, issue_id: str) -> tuple[EngagementComment, ...]:
         """Read an issue's comments with author identity + edit flag. Oldest-first. Raises

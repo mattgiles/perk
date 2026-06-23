@@ -34,7 +34,7 @@ class LinearStateNode(TypedDict):
 
 class LinearIssueNode(TypedDict):
     """The recurring 6-field issue selection ``id identifier url title description state { type }``
-    (``backend.get_plan`` / ``backend.read_issue``). The pilot ``TypedDict`` (Node 3.1): the runtime
+    (``backend.get_plan`` / ``backend.read_issue``). The pilot ``TypedDict``: the runtime
     shape guard runs once in :func:`_require_issue_node`, then call sites read typed fields directly
     instead of repeating the ``_require_str`` / ``_require_dict`` narrowing."""
 
@@ -69,7 +69,7 @@ _PERK_MARKER_RE = re.compile(r"<!--\s*(/?perk:[^>]+?)\s*-->")
 _DETAILS_OPEN_RE = re.compile(r"^<details><summary><code>[^<]*</code></summary>$")
 _DETAILS_CLOSE = "</details>"
 
-# The best-effort node-status → Linear workflow-state `type` mirror (Node 3.3). The status block
+# The best-effort node-status → Linear workflow-state `type` mirror. The status block
 # is the source of truth; this mirror only nudges the node-issue's workflow state to match (so the
 # project board reflects the roadmap). `blocked` has no Linear equivalent — mapped to `started`
 # (it is in-flight work, just stuck).
@@ -111,14 +111,14 @@ def _hex_color(color: str) -> str:
 
 # ------------------------------------------------------------------ engagement-read mapping
 # Pure mappers from Linear payload nodes into the backend-neutral engagement dataclasses
-# (Objective #682, Node 1.2). perk has no committed app-actor id, so perk detection rests on the
+# perk has no committed app-actor id, so perk detection rests on the
 # body sentinel; `perk_bot_ids=()` is the honest empty seam.
 
 
 def _is_present(value: object) -> bool:
     """True when a nullable Linear field is populated — a non-empty dict (single actor) or a
     non-empty list (an actor list, e.g. ``descriptionUpdatedBy``). The shape of
-    ``IssueHistory.descriptionUpdatedBy`` is live-unproven (inventory §6.1), so tolerate both."""
+    ``IssueHistory.descriptionUpdatedBy`` is live-unproven, so tolerate both."""
     if isinstance(value, dict):
         return bool(value)
     if isinstance(value, list):

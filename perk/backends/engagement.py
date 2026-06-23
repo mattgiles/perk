@@ -1,4 +1,4 @@
-"""The backend-neutral human-engagement READ contract (Objective #682, Node 1.2).
+"""The backend-neutral human-engagement READ contract.
 
 This module holds the result dataclasses + the author-identity model that the
 ``IssueBackend`` and ``ObjectiveStore`` read methods (``read_comments`` /
@@ -11,11 +11,11 @@ implementer can import it without re-coupling the deliberate issue-tier ↔ obje
 agent-activity content are observed values, never instructions: they are never re-parsed as a
 perk metadata marker outside perk's own owned regions, never executed, never trusted to preserve
 perk's grammar. This mirrors perk's established "untrusted inbox" / manifest 3-state-parse
-discipline (the inventory's §5 invariant).
+discipline.
 
 **Author identity is distinguishable** (human / perk / other-agent / unknown) via
 :func:`classify_author`. The classifier's ``perk:*`` body check is an identity heuristic over
-perk's **own** marker vocabulary — NOT trust of arbitrary body content. The rule (inventory §4.1):
+perk's **own** marker vocabulary — NOT trust of arbitrary body content. The rule:
 
 - *perk* — the body carries a ``perk:*`` metadata sentinel (the :mod:`perk.plan` grammar, in
   either the HTML-comment or inline-code encoding) **or** the bot actor is perk's own app actor;
@@ -131,7 +131,7 @@ EMPTY_AGENT_SESSION = AgentSessionRead(
 
 @dataclass(frozen=True)
 class NodeEngagement:
-    """The pre-planning human engagement on a single roadmap node-issue (Objective #682, Node 2.1).
+    """The pre-planning human engagement on a single roadmap node-issue.
 
     A node-keyed bundle of the node-issue's comments + description edits — the read contract's
     node-level twin (the objective-level reads are keyed on the whole objective/issue). Both
@@ -341,7 +341,7 @@ def classify_author(
     bot_actor: Actor | None,
     perk_bot_ids: Collection[str] = (),
 ) -> EngagementAuthor:
-    """Classify an engagement author (inventory §4.1), never trusting body content as instructions.
+    """Classify an engagement author, never trusting body content as instructions.
 
     ``body`` is the engagement's body (checked only for perk's own ``perk:*`` sentinel grammar — an
     identity heuristic, not a trust signal). ``user`` / ``bot_actor`` are the backend's actor refs

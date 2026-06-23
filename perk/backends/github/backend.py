@@ -1,7 +1,7 @@
-"""``GitHubIssueBackend`` — the issue-tier adapter over the GitHub substrate (Objective #746).
+"""``GitHubIssueBackend`` — the issue-tier adapter over the GitHub substrate.
 
-Node 1.1 (``perk/backends/issue_backend.py``) shipped the issue-tier **contract** — the
-``IssueBackend`` ``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``.
+The issue-tier **contract** (``perk/backends/issue_backend.py``) defines the ``IssueBackend``
+``Protocol``, the backend-neutral result dataclasses, and ``IssueBackendError``.
 This module makes the GitHub backend live: ``GitHubIssueBackend`` is a thin delegation adapter over
 the plan/issue substrate ``perk.backends.github.plans`` (the GitHub backend's private implementation
 substrate, a sibling in this package). The resolver every issue-tier consumer goes through lives in
@@ -9,7 +9,7 @@ substrate, a sibling in this package). The resolver every issue-tier consumer go
 
 This module imports the substrate (``perk.backends.github.plans``) and the contract
 (``perk.backends.issue_backend``); the pure forge gateway ``perk/github/`` never references the
-backend tier (Node 1.1's one-way import guard).
+backend tier (the one-way import guard).
 
 Adapter disciplines:
 
@@ -204,7 +204,7 @@ class GitHubIssueBackend:
         with _translate():
             return plans.get_plan_body(number=number, repo_root=self._repo_root)
 
-    # --- in-place issue adoption (#706, §8.29) ---
+    # --- in-place issue adoption (§8.29) ---
 
     def read_issue(self, *, issue_id: str) -> issue_backend.AdoptableIssue | None:
         number = _number(issue_id)
@@ -316,9 +316,9 @@ class GitHubIssueBackend:
             )
         return issue_backend.CommentResult(posted=result.posted)
 
-    # --- human-engagement reads (Objective #682, Node 1.3) ---
+    # --- human-engagement reads ---
     # Honest where GitHub exposes the primitive: comments + description edits via read-only
-    # `gh api graphql` (Node 1.3). Agent sessions stay the only stub — GitHub has no agent-session
+    # `gh api graphql`. Agent sessions stay the only stub — GitHub has no agent-session
     # surface, so the derived stop signal is a clean no-op (the Linear-only surface).
 
     def read_comments(self, *, issue_id: str) -> tuple[engagement.EngagementComment, ...]:

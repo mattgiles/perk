@@ -25,32 +25,29 @@ from perk.backends.linear.project_ops import _LinearProjectOps
 from perk.objective import drift as objective_drift
 
 # ===========================================================================
-# The project-backed objective-storage tier (Objective #548, Node 3.2):
-# `LinearProjectObjectiveStore`. A Linear **Project** is the objective (overview content =
-# header + Reconcilable prose, no roadmap table); the roadmap is materialized as node-**issues**
-# attached to the project (each carrying an `objective-node` block), phases as project milestones,
-# and explicit `depends_on` edges as blocking relations. The roadmap is derived live from the
-# node-issues — it is NOT stored in the overview.
+# The project-backed objective-storage tier: `LinearProjectObjectiveStore`. A Linear **Project**
+# is the objective (overview content = header + Reconcilable prose, no roadmap table); the roadmap
+# is materialized as node-**issues** attached to the project (each carrying an `objective-node`
+# block), phases as project milestones, and explicit `depends_on` edges as blocking relations. The
+# roadmap is derived live from the node-issues — it is NOT stored in the overview.
 #
-# Node 3.2 implemented `find_objective` + `create_objective`; Node 3.3 completes the contract with
-# `get_objective` + the three `update_*` methods, so the store now satisfies the full
-# `ObjectiveStore` protocol (conformance binding in the tests). Still dormant — NOT resolver-wired
-# (that is Node 3.4). One shared `client` gives both owned op classes a single shared
-# `_team_id_cache` (the single-shared-cache property, now via the client). Every
-# method body wraps in `_translate_objective()` (IssueBackendError → ObjectiveStoreError, verbatim).
+# The store satisfies the full `ObjectiveStore` protocol (conformance binding in the tests) and is
+# the resolver's `linear` arm. One shared `client` gives both owned op classes a single shared
+# `_team_id_cache` (the single-shared-cache property, now via the client). Every method body wraps
+# in `_translate_objective()` (IssueBackendError → ObjectiveStoreError, verbatim).
 #
 # Read model (`get_objective`): the roadmap is derived live from the project's node-issues — each
 # carries an `objective-node` block (id/status/description + optional slug/comment; NO
-# pr/depends_on) and, once Node 3.4 writes it, a `plan-header` block whose `pr` field is the plan
-# backlink. `depends_on` is reconstructed from blocking relations (`issue_blocked_by`). The
-# overview holds the `objective-header` block + the Reconcilable prose region.
+# pr/depends_on) and a `plan-header` block whose `pr` field is the plan backlink. `depends_on` is
+# reconstructed from blocking relations (`issue_blocked_by`). The overview holds the
+# `objective-header` block + the Reconcilable prose region.
 # ===========================================================================
 
 
 class LinearProjectObjectiveStore:
-    """A project-backed ``ObjectiveStore`` over Linear Projects — the full contract (Node 3.2
-    ``find`` + ``create``; Node 3.3 ``get`` + the three ``update_*`` methods). Dormant: not
-    resolver-wired (Node 3.4)."""
+    """A project-backed ``ObjectiveStore`` over Linear Projects — the full contract
+    (``find`` + ``create``, ``get``, and the three ``update_*`` methods). The resolver's ``linear``
+    arm."""
 
     backend_id = "linear"
 
@@ -81,7 +78,7 @@ class LinearProjectObjectiveStore:
         self, *, source_id: str
     ) -> objective_store.AdoptableObjectiveSource | None:
         """Read a Linear **Project** (and its issues) verbatim as an adoptable objective source
-        (#709, §8.30): prose = the project overview ``content`` (untrusted DATA); ``issues`` = the
+        (§8.30): prose = the project overview ``content`` (untrusted DATA); ``issues`` = the
         project's existing issues (title/body verbatim). ``None`` when the project is absent;
         infra failures propagate (mapped to ``ObjectiveStoreError``)."""
         with _translate_objective():
@@ -122,7 +119,7 @@ class LinearProjectObjectiveStore:
         dry_run: bool = False,
     ) -> objective_store.ObjectiveRef | None:
         """Stamp perk's objective metadata **additively** into a pre-existing Linear Project IN
-        PLACE (#709, §8.30), never minting a second project.
+        PLACE (§8.30), never minting a second project.
 
         Composes the new overview preserving the original verbatim (MODEL prose in the Reconcilable
         region + header(``adopted_from=source_id``) + manifest + the ``Adopted-from`` Immutable
@@ -289,7 +286,7 @@ class LinearProjectObjectiveStore:
             self._projects.update_project_content(project_id, overview)
 
             # --- one milestone per phase (enriched names), in grouped order ---
-            # Routed through the name-keyed `ensure_phase_milestone` seam (Node 4.3). The project
+            # Routed through the name-keyed `ensure_phase_milestone` seam. The project
             # is brand-new, so `known` is seeded EMPTY: every phase name is a guaranteed miss and
             # creates a milestone, keeping this path's network calls byte-identical to the prior
             # blind-create loop (no extra `project_milestones` read; same `create_project_milestone`
@@ -327,7 +324,7 @@ class LinearProjectObjectiveStore:
         """Reconstruct the objective state from the project + its node-issues. ``None`` when the
         project is absent. The roadmap is derived live from the node-issues (never stored as a
         block): each ``objective-node`` block gives id/status/description/slug/comment; ``pr`` is
-        read from the same node-issue's ``plan-header`` block (``None`` until Node 3.4 writes it);
+        read from the same node-issue's ``plan-header`` block (``None`` until it is written);
         ``depends_on`` is reconstructed from blocking relations. Nodes are returned sorted by
         :func:`objective.node_sort_key` — never Linear's connection order.
 
@@ -410,8 +407,8 @@ class LinearProjectObjectiveStore:
         """Reconstruct an ``ObjectiveNode`` from its ``objective-node`` block. A malformed block
         (missing/invalid ``id``/``status``) raises ``IssueBackendError``.
 
-        **The plan backlink is the node-issue's own identifier** (Node 3.4 unification, refining
-        Node 3.3): in the project model the plan *is* the node-issue, so the backlink is
+        **The plan backlink is the node-issue's own identifier** (the node↔plan unification): in
+        the project model the plan *is* the node-issue, so the backlink is
         self-referential. It is derived as ``canonical_pr(identifier)`` whenever the node-issue
         carries a ``plan-header`` block (i.e. a plan has been saved into it), else ``None``. This is
         stable across ``pr submit`` overwriting ``plan-header.pr`` with the GitHub PR number, so
@@ -465,7 +462,7 @@ class LinearProjectObjectiveStore:
         state.
 
         ``pr`` is intentionally NOT persisted to the node block — ``render_node_block`` excludes
-        ``pr``, and the backlink's single home is the node-issue's own ``plan-header`` (Node 3.4),
+        ``pr``, and the backlink's single home is the node-issue's own ``plan-header``,
         read back by :meth:`get_objective`. Passing ``pr`` here is a no-op on the stored block.
 
         ``comment_updated`` is always ``False`` — the project model has no objective-body comment
@@ -501,7 +498,7 @@ class LinearProjectObjectiveStore:
                 issue_uuid, {"description": new_body}, what="update objective node"
             )
 
-            # Manifest-sync (#612): a `description` change updates the matching manifest entry
+            # Manifest-sync: a `description` change updates the matching manifest entry
             # (structural identity); a status/pr-only change does NOT touch the manifest. Skips
             # cleanly when the objective carries no manifest block (a pre-manifest objective).
             if description is not None:
@@ -562,7 +559,7 @@ class LinearProjectObjectiveStore:
                 return objective_store.ObjectiveBodyUpdate(
                     objective_id=objective_id, comment_id=None, updated=False, dry_run=True
                 )
-            # Manifest phase-pin refresh (#612): in the SAME write, re-derive the phase names from
+            # Manifest phase-pin refresh: in the SAME write, re-derive the phase names from
             # the spliced overview (a reconcile may have rewritten a `### Phase N:` header) and
             # refresh the manifest `phases` pins so the pin stays authoritative. Node descriptions
             # are synced via `update_objective_node`, not here. No-op when no manifest block exists.
@@ -695,7 +692,7 @@ class LinearProjectObjectiveStore:
                         issue_id=found[0], related_issue_id=new_uuid
                     )
 
-            # Manifest-sync (#612): on a manifest-bearing objective, append the new node's entry
+            # Manifest-sync: on a manifest-bearing objective, append the new node's entry
             # (id/slug/description; explicit `depends_on`) and pin a new phase name when the node
             # opens a phase not already in the manifest. Skips entirely on a pre-manifest objective
             # (no manifest to maintain; `doctor --fix` backfill remains the path).
@@ -705,7 +702,7 @@ class LinearProjectObjectiveStore:
                 objective_id=objective_id, node_id=new_id, comment_updated=False, dry_run=False
             )
 
-    # ============================================ objective-write sub-steps (Node 3.1 extraction)
+    # ============================================ objective-write sub-steps
     # Behavior-preserving helpers shared by `create_objective` / `adopt_source_as_objective` /
     # `add_objective_node`. The orchestrators keep the once-only `_ensure_label_id` resolution and
     # pass the resolved ids + milestone map down, so the GraphQL call sequence is byte-identical.
@@ -725,7 +722,7 @@ class LinearProjectObjectiveStore:
         prose renders FIRST, the machine blocks follow (reads scan by marker, position-independent).
         Transcoded so the HTML Reconcilable markers become inline-code sentinels.
 
-        The manifest block (#612 drift baseline) pins the intended roadmap's structural identity +
+        The manifest block (the drift baseline) pins the intended roadmap's structural identity +
         the canonical phase names; status/pr are excluded (live/observed state)."""
         header = objective.ObjectiveHeader(
             run_id=run_id,
@@ -897,7 +894,7 @@ class LinearProjectObjectiveStore:
                     issue_id=node_uuid[dep], related_issue_id=node_uuid[node.id]
                 )
 
-    # ================================================================== manifest sync (#612)
+    # ================================================================== manifest sync
     # The persisted `objective-manifest` block is the drift baseline; these keep it current on the
     # live write paths. Every one is a clean no-op on a pre-manifest objective (no manifest block).
 
@@ -982,7 +979,7 @@ class LinearProjectObjectiveStore:
         data = objective.render_manifest_block(list(manifest.nodes), new_phase_names)
         return plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)
 
-    # ============================================================ drift detect / repair (#612)
+    # ============================================================ drift detect / repair
 
     def _build_observed_snapshot(self, objective_id: str) -> objective_drift.ObservedSnapshot:
         """Build the offline-diffable :class:`ObservedSnapshot` from the live project state (the
@@ -1081,7 +1078,7 @@ class LinearProjectObjectiveStore:
         )
 
     def detect_objective_drift(self, *, objective_id: str) -> objective_drift.DriftReport:
-        """Build the observed snapshot and diff it against the manifest baseline (#612)."""
+        """Build the observed snapshot and diff it against the manifest baseline."""
         with _translate_objective():
             return objective_drift.detect_drift(self._build_observed_snapshot(objective_id))
 
@@ -1107,7 +1104,7 @@ class LinearProjectObjectiveStore:
     def repair_objective_drift(
         self, *, objective_id: str, dry_run: bool = False
     ) -> objective_store.RepairResult:
-        """Apply the safe/unambiguous repairs in order, stop at the first failed write (#612)."""
+        """Apply the safe/unambiguous repairs in order, stop at the first failed write."""
         with _translate_objective():
             snapshot = self._build_observed_snapshot(objective_id)
             ordered = self._ordered_repairs(objective_drift.detect_drift(snapshot))
@@ -1161,7 +1158,7 @@ class LinearProjectObjectiveStore:
                 dry_run=False,
             )
 
-    # --- human-engagement reads (Objective #682, Node 2.3) ---
+    # --- human-engagement reads ---
     # Honest project-level reads: project comments are the project's discussion threads;
     # description edits stay an honest empty (no project-level edit-history primitive). The fourth
     # flow consumer (`/objective-reconcile`) composes these with the per-node
@@ -1182,7 +1179,7 @@ class LinearProjectObjectiveStore:
         # Honest empty: Linear projects expose no description-edit-history primitive analogous to
         # issue `history.descriptionUpdatedBy` (the project's "edits" signal lives on its
         # node-issues, which the per-node `read_node_engagement` sections carry). A flagged
-        # preview-grade deferral, not overpromised (Node 4.3 live gate).
+        # preview-grade deferral, not overpromised (a live gate).
         return ()
 
     def read_agent_session(self, *, objective_id: str) -> engagement.AgentSessionRead:
@@ -1458,8 +1455,8 @@ class LinearProjectObjectiveStore:
         is not an issue, so completion retires the Project, not an issue. ``dry_run`` returns
         ``False`` without a write.
 
-        **Flagged not-live-proven** (the 1.4 spike did not cover project state) — verify at the
-        Node 5.1 smoke gate alongside ``list_projects`` / ``_workflow_state_id``.
+        **Flagged not-live-proven** (the spike did not cover project state) — verify at the
+        smoke gate alongside ``list_projects`` / ``_workflow_state_id``.
         """
         if dry_run:
             return False
@@ -1468,11 +1465,11 @@ class LinearProjectObjectiveStore:
         return True
 
     def post_status_update(self, *, objective_id: str, body: str, dry_run: bool = False) -> bool:
-        """Post a Project **Update** to the Linear Project (the status-report feed; Node 4.3).
+        """Post a Project **Update** to the Linear Project (the status-report feed).
 
         ``dry_run`` returns ``False`` without a write; else posts ``projectUpdateCreate`` and
         returns ``True``. Call sites wrap this fail-open (the update is bookkeeping, never
-        load-bearing). Flagged not-live-proven \u2014 verify at the Node 5.1 smoke gate.
+        load-bearing). Flagged not-live-proven \u2014 verify at the smoke gate.
         """
         if dry_run:
             return False
