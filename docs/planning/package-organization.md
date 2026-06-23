@@ -1,10 +1,9 @@
 # Package organization for `perk/` — the north star
 
 *A durable design doc settling, from first principles, **why `perk/` is organized the way it is** and
-**where every module should live**. Same genre/home as `node-3.1-architecture-correction.md`: an
-architecture note, not a turn plan. The one code move it justifies now — `perk/objective_drift.py` →
-`perk/objective/drift.py` — landed with this doc (Stage A). Every larger, fixture-heavy
-reorganization is staged as a follow-up node below, **not** implemented yet.*
+**where every module lives**. Same genre/home as `node-3.1-architecture-correction.md`: an
+architecture note, not a turn plan. The layout it describes (§1C) is **fully realized** — every module
+lives at the home these principles assign it.*
 
 ---
 
@@ -52,50 +51,46 @@ axes disagree, the earlier one wins, and Principle 6 (symmetry) is the final tie
 
 ---
 
-## 1B. Reconciling today's asymmetries
+## 1B. Where each concern lives
 
-`perk/` is layered by role, but with six asymmetries. For each: *deliberate* (with the principle that
-justifies it) or *to-be-fixed* (with the target + the stage that does it).
+`perk/` is layered by role. Each formerly-asymmetric concern now lives at the home its governing
+principle assigns — no open asymmetry remains:
 
-1. **`linear_backend/` is a subpackage but there is no `github_backend/`** (GitHub's issue/objective
-   substrate lives *inside* `perk/github/`) → **to-be-fixed** via Principles 2 & 3 (**Stage C**).
-   Today it is grounded in "PRs are GitHub-universal", which keeps PR/CI/auth in `github/` — correct —
-   but the *issue/objective* substrate is backend-selectable and should move under
-   `perk/backends/github/` now that a second backend (Linear) exists.
+1. **The GitHub backend's issue/objective substrate lives under `perk/backends/github/`** (Principles
+   2 & 3) — symmetric with `perk/backends/linear/`. Issue tracking and objective storage are
+   backend-selectable, so they sit behind the backend-neutral contract, one subpackage per concrete
+   backend, rather than inside the forge gateway.
 
-2. **`perk/github/` plays two roles** — universal forge machinery (PR/CI/auth) *and* GitHub's
-   issue/objective-tier substrate → **to-be-fixed** (**Stage C**): `github/` becomes the **pure forge
-   gateway**; the issue/objective substrate moves to `backends/github/`.
+2. **`perk/github/` is a pure forge gateway** — universal git-forge machinery (PR/CI/auth) only
+   (Principle 2). It never imports the backend tier; the issue/objective substrate it once also held
+   now lives in `backends/github/`.
 
-3. **`objective_drift.py` is a top-level module** although it is pure objective mechanics → **fixed
-   NOW** (**Stage A**, Part 2): it is conceptually `perk.objective.drift` and moved there. This is the
-   only asymmetry with no principled defense — it was simply added at the top level in #612.
+3. **`perk/objective/drift.py` is pure objective mechanics under the `objective/` package**
+   (Principle 5) — conceptually `perk.objective.drift`, homed there rather than at the top level.
 
-4. **`issue_backend.py` (contract) vs `issues.py` (impl+resolver); `objective_store.py` (contract) vs
-   `objective_stores.py` (impl+resolver)** — the contract-vs-impl distinction rides on a near-invisible
-   `s` → **to-be-fixed** (**Stage C**): the two backend-neutral resolvers consolidate into
-   `backends/resolve.py`; the adapters move into `backends/github/`; the confusing `issues.py` /
-   `objective_stores.py` modules disappear, killing the singular/plural smell.
+4. **The two backend-neutral resolvers + the backend-id constants live in `perk/backends/resolve.py`**
+   (Principle 3); the adapters live under `backends/github/`. The old `issues.py` /
+   `objective_stores.py` modules are gone — killing the singular/plural contract-vs-impl smell where
+   the distinction rode on a near-invisible `s`.
 
-5. **`backends/linear.py` (the `LinearClient`) sits beside `linear_backend/`** rather than inside it →
-   **to-be-fixed** (**Stage B**): → `backends/linear/client.py`. Principle 4 keeps the client a
-   distinct module (it is the API seam), but it belongs *inside* the `linear/` subpackage.
+5. **`LinearClient` is `perk/backends/linear/client.py`** — Principle 4 keeps the client a distinct
+   module (it is the API seam), inside the `linear/` subpackage.
 
-6. **`backends/linear_agent.py` (the Linear Agents-UI session mirror) is a third flat Linear concern**
-   outside `linear_backend/` → **to-be-fixed** (**Stage B**): → `backends/linear/agent.py`.
+6. **The Linear Agents-UI session mirror is `perk/backends/linear/agent.py`** — a Linear concern,
+   homed inside the `linear/` subpackage with the rest of the backend.
 
 ---
 
-## 1C. The target tree (the north star)
+## 1C. The tree (the north star)
 
 ```
 perk/
   substrate/                  # cross-cutting plumbing (config, git, output, providers,
                               #   registry, bindings, binding_delivery) — unchanged
-  plan.py                     # pure plan mechanics (single module — see Stage D)
+  plan.py                     # pure plan mechanics (single module — ratified, Stage D)
   objective/                  # pure objective mechanics
     _models.py  parse.py  render.py  manifest.py  graph.py
-    drift.py                  # ← moved from perk/objective_drift.py (Stage A — DONE)
+    drift.py                  # pure objective drift mechanics
   github/                     # UNIVERSAL git-forge gateway (used by ALL backends)
     _exec.py  auth.py  prs.py  reviews.py  workflows.py
   backends/
@@ -106,67 +101,36 @@ perk/
                               #   + the backend-id constants
                               #   (replaces issues.py + objective_stores.py)
     github/                   # the GitHub backend (issue + objective substrate + adapters)
-      backend.py              #   GitHubIssueBackend       (from today's issues.py)
-      objective_store.py      #   GitHubObjectiveStore     (from today's objective_stores.py)
-      plans.py objectives.py engagement.py   # substrate (from today's perk/github/)
+      backend.py              #   GitHubIssueBackend
+      objective_store.py      #   GitHubObjectiveStore
+      plans.py objectives.py engagement.py   # GitHub issue/objective substrate
     linear/                   # the Linear backend (renamed from linear_backend/)
-      client.py               #   LinearClient            (from backends/linear.py)
+      client.py               #   LinearClient (the API seam)
       backend.py issue_ops.py project_ops.py project_store.py
       objectives.py readiness.py _helpers.py
-      agent.py                #   Linear Agents mirror     (from backends/linear_agent.py)
+      agent.py                #   Linear Agents mirror
   state/  run/  convergence/  cli/   # orchestration + surface (unchanged)
 ```
 
-The two symmetries this end-state restores: **`backends/github/` ↔ `backends/linear/`** (Principle 6
-over Asymmetries 1, 4, 5, 6), and **`github/` as a single-role forge gateway** (Principle 2 over
-Asymmetry 2).
+Two symmetries hold across this layout: **`backends/github/` ↔ `backends/linear/`** (Principle 6), and
+**`github/` as a single-role forge gateway** (Principle 2).
 
 ---
 
-## 1D. The staged roadmap (the "how", deferred)
+## 1D. Settled decisions
 
-Each stage records scope, churn/risk, the guards/tests it must keep green, and the ordering rationale.
-**Only Stage A is implemented in this PR.** B/C/D are doc-only here.
+The staged reorg that produced this layout is **fully realized** — every module in §1C lives at its
+home. One durable decision is recorded here so it is settled rather than reopened:
 
-### Stage A — `objective_drift` → `objective/drift.py` (DONE in this PR; see Part 2)
+### `plan.py` stays a single module
 
-The single genuinely-isolated, ~0-risk move. The module is imported by module-path in exactly four
-files; a hard cutover (no compat shim) re-points them. No import cycle, because
-`perk/objective/__init__.py` does **not** import the new `drift` submodule, and `drift.py` imports its
-three dependencies from sibling submodules (`_models`, `graph`, `manifest`) rather than the package
-root. `ty` over the whole repo is the completeness oracle (a rename is a pure type-resolution change).
-
-### Stage B — `linear_backend/` → `backends/linear/` (+ fold `linear.py` → `client.py`, `linear_agent.py` → `agent.py`) (DONE in Node 1.1)
-
-Linear-only churn, **no `perk.github` fixture impact**. Updates every
-`from perk.backends import … linear, linear_backend`, `from perk.backends.linear import …`,
-`from perk.backends.linear_backend… import …`, and the Linear test modules. **Medium risk.** Must keep
-the Linear conformance bindings + the offline GraphQL fakes green. Ordering: before Stage C, because
-it is self-contained and proves the per-backend-subpackage shape that Stage C mirrors for GitHub.
-
-### Stage C — the github split (the big one)
-
-Introduce `perk/backends/github/`; move `perk/github/{plans,objectives,engagement}.py` (the
-issue/objective substrate) into it; move `GitHubIssueBackend` / `GitHubObjectiveStore` into
-`backends/github/`; consolidate the two resolvers into `backends/resolve.py`; **delete**
-`issues.py` / `objective_stores.py`. **Cost:** the ~245 `monkeypatch.setattr(github, …)`
-issue/objective-tier sites must re-point at the new substrate module (the PR/CI/auth-tier monkeypatch
-sites are **unaffected** — they stay on `perk.github`); the **source-scan boundary guards**
-(`tests/test_issues.py`, `tests/test_issue_backend.py::TestImportDirection`, the objective-tier guard)
-must be rewritten for the new allowed-set + import directions. The import-cycle literal discipline (the
-`backend_id` constant) and the late-bound-delegation equivalence lock must be preserved — the
-late-bound adapters will delegate to `perk.backends.github` module functions instead of `perk.github`,
-so the fixtures migrate to a backend-substrate fake (the Fake-backend condition recorded in
-`docs/learned/workflow/issue-backend.md`, now met because Linear landed). **Highest risk — plan as its
-own dedicated node (or a small node sequence).** Ordering: last, because it is the most expensive and
-benefits from the Stage B template.
-
-### Stage D — `plan.py` packaging (ratify or split)
-
-Decide whether to leave `plan.py` a single module or split it into a `plan/` package for symmetry with
-`objective/`. **Recommendation: ratify-as-is.** `plan.py` is cohesive and under 400 lines; Principle 6
-makes symmetry a *tie-breaker*, not a mandate, and a cohesive sub-400-line module needs no package.
-Lowest value of the four stages; recorded here so the decision is settled rather than reopened.
+`plan.py` is **not** split into a `plan/` package. It is cohesive — one tier of pure plan mechanics
+(plan-issue header/body/metadata-block shaping/parsing/rendering) — and **395 lines**, under the
+400-line threshold. Principle 6 makes symmetry with `objective/` a *tie-breaker*, not a mandate, and a
+cohesive sub-400-line module needs no package: `objective/` is a package because objective mechanics
+genuinely span six concerns (`_models` / `parse` / `render` / `manifest` / `graph` / `drift`);
+`plan.py` has no such internal seams. Splitting would add a package boundary, an `__init__.py`
+re-export surface, and import churn for zero cohesion or testability gain.
 
 ---
 
