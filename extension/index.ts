@@ -1,8 +1,8 @@
 // perk Pi extension — the session *interior*.
 //
-// T3 adds the tier-3 session-state mechanics (contracts.md §8.2/§8.3): claim PERK_RUN_ID on
-// `session_start` (verified-linkage, Q3), rebuild `perk:workflow-state` on `session_start` AND
-// `session_tree` (per-field LWW), and derive a child run_id on fork. No workflow semantics yet.
+// The tier-3 session-state mechanics (contracts.md §8.2/§8.3): claim PERK_RUN_ID on
+// `session_start` (verified-linkage), rebuild `perk:workflow-state` on `session_start` AND
+// `session_tree` (per-field LWW), and derive a child run_id on fork.
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -95,27 +95,27 @@ function writeT3Sentinel(
 export default function (pi: ExtensionAPI) {
   const version = perkVersion();
 
-  // P2.T1 — the read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
-  // both session_start AND session_tree below. enter/exit are the surface T2/T5 consume.
+  // The read-only tool-gating primitive. Attaches to perk:workflow-state.mode; synced on
+  // both session_start AND session_tree below. enter/exit are the surface the gated stages consume.
   const gating = registerToolGating(pi);
 
-  // Vendored `btw` (#625): a `/btw` human-only side-chat popover backed by an isolated in-memory
+  // Vendored `btw`: a `/btw` human-only side-chat popover backed by an isolated in-memory
   // AgentSession. Takes `gating` for the gate-mirror — its side-session toolset + cache key follow
   // perk's read-only gate (`sideSessionTools`), so the isolated session never bypasses the read-only
   // guarantee. Its `ctx.ui.custom` overlay is the ONE sanctioned charter exception (§6 D6): human-
   // invoked only, `hasUI`-gated, no model tool, not a stage/door — never machine-reachable.
   registerBtw(pi, gating);
 
-  // Vendored `whimsical` (#625): flavors pi's default working-message label with a random phrase per
+  // Vendored `whimsical`: flavors pi's default working-message label with a random phrase per
   // turn, via the headless-no-op `setWorkingMessage` surfaces seam. Always on, no config toggle.
   registerWhimsical(pi);
 
-  // P2.T2a — perk-owned plan mode: the `/plan` + Ctrl+Alt+P + `--plan` toggle surface over T1's
-  // gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
+  // perk-owned plan mode: the `/plan` + Ctrl+Alt+P + `--plan` toggle surface over the
+  // read-only gate, plus the plan-authoring context injection. perk owns plan mode end-to-end now (the
   // borrowed `@tombell/pi-plan` is retired).
   registerPlanMode(pi, gating);
 
-  // Node 2.3 — the first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
+  // The first 3rd-party plan adapter: a perk-owned, injection-only bridge that re-enables
   // `@tombell/pi-plan` as a real plan provider. Always registered, but INERT unless
   // `[providers] plan = "tombell-plan"`; it directs the foreign free-form prose `/plan` surface into
   // perk's canonical `plan_save` → `cache.plan-ref` contract. It needs no `gating` (Invariant 1: the
@@ -125,18 +125,18 @@ export default function (pi: ExtensionAPI) {
   // The second 3rd-party plan adapter — AUGMENT posture: `@plannotator/pi-extension` contributes
   // its browser plan-review UI while perk's plan surface + gate stay (planMode skips only
   // `--plan`/`Ctrl+Alt+P` under this selection). Always registered, but INERT unless
-  // `[providers] plan = "plannotator-plan"`. Injection-only as of Node 2.5 — the `plan_review`
+  // `[providers] plan = "plannotator-plan"`. Injection-only — the `plan_review`
   // tool moved to planReview.ts (below), which dispatches to this adapter's event-bus bridge
   // when plannotator is selected.
   registerPlanAdapterPlannotator(pi);
 
-  // Node 2.5 — `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
+  // `plan_review`, perk's UNIVERSAL review door: plannotator-selected → the event-bus
   // bridge; ANY other selection → the first-party in-TUI editor review. It takes `gating` only to
   // COMPOSE the approvalSave seam on an APPROVED review (auto-save → D1a gate exit) — Invariant 1
   // holds: the door composes the gate through the seam, never owns it.
   registerPlanReview(pi, gating);
 
-  // P3.T2 — objective-author context injection (the objective mirror of plan mode's authoring
+  // Objective-author context injection (the objective mirror of plan mode's authoring
   // half). Keyed off (read-only gate AND stage === objective-author); planMode defers to it.
   registerObjectiveAuthor(pi, gating);
   let sharedOk = false;
@@ -158,12 +158,12 @@ export default function (pi: ExtensionAPI) {
   }
   const registryOk = registryStages > 0;
 
-  // Node 2.3 — the composed `perk` status handle (charter D2): one slot, ordered objective →
+  // The composed `perk` status handle (charter D2): one slot, ordered objective →
   // checkpoints segments. Created once here (no hidden module state) and threaded into the two
-  // segment publishers below; node 3.1's footer reads it back via get/subscribe.
+  // segment publishers below; the footer reads it back via get/subscribe.
   const perkStatus = createPerkStatus();
 
-  // Node 3.1 — install the perk-owned footer once per session (charter D2/D7). Once-only: pi's
+  // Install the perk-owned footer once per session (charter D2/D7). Once-only: pi's
   // dispose contract for a REPLACED footer factory is unverified, so re-installing on every
   // session_start (reload) could leak the previous handle subscription.
   let footerInstalled = false;
@@ -189,7 +189,7 @@ export default function (pi: ExtensionAPI) {
     let minted = false;
 
     if (decision.action === "claim") {
-      // Cold claim — establish before consume (Q3 strict).
+      // Cold claim — establish before consume (strict).
       const handoff = readHandoff(ctx.cwd, decision.runId);
       if (handoff === null || handoff.run_id !== decision.runId) {
         reportError(`handoff missing or mismatched for run ${decision.runId}`);
@@ -230,9 +230,9 @@ export default function (pi: ExtensionAPI) {
       pi.appendEntry(WORKFLOW_STATE_TYPE, data);
       resolved = data;
     } else if (decision.action === "none") {
-      // Node 1.1 (objective #339): a warm session with no identity mints its own run_id so
-      // per-run state (the session data dir, nodes 1.2+) can key off it. No disk artifacts —
-      // dirs are the accessor's job (1.2); provenance is 1.3. A failed cold claim above never
+      // A warm session with no identity mints its own run_id so
+      // per-run state (the session data dir) can key off it. No disk artifacts —
+      // dirs are the accessor's job; provenance is recorded separately. A failed cold claim above never
       // falls here (claim stays a loud unclaimed error).
       const runId = mintRunId();
       const data: WorkflowState = { run_id: runId, pi_session_id: currentSessionId ?? undefined };
@@ -249,7 +249,7 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // Plan-ref linkage (turn-2b §6, stage-gated #43): reconcile the cache.plan-ref file into
+    // Plan-ref linkage (turn-2b §6, stage-gated): reconcile the cache.plan-ref file into
     // active_plan_ref — but ONLY when the launched stage *consumes* the ref (its registry
     // `requires`/`reads` list `cache.plan-ref`). That is the worktree binding stages
     // (implement/submit/address/land/learn); the root `worktree: none` stages
@@ -298,7 +298,7 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
-    // Node 3.1 (charter D7): perk identity is standing footer state, not a transition — the
+    // Charter D7: perk identity is standing footer state, not a transition — the
     // `v<version> loaded` toast (and its headless stderr mirror) is retired. D5 is rescinded:
     // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
     // Footer-seam install-site vacating: under a foreign `[providers] footer` selection perk does
@@ -322,7 +322,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const dir = join(ctx.cwd, ".pi", "workflow");
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        // T1/T2 sentinel (unchanged — those gates parse this line).
+        // The gate sentinel (unchanged — those gates parse this line).
         writeFileSync(
           join(dir, ".perk-loaded"),
           `perk ${version} loaded; shared=${sharedOk ? "ok" : "miss"}; ` +
@@ -354,15 +354,15 @@ export default function (pi: ExtensionAPI) {
   // a successful command-path save exits read-only mode (the read-only → read-write boundary).
   registerPlanSave(pi, gating);
 
-  // #339 Node 2.1 — the `plan_draft` working-draft file tool. Registered in the factory so it
+  // The `plan_draft` working-draft file tool. Registered in the factory so it
   // exists before the gate snapshots tools; its name is in READ_ONLY_TOOLS (the structural
   // session-data carve-out), so it survives plan mode.
   registerPlanDraft(pi);
 
-  // #352 Node 2.1 — the `objective_draft` working-objective file tool (the plan_draft twin).
+  // The `objective_draft` working-objective file tool (the plan_draft twin).
   registerObjectiveDraft(pi);
 
-  // #187 — the universal `ask_user_question` tool: lets a model interactively ask the human a
+  // The universal `ask_user_question` tool: lets a model interactively ask the human a
   // clarifying question (free-text or multiple-choice). Registered in the factory so it exists
   // before the gate snapshots tools; its name is in READ_ONLY_TOOLS so it survives plan mode.
   registerAskUser(pi);
@@ -373,64 +373,64 @@ export default function (pi: ExtensionAPI) {
   // Warm door: the `submit` tool + `/submit` command (turn-5a).
   registerSubmit(pi);
 
-  // P2.T8a — the warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
+  // The warm `ready` door: the deliberate draft→ready review gate (submit keeps draft).
   registerReady(pi);
 
   // Warm doors: `land` (turn-5b) merges + sets pending-learn; `learn` clears it (TS-only).
   registerLand(pi);
   registerLearn(pi);
 
-  // P2.T7 — the warm `/address` review loop: the `resolve_review_threads` tool + `/address`
+  // The warm `/address` review loop: the `resolve_review_threads` tool + `/address`
   // command. Classify-then-act (the verbose feedback fetch + classification runs in an isolated
   // spawned child; the parent fixes actionable items and batch-resolves the threads).
   registerAddress(pi);
 
-  // #175 — the warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
+  // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
   registerPrReview(pi);
 
-  // P2.T5 — the read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
+  // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).
   registerCiExecutor(pi);
 
-  // P2.T2c — perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
+  // perk-owned checkpoints: seed from the plan body's `## Steps`, advance on `[DONE:n]`.
   // Inert when no step list is present (perk plans are prose). Own `session_start`/`session_tree`/
   // `turn_end` handlers (coexist with the others; pi.on supports multiple handlers per event).
-  // Node 3.1 todo-seam deferral: perk is the reference todo provider (`perk-checkpoints`); these
+  // Todo-seam deferral: perk is the reference todo provider (`perk-checkpoints`); these
   // runtime surfaces step aside when a foreign `[providers] todo` is selected (the todo-seam mirror
   // of planMode's plan-seam deferral) — silent on the event handlers, announced on `/checkpoints`.
   registerCheckpoints(pi, perkStatus);
 
-  // Node 3.2 — the FIRST 3rd-party todo adapter (the todo-seam mirror of registerPlanAdapterTombell).
+  // The FIRST 3rd-party todo adapter (the todo-seam mirror of registerPlanAdapterTombell).
   // Injection-only: inert unless `[providers] todo = "juicesharp-todo"` is selected AND the session
   // is an active workflow. It carries perk's implement-progress discipline onto `@juicesharp/rpiv-
-  // todo`'s checklist overlay (perk's own checkpoints deferred at Node 3.1). No `gating` argument —
+  // todo`'s checklist overlay (perk's own checkpoints deferred). No `gating` argument —
   // the shim NEVER arbitrates tools (Invariant 1); no registration-time vacating (no command-name
   // collision on the todo seam, unlike the plan seam); never writes `perk:checkpoint`.
   registerTodoAdapterJuicesharp(pi);
 
-  // P2.T9 — the objective substrate: `/objective` set/clear, budget accounting, threshold
+  // The objective substrate: `/objective` set/clear, budget accounting, threshold
   // compaction, all keyed off the now-live `active_objective`. Inert when no objective is active.
   // (The deterministic objective mechanics live in the Python plane: `perk objective …`.)
   registerObjective(pi, perkStatus);
 
-  // P3.T2 — the warm `objective_save` door: the `objective_save` tool + `/objective-save` command
+  // The warm `objective_save` door: the `objective_save` tool + `/objective-save` command
   // (the objective mirror of plan-save). Takes `gating` for the read-only → read-write boundary.
   registerObjectiveSave(pi, gating);
 
-  // P2.T10 — the objective plan factory's warm transition surface: the `objective_node` bounded
+  // The objective plan factory's warm transition surface: the `objective_node` bounded
   // tool (delegates to the Python cold door; `status:"done"` requires a completion audit) + the
   // `/objective-plan` command (select the next node and author a bounded plan). The command now
   // enters the read-only gate on invocation (parity with the cold door's `mode: read-only`
   // handoff; exit stays with plan_save / `/plan` off) — hence `gating`.
   registerObjectivePlan(pi, gating);
 
-  // hop-2 — the learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
+  // The learned-docs plan factory's warm surface: the `/learn-docs` command gathers open
   // perk:learn issues into an inbox (via the `perk learn docs --gather` cold door) and injects the
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
   registerLearnDocs(pi);
 
-  // Node 2.2 — warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
+  // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
   // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the
   // `command:<id>` suffix) is wired into the `/objective-reconcile` + `/learn-docs` guidance.
   registerBindingDelivery(pi);

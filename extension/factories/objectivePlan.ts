@@ -1,4 +1,4 @@
-// P2.T10 — the objective plan-factory's warm transition surface. Two pieces:
+// The objective plan-factory's warm transition surface. Two pieces:
 //
 //   1. `/objective-plan [<number>] [--node ID]` — the warm entry: resolve the objective (arg, else
 //      `active_objective` from the rebuilt `perk:workflow-state`), enter the read-only gate when it
@@ -13,7 +13,7 @@
 //
 // The completion-audit gate is a property of THIS model-facing boundary only — NOT an invariant on
 // the node-`done` state: the canonical `perk objective node --status done` (human/CI cold CLI) has
-// no audit gate, and T11's auto-on-merge node-done deliberately sets `done` without one. Both are
+// no audit gate, and the auto-on-merge node-done deliberately sets `done` without one. Both are
 // intentional non-audited paths; the structural refusal protects the model's path only. The
 // "are we done?" judgment text lives in the perk-objective-plan skill.
 
@@ -105,7 +105,7 @@ export function readNodeClaim(ctx: BranchSource): ObjectiveNodeClaim | null {
 }
 
 /**
- * Record/clear the warm node-link carrier (Node 2.3 of #339) after a SUCCESSFUL `objective_node`
+ * Record/clear the warm node-link carrier after a SUCCESSFUL `objective_node`
  * status transition. `planning` writes the claim (the exact moment the warm factory learns the
  * node id); any other explicit status clears it iff the rebuilt claim matches this objective +
  * node (an unrelated claim is never clobbered). Best-effort: a failed append is loud via
@@ -151,7 +151,7 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodePayload {
 }
 
 /**
- * Decode unknown tool-call params into `ObjectiveNodeParams` (the tool-boundary seam — Node 3.2):
+ * Decode unknown tool-call params into `ObjectiveNodeParams` (the tool-boundary seam):
  * `objective` required number, `node` required non-empty string; `status` narrowed against
  * `NODE_STATUSES` (present-but-unknown → null — fail before any exec instead of riding to the
  * Click enum); `pr`/`description`/`audit` optional strings. Null on any miss (strict-fail).
@@ -199,7 +199,7 @@ export function isNonTrivialAudit(audit: unknown): boolean {
 }
 
 /**
- * Build the `perk objective node` argv from the tool params (conditional, matching T9's optional
+ * Build the `perk objective node` argv from the tool params (conditional, matching the substrate's optional
  * `--status`/`--pr`: `--status ""` is a Click error, so it is OMITTED when no status change).
  * Returns `null` when the call is structurally invalid (neither status nor pr).
  */
@@ -259,7 +259,7 @@ export async function objectiveNode(
   });
   if (!r.ok) return fail(r.message, r.errorType);
 
-  // Node 2.3 (#339): maintain the warm node-link carrier off the successful transition.
+  // Maintain the warm node-link carrier off the successful transition.
   recordNodeClaim(pi, ctx, params);
 
   const detail = params.status
@@ -510,7 +510,7 @@ function parseCommandArgs(args: string): { number: string | null; node: string |
 }
 
 /**
- * Backend-aware supplemental clause for the objective-read step of the factory prompts (Node 4.1).
+ * Backend-aware supplemental clause for the objective-read step of the factory prompts.
  * Byte-identical to perk/cli/commands/objective/shared.py::objective_read_instruction (the Python
  * twin); drift in either plane fails the paired parity suites. github (and any non-linear) → ""
  * (the `perk objective show` step already covers it); linear → the Project URL + the
@@ -555,7 +555,7 @@ async function fetchObjectiveUrl(
 }
 
 /** The seed guidance the warm `/objective-plan` injects to start the factory loop (the
- * perk-objective-plan skill pointer rides the skill-binding suffix — Node 2.3 — not hardcoded).
+ * perk-objective-plan skill pointer rides the skill-binding suffix — not hardcoded).
  * The loop is file-first (`plan_draft` → `plan_review` → approval-driven save); the node link
  * rides the `objective_node_claim` carrier recorded by the unconditional `planning` mark.
  * When `model` is set, the OPTIONAL `perk.objective-explorer` spawn carries an inline `model`
@@ -601,7 +601,7 @@ export function factoryGuidance(
 }
 
 /** The seed guidance the warm `/objective-reconcile` injects to start the reconcile pass (the
- * perk-objective-reconcile skill pointer rides the skill-binding suffix — Node 2.3 — not
+ * perk-objective-reconcile skill pointer rides the skill-binding suffix — not
  * hardcoded). */
 export function reconcileGuidance(objective: string, backend = "github", url = ""): string {
   const readClause = objectiveReadInstruction(backend, objective, url);
@@ -851,7 +851,7 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
         );
       }
       // Inject the factory guidance as a user message so the model starts the loop (always a turn).
-      // The perk-objective-plan pointer rides the skill-binding suffix (Node 2.3, D5) since a warm
+      // The perk-objective-plan pointer rides the skill-binding suffix (D5) since a warm
       // /objective-plan outside a stage:objective-plan session gets none from Mechanism A.
       const model = loadPerkConfig(ctx.cwd).subagents["objective-explorer"];
       const backend = resolveIssueBackendId(ctx.cwd);

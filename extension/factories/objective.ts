@@ -1,11 +1,11 @@
-// P2.T9 — the objective TS substrate: `active_objective` live use + budget accounting + threshold
+// The objective TS substrate: `active_objective` live use + budget accounting + threshold
 // compaction. The deterministic mechanics (storage, roadmap, next-node) live in the Python plane
 // (`perk objective …`); this is the in-session interior keyed off the now-live `active_objective`
 // workflow-state field.
 //
 // NO model-facing bounded transition tools here — the `objective-plan` stage, the plan factory, and
-// the "fire only when…" tools are T10. This turn ships three pieces, all inert when no objective is
-// active:
+// the "fire only when…" tools live elsewhere. This module ships three pieces, all inert when no
+// objective is active:
 //   1. `/objective [<id>|clear]` — set/clear `active_objective` (LWW field) + seed a dedicated
 //      `perk:objective-budget` activation marker (high-churn budget data kept OFF the shared record,
 //      mirroring checkpoints' dedicated entry).
@@ -125,8 +125,8 @@ function activeObjective(ctx: ExtensionContext): string | null {
 }
 
 /**
- * Surface the budget as the objective segment of the composed `perk` status (node 2.3 — the
- * `perk-objective` widget is retired; the segment carries id + tokens + elapsed). Headless-safe:
+ * Surface the budget as the objective segment of the composed `perk` status (the `perk-objective`
+ * widget is retired; the segment carries id + tokens + elapsed). Headless-safe:
  * the handle no-ops without UI.
  */
 function renderStatus(ctx: ExtensionContext, status: PerkStatusHandle): void {

@@ -1,12 +1,12 @@
-// Node 1.2 — the headless stage-drive primitive (`driveStage`).
+// The headless stage-drive primitive (`driveStage`).
 //
 // Drives ONE read-write stage (`implement`/`address`) end-to-end on an already-prepared worktree,
 // running the SAME `@perk/pi` extension package, with a locked resource set, auto-compaction and
 // auto-retry off, and a budget/timeout watchdog. It seeds the stage's initial prompt, lets the
 // model work (calling perk's real tools), detects the stage's terminal signal, and returns a
-// structured `RunOutcome`. This implements the contract locked by Node 1.1
-// (`docs/design/headless-worker.md` §B) — the substrate Node 1.3 (event stream) and Node 4.1 (e2e
-// harness) consume.
+// structured `RunOutcome`. This implements the contract locked in
+// `docs/design/headless-worker.md` §B — the event-stream substrate and the e2e
+// harness consume.
 //
 // Scope here is the in-process drive primitive only. Positioning (worktree create, handoff/plan-ref
 // /plan-body materialization, `run_id` mint) is the cold-door/runner's job and is a PREPARED-
@@ -64,7 +64,7 @@ export interface DriveBudget {
 }
 
 /**
- * The structured run outcome (audit §B). **Additive-stable**: Node 1.3 may add fields; existing
+ * The structured run outcome (audit §B). **Additive-stable**: later fields may be added; existing
  * fields keep their meaning. Never thrown — `driveStage` always resolves with one of these.
  */
 export interface RunOutcome {
@@ -77,10 +77,10 @@ export interface RunOutcome {
   error: { type: string; message: string; summary: string } | null;
 }
 
-// --- structured run-event stream (Node 1.3; §8.12) ----------------------------------------------
+// --- structured run-event stream (§8.12) ----------------------------------------------
 
 /**
- * The structured run-event stream (Node 1.3, contracts §8.12). A small, JSON-serializable,
+ * The structured run-event stream (contracts §8.12). A small, JSON-serializable,
  * **additive-stable** discriminated union keyed on `kind` (distinct from `DriveEvent.type`). Every
  * event carries a monotonic `seq` (0-based) and `t` (elapsed ms, same basis as
  * `RunOutcome.budget.elapsed_ms`). Future nodes may add variants/fields; existing ones keep meaning.
@@ -132,7 +132,7 @@ export interface DriveStageDeps {
   createRuntime?: (opts: DriveStageOptions) => Promise<DriveRuntimeLike>;
   resourceLoaderOptions?: CreateAgentSessionServicesOptions["resourceLoaderOptions"];
   now?: () => number;
-  /** The structured run-event sink (Node 1.3). Absent ⇒ the default run-scoped NDJSON file sink. */
+  /** The structured run-event sink. Absent ⇒ the default run-scoped NDJSON file sink. */
   eventSink?: RunEventSink;
 }
 
@@ -262,7 +262,7 @@ export function evaluateTerminal(args: {
   if (args.stage === "implement") {
     const pr = extractPr(args.submitDetails);
     if (args.submitDetails?.ok === true && pr !== null) {
-      // #556 — completion additionally requires the submit to be mergeable: a definitively-
+      // Completion additionally requires the submit to be mergeable: a definitively-
       // unmergeable PR (merge conflicts unresolved) is NOT done. `mergeable === true`/`null`/
       // absent all allow completion (fail-open); only a definitive `false` blocks it. On the
       // happy path the resolver follow-up turns re-submit, overwriting submitDetails with a
@@ -356,7 +356,7 @@ export function assembleOutcome(args: {
   };
 }
 
-// --- run-event helpers (Node 1.3; offline-testable) ---------------------------------------------
+// --- run-event helpers (offline-testable) ---------------------------------------------
 
 /**
  * Extract `[WIP:n]`/`[DONE:n]` markers from assistant text in **textual appearance order** (pure).
@@ -465,7 +465,7 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
  * Re-derive the stage's initial prompt from the plan-ref — the TS twin of
  * `perk/run/launch.py._implement_prompt`/`_address_prompt`. INVARIANT: textual parity with the Python
  * plane (asserted reciprocally in `worker.test.ts` + `tests/test_worker_prompt_parity.py`); the
- * resolved skill-binding suffix is delivered by the cold door and is deferred to Phase-2. Returns
+ * resolved skill-binding suffix is delivered by the cold door, not here. Returns
  * `null` when there is no plan-ref (nothing to prime).
  */
 export function initialPromptFor(
@@ -627,7 +627,7 @@ export async function driveStage(
   const counters = freshCounters();
   const elapsed = (): number => Math.max(0, now() - startMs);
 
-  // Structured run-event stream (Node 1.3): resolve the sink + run_id once, build the emitter, and
+  // Structured run-event stream: resolve the sink + run_id once, build the emitter, and
   // route every terminal exit through `finish` so exactly one `run_finished` is emitted per drive.
   const runId = env.PERK_RUN_ID ?? "";
   const sink = deps.eventSink ?? defaultEventSink(opts.worktree, runId);

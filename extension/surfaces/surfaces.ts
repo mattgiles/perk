@@ -1,18 +1,18 @@
-// The perk surfaces module — Objective #251, node 2.1. The one module that owns perk's UI
+// The perk surfaces module. The one module that owns perk's UI
 // vocabulary per the TUI charter (`docs/design/tui-charter.md` §3–§5): the composed `perk` status
 // slot + widget slot keys, footer identity marks, the §5 glyph + theming vocabulary, the §4 height
 // bounds, the `createPerkStatus` composed-status handle + `setStandingWidget` widget setter, and
 // the pure format helpers the standing surfaces render with. The notify seam itself stays in
-// `report.ts` (re-exported here so "the surfaces module" is surfaces.ts + report.ts for the node
-// 4.1 guard).
+// `report.ts` (re-exported here so "the surfaces module" is surfaces.ts + report.ts for the
+// surfaces guard).
 //
-// Composed status (node 2.3, charter §6 D2): perk presents ONE footer status under the single
+// Composed status (charter §6 D2): perk presents ONE footer status under the single
 // `perk` slot — the objective + checkpoints segments composed in fixed charter order (objective
 // first), joined with two spaces. The per-feature status slots (`perk-checkpoints`,
-// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). Node 3.1 lifted
-// this composition into the perk-owned footer (`perkFooter`/`installPerkFooter` below); the
+// `perk-objective`) and the `perk-objective` widget are retired (D8 sanctioned). The perk-owned
+// footer (`perkFooter`/`installPerkFooter` below) lifted this composition; the
 // composed `perk` status slot keeps publishing — it is the RPC-visible surface (setFooter is an
-// RPC no-op). The regression guard binds in node 4.1.
+// RPC no-op). A regression guard enforces this composition.
 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 
@@ -20,7 +20,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 export { type ReportTarget, report, type Severity } from "./report.ts";
 
 // --- standing-surface slot keys (charter §2) ---
-// The ONE composed status slot (node 2.3 / D2): all perk status segments render under this key.
+// The ONE composed status slot (D2): all perk status segments render under this key.
 export const STATUS_SLOT_PERK = "perk";
 // NOTE: same string as providers.ts PERK_CHECKPOINTS_PROVIDER_ID but a different concept
 // (UI slot vs provider id) — deliberately NOT merged.
@@ -124,7 +124,7 @@ export function setWorkingMessage(target: WorkingMessageTarget, message?: string
   target.ui.setWorkingMessage(message);
 }
 
-// --- the composed perk status (node 2.3 / charter D2) --------------------------------------------
+// --- the composed perk status (charter D2) --------------------------------------------
 
 /** A named segment of the composed `perk` status. Order is fixed by `PERK_SEGMENT_ORDER` (D2). */
 export type PerkSegmentKey = "objective" | "checkpoints";
@@ -137,7 +137,7 @@ const PERK_SEGMENT_SEPARATOR = "  ";
 
 /**
  * The composed-status handle: each controller publishes its segment text through `set`, and the
- * handle recomposes + republishes the single `perk` status slot. Node 3.1: the footer reads
+ * handle recomposes + republishes the single `perk` status slot. The footer reads
  * segments back via `get` and repaints via `subscribe` — the slot's `setStatus` dual-publish is
  * deliberate (RPC clients see the slot; setFooter is an RPC no-op).
  */
@@ -187,7 +187,7 @@ export function createPerkStatus(): PerkStatusHandle {
   };
 }
 
-// --- the perk-owned footer (node 3.1 / charter D2) -----------------------------------------------
+// --- the perk-owned footer (charter D2) -----------------------------------------------
 
 /**
  * The raw material for one composed footer line. Left group (charter order 1–3): `identity`,

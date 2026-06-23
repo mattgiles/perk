@@ -1,7 +1,7 @@
-// Objective #339 Node 2.5 — the backend-neutral `plan_review` review door. perk's UNIVERSAL
+// The backend-neutral `plan_review` review door. perk's UNIVERSAL
 // plan-review surface: the model calls ONE tool; this module dispatches to the configured review
 // backend. Plannotator-selected → the event-bus bridge (`createPlannotatorBridge`,
-// planAdapterPlannotator.ts — the Node 2.4 AUGMENT-posture path, byte-stable); ANY other
+// planAdapterPlannotator.ts — the AUGMENT-posture path, byte-stable); ANY other
 // selection (perk-plan, tombell, unknown ids) → the FIRST-PARTY in-TUI editor review
 // (`runFirstPartyReview`): display the draft in pi's built-in `ctx.ui.editor` dialog (scrollable,
 // Ctrl+G opens the user's external $EDITOR), write optional human edits back to the draft via
@@ -15,7 +15,7 @@
 // artifact wins; the `plan` param is the fallback; the transcript scrape is NEVER reviewed — an
 // approval would auto-save scraped conversation bytes, so no draft + no param soft-skips with a
 // `plan_draft` redirect). An APPROVED outcome (either backend) wires into the shared
-// `approvalSave` seam (planSave.ts, Node 2.3): auto-save → D1a gate exit → terminating result,
+// `approvalSave` seam (planSave.ts): auto-save → D1a gate exit → terminating result,
 // node link recovered from the `objective_node_claim` carrier inside `savePlan`. A DENY returns
 // feedback and directs a `plan_draft` rewrite + re-review. Strict on deny, FAIL-OPEN everywhere
 // else: headless / dismissed (Esc anywhere = skip, mirroring ask_user_question's dismissal — deny
@@ -27,14 +27,14 @@
 // discarded (the aborted arm wins). Enter submits in the editor dialog (Shift+Enter = newline),
 // so the dialog titles carry the key hints — pi renders no other affordance.
 //
-// THE OBJECTIVE ARM (#352 Nodes 2.2 + 2.3): an objective-author session (read-only, stage
+// THE OBJECTIVE ARM: an objective-author session (read-only, stage
 // `objective-author`) routes through `executeObjectiveReview` instead of the plan path — the
 // reviewed bytes are the RENDERED objective draft (`readObjectiveDraft` + `renderObjectiveDraft`,
 // objectiveDraft.ts — never raw JSON, never the `plan` param, never the transcript; no draft
 // soft-skips with `reason: "no_objective_draft"`). Dispatch mirrors the plan path (plannotator
 // bridge or the first-party editor, VIEW-ONLY — edits are never written back; deny+feedback is
 // the change channel). An APPROVED outcome wires into the `objectiveApprovalSave` seam
-// (objectiveSave.ts, Node 2.3): re-read the STRUCTURED artifact → `saveObjective` → D1a gate
+// (objectiveSave.ts): re-read the STRUCTURED artifact → `saveObjective` → D1a gate
 // exit → a TERMINATING result; a failed save is non-terminating, leaves the gate read-only, and
 // directs the human `/objective-save` failsafe.
 //
@@ -237,7 +237,7 @@ const DENY_FEEDBACK_TITLE = "Deny feedback (optional) — Enter to send";
  * dismissed); (4) on deny, optional feedback via a second editor dialog. `ctx.ui.editor` takes no
  * AbortSignal — `signal?.aborted` is checked before each dialog (the aborted arm wins).
  *
- * Presentation options (#352 Node 2.2; defaults preserve the plan-path behavior byte-for-byte):
+ * Presentation options (defaults preserve the plan-path behavior byte-for-byte):
  * `editorTitle`/`verdicts` swap the displayed strings; `viewOnly: true` skips the write-back
  * branch entirely — the editor output is used only for Esc/dismissed detection, `plan` is
  * returned unchanged and `edited` stays false (deny+feedback is the change channel).
@@ -316,7 +316,7 @@ export async function runFirstPartyReview(args: {
 
 // ------------------------------------------------------------------- the objective review arm
 
-/** The objective-flavored verdict options (approval auto-saves — #352 Node 2.3). */
+/** The objective-flavored verdict options (approval auto-saves). */
 const OBJECTIVE_VERDICTS = {
   approve: "Approve — auto-save to GitHub",
   deny: "Deny — send feedback for revision",
@@ -448,7 +448,7 @@ export function approvedObjectiveSaveResult(
 }
 
 /**
- * The objective review arm (#352 Nodes 2.2 + 2.3), mirroring `executePlanReview`'s shape but
+ * The objective review arm, mirroring `executePlanReview`'s shape but
  * with the rendered objective draft as the SOLE review source (never the `plan` param, never
  * the transcript). First-party reviews run VIEW-ONLY (edits are never written back;
  * deny+feedback is the change channel). An APPROVED outcome wires into the
@@ -529,7 +529,7 @@ export async function executePlanReview(
   params: unknown,
   signal?: AbortSignal,
 ): Promise<ToolResult> {
-  // Tool-boundary decode (Node 3.2), in this tool's native fail-open vocabulary: a MISTYPED
+  // Tool-boundary decode, in this tool's native fail-open vocabulary: a MISTYPED
   // `plan` (or non-object params) skip-shapes (`reason: "bad_input"`) without reviewing; an
   // ABSENT `plan` proceeds — the validated draft artifact is the preferred source.
   const p = paramsOf(params);
@@ -545,14 +545,14 @@ export async function executePlanReview(
       details: { status: "skipped", reason: "bad_input" },
     };
   }
-  // 1. Objective-author session → the objective review arm (#352 Node 2.2): the rendered
+  // 1. Objective-author session → the objective review arm: the rendered
   //    objective draft is the sole review source; a well-typed `plan` param is ignored here.
   if (rebuildWorkflowState(branchOf(ctx)).stage === OBJECTIVE_AUTHOR_STAGE) {
     return executeObjectiveReview(pi, ctx, gating, bridge, signal ?? ctx.signal);
   }
   // 2. Headless → soft skip (fail-open; never wedges CI/supervisor runs on an interactive UI).
   if (!ctx.hasUI) return skipResult();
-  // 3. File-first resolution (Node 2.4): artifact → param, NEVER transcript — an approval
+  // 3. File-first resolution: artifact → param, NEVER transcript — an approval
   //    auto-saves the reviewed bytes, and scraped conversation bytes must never be those.
   const src = resolvePlanSource(ctx, plan);
   if (src === null || src.source === "transcript") {

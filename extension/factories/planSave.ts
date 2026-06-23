@@ -1,28 +1,28 @@
-// P1.T3 — the warm `/plan-save` door (turn-3 §5/§6). The in-session twin of the Python cold
-// door (`perk plan save`): a deterministic, terminating tool + command that WRAP T2's storage —
-// they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan save --json` via
-// the shared cold-door client (`runColdDoor`, Node 1.4 — the plan markdown rides the run-scratch
+// The warm `/plan-save` door (turn-3 §5/§6). The in-session twin of the Python cold
+// door (`perk plan save`): a deterministic, terminating tool + command that WRAP the existing
+// storage — they do NOT reimplement the GitHub write. `savePlan()` delegates to `perk plan save
+// --json` via the shared cold-door client (`runColdDoor` — the plan markdown rides the run-scratch
 // stdin channel), then appends `active_plan_ref` so the live session is linked immediately
 // (strict read-back, idempotent, headless-safe). Failures are loud-but-non-fatal — never throw.
 //
-// FILE-FIRST PLAN SOURCE (Node 2.2). Both surfaces resolve their plan through
+// FILE-FIRST PLAN SOURCE. Both surfaces resolve their plan through
 // `resolvePlanSource`: the validated `plan-draft.md` artifact (`readSessionArtifact`,
 // digest-validated, fail-open) wins; the explicit `plan` param (tool only, now optional) is the
 // fallback for sessions that never wrote a draft; `extractPlanMarkdown` (the transcript scrape)
 // is the universal last resort. A differing ignored param is surfaced, never silent.
 //
-// APPROVAL→SAVE ORCHESTRATION (Node 2.3). The exported `approvalSave` seam is the shared
+// APPROVAL→SAVE ORCHESTRATION. The exported `approvalSave` seam is the shared
 // APPROVED-review → save flow: artifact-first resolution → `savePlan` (warm node-link recovery
 // inside, from the `objective_node_claim` carrier) → gate exit on a successful save (D1a). The
-// `/plan-save` command is the MANUAL FAILSAFE invocation of the same seam; from Node 2.4 on, the
-// review backends (plannotator / first-party / tombell) wire their APPROVED outcome into it.
+// `/plan-save` command is the MANUAL FAILSAFE invocation of the same seam; the review backends
+// (plannotator / first-party / tombell) wire their APPROVED outcome into it.
 //
-// SEAM-SHARED SUBSTRATE (Node 2.2). `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
+// SEAM-SHARED SUBSTRATE. `savePlan`/the `plan_save` tool/`/plan-save`/the read-only gate
 // are the produced-contract landing for the PLAN seam (`adapter-architecture.md` Invariant 1) — the
-// Node 2.3 adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
+// adapter bridges a foreign plan surface *to* `plan_save`/`cache.plan-ref`/the gate, so
 // they must stay always-registered. They do NOT defer when a foreign `[providers] plan` is selected
 // — only perk's own authoring surface (`extension/factories/planMode.ts`: `/plan`, `Ctrl+Alt+P`, `--plan`,
-// the `perk:plan-context` injection) steps aside. Deferring this substrate would break Node 2.3.
+// the `perk:plan-context` injection) steps aside. Deferring this substrate would break the adapter.
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "../substrate/cache.ts";
@@ -62,7 +62,7 @@ export interface PlanSaveOk {
   plan_source: PlanSource | null;
 }
 
-/** The atomic objective node→plan commit surfaced by `perk plan save` (P2.T10). */
+/** The atomic objective node→plan commit surfaced by `perk plan save`. */
 export interface ObjectiveNodeLink {
   linked: boolean;
   node: string | null;
@@ -111,10 +111,10 @@ function decodePlanRef(payload: ColdJson): PlanRef | null {
   ) {
     return null;
   }
-  // `base` (#633) stays Python-owned for all behavior; carrying it keeps the workflow-state
+  // `base` stays Python-owned for all behavior; carrying it keeps the workflow-state
   // `active_plan_ref` copy byte-consistent with the cold door's `--json` plan_ref. Parity-only +
   // lenient: a present null/string is carried, an absent/mistyped value is simply omitted (never a
-  // decode failure — legacy pre-#633 plan-refs lack the field).
+  // decode failure — legacy plan-refs lack the field).
   const base = nullableStringField(ref, "base");
   return { provider, pr_id: prId, url, labels, objective_id: objectiveId, base };
 }
@@ -138,8 +138,8 @@ function decodeObjectiveNode(payload: ColdJson): ObjectiveNodeLink | null {
  * bad_output — it is appended to workflow-state, where a half-formed ref would poison
  * `planRefsEqual`). The rendered issue id/url are derived from the strict ref instead of decoded
  * independently — the cold door builds the ref FROM the issue, so they are byte-identical by
- * construction; this makes any `issue` sub-object shape change (e.g. the #387 `number`→`id`
- * rename under CLI↔extension version skew, the #390 incident) skew-harmless. `existed` and
+ * construction; this makes any `issue` sub-object shape change (e.g. a `number`→`id`
+ * rename under CLI↔extension version skew) skew-harmless. `existed` and
  * `objective_node` are advisory — the plan genuinely saved, so the success report must survive
  * them. With `plan_ref` the only strict field, `bad_output` is reachable only for a payload whose
  * persistence would corrupt workflow-state.
@@ -160,7 +160,7 @@ function decodePlanSave(payload: ColdJson): PlanSavePayload | null {
 
 /**
  * Whether perk-owned plan mode is active — read from perk's OWN signal, the `read-only` `mode` of
- * `perk:workflow-state` (the structural tool gate, P2.T1). This retires the P1.T3b soft coupling to
+ * `perk:workflow-state` (the structural tool gate). This retires the soft coupling to
  * `@tombell/pi-plan`'s `plan-mode-state` entry: perk now owns plan mode (`/plan` toggles
  * `gating.enter`/`exit`, which append `mode`), so the gate's own field is the source of truth.
  */
@@ -181,8 +181,8 @@ function textOf(content: unknown): string {
 }
 
 /**
- * Best-effort, deterministic: the whole text of the latest assistant message, or null. As of
- * Node 2.2 this is the universal fail-open transcript FALLBACK behind the validated plan-draft
+ * Best-effort, deterministic: the whole text of the latest assistant message, or null. This is
+ * the universal fail-open transcript FALLBACK behind the validated plan-draft
  * artifact (see `resolvePlanSource`) — no longer the `/plan-save` command's primary plan source.
  * Inherently fragile (it cannot tell a clean plan from conversation): keep the working draft
  * current with `plan_draft` so the validated artifact wins. (There is no tag/marker convention to
@@ -199,12 +199,12 @@ export function extractPlanMarkdown(entries: readonly unknown[]): string | null 
   return null;
 }
 
-/** Where the saved plan bytes came from (the Node 2.2 file-first resolution order). */
+/** Where the saved plan bytes came from (the file-first resolution order). */
 export type PlanSource = "plan-draft" | "param" | "transcript";
 
 /**
- * The shared plan-source resolver (Node 2.2) both save surfaces use — and Node 2.3's
- * approval→save orchestration later. Resolution order: (1) the validated `plan-draft.md`
+ * The shared plan-source resolver both save surfaces use — and the
+ * approval→save orchestration. Resolution order: (1) the validated `plan-draft.md`
  * artifact (`readSessionArtifact`: digest-validated, fail-open — null on no run_id / no pointer
  * / fork run_id mismatch / missing file / digest mismatch); (2) a non-blank explicit param;
  * (3) the transcript scrape (`extractPlanMarkdown`); else null.
@@ -248,7 +248,7 @@ export async function savePlan(
     objectiveId?: string;
     nodeId?: string;
     consumedLearn?: string[];
-    /** The resolved plan source (Node 2.2) — surfaced in the message + details when non-param. */
+    /** The resolved plan source — surfaced in the message + details when non-param. */
     source?: PlanSource;
     /** A differing explicit param was ignored in favor of the artifact (visibly flagged). */
     paramMismatch?: boolean;
@@ -259,7 +259,7 @@ export async function savePlan(
   const plan = opts.plan.trim();
   if (!plan) return fail("no plan markdown to save (propose a plan first)", "invalid_input");
 
-  // #129: forward an explicit title (previously accepted but DROPPED), else best-effort generate
+  // Forward an explicit title (previously accepted but DROPPED), else best-effort generate
   // one via the session model. On any failure the cold door's `derive_title` fallback takes over.
   const explicit = opts.title?.trim();
   const title =
@@ -269,16 +269,16 @@ export async function savePlan(
 
   const branch = (): BranchEntry[] => branchOf(ctx);
   // No read-only fail-fast here (D1a): the `plan_save` TOOL is structurally unreachable while
-  // read-only (T1's allowlist excludes it), so reaching savePlan via the tool means the gate is
+  // read-only (the read-only allowlist excludes it), so reaching savePlan via the tool means the gate is
   // already off; the `/plan-save` COMMAND is allowed to run while read-only and the command handler
   // exits the gate on a successful save (the read-only → read-write boundary in one gesture).
   const runId = rebuildWorkflowState(branch()).run_id ?? "";
 
-  // Node 2.3 (#339): warm node-link recovery. When BOTH link params are absent (an
+  // Warm node-link recovery. When BOTH link params are absent (an
   // approval-triggered save carries no model params), fill both-or-neither from the rebuilt
   // `objective_node_claim`. Any explicit value (even one) wins outright — a half-specified link
   // is the caller's, never mixed with the claim. Fail-open: a malformed/missing claim never
-  // blocks a save (readNodeClaim returns null). Mirrors the cold `_link_from_handoff` (#78).
+  // blocks a save (readNodeClaim returns null). Mirrors the cold `_link_from_handoff`.
   let objectiveId = opts.objectiveId;
   let nodeId = opts.nodeId;
   if (objectiveId === undefined && nodeId === undefined) {
@@ -291,16 +291,16 @@ export async function savePlan(
 
   const args = ["plan", "save", "--json"];
   if (runId) args.push("--run-id", runId);
-  // #129: the resolved title (explicit or LLM-generated). When absent, the cold door derives it.
+  // The resolved title (explicit or LLM-generated). When absent, the cold door derives it.
   if (title) args.push("--title", title);
-  // P2.T10: the plan→objective link. The objective plan-factory passes the active objective
+  // The plan→objective link. The objective plan-factory passes the active objective
   // number; non-objective plans omit it (unchanged behavior).
   if (objectiveId) args.push("--objective-id", objectiveId);
-  // P2.T10: the objective plan factory passes the node id alongside the objective id; the cold
+  // The objective plan factory passes the node id alongside the objective id; the cold
   // door commits the node→plan backlink + `in_progress` advance atomically. Non-factory plans
   // omit it (unchanged behavior).
   if (nodeId) args.push("--node-id", nodeId);
-  // hop-2: the learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
+  // The learn-docs factory passes the consumed perk:learn issue numbers; docs plans land
   // them (close + label perk:consolidated). Non-factory plans omit it (unchanged behavior).
   if (opts.consumedLearn && opts.consumedLearn.length > 0) {
     args.push("--consumed-learn", opts.consumedLearn.join(","));
@@ -327,7 +327,7 @@ export async function savePlan(
 
   const verb = r.data.issue.existed ? "Updated" : "Saved";
   const nodeLink = r.data.objective_node;
-  // Node 2.3 (#339): a successful node-linked save clears the matching claim (best-effort —
+  // A successful node-linked save clears the matching claim (best-effort —
   // failure only risks a stale claim silently linking a later, unrelated save; surfaced via
   // appendWorkflowState's report()). An unrelated claim is never clobbered.
   if (nodeLink?.linked === true) {
@@ -344,7 +344,7 @@ export async function savePlan(
       });
     }
   }
-  // Render all THREE node-link outcomes (the silent-partial-failure fix, #124). A failed advance
+  // Render all THREE node-link outcomes (the silent-partial-failure fix). A failed advance
   // (`linked: false`) is a non-fatal sub-step — the plan genuinely saved — but it must be VISIBLE
   // (the §8.4 "warn + retriable" intent), not swallowed. Both surfaces render content[0].text, so
   // this one site fixes the tool path (the model relays it) and the command path (the user sees the
@@ -357,7 +357,7 @@ export async function savePlan(
       nodeLink.error ? ` (${nodeLink.error})` : ""
     }`;
   }
-  // Node 2.2: surface NON-param sources in the message (param-path success messages stay
+  // Surface NON-param sources in the message (param-path success messages stay
   // byte-stable); a differing ignored param is visibly flagged, never silent.
   let sourceSuffix = "";
   if (opts.source === "plan-draft" || opts.source === "transcript") {
@@ -384,15 +384,15 @@ export async function savePlan(
   );
 }
 
-/** The approval→save orchestration outcome (Node 2.3 of #339). */
+/** The approval→save orchestration outcome. */
 export type ApprovalSaveOutcome =
   | { status: "no-plan" }
   | { status: "saved" | "save-failed"; result: SaveResult; gateExited: boolean };
 
 /**
- * The shared approval→save orchestration seam (Node 2.3 of #339): an APPROVED review outcome
- * (the `plan_review` door, planReview.ts — the plannotator bridge, Node 2.4, AND the first-party
- * in-TUI editor review, Node 2.5; tombell's re-aim remains Node 2.6) and the manual `/plan-save`
+ * The shared approval→save orchestration seam: an APPROVED review outcome
+ * (the `plan_review` door, planReview.ts — the plannotator bridge AND the first-party
+ * in-TUI editor review; tombell's re-aim is pending) and the manual `/plan-save`
  * failsafe both run THIS. Flow: artifact-first plan resolution (`resolvePlanSource` — the reviewed plan text is
  * the explicit fallback, the transcript scrape last) → `savePlan` (warm node-link recovery happens
  * inside) → gate exit on a successful save while read-only (the D1a pattern: snapshot
@@ -436,8 +436,8 @@ interface PlanSaveParams {
 }
 
 /**
- * Decode unknown `plan_save` tool-call params (the tool-boundary seam — Node 3.2). `plan` is
- * optional (Node 2.2: the validated plan-draft artifact is preferred) — absent decodes to
+ * Decode unknown `plan_save` tool-call params (the tool-boundary seam). `plan` is
+ * optional (the validated plan-draft artifact is preferred) — absent decodes to
  * `undefined`, but present-but-mistyped → null (strict-fail); the optional fields likewise.
  */
 export function decodePlanSaveParams(params: unknown): PlanSaveParams | null {
@@ -558,7 +558,7 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       "(the read-only → read-write boundary).",
     handler: async (args, ctx) => {
       const title = args.trim() || undefined;
-      // Node 2.3: the manual-failsafe invocation of the shared approval→save seam. Artifact-first
+      // The manual-failsafe invocation of the shared approval→save seam. Artifact-first
       // (no explicit param on the command path ⇒ paramMismatch is always false); the D1a gate exit
       // lives in the seam. (The tool path never exits the gate — it is structurally unreachable
       // while read-only.)
@@ -575,7 +575,7 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
       }
       // Severity reflects a failed objective-node advance: not-ok → error; saved-but-link-failed →
       // warning; otherwise info. A failed node-link never blocks the gate exit above (the plan was
-      // saved) — but it MUST surface (the #124 silent-partial-failure fix), in headless runs too.
+      // saved) — but it MUST surface (the silent-partial-failure fix), in headless runs too.
       const result = outcome.result;
       const message = result.content[0]?.text ?? "plan-save done";
       const severity: Severity = !result.details.ok
