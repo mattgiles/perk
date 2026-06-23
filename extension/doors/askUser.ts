@@ -1,4 +1,4 @@
-// #187 — the universal, first-party `ask_user_question` tool. Lets a model interactively ask the
+// The universal, first-party `ask_user_question` tool. Lets a model interactively ask the
 // human a clarifying question during a turn (free-text, or a multiple-choice selection with an
 // always-present "type a custom answer" escape) and continues its turn with the answer. It is
 // NON-terminating and headless-fail-safe: with no interactive UI it returns a graceful no-user
@@ -103,7 +103,7 @@ export async function runAskUserQuestion(args: {
 }
 
 /**
- * Decode unknown `ask_user_question` tool-call params (the tool-boundary seam — Node 3.2), in
+ * Decode unknown `ask_user_question` tool-call params (the tool-boundary seam), in
  * this tool's native graceful vocabulary: `question` absent OR mistyped → "" (routed into
  * `runAskUserQuestion`'s NO_QUESTION_TEXT arm — answered: false, never throws/blocks); `options`
  * mistyped → advisory-dropped to undefined (the free-text path) — a UI affordance, not a durable

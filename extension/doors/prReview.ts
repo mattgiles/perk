@@ -1,4 +1,4 @@
-// #175 / #658 — the warm `/pr-review` door: multi-angle, classify-then-act code review.
+// The warm `/pr-review` door: multi-angle, classify-then-act code review.
 //
 // Like `/address`, `/pr-review` now FOLLOWS the read-only-child convention: the parent spawns 2–3
 // angle-specialized `perk.pr-reviewer` children (`context: "fresh"`, so the implementation session's
@@ -7,7 +7,7 @@
 // verdict) and records ONE consolidated outcome on the PR via the `post_pr_review` tool.
 //
 // `post_pr_review` is the mechanical half (mirror of `/address`'s `resolve_review_threads`): it
-// DELEGATES the GitHub mutation to the Python cold door (`perk pr review-post`, D1 — mutations
+// DELEGATES the GitHub mutation to the Python cold door (`perk pr review-post` — mutations
 // canonical in Python) via the shared cold-door client (`runColdDoor`, the batch rides the
 // run-scratch stdin channel), then appends `last_pr_review` to `perk:workflow-state`. Never throws
 // (soft `details.ok`, mirrors resolveReviewThreads). This is documented in shared/contracts.md §8.3.
@@ -332,7 +332,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
       const guidance = prReviewGuidance(model);
       report(ctx, "pr-review", "info", "multi-angle review → reconcile → post");
       // Inject the spawn guidance as a user message so the model starts the review (warm entry).
-      // The perk-pr-review pointer rides the skill-binding suffix (command:pr-review, D5).
+      // The perk-pr-review pointer rides the skill-binding suffix (command:pr-review).
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:pr-review"));
     },
   });
