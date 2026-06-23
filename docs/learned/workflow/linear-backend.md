@@ -268,7 +268,7 @@ documented above (a third instance; see `shared-contracts.md`).
 
 ## Live smoke gate — RAN green (Modes 1 & 2 + the Projects spike)
 
-The gate that `docs/planning/linear-smoke-gate.md` once held UNRUN has now **run**: Mode 1 (issue lifecycle,
+The live smoke gate that once held UNRUN has now **run**: Mode 1 (issue lifecycle,
 #554), Mode 2 (GitHub-integration coexistence, #564), and the Linear Projects spike (#567) all fired
 **green — no backend defect, docs-only PRs.** The facts below resolve what the runbook reserved; the
 residual register at the bottom carries only the items the live runs did *not* answer.
@@ -591,8 +591,7 @@ offline-covered only at authoring — now **proven live** along with `set_projec
 
 ### The manifest-drift architecture (#609) — for the follow-up implementer
 
-The canonical spec is `docs/planning/objective-repair.md` (read it, don't re-derive). The
-load-bearing decisions:
+The load-bearing decisions:
 
 - **Drift is only tractable against a persisted manifest.** `LinearProjectObjectiveStore.get_objective`
   derives the roadmap **live** from node-issues (no stored roadmap table — Node 3.2), so there is no
@@ -658,7 +657,7 @@ avoid duplication.
   (idempotency keys off that sentinel). Use a throwaway field or restore immediately.
 - **Gotcha — Python `urllib` SSL fails in this env** (`CERTIFICATE_VERIFY_FAILED`); use `curl` for
   ad-hoc Linear GraphQL probes.
-- **Runbook drift corrected** in `docs/planning/linear-smoke-gate.md`: `perk init --verify` is **not** a flag
+- **Runbook drift corrected**: `perk init --verify` is **not** a flag
   (labels are created by `perk doctor --fix`); `perk plan-save` is `perk plan save`; `perk resume` is
   `perk plan resume`; the `perk submit` / `perk land` flat aliases *do* work; `perk pr land` is
   idempotent on an already-merged PR.

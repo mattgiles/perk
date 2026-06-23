@@ -106,8 +106,7 @@ a prerequisite was omitted (Objective #548 Node 4.4: the manifest was an unbuilt
 drift+repair surface, so operator direction reframed the node to *authoring the design doc*). What a
 future agent should expect when a node is reframed this way:
 
-- **The deliverable is a `docs/planning/` design doc** (genus of the node-outcomes docs —
-  `node-4.3-outcomes.md` etc.), **not executed / imported / tested.** Its only CI surface is
+- **The deliverable is a `docs/planning/` design doc**, **not executed / imported / tested.** Its only CI surface is
   markdown/prose linting — and **this repo has no markdown linter** in pre-commit or `just ci`
   (ruff/biome/tsc/tests only), so a docs-only node **skips all hooks** ("no files to check"). *Prove*
   it by checking the `just` recipes, don't assume a prose gate exists.

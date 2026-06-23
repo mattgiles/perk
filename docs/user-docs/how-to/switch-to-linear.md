@@ -103,8 +103,6 @@ two-directional, so the `npm:pi-mono-linear` package is removed when Linear is d
   — auth, labels, identifiers, doctor groups, and the maturity register.
 - [Configuration reference — `[issues]`](../reference/configuration.md#issues) — the config keys and
   committed-only semantics.
-- [The Linear live smoke gate](../../planning/linear-smoke-gate.md) — the live-validation
-  runbook.
 
 ---
 

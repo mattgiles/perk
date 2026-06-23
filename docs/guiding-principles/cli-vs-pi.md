@@ -5,8 +5,7 @@ spiritual successor to `erk`) and the **Pi extension** (TypeScript, loaded into 
 `pi` session). This is a foundational architecture decision; everything in
 ROADMAP.md is built on top of it.
 
-See [PRIOR_ART.md](./PRIOR_ART.md) for the erk learnings this is derived from, and
-[RESEARCH.md](./RESEARCH.md) for the Pi-native rationale.
+See [prior_art.md](./prior_art.md) for the erk learnings this is derived from.
 
 ---
 

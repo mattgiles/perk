@@ -39,7 +39,7 @@ components**". The audit therefore adopts nothing in code; where knowledge would
 | 3. Residual `.claude` references | erk's `.claude/settings.json` (hooks → `erk exec …`), `.claude/commands/erk/`, `.claude/agents/`, `.claude/hooks/`; artifact-sync (`src/erk/cli/commands/artifact/`) | Zero `.claude/` references in `perk/**/*.py`; only `.claude` here is `.gitignore`'s `/.claude/skills/` (the skills-tool runtime) | **DROP** (incl. rejected doctor check) | perk reads nothing from `.claude/`; inert artifacts are harmless; a standing advisory check wasn't judged worth the noise |
 | 4. Session import | erk's `src/erk/cli/commands/cc/session/` (`list_cmd.py`, `show_cmd.py`) reading `~/.claude/projects/` JSONL via `erk_shared.extraction.claude_code_session_store` | No Claude Code sessions exist in a Pi-native repo; the analogue is the unbuilt `docs/design/session-introspection.md` (a reader over **pi** session JSONL) | **DROP** (Claude import) + **DEFER** (Pi introspection) | Nothing to read; the Pi analogue is a separate, larger, loosely-coupled effort |
 | Adjacent: `erk artifact sync/check/list/show` | erk's `src/erk/cli/commands/artifact/` (`sync_cmd.py`, `check.py`, `list_cmd.py`, `show.py`) | `perk init` forward-converges into `.pi/` | **DROP** | No `.claude/` artifacts to sync; convergence is `init`'s job |
-| Adjacent: bootstrap-from-erk-repo | RESEARCH.md §1 ("inspect an existing erk repo and generate Pi config") — never built | `perk/init.py` forward-converges, has no erk-inspection (grep `\.erk\|bootstrap\|inspect` → no matches) | **DROP** | `init` is a forward-converging path, never an erk-importer |
+| Adjacent: bootstrap-from-erk-repo | "inspect an existing erk repo and generate Pi config" — never built | `perk/init.py` forward-converges, has no erk-inspection (grep `\.erk\|bootstrap\|inspect` → no matches) | **DROP** | `init` is a forward-converging path, never an erk-importer |
 
 ## Surface 1 — Import draft-PR plans → issue-canonical
 
@@ -92,7 +92,7 @@ schema "2".
 ## Surface 3 — Residual `.claude` references
 
 **What erk does.** erk's `.claude/settings.json` registered Claude Code hooks
-(`UserPromptSubmit` / `PreToolUse` / `PostToolUse` → `erk exec …`; see RESEARCH.md §15), alongside
+(`UserPromptSubmit` / `PreToolUse` / `PostToolUse` → `erk exec …`), alongside
 `.claude/commands/erk/`, `.claude/agents/`, `.claude/hooks/`, and an artifact-sync surface
 (erk's `src/erk/cli/commands/artifact/`).
 
@@ -134,7 +134,7 @@ Both adjacent surfaces are drops:
   `sync_cmd.py`, `check.py`, `list_cmd.py`, `show.py`) syncs `.claude/` artifacts from the
   installed erk package. perk manages its surface via `perk init`'s forward convergence into
   `.pi/`; there are no `.claude/` artifacts to sync. **DROP.**
-- **The never-built bootstrap-from-erk-repo idea** (RESEARCH.md §1: "a bootstrap command that can
+- **The never-built bootstrap-from-erk-repo idea** ("a bootstrap command that can
   inspect an existing erk repo and generate Pi config"). Verified **not built**: grepping
   `\.erk|bootstrap|inspect` in `perk/init.py` returns no matches. perk's `init` is
   forward-converging, never an erk-importer. **DROP.**

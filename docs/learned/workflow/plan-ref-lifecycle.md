@@ -111,8 +111,7 @@ cross-backend `plan save` inside an active worktree — it hijacks the active pl
   reviewers were spawned with `output:` paths into the worktree root and a later `git add -A` swept
   them in. **Lesson: subagent `output:` paths land in the worktree and `git add -A` commits them —
   write reviewer artifacts to a tmp/gitignored path, or `git add` explicit paths, when a review runs
-  mid-implementation.** (Known follow-up: delete those three files from the repo — not performed by
-  the consolidation plan that recorded this.)
+  mid-implementation.** (Follow-up: those three files were deleted from the repo in this change.)
 
 ## Cross-references
 

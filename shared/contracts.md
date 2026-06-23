@@ -3176,8 +3176,7 @@ everywhere — PRs are GitHub-universal. Concretely:
   (`_close_plan_issue_on_land`, surfaced as the envelope's `plan_issue_closed: bool`; idempotent
   beside autoclose or any tracker Done-on-merge automation).
 - The live validation surface is `tests/test_linear_lifecycle.py` (the stateful
-  `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook
-  `docs/planning/linear-smoke-gate.md`.
+  `FakeLinearWorkspace` offline suite) plus the manual live smoke gate runbook.
 
 ## §8.22 · Linear agent-session emission (Objective #252, Node 5.1 — stretch)
 
@@ -3193,8 +3192,8 @@ there is no TS twin).
   Linear agent application — a personal `LINEAR_API_KEY` is rejected by Linear's agent API. Sent
   in the OAuth `Authorization: Bearer <token>` header form (`LinearClient(bearer=True)`;
   personal-key requests keep the plain header byte-identically). Environment only — never
-  config/committed files. No new config keys, no doctor check — the live smoke doc
-  (`docs/planning/linear-smoke-gate.md`) is the verification surface.
+  config/committed files. No new config keys, no doctor check — the live smoke gate
+  is the verification surface.
 - **The file**: `.pi/workflow/agent-session.json` (cache tier, §8.1) —
   `{"session_id": str, "issue": str, "url": str | null}`, written at session create
   (`cache.write_agent_session`/`read_agent_session`). Absent at a follow-up hook → fail-soft
@@ -3489,7 +3488,7 @@ there (the `save_node_plan → None` / `post_status_update → False` precedent)
   Mode-4 run executed with the drift doctor design-only and substituted a `get_objective`
   perturbation baseline (gate 4.9) for the doctor run, so these two ops were **not** verified at 5.1
   and remain **offline-covered / not-yet-live-proven** — a live-unverified follow-up (no Phase-5
-  gate now covers them). The manifest-drift design lives in `docs/planning/objective-repair.md`.
+  gate now covers them).
 
 **Node 5.2 amendment — Phase 5 close-out (docs-only reconciliation).** Phase 5 closed Objective
 #548. Node 5.1 (PR #610) **live-proved** the four targeted Project ops on 2026-06-16 (Mode-4 gates
@@ -3544,7 +3543,7 @@ actor is the human user; these changes make perk's footprint read as native:
   **after** the Reconcilable region. The GitHub `style="html"` `<details>` render is unchanged.
 - **Deferred — the collapsed-toggle render.** Wrapping the Linear metadata blocks in a native
   collapsible toggle (the true `<details>` analog) depends on an **undocumented** markdown
-  round-trip and is gated on the live smoke gate (`docs/planning/linear-smoke-gate.md` Mode 5).
+  round-trip and is gated on the live smoke gate (Mode 5).
   Per the plan's safe-degradation, prose-first ships now and the toggle is deferred until the live
   round-trip is proven lossless (else dropped). Becoming a true Linear **Agent** (`actor=app`) is a
   separate, out-of-scope follow-up.
@@ -3555,8 +3554,7 @@ A backend-neutral **READ** surface for human engagement — comments, descriptio
 agent-session activities — added to **both** the `IssueBackend` (`issue_id`) and `ObjectiveStore`
 (`objective_id`) seams. Implemented honestly on the **Linear issue backend** over GraphQL; every
 other implementer ships a clean empty/no-op conforming impl (honest — **no flow consumers** wire it
-in Node 1.2; the consuming flows arrive in Phase 2+). Anchored on the Node 1.1 inventory
-(`docs/planning/human-interaction-api-inventory.md`, §3–§4).
+in Node 1.2; the consuming flows arrive in Phase 2+). Anchored on the Node 1.1 inventory.
 
 **Result dataclasses** (`perk/backends/engagement.py` — a pure module importing nothing from the
 backend tiers, so both protocols + every implementer import it without re-coupling the deliberate
@@ -3792,8 +3790,7 @@ A cold door that **adopts a pre-existing human-authored issue (Linear or GitHub)
 plan**: it reads the human title + body + engagement as untrusted seed DATA, runs a normal
 read-only `plan → review → save` authoring pass over it, and on save stamps perk's plan metadata
 **additively** into the *same* issue — never minting a second object. The first §8.25 consumer
-that reads a **non-perk** issue (§3.1 comment listing + the §4 provenance read of the inventory,
-`docs/planning/human-interaction-api-inventory.md`).
+that reads a **non-perk** issue (§3.1 comment listing + the §4 provenance read of the inventory).
 
 **Provenance model (`adopted_from`).** `PlanHeader` gains `adopted_from: str | None` (in
 `PLAN_HEADER_FIELDS` + `to_data()`), storing the source issue ref (e.g. `"#123"` / `"PER-45"`).
@@ -3845,7 +3842,7 @@ prints the header/body (now including `adopted_from`) without writes.
 the substantive deliverable is this contract section, not a new validating check.
 
 **Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
-is a preview-grade observation here (Mode 7 in `docs/planning/linear-smoke-gate.md`); final live
+is a preview-grade observation here (Mode 7); final live
 proof is node 4.3.
 
 ## §8.30 · In-place objective adoption (`objective author --from`, Objective #682, Node 3.2)
@@ -3960,6 +3957,6 @@ produces a fresh perk objective, `existed=False`). `--dry-run` falls through to 
 mutual-exclusion guard is needed (`objective create` has no `--node-id`).
 
 **Backend parity.** Honest on **both** GitHub and Linear (+ clean fake conformers). Live validation
-is preview-grade here (Mode 8 in `docs/planning/linear-smoke-gate.md`); final live proof is Node
+is preview-grade here (Mode 8); final live proof is Node
 4.3 — no new config key, provider seam, or `EXPECTED_SURFACE` change (a flag, not a new
 command/verb).

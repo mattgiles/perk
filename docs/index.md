@@ -21,8 +21,7 @@ notes that record specific decisions, and the **durable learnings** distilled fr
 
 | Doc | What it is |
 |---|---|
-| [RESEARCH.md](./guiding-principles/RESEARCH.md) | The seed document: original problem analysis and the Pi-native architecture rationale the design is built on. |
-| [PRIOR_ART.md](./guiding-principles/PRIOR_ART.md) | erk distilled into findings for perk (12 sections: state tiers, plan storage, objectives, PR operations, CI/review, context injection, hooks, capability model, etc.). |
+| [prior_art.md](./guiding-principles/prior_art.md) | erk distilled into findings for perk (12 sections: state tiers, plan storage, objectives, PR operations, CI/review, context injection, hooks, capability model, etc.). |
 | [erk-subagent-usage.md](./guiding-principles/erk-subagent-usage.md) | How erk used subagents, and the governing principle perk adopts: a subagent is a **context-and-capability device, not a parallelism trick** (11 sections — route-don't-relay, double-delivery, the three never-delegate boundaries, model tiering). |
 
 ## Pattern studies (how to build it in Pi)
@@ -47,20 +46,11 @@ The remaining `docs/design/*` notes (adapter-architecture, extension-layout,
 pluggability-taxonomy, provider-contract, the provider-smoke runbooks, session-introspection)
 are point design sketches read directly from the [`docs/design/`](./design/) directory.
 
-## Validation / gates
-
-| Doc | What it is |
-|---|---|
-| [linear-smoke-gate.md](./planning/linear-smoke-gate.md) | The **Linear live smoke gate runbook** (Objective #252, Node 4.1): the manual two-mode validation of the Linear issue backend against a real workspace (bare; GitHub-integration-installed), with a recorded-observations section feeding the documented follow-ups (`.codes` tightening, RATELIMITED posture, mutation identifier acceptance). The offline twin is `tests/test_linear_lifecycle.py`. |
-
 ## How the documents relate
 
-- **guiding-principles/PRIOR_ART / guiding-principles/RESEARCH** are the source findings;
+- **guiding-principles/prior_art** holds the source findings;
   **pi- / agent-stuff best-practices** are the build templates.
 - **guiding-principles/cli-vs-pi.md** feeds the CLI/extension split throughout the design.
-- **guiding-principles/foundation-open-questions.md** carries the thirteen settled questions
-  (Q1–Q13) — the *why* behind perk's locked foundational decisions; read it when you need the
-  reasoning behind a decision.
 - **docs/learned/** distills durable cross-cutting findings from landed work; its
   [index](./learned/index.md) is the full catalog and `.pi/APPEND_SYSTEM.md` carries the
   compressed ambient routing index.

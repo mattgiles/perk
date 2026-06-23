@@ -24,9 +24,8 @@ A hook that needs the session but finds the file absent fail-soft skips with a s
 
 **Offline-test limitation (flagged)**: the GraphQL operations here (``agentSessionCreateOnIssue``,
 ``agentActivityCreate``, ``agentSessionUpdate``) are substring-pinned in offline fakes only —
-exact field signatures are verified live at the smoke gate
-(``docs/planning/linear-smoke-gate.md``), the same known limitation class as the Linear backend's
-"GraphQL type strings unverified live" deferral.
+exact field signatures are verified live at the smoke gate, the same known limitation class as
+the Linear backend's "GraphQL type strings unverified live" deferral.
 
 **Known caveats + explicit deferrals** (flagged, not silently omitted):
 

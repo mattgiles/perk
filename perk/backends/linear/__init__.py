@@ -40,8 +40,7 @@ boundary — contracts §8.21).
 
 Explicit deferrals (flagged, not silently omitted):
 
-- **Live round-trip fidelity** — recorded at the live smoke gate
-  (``docs/planning/linear-smoke-gate.md``).
+- **Live round-trip fidelity** — recorded at the live smoke gate.
 - **Not-found discrimination** — *implemented* (Node 1.2, 2026-06-15 observation): the three
   not-found sites pair ``INPUT_ERROR in exc.codes`` with the ``"Entity not found"`` message
   prefix (``_is_entity_not_found``). The gate-8 row recorded ``INPUT_ERROR`` as a *generic*
@@ -50,7 +49,7 @@ Explicit deferrals (flagged, not silently omitted):
 - **Rate-limit retry/backoff** — *decided fail-loud* (Node 1.2): no RATELIMITED tripped at the
   smoke gate (gate-9, "not tripped at low volume"), so there is no observed behavior to justify
   backoff. The client keeps raising the typed ``LinearGraphQLError``; retry/backoff stays
-  deferred until a live RATELIMITED is observed (``docs/planning/linear-smoke-gate.md``).
+  deferred until a live RATELIMITED is observed.
 
 **Package layout (Node 2.1 module->package split).** The single-file module was decomposed into a
 package along its natural seams — a pure verbatim relocation (no logic edits), following the

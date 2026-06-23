@@ -119,8 +119,7 @@ class _LinearIssueOps:
             data = self._client.request(query, {"id": issue_id})
         except LinearGraphQLError as exc:
             # Missing-entity discriminator: the observed `INPUT_ERROR` code paired with the
-            # "Entity not found" message prefix
-            # (docs/planning/linear-smoke-gate.md gate-8, 2026-06-15).
+            # "Entity not found" message prefix (observed at the live smoke gate, 2026-06-15).
             # INPUT_ERROR alone is too broad, so both must match. Every other error re-raises.
             if _is_entity_not_found(exc):
                 return None
