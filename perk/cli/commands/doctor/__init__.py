@@ -4,8 +4,8 @@ The *second* canonical supervisor surface (cli-vs-pi.md §3.2): `--json` to stdo
 codes (0 healthy / 1 unhealthy / 2 not-a-repo), grouped human text to stderr.
 
 Shipped as a Click **group** with ``invoke_without_command=True`` so bare ``perk doctor`` runs the
-health checks today and the Phase-3 ``perk doctor workflow`` subgroup slots in without a breaking
-command-type change (erk's `cli/doctor-workflow.md` tripwire).
+health checks and the ``perk doctor workflow`` subgroup slots in without a breaking
+command-type change.
 """
 
 import json
@@ -31,7 +31,7 @@ def doctor_group(ctx: click.Context, *, fix: bool, verbose: bool, as_json: bool)
     `doctor` reports a grouped health view; `--fix` re-converges drifted managed pieces (and
     seeds missing config) — it never mutates GitHub and never overwrites your config edits.
 
-    Note (#706): a plan adopted in place from a pre-existing issue (`perk plan from <issue>`) is
+    Note: a plan adopted in place from a pre-existing issue (`perk plan from <issue>`) is
     identified by a populated `adopted_from` plan-header field; its issue body/title are verbatim
     human content. `doctor` never rewrites or validates that human prose — adoption provenance is
     awareness-only here, not a validating check.
@@ -44,7 +44,7 @@ def doctor_group(ctx: click.Context, *, fix: bool, verbose: bool, as_json: bool)
       perk doctor --json        # machine-readable report (supervisor surface)
     """
     if ctx.invoked_subcommand is not None:
-        return  # a future subgroup (e.g. `perk doctor workflow`, Phase 3) handles it
+        return  # a registered subcommand (e.g. `perk doctor workflow`) handles it
 
     try:
         root = require_repo(ctx)

@@ -1,4 +1,4 @@
-"""`perk doctor workflow` — the workflow-focused diagnostic subgroup (Node 3.3; contracts.md §8.19).
+"""`perk doctor workflow` — the workflow-focused diagnostic subgroup (contracts.md §8.19).
 
 `init`'s diagnostic twin, narrowed to the remote-runner subsystem. `check` composes the **static**
 prereq layer (`doctor.workflow_checks` — GitHub readiness ⊕ runner prereqs ⊕ the managed
@@ -8,7 +8,7 @@ confirm the runner started, then exit success; no plan checkout, no worker drive
 optionally polls it to completion, and self-cancels its own run on a poll timeout. The smoke writes
 **no** `DispatchRecord` and creates **no** GitHub artifacts, so it stays a pure doctor diagnostic
 (`perk workflow run list` is unaffected) — there is no `cleanup` command (perk's smoke leaves
-nothing durable, unlike erk's one-shot PR).
+nothing durable).
 """
 
 import click

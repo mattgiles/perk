@@ -1,6 +1,6 @@
 """``perk learn`` — the learn-stage launcher + the two learn workers (cold doors).
 
-A **hybrid default-dispatch group** (Node 2.2): ``capture`` (the ``/learn`` knowledge-capture
+A **hybrid default-dispatch group**: ``capture`` (the ``/learn`` knowledge-capture
 worker) and ``docs`` (the hop-2 learned-docs plan-factory cold door) are registered verbs, while
 any other invocation — bare ``perk learn``, ``perk learn --dry-run``, ``perk learn --worktree X``
 — falls through to a hidden launcher built from the generic registry-stage factory
@@ -9,7 +9,7 @@ stage launcher.
 
 Default-dispatch edge: launcher pi-args whose *first* token is literally ``capture`` or ``docs``
 would route to the verb instead of the launcher — accepted; in practice launcher pi-args start
-with ``-``. Launcher-vs-group presentation (Node 2.3): the root ``Stage Launchers`` section
+with ``-``. Launcher-vs-group presentation: the root ``Stage Launchers`` section
 header plus the generated launcher help sentence (``make_stage_launcher``) carry the
 disambiguation; the hidden ``launch`` verb intentionally stays out of subgroup help.
 """

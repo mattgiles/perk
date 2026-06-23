@@ -10,7 +10,7 @@ from perk.cli.commands.workflow.run.retry_cmd import retry_run
 
 @click.group("run", cls=AliasGroup)
 def run_group() -> None:
-    """Observe and (Node 3.2) control dispatched runs."""
+    """Observe and control dispatched runs."""
 
 
 register_with_aliases(run_group, list_runs)
