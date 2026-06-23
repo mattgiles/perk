@@ -2,9 +2,6 @@
 
 A developer / CI / `doctor` surface (like `perk registry`), **not** an agent affordance:
 the agent reads and writes workflow state through the extension, never by shelling `perk`.
-T4's launch primitive reuses ``run_id.mint`` + ``cache.write_handoff``; this group exercises
-them now so the T3 gate can drive the shell → ``PERK_RUN_ID`` → claim round-trip before the
-real launcher exists.
 """
 
 import click

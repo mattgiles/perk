@@ -1,8 +1,8 @@
 """``perk worktree`` — create / list / remove git worktrees (the exterior, cli-vs-pi §2.2).
 
-T4 only *creates and reports* a worktree's path; moving the parent shell into it
-(shell-activation) is Phase 1 (a deferral). Output is plain aligned text — Rich
-tables are deferred until a real dashboard (python-cli-guidelines §7.3).
+This group only *creates and reports* a worktree's path; moving the parent shell into it
+(shell-activation) is deferred. Output is plain aligned text — Rich
+tables await a real dashboard (python-cli-guidelines §7.3).
 """
 
 import click

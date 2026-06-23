@@ -36,7 +36,7 @@ def render_check(check: Check) -> None:
 
 
 def render_group(group: str, checks: list[Check], *, verbose: bool) -> None:
-    """erk's three-way condensed rule: collapse a clean group, else expand fails/warnings."""
+    """Three-way condensed rule: collapse a clean group, else expand fails/warnings."""
     total = len(checks)
     fails = [c for c in checks if c.status == "fail"]
     warns = [c for c in checks if c.status in ("warn", "info")]

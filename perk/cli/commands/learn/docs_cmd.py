@@ -68,7 +68,7 @@ def _seed_prompt(inbox_path: Path, learn_ids: tuple[str, ...]) -> str:
 
     Names the inbox path to ``read`` and instructs a ``plan_save`` carrying ``consumed_learn`` (the
     gathered ids — opaque strings, §8.21). The ``perk-learn-docs`` skill pointer is delivered by
-    the skill-binding mechanism (Node 2.3), not hardcoded here.
+    the skill-binding mechanism, not hardcoded here.
     """
     num_list = ", ".join(learn_ids)
     return (
@@ -167,7 +167,7 @@ def docs_learn(
         )
         return
 
-    # Opaque string ids at every machine boundary (contracts §8.21; Node 4.1).
+    # Opaque string ids at every machine boundary (contracts §8.21).
     learn_ids = tuple(issue.id for issue in issues)
     seed = _seed_prompt(inbox_path, learn_ids)
 
@@ -209,7 +209,7 @@ def docs_learn(
         # learn-docs borrows `plan`, so its binding trigger is the command (not stage:plan).
         binding_trigger="command:learn-docs",
         # Carry the gathered perk:learn ids through the handoff so `perk plan-save` recovers
-        # `consumed_learn` regardless of which save surface the model uses (#102, mirroring #78).
+        # `consumed_learn` regardless of which save surface the model uses.
         # The factory session is read-only, so the `plan_save` *tool* is gated out and the model
         # saves via the `/plan-save` *command* — which forwards only {plan, title}, dropping the
         # ids. Stashing them here makes the tool-vs-command save surface irrelevant.

@@ -1,4 +1,4 @@
-"""`perk learn capture --json --body <file>` — the deep `/learn` knowledge-capture pass (P2.T8b).
+"""`perk learn capture --json --body <file>` — the deep `/learn` knowledge-capture pass.
 
 Graduates `/learn` from a thin marker-clear into a real capture: read the agent-captured learnings
 markdown from a run-scoped scratch file (the stdin-less worker pattern), create a `perk:learn`
@@ -144,7 +144,7 @@ def _result_to_dict(result: LearnCaptureResult) -> dict[str, object]:
         "error_type": None,
         "message": None,
         "learn_issue": {
-            # Opaque string id at every machine boundary (contracts §8.21; Node 4.1).
+            # Opaque string id at every machine boundary (contracts §8.21).
             "id": result.learn_issue.id,
             "url": result.learn_issue.url,
             "existed": result.learn_issue.existed,
