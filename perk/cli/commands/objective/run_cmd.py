@@ -17,7 +17,7 @@ from typing import Any
 import click
 
 from perk import github, objective
-from perk.backends import issue_backend, issues, objective_stores
+from perk.backends import issue_backend, objective_stores, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.objective_store import ObjectiveStoreError
 from perk.cli.alias import alias
@@ -187,7 +187,7 @@ def _dispatch_stage_remote(
         f"stage '{stage_id}' is not remote-drivable (cold_remote:false)",
     )
     plan_ref = resume.reconstruct_plan_ref(
-        node_plan_state, provider=issues.resolve_issue_backend_id(repo_root)
+        node_plan_state, provider=resolve.resolve_issue_backend_id(repo_root)
     )
     if dry_run:
         return None
@@ -224,7 +224,7 @@ def _resolve_in_flight_stage(
     # the authority on whether it exists). Only the empty/missing case falls through to the
     # plan_required fallback below.
     plan_id = str(node.pr).lstrip("#").strip() if node.pr else ""
-    backend = issues.resolve_issue_backend(repo_root)
+    backend = resolve.resolve_issue_backend(repo_root)
     plan_state = backend.get_plan(issue_id=plan_id) if plan_id else None
     if plan_state is None:  # defensive: an in-flight node should carry a resolvable plan
         payload.update(action="plan_required", node=node.id, remediation=remediation)

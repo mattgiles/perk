@@ -359,16 +359,17 @@ class TestImportDirection:
         source = _github_package_source()
         assert "issue_backend" not in source
 
-    def test_github_module_never_imports_issues(self) -> None:
-        # Node 1.2's adapter module (perk/backends/issues.py) is the only module importing both
-        # sides; the github package must never reach back into it.
+    def test_github_module_never_imports_the_backend_tier(self) -> None:
+        # The pure-gateway rule (Principle 1): the adapter (perk/backends/github/backend.py) is the
+        # only module importing both sides; the github package must never reach up into the backend
+        # tier at all. A dotted `perk.backends` import is the violation (docstrings reference the
+        # backend tier in slash form, which is fine).
         source = _github_package_source()
-        assert "perk.backends.issues" not in source
-        assert "import issues" not in source
+        assert "perk.backends" not in source
 
-    def test_issue_backend_module_never_imports_issues(self) -> None:
+    def test_issue_backend_module_never_imports_the_resolver(self) -> None:
         # The contract stays implementation-free: the protocol module never references the
-        # concrete backend/resolver module.
+        # concrete backend/resolver modules.
         source = Path(issue_backend.__file__).read_text(encoding="utf-8")
-        assert "perk.backends.issues" not in source
-        assert "import issues" not in source
+        assert "perk.backends.resolve" not in source
+        assert "perk.backends.github" not in source

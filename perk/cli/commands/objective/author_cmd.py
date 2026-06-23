@@ -26,7 +26,7 @@ from pathlib import Path
 import click
 
 from perk import plan
-from perk.backends import issues, objective_stores
+from perk.backends import objective_stores, resolve
 from perk.backends.engagement import render_adopted_engagement
 from perk.backends.objective_store import AdoptableObjectiveSource, ObjectiveStoreError
 from perk.cli.commands.objective.shared import fail
@@ -278,8 +278,8 @@ def _author_from(
             )
         # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED — skipped). Resolved via
         # the issue tier's `read_issue.state` (the objective source shape carries no `state`).
-        if store.backend_id == issues.GITHUB_BACKEND_ID:
-            issue_read = issues.resolve_issue_backend(repo_root).read_issue(issue_id=source_id)
+        if store.backend_id == resolve.GITHUB_BACKEND_ID:
+            issue_read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=source_id)
             if issue_read is not None and issue_read.state != "OPEN":
                 raise UserFacingCliError(
                     f"Issue {source_id} is not open (state={issue_read.state or 'unknown'}); "

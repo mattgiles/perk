@@ -8,7 +8,7 @@ short-circuit ordering is preserved.
 import tomllib
 from pathlib import Path
 
-from perk.backends import issues, linear
+from perk.backends import linear, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import client as linear_client
 from perk.convergence.doctor.data import Check
@@ -18,7 +18,7 @@ from perk.substrate.config import load_committed_issues_backend, load_committed_
 def _linear_selected(root: Path) -> bool:
     """The verify-gate read for the `linear` group (malformed TOML defers to the config check)."""
     try:
-        return load_committed_issues_backend(root) == issues.LINEAR_BACKEND_ID
+        return load_committed_issues_backend(root) == resolve.LINEAR_BACKEND_ID
     except tomllib.TOMLDecodeError:
         return False
 

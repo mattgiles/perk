@@ -212,7 +212,7 @@ def test_wipe_output_in_candidate_order(git_repo, monkeypatch):
 
 
 def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
-    from perk.backends import issues
+    from perk.backends import resolve
     from perk.backends.issue_backend import IssueBackendError
 
     _add_plan_wt(git_repo, 1)
@@ -221,7 +221,7 @@ def test_wipe_backend_resolution_failure_skips_all(git_repo, monkeypatch):
     def boom(repo_root: Path):
         raise IssueBackendError("offline")
 
-    monkeypatch.setattr(issues, "resolve_issue_backend", boom)
+    monkeypatch.setattr(resolve, "resolve_issue_backend", boom)
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert (git_repo / ".worktrees" / "plan-1").exists()

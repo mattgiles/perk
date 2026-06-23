@@ -1,6 +1,6 @@
 """`perk objective author --from <source>`: the in-place objective-adoption cold door (#709, §8.30).
 
-`objective_stores.resolve_objective_store`, `issues.resolve_issue_backend`, and
+`objective_stores.resolve_objective_store`, `resolve.resolve_issue_backend`, and
 `launch.launch_stage` are stubbed (no Linear/GitHub, no `exec pi`), mirroring test_from_cmd.py.
 """
 
@@ -11,7 +11,8 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, objective, plan
-from perk.backends import issues, objective_store, objective_stores
+from perk.backends import objective_store, objective_stores, resolve
+from perk.backends.github import engagement as gh_engagement
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -69,7 +70,7 @@ def _stub(monkeypatch, *, store, sink: dict | None = None, issue_state="OPEN"):
         def read_issue(self, *, issue_id):
             return github.IssueRead(number=1, url="u", title="t", body="b", state=issue_state)
 
-    monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _Backend())
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     if sink is not None:
         monkeypatch.setattr(
             launch,
@@ -203,7 +204,7 @@ def test_linear_backend_skips_open_check(monkeypatch):
 def test_engagement_appended_and_points_seed(monkeypatch):
     _authed(monkeypatch)
     launched: dict = {}
-    comment = github.IssueCommentRow(
+    comment = gh_engagement.IssueCommentRow(
         id="c1",
         body="please scope tightly",
         created_at="2026-03-01T10:00:00Z",
@@ -212,9 +213,9 @@ def test_engagement_appended_and_points_seed(monkeypatch):
         author_id="u-1",
         author_is_bot=False,
     )
-    from perk.backends import issues as _issues_mod
+    from perk.backends.github import backend as _gh_backend
 
-    eng = _issues_mod._engagement_comment(comment)
+    eng = _gh_backend._engagement_comment(comment)
     _stub(monkeypatch, store=_FakeStore(source=_source(), comments=[eng]), sink=launched)
     runner = CliRunner()
     with runner.isolated_filesystem() as d:

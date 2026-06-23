@@ -7,7 +7,7 @@ from pathlib import Path
 
 import click
 
-from perk.backends import issue_backend, issues
+from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_repo
 from perk.state import cache
@@ -137,7 +137,7 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
     facts_by_path: dict[Path, _GatheredFacts] = {}
     if targets:
         try:
-            backend = issues.resolve_issue_backend(repo_root)
+            backend = resolve.resolve_issue_backend(repo_root)
         except IssueBackendError as exc:
             reason = f"could not determine PR state ({exc})"
             facts_by_path = {

@@ -1,25 +1,23 @@
-"""Tests for the GitHub issue backend + resolver (Objective #252, Node 1.2).
+"""Tests for the GitHub issue backend adapter (Objective #746, Node 2.1).
 
 Covers: static protocol conformance (ty-checked), per-method delegation onto ``perk.github``'s
 issue-tier functions (constructor-bound ``repo_root``, ``dry_run`` passthrough, str-id results),
 ``GitHubError`` → ``IssueBackendError`` translation (message verbatim, cause chained), the
-non-numeric-id guard, the resolver, the late-binding monkeypatch-interception guarantee, and the
-consumer-boundary source scan (no production module outside ``perk/backends/issues.py`` calls a
-``github.<issue-tier-fn>`` directly).
+non-numeric-id guard, the late-binding monkeypatch-interception guarantee, and the honest
+human-engagement reads (the github-native rows from ``perk.backends.github.engagement`` mapped to
+the neutral contract). The resolver + consumer-boundary source scan live in
+``tests/test_resolve.py``.
 """
 
-import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-import perk
 from perk import github
-from perk.backends import engagement, issue_backend, issues
-from perk.backends.issue_backend import IssueBackendError
-from perk.backends.issues import GitHubIssueBackend, resolve_issue_backend, resolve_issue_backend_id
-from perk.backends.linear import LinearIssueBackend
+from perk.backends import engagement, issue_backend
+from perk.backends.github import engagement as gh_engagement
+from perk.backends.github.backend import GitHubIssueBackend
 
 
 def _make_backend(repo_root: Path) -> issue_backend.IssueBackend:
@@ -32,72 +30,6 @@ class TestConformance:
     def test_backend_satisfies_protocol(self, tmp_path: Path) -> None:
         backend = _make_backend(tmp_path)
         assert isinstance(backend, GitHubIssueBackend)
-
-
-def _write_config(repo_root: Path, name: str, text: str) -> None:
-    pi = repo_root / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / name).write_text(text, encoding="utf-8")
-
-
-class TestResolver:
-    def test_returns_github_backend_bound_to_root(self, tmp_path: Path) -> None:
-        backend = resolve_issue_backend(tmp_path)
-        assert isinstance(backend, GitHubIssueBackend)
-        assert backend._repo_root == tmp_path
-
-    def test_explicit_github_selection_returns_github_backend(self, tmp_path: Path) -> None:
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "github"\n')
-        assert isinstance(resolve_issue_backend(tmp_path), GitHubIssueBackend)
-
-    def test_resolve_id_accepts_linear(self, tmp_path: Path) -> None:
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
-        assert resolve_issue_backend_id(tmp_path) == issues.LINEAR_BACKEND_ID
-
-    def test_linear_selection_missing_api_key_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
-        with pytest.raises(IssueBackendError, match="LINEAR_API_KEY"):
-            resolve_issue_backend(tmp_path)
-
-    def test_linear_selection_missing_team_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
-        with pytest.raises(IssueBackendError, match=r"\[issues\] team is required"):
-            resolve_issue_backend(tmp_path)
-
-    def test_linear_selection_returns_linear_backend(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("LINEAR_API_KEY", "lin_api_test")
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\nteam = "ENG"\n')
-        backend = resolve_issue_backend(tmp_path)
-        assert isinstance(backend, LinearIssueBackend)
-        assert backend.backend_id == "linear"
-        # Construction is lazy — the team key is bound, no network call issued.
-        assert backend._team_key == "ENG"
-
-    def test_unknown_selection_raises(self, tmp_path: Path) -> None:
-        _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "jira"\n')
-        with pytest.raises(IssueBackendError, match="unknown issue backend"):
-            resolve_issue_backend(tmp_path)
-
-    def test_local_overlay_selection_is_ignored(self, tmp_path: Path) -> None:
-        # Committed-only read: a perk.local.toml [issues] selection never fragments the store.
-        _write_config(tmp_path, "perk.local.toml", '[issues]\nbackend = "linear"\n')
-        assert isinstance(resolve_issue_backend(tmp_path), GitHubIssueBackend)
-
-    def test_malformed_committed_toml_raises_backend_error(self, tmp_path: Path) -> None:
-        _write_config(tmp_path, "perk.toml", "[issues\nbackend =")
-        with pytest.raises(IssueBackendError, match="not valid TOML"):
-            resolve_issue_backend(tmp_path)
-
-    def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
-        assert resolve_issue_backend_id(tmp_path) == issues.GITHUB_BACKEND_ID
 
     def test_github_backend_id(self) -> None:
         assert GitHubIssueBackend.backend_id == "github"
@@ -363,7 +295,7 @@ class TestEngagementReads:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rows = [
-            github.IssueCommentRow(
+            gh_engagement.IssueCommentRow(
                 id="IC_1",
                 body="a human note",
                 created_at="2026-03-01T00:00:00Z",
@@ -372,7 +304,7 @@ class TestEngagementReads:
                 author_id="11",
                 author_is_bot=False,
             ),
-            github.IssueCommentRow(
+            gh_engagement.IssueCommentRow(
                 id="IC_2",
                 body="automation beep",
                 created_at="2026-03-02T00:00:00Z",
@@ -381,7 +313,7 @@ class TestEngagementReads:
                 author_id="22",
                 author_is_bot=True,
             ),
-            github.IssueCommentRow(
+            gh_engagement.IssueCommentRow(
                 id="IC_3",
                 body="summary <!-- perk:metadata-block:plan-body --> end",
                 created_at="2026-03-04T00:00:00Z",
@@ -392,7 +324,7 @@ class TestEngagementReads:
             ),
         ]
         rec = _Recorder(rows)
-        monkeypatch.setattr(github, "read_issue_comments", rec)
+        monkeypatch.setattr(gh_engagement, "read_issue_comments", rec)
         comments = GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
         assert rec.kwargs == {"issue": 42, "repo_root": tmp_path}
         assert [c.author.kind for c in comments] == ["human", "other_agent", "perk"]
@@ -405,14 +337,14 @@ class TestEngagementReads:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         rows = [
-            github.DescriptionEditRow(
+            gh_engagement.DescriptionEditRow(
                 edited_at="2026-04-01T00:00:00Z",
                 diff="@@ -1 +1 @@",
                 editor_login="human",
                 editor_id="8",
                 editor_is_bot=False,
             ),
-            github.DescriptionEditRow(
+            gh_engagement.DescriptionEditRow(
                 edited_at="2026-04-02T00:00:00Z",
                 diff=None,
                 editor_login="bot",
@@ -421,7 +353,7 @@ class TestEngagementReads:
             ),
         ]
         rec = _Recorder(rows)
-        monkeypatch.setattr(github, "read_description_edits", rec)
+        monkeypatch.setattr(gh_engagement, "read_description_edits", rec)
         edits = GitHubIssueBackend(tmp_path).read_description_edits(issue_id="42")
         assert rec.kwargs == {"issue": 42, "repo_root": tmp_path}
         assert edits[0].diff == "@@ -1 +1 @@" and edits[0].author.kind == "human"
@@ -434,7 +366,7 @@ class TestEngagementReads:
         # A deleted/unresolvable GitHub account (author null) carries no login/id: it must
         # classify as `unknown`, never `human`.
         rows = [
-            github.IssueCommentRow(
+            gh_engagement.IssueCommentRow(
                 id="IC_1",
                 body="orphaned comment",
                 created_at="2026-03-01T00:00:00Z",
@@ -444,7 +376,7 @@ class TestEngagementReads:
                 author_is_bot=False,
             )
         ]
-        monkeypatch.setattr(github, "read_issue_comments", _Recorder(rows))
+        monkeypatch.setattr(gh_engagement, "read_issue_comments", _Recorder(rows))
         comments = GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
         assert comments[0].author.kind == "unknown"
         assert comments[0].author.id is None and comments[0].author.display_name is None
@@ -459,7 +391,7 @@ class TestEngagementReads:
         def boom(**kwargs: Any) -> None:
             raise github.GitHubError("HTTP 500: boom")
 
-        monkeypatch.setattr(github, "read_issue_comments", boom)
+        monkeypatch.setattr(gh_engagement, "read_issue_comments", boom)
         with pytest.raises(issue_backend.IssueBackendError, match="HTTP 500: boom"):
             GitHubIssueBackend(tmp_path).read_comments(issue_id="42")
 
@@ -507,58 +439,3 @@ class TestLateBinding:
         assert result is not None
         assert result.id == "1"
         assert rec.kwargs == {"number": 1, "repo_root": tmp_path}
-
-
-# The 15 issue-tier functions on the perk/github/ package (the GitHubIssueBackend substrate).
-# Production code must reach them through perk.backends.issues.resolve_issue_backend, never
-# directly. The objective-tier functions have their own scan in tests/test_objective_stores.py.
-ISSUE_TIER_FUNCTIONS: tuple[str, ...] = (
-    "create_label",
-    "find_plan_issue",
-    "create_plan_issue",
-    "update_plan_issue",
-    "update_plan_header",
-    "get_plan",
-    "get_plan_body",
-    "find_learn_issue",
-    "create_learn_issue",
-    "list_learn_issues",
-    "close_and_label_consolidated",
-    "close_issue",
-    "add_issue_comment",
-    "find_comment_id_by_marker",
-    "upsert_marked_comment",
-)
-
-
-class TestConsumerBoundary:
-    def test_no_production_module_calls_issue_tier_directly(self) -> None:
-        """Source scan: outside perk/backends/issues.py (the adapter) and the perk/github/
-        package itself, no module under perk/ may contain a `github.<issue-tier-fn>(` call.
-
-        `objective_stores.py` is also allowed: `GitHubObjectiveStore.close_objective` (Node 3.4)
-        deliberately reaches the issue-tier close primitive (`github.close_issue`) to retire a
-        GitHub objective issue — a GitHub objective IS an issue, so its close is byte-identical to
-        the issue close, and routing it through the objective adapter (not the issue backend) is the
-        point of moving the close onto the `ObjectiveStore`."""
-        perk_dir = Path(perk.__file__).parent
-        allowed = {
-            perk_dir / "backends" / "issues.py",
-            perk_dir / "backends" / "objective_stores.py",
-        }
-        github_pkg_dir = perk_dir / "github"
-        pattern = re.compile(
-            r"github\.(" + "|".join(re.escape(fn) for fn in ISSUE_TIER_FUNCTIONS) + r")\("
-        )
-        offenders: list[str] = []
-        for path in sorted(perk_dir.rglob("*.py")):
-            if path in allowed or path.is_relative_to(github_pkg_dir):
-                continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if pattern.search(line):
-                    offenders.append(
-                        f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
-                    )
-        assert not offenders, (
-            "issue-tier calls must go through perk.backends.issues:\n" + "\n".join(offenders)
-        )

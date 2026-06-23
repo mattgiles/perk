@@ -1,7 +1,7 @@
 """`perk plan from <issue>`: the in-place issue-adoption cold door (#706, §8.29).
 
-`github.read_issue`, `github.read_issue_comments`, `github.read_description_edits`, and
-`launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring test_replan_cmd.py.
+`github.read_issue`, `gh_engagement.read_issue_comments`, `gh_engagement.read_description_edits`,
+and `launch.launch_stage` are stubbed (no GitHub, no `exec pi`), mirroring test_replan_cmd.py.
 """
 
 import json
@@ -11,6 +11,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from perk import github, plan
+from perk.backends.github import engagement as gh_engagement
 from perk.cli.cli import cli
 from perk.run import launch
 
@@ -31,8 +32,8 @@ def _issue(*, state: str = "OPEN", body: str = "do the thing") -> github.IssueRe
     return github.IssueRead(number=7, url="u/7", title="Human title", body=body, state=state)
 
 
-def _comment_row(body: str, *, is_bot: bool = False) -> github.IssueCommentRow:
-    return github.IssueCommentRow(
+def _comment_row(body: str, *, is_bot: bool = False) -> gh_engagement.IssueCommentRow:
+    return gh_engagement.IssueCommentRow(
         id="c1",
         body=body,
         created_at="2026-03-01T10:00:00Z",
@@ -45,8 +46,8 @@ def _comment_row(body: str, *, is_bot: bool = False) -> github.IssueCommentRow:
 
 def _stub_issue(monkeypatch, *, issue=None, comments=None, edits=None) -> None:
     monkeypatch.setattr(github, "read_issue", lambda **k: _issue() if issue is None else issue)
-    monkeypatch.setattr(github, "read_issue_comments", lambda **k: list(comments or []))
-    monkeypatch.setattr(github, "read_description_edits", lambda **k: list(edits or []))
+    monkeypatch.setattr(gh_engagement, "read_issue_comments", lambda **k: list(comments or []))
+    monkeypatch.setattr(gh_engagement, "read_description_edits", lambda **k: list(edits or []))
 
 
 def _stub_launch(monkeypatch, sink: dict) -> None:
@@ -158,7 +159,7 @@ def test_engagement_read_failure_is_fail_soft(monkeypatch):
     def boom(**k):
         raise github.GitHubError("gh exploded")
 
-    monkeypatch.setattr(github, "read_issue_comments", boom)
+    monkeypatch.setattr(gh_engagement, "read_issue_comments", boom)
     launched: dict = {}
     _stub_launch(monkeypatch, launched)
     runner = CliRunner()

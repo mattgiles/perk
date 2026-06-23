@@ -16,7 +16,8 @@ import pytest
 
 import perk
 from perk import github, objective
-from perk.backends import engagement, issues, objective_store
+from perk.backends import engagement, objective_store, resolve
+from perk.backends.github import engagement as gh_engagement
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import LinearObjectiveStore, LinearProjectObjectiveStore
 from perk.backends.objective_store import ObjectiveStoreError
@@ -63,10 +64,10 @@ class TestResolver:
 
     def test_resolve_id_single_sources_off_issue_backend(self, tmp_path: Path) -> None:
         _write_config(tmp_path, "perk.toml", '[issues]\nbackend = "linear"\n')
-        assert resolve_objective_store_id(tmp_path) == issues.LINEAR_BACKEND_ID
+        assert resolve_objective_store_id(tmp_path) == resolve.LINEAR_BACKEND_ID
 
     def test_resolve_id_defaults_to_github(self, tmp_path: Path) -> None:
-        assert resolve_objective_store_id(tmp_path) == issues.GITHUB_BACKEND_ID
+        assert resolve_objective_store_id(tmp_path) == resolve.GITHUB_BACKEND_ID
 
     def test_linear_selection_returns_project_store(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -360,9 +361,9 @@ class TestGitHubDelegation:
     def test_read_comments_honest_over_objective_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Honest over the objective issue itself (Node 2.3): reuse `github.read_issue_comments` +
-        # the shared `issues._engagement_comment` mapper.
-        row = github.IssueCommentRow(
+        # Honest over the objective issue itself (Node 2.3): reuse
+        # `gh_engagement.read_issue_comments` + the shared `backend._engagement_comment` mapper.
+        row = gh_engagement.IssueCommentRow(
             id="c-1",
             body="please rescope",
             created_at="2026-03-01T10:00:00Z",
@@ -373,11 +374,11 @@ class TestGitHubDelegation:
         )
         captured: dict[str, Any] = {}
 
-        def _read(**kwargs: Any) -> list[github.IssueCommentRow]:
+        def _read(**kwargs: Any) -> list[gh_engagement.IssueCommentRow]:
             captured.update(kwargs)
             return [row]
 
-        monkeypatch.setattr(github, "read_issue_comments", _read)
+        monkeypatch.setattr(gh_engagement, "read_issue_comments", _read)
         out = GitHubObjectiveStore(tmp_path).read_comments(objective_id="252")
         assert captured == {"issue": 252, "repo_root": tmp_path}
         assert [c.id for c in out] == ["c-1"]
@@ -387,7 +388,7 @@ class TestGitHubDelegation:
     def test_read_description_edits_honest_over_objective_issue(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        row = github.DescriptionEditRow(
+        row = gh_engagement.DescriptionEditRow(
             edited_at="2026-03-02T11:00:00Z",
             diff="@@ -1 +1 @@",
             editor_login="ada",
@@ -396,11 +397,11 @@ class TestGitHubDelegation:
         )
         captured: dict[str, Any] = {}
 
-        def _read(**kwargs: Any) -> list[github.DescriptionEditRow]:
+        def _read(**kwargs: Any) -> list[gh_engagement.DescriptionEditRow]:
             captured.update(kwargs)
             return [row]
 
-        monkeypatch.setattr(github, "read_description_edits", _read)
+        monkeypatch.setattr(gh_engagement, "read_description_edits", _read)
         out = GitHubObjectiveStore(tmp_path).read_description_edits(objective_id="252")
         assert captured == {"issue": 252, "repo_root": tmp_path}
         assert len(out) == 1
@@ -411,10 +412,10 @@ class TestGitHubDelegation:
     def test_read_comments_wraps_github_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def _boom(**kwargs: Any) -> list[github.IssueCommentRow]:
+        def _boom(**kwargs: Any) -> list[gh_engagement.IssueCommentRow]:
             raise github.GitHubError("gh exploded")
 
-        monkeypatch.setattr(github, "read_issue_comments", _boom)
+        monkeypatch.setattr(gh_engagement, "read_issue_comments", _boom)
         with pytest.raises(ObjectiveStoreError, match="gh exploded"):
             GitHubObjectiveStore(tmp_path).read_comments(objective_id="252")
 

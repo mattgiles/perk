@@ -30,7 +30,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github, objective, plan
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.linear import client as linear_client
 from perk.backends.linear.client import LinearClient, LinearGraphQLError
 from perk.backends.objective_stores import resolve_objective_store
@@ -871,7 +871,7 @@ def test_foreign_linkback_comment_does_not_perturb_marker_scans(
         # The Linear GitHub integration posts linkback comments on linked issues; perk's
         # marker-keyed scans must tolerate this foreign writer.
         ws.add_foreign_comment("ENG-1", "Linked to PR mattgiles/perk#51 by the GitHub sync.")
-        backend = issues.resolve_issue_backend(root)
+        backend = resolve.resolve_issue_backend(root)
         # get_plan_body still finds the plan-body comment, not the foreign one
         body = backend.get_plan_body(issue_id="ENG-1")
         assert body is not None and "My linear plan" in body

@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from perk.backends import issues
+from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
@@ -163,7 +163,7 @@ def run_worker(
     """
     stage = _drivable_stage(stage_id)
     try:
-        backend = issues.resolve_issue_backend(repo_root)
+        backend = resolve.resolve_issue_backend(repo_root)
         state = backend.get_plan(issue_id=plan)
     except IssueBackendError as exc:
         raise UserFacingCliError(

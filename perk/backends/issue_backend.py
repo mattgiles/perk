@@ -8,7 +8,7 @@ issue backend). This module is that tier's contract: the ``IssueBackend`` `Proto
 backend-neutral result dataclasses, and the one backend-neutral error type. It is deliberately
 dormant in Node 1.1 — no extraction, no consumers; Node 1.2 extracted the GitHub backend behind
 it and Node 1.3 added the ``[issues]`` config table + config-driven resolver
-(``perk/backends/issues.py``).
+(``perk/backends/resolve.py``).
 
 Contract disciplines (every concrete backend MUST honor these):
 

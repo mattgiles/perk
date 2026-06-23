@@ -6,7 +6,7 @@ from typing import cast
 from click.testing import CliRunner
 
 from perk import github, plan
-from perk.backends import issue_backend, issues, objective_store, objective_stores
+from perk.backends import issue_backend, objective_store, objective_stores, resolve
 from perk.cli.commands.plan.save_cmd import plan_save
 from perk.cli.context import PerkContext
 
@@ -274,7 +274,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
         def prepend_plan_callout(self, *, issue_id, callout, command, dry_run=False):
             return True
 
-    monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _StubBackend())
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _StubBackend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -864,7 +864,7 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
             raise AssertionError("create_plan_issue must not run on the unified path")
 
     monkeypatch.setattr(objective_stores, "resolve_objective_store", lambda _root: _UnifyingStore())
-    monkeypatch.setattr(issues, "resolve_issue_backend", lambda _root: _Backend())
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _Backend())
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
