@@ -4,7 +4,8 @@ A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the ses
 *exterior*) plus a TypeScript Pi extension (the session *interior*).
 
 > Start at [`docs/user-docs/`](docs/user-docs/index.md).
-> Based heavily on prior art `erk` (RIP) by [dagster](https://github.com/dagster-io/dagster)
+
+> Originally based on prior art `erk`, by the team at [dagster](https://github.com/dagster-io/dagster)
 
 ## What perk is
 
