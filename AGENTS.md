@@ -57,6 +57,14 @@ repos **using** perk and is owned by `perk init` — never hand-edit between its
   in the delivered `perk-expert` skill references (`skills/perk-expert/references/`): a change to a
   config key / provider / backend updates the canonical `docs/user-docs/` reference **and** the
   matching `perk-expert` reference in the **same turn**.
+- **Comments express intent, not provenance.** Comments and docstrings carry the *why* + invariants +
+  gotchas — never plan history or a restatement of the code. Strip plan-provenance breadcrumbs
+  (`Node X.Y`, `Phase N`, `P#.T#`, `Q#`, `Objective #N`, bare issue/PR `#N`, `PRIOR_ART`, and `erk-*`
+  historical pointers); keep `contracts.md §X` references — on a mixed line, strip only the breadcrumb:
+  `(contracts.md §8.4; PRIOR_ART §2)` → `(contracts.md §8.4)`. Touch **comments and docstrings only** —
+  never string literals, registry vocabulary, or test assertion/fixture data (which may legitimately
+  contain `#NNN` / `§X` text). This bullet is the single reference every comment-hygiene sweep applies;
+  it is a prose convention with **no CI guard**.
 - **Rich UI goes through the surfaces module.** In the extension, `ctx.ui.notify`/`setStatus`/
   `setWidget`/`setFooter`/`setWorkingMessage` are called only inside `extension/surfaces/surfaces.ts`
   + `extension/surfaces/report.ts`; everything else uses their seams (`report()`, `createPerkStatus`,
