@@ -1,6 +1,6 @@
-"""``.pi/workflow/`` cache-tier I/O (Q2 / contracts.md §8.1).
+"""``.pi/workflow/`` cache-tier I/O (contracts.md §8.1).
 
-Free functions over an explicit repo ``root`` (erk's scratch/markers style). **Both
+Free functions over an explicit repo ``root``. **Both
 planes read and write the same files**; the TS twin is ``extension/substrate/cache.ts``. These are
 state-tiering *primitives* — no workflow semantics (no ``pending-learn`` meaning, no GC
 policy; the GC *policy* lives in ``perk/state/gc.py``, surfaced as ``perk state prune`` + the
@@ -17,7 +17,7 @@ from perk.substrate.output import user_output
 # The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
-# The land->learn semaphore (Q2 / Q5): `land` sets it, `learn` clears it; while present it
+# The land->learn semaphore: `land` sets it, `learn` clears it; while present it
 # signals the worktree is not yet releasable. Single source of the name across planes (the TS
 # twin is `PENDING_LEARN` in extension/substrate/cache.ts).
 PENDING_LEARN = "pending-learn"
@@ -38,8 +38,8 @@ def ensure_layout(root: Path) -> Path:
 
 # --- scratch: per-run inter-process files (scratch/runs/<run_id>/<name>) ---------------
 #
-# This module is the EXTERIOR accessor seam for scratch/session-data paths (contracts.md §8.1,
-# Objective #339 Node 1.2): production code never hand-builds the `scratch`/`runs` path segments
+# This module is the EXTERIOR accessor seam for scratch/session-data paths (contracts.md §8.1):
+# production code never hand-builds the `scratch`/`runs` path segments
 # outside this module (guard-tested by tests/test_cache_guard.py; the interior twins are
 # extension/substrate/cache.ts + extension/substrate/sessionData.ts).
 
@@ -85,7 +85,7 @@ def read_scratch(root: Path, run_id: str, name: str) -> str | None:
 
 # --- session data: run-scoped session artifacts (scratch/runs/<run_id>/data/<name>) ------
 #
-# The session data dir (Objective #339 Node 1.2) — a dedicated `data/` subdir so run-scoped
+# The session data dir — a dedicated `data/` subdir so run-scoped
 # session artifacts never overlap perk machine records (dispatch.json, events.ndjson, ci-*.md)
 # living directly in the run dir. Created lazily on first write; helpers degrade gracefully
 # (absence and I/O failure -> ``None`` + a stderr warning, never an exception).
@@ -172,7 +172,7 @@ def read_handoff(root: Path, run_id: str) -> dict[str, Any] | None:
 def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None = None) -> None:
     """Mark a handoff consumed (idempotent); a no-op if the handoff is absent.
 
-    Keeps the file (audit + GC signal); never deletes it (the erk GC pitfall, §8.1).
+    Keeps the file (audit + GC signal); never deletes it (the GC pitfall, §8.1).
     """
     data = read_handoff(root, run_id)
     if data is None:
@@ -183,7 +183,7 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
     handoff_path(root, run_id).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-# --- dispatch: the durable run_id->plan linkage for a remote drive (Node 2.1, §8.13) -----
+# --- dispatch: the durable run_id->plan linkage for a remote drive (§8.13) -----
 
 
 def dispatch_path(root: Path, run_id: str) -> Path:
@@ -194,7 +194,7 @@ def dispatch_path(root: Path, run_id: str) -> Path:
 def write_dispatch(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     """Write the durable ``run_id -> plan`` dispatch record (creating the run dir); return its
     path. ``run_id`` is authoritative (it overrides anything in ``data``), mirroring
-    ``write_handoff``. The supervisor (Node 3.1) enumerates ``scratch/runs/*/dispatch.json``
+    ``write_handoff``. The supervisor enumerates ``scratch/runs/*/dispatch.json``
     to correlate ``run_id <-> plan <-> PR`` (§8.13).
     """
     directory = run_scratch_dir(root, run_id)
@@ -270,7 +270,7 @@ def plan_body_path(root: Path) -> Path:
 
 def write_plan_body(root: Path, body: str) -> Path:
     """Materialize the plan body markdown to ``plan.md`` (so in-session checkpoints can seed from
-    its ``## Steps`` list, P2.T2c); return its path."""
+    its ``## Steps`` list); return its path."""
     path = plan_body_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")

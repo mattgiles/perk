@@ -1,4 +1,4 @@
-"""Mint and parse perk run ids (Q2 / contracts.md §8.2).
+"""Mint and parse perk run ids (contracts.md §8.2).
 
 A ``run_id`` is a canonical **ULID** (26-char Crockford base32) — time-sortable and
 self-dating, so GC-by-age and chronological ordering need no sidecar. Mint doctrine

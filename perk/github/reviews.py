@@ -6,13 +6,13 @@ from pathlib import Path
 from perk.github import _exec
 
 # ===========================================================================
-# Review-feedback ops (P2.T7 — the `/address` loop; contracts.md §8.4).
+# Review-feedback ops (the `/address` loop; contracts.md §8.4).
 #
 # Review threads and their resolution are **GraphQL-only** (there is no REST endpoint for
 # `isResolved` or the `resolveReviewThread`/`addPullRequestReviewThreadReply` mutations), so these
 # ops shell `gh api graphql` (the lone exceptions to the REST-over-porcelain convention, alongside
 # `mark_pr_ready`). Discussion comments live on the issue and stay REST. The GraphQL shapes are
-# verbatim from erk (its `.../graphql_queries.py`), the durable prior art (§8.4).
+# durable prior art (§8.4).
 #
 # Error model (§8.4): `get_pr_feedback` is a read that **raises** `GitHubError` on infra failure;
 # `resolve_review_threads` captures *per-item* failures into its result (so one bad thread does not
@@ -371,7 +371,7 @@ def resolve_review_threads(
 
 
 # ===========================================================================
-# PR review ops (#175 — the `/pr-review` automated-review door; contracts.md §8.4).
+# PR review ops (the `/pr-review` automated-review door; contracts.md §8.4).
 #
 # The read (`get_pr_review_context`) gathers everything the fresh-context `perk.pr-reviewer` child
 # needs to review the active PR (diff + PR text + plan body); the mutations send the child's

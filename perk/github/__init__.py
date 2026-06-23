@@ -1,14 +1,13 @@
 """The GitHub gateway — Python plane, **verification-only** (contracts.md §8.4).
 
 A thin ``gh``-shelling gateway implementing the two verification ops the init/doctor
-surfaces need in Phase 0. It **never mutates** GitHub (Q9 — the first label is created
-lazily by ``/plan-save`` in Phase 1). Mutation ops are named-only in §8.4 and land with
-their stage handlers.
+surfaces need. It **never mutates** GitHub (the first label is created lazily by
+``/plan-save``). Mutation ops are named-only in §8.4 and land with their stage handlers.
 
-The TS extension authors the *same* operation names + payload shapes in Phase 1, so
+The TS extension authors the *same* operation names + payload shapes, so
 ``doctor`` can verify both planes and either can later swap ``gh``-shell → API-backed.
 
-Issue/objective tier demotion (Objectives #252/#746): the issue/objective substrate now lives in
+Issue/objective tier demotion: the issue/objective substrate now lives in
 the backend tier at perk/backends/github/{plans,objectives,engagement}.py — plan/learn/objective
 issues, marked comments, labels, and the read-only ``gh api graphql`` engagement reads. Production
 code reaches that substrate only through the resolvers in perk/backends/resolve.py — never by

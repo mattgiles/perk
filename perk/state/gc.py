@@ -1,8 +1,8 @@
-"""GC policy for ``.pi/workflow/`` run state (contracts.md §8.1, Objective #339 Node 1.4).
+"""GC policy for ``.pi/workflow/`` run state (contracts.md §8.1).
 
 ``scratch/runs/<run_id>/`` dirs and ``handoff/<run_id>.json`` blobs accumulate forever (the
-erk pitfall §8.1 cites — ``mark_handoff_consumed`` keeps the file as an audit + GC signal, and
-nothing consumed that signal until now). This module is the *policy* home: pure-read
+pitfall §8.1 cites — ``mark_handoff_consumed`` keeps the file as an audit + GC signal). This
+module is the *policy* home: pure-read
 eligibility evaluation (:func:`plan_prune`) + destructive execution (:func:`execute_prune`),
 surfaced by ``perk state prune`` and the ``cache-gc`` doctor check. Exterior-owned (the CLI);
 there is no TS twin, consistent with ``perk/state/cache.py``'s "no GC policy here" note.

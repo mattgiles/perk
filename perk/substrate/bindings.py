@@ -8,7 +8,7 @@ reader (`extension/substrate/bindings.ts`) over the *same* bundled file.
 Validation is **shape-only and registry-free**: the validator checks that each binding's
 fields are well formed (and that no trigger repeats), but it does NOT cross-check that a
 `stage:` target is a real registry stage or that a `command:` target is a real command —
-that target-existence validation is `doctor`'s job (Node 3.1).
+that target-existence validation is `doctor`'s job.
 
 The shape + defaults are locked **and consumed**: the resolver (`resolve_bindings`,
 `shipped-defaults ⊕ user-bindings`) and cold-door delivery (`perk/substrate/binding_delivery.py`)
@@ -34,7 +34,7 @@ SUPPORTED_SCHEMA_VERSION = 1
 TRIGGER_KINDS: tuple[str, ...] = ("stage", "command")
 MODES: tuple[str, ...] = ("nudge", "transclude")
 
-# The `command:<id>` targets that perk's binding-delivery layer actually fires (Node 3.1, D5).
+# The `command:<id>` targets that perk's binding-delivery layer actually fires (D5).
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
 # only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
@@ -156,7 +156,7 @@ def _binding_issues(binding: Binding) -> list[Issue]:
     """Return the shape issues for a *single* binding (skill/mode/trigger well-formedness).
 
     Shape-only and registry-free (§8.9): does not check that a ``stage:``/``command:``
-    target actually exists — that cross-contract validation is ``doctor`` (Node 3.1).
+    target actually exists — that cross-contract validation is ``doctor``.
     Duplicate-trigger detection is a *set*-level concern owned by the caller (``validate``
     over a committed set; ``resolve_bindings`` over the user overlay).
     """
@@ -189,8 +189,8 @@ def _binding_issues(binding: Binding) -> list[Issue]:
 def validate(bindings: BindingSet) -> list[Issue]:
     """Return every shape issue (empty list == valid). Never raises for content.
 
-    Shape-only and registry-free (Node 1.1): does not check that a ``stage:``/``command:``
-    target actually exists — that cross-contract validation is ``doctor`` (Node 3.1).
+    Shape-only and registry-free: does not check that a ``stage:``/``command:``
+    target actually exists — that cross-contract validation is ``doctor``.
     """
     issues: list[Issue] = []
     seen: set[str] = set()
@@ -237,7 +237,7 @@ def resolve_bindings(
     shape-valid AND its trigger was not already applied by an earlier user binding;
     otherwise it is dropped and its issue recorded. An applied binding **replaces in place**
     the default with the same trigger, or **appends** at a new trigger — so the resolved set
-    has unique triggers by construction. Target-existence stays ``doctor`` (Node 3.1).
+    has unique triggers by construction. Target-existence stays ``doctor``.
     """
     if defaults is None:
         defaults = load_bindings().bindings

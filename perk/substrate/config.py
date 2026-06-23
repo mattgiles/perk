@@ -1,4 +1,4 @@
-"""perk's TOML config (Q13): `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml`
+"""perk's TOML config: `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml`
 (gitignored). Read-only via stdlib ``tomllib``; ``perk init`` *writes* the files.
 
 T4 needs only the worktree root; the ``Config`` dataclass grows as later turns add settings.
@@ -29,7 +29,7 @@ class Config:
     # one wholesale). Empty when absent/ill-typed.
     worktree_setup: list[str] = field(default_factory=list)
     user_bindings: list[Binding] = field(default_factory=list)
-    # The agent-keyed `[subagents]` table (#196) — a per-agent model override for each perk-owned
+    # The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
     # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`), injected as a
     # per-call inline `model` override on that agent's spawn. Absent keys mean "use the agent's
     # frontmatter default". Only known agent keys with string values are kept (mirrors `providers`).
@@ -38,9 +38,9 @@ class Config:
     # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
     # `user_bindings` is raw and `resolve_bindings` resolves it).
     providers: dict[str, str | None] = field(default_factory=dict)
-    # The `[workflow] base` default target branch (#633): the trunk that plans/objectives base off
+    # The `[workflow] base` default target branch: the trunk that plans/objectives base off
     # and target when no objective-level override is set. `None` (absent/non-string) ⇒ fall back
-    # to the GitHub default branch (byte-identical to pre-#633 behavior). The sibling
+    # to the GitHub default branch (byte-identical to prior behavior). The sibling
     # `[workflow] plan_authoring` key is TS-read and untouched.
     workflow_base: str | None = None
 
@@ -99,7 +99,7 @@ def _parse_worktree_setup(raw: Any) -> list[str]:
 
 
 def _parse_workflow_base(raw: Any) -> str | None:
-    """Read the `[workflow] base` value when it is a non-blank ``str`` (#633).
+    """Read the `[workflow] base` value when it is a non-blank ``str``.
 
     LBYL silent-omit (mirrors ``parse_issues_backend``): a non-dict/absent table or an
     absent/ill-typed/blank ``base`` yields ``None`` (callers fall back to the GitHub default

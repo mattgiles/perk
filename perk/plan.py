@@ -1,13 +1,12 @@
 """Plan storage: the two-part header/body metadata-block engine + the provider-agnostic
-plan ref (`contracts.md` §8.4; PRIOR_ART §2).
+plan ref (`contracts.md` §8.4).
 
 Pure and deterministic — **no Click, no subprocess, no network**. The GitHub *write* lives
-in :mod:`perk.github`; the *in-session* twin is the TS extension (T3). Inference-hoisting
-(PRIOR_ART §12 / erk-subagent §8): this layer stores what it is given (the plan body
-**verbatim**) and computes nothing agentic — which is what keeps it deterministically
-testable.
+in :mod:`perk.github`; the *in-session* twin is the TS extension. Inference-hoisting:
+this layer stores what it is given (the plan body **verbatim**) and computes nothing
+agentic — which is what keeps it deterministically testable.
 
-Storage shape (PRIOR_ART §2, erk's metadata-blocks, perk-namespaced):
+Storage shape (perk-namespaced):
 
 - **Issue body** holds the ``plan-header`` block — compact YAML, queryable without fetching
   comments.
@@ -26,14 +25,14 @@ PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
 PLAN_LABEL_DESCRIPTION = "perk plan issue"
 
-# The learn issue (P2.T8b): a `perk:learn`-labelled knowledge-capture issue, created by `/learn`
+# The learn issue: a `perk:learn`-labelled knowledge-capture issue, created by `/learn`
 # from agent-captured learnings. Distinct label + header key so its idempotency finder cannot
 # collide with the plan issue (which shares the same `run_id` under the `warm: keep` learn stage).
 LEARN_LABEL = "perk:learn"
 LEARN_LABEL_COLOR = "8250df"  # GitHub purple
 LEARN_LABEL_DESCRIPTION = "perk learn issue"
 
-# The consolidated label (hop-2): a `perk:learn` issue gets this label + is closed when its
+# The consolidated label: a `perk:learn` issue gets this label + is closed when its
 # learnings have been consumed into a `docs/learned/` documentation plan (the learn-docs factory).
 # Closing already excludes it from the next `state=open` gather; the label is the durable record.
 CONSOLIDATED_LABEL = "perk:consolidated"
@@ -64,7 +63,7 @@ _OPEN = "<!-- perk:metadata-block:{key} -->"
 _CLOSE = "<!-- /perk:metadata-block:{key} -->"
 _FENCE = "```"
 
-# The Linear-safe delimiter encoding (objective #252 Node 2.2): inline-code sentinels on their
+# The Linear-safe delimiter encoding: inline-code sentinels on their
 # own lines, with NO `<details>` wrapper. Linear stores bodies as ProseMirror documents and
 # round-trips markdown on write/read — HTML comments and `<details>` are not in its supported
 # markdown set and must be assumed lossy; inline code and fenced code blocks ARE supported.
@@ -75,8 +74,8 @@ BlockStyle = Literal["html", "inline-code"]
 
 
 class LifecycleStage(StrEnum):
-    """The stored, queryable plan stage (Q8 consolidation: ``planned → impl``; terminal
-    ``merged``/``closed`` are derived from PR state, never stored)."""
+    """The stored, queryable plan stage (``planned → impl``; terminal ``merged``/``closed``
+    are derived from PR state, never stored)."""
 
     PLANNED = "planned"
     IMPL = "impl"
@@ -87,7 +86,7 @@ class PlanHeader:
     """Compact, queryable metadata stored in the issue *body* (contracts.md §8.4).
 
     ``branch``/``pr`` are **staged** — null during planning, populated at submit
-    (PRIOR_ART §2: "commands must handle missing fields gracefully").
+    ("commands must handle missing fields gracefully").
     """
 
     run_id: str
@@ -95,14 +94,14 @@ class PlanHeader:
     lifecycle_stage: LifecycleStage = LifecycleStage.PLANNED
     branch: str | None = None
     pr: str | None = None
-    objective_id: str | None = None  # Phase 2
-    # hop-2: the perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
+    objective_id: str | None = None
+    # The perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
     # Linear "ENG-45"; contracts §8.21).
     consumed_learn: tuple[str, ...] = ()
-    # The pinned PR merge target / worktree start-point branch (#633). `None` ⇒ fall back to the
-    # GitHub default branch (byte-identical to pre-#633 behavior).
+    # The pinned PR merge target / worktree start-point branch. `None` ⇒ fall back to the
+    # GitHub default branch (byte-identical to prior behavior).
     base: str | None = None
-    # In-place issue adoption (#706, §8.29): the source issue ref this plan was adopted from
+    # In-place issue adoption (§8.29): the source issue ref this plan was adopted from
     # (e.g. `"#123"` / `"PER-45"`). Self-referential by construction (adoption stamps the plan
     # INTO the human issue); its **presence** is the canonical "this plan was adopted; its issue
     # body/title are verbatim human content" signal. `None` for a normally-authored plan.
@@ -128,7 +127,6 @@ class PlanRef:
 
     ``pr_id`` is a **string** (allows non-numeric ids like Jira ``PROJ-123``); during
     planning it carries the *issue* id, with ``branch``/``pr`` staged null in the header.
-    T2a **emits** this; T2b materializes it into ``cache.plan-ref``.
     """
 
     provider: str
@@ -136,9 +134,9 @@ class PlanRef:
     url: str
     labels: tuple[str, ...]
     objective_id: str | None = None
-    # hop-2: consumed perk:learn issue ids (opaque strings; closed on land).
+    # Consumed perk:learn issue ids (opaque strings; closed on land).
     consumed_learn: tuple[str, ...] = ()
-    # The pinned PR merge target / worktree start-point branch (#633); `None` ⇒ GitHub default.
+    # The pinned PR merge target / worktree start-point branch; `None` ⇒ GitHub default.
     base: str | None = None
 
     def to_data(self) -> dict[str, object]:
@@ -286,7 +284,7 @@ def render_plan_body(plan_markdown: str, *, style: BlockStyle = "html") -> str:
 def extract_plan_body(text: str) -> str | None:
     """Extract the verbatim plan markdown from a ``plan-body`` block (inverse of
     :func:`render_plan_body`). ``text`` is an issue body or a comment body. ``None`` when the block
-    is absent or malformed. Used to materialize the plan body for in-session checkpoints (P2.T2c).
+    is absent or malformed. Used to materialize the plan body for in-session checkpoints.
 
     Dual-encoding scan (mirrors :func:`find_metadata_block`): HTML first, then the Linear-safe
     inline-code sentinels — on that branch the body is the text strictly between the sentinels.
@@ -321,7 +319,7 @@ def extract_run_id(issue_body: str, *, header_key: str = PLAN_HEADER_KEY) -> str
     """The ``run_id`` in an issue body's metadata block (for idempotency). None if absent.
 
     ``header_key`` defaults to ``plan-header`` (the plan issue); the learn issue passes
-    ``learn-header`` so its run_id is read from its OWN block (P2.T8b — the label-scoped finder).
+    ``learn-header`` so its run_id is read from its OWN block (the label-scoped finder).
     """
     block = find_metadata_block(issue_body, header_key)
     if block is None:
@@ -359,7 +357,7 @@ def now_iso() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-# ----------------------------------------------------------- command callout (§664)
+# ----------------------------------------------------------------- command callout
 
 
 def render_command_callout(label: str, command: str, hint: str) -> str:
