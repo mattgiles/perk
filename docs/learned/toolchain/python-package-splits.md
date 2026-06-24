@@ -1,6 +1,6 @@
 ---
 title: Splitting a large Python module into a package — the script-generated recipe
-read_when: You are splitting a large `perk/<mod>.py` into a `perk/<mod>/` package (preserving import paths), rewriting call-site bindings, proving a verbatim split is complete, hitting the package-`__init__` submodule-import fallback / sorted-`__all__` F401 / hatchling auto-include facts, or applying the objective-#714 split-arc refinements (the seed-generous import-resolution loop, the monkeypatch-name-resolution contract, the module-object-vs-name-binding patch rule, constant-travels-with-helper, the E402 leaf data module, the `(stem,func)`-keyed guard ripple, the `__file__`→package-dir-glob source-scan-guard fix, or the AST byte-identity recipe).
+read_when: You are splitting a large `perk/<mod>.py` into a `perk/<mod>/` package (preserving import paths), rewriting call-site bindings, proving a verbatim split is complete, hitting the package-`__init__` submodule-import fallback / sorted-`__all__` F401 / hatchling auto-include facts, applying the objective-#714 split-arc refinements (the seed-generous import-resolution loop, the monkeypatch-name-resolution contract, the module-object-vs-name-binding patch rule, constant-travels-with-helper, the E402 leaf data module, the `(stem,func)`-keyed guard ripple, the `__file__`→package-dir-glob source-scan-guard fix, the AST byte-identity recipe), or **folding a flat module into a package / a cross-package relocation** (the non-re-export census that misses type annotations + docstrings, patch-shape divergence across a fold, the four-really-five monkeypatch forms + ty's string-`setattr` hole, BSD-`sed`-`\b`-is-a-no-op, the E402-insert-after-FIRST-import trap, the vacuous-source-scan-guard-on-move, sibling-submodule imports avoiding the package-root cycle, or the package-organization north-star doc).
 ---
 
 # Splitting a Python module into a package
@@ -111,6 +111,75 @@ sharpenings.
   the resolved values *down* to the extracted helpers, so no network call is added / removed /
   reordered. Pure string recomputation inside a helper is fine — it adds no network call. See
   `workflow/linear-backend.md` for the originating selection-order oracle.
+
+## Folds and cross-package relocations
+
+The #714 recipe above covers a verbatim **split** (one file → a package, import paths preserved). A
+later arc re-ran it for two harder shapes — **folding a flat module *into* an existing package** as a
+non-re-exported submodule, and **relocating symbols *across* a package boundary**. These add
+distinctions the split recipe doesn't cover (don't re-derive the monkeypatch/source-scan basics above —
+these are the new edges).
+
+- **Folding a flat module into a package as a NON-re-exported submodule.** When the old flat module was
+  reachable *as the package name* and consumers wrote `pkg.<sym>`, folding it to a submodule **without
+  re-exporting** means EVERY `pkg.<sym>` for a moved symbol must become an aliased submodule reference.
+  A grep for the obvious call is **insufficient** — it misses **type annotations** (`def f(x: pkg.Type)`,
+  an import-time `AttributeError`) and **module-docstring path references**. Use
+  `python -c "import <every consumer module>"` as the **first oracle** (it surfaces missing-attribute
+  breaks at import that grep won't). `git mv` ordering: move the **directory** first so the target
+  exists, then `git mv` the flat files into it.
+
+- **Monkeypatch targets diverge by patch SHAPE across a fold.** Three outcomes (this complements the
+  "name-resolution" rule above): consumer-**attribute** patches **survive** if the alias name is
+  preserved (the consumer re-binds the alias regardless of where it imports from);
+  **absolute-module-path** patches **break** (the module no longer exists at that path); late-bound
+  **package-attribute** patches must **move to the new owning module** (patching that module object
+  covers all consumers that import it).
+
+- **The cross-package relocation monkeypatch sweep — four (really five) forms, and ty has a HOLE.** A
+  pure relocation across the package boundary is a type-resolution change, so **`ty check` catches
+  missed import repoints and stale attribute references — but NOT
+  `monkeypatch.setattr(mod, "NAME", ...)` (the attribute-name-as-a-STRING form)**, which is opaque to
+  the type checker and raises only at runtime. **Never trust a green `ty` as proof the monkeypatch
+  sweep is complete — run the full pytest suite too.** The five escalating forms: attribute access /
+  single-line `setattr` / **multi-line `setattr`** (the regex must match the bare token so it spans
+  line breaks — a multi-line `setattr` was the source of a 90-failure miss) / string-path (repoint to
+  the substrate module path via late binding) / two-level `pkg.sub.NAME`. **Classify the moved-name set
+  vs the stays-put set first; census the counts up front.**
+
+- **macOS BSD `sed` `\b` is silently a no-op.** `sed -i '' 's/\bX\b/.../g'` does **nothing** but
+  reports success — use a Python `re.sub(r"(?<![.\w])X\.", ...)` (or `perl -pe`) for any word-boundary
+  replacement on macOS. The **negative-lookbehind** spares already-qualified names (don't re-prefix a
+  `mod.X` that's already correct).
+
+- **The E402 import-insertion-point trap.** Inserting a new top-level import "after the last `from perk`
+  import" can land it **after** a file's mid-file `# noqa: E402` block, so an earlier module-level use
+  `NameError`s at import. **Insert after the FIRST top-level `from perk` import.**
+
+- **A source-scan boundary guard goes VACUOUS when its target moves.** A guard searching for
+  `pkg.<fn>(` call patterns matches **nothing** once the functions move off `pkg` — silently passing
+  forever (false-green). Re-anchor it to the NEW location (scan for dot-form imports of the new
+  substrate package from production modules outside it) and **always run the self-check** (plant a
+  violation, confirm FAIL, revert). See `workflow/source-scan-guards.md`.
+
+- **Sibling-submodule imports avoid the package-root re-entry cycle.** A pure module moved *into* a
+  package should import siblings via their **submodule paths directly** (not `from pkg import …`) and
+  leave the package `__init__` **byte-unchanged** (the moved module NOT re-exported) — `__init__` loads
+  fully first and never references the new module, so no cycle. The `import X as old_name` alias keeps
+  existing call sites byte-identical (minimal-churn discipline). `ty check` (whole repo) is the
+  completeness oracle for a pure rename.
+
+- **The package-organization north-star (the durable rule, now without its doc).** This split arc was
+  governed by a `perk/`-layering north-star — six governing principles, a reconciliation of known
+  asymmetries, a target tree, and a staged A–D reorg roadmap. The planning doc that captured it
+  (`docs/planning/package-organization.md`) was later **removed with the rest of `docs/planning/`**,
+  so there is no live pointer to chase. The durable rule outlives the doc: **a `perk/` reorg should
+  consult the established layering (the existing package structure + the codebase-design deep-module
+  vocabulary) rather than re-deriving it ad hoc.**
+
+The gateway-purification refinement from this same relocation arc lives in
+`workflow/github-gateway.md` (hoisting a backend-specific read out of a neutral gateway into the
+consumer).
 
 ## The run_ci-green-≠-committable trap on generated files
 
