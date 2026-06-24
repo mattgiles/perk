@@ -62,31 +62,6 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
 
 
-def test_launch_warms_extension_clone_before_exec(git_repo, monkeypatch):
-    # ensure_extension_clone_present is invoked before os.execvpe on the local consumer path.
-    cache.write_plan_ref(git_repo, _PLAN_REF)
-    config = Config(worktree_root=git_repo / ".worktrees")
-    events: list[object] = []
-    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
-    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
-    monkeypatch.setattr(
-        launch.init,
-        "ensure_extension_clone_present",
-        lambda repo_root, *, self_repo: events.append(("warm", repo_root, self_repo)),
-    )
-    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: events.append("exec"))
-    launch_stage(
-        repo_root=git_repo,
-        config=config,
-        stage=_stage("implement"),
-        worktree=None,
-        dry_run=False,
-        remote=None,
-        pi_args=[],
-    )
-    assert events == [("warm", git_repo, False), "exec"]  # warmed first, then exec
-
-
 def test_launch_warms_extension_install_before_exec(git_repo, monkeypatch):
     # ensure_extension_install_present is invoked before os.execvpe on the local consumer path.
     cache.write_plan_ref(git_repo, _PLAN_REF)
@@ -118,7 +93,7 @@ def test_launch_does_not_warm_on_dry_run(git_repo, monkeypatch, capsys):
     warmed: list = []
     monkeypatch.setattr(
         launch.init,
-        "ensure_extension_clone_present",
+        "ensure_extension_install_present",
         lambda repo_root, *, self_repo: warmed.append(repo_root),
     )
     launch_stage(

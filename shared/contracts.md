@@ -1747,7 +1747,7 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the five perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
-check — §8.6a) ·
+check; `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
@@ -1757,7 +1757,7 @@ handoff-blob integrity). Managed-piece checks are filtered by `capabilities.appl
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
 
-### §8.6a · perk-package ref reconcile + the self-contained extension (#635/#639)
+### §8.6a · perk-package ref reconcile + the npm-install extension (#635/#639/#812)
 
 Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
 
@@ -1776,66 +1776,20 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   only** (perk never writes object-form for its own package — Invariant 2; a hand-written
   object-form perk entry is a documented limitation). This rides the existing `settings-wiring`
   `ManagedConvergence` — version-pin drift becomes a `settings-wiring` **fail** that `--fix`
-  repairs, with **no new doctor wiring**. **Forward pointer:** the remaining clone-freshness
-  bullets below describe the `git:`-clone extension lifecycle, which becomes orphaned after this
-  flip (pi loads the extension from the npm install) and is retired in a later node — they are
-  retained here until that retirement lands.
-- **The perk extension is self-contained in a consumer git clone.** pi loads the extension from
-  its git-package clone (`.pi/git/<host>/<path>`) via `jiti`, resolving imports through a **fixed
-  host-alias set** (`@earendil-works/pi-coding-agent`/`-pi-ai`/`-pi-tui`, the `@mariozechner/*`
-  aliases, and `typebox`) plus native `node_modules` walking. pi's `installGit`/`ensureGitRef`
-  **skip** `npm install` when the clone already exists at the pinned ref (and `pi update` shares
-  the early return), so the clone may have **no `node_modules`**. The extension therefore imports
-  **only** host-aliased packages + Node builtins — it has **zero runtime `dependencies`** — so the
-  clone needs no `node_modules` in every case (fresh, stale, partial, offline). The three bundled
-  `shared/*.yaml` contracts are parsed by the vendored `extension/substrate/miniYaml.ts` reader
-  (the twin of the Python plane's `pyyaml`-based readers), a deliberately minimal YAML-subset
-  parser scoped to perk's own files whose fidelity to the reference parser is pinned by
-  `miniYaml.test.ts` (`yaml` survives as a **dev-only** dependency powering that test). An
-  unsupported YAML construct makes `miniYaml` throw loudly rather than silently mis-parse. (This
-  supersedes #637's `extension-deps` doctor check + `npm install` repair gesture, now retired: with
-  no runtime deps there is nothing to install.)
-- **Clone commit-freshness is a *distinct* concern from dependency installation, and perk owns
-  it (#642).** #639's retirement of `extension-deps` was correct that a no-runtime-deps clone has
-  no `node_modules` to install — but it silently assumed pi would self-advance the clone. It does
-  not: `resolvePackageSources`' present-project-scope branch only calls `collectPackageResources`
-  (no `git fetch`/`reset`), so a clone first created at an old commit stays frozen across launches
-  (wrong import paths, a retired `yaml` import → a hard `Cannot find module 'yaml'` load failure)
-  while `perk doctor` reported green. perk now owns freshness: the verify-gated `extension-clone`
-  doctor check (group `package`) **fails** on a stale clone, `perk init` advances the clone
-  *forward* after `sync_skills`, and `perk doctor --fix` repairs it. Detection compares the clone
-  `HEAD` to `origin/main` (perk's pinned ref — `_desired_packages` writes `@main`) and is a
-  **network** op, so both the doctor check and the init reconcile are verify-gated and degrade to
-  `warn` / no-op (`unverifiable`) when offline — never a silent `ok`, never a crash. (`perk
-  doctor`/`perk init` are Python CLIs that do not load the TS extension, so they run fine against a
-  clone too stale to load, repairing it for the *next* launch.)
-- **perk materializes the clone *in place*, under a cross-process lock, and warms it pre-launch
-  (#655).** The original `#642` repair was a *blow-away-and-reclone* (`rm -rf` the clone, let pi
-  re-clone lazily on the next launch). That opened a **missing-clone window**: pi's lazy git-package
-  install (`resolvePackageSources`) is **unlocked** — `if (!existsSync(clonePath)) { installGit }
-  else { collectPackageResources }` — so when two perk sessions launch nearly simultaneously against
-  an absent clone, the second process sees the first's **half-created** clone dir, takes the `else`
-  branch, and collects resources from an **incomplete checkout** → the perk extension silently fails
-  to register (a session with *none* of perk's tools, perk absent from `[Extensions]`). perk now
-  removes that window and owns materialization end-to-end: it **never blows the clone away**.
-  `materialize_extension_clone` (init/doctor) converges the clone forward **in place** —
-  clone-if-absent / `git fetch`+`git reset --hard origin/main`-if-stale, **no `npm install`** — and
-  `ensure_extension_clone_present` warms it **pre-launch** in `launch_stage` (clone-on-absent only;
-  a cheap `is_dir()` no-op once present, so the launch hot path stays network-free). Both run under
-  an exclusive `fcntl.flock` on `<repo_root>/.pi/git/.perk-extension-clone.lock` (the lock lives in
-  the clone's *parent* so a clone-dir removal never drops it; degrades to a no-op lock on non-POSIX),
-  so concurrent launches **serialize** on the lock and a double-checked `is_dir()` clones exactly
-  once. Because perk pre-materializes the clone, pi's `--omit=dev` install never runs, so the clone
-  stays `node_modules`-free. All git work is best-effort + **non-fatal** (a `GitError` is swallowed,
-  never raised) so a flaky network never fails an init/doctor/launch; offline `unverifiable` leaves
-  a present clone as-is. The self-repo (`..` package) has no clone and is exempt. The moving `@main`
-  pin is kept — warming + in-place materialize make it safe.
-- **perk owns the `@perk/pi` *npm install* too, the twin of the clone materialization (#812).**
+  repairs, with **no new doctor wiring**.
+- **perk owns the `@perk/pi` *npm install*, superseding pi's `git:`-clone extension lifecycle
+  (#812).**
   Node 2.2 flipped perk's own extension to a pinned `npm:@perk/pi@{__version__}` settings entry; this
   bullet makes init/doctor/launch **physically install** that pin. pi installs a missing
-  project-scope `npm:` package lazily and **unlocked** at launch (`resolvePackageSources`) — the same
-  missing/half-materialized race the clone work closes for `git:` packages. perk now owns it
-  end-to-end: `materialize_extension_install` (init/doctor) reconciles the install **forward** —
+  project-scope `npm:` package lazily and **unlocked** at launch (`resolvePackageSources`) — a
+  missing/half-materialized race for `npm:` packages. The npm install path now **fully supersedes**
+  pi's `git:`-clone extension lifecycle, which is retired: the clone status/lock/materialize
+  primitives, the `extension-clone` doctor check, and the launch warm-clone are all removed. A
+  `doctor --fix` **migration** (`_remove_orphaned_git_clone`, in the `_MIGRATIONS` seam) carries a
+  former git-clone consumer forward by `rmtree`-ing the orphaned `.pi/git/<host>/<path>` clone
+  (filesystem-only, gitignored path; idempotent — a no-op once absent; a failed removal lands on
+  `fix_errors`, never swallowed). perk now owns the install end-to-end:
+  `materialize_extension_install` (init/doctor) reconciles the install **forward** —
   install-if-`absent` / reinstall-if-version-`mismatch` (the pinned `@perk/pi@{__version__}`,
   `npm install <pin> --prefix .pi/npm --legacy-peer-deps`, additive — borrowed entries untouched) —
   and `ensure_extension_install_present` warms it **pre-launch** in `launch_stage` (presence-only, a
@@ -1846,9 +1800,8 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   `is_dir()` installs exactly once. All npm work is best-effort + **non-fatal** (an `NpmError` —
   flaky network / not-yet-published pin — is swallowed, never raised); the self-repo (`..` package)
   is exempt. The verify-gated `extension-install` doctor check (group `package`) reports it:
-  `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — a deliberate
-  divergence from the clone check, where `absent` is benign `info`, because 2.3's charter is that
-  perk init/doctor *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
+  `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — perk init/doctor
+  *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
   This is **install ownership**: presence + the *install-vs-pin* version comparison. The
   *wired/installed-vs-running* version-parity enforcement + a session-start soft drift signal +
   packaging-pin tests are deferred to a later node (they reuse this node's
