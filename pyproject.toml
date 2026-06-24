@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "perk"
-dynamic = ["version"]
+version = "0.0.1"
 description = "Plan-oriented engineering workflow for Pi (the CLI exterior / session host)."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -37,9 +37,6 @@ testpaths = ["tests"]
 # worker (used by the wheel-build sharing in tests/test_packaging.py).
 # Debug serially by overriding on the CLI: `uv run pytest -n0 ...`.
 addopts = "-n auto --dist loadgroup"
-
-[tool.hatch.version]
-path = "perk/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["perk"]

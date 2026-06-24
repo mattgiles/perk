@@ -92,6 +92,9 @@ dependency change. It lands in uv's tool bin (`~/.local/bin`) — if `perk` isn'
 is not on your `PATH`; run `uv tool update-shell` (then restart your shell). Remove it with
 `uv tool uninstall perk`.
 
+Releasing perk → see [docs/releasing.md](docs/releasing.md) (version SSOT, dual-plane runbook,
+the `validate-release-versions` tag gate).
+
 `just setup` also runs `just hooks` (`prek install`), wiring a [prek](https://prek.j178.dev)
 pre-commit hook that runs `ruff check` on staged Python (config in `prek.toml`; the ruff
 env is built by prek from the remote ruff-pre-commit repo, so it never depends on a
