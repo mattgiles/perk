@@ -1,0 +1,13 @@
+# Golden parity cases for the cross-plane prompt render seam.
+# Each case names a template (root-relative under prompts/), the string-only vars to
+# render it with, and the committed golden-output file (root-relative under prompts/)
+# that BOTH jinja2 and nunjucks must reproduce byte-for-byte.
+- template: "_fixtures/templates/hello.md"
+  vars:
+    name: "world"
+  golden: "_fixtures/golden/hello.txt"
+- template: "_fixtures/templates/with_include.md"
+  vars:
+    name: "Ada"
+    place: "the fixture"
+  golden: "_fixtures/golden/with_include.txt"
