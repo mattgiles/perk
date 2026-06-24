@@ -8,7 +8,12 @@ the shared invariant: the SAME literals are asserted from the TS side in
 plane (someone edits one prompt but not the other) fails CI here or there.
 """
 
-from perk.run.launch import _address_prompt, _implement_prompt, _learn_prompt
+from perk.run.launch import (
+    _address_prompt,
+    _implement_prompt,
+    _learn_prompt,
+    _plan_read_instruction,
+)
 
 # Keep in lockstep with IMPLEMENT_SUBSTRINGS / ADDRESS_SUBSTRINGS in
 # extension/worker/worker.test.ts.
@@ -74,6 +79,18 @@ def test_address_prompt_injects_classifier_model_when_configured() -> None:
 
 def test_address_prompt_omits_model_clause_when_unconfigured() -> None:
     assert "passing `model:" not in _address_prompt(_PLAN_REF)
+
+
+def test_plan_read_instruction_selects_arm_per_provider() -> None:
+    """Thin per-arm selection guard for the render-backed helper (the golden cases prove
+    cross-plane byte-identity; this proves code picks the right arm and render() is wired)."""
+    assert _plan_read_instruction("github", "42", "u") == "gh issue view 42 --comments"
+    linear = _plan_read_instruction("linear", "uuid-1", "https://linear.app/x/ENG-1")
+    for needle in LINEAR_READ_SUBSTRINGS:
+        assert needle in linear, f"linear arm drifted — missing: {needle!r}"
+    assert "use the `linear_get_issue` tool (id `uuid-1`)" in linear
+    assert linear.endswith("open https://linear.app/x/ENG-1")
+    assert _plan_read_instruction("gitlab", "9", "u") == "open u"
 
 
 def test_implement_prompt_non_github_uses_open_url() -> None:

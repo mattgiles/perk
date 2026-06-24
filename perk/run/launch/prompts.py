@@ -11,6 +11,7 @@ paired parity suites.
 from pathlib import Path
 from typing import Any
 
+from perk.prompts import render
 from perk.run.launch.worktree import ResolvedWorktree
 from perk.state import cache
 from perk.substrate.binding_delivery import render_cold_bindings
@@ -48,16 +49,18 @@ def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
     saved plan". Byte-identical to `extension/doors/lifecycleGates.ts::planReadInstruction` (the TS
     twin); drift in either plane fails the paired parity suites. ``github`` reads via `gh`;
     ``linear`` points at the pi-mono-linear tools with an `open <url>` fallback; any other
-    provider falls back to opening the url."""
+    provider falls back to opening the url.
+
+    The wording now lives in the canonical templates ``prompts/common/plan-read/*.md``, rendered
+    identically by both planes via the shared render seam (contracts.md §8.31); branching stays in
+    code — only the arm chosen and the vars passed differ. Golden-fixture parity (the three
+    `plan-read-*` cases) plus a thin per-arm selection test replace the dedicated substring parity.
+    """
     if provider == "github":
-        return f"gh issue view {pr_id} --comments"
+        return render("common/plan-read/github.md", {"pr_id": pr_id, "url": url})
     if provider == "linear":
-        return (
-            f"use the `linear_get_issue` tool (id `{pr_id}`), then `linear_list_comments` — "
-            "the plan body is the first comment; "
-            f"if the linear tools are unavailable, open {url}"
-        )
-    return f"open {url}"
+        return render("common/plan-read/linear.md", {"pr_id": pr_id, "url": url})
+    return render("common/plan-read/other.md", {"pr_id": pr_id, "url": url})
 
 
 def _implement_prompt(plan_ref: dict[str, Any]) -> str:
