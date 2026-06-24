@@ -57,7 +57,9 @@ def installed_perk_version(repo_root: Path) -> str | None:
     path = consumer_perk_package_dir(repo_root) / "package.json"
     try:
         return json.loads(path.read_text(encoding="utf-8"))["version"]
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError, TypeError):
+        # TypeError: valid JSON that is a non-dict (`[]`/`null`) — indexing it raises, but an
+        # unparseable version still means "unverifiable", never a crash (the never-raises contract).
         return None
 
 

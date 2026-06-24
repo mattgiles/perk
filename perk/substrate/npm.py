@@ -39,6 +39,10 @@ def _run(args: list[str], *, cwd: Path | None = None, timeout: int = 300) -> str
         )
     except subprocess.TimeoutExpired as exc:
         raise NpmError(f"npm {' '.join(args)} timed out") from exc
+    except OSError as exc:
+        # `npm` absent from PATH (FileNotFoundError) or otherwise unspawnable: surface as a
+        # domain NpmError so the best-effort callers swallow it, never a raw traceback.
+        raise NpmError(f"npm {' '.join(args)} could not run: {exc}") from exc
     if proc.returncode != 0:
         raise NpmError(proc.stderr.strip() or f"npm {' '.join(args)} failed")
     return proc.stdout

@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -52,6 +53,29 @@ def test_status_unverifiable_unreadable_version(tmp_path):
 
 def test_installed_version_none_when_absent(tmp_path):
     assert init_mod.installed_perk_version(tmp_path) is None
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", "42", '"x"'])
+def test_status_unverifiable_non_dict_json(tmp_path, payload):
+    # Valid JSON that is not a dict: indexing ["version"] raises TypeError — must degrade to
+    # `unverifiable`, never crash (the never-raises contract).
+    pkg = init_mod.consumer_perk_package_dir(tmp_path)
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "package.json").write_text(payload, encoding="utf-8")
+    assert init_mod.installed_perk_version(tmp_path) is None
+    status, _ = init_mod.extension_install_status(tmp_path, self_repo=False)
+    assert status == "unverifiable"
+
+
+def test_npm_run_wraps_oserror_as_npmerror(monkeypatch):
+    # `npm` absent from PATH raises FileNotFoundError (an OSError); _run must re-raise NpmError so
+    # the best-effort callers swallow it rather than crash on a raw traceback.
+    def _boom(*a, **k):
+        raise FileNotFoundError("No such file or directory: 'npm'")
+
+    monkeypatch.setattr(_ext_install.npm.subprocess, "run", _boom)
+    with pytest.raises(_ext_install.npm.NpmError):
+        _ext_install.npm.install("@perk/pi@1.0.0", prefix=Path("/tmp/x"))
 
 
 def test_paths_match_pi_layout(tmp_path):
