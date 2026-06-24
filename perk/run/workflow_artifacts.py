@@ -20,6 +20,7 @@ inputs ``run_id``/``stage``/``plan``/``base``; a per-plan ``concurrency`` group.
 
 from pathlib import Path
 
+from perk import __version__
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
 # The two managed files (repo-relative). The composite action lives at a fixed local path the
@@ -142,10 +143,11 @@ jobs:
 """
 
 # The `perk` install command differs by repo kind: the perk self-repo dogfoods the code under test
-# (`--from .`); a consumer installs the published distribution by name. The consumer install + its
-# version pinning is a prereq concern (named here so the artifact is honest, not fiction).
+# (`--from .`); a consumer installs the published PyPI distribution pinned to the exact perk version
+# that wired the repo. The pin is baked into `action.yml` at `perk init` time (re-converged by
+# `perk doctor --fix`), so the remote runner reproduces the same perk the local CLI ran.
 _PERK_INSTALL_SELF = "uv tool install --from . perk"
-_PERK_INSTALL_CONSUMER = "uv tool install git+https://github.com/mattgiles/perk@main"
+_PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout has no

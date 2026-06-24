@@ -2490,7 +2490,8 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   `runner-workflow-permissions` check is advisory `info` because of this PAT-push model — §8.16).
 - **`.github/actions/perk-remote-setup/action.yml`** — the composite setup action: the two pinned
   toolchains (uv + Node 22), then perk (the exterior CLI — `--from . perk` for the self-repo,
-  `git+https://github.com/mattgiles/perk@main` for a consumer), pi (the interior the
+  an exact-version-pinned PyPI install `uv tool install perk=={__version__}` for a consumer,
+  baked in at `perk init` time so the runner reproduces the wiring perk version), pi (the interior the
   worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker

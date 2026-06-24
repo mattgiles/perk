@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from perk import __version__
 from perk.run import workflow_artifacts as wa
 from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
@@ -69,13 +70,15 @@ def test_composite_action_installs_perk_and_pi():
 
 
 def test_composite_action_install_is_self_vs_consumer_aware():
-    # The self-repo dogfoods the code under test; a consumer installs the version-pinned git build.
+    # The self-repo dogfoods the code under test; a consumer installs the exact-version-pinned
+    # published PyPI distribution.
     assert "uv tool install --from . perk" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
-    assert "git+https://github.com/mattgiles/perk@main" in consumer
+    # The old git-source install is gone; the consumer now pins the published PyPI build.
+    assert "git+https://github.com/mattgiles/perk@main" not in consumer
     assert "--from ." not in consumer
-    # The fictional bare `uv tool install perk` is gone (B3).
-    assert "run: uv tool install perk" not in consumer
+    assert "uv tool install perk==" in consumer
+    assert f"uv tool install perk=={__version__}" in consumer
 
 
 def test_composite_action_configures_git_identity():
