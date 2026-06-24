@@ -91,13 +91,16 @@ def test_composite_action_configures_git_identity():
 
 
 def test_composite_action_worker_deps_is_repo_kind_aware():
-    # B4: self uses `npm ci`; consumer is a loud Node-2.4 deferral (no silent `npm ci`).
+    # self uses `npm ci`; consumer installs the pinned `@perk/pi` into `.pi/npm` (no deferral).
     assert "npm ci" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
     assert "npm ci" not in consumer
-    assert "::error::" in consumer
-    assert "exit 1" in consumer
-    assert "Node 2.4" in consumer
+    assert f"npm install @perk/pi@{__version__}" in consumer
+    assert "--prefix .pi/npm" in consumer
+    assert "--legacy-peer-deps" in consumer
+    assert "::error::" not in consumer
+    assert "exit 1" not in consumer
+    assert "Node 2.4" not in consumer
 
 
 def test_workflow_validates_model_keys_fail_fast():
