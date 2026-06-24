@@ -658,6 +658,29 @@ def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote, monkeypatch):
     assert _sha(wt) == advanced  # based off freshly-fetched origin/main, not stale local HEAD
 
 
+def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
+    """The local launch seam injects PERK_CLI_VERSION = the running CLI's version into the exec
+    env, alongside PERK_RUN_ID, so the extension can surface the soft version-parity signal."""
+    import perk
+
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, env: captured.update(env))
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert captured["PERK_CLI_VERSION"] == perk.__version__
+
+
 def test_reuse_does_not_fetch_or_rebase(git_repo_with_remote, monkeypatch):
     clone, _remote, _advance = git_repo_with_remote
     cache.write_plan_ref(clone, _PLAN_REF)

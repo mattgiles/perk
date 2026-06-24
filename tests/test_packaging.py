@@ -48,6 +48,20 @@ def test_version_lockstep():
     assert __version__ == ssot
 
 
+def test_npm_pin_lockstep():
+    # Beyond the `__version__` lockstep, both perk-owned `@perk/pi` install pins must track the
+    # file SSOT (`pyproject.toml` version): the `perk init` *wired* pin (`_perk_npm_entry()` written
+    # into `.pi/settings.json`) and the *npm-install* pin (`_pinned_spec()` to `npm install`).
+    from perk.convergence.init.extension_install import _pinned_spec
+    from perk.convergence.init.settings import NPM_PACKAGE, _perk_npm_entry
+
+    ssot = _pyproject_version()
+    assert _perk_npm_entry() == f"npm:@perk/pi@{ssot}"
+    assert _pinned_spec() == f"@perk/pi@{ssot}"
+    # The install spec's package name is exactly the wired entry's name minus the `npm:` protocol.
+    assert _pinned_spec().rsplit("@", 1)[0] == NPM_PACKAGE.removeprefix("npm:")
+
+
 @pytest.fixture(scope="session")
 def built_wheel(tmp_path_factory):
     """Build the wheel exactly once per session and share it across the wheel-bundle tests.

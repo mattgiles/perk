@@ -121,6 +121,37 @@ test("mint: a plain warm session mints its own run_id", async () => {
   }
 });
 
+test("version parity: a divergent PERK_CLI_VERSION emits the soft drift warning", async () => {
+  // The harness loads the extension from source, so perkVersion() is the real repo
+  // package.json version; a fake PERK_CLI_VERSION guarantees a mismatch -> the warning fires.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID", PERK_CLI_VERSION: "9.9.9-not-real" },
+  });
+  try {
+    assert.ok(
+      h.notifies.some((m) => /version parity/.test(m)),
+      `expected a version-parity warning, got ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("version parity: no PERK_CLI_VERSION emits no drift warning", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
+  try {
+    assert.ok(
+      !h.notifies.some((m) => /version parity/.test(m)),
+      `expected no version-parity warning, got ${JSON.stringify(h.notifies)}`,
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
 test("session_tree: navigateTree fires the tree-rebuild handler", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });

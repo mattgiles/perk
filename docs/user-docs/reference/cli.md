@@ -79,6 +79,10 @@ under the same lock — so concurrent sessions never race pi's unlocked lazy ins
 best-effort and non-fatal: a not-yet-published pin or flaky network is swallowed (init/doctor/launch
 never crash; pi's lazy install remains the fallback). The self-repo (which wires the local `..`
 package) is exempt.
+Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
+at session start** when the `@perk/pi` extension that pi actually loaded differs in version from the
+running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
+reinstall the pinned version. It is silent when versions match and for an ad-hoc `pi` launch.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.

@@ -1802,10 +1802,26 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   is exempt. The verify-gated `extension-install` doctor check (group `package`) reports it:
   `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — perk init/doctor
   *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
-  This is **install ownership**: presence + the *install-vs-pin* version comparison. The
-  *wired/installed-vs-running* version-parity enforcement + a session-start soft drift signal +
-  packaging-pin tests are deferred to a later node (they reuse this node's
-  `materialize_extension_install` reinstall primitive).
+  This is **install ownership**: presence + the *install-vs-pin* version comparison.
+- **Version-parity enforcement is complete (#838).** The *wired* pin is enforced by the
+  `settings-wiring` check (`_perk_npm_entry()` reconciled forward to `npm:@perk/pi@{__version__}`,
+  above) and the *installed* version by the `extension-install` check (install-vs-`__version__`
+  `mismatch` → fail), both against the running CLI's `perk.__version__` SSOT — **no third
+  `version-parity` doctor check** is added (it would only duplicate these). The only version perk
+  cannot *statically* check is the **live loaded** extension at launch: pi can lazy-install / load a
+  stale `npm:@perk/pi`, so the `@perk/pi` actually running may differ from the CLI that launched it.
+  That runtime skew is surfaced by a **soft `session_start` drift signal**: the local launch seam
+  (`launch_stage`) injects `PERK_CLI_VERSION = __version__` into the exec env (a second informational
+  launch env var beside `PERK_RUN_ID` — §8.2 — but *not* run-control data: the extension only reads
+  it to compare versions), and the extension's `session_start` handler compares it against its own
+  `perkVersion()`. When both are present and differ, it emits a **soft, non-fatal `warning`** via
+  `report()` (headless-safe; UI notify or stderr) pointing at `perk doctor --fix`. No once-guard
+  (it may re-emit on reload — acceptable for a soft warning); silent for ad-hoc `pi` (no env) and the
+  self-repo (versions equal). Injected at the **local launch only** (the operator-facing path); the
+  remote worker loads from the same pinned install and is headless, so it is deliberately out of
+  scope. `tests/test_packaging.py` now also guards the **wired + install pin lockstep** against the
+  version SSOT (`test_npm_pin_lockstep`: `_perk_npm_entry()` and `_pinned_spec()` both track
+  `_pyproject_version()`), beyond the existing `__version__` `test_version_lockstep`.
 
 ---
 

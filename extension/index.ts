@@ -298,6 +298,23 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
+    // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@perk/pi`, so the
+    // extension actually running may differ from the `perk` CLI that launched it. The local launch
+    // seam injects PERK_CLI_VERSION; compare it against this extension's own `perkVersion()`. Soft +
+    // non-fatal (warning), headless-safe via report(). No once-guard — may re-emit on reload, fine
+    // for a soft warning. Silent for ad-hoc `pi` (no env) and the self-repo (versions equal).
+    const cliVersion = (process.env.PERK_CLI_VERSION ?? "").trim();
+    if (cliVersion && version && cliVersion !== version) {
+      report(
+        ctx,
+        "version parity",
+        "warning",
+        `the loaded @perk/pi extension (v${version}) differs from the running perk CLI ` +
+          `(v${cliVersion}) — run 'perk doctor --fix' to reinstall the pinned version`,
+        { alsoLog: true },
+      );
+    }
+
     // Charter D7: perk identity is standing footer state, not a transition — the
     // `v<version> loaded` toast (and its headless stderr mirror) is retired. D5 is rescinded:
     // perk keeps pi's default working indicator (no setWorkingIndicator call anywhere).
