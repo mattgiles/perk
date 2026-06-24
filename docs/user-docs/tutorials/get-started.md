@@ -29,12 +29,10 @@ mandatory for this tutorial.
 
 ## Step 1 — Install perk
 
-perk is not yet published to a package index, so install it **from source** with `uv`:
+Install perk from PyPI with `uv`:
 
 ```bash
-git clone https://github.com/mattgiles/perk.git
-cd perk
-uv tool install --editable .
+uv tool install perk
 ```
 
 This puts the `perk` CLI on your PATH (uv's tool bin, `~/.local/bin`). If your shell can't
