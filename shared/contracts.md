@@ -1760,15 +1760,25 @@ group; else expand only its failures/warnings); `--verbose` expands every check.
 
 Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
 
-- **perk's own `git:` entry is ref-reconciled *forward*** (no longer purely append-only).
-  `_merge_static_packages` rewrites perk's own `packages` entry **in place** (list position
-  preserved) when its identity already exists but the full spec differs from the desired
-  `git:github.com/mattgiles/perk@main` — so a stale pinned `@v0.0.1` (or a no-ref entry) is
-  reconciled to `@main`. Only perk's own identity is ever in the desired set, so a user's other
-  `git:` packages stay untouched/append-only. **String-form only** (perk never writes object-form
-  for its own package — Invariant 2; a hand-written object-form perk entry is a documented
-  limitation). This rides the existing `settings-wiring` `ManagedConvergence` — ref drift becomes
-  a `settings-wiring` **fail** that `--fix` repairs, with **no new doctor wiring** for the ref.
+- **perk's own extension is wired as an exact version-pinned `npm:@perk/pi` entry, reconciled
+  *forward*** (no longer purely append-only). `_desired_packages` emits `npm:@perk/pi@{__version__}`
+  for a consumer (`_perk_npm_entry()`, mirroring the PyPI install pin SSOT in
+  `workflow_artifacts.py`); the self-repo still wires `..`. `_merge_static_packages` rewrites perk's
+  own `packages` entry **in place** (list position preserved) when its `@perk/pi` identity already
+  exists but the full spec differs from the desired pin — so a stale `npm:@perk/pi@0.0.0` is
+  reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one). Only
+  perk's own npm identity is version-reconciled; the borrowed npm packages stay unpinned/append-only
+  (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a user's other packages
+  are never in the desired set so they stay untouched/append-only. The in-body migration strips a
+  repo's legacy **`git:` perk** entry (any ref, by `_git_identity == GIT_PACKAGE`) so the flip from
+  the old git wiring converges; a user's unrelated `git:` packages are preserved. **String-form
+  only** (perk never writes object-form for its own package — Invariant 2; a hand-written
+  object-form perk entry is a documented limitation). This rides the existing `settings-wiring`
+  `ManagedConvergence` — version-pin drift becomes a `settings-wiring` **fail** that `--fix`
+  repairs, with **no new doctor wiring**. **Forward pointer:** the remaining clone-freshness
+  bullets below describe the `git:`-clone extension lifecycle, which becomes orphaned after this
+  flip (pi loads the extension from the npm install) and is retired in a later node — they are
+  retained here until that retirement lands.
 - **The perk extension is self-contained in a consumer git clone.** pi loads the extension from
   its git-package clone (`.pi/git/<host>/<path>`) via `jiti`, resolving imports through a **fixed
   host-alias set** (`@earendil-works/pi-coding-agent`/`-pi-ai`/`-pi-tui`, the `@mariozechner/*`

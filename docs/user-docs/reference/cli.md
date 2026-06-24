@@ -62,8 +62,9 @@ never prompts (CI/supervisor); `--json` emits a machine-readable report.
 
 Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-converges drifted
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
-edits. `--fix` also **reconciles perk's own git-package ref** in `.pi/settings.json` to the
-version this perk wants (e.g. a stale pinned `@v0.0.1` → `@main`). (The perk extension is
+edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@perk/pi`) in
+`.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@perk/pi@0.0.0` → the
+pinned `@{version}`). (The perk extension is
 self-contained — it has no runtime Node dependencies — so perk pre-materializes the git-clone with
 a plain `git clone` and **no `npm install`**, leaving it `node_modules`-free.)
 The `package` group's `extension-clone` check verifies the loaded git-package clone is at current

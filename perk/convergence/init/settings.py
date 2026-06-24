@@ -5,6 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from perk import __version__
 from perk.cli.ensure import UserFacingCliError
 from perk.substrate.config import (
     load_committed_compaction,
@@ -13,7 +14,20 @@ from perk.substrate.config import (
 )
 from perk.substrate.providers import ProviderSet, load_providers, resolve_providers
 
+# Legacy `git:` identity for perk's own extension. Still consumed by `extension_clone.py`
+# (the git-clone lifecycle, retired in a later node); `_converge_settings` strips a repo's
+# legacy `git:` perk entry by this identity when flipping to the pinned npm wiring.
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
+
+# perk's own extension is now wired as an exact version-pinned npm spec. `_perk_npm_entry()`
+# mirrors the PyPI install pin SSOT in `workflow_artifacts.py` (both pin `perk.__version__`).
+NPM_PACKAGE = "npm:@perk/pi"
+
+
+def _perk_npm_entry() -> str:
+    """The pinned npm spec for perk's own extension (`npm:@perk/pi@{__version__}`)."""
+    return f"{NPM_PACKAGE}@{__version__}"
+
 
 # Borrowed default set (the crossover scaffolding). Independent npm: entries; Pi
 # auto-installs them on the next launch. `@tombell/pi-plan` was retired
@@ -86,7 +100,7 @@ def _package_identity(entry: object) -> str | None:
 
 
 def _desired_packages(self_repo: bool) -> list[str]:
-    own = ".." if self_repo else f"{GIT_PACKAGE}@main"
+    own = ".." if self_repo else _perk_npm_entry()
     return [own, *BORROWED_PACKAGES]
 
 
@@ -96,42 +110,36 @@ def _merge_static_packages(
     """Merge the static perk+borrowed package set; returns (packages, added, updated).
 
     Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles perk's own
-    `git:` ref *forward*: when a desired `git:` identity already exists as a **string-form** entry
-    whose full spec differs from the desired spec (e.g. a stale pinned `@v0.0.1`, or a no-ref
-    `git:github.com/mattgiles/perk`), the entry is **rewritten in place** (list position
-    preserved) to the desired spec instead of being skipped; any extra string entries sharing
-    that identity are dropped so the repo converges to a single canonical perk entry. Only perk's
-    own identity is ever in ``desired`` (`_desired_packages`), so this can only ever touch perk's
-    own package — a user's other `git:` entries are never in ``desired`` and stay
-    append-only/untouched. Object-form
-    entries are left alone (perk never writes object-form for its own package — Invariant 2;
-    a hand-written object-form perk entry is a documented limitation). Idempotent: once at the
-    desired spec, the entry equals it → no change.
+    `npm:@perk/pi` **version pin** *forward*: when perk's own npm identity already exists as a
+    **string-form** entry whose full spec differs from the desired pin (e.g. a stale
+    `npm:@perk/pi@0.0.0`), the entry is **rewritten in place** (list position preserved) to the
+    desired pinned spec instead of being skipped; any extra string entries sharing that identity
+    are dropped so the repo converges to a single canonical perk entry. Only perk's own identity
+    is version-reconciled — borrowed npm packages (`BORROWED_PACKAGES`) are unpinned and stay
+    **append-only** (never version-reconciled), distinguished by comparing the entry's `_npm_name`
+    identity to `_npm_name(NPM_PACKAGE)`. A user's own packages are never in ``desired`` and stay
+    append-only/untouched. Object-form entries are left alone (perk never writes object-form for
+    its own package — Invariant 2; a hand-written object-form perk entry is a documented
+    limitation). Idempotent: once at the desired pin, the entry equals it → no change.
     """
     have_local = {p for p in packages if isinstance(p, str) and not p.startswith(("npm:", "git:"))}
     have_npm = {n for n in (_npm_name(p) for p in packages if isinstance(p, str)) if n}
-    have_git = {i for i in (_git_identity(p) for p in packages if isinstance(p, str)) if i}
+    perk_npm_identity = _npm_name(NPM_PACKAGE)
 
     added: list[str] = []
     updated: list[str] = []
     for want in desired:
         if want.startswith("npm:"):
             name = _npm_name(want)
-            if name is None or name in have_npm:
+            if name is None:
                 continue
-            packages.append(want)
-            have_npm.add(name)
-        elif want.startswith("git:"):
-            identity = _git_identity(want)
-            if identity is None:
-                continue
-            if identity in have_git:
-                # Identity present — reconcile forward to the desired spec (string-form entries
-                # only), collapsing any duplicates so the repo converges to a single perk entry.
+            if name == perk_npm_identity and name in have_npm:
+                # perk's own identity present — reconcile the version pin forward (string-form
+                # entries only), collapsing any duplicates so the repo converges to one entry.
                 matches = [
                     (i, entry)
                     for i, entry in enumerate(packages)
-                    if isinstance(entry, str) and _git_identity(entry) == identity
+                    if isinstance(entry, str) and _npm_name(entry) == name
                 ]
                 if matches:
                     first, existing = matches[0]
@@ -144,8 +152,10 @@ def _merge_static_packages(
                         packages.pop(i)
                         updated.append(f"removed duplicate {dup}")
                 continue
+            if name in have_npm:
+                continue
             packages.append(want)
-            have_git.add(identity)
+            have_npm.add(name)
         else:
             if want in have_local:
                 continue
@@ -178,8 +188,10 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
     if not isinstance(packages, list):
         packages = []
 
-    # Migration: strip legacy npm perk entries written by earlier perk init runs.
-    packages = [p for p in packages if not (isinstance(p, str) and p.startswith("npm:@perk/pi"))]
+    # Migration: strip the legacy `git:` perk entry written by earlier perk init runs (any ref);
+    # _merge_static_packages then adds the pinned npm entry. A user's unrelated `git:` packages
+    # (different identity) are preserved.
+    packages = [p for p in packages if not (isinstance(p, str) and _git_identity(p) == GIT_PACKAGE)]
 
     packages, added, updated = _merge_static_packages(packages, _desired_packages(self_repo))
 
