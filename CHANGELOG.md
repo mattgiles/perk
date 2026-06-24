@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PyPI release automation: a tag-gated `publish-pypi` job (OIDC trusted publishing via
   `pypa/gh-action-pypi-publish`, `pypi-publish` environment gate), an always-on PyPI
   build/check/smoke job, and a `workflow_dispatch` TestPyPI rehearsal in `release.yml`.
+- npm release automation: an always-on `build-npm` job (`npm ci` + `npm pack` + tarball artifact),
+  a tag-gated `publish-npm` job (`npm publish --provenance --access public`, `NPM_TOKEN` auth behind
+  the `npm-publish` environment), and a `github-release` capstone (GitHub Release with auto-generated
+  notes once both planes publish) in `release.yml`. Adds `repository`/`homepage`/`bugs` to
+  `package.json` (npm provenance requires `repository.url`).
 
 ### Changed
 
