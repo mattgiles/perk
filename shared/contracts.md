@@ -4027,3 +4027,37 @@ proves the code picks the right arm and `render()` is wired. This golden-fixture
 selection tests) **replaces the prior dedicated substring parity** for plan-read; the
 implement/learn prompt parity suites are untouched (they embed the byte-identical helper output, so
 they keep passing — the downstream prompts move in nodes 2.2/2.4).
+
+**The address prompt moved onto the seam — converging three consumers (Node 2.3).** The
+address-stage wording lives in two canonical templates `prompts/stages/address/{action,preview}.md`
+(each a complete body, no template logic; vars `{{ provider }}`, `{{ pr_id }}`, `{{ url }}`,
+`{{ model_clause }}`), rendered identically by **all three** address consumers via the shared
+render seam: the cold `perk/run/launch/prompts.py::_address_prompt`, the worker
+`extension/worker/worker.ts::initialPromptFor("address")`, and the warm
+`extension/doors/address.ts::addressGuidance`. Before this node the warm `/address` loop used a
+*different* wording; the three were **converged** onto one canonical body — the cold/worker
+structure (the PR-identity header a fresh headless worker needs) **plus** warm's Plan File Mode
+step, which now upgrades the cold/worker path too; warm loses its divergent framing. This is a
+deliberate wording change to all three surfaces; the *command/flag/config* surface of `/address`
+and `perk pr address` is unchanged.
+
+**Branching stays in code** (the frozen subset has no conditionals): preview vs action is a
+template *selection* (`preview.md` for `--preview`, which omits the action steps including Plan
+File Mode; `action.md` otherwise), and the classifier present/absent split builds the
+`model_clause` render var in code (empty string when no `[subagents] review-classifier` model) —
+the clause's own wording is deferred to node 3.3. The worker has **no preview path** (preview is a
+warm/cold flag), so it always renders `action.md`.
+
+**The warm door is now ref-aware and null-guarded.** The converged body carries the PR identity, so
+`addressGuidance` takes the active `PlanRef`; the `/address` handler resolves it via the same
+helper `doors/learn.ts` uses (`readPlanRef(ctx.cwd)` → fallback
+`rebuildWorkflowState(branchOf(ctx)).active_plan_ref`). A null ref reports a `warning` (mirroring
+the `/implement` guard) and sends no guidance — a strict improvement, since `/address` cannot
+function without a plan-ref regardless (the classifier child's `perk pr feedback` hard-errors
+`no_plan_ref`).
+
+The two address templates (and their golden files) carry **no trailing newline** (the builders
+return mid-prompt strings). Four `address-*` golden cases in `cases.yaml` (action/preview × model
+present/absent) prove cross-plane byte-identity; thin per-plane selection tests prove each caller
+picks the right template and injects/omits the model clause, and the warm null-ref guard is
+covered. This golden-fixture parity **replaces the prior `ADDRESS_SUBSTRINGS` substring parity**.
