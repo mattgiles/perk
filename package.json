@@ -15,6 +15,7 @@
     "!extension/**/*.test.ts",
     "!extension/testing/",
     "shared/",
+    "prompts/",
     "README.md"
   ],
   "pi": {

@@ -57,3 +57,27 @@ def agents_dir() -> Path:
         "perk: could not locate the bundled 'agents/' definitions directory "
         "(checked package data 'perk/_agents' and repo sibling 'agents/')."
     )
+
+
+def prompts_dir() -> Path:
+    """Return the bundled ``prompts/`` directory (canonical cross-plane prompt templates).
+
+    Mirrors :func:`shared_dir`:
+
+    - **Installed wheel:** carried as package data at ``perk/_prompts`` (hatchling
+      ``force-include``).
+    - **Editable / dev install:** read the repo sibling ``<repo>/prompts`` (the
+      ``force-include`` copy does not exist in an editable checkout).
+    """
+    candidate = Path(str(resources.files("perk"))) / "_prompts"
+    if candidate.is_dir():
+        return candidate
+
+    sibling = Path(__file__).resolve().parent.parent / "prompts"
+    if sibling.is_dir():
+        return sibling
+
+    raise FileNotFoundError(
+        "perk: could not locate the bundled 'prompts/' templates directory "
+        "(checked package data 'perk/_prompts' and repo sibling 'prompts/')."
+    )
