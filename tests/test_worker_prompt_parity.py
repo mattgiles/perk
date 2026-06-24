@@ -95,7 +95,10 @@ def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
 
 def test_learn_prompt_linear_reads_via_tools_and_keeps_gh_pr_derivation() -> None:
     """The linear learn prompt reads the plan via the linear tools but keeps the
-    merged-PR derivation on `gh` — PRs are GitHub-universal under every issue backend."""
+    merged-PR derivation on `gh` — PRs are GitHub-universal under every issue backend.
+
+    A thin selection test (cold renders the linear `read_cmd` + the `gh pr list --head plan-<pr_id>`
+    block); the four `learn-*` golden cases now carry the cross-plane byte-parity."""
     prompt = _learn_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear learn prompt drifted — missing: {needle!r}"

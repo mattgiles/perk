@@ -128,10 +128,11 @@ test("learnGuidance: a linear plan-ref reads via the linear tools but keeps the 
   assert.doesNotMatch(linear, /gh issue view/);
   // The github arm is unchanged.
   assert.match(learnGuidance(PLAN_REF), /gh issue view 42 --comments/);
-  // An unknown provider falls back to the plan url; PR derivation still rides gh.
+  // An unknown provider collapses to a single "Open the plan and its merged change" line
+  // (no merged-PR derivation) — the unified `other` arm matches cold `_learn_prompt`.
   const other = learnGuidance({ ...PLAN_REF, provider: "gitlab" });
-  assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);
-  assert.match(other, /gh pr list --head plan-42/);
+  assert.match(other, /Open the plan and its merged change: https:\/\/gh\/o\/r\/issues\/42/);
+  assert.doesNotMatch(other, /gh pr list --head plan-42/);
 });
 
 test("tool: learn with a summary delegates capture, surfaces the issue, and clears", async () => {
