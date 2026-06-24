@@ -22,7 +22,6 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence import init
 from perk.run import launch, resume, run_report
 from perk.state import cache
 from perk.substrate.output import user_output
@@ -41,7 +40,7 @@ class WorkerEntry:
     """The resolved Node worker entrypoint + how it was found (for the progress line)."""
 
     path: Path
-    source: str  # "env" | "self" | "consumer-git" | "consumer-npm"
+    source: str  # "env" | "self" | "consumer-npm"
 
 
 def _drivable_stage(stage_id: str) -> Stage:
@@ -57,20 +56,10 @@ def _drivable_stage(stage_id: str) -> Stage:
     return stage
 
 
-def _git_clone_worker_entry(repo_root: Path) -> Path:
-    """The worker entrypoint inside pi's git-package clone.
-
-    Derives the clone root via :func:`init.consumer_git_clone_root` (the SSOT for the
-    ``.pi/git/<host>/<path>`` derivation), so a ``GIT_PACKAGE`` URL change cannot desync this
-    candidate from the other consumers of the clone location.
-    """
-    return init.consumer_git_clone_root(repo_root) / "extension" / "workerMain.ts"
-
-
 def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntry:
     """Locate ``workerMain.ts``: the ``PERK_WORKER_ENTRY`` override, else the self-repo path, else
-    the consumer git-package clone under ``.pi/git/<host>/<path>``, else the consumer npm install
-    under ``.pi/npm/node_modules/@perk/pi``. A miss is loud, never silent."""
+    the consumer npm install under ``.pi/npm/node_modules/@perk/pi``. A miss is loud, never
+    silent."""
     override = (environ.get("PERK_WORKER_ENTRY") or "").strip()
     if override:
         path = Path(override)
@@ -82,7 +71,6 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
         )
     candidates: list[tuple[Path, str]] = [
         (repo_root / "extension" / "workerMain.ts", "self"),
-        (_git_clone_worker_entry(repo_root), "consumer-git"),
         (
             repo_root
             / ".pi"

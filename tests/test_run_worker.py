@@ -300,14 +300,3 @@ def test_worker_entry_consumer_npm_install(tmp_path):
     resolved = run_worker.resolve_worker_entry(tmp_path, {})
     assert resolved.path == entry
     assert resolved.source == "consumer-npm"
-
-
-def test_worker_entry_consumer_git_clone(tmp_path):
-    # B2: pi clones the `git:` package to `.pi/git/<host>/<path>`; the resolver finds it (derived
-    # from GIT_PACKAGE) before the npm fallback.
-    entry = run_worker._git_clone_worker_entry(tmp_path)
-    entry.parent.mkdir(parents=True)
-    entry.write_text("// w\n", encoding="utf-8")
-    resolved = run_worker.resolve_worker_entry(tmp_path, {})
-    assert resolved.path == entry
-    assert resolved.source == "consumer-git"

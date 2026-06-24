@@ -2482,9 +2482,10 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
-  resolves); **consumer** is a **loud Node-2.4 deferral** (`::error::` + `exit 1`) because the
-  consumer worker-clone genuinely cannot exist in CI yet (`.pi/git` + `.pi/npm` are gitignored and
-  nothing in the composite runs `pi` to trigger pi's git-package `npm install`).
+  resolves); **consumer** installs the pinned `@perk/pi`
+  (`npm install @perk/pi@{__version__} --prefix .pi/npm --legacy-peer-deps`, baked in at `perk init`
+  time so the runner reproduces the wiring perk version) — landing `@perk/pi` *and its runtime deps*
+  under `.pi/npm/node_modules/`, so the `consumer-npm` worker entry and its peer imports resolve.
 
 Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited file reads as drift and
 is converged back to the template. The templates are authored as code (string constants), not
@@ -2503,9 +2504,7 @@ by the workflow **after** it checks out the plan branch (so cwd = the checkout =
    `write_handoff({stage, mode})`, `write_plan_ref`, then materialize the plan body. The worker
    inherits the prepared worktree and never re-writes it (the §B inputs table).
 4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
-   `extension/workerMain.ts` (`self`), else the consumer git-package clone
-   `.pi/git/<host>/<path>/extension/workerMain.ts` (`consumer-git`, derived from `GIT_PACKAGE` so a
-   package-URL change cannot desync the resolver), else the consumer npm install under
+   `extension/workerMain.ts` (`self`), else the consumer npm install under
    `.pi/npm/node_modules/@perk/pi/extension/workerMain.ts` (`consumer-npm`); a miss ⇒
    `worker_entry_missing`.
 5. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
@@ -2793,8 +2792,7 @@ mirror §8.6: **1** if any `fail`, else **0** (warns allowed); **2** only on not
 Proves the genuinely CI-only prerequisites a static check cannot: that the managed workflow is
 **dispatchable**, the runner actually **starts a job**, and the secrets are **readable in the Actions
 context** (environment-protection rules can hide an existing secret). It does **not** exercise the
-composite setup or the worker/model drive (the consumer worker-deps step is a loud Node-2.2
-deferral, so including it would make the smoke self-repo-only) — the `smoke=true` short-circuit keeps
+composite setup or the worker/model drive — the `smoke=true` short-circuit keeps
 it universal and ~0-cost. A future "full" smoke is out of scope.
 
 Flow: `require_repo` + `require_github`; run `workflow_checks` (rendered like `check`). **Gate (refuse
