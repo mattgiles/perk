@@ -154,7 +154,7 @@ anchored to real symbols.
   exactly that asymmetric load.
 - **Resolution (1.2):** the worker constructs a `DefaultResourceLoader` with
   **`cwd = <prepared worktree>`** (so project extensions/skills/context — including perk's
-  `@perk/pi` extension referenced by the managed `.pi/settings.json`, and the managed
+  `@mgiles/perk` extension referenced by the managed `.pi/settings.json`, and the managed
   `AGENTS.md`/`APPEND_SYSTEM.md` — load) and **`agentDir = <throwaway temp dir>`** (so NO user-global
   extensions/settings/skills/models/auth leak in — the same throwaway-`agentDir` trick
   `createReadOnlySession` already uses for a different purpose). It calls `await loader.reload()`
@@ -372,7 +372,7 @@ runnable entrypoint shim). The worker contract is recorded in `shared/contracts.
 
 **Gap-4 verification discharged.** `extension/worker.test.ts` ("Gap-4: a bound perk session
 registers the worker's terminal tools and claims its run") proves under the offline
-`loadPerkSession` harness that a throwaway `agentDir` still loads + binds the project `@perk/pi`
+`loadPerkSession` harness that a throwaway `agentDir` still loads + binds the project `@mgiles/perk`
 extension: the `submit` and `resolve_review_threads` tools register, and the `session_start` claim
 engages for a planted handoff + `PERK_RUN_ID` (the rebuilt `perk:workflow-state.run_id` matches).
 

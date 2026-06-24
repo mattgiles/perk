@@ -247,7 +247,7 @@ def launch_stage(
         run_worktree_setup(wt, config.worktree_setup)
     # PERK_CLI_VERSION carries the running CLI's version into the launched session so the
     # extension's `session_start` handler can surface a soft drift warning when the live loaded
-    # `@perk/pi` extension differs from the CLI that launched it (a stale lazy-installed npm:
+    # `@mgiles/perk` extension differs from the CLI that launched it (a stale lazy-installed npm:
     # package). Informational only (not run-control data, unlike PERK_RUN_ID); set at this single
     # local-launch seam — the remote worker early-returns before here.
     env = {
@@ -266,7 +266,7 @@ def launch_stage(
         if local_linear_key is not None:
             env["LINEAR_API_KEY"] = local_linear_key
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
-    # Warm perk's @perk/pi npm install before exec so the perk extension always loads from a
+    # Warm perk's @mgiles/perk npm install before exec so the perk extension always loads from a
     # COMPLETE install. pi installs a missing project-scope `npm:` package lazily and unlocked, so
     # a missing-install window + parallel launches let a second process load from a half-installed
     # package and drop the perk extension. `ensure_extension_install_present` installs-on-absent

@@ -46,7 +46,7 @@ not "a stage will complete remotely."
 There is also a specific, named open risk worth stating plainly: a real remote launch may register
 **zero extension tools.** The worker builds its runtime through `defaultCreateRuntime`, whose in-memory
 settings ignore the disk `.pi/settings.json` package list — so as currently written, a remote worker may
-come up with none of perk's own tools loaded. Whether a real launch loads `@perk/pi` at all is an open
+come up with none of perk's own tools loaded. Whether a real launch loads `@mgiles/perk` at all is an open
 question that only a live run will answer.
 
 So: treat this surface as **emerging, not battle-tested** — the same tone [How perk thinks](./how-perk-thinks.md)

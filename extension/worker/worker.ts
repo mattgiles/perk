@@ -1,7 +1,7 @@
 // The headless stage-drive primitive (`driveStage`).
 //
 // Drives ONE read-write stage (`implement`/`address`) end-to-end on an already-prepared worktree,
-// running the SAME `@perk/pi` extension package, with a locked resource set, auto-compaction and
+// running the SAME `@mgiles/perk` extension package, with a locked resource set, auto-compaction and
 // auto-retry off, and a budget/timeout watchdog. It seeds the stage's initial prompt, lets the
 // model work (calling perk's real tools), detects the stage's terminal signal, and returns a
 // structured `RunOutcome`. This implements the contract locked in
@@ -546,7 +546,7 @@ export function createBindManager(binding: unknown, listener: (event: DriveEvent
 // --- the production runtime factory -------------------------------------------------------------
 
 /**
- * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@perk/pi` extension via the
+ * Build the asymmetric runtime: `cwd = worktree` (project tier — perk's `@mgiles/perk` extension via the
  * managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`) and `agentDir = throwaway`
  * (user-global tier OUT), compaction-off + retry-off settings, env-var/registry auth+model (Gap 5).
  * No `tools` allowlist — read-write defaults + extension tools. The `createAgentSessionServices`

@@ -1,10 +1,11 @@
-"""perk's ``@perk/pi`` npm-install lifecycle: status, lock, and pin-aware materialize.
+"""perk's ``@mgiles/perk`` npm-install lifecycle: status, lock, and pin-aware materialize.
 
 pi installs a project-scope ``npm:`` package lazily and
 **unlocked** at launch (``resolvePackageSources``) — a race window perk closes for its own
 extension. perk owns the install end-to-end: init/doctor reconcile it
-forward (install-if-absent / reinstall-if-version-mismatch, the pinned ``@perk/pi@{__version__}``)
-and the launch warms its presence pre-exec, all under an ``fcntl`` lock.
+forward (install-if-absent / reinstall-if-version-mismatch, the pinned
+``@mgiles/perk@{__version__}``) and the launch warms its presence pre-exec, all under an
+``fcntl`` lock.
 """
 
 import contextlib
@@ -26,13 +27,13 @@ try:
 except ImportError:  # pragma: no cover - non-POSIX (perk dev platforms are macOS/Linux)
     fcntl = None
 
-# `@perk/pi`, derived from the `npm:@perk/pi` settings SSOT so a package-name change stays in
-# lockstep with the wired entry.
+# `@mgiles/perk`, derived from the `npm:@mgiles/perk` settings SSOT so a package-name change
+# stays in lockstep with the wired entry.
 _PERK_NPM_NAME = NPM_PACKAGE.removeprefix("npm:")
 
 
 def _pinned_spec() -> str:
-    """The exact npm spec perk installs (`@perk/pi@{__version__}`), pinned to the running CLI."""
+    """The exact npm spec perk installs, pinned to the running CLI."""
     return f"{_PERK_NPM_NAME}@{__version__}"
 
 
@@ -43,13 +44,16 @@ def consumer_npm_install_root(repo_root: Path) -> Path:
 
 
 def consumer_perk_package_dir(repo_root: Path) -> Path:
-    """The installed location of perk's extension (``.pi/npm/node_modules/@perk/pi``), matching
+    """The installed location of perk's extension (``.pi/npm/node_modules/@mgiles/perk``), matching
     pi's ``getManagedNpmInstallPath`` (``<root>/node_modules/<name>``)."""
-    return consumer_npm_install_root(repo_root) / "node_modules" / "@perk" / "pi"
+    package_dir = consumer_npm_install_root(repo_root) / "node_modules"
+    for segment in _PERK_NPM_NAME.split("/"):
+        package_dir = package_dir / segment
+    return package_dir
 
 
 def installed_perk_version(repo_root: Path) -> str | None:
-    """The ``version`` of the installed ``@perk/pi`` (read from its ``package.json``), or ``None``.
+    """The ``version`` of the installed ``@mgiles/perk``, or ``None``.
 
     Best-effort, never raises: ``None`` when the dir/file is absent or the JSON / ``version`` is
     unreadable. Mirrors pi's ``getInstalledNpmVersion``.
@@ -69,7 +73,7 @@ ExtensionInstallStatus = Literal["self", "absent", "present", "mismatch", "unver
 def extension_install_status(
     repo_root: Path, *, self_repo: bool
 ) -> tuple[ExtensionInstallStatus, str]:
-    """Classify perk's ``@perk/pi`` npm install + a human detail string.
+    """Classify perk's ``@mgiles/perk`` npm install + a human detail string.
 
     pi loads perk's extension from ``consumer_perk_package_dir(repo_root)`` but installs a missing
     project-scope ``npm:`` package lazily and **unlocked** at launch. perk owns the install:
@@ -85,14 +89,14 @@ def extension_install_status(
     if not consumer_perk_package_dir(repo_root).is_dir():
         return (
             "absent",
-            "perk installs the pinned @perk/pi pre-launch (pi lazy-installs as fallback)",
+            "perk installs the pinned @mgiles/perk pre-launch (pi lazy-installs as fallback)",
         )
     installed = installed_perk_version(repo_root)
     if installed is None:
-        return "unverifiable", "installed @perk/pi package.json version unreadable"
+        return "unverifiable", "installed @mgiles/perk package.json version unreadable"
     if installed == __version__:
         return "present", installed
-    return "mismatch", f"installed @perk/pi {installed} != pinned {__version__}"
+    return "mismatch", f"installed @mgiles/perk {installed} != pinned {__version__}"
 
 
 @contextlib.contextmanager
@@ -119,7 +123,7 @@ def _extension_install_lock(repo_root: Path) -> Iterator[None]:
 
 
 def _install_perk_extension(repo_root: Path) -> None:
-    """Install the pinned ``@perk/pi@{__version__}`` into ``.pi/npm/`` (raises ``NpmError``).
+    """Install the pinned ``@mgiles/perk@{__version__}`` into ``.pi/npm/`` (raises ``NpmError``).
 
     The single install primitive both ``materialize_extension_install`` and
     ``ensure_extension_install_present`` drive (and the stub overrides in tests).
@@ -130,11 +134,11 @@ def _install_perk_extension(repo_root: Path) -> None:
 
 
 def materialize_extension_install(repo_root: Path, *, self_repo: bool) -> str | None:
-    """Materialize perk's ``@perk/pi`` npm install, under a cross-process lock.
+    """Materialize perk's ``@mgiles/perk`` npm install, under a cross-process lock.
 
     The full version used by init/doctor: re-checks ``extension_install_status`` under the lock and
     converges the install forward — install-if-``absent`` / reinstall-if-``mismatch`` (the pinned
-    ``@perk/pi@{__version__}``), no-op otherwise. Best-effort + **non-fatal**: an ``NpmError``
+    ``@mgiles/perk@{__version__}``), no-op otherwise. Best-effort + **non-fatal**: an ``NpmError``
     (network / not-yet-published pin) is swallowed and reported in the returned message, never
     raised — init/doctor and especially a launch must not fail on it. Returns a human-readable
     change line **only when it actually changed something**; ``None`` for a genuine no-op
@@ -148,19 +152,19 @@ def materialize_extension_install(repo_root: Path, *, self_repo: bool) -> str | 
         try:
             if status == "absent":
                 _install_perk_extension(repo_root)
-                return f"{rel}: installed @perk/pi@{__version__} (perk-owned)"
+                return f"{rel}: installed @mgiles/perk@{__version__} (perk-owned)"
             if status == "mismatch":
                 old = installed_perk_version(repo_root)
                 _install_perk_extension(repo_root)
-                return f"{rel}: reinstalled @perk/pi@{__version__} (was {old})"
+                return f"{rel}: reinstalled @mgiles/perk@{__version__} (was {old})"
             # present / unverifiable: leave a present install for pi to load — a genuine no-op.
             return None
         except npm.NpmError as exc:
-            return f"{rel}: @perk/pi install failed (non-fatal): {exc}"
+            return f"{rel}: @mgiles/perk install failed (non-fatal): {exc}"
 
 
 def ensure_extension_install_present(repo_root: Path, *, self_repo: bool) -> str | None:
-    """Cheap launch hot-path guarantee that perk's ``@perk/pi`` install **exists** (no version).
+    """Cheap launch hot-path guarantee that perk's ``@mgiles/perk`` install **exists** (no version).
 
     ``self_repo`` → ``None``. If the package dir already exists → ``None`` fast (**no network, no
     version check**) — the norm after init/doctor. Else, under the lock, **re-check** ``is_dir()``
@@ -182,4 +186,4 @@ def ensure_extension_install_present(repo_root: Path, *, self_repo: bool) -> str
             _install_perk_extension(repo_root)
         except npm.NpmError:
             return None
-        return f"{rel}: installed @perk/pi@{__version__} pre-launch (perk-owned)"
+        return f"{rel}: installed @mgiles/perk@{__version__} pre-launch (perk-owned)"

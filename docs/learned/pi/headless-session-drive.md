@@ -107,7 +107,7 @@ A "no model available" test must **inject an empty `{ getAvailable: () => [] }` 
 stubs** — NOT delete `ANTHROPIC_API_KEY`/etc. `ModelRegistry.getAvailable()` also reads the dev
 machine's `auth.json`, so env-var deletion is **not** deterministic.
 
-The asymmetric-load verification (throwaway `agentDir` still loads + binds the project `@perk/pi`
+The asymmetric-load verification (throwaway `agentDir` still loads + binds the project `@mgiles/perk`
 extension, `session_start` claim engages) is provable **fully offline** via the existing
 `loadPerkSession` harness — assert `getAllRegisteredTools()` includes `submit` /
 `resolve_review_threads` and that the rebuilt `workflow-state.run_id` matches the planted handoff.
@@ -115,7 +115,7 @@ extension, `session_start` claim engages) is provable **fully offline** via the 
 ## Driving the real runtime offline with a faux model (the e2e worker tier)
 
 The e2e worker tier (`extension/worker/workerE2e.test.ts` + `extension/testing/harness.ts`) drives a full
-stage through the production `defaultCreateRuntime` against the real `@perk/pi` extension and a
+stage through the production `defaultCreateRuntime` against the real `@mgiles/perk` extension and a
 faux pi-ai model, GitHub-free at the `PERK_BIN` seam. Three load-bearing assumptions were wrong;
 the corrections are the durable knowledge.
 

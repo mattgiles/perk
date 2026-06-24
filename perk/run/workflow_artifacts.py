@@ -26,7 +26,7 @@ from perk.run.runner import GITHUB_ACTIONS_WORKFLOW
 
 # The wired npm package name (without the `npm:` protocol prefix), single-sourced from the install
 # SSOT so the consumer worker-deps install stays in lockstep with the package perk actually wires.
-_NPM_NAME = NPM_PACKAGE.removeprefix("npm:")  # "@perk/pi"
+_NPM_NAME = NPM_PACKAGE.removeprefix("npm:")  # "@mgiles/perk"
 
 # The two managed files (repo-relative). The composite action lives at a fixed local path the
 # workflow references as `./.github/actions/perk-remote-setup`.
@@ -156,11 +156,11 @@ _PERK_INSTALL_CONSUMER = f"uv tool install perk=={__version__}"
 
 # The Node worker deps step differs by repo kind. The self-repo has the `package.json` + lockfile +
 # the `@earendil-works/*` devDeps the worker resolves, so `npm ci` works. A consumer checkout
-# installs the pinned `@perk/pi` into the project-scope `.pi/npm` root (mirroring the PyPI install
-# pin in `_PERK_INSTALL_CONSUMER` and the perk-owned `.pi/npm` install in
-# `convergence.init.extension_install`): this lands `@perk/pi` *and its runtime deps* under
+# installs the pinned `@mgiles/perk` into the project-scope `.pi/npm` root (mirroring the
+# PyPI install pin in `_PERK_INSTALL_CONSUMER` and the perk-owned `.pi/npm` install in
+# `convergence.init.extension_install`): this lands `@mgiles/perk` *and its runtime deps* under
 # `.pi/npm/node_modules/`, so the `consumer-npm` worker entry
-# (`.pi/npm/node_modules/@perk/pi/extension/workerMain.ts`) and its peer imports resolve. An
+# (`.pi/npm/node_modules/@mgiles/perk/extension/workerMain.ts`) and its peer imports resolve. An
 # end-to-end consumer remote drive is still execution-untested (the `defaultCreateRuntime`
 # disk-settings follow-up is unchanged), but it is no longer an unbuildable `exit 1` deferral.
 _WORKER_DEPS_SELF = "npm ci"

@@ -2,7 +2,7 @@
 
 The four language-neutral contracts both planes obey, authored once here and bundled into
 each build artifact (`Q12`). These are **prose specs** (no parser): the Python CLI (`perk`)
-and the TS extension (`@perk/pi`) each implement one side, against the exact names/paths/
+and the TS extension (`@mgiles/perk`) each implement one side, against the exact names/paths/
 fields pinned below. `perk doctor` (T6) verifies conformance.
 
 There are now **three** parsed contracts (siblings of this file): `registry.yaml` — the stage
@@ -1761,12 +1761,12 @@ group; else expand only its failures/warnings); `--verbose` expands every check.
 
 Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
 
-- **perk's own extension is wired as an exact version-pinned `npm:@perk/pi` entry, reconciled
-  *forward*** (no longer purely append-only). `_desired_packages` emits `npm:@perk/pi@{__version__}`
+- **perk's own extension is wired as an exact version-pinned `npm:@mgiles/perk` entry, reconciled
+  *forward*** (no longer purely append-only). `_desired_packages` emits `npm:@mgiles/perk@{__version__}`
   for a consumer (`_perk_npm_entry()`, mirroring the PyPI install pin SSOT in
   `workflow_artifacts.py`); the self-repo still wires `..`. `_merge_static_packages` rewrites perk's
-  own `packages` entry **in place** (list position preserved) when its `@perk/pi` identity already
-  exists but the full spec differs from the desired pin — so a stale `npm:@perk/pi@0.0.0` is
+  own `packages` entry **in place** (list position preserved) when its `@mgiles/perk` identity already
+  exists but the full spec differs from the desired pin — so a stale `npm:@mgiles/perk@0.0.0` is
   reconciled to `@{__version__}` (extra string duplicates of that identity collapse to one). Only
   perk's own npm identity is version-reconciled; the borrowed npm packages stay unpinned/append-only
   (distinguished by `_npm_name` identity vs `_npm_name(NPM_PACKAGE)`), and a user's other packages
@@ -1777,9 +1777,9 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   object-form perk entry is a documented limitation). This rides the existing `settings-wiring`
   `ManagedConvergence` — version-pin drift becomes a `settings-wiring` **fail** that `--fix`
   repairs, with **no new doctor wiring**.
-- **perk owns the `@perk/pi` *npm install*, superseding pi's `git:`-clone extension lifecycle
+- **perk owns the `@mgiles/perk` *npm install*, superseding pi's `git:`-clone extension lifecycle
   (#812).**
-  Node 2.2 flipped perk's own extension to a pinned `npm:@perk/pi@{__version__}` settings entry; this
+  Node 2.2 flipped perk's own extension to a pinned `npm:@mgiles/perk@{__version__}` settings entry; this
   bullet makes init/doctor/launch **physically install** that pin. pi installs a missing
   project-scope `npm:` package lazily and **unlocked** at launch (`resolvePackageSources`) — a
   missing/half-materialized race for `npm:` packages. The npm install path now **fully supersedes**
@@ -1790,7 +1790,7 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   (filesystem-only, gitignored path; idempotent — a no-op once absent; a failed removal lands on
   `fix_errors`, never swallowed). perk now owns the install end-to-end:
   `materialize_extension_install` (init/doctor) reconciles the install **forward** —
-  install-if-`absent` / reinstall-if-version-`mismatch` (the pinned `@perk/pi@{__version__}`,
+  install-if-`absent` / reinstall-if-version-`mismatch` (the pinned `@mgiles/perk@{__version__}`,
   `npm install <pin> --prefix .pi/npm --legacy-peer-deps`, additive — borrowed entries untouched) —
   and `ensure_extension_install_present` warms it **pre-launch** in `launch_stage` (presence-only, a
   cheap `is_dir()` no-op once present, so the launch hot path stays network-free). Both run under an
@@ -1804,12 +1804,12 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
   This is **install ownership**: presence + the *install-vs-pin* version comparison.
 - **Version-parity enforcement is complete (#838).** The *wired* pin is enforced by the
-  `settings-wiring` check (`_perk_npm_entry()` reconciled forward to `npm:@perk/pi@{__version__}`,
+  `settings-wiring` check (`_perk_npm_entry()` reconciled forward to `npm:@mgiles/perk@{__version__}`,
   above) and the *installed* version by the `extension-install` check (install-vs-`__version__`
   `mismatch` → fail), both against the running CLI's `perk.__version__` SSOT — **no third
   `version-parity` doctor check** is added (it would only duplicate these). The only version perk
   cannot *statically* check is the **live loaded** extension at launch: pi can lazy-install / load a
-  stale `npm:@perk/pi`, so the `@perk/pi` actually running may differ from the CLI that launched it.
+  stale `npm:@mgiles/perk`, so the `@mgiles/perk` actually running may differ from the CLI that launched it.
   That runtime skew is surfaced by a **soft `session_start` drift signal**: the local launch seam
   (`launch_stage`) injects `PERK_CLI_VERSION = __version__` into the exec env (a second informational
   launch env var beside `PERK_RUN_ID` — §8.2 — but *not* run-control data: the extension only reads
@@ -2198,7 +2198,7 @@ objective threshold compaction (`[objective] compact_threshold`) are orthogonal 
 
 The **stage-drive primitive** (`extension/worker/worker.ts` `driveStage`) drives ONE read-write stage
 (`implement`/`address`) end-to-end on an **already-prepared** worktree, in-process via the SDK
-runtime factory, running the **same** `@perk/pi` extension package. It is the substrate Node 1.3
+runtime factory, running the **same** `@mgiles/perk` extension package. It is the substrate Node 1.3
 (the structured event stream) and Node 4.1 (the e2e harness) consume. This section locks the
 worker's inputs, determinism invariants, terminal-signal definition, and outcome shape (the full
 audit is `docs/design/headless-worker.md`, Node 1.1). The worker makes **no GitHub mutation of its
@@ -2221,7 +2221,7 @@ exactly as in a warm session (§8.4).
 ### Determinism invariants (fixed by the worker; not caller-tunable)
 
 - **`cwd = worktree`, `agentDir = throwaway temp dir`** (Gap 4): the project tier loads (perk's
-  `@perk/pi` via the managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`); the
+  `@mgiles/perk` via the managed `.pi/settings.json`, the managed `AGENTS.md`/`APPEND_SYSTEM.md`); the
   user-global tier (extensions/settings/skills/models/auth) is locked out. The
   `createAgentSessionServices` factory builds the `DefaultResourceLoader` internally from
   `cwd`/`agentDir` — the runtime path does **not** take a pre-built loader (recipe correction #1).
@@ -2498,9 +2498,9 @@ so `init` writes them and `doctor` verifies/repairs them through the one shared 
   worker drives), the Node worker's peer deps, and a final **git-identity** step (`perk[bot]`,
   `--global`) so the worker's commits succeed on a fresh runner. The worker-deps step is repo-kind
   aware: **self** uses `npm ci` (the self-repo has the `package.json`/lockfile/devDeps the worker
-  resolves); **consumer** installs the pinned `@perk/pi`
-  (`npm install @perk/pi@{__version__} --prefix .pi/npm --legacy-peer-deps`, baked in at `perk init`
-  time so the runner reproduces the wiring perk version) — landing `@perk/pi` *and its runtime deps*
+  resolves); **consumer** installs the pinned `@mgiles/perk`
+  (`npm install @mgiles/perk@{__version__} --prefix .pi/npm --legacy-peer-deps`, baked in at `perk init`
+  time so the runner reproduces the wiring perk version) — landing `@mgiles/perk` *and its runtime deps*
   under `.pi/npm/node_modules/`, so the `consumer-npm` worker entry and its peer imports resolve.
 
 Full-file managed (like the settings/gitignore/AGENTS blocks): a hand-edited file reads as drift and
@@ -2521,7 +2521,7 @@ by the workflow **after** it checks out the plan branch (so cwd = the checkout =
    inherits the prepared worktree and never re-writes it (the §B inputs table).
 4. Resolve the Node worker entrypoint — `PERK_WORKER_ENTRY` override (`env`), else the self-repo
    `extension/workerMain.ts` (`self`), else the consumer npm install under
-   `.pi/npm/node_modules/@perk/pi/extension/workerMain.ts` (`consumer-npm`); a miss ⇒
+   `.pi/npm/node_modules/@mgiles/perk/extension/workerMain.ts` (`consumer-npm`); a miss ⇒
    `worker_entry_missing`.
 5. **Spawn** `node <entry> <stage> --worktree <repo_root>` with `PERK_RUN_ID=<run_id>` in the env
    (inherited stdio — the worker owns stdout/the `RunOutcome` JSON), and **exit with the worker's

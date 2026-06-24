@@ -176,7 +176,7 @@ Node 1.3 lands tranches 2+3 as one PR with two mv+sweep commit pairs. After ever
    `import.meta.dirname` recursive scan already covers subdirectories; **path-literal updates in
    tranche 3** (classified as path-sweep edits, not test-logic edits).
 6. `perk/run_worker.py` worker-entry ladder (`_clone_worker_entry`, `resolve_worker_entry`:
-   self-repo path, clone path, published `node_modules/@perk/pi/extension/workerMain.ts`, plus
+   self-repo path, clone path, published `node_modules/@mgiles/perk/extension/workerMain.ts`, plus
    the `PERK_WORKER_ENTRY` error message) — the only *behavior-bearing* cross-plane path
    reference into `extension/`; **neutralized by keeping `workerMain.ts` at root**; no Python
    edits in any extension tranche.

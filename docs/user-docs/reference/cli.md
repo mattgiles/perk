@@ -62,25 +62,25 @@ never prompts (CI/supervisor); `--json` emits a machine-readable report.
 
 Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-converges drifted
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
-edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@perk/pi`) in
-`.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@perk/pi@0.0.0` → the
-pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@perk/pi` install
+edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@mgiles/perk`) in
+`.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@mgiles/perk@0.0.0` → the
+pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@mgiles/perk` install
 (below); the older `git:`-clone delivery path has been retired. If your repo was previously on the
 git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
 `.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
-The `package` group's `extension-install` check verifies perk's own `@perk/pi` npm extension is
+The `package` group's `extension-install` check verifies perk's own `@mgiles/perk` npm extension is
 **physically installed** under `.pi/npm/` at the pinned version. Because pi installs a missing
 project-scope `npm:` package lazily and unlocked at launch, perk owns the install: `perk init`
 installs the pin (and reinstalls it on version drift), `perk doctor` **fails** when the install is
 absent or its version differs from the pin and `perk doctor --fix` installs/reinstalls
-`npm:@perk/pi@{version}` (`npm install … --prefix .pi/npm --legacy-peer-deps`, under a cross-process
+`npm:@mgiles/perk@{version}` (`npm install … --prefix .pi/npm --legacy-peer-deps`, under a cross-process
 lock), and `perk <stage>` **warms** the install before every local launch — installing it if absent
 under the same lock — so concurrent sessions never race pi's unlocked lazy install. All npm work is
 best-effort and non-fatal: a not-yet-published pin or flaky network is swallowed (init/doctor/launch
 never crash; pi's lazy install remains the fallback). The self-repo (which wires the local `..`
 package) is exempt.
 Beyond these doctor checks, a local `perk <stage>` launch also surfaces a **soft, non-fatal warning
-at session start** when the `@perk/pi` extension that pi actually loaded differs in version from the
+at session start** when the `@mgiles/perk` extension that pi actually loaded differs in version from the
 running `perk` CLI (pi can lazy-load a stale `npm:` package), pointing you at `perk doctor --fix` to
 reinstall the pinned version. It is silent when versions match and for an ad-hoc `pi` launch.
 The

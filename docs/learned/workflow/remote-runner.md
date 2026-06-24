@@ -134,7 +134,7 @@ Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the 
 - **Worker-entry resolution is a four-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
   `extension/workerMain.ts` → consumer git-package clone
   (`.pi/git/<host>/<path>/extension/workerMain.ts`, `consumer-git`) → npm install
-  (`.pi/npm/node_modules/@perk/pi/...`, `consumer-npm`). The `consumer-git` path is **derived from
+  (`.pi/npm/node_modules/@mgiles/perk/...`, `consumer-npm`). The `consumer-git` path is **derived from
   `GIT_PACKAGE`** (split on `/` after stripping `git:`) — never hardcoded segments, so a package-URL
   change can't silently desync the resolver. Importing `GIT_PACKAGE` into `run_worker` is cycle-free
   (`perk.convergence.init` does not import `perk.run.run_worker`).
@@ -148,7 +148,7 @@ fiction": land the cheap/correct/unit-testable pieces now (the resolver candidat
 genuinely-unbuildable consumer worker-deps step a **loud `::error::` + `exit 1` deferral**, not a
 silently-broken `npm ci`. Self-repo keeps `npm ci`.
 
-### Open follow-up: does a real remote launch load `@perk/pi` at all?
+### Open follow-up: does a real remote launch load `@mgiles/perk` at all?
 
 The first real execution of the runner path (the e2e worker test tier) surfaced an unresolved gap:
 `defaultCreateRuntime`'s in-memory settings **ignore disk `.pi/settings.json` packages**, so a

@@ -281,7 +281,7 @@ export function fakePerk(
 }
 
 /**
- * Scaffold a temp worktree that loads the REAL `@perk/pi` extension end-to-end. The
+ * Scaffold a temp worktree that loads the REAL `@mgiles/perk` extension end-to-end. The
  * worktree's `.pi/settings.json` references the live checkout by ABSOLUTE path (offline, no install),
  * so pi reads `<repoRoot>/package.json` `pi.extensions` and binds the real extension. Plants the
  * handoff + plan-ref + PERK_RUN_ID claim path, and `git init`s so the resource loader's ancestor

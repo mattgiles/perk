@@ -293,7 +293,14 @@ def test_worker_entry_env_override_missing_file_is_loud(tmp_path):
 
 def test_worker_entry_consumer_npm_install(tmp_path):
     entry = (
-        tmp_path / ".pi" / "npm" / "node_modules" / "@perk" / "pi" / "extension" / "workerMain.ts"
+        tmp_path
+        / ".pi"
+        / "npm"
+        / "node_modules"
+        / "@mgiles"
+        / "perk"
+        / "extension"
+        / "workerMain.ts"
     )
     entry.parent.mkdir(parents=True)
     entry.write_text("// w\n", encoding="utf-8")

@@ -3,11 +3,14 @@
 Maintainer-facing release policy + runbook for perk's two published planes:
 
 - **`perk`** — the Python CLI, published to PyPI.
-- **`@perk/pi`** — the TypeScript Pi extension, published to npm.
+- **`@mgiles/perk`** — the TypeScript Pi extension, published to npm.
 
 Both planes **always release at the same version, from one tag.** This document is the human
 runbook; the publish workflows (PyPI + npm) enact it and hang their publish jobs off the
 `validate-release-versions` gate in `.github/workflows/release.yml`.
+
+For the first real release, use the step-by-step
+[release checklist](./release-checklist.md) before following the shorter runbook below.
 
 > **Status:** both planes are wired. **PyPI:** an always-on `build-pypi` job (build + `twine check`
 > + wheel smoke) on every PR/`main`/tag, a tag-gated `publish-pypi` (OIDC trusted publishing behind
@@ -40,9 +43,7 @@ Everything else derives from or mirrors it:
 - **`package.json`** `version` mirrors the SSOT; equality across all three is guarded by
   `tests/test_packaging.py::test_version_lockstep`.
 
-> **Future (objective node 2.2):** `perk init` will wire the consumer's `@perk/pi` npm entry
-> pinned to the released version. Today the consumer pin is `@main`; the version-pinned npm
-> wiring lands later in this objective.
+`perk init` wires the consumer's `@mgiles/perk` npm entry pinned to the running `perk` version.
 
 ## One-time publishing setup
 
@@ -52,10 +53,13 @@ maintainer does this once:
 - **On PyPI:** configure a *trusted publisher* for project `perk` — owner `mattgiles`, repo `perk`,
   workflow `release.yml`, environment `pypi-publish`.
 - **On TestPyPI:** the same trusted-publisher config, environment `testpypi-publish`.
-- **In GitHub repo settings → Environments:** create `pypi-publish` (with **required reviewers** —
-  this is the human approval gate) and `testpypi-publish`.
+- **On npm:** create a granular publish token for the `@mgiles` scope/package and store it as the
+  GitHub Actions repository secret `NPM_TOKEN`.
+- **In GitHub repo settings → Environments:** create `pypi-publish`, `testpypi-publish`, and
+  `npm-publish` (with **required reviewers** — these are the human approval gates).
 
-No API tokens are stored anywhere — publishing is OIDC-only.
+PyPI/TestPyPI use OIDC trusted publishing, so no PyPI API token is stored. The current npm workflow
+uses `NPM_TOKEN`; moving npm to OIDC trusted publishing is a separate workflow change.
 
 ## CHANGELOG discipline
 
@@ -79,8 +83,8 @@ is added above it.
 6. **Tag:** create + push an **annotated** tag `vX.Y.Z` on the merged commit
    (e.g. `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`).
 7. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
-   plane versions. On success, `publish-pypi` runs and **waits on the `pypi-publish` environment
-   approval** before uploading the built dist to production PyPI over OIDC.
+   plane versions. On success, `publish-pypi` and `publish-npm` run behind their deployment
+   environment approvals; the GitHub Release is created only after both registries publish.
 
 > **Rehearsal:** before cutting a real tag, maintainers can validate the publish path end-to-end
 > via **Actions → Release → "Run workflow"** (`workflow_dispatch`), which runs `publish-testpypi`

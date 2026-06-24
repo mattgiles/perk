@@ -75,14 +75,14 @@ def test_npm_run_wraps_oserror_as_npmerror(monkeypatch):
 
     monkeypatch.setattr(_ext_install.npm.subprocess, "run", _boom)
     with pytest.raises(_ext_install.npm.NpmError):
-        _ext_install.npm.install("@perk/pi@1.0.0", prefix=Path("/tmp/x"))
+        _ext_install.npm.install("@mgiles/perk@1.0.0", prefix=Path("/tmp/x"))
 
 
 def test_paths_match_pi_layout(tmp_path):
     assert init_mod.consumer_npm_install_root(tmp_path) == tmp_path / ".pi" / "npm"
     assert (
         init_mod.consumer_perk_package_dir(tmp_path)
-        == tmp_path / ".pi" / "npm" / "node_modules" / "@perk" / "pi"
+        == tmp_path / ".pi" / "npm" / "node_modules" / "@mgiles" / "perk"
     )
 
 
@@ -107,7 +107,7 @@ def test_materialize_absent_installs(tmp_path, monkeypatch):
     monkeypatch.setattr(_ext_install, "_install_perk_extension", _install)
     msg = init_mod.materialize_extension_install(tmp_path, self_repo=False)
     assert calls == [tmp_path]
-    assert msg is not None and f"installed @perk/pi@{__version__}" in msg
+    assert msg is not None and f"installed @mgiles/perk@{__version__}" in msg
     assert "reinstalled" not in msg
 
 

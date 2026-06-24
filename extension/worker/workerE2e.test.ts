@@ -2,7 +2,7 @@
 //
 // Unlike `worker.test.ts` (which injects a hand-rolled `FakeSession` via `deps.createRuntime`), this
 // tier drives a full `implement`/`address` stage through the production `defaultCreateRuntime` —
-// real Pi session, the real `@perk/pi` extension loaded from a temp worktree's `.pi/settings.json`,
+// real Pi session, the real `@mgiles/perk` extension loaded from a temp worktree's `.pi/settings.json`,
 // the real bind/subscribe loop — driven by a FAUX pi-ai model that scripts the terminating tool
 // calls, with NO live GitHub (the terminating tools' Python delegation is stubbed via PERK_BIN).
 // Asserts both the structured run-event stream (§8.12) and the terminal `RunOutcome`
@@ -31,7 +31,7 @@ import { type DriveStage, driveStage, type RunEvent } from "./worker.ts";
 // The production
 // `defaultCreateRuntime` builds its session with `SettingsManager.inMemory({compaction,retry})`, which
 // does NOT read the worktree's on-disk `.pi/settings.json` `packages` — so disk-package discovery can
-// never load `@perk/pi` (a runtime, not a test, fact). The extension is therefore delivered through the
+// never load `@mgiles/perk` (a runtime, not a test, fact). The extension is therefore delivered through the
 // documented `resourceLoaderOptions.extensionFactories` seam (the same injection `loadPerkSession` uses),
 // while STILL driving the real `defaultCreateRuntime` (real services → session → runtime, real bind/
 // subscribe, real tools + PERK_BIN delegation). `scaffoldWorkerWorktree` keeps a real `.pi/settings.json`

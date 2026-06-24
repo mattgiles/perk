@@ -91,11 +91,11 @@ def test_composite_action_configures_git_identity():
 
 
 def test_composite_action_worker_deps_is_repo_kind_aware():
-    # self uses `npm ci`; consumer installs the pinned `@perk/pi` into `.pi/npm` (no deferral).
+    # self uses `npm ci`; consumer installs the pinned `@mgiles/perk` into `.pi/npm` (no deferral).
     assert "npm ci" in wa.remote_setup_action(self_repo=True)
     consumer = wa.remote_setup_action(self_repo=False)
     assert "npm ci" not in consumer
-    assert f"npm install @perk/pi@{__version__}" in consumer
+    assert f"npm install @mgiles/perk@{__version__}" in consumer
     assert "--prefix .pi/npm" in consumer
     assert "--legacy-peer-deps" in consumer
     assert "::error::" not in consumer

@@ -26,7 +26,7 @@ _PLAN_REF = {
 def _no_network_clone_warm(monkeypatch):
     """Stub the pre-exec npm-install warming so launch_stage tests never hit the network.
 
-    `launch_stage` warms perk's `@perk/pi` npm install before exec; in a throwaway `git_repo`
+    `launch_stage` warms perk's `@mgiles/perk` npm install before exec; in a throwaway `git_repo`
     (not the self-repo, absent) that would shell a real `npm install`. The dedicated call-site
     tests override it with their own recorder.
     """

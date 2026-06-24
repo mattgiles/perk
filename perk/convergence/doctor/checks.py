@@ -339,7 +339,7 @@ def _subagent_engine_check(root: Path) -> Check:
 
 
 def _extension_install_check(root: Path, self_repo: bool) -> Check:
-    """Presence + pinned version of perk's ``@perk/pi`` npm install (``package``; verify-gated).
+    """Presence + pinned version of perk's ``@mgiles/perk`` npm install (``package``; verify-gated).
 
     pi installs a missing project-scope ``npm:`` package lazily and **unlocked** at launch, so a
     missing / half-materialized install is a race window. Built from
@@ -358,7 +358,7 @@ def _extension_install_check(root: Path, self_repo: bool) -> Check:
             "extension-install",
             "package",
             "fail",
-            "@perk/pi extension not installed",
+            "@mgiles/perk extension not installed",
             detail,
             "perk doctor --fix",
         )
@@ -367,15 +367,17 @@ def _extension_install_check(root: Path, self_repo: bool) -> Check:
             "extension-install",
             "package",
             "fail",
-            "@perk/pi install version drift",
+            "@mgiles/perk install version drift",
             detail,
             "perk doctor --fix",
         )
     if status == "present":
         return Check(
-            "extension-install", "package", "ok", "@perk/pi installed at the pinned version"
+            "extension-install", "package", "ok", "@mgiles/perk installed at the pinned version"
         )
-    return Check("extension-install", "package", "warn", "@perk/pi install not verified", detail)
+    return Check(
+        "extension-install", "package", "warn", "@mgiles/perk install not verified", detail
+    )
 
 
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:

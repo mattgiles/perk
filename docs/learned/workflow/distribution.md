@@ -1,12 +1,12 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, the git→npm extension-wiring flip, or init/doctor/launch owning the `@perk/pi` npm install.
+read_when: You are working on perk's release workflow, the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, the git→npm extension-wiring flip, or init/doctor/launch owning the `@mgiles/perk` npm install.
 ---
 
 # Distribution — how perk ships as published packages
 
 perk ships as **two published packages from one repo**: a Python wheel/sdist (`perk` on PyPI, the
-CLI + the wheel-bundled `shared/`/`agents/` resources) and an npm tarball (`@perk/pi`, the Pi
+CLI + the wheel-bundled `shared/`/`agents/` resources) and an npm tarball (`@mgiles/perk`, the Pi
 extension). This doc is the durable arc of *how* perk became publishable — the version SSOT, the
 build-backend decision that constrains every future packaging change, the one dual-plane release
 workflow, the install-pin policy, and how init/doctor/launch took ownership of the consumer-side npm
@@ -70,7 +70,7 @@ plus per-job gating**. The durable discipline this surfaced:
 Provenance fails with **HTTP 422** unless `package.json` carries a `repository.url` that **matches the
 OIDC-detected repo** (case-sensitive). Adding `repository` / `homepage` / `bugs` to `package.json`
 does **not** change the `npm pack` files surface (verified against the packaging suite), so it is a
-safe metadata addition. Two adjacent facts: a scoped name like `@perk/pi` needs `--access public` on
+safe metadata addition. Two adjacent facts: a scoped name like `@mgiles/perk` needs `--access public` on
 first publish, and provenance needs npm ≥ 9.5 — Node 22 ships npm ≥ 10, so the runner is fine.
 
 ## The three-way install-pin policy
@@ -79,7 +79,7 @@ The durable distribution rule for how consumer-side install commands are pinned:
 
 - **Machine / reproducibility surfaces pin to `__version__`** — the remote-runner consumer install
   (`perk/run/workflow_artifacts.py`) pins `perk=={__version__}`, and the npm extension wiring
-  (`perk/substrate/settings.py` / the convergence layer) pins `@perk/pi@{__version__}`. Both derive
+  (`perk/substrate/settings.py` / the convergence layer) pins `@mgiles/perk@{__version__}`. Both derive
   from the **one** `__version__` SSOT (the `importlib`-derived value).
 - **Human-facing docs stay unpinned (always-latest)** — `README` / get-started read a bare
   `uv tool install perk`.
@@ -91,7 +91,7 @@ re-creates the dependency on the SSOT symbol.
 
 ## The git→npm extension-wiring flip — protocol → identity discriminator
 
-When perk's own Pi extension moved from a `git:` package entry to an `npm:` entry (`@perk/pi`), the
+When perk's own Pi extension moved from a `git:` package entry to an `npm:` entry (`@mgiles/perk`), the
 reconcile-forward logic in `_merge_static_packages` had to change its discriminator:
 
 - **The discriminator shifted from PROTOCOL to IDENTITY.** The old git-vs-npm split keyed on the entry
@@ -110,7 +110,7 @@ reconcile-forward logic in `_merge_static_packages` had to change its discrimina
   forward-pointer** comment, rather than retiring it inline or silently leaving stale text. Deliberate
   staged-deprecation hygiene: name the orphan and point forward.
 
-## init/doctor/launch own the `@perk/pi` npm install — the git→npm mirror
+## init/doctor/launch own the `@mgiles/perk` npm install — the git→npm mirror
 
 The npm-install lifecycle **mirrors** the git-clone lifecycle (see `extension-clone-lifecycle.md`): a
 gateway over the CLI, a status/lock/materialize/launch-warm path, and a verify-gated doctor check. But
@@ -138,7 +138,7 @@ would be wrong:
 
 - **The conftest install stub must land a HEALTHY terminal state (`present`), not `unverifiable`.**
   Forced by `absent → fail`: the fake must write `package.json` with the right version so a *second*
-  init sees `present`; idempotency then becomes "no `@perk/pi` line in the second-run changes."
+  init sees `present`; idempotency then becomes "no `@mgiles/perk` line in the second-run changes."
 
 Mechanical reusables that DO transfer from the git lifecycle:
 

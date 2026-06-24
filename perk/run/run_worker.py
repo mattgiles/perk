@@ -22,6 +22,7 @@ from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence.init.extension_install import consumer_perk_package_dir
 from perk.run import launch, resume, run_report
 from perk.state import cache
 from perk.substrate.output import user_output
@@ -58,7 +59,7 @@ def _drivable_stage(stage_id: str) -> Stage:
 
 def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntry:
     """Locate ``workerMain.ts``: the ``PERK_WORKER_ENTRY`` override, else the self-repo path, else
-    the consumer npm install under ``.pi/npm/node_modules/@perk/pi``. A miss is loud, never
+    the consumer npm install under ``.pi/npm/node_modules/@mgiles/perk``. A miss is loud, never
     silent."""
     override = (environ.get("PERK_WORKER_ENTRY") or "").strip()
     if override:
@@ -71,17 +72,7 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
         )
     candidates: list[tuple[Path, str]] = [
         (repo_root / "extension" / "workerMain.ts", "self"),
-        (
-            repo_root
-            / ".pi"
-            / "npm"
-            / "node_modules"
-            / "@perk"
-            / "pi"
-            / "extension"
-            / "workerMain.ts",
-            "consumer-npm",
-        ),
+        (consumer_perk_package_dir(repo_root) / "extension" / "workerMain.ts", "consumer-npm"),
     ]
     for path, source in candidates:
         if path.is_file():

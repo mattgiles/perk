@@ -35,7 +35,7 @@ def stub_env(monkeypatch):
     # inits in tests never clone over the network.
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)
 
-    # The @perk/pi npm-install primitive shells `npm install` over the network (init/doctor now
+    # The @mgiles/perk npm-install primitive shells `npm install` over the network (init/doctor now
     # materialize the install); stub it so verified inits never reach the network. The fake lands
     # the pinned package.json so a second verified init sees the install present at __version__ →
     # status `present` → a no-op (idempotency preserved). Dedicated tests override it.

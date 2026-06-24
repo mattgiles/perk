@@ -38,11 +38,11 @@ def consumer_git_clone_root(repo_root: Path) -> Path:
 
 # perk's own extension is now wired as an exact version-pinned npm spec. `_perk_npm_entry()`
 # mirrors the PyPI install pin SSOT in `workflow_artifacts.py` (both pin `perk.__version__`).
-NPM_PACKAGE = "npm:@perk/pi"
+NPM_PACKAGE = "npm:@mgiles/perk"
 
 
 def _perk_npm_entry() -> str:
-    """The pinned npm spec for perk's own extension (`npm:@perk/pi@{__version__}`)."""
+    """The pinned npm spec for perk's own extension (`npm:@mgiles/perk@{__version__}`)."""
     return f"{NPM_PACKAGE}@{__version__}"
 
 
@@ -127,9 +127,9 @@ def _merge_static_packages(
     """Merge the static perk+borrowed package set; returns (packages, added, updated).
 
     Append-merges the borrowed/npm/local entries (dedup by identity) AND reconciles perk's own
-    `npm:@perk/pi` **version pin** *forward*: when perk's own npm identity already exists as a
+    `npm:@mgiles/perk` **version pin** *forward*: when perk's own npm identity already exists as a
     **string-form** entry whose full spec differs from the desired pin (e.g. a stale
-    `npm:@perk/pi@0.0.0`), the entry is **rewritten in place** (list position preserved) to the
+    `npm:@mgiles/perk@0.0.0`), the entry is **rewritten in place** (list position preserved) to the
     desired pinned spec instead of being skipped; any extra string entries sharing that identity
     are dropped so the repo converges to a single canonical perk entry. Only perk's own identity
     is version-reconciled — borrowed npm packages (`BORROWED_PACKAGES`) are unpinned and stay

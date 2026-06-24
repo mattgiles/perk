@@ -68,7 +68,7 @@ def _untrack_materialized_plan_cache(root: Path) -> tuple[list[str], list[str]]:
 def _remove_orphaned_git_clone(root: Path) -> tuple[list[str], list[str]]:
     """Migrate a former git-clone consumer forward by removing the orphaned on-disk clone.
 
-    The `npm:@perk/pi` install path superseded pi's `git:`-clone extension lifecycle, leaving a
+    The `npm:@mgiles/perk` install path superseded pi's `git:`-clone extension lifecycle, leaving a
     consumer that was previously on the clone with an orphaned `.pi/git/<host>/<path>` tree. This
     forward-only repair `rmtree`s it once (filesystem-only, gitignored path — no network); it is a
     no-op (returns `([], [])`) once the clone is absent, so `--fix` stays idempotent. Returns
@@ -81,7 +81,9 @@ def _remove_orphaned_git_clone(root: Path) -> tuple[list[str], list[str]]:
         rel = clone.relative_to(root)
         try:
             shutil.rmtree(clone)
-            changes.append(f"{rel}: removed orphaned perk clone (migrated to @perk/pi npm install)")
+            changes.append(
+                f"{rel}: removed orphaned perk clone (migrated to @mgiles/perk npm install)"
+            )
         except OSError as exc:
             errors.append(f"{rel}: orphaned-clone removal failed (rmtree): {exc}")
     return changes, errors
@@ -137,7 +139,7 @@ def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list
         elif check.name == "config":
             fixed.extend(_fix_config(root))
         elif check.name == "extension-install":
-            # Install/reinstall the pinned @perk/pi under .pi/npm/ (the perk-owned install)
+            # Install/reinstall the pinned @mgiles/perk under .pi/npm/ (the perk-owned install)
             # under a cross-process lock; best-effort + non-fatal. Only triggers when the
             # verify-gated check flagged `fail` (absent/mismatch) — a real change, so a message
             # is returned.

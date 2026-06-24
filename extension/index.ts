@@ -298,7 +298,7 @@ export default function (pi: ExtensionAPI) {
       console.error(`perk: tool-gating sync failed on session_start — ${error}`);
     }
 
-    // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@perk/pi`, so the
+    // Soft version-parity drift signal: pi can lazy-install / load a stale `npm:@mgiles/perk`, so the
     // extension actually running may differ from the `perk` CLI that launched it. The local launch
     // seam injects PERK_CLI_VERSION; compare it against this extension's own `perkVersion()`. Soft +
     // non-fatal (warning), headless-safe via report(). No once-guard — may re-emit on reload, fine
@@ -309,7 +309,7 @@ export default function (pi: ExtensionAPI) {
         ctx,
         "version parity",
         "warning",
-        `the loaded @perk/pi extension (v${version}) differs from the running perk CLI ` +
+        `the loaded @mgiles/perk extension (v${version}) differs from the running perk CLI ` +
           `(v${cliVersion}) — run 'perk doctor --fix' to reinstall the pinned version`,
         { alsoLog: true },
       );

@@ -363,7 +363,7 @@ def run_init(
                 error_type="skills_sync_failed",
                 message=sync_error,
             )
-        # Forward-reconcile perk's own @perk/pi npm install (install-if-absent /
+        # Forward-reconcile perk's own @mgiles/perk npm install (install-if-absent /
         # reinstall-if-version-mismatch). Best-effort + non-fatal: a network op (verify-gated),
         # it degrades to a swallowed NpmError when the pin is unpublished / offline.
         _reconcile_extension_install(root, changes, self_repo)
@@ -399,10 +399,10 @@ def run_init(
 
 
 def _reconcile_extension_install(root: Path, changes: list[str], self_repo: bool) -> None:
-    """Best-effort forward reconcile of perk's ``@perk/pi`` npm install (verify-gated, non-fatal).
+    """Best-effort forward reconcile of perk's ``@mgiles/perk`` npm install.
 
     Materializes the install (``materialize_extension_install``): install-if-``absent`` /
-    reinstall-if-``mismatch`` (the pinned ``@perk/pi@{__version__}``), no-op on
+    reinstall-if-``mismatch`` (the pinned ``@mgiles/perk@{__version__}``), no-op on
     ``self``/``present``/``unverifiable``. An ``NpmError`` (unpublished pin / offline) is swallowed
     into a non-fatal change line — it never blocks init, mirroring how the clone reconcile and
     GitHub readiness degrade (D3). A change line is recorded only when materialize actually changed

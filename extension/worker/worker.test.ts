@@ -3,7 +3,7 @@
 // happy-path drive via an INJECTED runtime (no model turn / network ever), the bind/rebind
 // structural contract, the cross-plane prompt-parity invariant (reciprocal of
 // tests/test_worker_prompt_parity.py), and the Gap-4 verification (a throwaway agentDir still loads
-// + binds the project `@perk/pi` extension, with the `session_start` claim engaging). See worker.ts.
+// + binds the project `@mgiles/perk` extension, with the `session_start` claim engaging). See worker.ts.
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
@@ -531,7 +531,7 @@ test("initialPromptFor: a null plan-ref yields null (nothing to prime)", () => {
   assert.equal(initialPromptFor("address", null), null);
 });
 
-// --- Gap-4 verification: throwaway agentDir still loads + binds the project @perk/pi extension ---
+// --- Gap-4 verification: throwaway agentDir still loads + binds the project @mgiles/perk extension ---
 
 test("Gap-4: a bound perk session registers the worker's terminal tools and claims its run", async () => {
   const runId = "01JWORKERTESTRUNID000000000";

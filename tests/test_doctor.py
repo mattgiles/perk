@@ -1092,7 +1092,7 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path, converge_skills_work
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
     monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: None)
-    # The verify-gated @perk/pi install check fails on an absent install; stub it benign so this
+    # The verify-gated @mgiles/perk install check fails on an absent install; stub it benign so this
     # test stays about runner-prereqs degradation (not install ownership).
     monkeypatch.setattr(
         init, "extension_install_status", lambda root, *, self_repo: ("present", "x")
@@ -1213,12 +1213,12 @@ def test_ref_drift_detected_and_fixed(git_repo):
 
     from perk import __version__
 
-    pin = f"npm:@perk/pi@{__version__}"
+    pin = f"npm:@mgiles/perk@{__version__}"
     _scaffold(git_repo)
     settings_path = git_repo / ".pi" / "settings.json"
     settings = _json.loads(settings_path.read_text())
     settings["packages"] = [
-        "npm:@perk/pi@0.0.0" if isinstance(p, str) and p.startswith("npm:@perk/pi") else p
+        "npm:@mgiles/perk@0.0.0" if isinstance(p, str) and p.startswith("npm:@mgiles/perk") else p
         for p in settings["packages"]
     ]
     settings_path.write_text(_json.dumps(settings, indent=2) + "\n", encoding="utf-8")
@@ -1228,7 +1228,7 @@ def test_ref_drift_detected_and_fixed(git_repo):
     assert fixed.healthy
     packages = _json.loads(settings_path.read_text())["packages"]
     assert pin in packages
-    assert "npm:@perk/pi@0.0.0" not in packages
+    assert "npm:@mgiles/perk@0.0.0" not in packages
 
 
 # --- the verify-gated `extension-install` check ---------------------------------------
@@ -1241,11 +1241,11 @@ def _install_check(report):
 @pytest.mark.parametrize(
     ("status", "detail", "expect_status", "expect_remediation"),
     [
-        ("absent", "perk installs the pinned @perk/pi pre-launch", "fail", "perk doctor --fix"),
-        ("mismatch", "installed @perk/pi 0.0.0 != pinned 1.0.0", "fail", "perk doctor --fix"),
+        ("absent", "perk installs the pinned @mgiles/perk pre-launch", "fail", "perk doctor --fix"),
+        ("mismatch", "installed @mgiles/perk 0.0.0 != pinned 1.0.0", "fail", "perk doctor --fix"),
         ("present", "1.0.0", "ok", ""),
         ("self", "self-repo uses the local '..' package — no npm install", "info", ""),
-        ("unverifiable", "installed @perk/pi package.json version unreadable", "warn", ""),
+        ("unverifiable", "installed @mgiles/perk package.json version unreadable", "warn", ""),
     ],
 )
 def test_extension_install_check_statuses(
@@ -1281,9 +1281,9 @@ def test_fix_materializes_perk_extension_install(git_repo, stub_env, monkeypatch
 
     def _spy(root, *, self_repo):
         calls.append((root, self_repo))
-        return ".pi/npm/node_modules/@perk/pi: installed @perk/pi@x (perk-owned)"
+        return ".pi/npm/node_modules/@mgiles/perk: installed @mgiles/perk@x (perk-owned)"
 
     monkeypatch.setattr(doctor_mod.init, "materialize_extension_install", _spy)
     report = run_doctor(git_repo, fix=True, verify=True)
     assert len(calls) == 1
-    assert any("@perk/pi" in line for line in report.fixed)
+    assert any("@mgiles/perk" in line for line in report.fixed)
