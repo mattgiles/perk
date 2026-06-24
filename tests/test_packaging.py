@@ -3,7 +3,8 @@
 These promote the cross-plane packaging assertions formerly carried by the
 `scripts/verify-*.sh` hard gates into the standard pytest suite:
 
-- version lockstep between the npm `package.json` and the Python `perk.__version__`,
+- version lockstep across the version SSOT (`pyproject.toml` `[project] version`), the npm
+  `package.json`, and the runtime-derived Python `perk.__version__`,
 - the built **wheel** bundles `perk/_shared/{README,registry,contracts}`,
 - the **npm tarball** ships `shared/` and `extension/index.ts` while excluding the dev-only
   `extension/testing/` + `*.test.ts` (skills are delivered by the external `skills` CLI from the
@@ -18,6 +19,7 @@ CI-robust; in CI both toolchains are present so they actually run.
 import json
 import shutil
 import subprocess
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -32,9 +34,18 @@ def _package_json() -> dict:
     return json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
 
 
+def _pyproject_version() -> str:
+    data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return data["project"]["version"]
+
+
 def test_version_lockstep():
-    # The npm package.json version and the Python single-source version must match.
-    assert _package_json()["version"] == __version__
+    # `pyproject.toml` `[project] version` is the SSOT (bumped via `uv version`). The npm
+    # `package.json` mirrors it (install-independent file-literal lockstep), and the runtime
+    # `perk.__version__` must derive to the same value in the `uv sync`'d test env.
+    ssot = _pyproject_version()
+    assert _package_json()["version"] == ssot
+    assert __version__ == ssot
 
 
 @pytest.fixture(scope="session")
