@@ -44,9 +44,10 @@ packages = ["perk"]
 [tool.hatch.build.targets.wheel.force-include]
 "shared" = "perk/_shared"
 "agents" = "perk/_agents"
+"prompts" = "perk/_prompts"
 
 [tool.hatch.build.targets.sdist]
-only-include = ["perk", "shared", "agents", "README.md"]
+only-include = ["perk", "shared", "agents", "prompts", "README.md"]
 
 # Marks this repository as perk's own source tree. `perk init` reads this to wire
 # perk's extension as a local-path package (dev) instead of the published npm package.

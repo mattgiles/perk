@@ -21,6 +21,15 @@ export function sharedDir(): string {
   return dir;
 }
 
+/** Absolute path to the bundled `prompts/` directory. */
+export function promptsDir(): string {
+  const dir = join(packageRoot(), "prompts");
+  if (!existsSync(dir)) {
+    throw new Error(`perk: could not locate the bundled 'prompts/' directory at ${dir}`);
+  }
+  return dir;
+}
+
 /** perk version, read from the package.json shipped alongside the extension. */
 export function perkVersion(): string {
   try {

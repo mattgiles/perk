@@ -88,6 +88,15 @@ def test_wheel_bundles_shared(built_wheel):
 
 
 @pytest.mark.xdist_group("wheel_build")
+def test_wheel_bundles_prompts(built_wheel):
+    # The canonical cross-plane prompt templates are bundled into the wheel as `perk/_prompts`
+    # (force-include), mirroring `perk/_shared`. The README is the durable bundling probe.
+    with zipfile.ZipFile(built_wheel) as zf:
+        names = set(zf.namelist())
+    assert "perk/_prompts/README.md" in names, names
+
+
+@pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_agents(built_wheel):
     # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so
     # `perk init` can materialize them into consumer `.pi/agents/perk/` dirs.
@@ -123,6 +132,7 @@ def test_npm_pack_lists_shipped_and_excludes_dev():
     assert "shared/contracts.md" in paths
     assert "shared/contracts-history.md" in paths
     assert "shared/README.md" in paths
+    assert "prompts/README.md" in paths
 
     # Dev-only surface must be excluded.
     assert not any(p.startswith("extension/testing/") for p in paths), paths
