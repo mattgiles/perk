@@ -4028,8 +4028,12 @@ scalars; fixture vars are strings only in this node (sidestepping jinja2-vs-nunj
 rendering divergence).
 
 **Environment-config parity baseline** (both engines): `autoescape` off (prompts are plain text,
-never HTML-escaped), `trim_blocks`/`lstrip_blocks` off, and jinja2 `keep_trailing_newline` on so
-jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
+never HTML-escaped), `trim_blocks` **on** (as of Node 2.4) so a block tag on its own line emits no
+spurious newline — conditional templates keep their `{% %}` tags off the content lines while
+preserving the content's own indentation — `lstrip_blocks` off, and jinja2 `keep_trailing_newline`
+on so jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
+(`trim_blocks` only affects block-tag templates; the only such templates are `stages/learn.md`
+and the `with_include` fixture — every real arm template uses `{{ var }}` only and is unaffected.)
 
 **Dependencies:** `jinja2` is a Python runtime dependency. `nunjucks` is a TS **runtime**
 dependency (`@types/nunjucks` dev-only for typing) **until node 4.2** vendors a zero-dependency
@@ -4143,6 +4147,10 @@ conditionals**: the `{% if pr_id %}` header split and the no-ref / github+linear
 selection are the template's conditional on `provider` (+ `pr_id` presence); the provider read-line
 text is supplied as the `read_cmd` var from the node-2.1 plan-read helper (`_plan_read_instruction`
 / `planReadInstruction`), `read_cmd` passed always (empty string when absent) so it is defined. The
+template keeps each `{% if %}`/`{% elif %}`/`{% else %}`/`{% endif %}` tag on its **own line** (off
+the content lines) — enabled by the `trim_blocks` env flip above, which swallows the single newline
+after each block tag so the indented bullet content renders intact (whitespace-control `{%- -%}`
+markers alone could not — they also strip the bullets' leading indentation). The
 template and all four golden files carry **no trailing newline** (matching the cold literal). Four
 `learn-*` golden cases in `cases.yaml` (`learn-github`, `learn-linear`, `learn-other`,
 `learn-no-ref`) prove cross-plane byte-identity and **replace the dedicated learn substring parity**;
