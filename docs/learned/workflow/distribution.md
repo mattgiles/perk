@@ -1,6 +1,6 @@
 ---
 title: How perk ships — version SSOT, the dual-plane release workflow, the install-pin policy, and init/doctor owning the npm install
-read_when: You are working on perk's release workflow, the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, the git→npm extension-wiring flip, or init/doctor/launch owning the `@mgiles/perk` npm install.
+read_when: You are working on perk's release workflow, the version SSOT, PyPI/npm publishing (OIDC trusted publishing, `npm publish --provenance`), the consumer install-pin policy, version-parity enforcement (the `PERK_CLI_VERSION` informational launch env var, the soft `session_start` version-drift signal, the no-third-doctor-check decision, `test_npm_pin_lockstep`), the git→npm extension-wiring flip, or init/doctor/launch owning the `@perk/pi` npm install.
 ---
 
 # Distribution — how perk ships as published packages
@@ -89,6 +89,53 @@ A practical consequence: pinning a machine surface to `__version__` can require 
 `from perk import __version__` import that an earlier node deliberately dropped — pinning a surface
 re-creates the dependency on the SSOT symbol.
 
+## Version-parity enforcement — the launch env var, the soft drift signal, and the pin-lockstep test
+
+The `__version__` SSOT is enforced into the *running session* by three deliberately-chosen mechanisms
+(and one deliberately-rejected one). This builds on the install-pin policy above.
+
+- **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** `launch_stage`
+  (`perk/run/launch/__init__.py`) injects **two** env vars into the `os.execvpe` env dict: the existing
+  run-control `PERK_RUN_ID` **and** the new `PERK_CLI_VERSION = __version__`. The distinction (documented
+  in contracts §8.2/§8.6a): `PERK_RUN_ID` is run-control data the extension *acts on*; `PERK_CLI_VERSION`
+  is **informational only** — read solely to *compare* versions, never to drive state. This is the
+  template for any future "carry a CLI fact into the session for display/comparison" need: add it to the
+  single local-launch env dict, document it as non-run-control, and inject **at the local launch seam
+  only** — the `--remote`/`--dry-run` paths early-return *before* this seam, so the remote worker (same
+  pinned install, headless) is deliberately out of scope with no extra code.
+
+- **Decision: NO third overlapping doctor check (confirmed with maintainer).** Parity is already
+  enforced by two *existing* checks against the running CLI's `perk.__version__` SSOT: `settings-wiring`
+  (the wired `npm:@perk/pi@{__version__}` pin, reconciled forward by `--fix`) and `extension-install`
+  (installed-vs-pin, `mismatch`→fail). A redundant `version-parity` check only muddies doctor output.
+  **General principle: before adding a doctor check, ask whether an existing check already covers the
+  invariant from a different angle.**
+
+- **The runtime skew the static checks can't see → a soft `session_start` signal.** The one version perk
+  cannot statically check is the **live-loaded** extension: pi can lazy-install/load a stale
+  `npm:@perk/pi`, so the running `@perk/pi` may differ from the launching CLI. The extension's
+  `session_start` handler (`extension/index.ts`) compares `process.env.PERK_CLI_VERSION` against its own
+  `perkVersion()` and, when both are present and differ, emits a **soft non-fatal `warning`** via the
+  surfaces seam (`report()`, headless-safe) pointing at `perk doctor --fix`. Deliberately **no
+  once-guard** — the simplest code (one plain `if` in the existing handler); re-emitting on reload is
+  acceptable for a soft warning. Silent for ad-hoc `pi` (no env) and the self-repo (versions equal).
+  Cross-ref `pi/extension-api.md` for the `session_start` handler facts.
+
+- **Reusable test patterns:**
+  - **Harness fact:** `sessionLifecycle.test.ts` loads the extension *from source*, so `perkVersion()`
+    resolves to the real repo `package.json` version. A fake `PERK_CLI_VERSION: "9.9.9-not-real"`
+    deterministically triggers the signal (assert `notifies` matches `/version parity/`); omitting the
+    env deterministically suppresses it — no need to read/inject the real version in-test.
+  - **Launch-env capture pattern:** to assert what env `launch_stage` passes to exec, monkeypatch
+    `perk.run.launch.os.execvpe` with a **recorder** (`lambda _f,_a,env: captured.update(env)`) rather
+    than a discarding `_no_exec`, plus the usual `os.chdir`→no-op and `get_plan_body`→None stubs; then
+    assert `captured["PERK_CLI_VERSION"] == perk.__version__`.
+  - **Pin-lockstep beyond `__version__`** (`tests/test_packaging.py::test_npm_pin_lockstep`): both
+    perk-owned `@perk/pi` install pins must track the **file** SSOT (`_pyproject_version()`) — the wired
+    pin (`settings._perk_npm_entry()`) and the npm-install pin (`extension_install._pinned_spec()`),
+    with the install spec's name == `NPM_PACKAGE.removeprefix("npm:")`. Proves both pins track the
+    version SSOT, not just each other.
+
 ## The git→npm extension-wiring flip — protocol → identity discriminator
 
 When perk's own Pi extension moved from a `git:` package entry to an `npm:` entry (`@mgiles/perk`), the
@@ -162,6 +209,9 @@ Mechanical reusables that DO transfer from the git lifecycle:
   discriminator must spare
 - `docs/learned/workflow/prompt-templates.md` — the zero-runtime-dep invariant (relevant when a node
   adds a runtime dep)
+- `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides
+- `perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
+  `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
 - `pyproject.toml`, `package.json`, `.github/workflows/release.yml` — the SSOT version + the dual-plane
   workflow
