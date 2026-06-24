@@ -325,10 +325,14 @@ def test_address_prompt_preview_is_classification_only():
     # The fix→resolve→land tail is omitted in preview.
     assert "resolve_review_threads" not in preview
     assert "/land" not in preview
+    # Preview takes no action, so Plan File Mode (an action step) is omitted.
+    assert "Plan File Mode" not in preview
     # The non-preview body (the default) keeps the full loop.
     full = _address_prompt(_PLAN_REF)
     assert _address_prompt(_PLAN_REF, preview=False) == full
     assert "resolve_review_threads" in full and "PREVIEWING" not in full
+    # The converged body upgrades cold/worker with warm's Plan File Mode step.
+    assert "Plan File Mode" in full
 
 
 def test_initial_prompt_injects_classifier_model_from_config():

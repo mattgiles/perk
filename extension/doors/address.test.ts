@@ -6,17 +6,71 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { type PlanRef, writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { addressGuidance, decodeResolveParams } from "./address.ts";
 
+const REF: PlanRef = {
+  provider: "github",
+  pr_id: "148",
+  url: "https://github.com/mattgiles/perk/issues/148",
+  labels: [],
+  objective_id: null,
+};
+
 test("addressGuidance injects the configured review-classifier model when set", () => {
-  const text = addressGuidance(false, "x/y");
+  const text = addressGuidance(REF, false, "x/y");
   assert.match(text, /model: "x\/y"/);
   assert.match(text, /\[subagents\] review-classifier model/);
 });
 
 test("addressGuidance omits the model override when unset", () => {
-  assert.doesNotMatch(addressGuidance(false), /model: "/);
+  assert.doesNotMatch(addressGuidance(REF, false), /model: "/);
+});
+
+test("addressGuidance renders the converged body carrying the PR identity + Plan File Mode", () => {
+  const action = addressGuidance(REF, false);
+  assert.match(action, /addressing review feedback on the PR for plan github #148/);
+  assert.match(action, /Plan File Mode/);
+  assert.match(action, /resolve_review_threads/);
+  const preview = addressGuidance(REF, true);
+  assert.match(preview, /PREVIEWING/);
+  assert.doesNotMatch(preview, /Plan File Mode/);
+  assert.doesNotMatch(preview, /resolve_review_threads/);
+});
+
+test("/address with no active plan-ref warns and sends no guidance", async () => {
+  const cwd = scaffoldRepo();
+  const h = await loadPerkSession({ cwd });
+  try {
+    const { seeded } = await h.runCommandHandler("address", "");
+    assert.equal(seeded.length, 0, "no guidance sent without a plan-ref");
+    assert.ok(
+      h.notifies.some((n) => n.includes("needs an active plan-ref")),
+      "warned that /address needs a plan-ref",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/address with an active plan-ref proceeds (no plan-ref warning)", async () => {
+  const cwd = scaffoldRepo();
+  writePlanRef(cwd, REF);
+  const h = await loadPerkSession({ cwd });
+  try {
+    await h.runCommandHandler("address", "");
+    assert.ok(
+      h.notifies.some((n) => n.includes("classify → fix → resolve")),
+      "reported the classify→fix→resolve loop",
+    );
+    assert.ok(
+      !h.notifies.some((n) => n.includes("needs an active plan-ref")),
+      "no plan-ref warning when a ref is present",
+    );
+  } finally {
+    h.dispose();
+  }
 });
 
 const RESOLVE_JSON = JSON.stringify({
