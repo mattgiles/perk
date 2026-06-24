@@ -13,7 +13,7 @@ concurrency:
 
 # The PyPI publish jobs below attach their own `id-token: write` at job scope for OIDC
 # trusted publishing; the workflow default stays `contents: read`. The npm `build`/`publish-npm`
-# jobs + the GitHub Release step are deferred to a later objective node.
+# jobs + the GitHub Release step are deferred to a later release stage.
 permissions:
   contents: read
 

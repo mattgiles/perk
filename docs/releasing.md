@@ -13,7 +13,7 @@ runbook; the publish workflows (PyPI + npm) enact it and hang their publish jobs
 > check` + wheel smoke-test on every PR/`main`/tag), a tag-gated `publish-pypi` job that uploads to
 > production PyPI via OIDC trusted publishing behind the `pypi-publish` environment approval gate,
 > and a `workflow_dispatch` TestPyPI rehearsal (`publish-testpypi`). The **npm** half (build +
-> `publish-npm` + the GitHub Release step) is still pending a later objective node.
+> `publish-npm` + the GitHub Release step) is still pending a future release stage.
 
 ## Versioning policy
 
