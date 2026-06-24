@@ -4052,6 +4052,23 @@ selection tests) **replaces the prior dedicated substring parity** for plan-read
 implement/learn prompt parity suites are untouched (they embed the byte-identical helper output, so
 they keep passing — the downstream prompts move in nodes 2.2/2.4).
 
+**Second prompt moved — the implement primer (Node 2.2).** The implement-stage primer wording lives
+at `prompts/stages/implement.md`, the second real consumer of the render seam. All three sites that
+used to hand-duplicate it — cold `perk/run/launch/prompts.py::_implement_prompt`, worker
+`extension/worker/worker.ts::initialPromptFor` (implement arm), and warm
+`extension/doors/lifecycleGates.ts::implementHandoffPrompt` — are now thin `render("stages/
+implement.md", {provider, pr_id, url, read_cmd})` calls. The prior warm/cold variance (the warm
+handoff omitting the "Progress markers:" tail) is reconciled by **unifying**: all three render the
+one template with the same vars, so they are **byte-identical** and the warm handoff now carries the
+progress markers too. `read_cmd` is the provider-selected plan-read instruction computed in code via
+the Node-2.1 helper — branching stays in code, no `{% if %}`/second template. The template and its
+golden (`implement-github`) carry **no trailing newline** (matching the prior cold/worker literal).
+One golden case proves the template renders identically in both planes; thin per-plane composition
+tests (start-with / contains read_cmd / ends-with the progress tail) prove each helper wires the
+right template + vars — together these **replace `IMPLEMENT_SUBSTRINGS`**. The pre-objective audit
+`docs/design/prompt-language-audit.md` (still describing warm as a shorter near-copy) is left as a
+frozen snapshot; this paragraph is the authoritative current-state note.
+
 **The address prompt moved onto the seam — converging three consumers (Node 2.3).** The
 address-stage wording lives in two canonical templates `prompts/stages/address/{action,preview}.md`
 (each a complete body, no template logic; vars `{{ provider }}`, `{{ pr_id }}`, `{{ url }}`,

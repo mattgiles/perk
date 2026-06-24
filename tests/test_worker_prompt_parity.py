@@ -17,17 +17,7 @@ from perk.run.launch import (
     _plan_read_instruction,
 )
 
-# Keep in lockstep with IMPLEMENT_SUBSTRINGS in extension/worker/worker.test.ts.
-IMPLEMENT_SUBSTRINGS = [
-    "You are implementing perk plan",
-    "First, read the full plan:",
-    "open the pull request with the /submit",
-    "Progress markers: when the plan has a `## Steps` list,",
-    "`[WIP:n]`",
-    "`[DONE:n]`",
-    "perk may inject a generated checklist as a context message",
-    "otherwise don't invent step numbers",
-]
+# Keep in lockstep with ADDRESS_SUBSTRINGS in extension/worker/worker.test.ts.
 # The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 # extension/worker/worker.test.ts (the literal fragments of the shared linear arm).
 LINEAR_READ_SUBSTRINGS = [
@@ -44,11 +34,13 @@ _PLAN_REF = {
 }
 
 
-def test_implement_prompt_carries_invariant_substrings() -> None:
+def test_implement_prompt_composes_template_with_read_cmd() -> None:
+    """Thin composition guard (the golden case proves cross-plane byte-identity of the template;
+    this proves the helper wires body + read_cmd + the inline progress paragraph)."""
     prompt = _implement_prompt(_PLAN_REF)
-    for needle in IMPLEMENT_SUBSTRINGS:
-        assert needle in prompt, f"implement prompt drifted — missing: {needle!r}"
+    assert prompt.startswith("You are implementing perk plan github #148")
     assert "gh issue view 148 --comments" in prompt
+    assert prompt.endswith("otherwise don't invent step numbers.")
 
 
 # The review-classifier model clause — byte-identical to ADDRESS_MODEL_CLAUSE in
@@ -99,8 +91,6 @@ def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear implement prompt drifted — missing: {needle!r}"
     assert "open https://linear.app/acme/issue/ENG-123" in prompt
-    for needle in IMPLEMENT_SUBSTRINGS:
-        assert needle in prompt, f"implement prompt drifted — missing: {needle!r}"
 
 
 def test_learn_prompt_linear_reads_via_tools_and_keeps_gh_pr_derivation() -> None:

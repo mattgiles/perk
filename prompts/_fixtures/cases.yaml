@@ -54,3 +54,10 @@
     url: "https://github.com/mattgiles/perk/issues/148"
     model_clause: ", passing `model: \"test/model\"` on that call (the configured [subagents] review-classifier model)"
   golden: "_fixtures/golden/address-preview-model.txt"
+- template: "stages/implement.md"
+  vars:
+    provider: "github"
+    pr_id: "42"
+    url: "https://x/9"
+    read_cmd: "gh issue view 42 --comments"
+  golden: "_fixtures/golden/implement-github.txt"

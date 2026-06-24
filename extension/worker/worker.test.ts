@@ -36,16 +36,6 @@ import {
 // The cross-plane prompt-parity invariant: these substrings MUST appear in BOTH the TS
 // `initialPromptFor` output and the Python `perk/run/launch.py` prompts. The same literals live in
 // tests/test_worker_prompt_parity.py, so drift in EITHER plane fails CI.
-const IMPLEMENT_SUBSTRINGS = [
-  "You are implementing perk plan",
-  "First, read the full plan:",
-  "open the pull request with the /submit",
-  "Progress markers: when the plan has a `## Steps` list,",
-  "`[WIP:n]`",
-  "`[DONE:n]`",
-  "perk may inject a generated checklist as a context message",
-  "otherwise don't invent step numbers",
-];
 // The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
 // tests/test_worker_prompt_parity.py (the literal fragments of the shared linear arm).
 const LINEAR_READ_SUBSTRINGS = [
@@ -491,11 +481,14 @@ test("createBindManager: a rebind unsubscribes the prior listener (no double-cou
 
 // --- prompt parity (reciprocal of tests/test_worker_prompt_parity.py) ---------------------------
 
-test("initialPromptFor: implement output carries the cross-plane invariant substrings", () => {
+test("initialPromptFor: implement output composes the template with the read_cmd", () => {
+  // Thin composition guard (the golden case proves cross-plane byte-identity of the template;
+  // this proves the helper wires body + read_cmd + the inline progress paragraph).
   const prompt = initialPromptFor("implement", samplePlanRef);
   assert.ok(prompt);
-  for (const s of IMPLEMENT_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
+  assert.ok(prompt?.startsWith("You are implementing perk plan github #148"));
   assert.ok(prompt?.includes("gh issue view 148 --comments"));
+  assert.ok(prompt?.endsWith("otherwise don't invent step numbers."));
 });
 
 test("initialPromptFor: linear implement output carries the linear read substrings", () => {
@@ -510,7 +503,6 @@ test("initialPromptFor: linear implement output carries the linear read substrin
   assert.ok(prompt);
   for (const s of LINEAR_READ_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
   assert.ok(prompt?.includes("open https://linear.app/acme/issue/ENG-123"));
-  for (const s of IMPLEMENT_SUBSTRINGS) assert.ok(prompt?.includes(s), `missing: ${s}`);
 });
 
 // The review-classifier model clause — the parity literal shared with
