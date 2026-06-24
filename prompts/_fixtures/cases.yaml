@@ -61,3 +61,13 @@
     url: "https://x/9"
     read_cmd: "gh issue view 42 --comments"
   golden: "_fixtures/golden/implement-github.txt"
+- template: "common/objective-read/linear.md"
+  vars:
+    where: "(https://linear.app/x/ENG-1)"
+    fallback: "; if the linear tools are unavailable, open https://linear.app/x/ENG-1"
+  golden: "_fixtures/golden/objective-read-linear.txt"
+- template: "common/objective-read/linear.md"
+  vars:
+    where: "(run `perk objective show 7` for its URL)"
+    fallback: ""
+  golden: "_fixtures/golden/objective-read-linear-nourl.txt"

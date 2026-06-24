@@ -18,8 +18,9 @@ import {
   reconcileGuidance,
 } from "./objectivePlan.ts";
 
-// Keep in lockstep with OBJECTIVE_LINEAR_SUBSTRINGS in tests/test_objective_prompt_parity.py —
-// the literal fragments of the shared linear arm (cross-plane parity invariant).
+// Local fragments of the shared linear arm — used by the per-plane selection + guidance
+// composition tests below (no longer a cross-plane lockstep; the `objective-read-*` golden cases
+// own cross-plane byte-parity).
 const OBJECTIVE_LINEAR_SUBSTRINGS = [
   "Linear Project",
   "linear_get_issue",

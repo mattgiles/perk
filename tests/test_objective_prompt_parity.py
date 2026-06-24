@@ -1,19 +1,20 @@
-"""Cross-plane objective-prompt parity invariant.
+"""Per-plane objective-prompt selection tests (cross-plane byte-parity owned by golden).
 
-The objective seed prompts are backend-aware via a single shared helper per plane:
-``perk/cli/commands/objective/shared.py::objective_read_instruction`` (cold) and its byte-identical
-TS twin ``extension/factories/objectivePlan.ts::objectiveReadInstruction`` (warm). These substrings
-are the shared invariant — the SAME literals are asserted from the TS side in
-``extension/factories/objectivePlan.test.ts`` (``OBJECTIVE_LINEAR_SUBSTRINGS``), so a drift in
-EITHER plane fails CI here or there. Mirrors ``tests/test_worker_prompt_parity.py``.
+The objective-read clause is rendered by a shared helper per plane:
+``perk/cli/commands/objective/shared.py::objective_read_instruction`` (cold) and its TS twin
+``extension/factories/objectivePlan.ts::objectiveReadInstruction`` (warm), both sharing the wording
+in ``prompts/common/objective-read/linear.md`` via the render seam (contracts.md §8.31). Cross-plane
+byte-parity is now owned by the ``objective-read-*`` golden cases (``tests/test_prompts.py`` +
+``extension/substrate/prompts.test.ts``); the tests here are per-plane SELECTION tests proving the
+code picks the right arm + computes where/fallback. Mirrors ``tests/test_worker_prompt_parity.py``.
 """
 
 from perk import objective
 from perk.cli.commands.objective.plan_cmd import _seed_prompt
 from perk.cli.commands.objective.shared import objective_read_instruction
 
-# Keep in lockstep with OBJECTIVE_LINEAR_SUBSTRINGS in extension/factories/objectivePlan.test.ts —
-# the literal fragments of the shared linear arm.
+# Local fragments of the shared linear arm — used by the per-plane selection + seed-composition
+# tests below (no longer a cross-plane lockstep; golden owns byte-parity).
 OBJECTIVE_LINEAR_SUBSTRINGS = [
     "Linear Project",
     "linear_get_issue",
