@@ -14,10 +14,27 @@ from perk.substrate.config import (
 )
 from perk.substrate.providers import ProviderSet, load_providers, resolve_providers
 
-# Legacy `git:` identity for perk's own extension. Still consumed by `extension_clone.py`
-# (the git-clone lifecycle, retired in a later node); `_converge_settings` strips a repo's
-# legacy `git:` perk entry by this identity when flipping to the pinned npm wiring.
+# Legacy `git:` identity for perk's own extension. The git-clone lifecycle is retired (the npm
+# install path supersedes it); `_converge_settings` strips a repo's legacy `git:` perk entry by
+# this identity when flipping to the pinned npm wiring, and `consumer_git_clone_root` derives the
+# orphaned-clone path so `doctor --fix` can migrate a former git-clone consumer forward.
 GIT_PACKAGE = "git:github.com/mattgiles/perk"
+
+
+def consumer_git_clone_root(repo_root: Path) -> Path:
+    """The root of pi's git-package clone for perk, derived from ``GIT_PACKAGE``.
+
+    pi clones a ``git:`` package to ``.pi/git/<host>/<path>`` (docs/packages.md). Deriving the
+    path from ``GIT_PACKAGE`` (rather than hardcoding segments) keeps every consumer of the clone
+    location — the run-worker entrypoint resolver — in lockstep with the package URL, so a URL
+    change cannot silently desync them.
+    """
+    remainder = GIT_PACKAGE.removeprefix("git:")
+    clone = repo_root / ".pi" / "git"
+    for segment in remainder.split("/"):
+        clone = clone / segment
+    return clone
+
 
 # perk's own extension is now wired as an exact version-pinned npm spec. `_perk_npm_entry()`
 # mirrors the PyPI install pin SSOT in `workflow_artifacts.py` (both pin `perk.__version__`).

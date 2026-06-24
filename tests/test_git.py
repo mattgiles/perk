@@ -330,27 +330,3 @@ def test_detect_merge_conflicts_unparseable_conflict_is_still_unmergeable(
     assert probe.determined is True
     assert probe.mergeable is False  # the bug would have made this True
     assert probe.conflicts == ()
-
-
-# --- read-only SHA helpers -----------------------------------------------------------
-
-
-def test_head_sha_returns_head_and_none_off_repo(git_repo, tmp_path_factory):
-    assert git.head_sha(git_repo) == _sha(git_repo, "HEAD")
-    outside = tmp_path_factory.mktemp("not-a-repo")
-    assert git.head_sha(outside) is None
-
-
-def test_ls_remote_sha_matches_origin(git_repo_with_remote):
-    clone, _remote, advance_origin = git_repo_with_remote
-    remote_sha = git.ls_remote_sha(clone, "refs/heads/main")
-    assert remote_sha == _sha(clone, "origin/main")
-    # After advancing origin, ls-remote sees the new tip without a local fetch.
-    new_sha = advance_origin()
-    assert git.ls_remote_sha(clone, "refs/heads/main") == new_sha
-
-
-def test_ls_remote_sha_none_on_bogus_ref_and_remote(git_repo_with_remote):
-    clone, _remote, _advance = git_repo_with_remote
-    assert git.ls_remote_sha(clone, "refs/heads/does-not-exist") is None
-    assert git.ls_remote_sha(clone, "refs/heads/main", remote="nope") is None

@@ -1,8 +1,8 @@
 """perk's ``@perk/pi`` npm-install lifecycle: status, lock, and pin-aware materialize.
 
-The npm twin of ``extension_clone.py``. pi installs a project-scope ``npm:`` package lazily and
-**unlocked** at launch (``resolvePackageSources``) — exactly the race window the git-clone
-lifecycle closes for ``git:`` packages. perk owns the install end-to-end: init/doctor reconcile it
+pi installs a project-scope ``npm:`` package lazily and
+**unlocked** at launch (``resolvePackageSources``) — a race window perk closes for its own
+extension. perk owns the install end-to-end: init/doctor reconcile it
 forward (install-if-absent / reinstall-if-version-mismatch, the pinned ``@perk/pi@{__version__}``)
 and the launch warms its presence pre-exec, all under an ``fcntl`` lock.
 """

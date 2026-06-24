@@ -64,16 +64,10 @@ Diagnose the perk-managed repo, reporting a grouped health view. `--fix` re-conv
 managed pieces (and seeds missing config) without ever mutating GitHub or overwriting your config
 edits. `--fix` also **reconciles perk's own npm version pin** (`npm:@perk/pi`) in
 `.pi/settings.json` to the version this perk wants (e.g. a stale `npm:@perk/pi@0.0.0` → the
-pinned `@{version}`). (The perk extension is
-self-contained — it has no runtime Node dependencies — so perk pre-materializes the git-clone with
-a plain `git clone` and **no `npm install`**, leaving it `node_modules`-free.)
-The `package` group's `extension-clone` check verifies the loaded git-package clone is at current
-`main` and **fails** on a stale clone (pi does not self-advance an existing clone); `perk doctor
---fix` repairs it by materializing the clone **in place** (clone-if-absent / `git fetch`+`reset`
-if stale, under a cross-process lock), and `perk init` performs the same forward reconcile on every
-run. perk also **warms** the clone before every local launch — cloning it if absent under the same
-lock — so concurrent sessions never race pi's unlocked lazy clone and the perk extension always
-loads.
+pinned `@{version}`). perk's own extension is delivered as the pinned `npm:@perk/pi` install
+(below); the older `git:`-clone delivery path has been retired. If your repo was previously on the
+git clone, `perk doctor --fix` **migrates it forward** by removing the now-orphaned
+`.pi/git/<host>/<path>` clone (filesystem-only; idempotent — a no-op once gone).
 The `package` group's `extension-install` check verifies perk's own `@perk/pi` npm extension is
 **physically installed** under `.pi/npm/` at the pinned version. Because pi installs a missing
 project-scope `npm:` package lazily and unlocked at launch, perk owns the install: `perk init`

@@ -5,13 +5,12 @@ is safe to re-run (re-running on a converged repo is a no-op). It owns *all* Pi
 wiring from the first turn (the init-spine principle).
 
 **Package layout.** This ``__init__`` keeps the orchestration
-(``run_init``, ``managed_convergences``, ``_reconcile_extension_clone``, ``_linear_readiness``,
+(``run_init``, ``managed_convergences``, ``_linear_readiness``,
 ``_converge_workflow_dir``, ``_write_post_init``, ``is_self_repo``) and re-exports every submodule
 symbol behind a sorted ``__all__``, preserving the ``init.X`` attribute-access import path.
 The orchestrators reference the moved helpers as
-facade globals, so the existing ``init_mod.sync_skills`` / ``init_mod.materialize_extension_clone``
-monkeypatches keep working. Submodules: ``templates``, ``report``, ``blocks``, ``settings``,
-``agents``, ``skills``, ``extension_clone``.
+facade globals, so the existing ``init_mod.sync_skills`` monkeypatch keeps working. Submodules:
+``templates``, ``report``, ``blocks``, ``settings``, ``agents``, ``skills``.
 """
 
 import shutil
@@ -36,17 +35,6 @@ from perk.convergence.init.blocks import (
     GITIGNORE_END,
     _agents_inner,
     _apply_managed_block,
-)
-from perk.convergence.init.extension_clone import (
-    ExtensionCloneStatus,
-    _clone_extension_fresh,
-    _extension_clone_lock,
-    _extension_clone_url,
-    _freshen_extension,
-    consumer_git_clone_root,
-    ensure_extension_clone_present,
-    extension_clone_status,
-    materialize_extension_clone,
 )
 from perk.convergence.init.extension_install import (
     ExtensionInstallStatus,
@@ -82,6 +70,7 @@ from perk.convergence.init.settings import (
     _npm_name,
     _package_identity,
     _ProviderChanges,
+    consumer_git_clone_root,
 )
 from perk.convergence.init.skills import (
     MANAGED_SKILL_NAMES,
@@ -139,7 +128,6 @@ __all__ = [
     "REQUIRED_EXTERNAL_SKILLS",
     "REQUIRED_SKILL_SOURCES",
     "SKILLS_MANAGED_PATHSPECS",
-    "ExtensionCloneStatus",
     "ExtensionInstallStatus",
     "GitHubReport",
     "InitReport",
@@ -149,7 +137,6 @@ __all__ = [
     "_ProviderChanges",
     "_agents_inner",
     "_apply_managed_block",
-    "_clone_extension_fresh",
     "_converge_compaction",
     "_converge_linear_package",
     "_converge_provider_packages",
@@ -160,10 +147,7 @@ __all__ = [
     "_desired_packages",
     "_desired_skills_manifest",
     "_env_to_dict",
-    "_extension_clone_lock",
-    "_extension_clone_url",
     "_extension_install_lock",
-    "_freshen_extension",
     "_git_identity",
     "_install_perk_extension",
     "_linear_readiness",
@@ -172,7 +156,6 @@ __all__ = [
     "_merge_static_packages",
     "_npm_name",
     "_package_identity",
-    "_reconcile_extension_clone",
     "_reconcile_extension_install",
     "_skill_link_state",
     "_skills_conflict_message",
@@ -182,16 +165,13 @@ __all__ = [
     "consumer_npm_install_root",
     "consumer_perk_package_dir",
     "converge_config",
-    "ensure_extension_clone_present",
     "ensure_extension_install_present",
-    "extension_clone_status",
     "extension_install_status",
     "git",
     "installed_perk_version",
     "is_self_repo",
     "linear",
     "managed_convergences",
-    "materialize_extension_clone",
     "materialize_extension_install",
     "report_to_dict",
     "run_init",
@@ -383,9 +363,6 @@ def run_init(
                 error_type="skills_sync_failed",
                 message=sync_error,
             )
-        # Forward-reconcile pi's git-package clone (reclone-when-stale). Best-effort + non-fatal:
-        # a network op (verify-gated), it degrades to a no-op when offline (`unverifiable`).
-        _reconcile_extension_clone(root, changes, self_repo)
         # Forward-reconcile perk's own @perk/pi npm install (install-if-absent /
         # reinstall-if-version-mismatch). Best-effort + non-fatal: a network op (verify-gated),
         # it degrades to a swallowed NpmError when the pin is unpublished / offline.
@@ -432,21 +409,6 @@ def _reconcile_extension_install(root: Path, changes: list[str], self_repo: bool
     something. Kept a small free helper so it is unit-testable.
     """
     message = materialize_extension_install(root, self_repo=self_repo)
-    if message is not None:
-        changes.append(message)
-
-
-def _reconcile_extension_clone(root: Path, changes: list[str], self_repo: bool) -> None:
-    """Best-effort forward reconcile of pi's git-package clone (verify-gated, non-fatal).
-
-    Materializes the clone **in place** (``materialize_extension_clone``): clone-if-absent /
-    ``fetch``+``reset``-if-stale (no ``npm install``), leaving a present, fresh clone for both
-    ``absent`` and ``stale``. ``self``/``fresh`` are internal no-ops and ``unverifiable``
-    (offline) is left as-is — it never blocks init, mirroring how GitHub readiness degrades (D3).
-    A change line is recorded only when materialize actually changed something (``None`` no-ops
-    keep a converged re-run change-free). Kept a small free helper so it is unit-testable.
-    """
-    message = materialize_extension_clone(root, self_repo=self_repo)
     if message is not None:
         changes.append(message)
 

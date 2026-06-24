@@ -8,7 +8,6 @@ from perk import github as gh_mod
 from perk.cli.cli import cli
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
-from perk.convergence.init import extension_clone as _ext_clone
 from perk.convergence.init import report_to_dict, run_init
 from perk.convergence.init import skills as _skills_mod
 
@@ -219,7 +218,6 @@ def test_github_error_is_non_fatal(git_repo, monkeypatch):
     # A flaky/slow/broken gh (GitHubError) must not crash init (D3 — GitHub non-fatal).
     monkeypatch.setattr(env_mod, "required_tools_ok", lambda checks: True)
     monkeypatch.setattr(init_mod, "sync_skills", lambda root, changes, **kw: None)  # no network
-    monkeypatch.setattr(_ext_clone, "_clone_extension_fresh", lambda clone, url: None)  # no network
 
     def boom():
         raise gh_mod.GitHubError("gh timed out")

@@ -338,39 +338,6 @@ def _subagent_engine_check(root: Path) -> Check:
     )
 
 
-def _extension_clone_check(root: Path, self_repo: bool) -> Check:
-    """Freshness of pi's git-package clone for perk (group ``package``; verify-gated network op).
-
-    pi never self-advances a present project-scoped ``git:`` clone, so a clone first created at an
-    old commit stays frozen and loads stale extension code. Built from
-    ``init.extension_clone_status``: ``stale`` is a **fail** (with the ``perk doctor --fix``
-    remediation — the reclone), ``unverifiable`` is a ``warn`` (no silent pass — carries the
-    reason), and ``self``/``absent``/``fresh`` are benign (``info``/``info``/``ok``).
-    """
-    status, detail = init.extension_clone_status(root, self_repo=self_repo)
-    if status == "self":
-        return Check("extension-clone", "package", "info", "self-repo — local package, no clone")
-    if status == "absent":
-        return Check(
-            "extension-clone",
-            "package",
-            "info",
-            "clone absent — pi clones fresh main on next launch",
-        )
-    if status == "fresh":
-        return Check("extension-clone", "package", "ok", "extension clone at current main")
-    if status == "stale":
-        return Check(
-            "extension-clone",
-            "package",
-            "fail",
-            "extension clone is stale",
-            detail,
-            "perk doctor --fix",
-        )
-    return Check("extension-clone", "package", "warn", "extension clone not verified", detail)
-
-
 def _extension_install_check(root: Path, self_repo: bool) -> Check:
     """Presence + pinned version of perk's ``@perk/pi`` npm install (``package``; verify-gated).
 

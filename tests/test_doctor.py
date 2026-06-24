@@ -638,6 +638,24 @@ def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
 
 
+def test_fix_removes_orphaned_git_clone(git_repo):
+    # The forward migration: a consumer previously on pi's git-clone has an orphaned
+    # `.pi/git/<host>/<path>` tree after the npm install superseded it. `--fix` rmtrees it once
+    # (migrating forward) and a second `--fix` is a no-op (idempotent).
+    _scaffold(git_repo)
+    clone = doctor_mod.init.consumer_git_clone_root(git_repo)
+    clone.mkdir(parents=True)
+    (clone / "package.json").write_text("{}", encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not clone.exists()
+    rel = clone.relative_to(git_repo)
+    assert any("removed orphaned perk clone" in line for line in fixed.fixed)
+    assert any(str(rel) in line for line in fixed.fixed)
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any("removed orphaned perk clone" in line for line in again.fixed)  # idempotent
+
+
 def test_cache_gc_ok_when_no_prunable_state(git_repo):
     # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
     _scaffold(git_repo)
@@ -1211,64 +1229,6 @@ def test_ref_drift_detected_and_fixed(git_repo):
     packages = _json.loads(settings_path.read_text())["packages"]
     assert pin in packages
     assert "npm:@perk/pi@0.0.0" not in packages
-
-
-# --- the verify-gated `extension-clone` check -----------------------------------------
-
-
-def _clone_check(report):
-    return next((c for c in report.checks if c.name == "extension-clone"), None)
-
-
-@pytest.mark.parametrize(
-    ("status", "detail", "expect_status", "expect_remediation"),
-    [
-        ("stale", "clone HEAD aaaaaaaa != origin/main bbbbbbbb", "fail", "perk doctor --fix"),
-        ("fresh", "abc123", "ok", ""),
-        ("absent", "pi clones fresh at main on next launch", "info", ""),
-        ("self", "self-repo uses the local '..' package — no git clone", "info", ""),
-        ("unverifiable", "clone HEAD or origin/main tip unreadable — offline?", "warn", ""),
-    ],
-)
-def test_extension_clone_check_statuses(
-    git_repo, stub_env, monkeypatch, status, detail, expect_status, expect_remediation
-):
-    _scaffold(git_repo)
-    monkeypatch.setattr(
-        doctor_mod.init, "extension_clone_status", lambda root, *, self_repo: (status, detail)
-    )
-    report = run_doctor(git_repo, verify=True)
-    check = _clone_check(report)
-    assert check is not None
-    assert check.group == "package"
-    assert check.status == expect_status
-    assert check.remediation == expect_remediation
-
-
-def test_extension_clone_check_absent_without_verify(git_repo):
-    _scaffold(git_repo)
-    report = run_doctor(git_repo, verify=False)
-    assert _clone_check(report) is None
-
-
-def test_fix_materializes_stale_extension_clone(git_repo, stub_env, monkeypatch):
-    _scaffold(git_repo)
-    monkeypatch.setattr(
-        doctor_mod.init,
-        "extension_clone_status",
-        lambda root, *, self_repo: ("stale", "clone HEAD aaaa != origin/main bbbb"),
-    )
-    calls: list = []
-
-    def _spy(root, *, self_repo):
-        calls.append((root, self_repo))
-        return ".pi/git/github.com/mattgiles/perk: freshened to origin/main in place"
-
-    # The fix gesture materializes in place (no shutil.rmtree blow-away).
-    monkeypatch.setattr(doctor_mod.init, "materialize_extension_clone", _spy)
-    report = run_doctor(git_repo, fix=True, verify=True)
-    assert len(calls) == 1
-    assert any("freshened to origin/main in place" in line for line in report.fixed)
 
 
 # --- the verify-gated `extension-install` check ---------------------------------------

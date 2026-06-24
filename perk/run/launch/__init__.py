@@ -255,14 +255,6 @@ def launch_stage(
         if local_linear_key is not None:
             env["LINEAR_API_KEY"] = local_linear_key
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
-    # Warm pi's git-package clone before exec so the perk extension always loads from a COMPLETE
-    # clone. pi clones a missing `git:` package lazily and unlocked, so a missing-clone window +
-    # parallel launches let a second process collect resources from a half-created clone and drop
-    # the perk extension. `ensure_extension_clone_present` clones-on-absent under a
-    # cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and best-effort
-    # + non-fatal internally. Targets the repo-root clone (`worktree: none` stages load from
-    # there). Not reached on --dry-run / --remote (both early-returned above).
-    init.ensure_extension_clone_present(repo_root, self_repo=init.is_self_repo(repo_root))
     # Warm perk's @perk/pi npm install before exec so the perk extension always loads from a
     # COMPLETE install. pi installs a missing project-scope `npm:` package lazily and unlocked, so
     # a missing-install window + parallel launches let a second process load from a half-installed

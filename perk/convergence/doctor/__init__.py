@@ -37,7 +37,6 @@ from perk.convergence.doctor.checks import (
     _cache_check,
     _config_check,
     _env_checks,
-    _extension_clone_check,
     _extension_install_check,
     _gc_check,
     _issues_check,
@@ -89,7 +88,6 @@ __all__ = [
     "_cache_check",
     "_config_check",
     "_env_checks",
-    "_extension_clone_check",
     "_extension_install_check",
     "_fix_config",
     "_fix_linear_labels",
@@ -159,9 +157,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
             checks.extend(_linear_checks(root))
         # Verify-gated like env/github: it shells git + validates external-CLI outcomes.
         checks.append(_skills_delivery_check(root, self_repo))
-        # Verify-gated like _skills_delivery_check / github: a network op (ls-remote).
-        checks.append(_extension_clone_check(root, self_repo))
-        # Verify-gated like the clone check: shells `npm` (a network op).
+        # Verify-gated like _skills_delivery_check / github: shells `npm` (a network op).
         checks.append(_extension_install_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
     checks.append(_config_check(root))
