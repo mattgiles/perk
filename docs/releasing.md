@@ -9,8 +9,11 @@ Both planes **always release at the same version, from one tag.** This document 
 runbook; the publish workflows (PyPI + npm) enact it and hang their publish jobs off the
 `validate-release-versions` gate in `.github/workflows/release.yml`.
 
-> **Status:** until the PyPI/npm publish jobs land, `release.yml` **only validates** version
-> agreement on a tag push — it does not publish anything.
+> **Status:** the **PyPI** publish path is wired — an always-on `build-pypi` job (build + `twine
+> check` + wheel smoke-test on every PR/`main`/tag), a tag-gated `publish-pypi` job that uploads to
+> production PyPI via OIDC trusted publishing behind the `pypi-publish` environment approval gate,
+> and a `workflow_dispatch` TestPyPI rehearsal (`publish-testpypi`). The **npm** half (build +
+> `publish-npm` + the GitHub Release step) is still pending a later objective node.
 
 ## Versioning policy
 
@@ -39,6 +42,19 @@ Everything else derives from or mirrors it:
 > pinned to the released version. Today the consumer pin is `@main`; the version-pinned npm
 > wiring lands later in this objective.
 
+## One-time publishing setup
+
+The publish jobs assume trusted publishing + deployment environments are configured out-of-band. A
+maintainer does this once:
+
+- **On PyPI:** configure a *trusted publisher* for project `perk` — owner `mattgiles`, repo `perk`,
+  workflow `release.yml`, environment `pypi-publish`.
+- **On TestPyPI:** the same trusted-publisher config, environment `testpypi-publish`.
+- **In GitHub repo settings → Environments:** create `pypi-publish` (with **required reviewers** —
+  this is the human approval gate) and `testpypi-publish`.
+
+No API tokens are stored anywhere — publishing is OIDC-only.
+
 ## CHANGELOG discipline
 
 Every user-facing change updates `CHANGELOG.md` (root) under `## [Unreleased]`. At release, the
@@ -61,8 +77,12 @@ is added above it.
 6. **Tag:** create + push an **annotated** tag `vX.Y.Z` on the merged commit
    (e.g. `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`).
 7. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
-   plane versions. On success the (future, publish) jobs run behind a deployment-environment human
-   approval gate.
+   plane versions. On success, `publish-pypi` runs and **waits on the `pypi-publish` environment
+   approval** before uploading the built dist to production PyPI over OIDC.
+
+> **Rehearsal:** before cutting a real tag, maintainers can validate the publish path end-to-end
+> via **Actions → Release → "Run workflow"** (`workflow_dispatch`), which runs `publish-testpypi`
+> against TestPyPI (behind the `testpypi-publish` environment) with zero production risk.
 
 ## Failure modes
 

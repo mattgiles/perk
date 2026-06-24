@@ -1,20 +1,27 @@
 name: Release
 
 on:
+  pull_request:
   push:
+    branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# Publish jobs (added in later objective nodes) attach their own `id-token: write` at job scope.
+# The PyPI publish jobs below attach their own `id-token: write` at job scope for OIDC
+# trusted publishing; the workflow default stays `contents: read`. The npm `build`/`publish-npm`
+# jobs + the GitHub Release step are deferred to a later objective node.
 permissions:
   contents: read
 
 jobs:
   validate-release-versions:
     name: validate release versions
+    # Reads a `v`-prefixed tag from GITHUB_REF_NAME — meaningless off a tag push.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,3 +42,77 @@ jobs:
             exit 1
           fi
           echo "release version agreed: $expected"
+
+  build-pypi:
+    name: build · check · smoke (PyPI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv (+ Python 3.13)
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      # `uv build` (no flags) produces both wheel and sdist into dist/. The hatchling
+      # backend force-includes top-level shared/ → perk/_shared and agents/ → perk/_agents.
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Validate distributions
+        run: uvx twine check dist/*
+
+      # Install the built wheel into an isolated env and run its console script.
+      - name: Smoke-test the wheel
+        run: |
+          wheel="$(ls dist/*.whl)"
+          uvx --from "$wheel" perk --help
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/
+
+  publish-pypi:
+    name: publish to PyPI
+    # Production publish — tag pushes only, behind the pypi-publish environment human gate.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [validate-release-versions, build-pypi]
+    runs-on: ubuntu-latest
+    environment: pypi-publish
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/
+
+      # OIDC trusted publishing — no API token. Default packages-dir: dist/.
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-testpypi:
+    name: publish to TestPyPI (rehearsal)
+    # Manual rehearsal only — never on PRs/main/tags.
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build-pypi]
+    runs-on: ubuntu-latest
+    environment: testpypi-publish
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/
+
+      # OIDC trusted publishing against TestPyPI — no API token.
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
