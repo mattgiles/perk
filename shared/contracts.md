@@ -4110,3 +4110,29 @@ template and all four golden files carry **no trailing newline** (matching the c
 thin per-plane selection/composition tests remain. nunjucks stays the TS engine — the golden suite
 is the byte-parity proof that jinja2 and nunjucks render the conditional template identically (the
 tag-hugging whitespace discipline keeps them equal with `trim_blocks`/`lstrip_blocks` off).
+
+**The objective-plan factory seed + warm guidance moved onto the seam (Node 2.6).** The two
+hand-built objective-plan-factory prompt bodies — the **cold** seed
+(`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the **warm** guidance
+(`extension/factories/objectivePlan.ts::factoryGuidance`) — moved onto the render seam as the sixth
+real consumer. Unlike the implement (2.2) / learn (2.4) moves, they are **NOT unified**: the cold
+seed launches a *fresh* read-only session, so it **injects** the objective title + node description
+(the `<untrusted_objective>` block) and the pre-planning node-engagement block as DATA, and its node
+is already marked `planning` by the cold door; the warm guidance runs *in-session*, so it
+**instructs** the model to fetch the objective + node engagement and to mark the node `planning`
+itself. This **cold-injects / warm-instructs** asymmetry makes them genuinely different bodies, so
+they become **two arm files in a subdirectory** — `prompts/stages/objective-plan/{seed,guidance}.md`
+(filenames mirror the function names) — like 2.1/2.3/2.5 landed despite singular node titles. The
+**branching moved INTO the templates** as `{% if %}` conditionals (the learn-2.4 pattern, enabled by
+`trim_blocks`): block-level tags on their own lines (the cold engagement block, the warm
+node-selection line) and inline tags mid-line (the read clause, the explorer/model clause). The
+helpers now pass **raw** vars — `node_engagement` (the rendered block, `""` when absent),
+`read_clause` (the rendered linear clause, `""` for github/other), `model` (`""` when unset), and
+(warm) `node` (`""` → select-next) — while the in-code arm SELECTION
+(`objective_read_instruction` / `objectiveReadInstruction` backend logic) is unchanged. Both
+templates and their golden files carry **no trailing newline** (the prior literals had none). Four
+`objective-plan-*` golden cases in `cases.yaml` (seed/guidance × github/linear) prove cross-plane
+byte-parity across both arms of every conditional. The per-plane composition tests are **retained**
+(`OBJECTIVE_LINEAR_SUBSTRINGS` survives as a local constant feeding the per-plane selection +
+seed-composition tests); no cross-plane substring lockstep existed between the two different prompts,
+so none is removed.
