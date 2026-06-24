@@ -9,7 +9,9 @@ jinja2 is the **reference engine**: the committed golden bytes under
 ``prompts/_fixtures/golden/`` ARE this seam's output, and the nunjucks twin (and the future
 vendored renderer) must reproduce them byte-for-byte. Golden parity is enforced by
 ``tests/test_prompts.py`` + ``extension/substrate/prompts.test.ts``. The Environment config
-below is the parity baseline both engines share (autoescape off, trim/lstrip off, and
+below is the parity baseline both engines share (autoescape off, ``trim_blocks`` on so a block
+tag on its own line emits no spurious newline — letting conditional templates keep their tags
+off the content lines while preserving indentation — ``lstrip_blocks`` off, and
 ``keep_trailing_newline`` on so jinja2 does not strip a trailing ``\\n`` that nunjucks keeps).
 """
 
@@ -24,7 +26,7 @@ _env = Environment(
     undefined=StrictUndefined,
     autoescape=False,
     keep_trailing_newline=True,
-    trim_blocks=False,
+    trim_blocks=True,
     lstrip_blocks=False,
 )
 

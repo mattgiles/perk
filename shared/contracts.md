@@ -3955,8 +3955,9 @@ command/verb).
 
 Two cross-plane **render seams** load prompt templates by explicit `name` (root-relative under
 `prompts/`, located via the node-1.1 resolvers `prompts_dir()` / `promptsDir()`) and render them
-with a small, fixed feature surface — `{{ var }}` substitution and `{% include %}` (no
-conditionals/loops yet). Every later node in this objective rides on this mechanism; this node
+with a small, fixed feature surface — `{{ var }}` substitution, `{% include %}`, and (as of
+Node 2.4) `{% if %}`/`{% elif %}`/`{% else %}` conditionals with string equality (`==`) and
+`or`/`not` (no loops yet). Every later node in this objective rides on this mechanism; this node
 proves it end-to-end on trivial fixture templates only — no real prompt content moves here.
 
 - **Python:** `perk/prompts.py::render(name, variables)` over a module-level jinja2 `Environment`.
@@ -3980,8 +3981,12 @@ scalars; fixture vars are strings only in this node (sidestepping jinja2-vs-nunj
 rendering divergence).
 
 **Environment-config parity baseline** (both engines): `autoescape` off (prompts are plain text,
-never HTML-escaped), `trim_blocks`/`lstrip_blocks` off, and jinja2 `keep_trailing_newline` on so
-jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
+never HTML-escaped), `trim_blocks` **on** (as of Node 2.4) so a block tag on its own line emits no
+spurious newline — conditional templates keep their `{% %}` tags off the content lines while
+preserving the content's own indentation — `lstrip_blocks` off, and jinja2 `keep_trailing_newline`
+on so jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
+(`trim_blocks` only affects block-tag templates; the only such templates are `stages/learn.md`
+and the `with_include` fixture — every real arm template uses `{{ var }}` only and is unaffected.)
 
 **Dependencies:** `jinja2` is a Python runtime dependency. `nunjucks` is a TS **runtime**
 dependency (`@types/nunjucks` dev-only for typing) **until node 4.2** vendors a zero-dependency
@@ -4081,3 +4086,27 @@ code picks the right arm + computes where/fallback. This golden-fixture parity *
 `OBJECTIVE_LINEAR_SUBSTRINGS` substring lockstep** (which remains only as a local constant for the
 per-plane + seed-composition tests, no longer a cross-plane invariant). The `_seed_prompt` /
 `factoryGuidance` / `reconcileGuidance` body moves are deferred to Node 2.6.
+
+**The learn primer moved onto the seam (Node 2.4).** The learn-stage primer wording moved off its
+two hand-concatenated twins onto the render seam — one canonical `prompts/stages/learn.md` rendered
+byte-identical by cold `perk/run/launch/prompts.py::_learn_prompt` and warm
+`extension/doors/learn.ts::learnGuidance` (learn has **no worker twin** — only cold + warm). Cold
+and warm are **unified onto the cold body**: warm `/learn` wording changed from its prior numbered
+"perk /learn —" style to the cold bullet "You are in the learn step…" body, the `other` arm
+collapsed to a single "Open the plan and its merged change" line (warm **lost** its prior `other`
+merged-PR derivation — an accepted change for the effectively-unreachable provider arm), and warm's
+no-plan-ref fallback folded into the same template. This node is the **first template to use
+conditionals**: the `{% if pr_id %}` header split and the no-ref / github+linear / other structure
+selection are the template's conditional on `provider` (+ `pr_id` presence); the provider read-line
+text is supplied as the `read_cmd` var from the node-2.1 plan-read helper (`_plan_read_instruction`
+/ `planReadInstruction`), `read_cmd` passed always (empty string when absent) so it is defined. The
+template keeps each `{% if %}`/`{% elif %}`/`{% else %}`/`{% endif %}` tag on its **own line** (off
+the content lines) — enabled by the `trim_blocks` env flip above, which swallows the single newline
+after each block tag so the indented bullet content renders intact (whitespace-control `{%- -%}`
+markers alone could not — they also strip the bullets' leading indentation). The
+template and all four golden files carry **no trailing newline** (matching the cold literal). Four
+`learn-*` golden cases in `cases.yaml` (`learn-github`, `learn-linear`, `learn-other`,
+`learn-no-ref`) prove cross-plane byte-identity and **replace the dedicated learn substring parity**;
+thin per-plane selection/composition tests remain. nunjucks stays the TS engine — the golden suite
+is the byte-parity proof that jinja2 and nunjucks render the conditional template identically (the
+tag-hugging whitespace discipline keeps them equal with `trim_blocks`/`lstrip_blocks` off).
