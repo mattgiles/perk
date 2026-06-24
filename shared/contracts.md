@@ -4150,3 +4150,23 @@ byte-parity across both arms of every conditional. The per-plane composition tes
 (`OBJECTIVE_LINEAR_SUBSTRINGS` survives as a local constant feeding the per-plane selection +
 seed-composition tests); no cross-plane substring lockstep existed between the two different prompts,
 so none is removed.
+
+**The learned-docs factory seed + warm guidance moved onto the seam (Node 2.7).** The two
+hand-built learned-docs-factory prompt bodies — the **cold** seed
+(`perk/cli/commands/learn/docs_cmd.py::_seed_prompt`) and the **warm** guidance
+(`extension/doors/learnDocs.ts::learnDocsGuidance`) — moved onto the render seam as the seventh real
+consumer. **Unlike 2.6 they are UNIFIED** (the implement-2.2 / learn-2.4 pattern): the cold/warm
+differences were all **superficial factory house-style** — header wording, a header blank line,
+step-number indentation, a cold-only "from this read-only session" qualifier, and the
+closing-paragraph phrasing — none load-bearing, so they were **converged away** onto the **cold-seed
+orientation form** rather than preserved behind conditionals. The warm guidance gained the "You are
+running…" header + the standalone closing paragraph ("Judgment, user interaction, and durable writes
+stay with you — never delegate them."), and the cold seed lost the `"  "` step indent + the "from
+this read-only session" qualifier (the warm session is not read-only, so the qualifier was
+cold-only-accurate anyway; the bare "NEVER write the docs directly" is correct in both planes). The
+result is a single **flat** template `prompts/stages/learn-docs.md` with **zero `{% if %}`
+conditionals**; both planes pass the same two vars (`inbox_path`, `num_list`). The template and its
+golden carry **no trailing newline**. One `learn-docs` golden case in `cases.yaml` proves cross-plane
+byte-parity. No cross-plane substring lockstep existed between cold and warm, so none is removed; the
+per-plane composition tests are retained (one warm header assertion updated from `"perk /learn-docs"`
+to `"learned-docs plan factory"`).
