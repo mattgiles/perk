@@ -1746,7 +1746,8 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `linear` (verify-gated Linear readiness — auth/team/labels; present only when the committed
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the five perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
-`package` (settings wiring + perk-package ref reconcile — §8.6a) ·
+`package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
+check — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
@@ -1829,6 +1830,29 @@ Keeping a consumer's pi-loaded perk extension runnable rests on two invariants:
   never raised) so a flaky network never fails an init/doctor/launch; offline `unverifiable` leaves
   a present clone as-is. The self-repo (`..` package) has no clone and is exempt. The moving `@main`
   pin is kept — warming + in-place materialize make it safe.
+- **perk owns the `@perk/pi` *npm install* too, the twin of the clone materialization (#812).**
+  Node 2.2 flipped perk's own extension to a pinned `npm:@perk/pi@{__version__}` settings entry; this
+  bullet makes init/doctor/launch **physically install** that pin. pi installs a missing
+  project-scope `npm:` package lazily and **unlocked** at launch (`resolvePackageSources`) — the same
+  missing/half-materialized race the clone work closes for `git:` packages. perk now owns it
+  end-to-end: `materialize_extension_install` (init/doctor) reconciles the install **forward** —
+  install-if-`absent` / reinstall-if-version-`mismatch` (the pinned `@perk/pi@{__version__}`,
+  `npm install <pin> --prefix .pi/npm --legacy-peer-deps`, additive — borrowed entries untouched) —
+  and `ensure_extension_install_present` warms it **pre-launch** in `launch_stage` (presence-only, a
+  cheap `is_dir()` no-op once present, so the launch hot path stays network-free). Both run under an
+  exclusive `fcntl.flock` on `<repo_root>/.pi/npm/.perk-npm-install.lock` (the lock lives in the
+  install **root** `.pi/npm/` — already managed-gitignored — so a `node_modules` wipe never drops it;
+  degrades to a no-op lock on non-POSIX), so concurrent launches **serialize** and a double-checked
+  `is_dir()` installs exactly once. All npm work is best-effort + **non-fatal** (an `NpmError` —
+  flaky network / not-yet-published pin — is swallowed, never raised); the self-repo (`..` package)
+  is exempt. The verify-gated `extension-install` doctor check (group `package`) reports it:
+  `absent`/`mismatch` → **fail** (+`perk doctor --fix`, which install/reinstalls — a deliberate
+  divergence from the clone check, where `absent` is benign `info`, because 2.3's charter is that
+  perk init/doctor *own installing*), `present` → `ok`, `unverifiable` → `warn`, `self` → `info`.
+  This is **install ownership**: presence + the *install-vs-pin* version comparison. The
+  *wired/installed-vs-running* version-parity enforcement + a session-start soft drift signal +
+  packaging-pin tests are deferred to a later node (they reuse this node's
+  `materialize_extension_install` reinstall primitive).
 
 ---
 

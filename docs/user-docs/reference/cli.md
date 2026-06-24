@@ -74,6 +74,17 @@ if stale, under a cross-process lock), and `perk init` performs the same forward
 run. perk also **warms** the clone before every local launch — cloning it if absent under the same
 lock — so concurrent sessions never race pi's unlocked lazy clone and the perk extension always
 loads.
+The `package` group's `extension-install` check verifies perk's own `@perk/pi` npm extension is
+**physically installed** under `.pi/npm/` at the pinned version. Because pi installs a missing
+project-scope `npm:` package lazily and unlocked at launch, perk owns the install: `perk init`
+installs the pin (and reinstalls it on version drift), `perk doctor` **fails** when the install is
+absent or its version differs from the pin and `perk doctor --fix` installs/reinstalls
+`npm:@perk/pi@{version}` (`npm install … --prefix .pi/npm --legacy-peer-deps`, under a cross-process
+lock), and `perk <stage>` **warms** the install before every local launch — installing it if absent
+under the same lock — so concurrent sessions never race pi's unlocked lazy install. All npm work is
+best-effort and non-fatal: a not-yet-published pin or flaky network is swallowed (init/doctor/launch
+never crash; pi's lazy install remains the fallback). The self-repo (which wires the local `..`
+package) is exempt.
 The
 `environment` group reports required tools as `fail` when missing and optional tools
 (e.g. `ast-grep`) as `warn`. `--verbose` shows every check, not just failures; `--json` emits a machine-readable report.

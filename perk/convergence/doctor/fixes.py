@@ -119,6 +119,14 @@ def _apply_fixes(root: Path, self_repo: bool, checks: list[Check]) -> tuple[list
             message = init.materialize_extension_clone(root, self_repo=self_repo)
             if message is not None:
                 fixed.append(message)
+        elif check.name == "extension-install":
+            # Install/reinstall the pinned @perk/pi under .pi/npm/ (the perk-owned install)
+            # under a cross-process lock; best-effort + non-fatal. Only triggers when the
+            # verify-gated check flagged `fail` (absent/mismatch) — a real change, so a message
+            # is returned.
+            message = init.materialize_extension_install(root, self_repo=self_repo)
+            if message is not None:
+                fixed.append(message)
     for migration in _MIGRATIONS:
         changes, migration_errors = migration(root)
         fixed.extend(changes)

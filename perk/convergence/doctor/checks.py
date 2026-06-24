@@ -371,6 +371,46 @@ def _extension_clone_check(root: Path, self_repo: bool) -> Check:
     return Check("extension-clone", "package", "warn", "extension clone not verified", detail)
 
 
+def _extension_install_check(root: Path, self_repo: bool) -> Check:
+    """Presence + pinned version of perk's ``@perk/pi`` npm install (``package``; verify-gated).
+
+    pi installs a missing project-scope ``npm:`` package lazily and **unlocked** at launch, so a
+    missing / half-materialized install is a race window. Built from
+    ``init.extension_install_status``. Unlike the clone check (where ``absent`` is benign ``info``),
+    node 2.3's charter is that perk init/doctor *own installing*, so ``absent``/``mismatch`` are
+    **fail** (with the ``perk doctor --fix`` install/reinstall remediation); ``unverifiable`` is a
+    ``warn`` (no silent pass — carries the reason); ``present`` is ``ok`` and ``self`` is ``info``.
+    """
+    status, detail = init.extension_install_status(root, self_repo=self_repo)
+    if status == "self":
+        return Check(
+            "extension-install", "package", "info", "self-repo — local package, no npm install"
+        )
+    if status == "absent":
+        return Check(
+            "extension-install",
+            "package",
+            "fail",
+            "@perk/pi extension not installed",
+            detail,
+            "perk doctor --fix",
+        )
+    if status == "mismatch":
+        return Check(
+            "extension-install",
+            "package",
+            "fail",
+            "@perk/pi install version drift",
+            detail,
+            "perk doctor --fix",
+        )
+    if status == "present":
+        return Check(
+            "extension-install", "package", "ok", "@perk/pi installed at the pinned version"
+        )
+    return Check("extension-install", "package", "warn", "@perk/pi install not verified", detail)
+
+
 def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     """The fail-level skills-delivery substrate check (skills delivery is load-bearing).
 
