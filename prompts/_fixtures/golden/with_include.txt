@@ -1,0 +1,4 @@
+Welcome, Ada.
+Greetings from the fixture.
+
+That is all.

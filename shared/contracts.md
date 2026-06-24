@@ -3960,3 +3960,39 @@ mutual-exclusion guard is needed (`objective create` has no `--node-id`).
 is preview-grade here (Mode 8); final live proof is Node
 4.3 — no new config key, provider seam, or `EXPECTED_SURFACE` change (a flag, not a new
 command/verb).
+
+## §8.31 · The prompt render seam + golden parity (Objective #791, Node 1.2)
+
+Two cross-plane **render seams** load prompt templates by explicit `name` (root-relative under
+`prompts/`, located via the node-1.1 resolvers `prompts_dir()` / `promptsDir()`) and render them
+with a small, fixed feature surface — `{{ var }}` substitution and `{% include %}` (no
+conditionals/loops yet). Every later node in this objective rides on this mechanism; this node
+proves it end-to-end on trivial fixture templates only — no real prompt content moves here.
+
+- **Python:** `perk/prompts.py::render(name, variables)` over a module-level jinja2 `Environment`.
+- **TS:** `extension/substrate/prompts.ts::render(name, vars)` over a module-level nunjucks
+  `Environment`. This module is imported **only** by its test in this node (no real prompt to render
+  until Phase 2; wiring it into `extension/index.ts` would be dead code).
+
+**Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
+nunjucks uses `throwOnUndefined: true`. A missing required variable is an error, never an empty
+string.
+
+**jinja2 is the reference engine.** The committed golden files under `prompts/_fixtures/golden/`
+ARE jinja2's rendered output. The golden harness — `prompts/_fixtures/cases.yaml` listing
+`(template, vars, golden)` cases with committed golden-output files — is the byte-parity proof:
+`tests/test_prompts.py` asserts `jinja2-render == golden`, and
+`extension/substrate/prompts.test.ts` asserts `nunjucks-render == golden`. The frozen subset is
+"the jinja subset"; the future vendored TS renderer (node 4.2) must reproduce these same golden
+bytes. Golden outputs are **separate committed files** (not inline multiline YAML) because the TS
+harness reads `cases.yaml` through the vendored `miniYaml` reader, which throws on `|`/`>` block
+scalars; fixture vars are strings only in this node (sidestepping jinja2-vs-nunjucks non-string
+rendering divergence).
+
+**Environment-config parity baseline** (both engines): `autoescape` off (prompts are plain text,
+never HTML-escaped), `trim_blocks`/`lstrip_blocks` off, and jinja2 `keep_trailing_newline` on so
+jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
+
+**Dependencies:** `jinja2` is a Python runtime dependency. `nunjucks` is a TS **runtime**
+dependency (`@types/nunjucks` dev-only for typing) **until node 4.2** vendors a zero-dependency
+renderer and removes it, restoring the bare-clone-loadable / zero-runtime-dependency invariant.
