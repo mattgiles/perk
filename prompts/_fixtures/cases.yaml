@@ -11,3 +11,18 @@
     name: "Ada"
     place: "the fixture"
   golden: "_fixtures/golden/with_include.txt"
+- template: "common/plan-read/github.md"
+  vars:
+    pr_id: "42"
+    url: "https://x/9"
+  golden: "_fixtures/golden/plan-read-github.txt"
+- template: "common/plan-read/linear.md"
+  vars:
+    pr_id: "uuid-1"
+    url: "https://linear.app/x/ENG-1"
+  golden: "_fixtures/golden/plan-read-linear.txt"
+- template: "common/plan-read/other.md"
+  vars:
+    pr_id: "42"
+    url: "https://x/9"
+  golden: "_fixtures/golden/plan-read-other.txt"

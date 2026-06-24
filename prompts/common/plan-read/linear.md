@@ -1,0 +1,1 @@
+use the `linear_get_issue` tool (id `{{ pr_id }}`), then `linear_list_comments` — the plan body is the first comment; if the linear tools are unavailable, open {{ url }}

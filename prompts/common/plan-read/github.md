@@ -1,0 +1,1 @@
+gh issue view {{ pr_id }} --comments

@@ -1,0 +1,1 @@
+use the `linear_get_issue` tool (id `uuid-1`), then `linear_list_comments` — the plan body is the first comment; if the linear tools are unavailable, open https://linear.app/x/ENG-1

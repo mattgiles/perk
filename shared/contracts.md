@@ -3997,3 +3997,23 @@ jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-
 **Dependencies:** `jinja2` is a Python runtime dependency. `nunjucks` is a TS **runtime**
 dependency (`@types/nunjucks` dev-only for typing) **until node 4.2** vendors a zero-dependency
 renderer and removes it, restoring the bare-clone-loadable / zero-runtime-dependency invariant.
+
+**First prompt moved onto the seam — the plan-read instruction (Node 2.1).** The cross-plane
+plan-read instruction (the "how do I read the saved plan" SSOT) is the first real (non-fixture)
+consumer of the render seam. Its three arm templates live at
+`prompts/common/plan-read/{github,linear,other}.md` — one file per provider arm, no
+conditionals/loops in the frozen subset. **Branching stays in code**: `perk/run/launch/prompts.py::
+_plan_read_instruction` and `extension/doors/lifecycleGates.ts::planReadInstruction` keep their
+`(provider, pr_id/prId, url)` signature and the same if/elif/else, each arm now a `render(...)` call
+selecting its arm template (passing `{pr_id, url}`; jinja2/nunjucks ignore unused vars). The helpers
+still branch on `cache.plan-ref.provider` — only the **wording source** moved.
+
+The arm templates (and their golden files) carry **no trailing newline** — the helper returns
+single-line strings embedded mid-prompt, so the render output must equal the prior literal exactly
+(a deliberate departure from the fixture convention of trailing newlines). The three `plan-read-*`
+golden cases in `cases.yaml` prove cross-plane byte-identity for each arm; a thin per-arm selection
+test in each plane (`tests/test_worker_prompt_parity.py`, `extension/doors/lifecycleGates.test.ts`)
+proves the code picks the right arm and `render()` is wired. This golden-fixture parity (plus the
+selection tests) **replaces the prior dedicated substring parity** for plan-read; the
+implement/learn prompt parity suites are untouched (they embed the byte-identical helper output, so
+they keep passing — the downstream prompts move in nodes 2.2/2.4).
