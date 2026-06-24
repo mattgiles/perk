@@ -1,11 +1,14 @@
+import json
 import subprocess
 
 import pytest
 
+from perk import __version__
 from perk import github as gh_mod
 from perk.convergence import env as env_mod
 from perk.convergence import init as init_mod
 from perk.convergence.init import extension_clone as _ext_clone
+from perk.convergence.init import extension_install as _ext_install
 
 
 @pytest.fixture
@@ -43,6 +46,17 @@ def stub_env(monkeypatch):
         lambda clone, url: clone.mkdir(parents=True, exist_ok=True),
     )
     monkeypatch.setattr(_ext_clone, "_freshen_extension", lambda clone: None)
+
+    # The @perk/pi npm-install primitive shells `npm install` over the network (init/doctor now
+    # materialize the install); stub it so verified inits never reach the network. The fake lands
+    # the pinned package.json so a second verified init sees the install present at __version__ →
+    # status `present` → a no-op (idempotency preserved). Dedicated tests override it.
+    def _fake_install(root):
+        pkg = _ext_install.consumer_perk_package_dir(root)
+        pkg.mkdir(parents=True, exist_ok=True)
+        (pkg / "package.json").write_text(json.dumps({"version": __version__}), encoding="utf-8")
+
+    monkeypatch.setattr(_ext_install, "_install_perk_extension", _fake_install)
 
 
 @pytest.fixture

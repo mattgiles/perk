@@ -24,14 +24,17 @@ _PLAN_REF = {
 
 @pytest.fixture(autouse=True)
 def _no_network_clone_warm(monkeypatch):
-    """Stub the pre-exec clone warming so launch_stage tests never `git clone` the network.
+    """Stub the pre-exec clone + npm-install warming so launch_stage tests never hit the network.
 
-    `launch_stage` warms pi's git-package clone before exec; in a throwaway `git_repo` (not the
-    self-repo, clone absent) that would shell a real `git clone`. The dedicated call-site test
-    overrides this with its own recorder.
+    `launch_stage` warms pi's git-package clone AND perk's `@perk/pi` npm install before exec; in a
+    throwaway `git_repo` (not the self-repo, both absent) that would shell a real `git clone` /
+    `npm install`. The dedicated call-site tests override these with their own recorders.
     """
     monkeypatch.setattr(
         launch.init, "ensure_extension_clone_present", lambda repo_root, *, self_repo: None
+    )
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
     )
 
 

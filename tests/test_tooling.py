@@ -42,6 +42,7 @@ def test_prek_ruff_rev_matches_pyproject_floor():
 _SANCTIONED_SUBPROCESS_WRAPPERS = {
     ("git", "_run"),
     ("git", "_run_capture"),
+    ("npm", "_run"),
     ("_exec", "_run"),
     ("env", "_node_version"),
     ("skills", "sync_skills"),

@@ -683,6 +683,22 @@ def test_init_verify_materializes_stale_extension_clone(git_repo, stub_env, monk
     assert any("freshened to origin/main in place" in line for line in report.changes)
 
 
+def test_init_verify_installs_perk_extension_and_is_idempotent(git_repo, stub_env):
+    from perk.convergence import init as init_mod
+
+    # stub_env's fake `_install_perk_extension` lands the pinned @perk/pi package.json, so a
+    # verified init installs the pin (absent → installed) and a second run is a no-op (present).
+    report = run_init(git_repo, verify=True)
+    assert report.ok
+    pkg = init_mod.consumer_perk_package_dir(git_repo)
+    assert (pkg / "package.json").is_file()
+    assert init_mod.installed_perk_version(git_repo) == __version__
+    assert any(f"installed @perk/pi@{__version__}" in line for line in report.changes)
+    again = run_init(git_repo, verify=True)
+    assert again.ok
+    assert not any("@perk/pi" in line for line in again.changes)  # present → no change
+
+
 # --- perk-owned in-place clone materialization ----------------------------------------
 
 

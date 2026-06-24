@@ -1074,6 +1074,11 @@ def test_runner_githuberror_degrades(monkeypatch, tmp_path, converge_skills_work
     monkeypatch.setattr(doctor, "_env_checks", lambda: [])
     monkeypatch.setattr(doctor, "_github_checks", lambda root: [])
     monkeypatch.setattr(init, "sync_skills", lambda root, changes, **kw: None)
+    # The verify-gated @perk/pi install check fails on an absent install; stub it benign so this
+    # test stays about runner-prereqs degradation (not install ownership).
+    monkeypatch.setattr(
+        init, "extension_install_status", lambda root, *, self_repo: ("present", "x")
+    )
     _scaffold(tmp_path_repo := _git_repo_at(tmp_path))
     converge_skills_workspace(tmp_path_repo)
     report = run_doctor(tmp_path_repo, verify=True)
@@ -1264,3 +1269,61 @@ def test_fix_materializes_stale_extension_clone(git_repo, stub_env, monkeypatch)
     report = run_doctor(git_repo, fix=True, verify=True)
     assert len(calls) == 1
     assert any("freshened to origin/main in place" in line for line in report.fixed)
+
+
+# --- the verify-gated `extension-install` check ---------------------------------------
+
+
+def _install_check(report):
+    return next((c for c in report.checks if c.name == "extension-install"), None)
+
+
+@pytest.mark.parametrize(
+    ("status", "detail", "expect_status", "expect_remediation"),
+    [
+        ("absent", "perk installs the pinned @perk/pi pre-launch", "fail", "perk doctor --fix"),
+        ("mismatch", "installed @perk/pi 0.0.0 != pinned 1.0.0", "fail", "perk doctor --fix"),
+        ("present", "1.0.0", "ok", ""),
+        ("self", "self-repo uses the local '..' package — no npm install", "info", ""),
+        ("unverifiable", "installed @perk/pi package.json version unreadable", "warn", ""),
+    ],
+)
+def test_extension_install_check_statuses(
+    git_repo, stub_env, monkeypatch, status, detail, expect_status, expect_remediation
+):
+    _scaffold(git_repo)
+    monkeypatch.setattr(
+        doctor_mod.init, "extension_install_status", lambda root, *, self_repo: (status, detail)
+    )
+    report = run_doctor(git_repo, verify=True)
+    check = _install_check(report)
+    assert check is not None
+    assert check.group == "package"
+    assert check.status == expect_status
+    assert check.remediation == expect_remediation
+
+
+def test_extension_install_check_absent_without_verify(git_repo):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert _install_check(report) is None
+
+
+@pytest.mark.parametrize("status", ["absent", "mismatch"])
+def test_fix_materializes_perk_extension_install(git_repo, stub_env, monkeypatch, status):
+    _scaffold(git_repo)
+    monkeypatch.setattr(
+        doctor_mod.init,
+        "extension_install_status",
+        lambda root, *, self_repo: (status, "drift"),
+    )
+    calls: list = []
+
+    def _spy(root, *, self_repo):
+        calls.append((root, self_repo))
+        return ".pi/npm/node_modules/@perk/pi: installed @perk/pi@x (perk-owned)"
+
+    monkeypatch.setattr(doctor_mod.init, "materialize_extension_install", _spy)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert len(calls) == 1
+    assert any("@perk/pi" in line for line in report.fixed)

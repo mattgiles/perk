@@ -263,6 +263,14 @@ def launch_stage(
     # + non-fatal internally. Targets the repo-root clone (`worktree: none` stages load from
     # there). Not reached on --dry-run / --remote (both early-returned above).
     init.ensure_extension_clone_present(repo_root, self_repo=init.is_self_repo(repo_root))
+    # Warm perk's @perk/pi npm install before exec so the perk extension always loads from a
+    # COMPLETE install. pi installs a missing project-scope `npm:` package lazily and unlocked, so
+    # a missing-install window + parallel launches let a second process load from a half-installed
+    # package and drop the perk extension. `ensure_extension_install_present` installs-on-absent
+    # under a cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and
+    # best-effort + non-fatal internally. Targets the repo-root install (`worktree: none` stages
+    # load from there). Not reached on --dry-run / --remote (both early-returned above).
+    init.ensure_extension_install_present(repo_root, self_repo=init.is_self_repo(repo_root))
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 

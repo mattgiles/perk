@@ -48,6 +48,17 @@ from perk.convergence.init.extension_clone import (
     extension_clone_status,
     materialize_extension_clone,
 )
+from perk.convergence.init.extension_install import (
+    ExtensionInstallStatus,
+    _extension_install_lock,
+    _install_perk_extension,
+    consumer_npm_install_root,
+    consumer_perk_package_dir,
+    ensure_extension_install_present,
+    extension_install_status,
+    installed_perk_version,
+    materialize_extension_install,
+)
 from perk.convergence.init.report import (
     GitHubReport,
     InitReport,
@@ -129,6 +140,7 @@ __all__ = [
     "REQUIRED_SKILL_SOURCES",
     "SKILLS_MANAGED_PATHSPECS",
     "ExtensionCloneStatus",
+    "ExtensionInstallStatus",
     "GitHubReport",
     "InitReport",
     "LinearReport",
@@ -150,8 +162,10 @@ __all__ = [
     "_env_to_dict",
     "_extension_clone_lock",
     "_extension_clone_url",
+    "_extension_install_lock",
     "_freshen_extension",
     "_git_identity",
+    "_install_perk_extension",
     "_linear_readiness",
     "_linear_to_dict",
     "_managed_identities",
@@ -159,19 +173,26 @@ __all__ = [
     "_npm_name",
     "_package_identity",
     "_reconcile_extension_clone",
+    "_reconcile_extension_install",
     "_skill_link_state",
     "_skills_conflict_message",
     "_sync_failure",
     "_write_post_init",
     "consumer_git_clone_root",
+    "consumer_npm_install_root",
+    "consumer_perk_package_dir",
     "converge_config",
     "ensure_extension_clone_present",
+    "ensure_extension_install_present",
     "extension_clone_status",
+    "extension_install_status",
     "git",
+    "installed_perk_version",
     "is_self_repo",
     "linear",
     "managed_convergences",
     "materialize_extension_clone",
+    "materialize_extension_install",
     "report_to_dict",
     "run_init",
     "shutil",
@@ -365,6 +386,10 @@ def run_init(
         # Forward-reconcile pi's git-package clone (reclone-when-stale). Best-effort + non-fatal:
         # a network op (verify-gated), it degrades to a no-op when offline (`unverifiable`).
         _reconcile_extension_clone(root, changes, self_repo)
+        # Forward-reconcile perk's own @perk/pi npm install (install-if-absent /
+        # reinstall-if-version-mismatch). Best-effort + non-fatal: a network op (verify-gated),
+        # it degrades to a swallowed NpmError when the pin is unpublished / offline.
+        _reconcile_extension_install(root, changes, self_repo)
 
     github_report: GitHubReport | None = None
     if verify:
@@ -394,6 +419,21 @@ def run_init(
         capabilities=managed,
         linear=linear_report,
     )
+
+
+def _reconcile_extension_install(root: Path, changes: list[str], self_repo: bool) -> None:
+    """Best-effort forward reconcile of perk's ``@perk/pi`` npm install (verify-gated, non-fatal).
+
+    Materializes the install (``materialize_extension_install``): install-if-``absent`` /
+    reinstall-if-``mismatch`` (the pinned ``@perk/pi@{__version__}``), no-op on
+    ``self``/``present``/``unverifiable``. An ``NpmError`` (unpublished pin / offline) is swallowed
+    into a non-fatal change line — it never blocks init, mirroring how the clone reconcile and
+    GitHub readiness degrade (D3). A change line is recorded only when materialize actually changed
+    something. Kept a small free helper so it is unit-testable.
+    """
+    message = materialize_extension_install(root, self_repo=self_repo)
+    if message is not None:
+        changes.append(message)
 
 
 def _reconcile_extension_clone(root: Path, changes: list[str], self_repo: bool) -> None:
