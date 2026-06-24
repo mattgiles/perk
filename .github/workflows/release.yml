@@ -11,9 +11,9 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
-# The PyPI publish jobs below attach their own `id-token: write` at job scope for OIDC
-# trusted publishing; the workflow default stays `contents: read`. The npm `build`/`publish-npm`
-# jobs + the GitHub Release step are deferred to a later release stage.
+# The PyPI + npm publish jobs below attach their own `id-token: write` at job scope (OIDC
+# trusted publishing / Sigstore provenance); the workflow default stays `contents: read`.
+# The GitHub Release job attaches `contents: write` at job scope.
 permissions:
   contents: read
 
@@ -116,3 +116,73 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  build-npm:
+    name: build · check (npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # `npm pack` validates the manifest + `files` surface and produces the publishable tarball.
+      - name: Pack the npm tarball
+        run: npm pack
+
+      - name: Upload npm tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: "*.tgz"
+
+  publish-npm:
+    name: publish to npm
+    # Production publish — tag pushes only, behind the npm-publish environment human gate.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [validate-release-versions, build-npm]
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write   # Sigstore provenance attestation via GitHub OIDC
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22 (+ npm registry auth)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install deps
+        run: npm ci
+
+      # `npm publish` re-packs from source so provenance is generated at publish time.
+      # `--access public` is required for the scoped @perk/pi package.
+      - name: Publish to npm with provenance
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  github-release:
+    name: create GitHub Release
+    # The lockstep capstone — only after BOTH planes publish.
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [publish-pypi, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release with generated notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" --verify-tag --generate-notes --title "${GITHUB_REF_NAME}"

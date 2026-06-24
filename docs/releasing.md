@@ -9,11 +9,13 @@ Both planes **always release at the same version, from one tag.** This document 
 runbook; the publish workflows (PyPI + npm) enact it and hang their publish jobs off the
 `validate-release-versions` gate in `.github/workflows/release.yml`.
 
-> **Status:** the **PyPI** publish path is wired — an always-on `build-pypi` job (build + `twine
-> check` + wheel smoke-test on every PR/`main`/tag), a tag-gated `publish-pypi` job that uploads to
-> production PyPI via OIDC trusted publishing behind the `pypi-publish` environment approval gate,
-> and a `workflow_dispatch` TestPyPI rehearsal (`publish-testpypi`). The **npm** half (build +
-> `publish-npm` + the GitHub Release step) is still pending a future release stage.
+> **Status:** both planes are wired. **PyPI:** an always-on `build-pypi` job (build + `twine check`
+> + wheel smoke) on every PR/`main`/tag, a tag-gated `publish-pypi` (OIDC trusted publishing behind
+> the `pypi-publish` environment), and a `workflow_dispatch` TestPyPI rehearsal. **npm:** an
+> always-on `build-npm` job (`npm ci` + `npm pack` + tarball artifact), a tag-gated `publish-npm`
+> (`npm publish --provenance --access public`, `NPM_TOKEN` auth behind the `npm-publish`
+> environment), and a `github-release` capstone job that creates the GitHub Release (with generated
+> notes) once both planes publish.
 
 ## Versioning policy
 
