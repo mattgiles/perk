@@ -64,21 +64,21 @@ def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
 
 
 def _implement_prompt(plan_ref: dict[str, Any]) -> str:
+    """The implement-stage primer. The wording lives in the canonical template
+    ``prompts/stages/implement.md``, rendered identically by both planes via the shared render seam
+    (contracts.md §8.31); branching stays in code — only the ``read_cmd`` var (the provider-selected
+    plan-read instruction) differs. Byte-identical to its TS twins ``worker.ts::initialPromptFor``
+    and ``lifecycleGates.ts::implementHandoffPrompt`` (the warm handoff now carries the same
+    "Progress markers:" tail — the prior shorter near-copy omission is removed). One golden case
+    (`implement-github`) plus the thin per-plane composition tests replace the substring parity.
+    """
     provider = str(plan_ref.get("provider", ""))
     pr_id = str(plan_ref.get("pr_id", ""))
     url = str(plan_ref.get("url", ""))
     read_cmd = _plan_read_instruction(provider, pr_id, url)
-    return (
-        f"You are implementing perk plan {provider} #{pr_id} ({url}) on this branch.\n\n"
-        f"First, read the full plan:\n    {read_cmd}\n\n"
-        "Then implement it here. Work in focused steps and keep the tree committable. When the "
-        "implementation is complete and committed, open the pull request with the /submit "
-        "command.\n\n"
-        "Progress markers: when the plan has a `## Steps` list, "
-        "emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is "
-        "COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) perk may "
-        "inject a generated checklist as a context message — when it does, use exactly those step "
-        "numbers; otherwise don't invent step numbers."
+    return render(
+        "stages/implement.md",
+        {"provider": provider, "pr_id": pr_id, "url": url, "read_cmd": read_cmd},
     )
 
 

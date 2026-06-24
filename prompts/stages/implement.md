@@ -1,0 +1,8 @@
+You are implementing perk plan {{ provider }} #{{ pr_id }} ({{ url }}) on this branch.
+
+First, read the full plan:
+    {{ read_cmd }}
+
+Then implement it here. Work in focused steps and keep the tree committable. When the implementation is complete and committed, open the pull request with the /submit command.
+
+Progress markers: when the plan has a `## Steps` list, emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) perk may inject a generated checklist as a context message — when it does, use exactly those step numbers; otherwise don't invent step numbers.

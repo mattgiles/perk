@@ -135,6 +135,8 @@ test("implementHandoffPrompt: carries the plan forward (read it; never summarize
   assert.match(prompt, /implementing perk plan github #42/);
   assert.match(prompt, /gh issue view 42 --comments/);
   assert.match(prompt, /\/submit/);
+  // The warm handoff is now unified with the cold/worker primer — it carries the progress tail.
+  assert.match(prompt, /Progress markers:/);
   // A non-github provider falls back to opening the url.
   const other = implementHandoffPrompt({ ...REF, provider: "gitlab" });
   assert.match(other, /open https:\/\/gh\/o\/r\/issues\/42/);

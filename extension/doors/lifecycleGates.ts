@@ -55,11 +55,6 @@ async function guardTransition(
 }
 
 /**
- * The plan-read priming seed for a fresh implement session. The in-session twin of
- * `perk/run/launch.py`'s `_initial_prompt`: carry the plan FORWARD (read it from its canonical source),
- * never summarize it — the plan is the only artifact that crosses the boundary. Pure → unit-testable offline.
- */
-/**
  * The per-backend plan-read instruction — the prompt SSOT for "how do I read the saved
  * plan". Byte-identical to `perk/run/launch.py::_plan_read_instruction` (the Python twin); drift in
  * either plane fails the paired parity suites. `github` reads via `gh`; `linear` points at the
@@ -77,14 +72,24 @@ export function planReadInstruction(provider: string, prId: string, url: string)
   return render("common/plan-read/other.md", { pr_id: prId, url });
 }
 
+/**
+ * The plan-read priming seed for a fresh implement session. The in-session twin of
+ * `perk/run/launch.py`'s `_implement_prompt`: carry the plan FORWARD (read it from its canonical
+ * source), never summarize it — the plan is the only artifact that crosses the boundary.
+ *
+ * The wording lives in the canonical template `prompts/stages/implement.md`, rendered by the shared
+ * seam (contracts.md §8.31); branching stays in code — only the `read_cmd` var differs. This warm
+ * handoff is now byte-identical to the cold/worker primer, so it carries the same "Progress
+ * markers:" tail (the prior shorter near-copy omission is removed).
+ */
 export function implementHandoffPrompt(ref: PlanRef): string {
   const readCmd = planReadInstruction(ref.provider, String(ref.pr_id), ref.url);
-  return (
-    `You are implementing perk plan ${ref.provider} #${ref.pr_id} (${ref.url}) on this branch.\n\n` +
-    `First, read the full plan:\n    ${readCmd}\n\n` +
-    "Then implement it here. Work in focused steps and keep the tree committable. When the " +
-    "implementation is complete and committed, open the pull request with the /submit command."
-  );
+  return render("stages/implement.md", {
+    provider: ref.provider,
+    pr_id: String(ref.pr_id),
+    url: ref.url,
+    read_cmd: readCmd,
+  });
 }
 
 /**

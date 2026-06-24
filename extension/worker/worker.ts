@@ -469,6 +469,10 @@ export function defaultEventSink(worktree: string, runId: string): RunEventSink 
  * resolved skill-binding suffix is delivered by the cold door, not here. Returns
  * `null` when there is no plan-ref (nothing to prime).
  *
+ * The implement primer's wording lives in the canonical template `prompts/stages/implement.md`,
+ * rendered by the shared seam (contracts.md §8.31); branching stays in code — only the `read_cmd`
+ * var differs. This implement output is byte-identical to the warm `implementHandoffPrompt`.
+ *
  * The `address` wording lives in the shared canonical template `prompts/stages/address/action.md`
  * rendered via the cross-plane render seam (contracts.md §8.31); the worker has no preview path
  * (preview is a warm/cold flag only), so it always renders the action body. The classifier
@@ -485,18 +489,7 @@ export function initialPromptFor(
   const url = String(planRef.url ?? "");
   if (stage === "implement") {
     const readCmd = planReadInstruction(provider, prId, url);
-    return (
-      `You are implementing perk plan ${provider} #${prId} (${url}) on this branch.\n\n` +
-      `First, read the full plan:\n    ${readCmd}\n\n` +
-      "Then implement it here. Work in focused steps and keep the tree committable. When the " +
-      "implementation is complete and committed, open the pull request with the /submit " +
-      "command.\n\n" +
-      "Progress markers: when the plan has a `## Steps` list, " +
-      "emit `[WIP:n]` inline when you START work on step n, and `[DONE:n]` inline when step n is " +
-      "COMPLETE — perk's checkpoints track these. For a prose plan (no `## Steps`) perk may " +
-      "inject a generated checklist as a context message — when it does, use exactly those step " +
-      "numbers; otherwise don't invent step numbers."
-    );
+    return render("stages/implement.md", { provider, pr_id: prId, url, read_cmd: readCmd });
   }
   // address
   const modelClause = classifierModel
