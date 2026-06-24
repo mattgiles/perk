@@ -6,6 +6,7 @@ import click
 
 from perk import objective
 from perk.cli.commands.plan.resume_cmd import parse_plan_id
+from perk.prompts import render
 from perk.substrate.output import machine_output, user_output
 
 EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -30,19 +31,16 @@ def fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) ->
 
 def objective_read_instruction(backend: str, objective_id: str, url: str) -> str:
     """Backend-aware supplemental clause for the objective-read step of the factory prompts.
-    Byte-identical to extension/factories/objectivePlan.ts::objectiveReadInstruction
-    (the TS twin); drift in either plane fails the paired parity suites. github (and any non-linear)
-    → "" (the `perk objective show` step already covers it); linear → the Project URL + the
-    linear_get_issue/linear_list_comments tools (an `open <url>` fallback when the url is known)."""
+    The wording lives in `prompts/common/objective-read/linear.md`, rendered identically by both
+    planes via the shared render seam (contracts.md §8.31); branching stays in code. github (and any
+    non-linear) → "" (the `perk objective show` step already covers it); linear → the Project URL +
+    the linear_get_issue/linear_list_comments tools (an `open <url>` fallback when the url is
+    known)."""
     if backend != "linear":
         return ""
     where = f"({url})" if url else f"(run `perk objective show {objective_id}` for its URL)"
     fallback = f"; if the linear tools are unavailable, open {url}" if url else ""
-    return (
-        f"This objective is a Linear Project {where}. Its roadmap nodes are Linear issues in that "
-        "Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and "
-        f"`linear_list_comments` tools{fallback}."
-    )
+    return render("common/objective-read/linear.md", {"where": where, "fallback": fallback})
 
 
 def node_to_dict(node: objective.ObjectiveNode) -> dict[str, object]:

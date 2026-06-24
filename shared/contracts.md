@@ -3161,10 +3161,12 @@ delivered by the whole-directory skills sync. Historical Status notes elsewhere 
 The **objective seed prompts** are backend-aware the same way (Node 4.1). The objective-plan cold
 seed (`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the warm guidance
 (`extension/factories/objectivePlan.ts::factoryGuidance` / `reconcileGuidance`) branch on the
-objective backend via the parity-pinned `objective_read_instruction` /
-`objectiveReadInstruction` helpers (byte-parity asserted by
-`tests/test_objective_prompt_parity.py` + `extension/factories/objectivePlan.test.ts` — the
-`OBJECTIVE_LINEAR_SUBSTRINGS` set). The helper returns a **supplemental** clause appended to the
+objective backend via the seam-rendered `objective_read_instruction` /
+`objectiveReadInstruction` helpers (cross-plane byte-parity owned by
+the `objective-read-*` golden cases — `tests/test_prompts.py` +
+`extension/substrate/prompts.test.ts` — with per-plane selection tests in
+`tests/test_objective_prompt_parity.py` + `extension/factories/objectivePlan.test.ts`; see §8.31).
+The helper returns a **supplemental** clause appended to the
 existing `perk objective show <id>` step (never a replacement): the `linear` arm references the
 Linear **Project URL** + the read-only `linear_get_issue` / `linear_list_comments` tools (an
 `open <url>` fallback when the url is known; the indirect `run \`perk objective show <id>\` for its
@@ -4102,3 +4104,27 @@ return mid-prompt strings). Four `address-*` golden cases in `cases.yaml` (actio
 present/absent) prove cross-plane byte-identity; thin per-plane selection tests prove each caller
 picks the right template and injects/omits the model clause, and the warm null-ref guard is
 covered. This golden-fixture parity **replaces the prior `ADDRESS_SUBSTRINGS` substring parity**.
+
+**The objective-read instruction moved onto the seam (Node 2.5).** The cross-plane objective-read
+clause (the supplemental wording telling the model how to inspect a Linear-Project-backed
+objective's node-issues) moved off its two hand-duplicated twins onto the render seam, mirroring the
+plan-read move. The wording lives in a subdirectory at `prompts/common/objective-read/linear.md` —
+one arm file for the **linear** arm only (github and any non-linear backend return `""` directly in
+code without rendering, since `perk objective show` already covers them). **Branching stays in
+code**: `perk/cli/commands/objective/shared.py::objective_read_instruction` and
+`extension/factories/objectivePlan.ts::objectiveReadInstruction` keep their `(backend,
+objective_id/objectiveId, url)` signature and the `backend != "linear" → ""` early return; the
+linear arm computes the two **url-presence** render vars `where`/`fallback` in code (the frozen
+subset has no conditionals — mirroring the `model_clause` precedent) and renders the one template.
+
+The template (and its golden files) carry **no trailing newline** — the helper returns a single-line
+string embedded mid-prompt, so the render output must equal the prior literal exactly (the
+`_seed_prompt`/`factoryGuidance`/`reconcileGuidance` composition tests embed it and keep passing).
+Two `objective-read-*` golden cases in `cases.yaml` (the linear arm, both url sub-variants) prove
+cross-plane byte-identity; the empty github/other arm stays code-only (no render → no golden) and is
+covered by the per-plane selection tests. Per-plane selection tests in each plane
+(`tests/test_objective_prompt_parity.py`, `extension/factories/objectivePlan.test.ts`) prove the
+code picks the right arm + computes where/fallback. This golden-fixture parity **replaces the prior
+`OBJECTIVE_LINEAR_SUBSTRINGS` substring lockstep** (which remains only as a local constant for the
+per-plane + seed-composition tests, no longer a cross-plane invariant). The `_seed_prompt` /
+`factoryGuidance` / `reconcileGuidance` body moves are deferred to Node 2.6.
