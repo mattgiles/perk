@@ -1,6 +1,6 @@
 ---
 title: The github.py gateway — parse-helper family, consolidation boundary rules, the not-found fold, mutation-posting policies
-read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts), or fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge).
+read_when: You are touching `perk/github/`, consolidating repeated subprocess/parse idioms, debugging a phantom-`None` GitHub lookup, adding a REST/GraphQL call (the gh-GraphQL transport facts — no `{owner}/{repo}` templating, cursor pagination, the GraphQL not-found shape), designing a mutation-posting policy (failure ladders, verdict-driven artifacts), fixing the non-default-base autoclose strand (`Closes #N` fires only on a default-branch merge), or purifying a neutral gateway that carries a backend-specific read (hoist it to the consumer as a value resolved via the resolver).
 ---
 
 # The github.py gateway
@@ -126,6 +126,23 @@ close"). Three durable craft points:
 Semantics change to note: `plan_issue_closed` is now `True` on a non-default-base github land. No TS
 twin — the warm `/land` delegates to `perk pr land`, and the envelope change is purely additive.
 
+## Gateway purification by hoisting a backend-specific read to the consumer
+
+A gateway meant to be **backend-neutral** can silently accrete a **backend-specific** read. The
+concrete case: a "pure" github gateway carried a **github-only direct-fetch fallback** with a
+silently-missing Linear path — present *only* because the gateway couldn't reach the other backend
+without a layering violation. The clean fix is a single move:
+
+- **Delete the read from the gateway, make the value a parameter, and resolve it in the consumer**
+  backend-neutrally **via the resolver** (which owns the id shape — dropping the old `isdigit()` gate).
+  This **simultaneously** makes the gateway pure AND adds the missing backend fallback **for free**.
+
+**Generalizable signal: a layering violation forcing backend-specific branching into a neutral layer
+means the read belongs in the CONSUMER, passed down as a value.** Two corroborating details: the
+load-bearing **import-direction guard** now actually bites (the gateway imports neither the backends
+nor the state tier), and the `backend_id = "github"` module-level **literal** that breaks the
+resolver↔adapter import cycle (cross-ref `objective-store.md`, where it's already noted).
+
 ## The resolved `dry_run` ruling (record)
 
 Every gateway-mutation caller was audited: all dry-run-capable flows either plumb `dry_run` to the
@@ -141,3 +158,5 @@ plumb-through — the `= False` defaults are audited and stay.
 - `docs/learned/toolchain/ruff.md` — the preview-rule enablement collateral from the same sweep
 - `docs/learned/workflow/cold-door-client.md` — the parent-posts warm-tool recipe (`post_pr_review`)
 - `docs/learned/pi/subagents.md` — the report-only reviewer-agent change (read-only fan-out)
+- `docs/learned/toolchain/python-package-splits.md` — the cross-package relocation arc that produced
+  the gateway-purification refinement (the `backend_id` literal, the import-direction guard)

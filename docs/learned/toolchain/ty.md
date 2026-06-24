@@ -1,6 +1,6 @@
 ---
 title: ty gotchas — narrowing untyped JSON values, suppression syntax, enum strictness in tests
-read_when: You hit a ty invalid-argument-type or no-matching-overload error while handling untyped or object-form values parsed from JSON/settings (incl. deep GraphQL payloads — the narrowing-helper family), want to read a known key off an `object`-narrowed dict without a `cast` (the `.items()`-iteration idiom), hit per-element `isinstance` not refining the surrounding container, are choosing between the raising `_require_*` and the lenient `_opt_*` helper family (the disposition-matching rule), need to suppress a ty diagnostic in a test, or ty rejects a string literal where an enum is annotated.
+read_when: You hit a ty invalid-argument-type or no-matching-overload error while handling untyped or object-form values parsed from JSON/settings (incl. deep GraphQL payloads — the narrowing-helper family), want to read a known key off an `object`-narrowed dict without a `cast` (the `.items()`-iteration idiom), hit per-element `isinstance` not refining the surrounding container, are choosing between the raising `_require_*` and the lenient `_opt_*` helper family (the disposition-matching rule), hit `dict` invariance forcing a `cast` where a scalar/list return needed none (the `Any`→`object` tightening), are distrusting a plan's "body-unchanged, no new cast" `Any`→`object` claim (budget cast-confined shared-leaf helpers), are renaming two divergent same-named enums (rename-not-unify, byte-identical string values), need to suppress a ty diagnostic in a test, or ty rejects a string literal where an enum is annotated.
 ---
 
 # ty narrowing of untyped / JSON-shaped dict values
@@ -95,6 +95,47 @@ its original *disposition*:
 - The four `cast(` calls that remain in the Linear package live **inside the `_opt_*`/`_require_*`
   definitions** (`perk/backends/linear.py`), internalizing the ty quirk so call sites stay cast-free.
   See `workflow/linear-backend.md`.
+
+## `Any`→`object` tightening: dict invariance forces a `cast` where scalars/lists don't
+
+Narrowing a helper's input from `Any` to `object` (an `isinstance`-guarded tightening) is
+**body-unchanged-safe ONLY for scalar / list / set returns**. **Dict-returning helpers hit `dict`
+invariance and need a `cast`.** Narrowing an `object` via `isinstance(x, dict)` yields
+`dict[Unknown, Unknown]`; after a ternary join ty reports `Top[dict[Unknown, Unknown]]`, **not
+assignable to `dict[str, Any]` because `dict` is invariant in its key type**. Neither an explicit
+local annotation nor a non-ternary if/return rescues it — the fix is the guarded
+`cast(dict[str, Any], x) if isinstance(x, dict) else {}`.
+
+**Intra-objective inconsistency to expect:** sibling nodes chose the cast-free `.items()` /
+typed-accumulation forms (above) for the same quirk while another chose the minimal guarded `cast` —
+**both are sanctioned; match the local site's preference** rather than assuming one canonical form.
+This sharpens the `.items()`-cast-free-alternative note above.
+
+## Distrust a plan's "`Any`→`object` is body-unchanged, no new cast" claim
+
+Under ty, an `object`-via-`isinstance(dict)` value's `.get(str_key)` fails ("Expected Never"), and the
+`(cur or {}).get` idiom produces a `~AlwaysFalsy | dict` union with **no `.get`**. The established fix
+routes every hop through **cast-confined `_opt_dict` / `_dicts` / `_opt_str` / `_opt_int` helpers added
+to the shared leaf** — the casts live **only there**, call sites stay cast-free. **When a plan claims an
+`Any`→`object` narrowing is body-unchanged, budget for cast-confined helpers in the shared leaf.**
+
+Incidental hardening from routing through these helpers: the `_opt_dict`-per-hop walker is *more*
+None-safe (degrades to `{}` on a non-dict intermediate instead of `AttributeError`), and `_opt_int`
+**rejects `bool`** (since `isinstance(True, int)` is true), preventing a boolean coercing into a numeric
+id.
+
+Also note (test-author): an **inline dict literal** passed to a `dict[str, object]` param fails ty
+(inferred as a deeply-nested invariant type) — **annotate the local**; this reinforces the
+heterogeneous-literal section above.
+
+## Two divergent same-named enums → rename to domain-accurate names, not unify
+
+When two enums **share a name** but diverge in member sets and neither lives in `shared/`, **rename
+both to domain-accurate names** rather than unifying (unifying would give one an unused member). Because
+the member **string values are unchanged**, `__str__` / serialization stay **byte-identical** — a pure
+identifier rename with **no `__all__` / facade re-export surface** to touch. Mechanics (whole-word
+rename via `perl` / python, not BSD `sed \b`; longer identifiers rippling E501/I001) are
+cross-referenced to `python-package-splits.md` / `ruff.md`.
 
 ## ty suppression + enum strictness in tests
 
