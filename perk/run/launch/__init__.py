@@ -41,6 +41,7 @@ import os
 import subprocess as subprocess
 from pathlib import Path
 
+from perk import __version__
 from perk import github as github
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import Ensure
@@ -244,7 +245,17 @@ def launch_stage(
     # Never reached on a dry run (the `if dry_run:` block returns above) or on reuse.
     if resolved.created and config.worktree_setup:
         run_worktree_setup(wt, config.worktree_setup)
-    env = {**_NPM_QUIET_ENV, **os.environ, "PERK_RUN_ID": rid}
+    # PERK_CLI_VERSION carries the running CLI's version into the launched session so the
+    # extension's `session_start` handler can surface a soft drift warning when the live loaded
+    # `@perk/pi` extension differs from the CLI that launched it (a stale lazy-installed npm:
+    # package). Informational only (not run-control data, unlike PERK_RUN_ID); set at this single
+    # local-launch seam — the remote worker early-returns before here.
+    env = {
+        **_NPM_QUIET_ENV,
+        **os.environ,
+        "PERK_RUN_ID": rid,
+        "PERK_CLI_VERSION": __version__,
+    }
     # Seed LINEAR_API_KEY from the gitignored `.pi/perk.local.toml` `[linear] api_key` so the
     # borrowed in-session `linear_*` tools and any `perk <stage> --json` cold-door worker the
     # session spawns (they inherit this env) can authenticate. Env wins: only fill it when the
