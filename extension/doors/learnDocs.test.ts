@@ -65,7 +65,7 @@ test("/learn-docs: a success envelope notifies the gathered count and injects th
       "notified the gathered count",
     );
     assert.ok(
-      injected.some((m) => m.includes("perk /learn-docs") && m.includes("[45, 50]")),
+      injected.some((m) => m.includes("learned-docs plan factory") && m.includes("[45, 50]")),
       "the factory guidance was injected",
     );
   } finally {
