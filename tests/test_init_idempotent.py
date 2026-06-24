@@ -23,7 +23,7 @@ def test_init_converges_and_is_idempotent(tmp_path):
 
     settings = json.loads((tmp_path / ".pi" / "settings.json").read_text())
     packages = settings["packages"]
-    assert "git:github.com/mattgiles/perk@main" in packages
+    assert f"npm:@perk/pi@{__version__}" in packages  # version-pinned perk extension
     assert "npm:@tombell/pi-diff" in packages  # surviving borrowed package (anchor)
     assert "npm:@tombell/pi-status" not in packages  # retired: footer conflict
     assert "npm:@tombell/pi-plan" not in packages  # perk owns plan mode now
@@ -480,13 +480,34 @@ def test_init_preserves_user_settings(tmp_path):
     settings = json.loads((pi_dir / "settings.json").read_text())
     assert "npm:@me/custom" in settings["packages"]  # user entry preserved
     assert settings["theme"] == "nightowl"  # unknown key preserved
-    assert "git:github.com/mattgiles/perk@main" in settings["packages"]  # perk entry added
+    assert f"npm:@perk/pi@{__version__}" in settings["packages"]  # perk entry added
 
 
-def test_init_migrates_legacy_npm_perk_entry(tmp_path):
-    # A repo wired by an earlier perk init carries the stale `npm:@perk/pi` entry that
-    # Pi can't install (never published). init must strip it (forward convergence) and
-    # replace it with the git URL, without touching the user's own entries.
+def test_init_migrates_legacy_git_perk_entry(tmp_path):
+    # A repo wired by an earlier perk init carries the legacy `git:` perk entry. init must strip
+    # it (forward convergence to the npm wiring) and add the version-pinned npm entry, without
+    # touching the user's own entries.
+    pi_dir = tmp_path / ".pi"
+    pi_dir.mkdir()
+    (pi_dir / "settings.json").write_text(
+        json.dumps({"packages": ["git:github.com/mattgiles/perk@main", "npm:@me/custom"]}, indent=2)
+        + "\n"
+    )
+
+    run_init(tmp_path, verify=False)
+
+    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
+    # legacy git perk entry stripped, npm pin added
+    assert not any(
+        isinstance(p, str) and p.startswith("git:github.com/mattgiles/perk") for p in packages
+    )
+    assert f"npm:@perk/pi@{__version__}" in packages  # npm pin added
+    assert "npm:@me/custom" in packages  # user entry preserved
+
+
+def test_init_reconciles_stale_perk_version(tmp_path):
+    # A consumer pinned to a stale npm version must be reconciled forward to the pin
+    # (version-aware convergence), preserving list position and the user's unrelated packages.
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(
@@ -495,53 +516,18 @@ def test_init_migrates_legacy_npm_perk_entry(tmp_path):
 
     run_init(tmp_path, verify=False)
 
+    pin = f"npm:@perk/pi@{__version__}"
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    # legacy entry stripped (string entries only; the web default adds an object-form entry)
-    assert not any(isinstance(p, str) and p.startswith("npm:@perk/pi") for p in packages)
-    assert "git:github.com/mattgiles/perk@main" in packages  # git entry added
-    assert "npm:@me/custom" in packages  # user entry preserved
-
-
-def test_init_reconciles_stale_perk_ref(tmp_path):
-    # A consumer pinned to a stale tag must be reconciled forward to @main (ref-aware
-    # convergence), preserving list position and the user's unrelated packages.
-    pi_dir = tmp_path / ".pi"
-    pi_dir.mkdir()
-    (pi_dir / "settings.json").write_text(
-        json.dumps(
-            {"packages": ["git:github.com/mattgiles/perk@v0.0.1", "npm:@me/custom"]}, indent=2
-        )
-        + "\n"
-    )
-
-    run_init(tmp_path, verify=False)
-
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    assert "git:github.com/mattgiles/perk@main" in packages  # reconciled forward
-    assert "git:github.com/mattgiles/perk@v0.0.1" not in packages  # stale ref gone
+    assert pin in packages  # reconciled forward
+    assert "npm:@perk/pi@0.0.0" not in packages  # stale version gone
     assert "npm:@me/custom" in packages  # user entry preserved
     # position preserved (rewritten in place, not appended)
-    assert packages.index("git:github.com/mattgiles/perk@main") < packages.index("npm:@me/custom")
-
-
-def test_init_reconciles_noref_perk_entry(tmp_path):
-    # A no-ref perk entry reconciles to @main too (identity matches, spec differs).
-    pi_dir = tmp_path / ".pi"
-    pi_dir.mkdir()
-    (pi_dir / "settings.json").write_text(
-        json.dumps({"packages": ["git:github.com/mattgiles/perk"]}, indent=2) + "\n"
-    )
-
-    run_init(tmp_path, verify=False)
-
-    packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    assert "git:github.com/mattgiles/perk@main" in packages
-    assert "git:github.com/mattgiles/perk" not in packages
+    assert packages.index(pin) < packages.index("npm:@me/custom")
 
 
 def test_init_preserves_unrelated_git_package(tmp_path):
-    # A user's *unrelated* git: package with its own ref is never reconciled (only perk's
-    # own identity is ever in the desired set).
+    # A user's unrelated git: package with its own ref is never touched (only perk's own npm
+    # identity is ever in the desired set); the npm pin is added (not a git entry).
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(
@@ -552,20 +538,20 @@ def test_init_preserves_unrelated_git_package(tmp_path):
 
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "git:github.com/someone/other@v1.2.3" in packages  # untouched
-    assert "git:github.com/mattgiles/perk@main" in packages  # perk entry still added
+    assert f"npm:@perk/pi@{__version__}" in packages  # npm pin added
 
 
 def test_init_dedups_duplicate_perk_entries(tmp_path):
-    # A pathological repo with two perk git entries converges to a single @main entry
-    # (rewrite the first, drop the rest) rather than producing duplicate @main entries.
+    # A pathological repo with two perk npm entries converges to a single pinned entry
+    # (rewrite the first, drop the rest) rather than producing duplicate pinned entries.
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     (pi_dir / "settings.json").write_text(
         json.dumps(
             {
                 "packages": [
-                    "git:github.com/mattgiles/perk@v0.0.1",
-                    "git:github.com/mattgiles/perk@v0.0.2",
+                    "npm:@perk/pi@0.0.0",
+                    "npm:@perk/pi@0.0.2",
                 ]
             },
             indent=2,
@@ -576,12 +562,12 @@ def test_init_dedups_duplicate_perk_entries(tmp_path):
     run_init(tmp_path, verify=False)
 
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
-    perk_entries = [p for p in packages if isinstance(p, str) and "mattgiles/perk" in p]
-    assert perk_entries == ["git:github.com/mattgiles/perk@main"]  # collapsed to one
+    perk_entries = [p for p in packages if isinstance(p, str) and p.startswith("npm:@perk/pi")]
+    assert perk_entries == [f"npm:@perk/pi@{__version__}"]  # collapsed to one
 
 
 def test_init_ref_reconcile_is_idempotent(tmp_path):
-    # Once at @main, a re-run is a no-op (spec equals desired → no change).
+    # Once at the pin, a re-run is a no-op (spec equals desired → no change).
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     run_init(tmp_path, verify=False)
@@ -605,9 +591,11 @@ def test_init_self_mode_uses_local_path(tmp_path):
     run_init(tmp_path, verify=False)
     packages = json.loads((tmp_path / ".pi" / "settings.json").read_text())["packages"]
     assert ".." in packages
+    # Self-repo wires `..` only — neither a git: perk entry nor an npm:@perk/pi entry.
     assert not any(
         isinstance(p, str) and p.startswith("git:github.com/mattgiles/perk") for p in packages
     )
+    assert not any(isinstance(p, str) and p.startswith("npm:@perk/pi") for p in packages)
 
 
 def test_init_writes_skills_manifest_fragment(tmp_path):

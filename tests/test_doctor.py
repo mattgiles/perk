@@ -1184,16 +1184,18 @@ def test_workflow_checks_githuberror_degrades_to_info(monkeypatch, git_repo):
 
 
 def test_ref_drift_detected_and_fixed(git_repo):
-    # A stale pinned perk ref surfaces as a settings-wiring fail; --fix reconciles to @main.
+    # A stale pinned perk npm version surfaces as a settings-wiring fail; --fix reconciles to
+    # the version this perk wants (`@{__version__}`).
     import json as _json
 
+    from perk import __version__
+
+    pin = f"npm:@perk/pi@{__version__}"
     _scaffold(git_repo)
     settings_path = git_repo / ".pi" / "settings.json"
     settings = _json.loads(settings_path.read_text())
     settings["packages"] = [
-        "git:github.com/mattgiles/perk@v0.0.1"
-        if isinstance(p, str) and "mattgiles/perk" in p
-        else p
+        "npm:@perk/pi@0.0.0" if isinstance(p, str) and p.startswith("npm:@perk/pi") else p
         for p in settings["packages"]
     ]
     settings_path.write_text(_json.dumps(settings, indent=2) + "\n", encoding="utf-8")
@@ -1202,8 +1204,8 @@ def test_ref_drift_detected_and_fixed(git_repo):
     fixed = run_doctor(git_repo, fix=True, verify=False)
     assert fixed.healthy
     packages = _json.loads(settings_path.read_text())["packages"]
-    assert "git:github.com/mattgiles/perk@main" in packages
-    assert "git:github.com/mattgiles/perk@v0.0.1" not in packages
+    assert pin in packages
+    assert "npm:@perk/pi@0.0.0" not in packages
 
 
 # --- the verify-gated `extension-clone` check -----------------------------------------
