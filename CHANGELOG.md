@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [1.0.1] - 2026-06-24
+
+### Added
+
 - PyPI release automation: a tag-gated `publish-pypi` job (OIDC trusted publishing via
   `pypa/gh-action-pypi-publish`, `pypi-publish` environment gate), an always-on PyPI
   build/check/smoke job, and a `workflow_dispatch` TestPyPI rehearsal in `release.yml`.
