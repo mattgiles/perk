@@ -482,7 +482,7 @@ test("createBindManager: a rebind unsubscribes the prior listener (no double-cou
 // --- prompt parity (reciprocal of tests/test_worker_prompt_parity.py) ---------------------------
 
 test("initialPromptFor: implement output composes the template with the read_cmd", () => {
-  // Thin composition guard (the golden case proves cross-plane byte-identity of the template;
+  // Thin composition guard (the live-parity case proves cross-plane byte-identity of the template;
   // this proves the helper wires body + read_cmd + the inline progress paragraph).
   const prompt = initialPromptFor("implement", samplePlanRef);
   assert.ok(prompt);

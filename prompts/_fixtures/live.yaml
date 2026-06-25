@@ -1,0 +1,115 @@
+# Live cross-engine parity manifest — real templates rendered by BOTH engines and asserted equal;
+# NO golden (decoupled from prose). Editing a real prompt's prose touches no fixture here; only the
+# var set (and whether a new template must be listed) is curated. Each entry names a real template
+# (root-relative under prompts/) and the string-only vars to render it with — multi-arm entries
+# repeat a template to pin every conditional branch. Vars string-only, miniYaml subset (block
+# maps/seqs, double-quoted strings, the backtick-quoting rule, no |/> block scalars) so the file is
+# dual-parseable (pyyaml on the Python side, miniYaml on the node side).
+- template: "common/plan-read/github.md"
+  vars:
+    pr_id: "42"
+    url: "https://x/9"
+- template: "common/plan-read/linear.md"
+  vars:
+    pr_id: "uuid-1"
+    url: "https://linear.app/x/ENG-1"
+- template: "common/plan-read/other.md"
+  vars:
+    pr_id: "42"
+    url: "https://x/9"
+- template: "stages/address/action.md"
+  vars:
+    provider: "github"
+    pr_id: "148"
+    url: "https://github.com/mattgiles/perk/issues/148"
+    model_clause: ""
+- template: "stages/address/action.md"
+  vars:
+    provider: "github"
+    pr_id: "148"
+    url: "https://github.com/mattgiles/perk/issues/148"
+    model_clause: ", passing `model: \"test/model\"` on that call (the configured [subagents] review-classifier model)"
+- template: "stages/address/preview.md"
+  vars:
+    provider: "github"
+    pr_id: "148"
+    url: "https://github.com/mattgiles/perk/issues/148"
+    model_clause: ""
+- template: "stages/address/preview.md"
+  vars:
+    provider: "github"
+    pr_id: "148"
+    url: "https://github.com/mattgiles/perk/issues/148"
+    model_clause: ", passing `model: \"test/model\"` on that call (the configured [subagents] review-classifier model)"
+- template: "stages/implement.md"
+  vars:
+    provider: "github"
+    pr_id: "42"
+    url: "https://x/9"
+    read_cmd: "gh issue view 42 --comments"
+- template: "stages/learn.md"
+  vars:
+    provider: "github"
+    pr_id: "42"
+    url: "https://x/9"
+    read_cmd: "gh issue view 42 --comments"
+- template: "stages/learn.md"
+  vars:
+    provider: "linear"
+    pr_id: "uuid-1"
+    url: "https://linear.app/x/ENG-1"
+    read_cmd: "use the `linear_get_issue` tool (id `uuid-1`), then `linear_list_comments` — the plan body is the first comment; if the linear tools are unavailable, open https://linear.app/x/ENG-1"
+- template: "stages/learn.md"
+  vars:
+    provider: "gitlab"
+    pr_id: "9"
+    url: "https://gl/x"
+    read_cmd: "open https://gl/x"
+- template: "stages/learn.md"
+  vars:
+    provider: ""
+    pr_id: ""
+    url: ""
+    read_cmd: ""
+- template: "common/objective-read/linear.md"
+  vars:
+    where: "(https://linear.app/x/ENG-1)"
+    fallback: "; if the linear tools are unavailable, open https://linear.app/x/ENG-1"
+- template: "common/objective-read/linear.md"
+  vars:
+    where: "(run `perk objective show 7` for its URL)"
+    fallback: ""
+- template: "stages/objective-plan/seed.md"
+  vars:
+    number: "7"
+    title: "Ship it"
+    node_id: "1.2"
+    node_description: "Do the thing"
+    node_engagement: ""
+    read_clause: ""
+    model: ""
+- template: "stages/objective-plan/seed.md"
+  vars:
+    number: "7"
+    title: "Ship it"
+    node_id: "1.2"
+    node_description: "Do the thing"
+    node_engagement: "<untrusted_node_engagement>\n[c-1 by Ada] please scope this down\n</untrusted_node_engagement>"
+    read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
+    model: "google/gemini-3.5-flash"
+- template: "stages/objective-plan/guidance.md"
+  vars:
+    objective: "7"
+    node: "1.2"
+    read_clause: ""
+    model: ""
+- template: "stages/objective-plan/guidance.md"
+  vars:
+    objective: "7"
+    node: ""
+    read_clause: "This objective is a Linear Project (https://linear.app/x/ENG-1). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools; if the linear tools are unavailable, open https://linear.app/x/ENG-1."
+    model: "google/gemini-3.5-flash"
+- template: "stages/learn-docs.md"
+  vars:
+    inbox_path: ".pi/workflow/scratch/learn-docs-inbox.md"
+    num_list: "45, 50"

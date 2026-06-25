@@ -19,8 +19,8 @@ import {
 } from "./objectivePlan.ts";
 
 // Local fragments of the shared linear arm — used by the per-plane selection + guidance
-// composition tests below (no longer a cross-plane lockstep; the `objective-read-*` golden cases
-// own cross-plane byte-parity).
+// composition tests below (no longer a cross-plane lockstep; the `objective-read-*` live-parity
+// cases own cross-plane byte-parity).
 const OBJECTIVE_LINEAR_SUBSTRINGS = [
   "Linear Project",
   "linear_get_issue",

@@ -1,1 +1,0 @@
-gh issue view 42 --comments

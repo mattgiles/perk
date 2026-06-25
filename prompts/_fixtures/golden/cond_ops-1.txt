@@ -1,0 +1,3 @@
+both: no .
+either: yes .
+missingA: no .

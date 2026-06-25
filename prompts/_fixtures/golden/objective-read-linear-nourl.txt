@@ -1,1 +1,0 @@
-This objective is a Linear Project (run `perk objective show 7` for its URL). Its roadmap nodes are Linear issues in that Project — inspect a node-issue's detail or discussion with the `linear_get_issue` and `linear_list_comments` tools.

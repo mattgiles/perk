@@ -13,10 +13,26 @@ this README is a durable doc, not a template.
 ## Frozen template grammar
 
 The templates use a deliberately tiny, **frozen** subset of jinja syntax — the canonical
-"mini-jinja" surface. jinja2 is the reference engine (the committed golden files under
-`_fixtures/golden/` are jinja2's output); the extension renders the same subset. A **cross-plane
-conformance guard** (`tests/test_prompt_grammar.py` + `extension/substrate/promptGrammar.test.ts`)
-fails CI if any template uses a construct outside the subset.
+"mini-jinja" surface. jinja2 is the reference engine; the extension renders the same subset. A
+**cross-plane conformance guard** (`tests/test_prompt_grammar.py` +
+`extension/substrate/promptGrammar.test.ts`) fails CI if any template uses a construct outside the
+subset.
+
+## Render parity — two decoupled tiers
+
+The two render seams (jinja2 on Python, the vendored mini-jinja on TS) are kept byte-identical by
+two tiers that separate the frozen render **contract** from real prompt **prose**:
+
+- **Tier A — contract snapshots.** `_fixtures/cases.yaml` lists purpose-built fixture templates
+  under `_fixtures/templates/` (one per render feature) with committed goldens under
+  `_fixtures/golden/` (jinja2's output). Both planes assert `render == golden`
+  (`tests/test_prompts.py` + `extension/substrate/prompts.test.ts`). These goldens change only when
+  the render contract changes — never when a real prompt's prose changes.
+- **Tier B — live cross-engine equality.** `_fixtures/live.yaml` lists every real template with
+  representative vars and **no** golden. `tests/test_prompt_parity.py` renders each real template
+  with jinja2, shells out once to `extension/testing/renderLive.ts` (mini-jinja), and asserts the
+  two outputs are byte-equal — so editing a real prompt's prose touches no fixture. A coverage
+  guard asserts every real template is listed in `live.yaml`.
 
 The subset is exactly four categories:
 
