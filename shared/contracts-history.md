@@ -401,3 +401,170 @@ bundled — the Python wheel as package data `perk/_shared/`, the npm package un
 > selection** — it is pi-web-access-specific (it depends on `fetch_content`'s GitHub-clone path),
 > documented and not re-homed. Catalog entries carry no `package_filter` (each package's sole
 > extension is its root `./index.ts`, verified via `npm view <pkg> pi`).
+
+## §8.31 · The prompt render seam + golden parity (Objective #791, Node 1.2)
+
+**First prompt moved onto the seam — the plan-read instruction (Node 2.1).** The cross-plane
+plan-read instruction (the "how do I read the saved plan" SSOT) is the first real (non-fixture)
+consumer of the render seam. Its three arm templates live at
+`prompts/common/plan-read/{github,linear,other}.md` — one file per provider arm, no
+conditionals/loops in the frozen subset. **Branching stays in code**: `perk/run/launch/prompts.py::
+_plan_read_instruction` and `extension/doors/lifecycleGates.ts::planReadInstruction` keep their
+`(provider, pr_id/prId, url)` signature and the same if/elif/else, each arm now a `render(...)` call
+selecting its arm template (passing `{pr_id, url}`; jinja2/nunjucks ignore unused vars). The helpers
+still branch on `cache.plan-ref.provider` — only the **wording source** moved.
+
+The arm templates (and their golden files) carry **no trailing newline** — the helper returns
+single-line strings embedded mid-prompt, so the render output must equal the prior literal exactly
+(a deliberate departure from the fixture convention of trailing newlines). The three `plan-read-*`
+golden cases in `cases.yaml` prove cross-plane byte-identity for each arm; a thin per-arm selection
+test in each plane (`tests/test_worker_prompt_parity.py`, `extension/doors/lifecycleGates.test.ts`)
+proves the code picks the right arm and `render()` is wired. This golden-fixture parity (plus the
+selection tests) **replaces the prior dedicated substring parity** for plan-read; the
+implement/learn prompt parity suites are untouched (they embed the byte-identical helper output, so
+they keep passing — the downstream prompts move in nodes 2.2/2.4).
+
+**Second prompt moved — the implement primer (Node 2.2).** The implement-stage primer wording lives
+at `prompts/stages/implement.md`, the second real consumer of the render seam. All three sites that
+used to hand-duplicate it — cold `perk/run/launch/prompts.py::_implement_prompt`, worker
+`extension/worker/worker.ts::initialPromptFor` (implement arm), and warm
+`extension/doors/lifecycleGates.ts::implementHandoffPrompt` — are now thin `render("stages/
+implement.md", {provider, pr_id, url, read_cmd})` calls. The prior warm/cold variance (the warm
+handoff omitting the "Progress markers:" tail) is reconciled by **unifying**: all three render the
+one template with the same vars, so they are **byte-identical** and the warm handoff now carries the
+progress markers too. `read_cmd` is the provider-selected plan-read instruction computed in code via
+the Node-2.1 helper — branching stays in code, no `{% if %}`/second template. The template and its
+golden (`implement-github`) carry **no trailing newline** (matching the prior cold/worker literal).
+One golden case proves the template renders identically in both planes; thin per-plane composition
+tests (start-with / contains read_cmd / ends-with the progress tail) prove each helper wires the
+right template + vars — together these **replace `IMPLEMENT_SUBSTRINGS`**. The pre-objective audit
+`docs/design/prompt-language-audit.md` (still describing warm as a shorter near-copy) is left as a
+frozen snapshot; this paragraph is the authoritative current-state note.
+
+**The address prompt moved onto the seam — converging three consumers (Node 2.3).** The
+address-stage wording lives in two canonical templates `prompts/stages/address/{action,preview}.md`
+(each a complete body, no template logic; vars `{{ provider }}`, `{{ pr_id }}`, `{{ url }}`,
+`{{ model_clause }}`), rendered identically by **all three** address consumers via the shared
+render seam: the cold `perk/run/launch/prompts.py::_address_prompt`, the worker
+`extension/worker/worker.ts::initialPromptFor("address")`, and the warm
+`extension/doors/address.ts::addressGuidance`. Before this node the warm `/address` loop used a
+*different* wording; the three were **converged** onto one canonical body — the cold/worker
+structure (the PR-identity header a fresh headless worker needs) **plus** warm's Plan File Mode
+step, which now upgrades the cold/worker path too; warm loses its divergent framing. This is a
+deliberate wording change to all three surfaces; the *command/flag/config* surface of `/address`
+and `perk pr address` is unchanged.
+
+**Branching stays in code** (the frozen subset has no conditionals): preview vs action is a
+template *selection* (`preview.md` for `--preview`, which omits the action steps including Plan
+File Mode; `action.md` otherwise), and the classifier present/absent split builds the
+`model_clause` render var in code (empty string when no `[subagents] review-classifier` model) —
+the clause's own wording is deferred to node 3.3. The worker has **no preview path** (preview is a
+warm/cold flag), so it always renders `action.md`.
+
+**The warm door is now ref-aware and null-guarded.** The converged body carries the PR identity, so
+`addressGuidance` takes the active `PlanRef`; the `/address` handler resolves it via the same
+helper `doors/learn.ts` uses (`readPlanRef(ctx.cwd)` → fallback
+`rebuildWorkflowState(branchOf(ctx)).active_plan_ref`). A null ref reports a `warning` (mirroring
+the `/implement` guard) and sends no guidance — a strict improvement, since `/address` cannot
+function without a plan-ref regardless (the classifier child's `perk pr feedback` hard-errors
+`no_plan_ref`).
+
+The two address templates (and their golden files) carry **no trailing newline** (the builders
+return mid-prompt strings). Four `address-*` golden cases in `cases.yaml` (action/preview × model
+present/absent) prove cross-plane byte-identity; thin per-plane selection tests prove each caller
+picks the right template and injects/omits the model clause, and the warm null-ref guard is
+covered. This golden-fixture parity **replaces the prior `ADDRESS_SUBSTRINGS` substring parity**.
+
+**The learn primer moved onto the seam (Node 2.4).** The learn-stage primer wording moved off its
+two hand-concatenated twins onto the render seam — one canonical `prompts/stages/learn.md` rendered
+byte-identical by cold `perk/run/launch/prompts.py::_learn_prompt` and warm
+`extension/doors/learn.ts::learnGuidance` (learn has **no worker twin** — only cold + warm). Cold
+and warm are **unified onto the cold body**: warm `/learn` wording changed from its prior numbered
+"perk /learn —" style to the cold bullet "You are in the learn step…" body, the `other` arm
+collapsed to a single "Open the plan and its merged change" line (warm **lost** its prior `other`
+merged-PR derivation — an accepted change for the effectively-unreachable provider arm), and warm's
+no-plan-ref fallback folded into the same template. This node is the **first template to use
+conditionals**: the `{% if pr_id %}` header split and the no-ref / github+linear / other structure
+selection are the template's conditional on `provider` (+ `pr_id` presence); the provider read-line
+text is supplied as the `read_cmd` var from the node-2.1 plan-read helper (`_plan_read_instruction`
+/ `planReadInstruction`), `read_cmd` passed always (empty string when absent) so it is defined. The
+template keeps each `{% if %}`/`{% elif %}`/`{% else %}`/`{% endif %}` tag on its **own line** (off
+the content lines) — enabled by the `trim_blocks` env flip above, which swallows the single newline
+after each block tag so the indented bullet content renders intact (whitespace-control `{%- -%}`
+markers alone could not — they also strip the bullets' leading indentation). The
+template and all four golden files carry **no trailing newline** (matching the cold literal). Four
+`learn-*` golden cases in `cases.yaml` (`learn-github`, `learn-linear`, `learn-other`,
+`learn-no-ref`) prove cross-plane byte-identity and **replace the dedicated learn substring parity**;
+thin per-plane selection/composition tests remain. nunjucks stays the TS engine — the golden suite
+is the byte-parity proof that jinja2 and nunjucks render the conditional template identically (the
+tag-hugging whitespace discipline keeps them equal with `trim_blocks`/`lstrip_blocks` off).
+
+**The objective-read instruction moved onto the seam (Node 2.5).** The cross-plane objective-read
+clause (the supplemental wording telling the model how to inspect a Linear-Project-backed
+objective's node-issues) moved off its two hand-duplicated twins onto the render seam, mirroring the
+plan-read move. The wording lives in a subdirectory at `prompts/common/objective-read/linear.md` —
+one arm file for the **linear** arm only (github and any non-linear backend return `""` directly in
+code without rendering, since `perk objective show` already covers them). **Branching stays in
+code**: `perk/cli/commands/objective/shared.py::objective_read_instruction` and
+`extension/factories/objectivePlan.ts::objectiveReadInstruction` keep their `(backend,
+objective_id/objectiveId, url)` signature and the `backend != "linear" → ""` early return; the
+linear arm computes the two **url-presence** render vars `where`/`fallback` in code (the frozen
+subset has no conditionals — mirroring the `model_clause` precedent) and renders the one template.
+
+The template (and its golden files) carry **no trailing newline** — the helper returns a single-line
+string embedded mid-prompt, so the render output must equal the prior literal exactly (the
+`_seed_prompt`/`factoryGuidance`/`reconcileGuidance` composition tests embed it and keep passing).
+Two `objective-read-*` golden cases in `cases.yaml` (the linear arm, both url sub-variants) prove
+cross-plane byte-identity; the empty github/other arm stays code-only (no render → no golden) and is
+covered by the per-plane selection tests. Per-plane selection tests in each plane
+(`tests/test_objective_prompt_parity.py`, `extension/factories/objectivePlan.test.ts`) prove the
+code picks the right arm + computes where/fallback. This golden-fixture parity **replaces the prior
+`OBJECTIVE_LINEAR_SUBSTRINGS` substring lockstep** (which remains only as a local constant for the
+per-plane + seed-composition tests, no longer a cross-plane invariant). The `_seed_prompt` /
+`factoryGuidance` / `reconcileGuidance` body moves are deferred to Node 2.6.
+
+**The objective-plan factory seed + warm guidance moved onto the seam (Node 2.6).** The two
+hand-built objective-plan-factory prompt bodies — the **cold** seed
+(`perk/cli/commands/objective/plan_cmd.py::_seed_prompt`) and the **warm** guidance
+(`extension/factories/objectivePlan.ts::factoryGuidance`) — moved onto the render seam as the sixth
+real consumer. Unlike the implement (2.2) / learn (2.4) moves, they are **NOT unified**: the cold
+seed launches a *fresh* read-only session, so it **injects** the objective title + node description
+(the `<untrusted_objective>` block) and the pre-planning node-engagement block as DATA, and its node
+is already marked `planning` by the cold door; the warm guidance runs *in-session*, so it
+**instructs** the model to fetch the objective + node engagement and to mark the node `planning`
+itself. This **cold-injects / warm-instructs** asymmetry makes them genuinely different bodies, so
+they become **two arm files in a subdirectory** — `prompts/stages/objective-plan/{seed,guidance}.md`
+(filenames mirror the function names) — like 2.1/2.3/2.5 landed despite singular node titles. The
+**branching moved INTO the templates** as `{% if %}` conditionals (the learn-2.4 pattern, enabled by
+`trim_blocks`): block-level tags on their own lines (the cold engagement block, the warm
+node-selection line) and inline tags mid-line (the read clause, the explorer/model clause). The
+helpers now pass **raw** vars — `node_engagement` (the rendered block, `""` when absent),
+`read_clause` (the rendered linear clause, `""` for github/other), `model` (`""` when unset), and
+(warm) `node` (`""` → select-next) — while the in-code arm SELECTION
+(`objective_read_instruction` / `objectiveReadInstruction` backend logic) is unchanged. Both
+templates and their golden files carry **no trailing newline** (the prior literals had none). Four
+`objective-plan-*` golden cases in `cases.yaml` (seed/guidance × github/linear) prove cross-plane
+byte-parity across both arms of every conditional. The per-plane composition tests are **retained**
+(`OBJECTIVE_LINEAR_SUBSTRINGS` survives as a local constant feeding the per-plane selection +
+seed-composition tests); no cross-plane substring lockstep existed between the two different prompts,
+so none is removed.
+
+**The learned-docs factory seed + warm guidance moved onto the seam (Node 2.7).** The two
+hand-built learned-docs-factory prompt bodies — the **cold** seed
+(`perk/cli/commands/learn/docs_cmd.py::_seed_prompt`) and the **warm** guidance
+(`extension/doors/learnDocs.ts::learnDocsGuidance`) — moved onto the render seam as the seventh real
+consumer. **Unlike 2.6 they are UNIFIED** (the implement-2.2 / learn-2.4 pattern): the cold/warm
+differences were all **superficial factory house-style** — header wording, a header blank line,
+step-number indentation, a cold-only "from this read-only session" qualifier, and the
+closing-paragraph phrasing — none load-bearing, so they were **converged away** onto the **cold-seed
+orientation form** rather than preserved behind conditionals. The warm guidance gained the "You are
+running…" header + the standalone closing paragraph ("Judgment, user interaction, and durable writes
+stay with you — never delegate them."), and the cold seed lost the `"  "` step indent + the "from
+this read-only session" qualifier (the warm session is not read-only, so the qualifier was
+cold-only-accurate anyway; the bare "NEVER write the docs directly" is correct in both planes). The
+result is a single **flat** template `prompts/stages/learn-docs.md` with **zero `{% if %}`
+conditionals**; both planes pass the same two vars (`inbox_path`, `num_list`). The template and its
+golden carry **no trailing newline**. One `learn-docs` golden case in `cases.yaml` proves cross-plane
+byte-parity. No cross-plane substring lockstep existed between cold and warm, so none is removed; the
+per-plane composition tests are retained (one warm header assertion updated from `"perk /learn-docs"`
+to `"learned-docs plan factory"`).
