@@ -556,6 +556,23 @@ class TestIssueBackedStoreNode34Methods:
         assert result is None
         assert fake.requests == []
 
+    def test_supersede_objective_returns_none(self) -> None:
+        store, fake = _make_store()
+        result = store.supersede_objective(
+            old_objective_id="obj-1",
+            title="t",
+            prose="p",
+            run_id="R",
+            roadmap_nodes=[
+                objective.ObjectiveNode(
+                    id="1.1", description="A", status=objective.NodeStatus.PENDING
+                )
+            ],
+            carry_map={},
+        )
+        assert result is None
+        assert fake.requests == []
+
     def test_close_objective_moves_issue_to_done(self) -> None:
         store, fake = _make_store(
             {

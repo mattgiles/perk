@@ -75,6 +75,23 @@ class LinearObjectiveStore:
         unambiguous "doesn't adopt" signal, mirroring ``save_node_plan → None``; §8.30)."""
         return None
 
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Dormant issue-backed store: does NOT support superseding — always ``None`` (the
+        unambiguous "doesn't support it" signal, mirroring ``adopt_source_as_objective → None``)."""
+        return None
+
     def create_objective(
         self,
         *,

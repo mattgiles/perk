@@ -219,6 +219,116 @@ def test_adopt_issue_as_objective_dry_run_does_not_shell(monkeypatch):
     assert adopted.dry_run is True and adopted.existed is False
 
 
+def test_supersede_objective_issue_creates_new_and_closes_old(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),  # find_objective_issue (twice) -> none
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),  # lazy label create
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),  # body comment
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),  # backfill read
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),  # header backfill PATCH
+            (_has("issues/42", ".body"), _Proc(0, _obj_body("01OLD", nodes))),  # old header read
+            (_has("issues/42", "PATCH"), _Proc(0, "{}")),  # superseded_by stamp + close
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="New objective",
+        prose="# New objective\n\nprose",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    assert created.number == 200 and created.existed is False
+    # the new issue body carries supersedes=#42
+    new_body = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("supersedes") == "#42"
+    )
+    assert plan.find_metadata_block(new_body, objective.OBJECTIVE_ROADMAP_KEY) is not None
+    # the old issue header gets superseded_by=#200
+    old_patch = next(
+        b
+        for b in rec.body_files
+        if (h := plan.find_metadata_block(b, objective.OBJECTIVE_HEADER_KEY)) is not None
+        and h.get("superseded_by") == "#200"
+    )
+    assert old_patch is not None
+    # the old issue was closed (state=closed PATCH on issues/42)
+    assert any("issues/42" in " ".join(c) and "state=closed" in " ".join(c) for c in rec.calls)
+
+
+def test_supersede_objective_issue_idempotent(monkeypatch):
+    existing = [{"number": 200, "html_url": "u/200", "body": _obj_header("01RID")}]
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, json.dumps(existing)))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=[
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ],
+    )
+    assert created.number == 200 and created.existed is True
+    # the idempotent short-circuit never closes the old objective (no PATCH at all)
+    assert not any("PATCH" in c for c in rec.calls)
+
+
+def test_supersede_objective_issue_close_failure_is_fail_open(monkeypatch):
+    nodes = [
+        objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+    ]
+    rec = _GhDispatch(
+        [
+            (_has("issues", "GET"), _Proc(0, "[]")),
+            (_has("{repo}/labels", "POST"), _Proc(0, "{}")),
+            (_has("comments", "POST"), _Proc(0, json.dumps({"id": 555}))),
+            (
+                _has("repos/{owner}/{repo}/issues", "POST"),
+                _Proc(0, json.dumps({"number": 200, "url": "u/200"})),
+            ),
+            (_has("issues/200", ".body"), _Proc(0, _obj_body("01RID", nodes))),
+            (_has("issues/200", "PATCH"), _Proc(0, "{}")),
+            # the OLD-side close fails (read returns error) — must be swallowed fail-open
+            (_has("issues/42", ".body"), _Proc(1, stderr="boom")),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    created = objectives.supersede_objective_issue(
+        old_number=42,
+        title="t",
+        prose="p",
+        repo_root=ROOT,
+        run_id="01RID",
+        roadmap_nodes=nodes,
+    )
+    # the new objective still exists despite the close failure
+    assert created.number == 200 and created.existed is False
+    assert not any("state=closed" in " ".join(c) for c in rec.calls)
+
+
+def test_supersede_objective_issue_rejects_empty_roadmap(monkeypatch):
+    rec = _GhDispatch([(_has("issues", "GET"), _Proc(0, "[]"))])
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="roadmap is empty"):
+        objectives.supersede_objective_issue(
+            old_number=42, title="t", prose="p", repo_root=ROOT, run_id="01RID", roadmap_nodes=[]
+        )
+
+
 def test_get_objective_parses_header_and_nodes(monkeypatch):
     nodes = [
         objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.DONE),

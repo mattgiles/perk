@@ -45,6 +45,8 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 
 - [How to author an objective roadmap](./author-a-roadmap.md) — stand up a new objective + roadmap
   in a read-only authoring session.
+- [How to replan an objective](./replan-an-objective.md) — re-author an objective as a superseding
+  net-new objective that carries forward only the unfinished work and closes the old one.
 - [How to advance or skip roadmap nodes manually](./advance-or-skip-nodes.md) — change a node's
   status by hand outside the auto-on-land path.
 - [How to reconcile an objective manually](./reconcile-an-objective.md) — re-sync an objective's

@@ -262,10 +262,14 @@ class _AdoptStubStore:
 
     backend_id = "github"
 
-    def __init__(self, *, adopt_returns_none: bool = False) -> None:
+    def __init__(
+        self, *, adopt_returns_none: bool = False, supersede_returns_none: bool = False
+    ) -> None:
         self.adopt_kwargs: dict | None = None
+        self.supersede_kwargs: dict | None = None
         self.created = False
         self._adopt_returns_none = adopt_returns_none
+        self._supersede_returns_none = supersede_returns_none
         from perk.backends import objective_store
 
         self._ref_cls = objective_store.ObjectiveRef
@@ -275,6 +279,12 @@ class _AdoptStubStore:
         if self._adopt_returns_none:
             return None
         return self._ref_cls(id="proj-1", url="p/url", existed=False)
+
+    def supersede_objective(self, **kwargs):
+        self.supersede_kwargs = kwargs
+        if self._supersede_returns_none:
+            return None
+        return self._ref_cls(id="proj-2", url="p/url2", existed=False)
 
     def create_objective(self, **kwargs):
         self.created = True
@@ -401,6 +411,135 @@ def test_create_adopt_from_dry_run_composes_without_adopting(monkeypatch):
     assert result.exit_code == 0, result.output
     # dry-run falls through to the offline create_objective(dry_run=True) compose-preview
     assert store.adopt_kwargs is None and store.created is True
+
+
+def test_create_supersedes_routes_to_writer(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps(
+        [
+            {"id": "1.1", "description": "carried", "adopt_issue": "ENG-2"},
+            {"id": "1.2", "description": "fresh"},
+        ]
+    )
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "#42", "--roadmap", roadmap],
+        body="# Successor\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    assert store.supersede_kwargs is not None and store.created is False
+    assert store.supersede_kwargs["old_objective_id"] == "42"  # `#` stripped
+    assert store.supersede_kwargs["carry_map"] == {"1.1": "ENG-2"}
+    assert [n.id for n in store.supersede_kwargs["roadmap_nodes"]] == ["1.1", "1.2"]
+
+
+def test_create_supersedes_handoff_recovery(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--run-id", "RID9", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+        write_handoff=("RID9", {"supersedes": "55"}),
+    )
+    assert result.exit_code == 0, result.output
+    assert store.supersede_kwargs is not None
+    assert store.supersede_kwargs["old_objective_id"] == "55"  # recovered from the handoff
+
+
+def test_create_explicit_supersedes_wins_over_handoff(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--run-id",
+            "RID9",
+            "--supersedes",
+            "explicit-9",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+        write_handoff=("RID9", {"supersedes": "handoff-9"}),
+    )
+    assert result.exit_code == 0, result.output
+    assert store.supersede_kwargs is not None
+    assert store.supersede_kwargs["old_objective_id"] == "explicit-9"
+
+
+def test_create_supersede_unsupported(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore(supersede_returns_none=True)
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        ["objective", "create", "--json", "--supersedes", "42", "--roadmap", roadmap],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "supersede_unsupported"
+
+
+def test_create_supersedes_and_adopt_from_mutually_exclusive(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--supersedes",
+            "42",
+            "--adopt-from",
+            "proj-1",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["success"] is False and payload["error_type"] == "invalid_input"
+    assert store.supersede_kwargs is None and store.adopt_kwargs is None
+
+
+def test_create_supersedes_dry_run_composes_without_superseding(monkeypatch):
+    _authed(monkeypatch)
+    store = _AdoptStubStore()
+    roadmap = json.dumps([{"id": "1.1", "description": "x"}])
+    result = _invoke_adopt(
+        [
+            "objective",
+            "create",
+            "--json",
+            "--dry-run",
+            "--supersedes",
+            "42",
+            "--roadmap",
+            roadmap,
+        ],
+        body="# Obj\n\nprose",
+        monkeypatch=monkeypatch,
+        store=store,
+    )
+    assert result.exit_code == 0, result.output
+    # dry-run falls through to the offline create_objective(dry_run=True) compose-preview
+    assert store.supersede_kwargs is None and store.created is True
 
 
 def test_show_json(monkeypatch):

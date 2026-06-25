@@ -46,7 +46,16 @@ OBJECTIVE_SCHEMA_VERSION = "1"
 # The valid `objective-header` field names (LBYL on the staged-population schema, mirroring
 # plan.PLAN_HEADER_FIELDS). `status` is the objective-level rollup, stored explicitly.
 OBJECTIVE_HEADER_FIELDS = frozenset(
-    {"run_id", "created", "objective_comment_id", "status", "base", "adopted_from"}
+    {
+        "run_id",
+        "created",
+        "objective_comment_id",
+        "status",
+        "base",
+        "adopted_from",
+        "supersedes",
+        "superseded_by",
+    }
 )
 
 # The human-readable rendered-table markers spliced into the `objective-body` comment.
@@ -164,6 +173,13 @@ class ObjectiveHeader:
     # **presence** is the canonical "this objective was adopted; the `Adopted-from` Immutable note
     # holds the original human content" signal. `None` for a normally-authored objective.
     adopted_from: str | None = None
+    # Objective re-authoring lineage (the supersede model): `supersedes` on a NEW objective points
+    # back at the OLD objective it re-authored and closed; `superseded_by` is stamped onto the OLD
+    # objective pointing forward at its successor. A GitHub ref (`"#<n>"`) or a Linear project UUID,
+    # opaque at this tier. Both `None` for a normally-authored objective. Bidirectional by
+    # construction (create-new-first, close-old-last, fail-open on the close).
+    supersedes: str | None = None
+    superseded_by: str | None = None
 
     def to_data(self) -> dict[str, object]:
         return {
@@ -173,6 +189,8 @@ class ObjectiveHeader:
             "status": self.status,
             "base": self.base,
             "adopted_from": self.adopted_from,
+            "supersedes": self.supersedes,
+            "superseded_by": self.superseded_by,
         }
 
 

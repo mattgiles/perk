@@ -243,6 +243,46 @@ class ObjectiveStore(Protocol):
         """
         ...
 
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> ObjectiveRef | None:
+        """Re-author an objective as a **net-new** objective that supersedes and closes the old one
+        (the objective analog of ``plan replan`` — but close-old/create-new, not an in-place upsert,
+        because ``create_objective`` is find-then-return idempotent on ``run_id``, not an upsert).
+
+        Creates a net-new objective from ``title``/``prose``/``roadmap_nodes`` (idempotent on
+        ``run_id`` — find-then-return ``existed=True``), stamps ``supersedes=<old_objective_id>``
+        into the new header, then **closes** ``old_objective_id`` (stamping
+        ``superseded_by=<new id>`` into its header) and posts a best-effort status update.
+        **Create-new-first, close-old-last; the close + the old-side stamp are fail-open** (a
+        failure there never fails the create — mirrors the fail-open bookkeeping posture in
+        ``create_objective``'s ``post_status_update``).
+
+        ``carry_map`` (new-roadmap-node-id → existing source-node-**issue** id) maps a carried
+        roadmap node to an existing node-issue to **move** into the new objective (Linear project
+        store only — preserving identity / open PRs / discussion); it is ignored where the store has
+        no node-issues (GitHub re-authors the carried nodes as fresh rows). Dropped (un-carried)
+        still-open node-issues on the old objective are Canceled (Linear project store).
+
+        Returns the new objective's ``ObjectiveRef`` (``existed=True`` on idempotent re-save via
+        ``run_id``, else ``existed=False``). Returns **``None``** for a store that does NOT support
+        superseding (the dormant issue-backed Linear store) — the unambiguous "doesn't support it"
+        signal (mirrors ``adopt_source_as_objective → None``). ``dry_run`` returns ``None``
+        (resolving the old objective needs a network read; the cold door's ``--dry-run`` is
+        offline). An empty ``roadmap_nodes`` raises (the storage backstop).
+        """
+        ...
+
     def create_objective(
         self,
         *,

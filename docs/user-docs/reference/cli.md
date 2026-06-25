@@ -200,7 +200,7 @@ human title/body verbatim and **never minting a second object**. Local-only (`co
 ### `perk objective` (alias `obj`)
 
 The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
-`save`, `plan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
+`save`, `plan`, `replan`) and **Workers** (the deterministic dev/CI/T10 storage + mechanics surface, not an
 agent affordance: `create` (`new`), `show` (`s`), `node`, `reconcile` (`rec`), `next` (`n`), `run`
 (`r`)). Bare `perk objective` shows this group help.
 
@@ -286,6 +286,21 @@ GitHub single-issue objectives (and the dormant issue-backed Linear store) repor
 Reconcile an objective's Reconcilable prose region against the merged diff — rewriting only the
 marker-bounded region, never the roadmap table or Immutable notes. Reads the required `--body`
 file; `--dry-run` composes without writing.
+
+### `perk objective replan NUMBER`
+
+Re-author an objective as a **net-new objective that supersedes and closes the old one** — the
+objective analog of [`perk plan replan`](#perk-plan-replan-plan), but close-old/create-new rather
+than in-place (perk's `objective_save` is not an upsert). Carries forward only the **unfinished**
+work (reshaped); already-`done` nodes stay as history on the closed old objective. Read-only,
+local-only (`cold_remote:false`); `--dry-run` materializes the old objective + prints the seed
+without launching; `--worktree` and `--json` are also accepted. Refuses when the objective is not
+found, already superseded, or (GitHub) not open. The `supersedes` link rides the run handoff, the
+new header gets `supersedes`, the old header gets `superseded_by`. On **Linear** the unfinished
+node-issues are **moved** into the new objective (identity / open PRs preserved) and dropped open
+node-issues are Canceled; on **GitHub** carried nodes are authored as fresh roadmap rows and the
+old issue is closed. See
+[How to replan an objective](../how-to/replan-an-objective.md).
 
 ### `perk objective next NUMBER` (alias `n`)
 

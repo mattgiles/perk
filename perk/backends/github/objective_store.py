@@ -138,6 +138,39 @@ class GitHubObjectiveStore:
             id=str(adopted.number), url=adopted.url, existed=adopted.existed
         )
 
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Create a net-new objective issue superseding + closing ``old_objective_id`` (the
+        supersede model). ``carry_map`` is ignored (GitHub objectives have no child issues — carried
+        nodes are authored fresh rows). ``dry_run`` → ``None`` (the cold door's ``--dry-run`` is
+        offline)."""
+        if dry_run:
+            return None
+        old_number = _number(old_objective_id)
+        with _translate():
+            created = objectives.supersede_objective_issue(
+                old_number=old_number,
+                title=title,
+                prose=prose,
+                repo_root=self._repo_root,
+                run_id=run_id,
+                status=status,
+                base=base,
+                roadmap_nodes=roadmap_nodes,
+            )
+        return _objective_ref(created)
+
     def create_objective(
         self,
         *,

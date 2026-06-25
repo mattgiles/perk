@@ -25,6 +25,7 @@ from perk.cli.commands.objective.node_cmd import node_objective
 from perk.cli.commands.objective.node_engagement_cmd import node_engagement_objective
 from perk.cli.commands.objective.plan_cmd import plan_objective
 from perk.cli.commands.objective.reconcile_cmd import reconcile_objective
+from perk.cli.commands.objective.replan_cmd import replan_objective
 from perk.cli.commands.objective.run_cmd import run_objective
 from perk.cli.commands.objective.save_cmd import save_objective
 from perk.cli.commands.objective.show_cmd import show_objective
@@ -40,6 +41,7 @@ def objective_group() -> None:
 register_with_aliases(objective_group, mark_kind(author_objective, "launcher"))
 register_with_aliases(objective_group, mark_kind(save_objective, "launcher"))
 register_with_aliases(objective_group, mark_kind(plan_objective, "launcher"))
+register_with_aliases(objective_group, mark_kind(replan_objective, "launcher"))
 
 # Workers (deterministic dev/CI surface).
 register_with_aliases(objective_group, mark_kind(create_objective, "worker"))

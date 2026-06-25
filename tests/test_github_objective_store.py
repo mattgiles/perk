@@ -262,6 +262,44 @@ class TestGitHubDelegation:
         )
         assert result is None
 
+    def test_supersede_objective(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _Recorder(objectives.ObjectiveIssue(number=99, url="u99", existed=False))
+        monkeypatch.setattr(objectives, "supersede_objective_issue", rec)
+        nodes = [
+            objective.ObjectiveNode(id="1.1", description="A", status=objective.NodeStatus.PENDING)
+        ]
+        result = GitHubObjectiveStore(tmp_path).supersede_objective(
+            old_objective_id="42",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=nodes,
+            carry_map={"1.1": "ignored-on-github"},
+        )
+        assert rec.kwargs == {
+            "old_number": 42,
+            "title": "t",
+            "prose": "p",
+            "repo_root": tmp_path,
+            "run_id": "RUN1",
+            "status": "active",
+            "base": None,
+            "roadmap_nodes": nodes,
+        }
+        assert result == objective_store.ObjectiveRef(id="99", url="u99", existed=False)
+
+    def test_supersede_objective_dry_run_returns_none(self, tmp_path: Path) -> None:
+        result = GitHubObjectiveStore(tmp_path).supersede_objective(
+            old_objective_id="42",
+            title="t",
+            prose="p",
+            run_id="RUN1",
+            roadmap_nodes=[],
+            carry_map={},
+            dry_run=True,
+        )
+        assert result is None
+
     def test_save_node_plan_returns_none(self, tmp_path: Path) -> None:
         # GitHub does not unify node + plan: always None so the caller takes the standalone path.
         result = GitHubObjectiveStore(tmp_path).save_node_plan(
