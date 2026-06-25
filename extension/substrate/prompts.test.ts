@@ -18,7 +18,7 @@ function loadCases(): Case[] {
   return parse(text) as Case[];
 }
 
-test("golden parity: nunjucks render == the committed jinja2 golden bytes", () => {
+test("golden parity: vendored mini-jinja render == the committed jinja2 golden bytes", () => {
   const cases = loadCases();
   assert.ok(cases.length > 0, "cases.yaml must list at least one case");
   for (const c of cases) {

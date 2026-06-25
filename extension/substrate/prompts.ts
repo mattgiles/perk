@@ -1,35 +1,26 @@
 // The TS plane's prompt render seam — the twin of perk/prompts.py::render.
 //
 // Templates are loaded by explicit `name` (root-relative under `prompts/`) via promptsDir(),
-// the same directory the Python twin reads. The feature surface is intentionally small —
-// `{{ var }}` substitution and `{% include %}` — and `throwOnUndefined` makes a missing
-// variable fail loudly rather than render an empty string.
+// the same directory the Python twin reads. The feature surface is the frozen mini-jinja subset
+// (`shared/contracts.md §8.31`): `{{ var }}` substitution, `{% include %}`, and
+// `{% if %}`/`{% elif %}`/`{% else %}`/`{% endif %}` conditionals. A missing (or non-string)
+// variable fails loudly rather than rendering an empty string.
 //
 // jinja2 is the REFERENCE engine: the committed golden bytes under prompts/_fixtures/golden/
-// ARE jinja2's output, and this nunjucks twin must reproduce them byte-for-byte. Golden parity
-// is enforced by prompts.test.ts + tests/test_prompts.py. The Environment config below is the
-// parity baseline both engines share (autoescape off, trimBlocks on so a block tag on its own
-// line emits no spurious newline — letting conditional templates keep their tags off the content
-// lines while preserving indentation — lstripBlocks off; nunjucks keeps the trailing newline,
-// matching jinja2's keep_trailing_newline=True).
+// ARE jinja2's output, and this seam must reproduce them byte-for-byte (enforced by prompts.test.ts
+// + tests/test_prompts.py). Rendering is delegated to the vendored, zero-dependency
+// ./miniJinja.ts renderer — which bakes in the frozen render config (trim_blocks on so a block
+// tag on its own line emits no spurious newline, lstrip off, trailing newline preserved) and
+// owns the filesystem (resolving `name` and every `{% include %}` under promptsDir()). Vendoring
+// keeps the extension zero-runtime-dep / loadable from a bare git clone (guarded by
+// extension/bareImportGuard.test.ts).
 //
-// This module is imported ONLY by its test in this node — there is no real prompt to render
-// until Phase 2, so wiring it into extension/index.ts would be dead code. The runtime nunjucks
-// dependency is removed and the zero-dep / bare-clone-loadable invariant restored when the
-// renderer is vendored (node 4.2).
+// This seam is LIVE in production: render is imported by extension/worker/worker.ts, the
+// learn/address/learnDocs/lifecycleGates doors, and extension/factories/objectivePlan.ts.
 
-import nunjucks from "nunjucks";
-
-import { promptsDir } from "./resources.ts";
-
-const env = new nunjucks.Environment(new nunjucks.FileSystemLoader(promptsDir()), {
-  throwOnUndefined: true,
-  autoescape: false,
-  trimBlocks: true,
-  lstripBlocks: false,
-});
+import { render as miniJinjaRender } from "./miniJinja.ts";
 
 /** Render the template at `name` (root-relative under `prompts/`) with `vars`. */
 export function render(name: string, vars: Record<string, unknown>): string {
-  return env.render(name, vars);
+  return miniJinjaRender(name, vars);
 }

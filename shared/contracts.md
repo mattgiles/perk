@@ -3976,36 +3976,45 @@ with a small, fixed feature surface — `{{ var }}` substitution, `{% include %}
 guard. Every later node in this objective rides on this mechanism.
 
 - **Python:** `perk/prompts.py::render(name, variables)` over a module-level jinja2 `Environment`.
-- **TS:** `extension/substrate/prompts.ts::render(name, vars)` over a module-level nunjucks
-  `Environment`. This module is imported **only** by its test in this node (no real prompt to render
-  until Phase 2; wiring it into `extension/index.ts` would be dead code).
+- **TS:** `extension/substrate/prompts.ts::render(name, vars)`, delegating to the vendored,
+  zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine that
+  replaced nunjucks). The seam is LIVE: `render` is imported by the worker, the
+  learn/address/learnDocs/lifecycleGates doors, and the objective-plan factory.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
-nunjucks uses `throwOnUndefined: true`. A missing required variable is an error, never an empty
-string.
+the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
+throws (`perk mini-jinja: …`). This deliberately tightens nunjucks's looser `throwOnUndefined` (and
+forbids a `String(value)` divergence): the render contract is string-only, so a missing required
+variable — or a boolean/number/null — is an error, never an empty or coerced string.
 
 **jinja2 is the reference engine.** The committed golden files under `prompts/_fixtures/golden/`
 ARE jinja2's rendered output. The golden harness — `prompts/_fixtures/cases.yaml` listing
 `(template, vars, golden)` cases with committed golden-output files — is the byte-parity proof:
 `tests/test_prompts.py` asserts `jinja2-render == golden`, and
-`extension/substrate/prompts.test.ts` asserts `nunjucks-render == golden`. The frozen subset is
-"the jinja subset"; the future vendored TS renderer (node 4.2) must reproduce these same golden
-bytes. Golden outputs are **separate committed files** (not inline multiline YAML) because the TS
-harness reads `cases.yaml` through the vendored `miniYaml` reader, which throws on `|`/`>` block
-scalars; fixture vars are strings only in this node (sidestepping jinja2-vs-nunjucks non-string
-rendering divergence).
+`extension/substrate/prompts.test.ts` asserts the vendored mini-jinja render `== golden`. The
+frozen subset is "the jinja subset"; the vendored TS renderer reproduces these same golden bytes.
+Golden outputs are **separate committed files** (not inline multiline YAML) because the TS harness
+reads `cases.yaml` through the vendored `miniYaml` reader, which throws on `|`/`>` block scalars;
+fixture vars are strings only (matching the string-only render contract, which also sidesteps any
+non-string rendering divergence).
 
 **Environment-config parity baseline** (both engines): `autoescape` off (prompts are plain text,
 never HTML-escaped), `trim_blocks` **on** (as of Node 2.4) so a block tag on its own line emits no
 spurious newline — conditional templates keep their `{% %}` tags off the content lines while
 preserving the content's own indentation — `lstrip_blocks` off, and jinja2 `keep_trailing_newline`
-on so jinja2 does not strip a trailing `\n` that nunjucks keeps — required for byte-parity.
-(`trim_blocks` only affects block-tag templates; the only such templates are `stages/learn.md`
-and the `with_include` fixture — every real arm template uses `{{ var }}` only and is unaffected.)
+on so jinja2 does not strip a trailing `\n` (the vendored TS renderer never strips one) — required
+for byte-parity. (`trim_blocks` only affects block-tag templates; the only such templates are
+`stages/learn.md` and the `with_include` fixture — every real arm template uses `{{ var }}` only
+and is unaffected.) The vendored renderer **bakes these in** — the subset is frozen, so there is no
+config object.
 
-**Dependencies:** `jinja2` is a Python runtime dependency. `nunjucks` is a TS **runtime**
-dependency (`@types/nunjucks` dev-only for typing) **until node 4.2** vendors a zero-dependency
-renderer and removes it, restoring the bare-clone-loadable / zero-runtime-dependency invariant.
+**Dependencies:** `jinja2` is the Python runtime dependency and the reference engine. The TS plane
+has **zero runtime dependencies**: the former lone runtime dep (`nunjucks`) is replaced by the
+vendored, zero-dependency `extension/substrate/miniJinja.ts` renderer, restoring the
+bare-clone-loadable / zero-runtime-dependency invariant. That invariant is durably guarded by
+`extension/bareImportGuard.test.ts` (no shipped source imports a bare npm package) and
+`tests/test_packaging.py::test_no_runtime_dependencies` (`package.json` declares no runtime
+`dependencies`).
 
 **The frozen template-grammar subset (the node-4.2 renderer's input contract).** The construct
 surface actually used across every `prompts/` template is **frozen** as the canonical "mini-jinja"
