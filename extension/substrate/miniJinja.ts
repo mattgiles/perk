@@ -472,6 +472,9 @@ export function render(
   rootDir: string = promptsDir(),
 ): string {
   const file = resolveTemplatePath(rootDir, name);
-  const src = readFileSync(file, "utf8");
+  // Normalize CRLF / lone-CR to LF before tokenizing — Python's text-mode read does universal
+  // newline translation before jinja2 sees the source, so a CRLF checkout must not diverge the
+  // planes (notably trim_blocks, which consumes a single `\n` after a block tag's `%}`).
+  const src = readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
   return renderNodes(parse(tokenize(src)), vars, rootDir);
 }

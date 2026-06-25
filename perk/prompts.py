@@ -32,5 +32,18 @@ _env = Environment(
 
 
 def render(name: str, variables: Mapping[str, object]) -> str:
-    """Render the template at ``name`` (root-relative under ``prompts/``) with ``variables``."""
+    """Render the template at ``name`` (root-relative under ``prompts/``) with ``variables``.
+
+    The render contract is **string-only** (the frozen mini-jinja subset, ``contracts.md §8.31``):
+    every variable value must be a ``str``. This mechanically enforces the same contract the TS
+    twin's vendored renderer enforces — the difference being only *when* it fires: the TS renderer
+    throws lazily on a referenced non-string, this validates the whole var map eagerly. Both forbid
+    the silent ``str(value)`` coercion (a future ``False`` must never render ``"False"``).
+    """
+    for key, value in variables.items():
+        if not isinstance(value, str):
+            raise TypeError(
+                f"perk prompts: variable {key!r} is {type(value).__name__}, not str "
+                "(the render contract is string-only)"
+            )
     return _env.get_template(name).render(variables)

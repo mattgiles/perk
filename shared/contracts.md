@@ -3985,7 +3985,10 @@ guard. Every later node in this objective rides on this mechanism.
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**
 throws (`perk mini-jinja: …`). This deliberately tightens nunjucks's looser `throwOnUndefined` (and
 forbids a `String(value)` divergence): the render contract is string-only, so a missing required
-variable — or a boolean/number/null — is an error, never an empty or coerced string.
+variable — or a boolean/number/null — is an error, never an empty or coerced string. **The
+string-only contract is enforced on BOTH planes:** the TS renderer throws lazily on a referenced
+non-string; `perk/prompts.py::render` validates the whole var map eagerly (raising `TypeError`)
+before delegating to jinja2.
 
 **jinja2 is the reference engine.** The committed golden files under `prompts/_fixtures/golden/`
 ARE jinja2's rendered output. The golden harness — `prompts/_fixtures/cases.yaml` listing
@@ -4003,10 +4006,10 @@ never HTML-escaped), `trim_blocks` **on** (as of Node 2.4) so a block tag on its
 spurious newline — conditional templates keep their `{% %}` tags off the content lines while
 preserving the content's own indentation — `lstrip_blocks` off, and jinja2 `keep_trailing_newline`
 on so jinja2 does not strip a trailing `\n` (the vendored TS renderer never strips one) — required
-for byte-parity. (`trim_blocks` only affects block-tag templates; the only such templates are
-`stages/learn.md` and the `with_include` fixture — every real arm template uses `{{ var }}` only
-and is unaffected.) The vendored renderer **bakes these in** — the subset is frozen, so there is no
-config object.
+for byte-parity. (`trim_blocks` only affects block-tag templates — `stages/learn.md`,
+`stages/objective-plan/{seed,guidance}.md`, and the `with_include` fixture; the remaining arm
+templates use `{{ var }}` only and are unaffected.) The vendored renderer **bakes these in** — the
+subset is frozen, so there is no config object.
 
 **Dependencies:** `jinja2` is the Python runtime dependency and the reference engine. The TS plane
 has **zero runtime dependencies**: the former lone runtime dep (`nunjucks`) is replaced by the

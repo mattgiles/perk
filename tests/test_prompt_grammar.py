@@ -26,17 +26,28 @@ _BLOCK = re.compile(r"\{\{(.*?)\}\}|\{%(.*?)%\}|\{#(.*?)#\}")
 # A bare identifier — the only thing admitted inside `{{ }}` and the atom of a condition.
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# `include "<path>"` — double-quoted path only.
-_INCLUDE = re.compile(r'include\s+"[^"]*"')
+# `include "<path>"` — double-quoted path only, NO escapes (`[^"\\]*`, mirroring miniJinja). The
+# captured path is additionally checked for containment (non-empty / non-absolute / no `..`).
+_INCLUDE = re.compile(r'include\s+"([^"\\]*)"')
 
-# A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string, `==`} separated
-# by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers) leaves unrecognized
-# text → no full match → violation.
-_COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|==)\s*)+')
+# A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string (no escapes),
+# `==`} separated by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers,
+# escaped quotes) leaves unrecognized text → no full match → violation. The string literal is
+# `[^"\\]*` to mirror miniJinja's reject-escapes rule.
+_COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+')
 
 # Bare-word tokens that LOOK like identifiers but are jinja operators outside the frozen subset.
 # (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
 _BANNED_COND_WORDS = {"in", "is"}
+
+
+def _include_path_is_valid(p: str) -> bool:
+    """Mirror miniJinja's resolveTemplatePath containment: non-empty / non-absolute / no `..`."""
+    if not p:
+        return False
+    if p.startswith("/") or re.match(r"^[A-Za-z]:", p):  # absolute (posix or windows drive)
+        return False
+    return ".." not in re.split(r"[\\/]", p)
 
 
 def _block_is_valid(raw: str, is_variable: bool) -> bool:
@@ -48,8 +59,9 @@ def _block_is_valid(raw: str, is_variable: bool) -> bool:
     # `{% X %}` (catches `{%- … -%}` since the leading `-` breaks every branch below).
     if inner in {"else", "endif"}:
         return True
-    if _INCLUDE.fullmatch(inner):
-        return True
+    include = _INCLUDE.fullmatch(inner)
+    if include is not None:
+        return _include_path_is_valid(include.group(1))
     for keyword in ("if", "elif"):
         prefix = keyword + " "
         if inner.startswith(prefix):
@@ -57,7 +69,7 @@ def _block_is_valid(raw: str, is_variable: bool) -> bool:
             if not cond or not _COND.fullmatch(cond):
                 return False
             # Reject `in`/`is` operators (lexically identifiers) outside string literals.
-            words = _IDENT.findall(re.sub(r'"[^"]*"', " ", cond))
+            words = _IDENT.findall(re.sub(r'"[^"\\]*"', " ", cond))
             return not any(word in _BANNED_COND_WORDS for word in words)
     return False
 
@@ -128,6 +140,12 @@ def test_validator_flags_out_of_subset_blocks() -> None:
         "{% if a != b %}",
         "{% if (a or b) %}",
         "{# comment #}",
+        # Escaped string literals + out-of-containment include paths the runtime rejects.
+        r'{% if a == "x\"y" %}',
+        '{% include "../x.md" %}',
+        '{% include "/x.md" %}',
+        '{% include "" %}',
+        '{% include "a/../b.md" %}',
     ]
     for block in bad:
         assert _violations(block, "synthetic.md"), f"expected violation for {block!r}"

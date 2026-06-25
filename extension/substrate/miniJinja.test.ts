@@ -69,6 +69,12 @@ test("== / or / not / and", () => {
   assert.equal(r("{% if a and b %}both{% endif %}", { a: "1", b: "" }), "");
 });
 
+test("CRLF / lone-CR source is normalized to LF (byte-parity with the universal-newline Python read)", () => {
+  // trim_blocks must consume the newline after `%}` regardless of the checkout's line endings.
+  assert.equal(r("{% if a %}\r\nA\r\n{% endif %}\r\n", { a: "x" }), "A\n");
+  assert.equal(r("line1\rline2\r", {}), "line1\nline2\n");
+});
+
 test("nested if", () => {
   const tpl = "{% if a %}{% if b %}AB{% else %}A{% endif %}{% endif %}";
   assert.equal(r(tpl, { a: "1", b: "1" }), "AB");

@@ -27,16 +27,28 @@ const BLOCK = /\{\{(.*?)\}\}|\{%(.*?)%\}|\{#(.*?)#\}/g;
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IDENT_G = /[A-Za-z_][A-Za-z0-9_]*/g;
 
-// `include "<path>"` — double-quoted path only.
-const INCLUDE = /^include\s+"[^"]*"$/;
+// `include "<path>"` — double-quoted path only, NO escapes (`[^"\\]*`, mirroring miniJinja). The
+// captured path is additionally checked for containment (non-empty / non-absolute / no `..`).
+const INCLUDE = /^include\s+"([^"\\]*)"$/;
 
-// A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string, `==`} separated
-// by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers) → no full match.
-const COND = /^(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|==)\s*)+$/;
+// A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string (no escapes),
+// `==`} separated by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers,
+// escaped quotes) → no full match. The string literal is `[^"\\]*` to mirror miniJinja's reject-
+// escapes rule.
+const COND = /^(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+$/;
 
 // Bare-word tokens that LOOK like identifiers but are jinja operators outside the frozen subset.
 // (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
 const BANNED_COND_WORDS = new Set(["in", "is"]);
+
+// An `{% include %}` path matches miniJinja's resolveTemplatePath containment: non-empty, not
+// absolute, and no `..` segment (the runtime additionally resolves against rootDir).
+function includePathIsValid(p: string): boolean {
+  if (p === "") return false;
+  if (path.isAbsolute(p)) return false;
+  if (p.split(/[\\/]/).includes("..")) return false;
+  return true;
+}
 
 /** True iff one extracted block (without its delimiters) is in the frozen subset. */
 function blockIsValid(raw: string, isVariable: boolean): boolean {
@@ -47,13 +59,14 @@ function blockIsValid(raw: string, isVariable: boolean): boolean {
   }
   // `{% X %}` (catches `{%- … -%}` since the leading `-` breaks every branch below).
   if (inner === "else" || inner === "endif") return true;
-  if (INCLUDE.test(inner)) return true;
+  const include = INCLUDE.exec(inner);
+  if (include !== null) return includePathIsValid(include[1] ?? "");
   for (const keyword of ["if ", "elif "]) {
     if (inner.startsWith(keyword)) {
       const cond = inner.slice(keyword.length).trim();
       if (cond === "" || !COND.test(cond)) return false;
       // Reject `in`/`is` operators (lexically identifiers) outside string literals.
-      const words = cond.replace(/"[^"]*"/g, " ").match(IDENT_G) ?? [];
+      const words = cond.replace(/"[^"\\]*"/g, " ").match(IDENT_G) ?? [];
       return !words.some((word) => BANNED_COND_WORDS.has(word));
     }
   }
@@ -132,6 +145,12 @@ test("validator flags out-of-subset blocks", () => {
     "{% if a != b %}",
     "{% if (a or b) %}",
     "{# comment #}",
+    // Escaped string literals + out-of-containment include paths the runtime rejects (mirror miniJinja).
+    '{% if a == "x\\"y" %}',
+    '{% include "../x.md" %}',
+    '{% include "/x.md" %}',
+    '{% include "" %}',
+    '{% include "a/../b.md" %}',
   ];
   for (const block of bad) {
     assert.ok(violations(block, "synthetic.md").length > 0, `expected violation for ${block}`);

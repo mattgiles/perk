@@ -6,6 +6,9 @@
 // source file the runtime can reach (the import graph rooted at `extension/index.ts`) must import
 // ONLY Node builtins (`node:*`), relative paths, or the host/peer packages — never a bare npm
 // dependency. This source-scan test fails CI on any drift (e.g. re-introducing `nunjucks`/`yaml`).
+// It covers static `import … from`, bare side-effect `import "…"`, and the string-literal form of
+// dynamic `import(…)` / `require(…)` (a computed specifier has no literal to scan, but the bundled
+// extension uses none).
 //
 // Paired with `tests/test_packaging.py::test_no_runtime_dependencies` (package.json has no runtime
 // `dependencies`); together they durably pin the invariant the vendored miniYaml/miniJinja readers
@@ -48,8 +51,9 @@ function stripComments(source: string): string {
 
 /**
  * Extract every imported/re-exported module specifier from already-comment-stripped source:
- * `import … from "spec"` / `export … from "spec"` (the `from "…"` clause, multiline-safe) and bare
- * side-effect `import "spec"`.
+ * `import … from "spec"` / `export … from "spec"` (the `from "…"` clause, multiline-safe), bare
+ * side-effect `import "spec"`, and the string-literal form of dynamic `import("spec")` /
+ * `require("spec")` (a non-literal dynamic specifier has no string to scan and is not flagged).
  */
 function specifiersOf(strippedSource: string): string[] {
   const specs: string[] = [];
@@ -57,6 +61,9 @@ function specifiersOf(strippedSource: string): string[] {
     if (m[1] !== undefined) specs.push(m[1]);
   }
   for (const m of strippedSource.matchAll(/\bimport\s*["']([^"']+)["']/g)) {
+    if (m[1] !== undefined) specs.push(m[1]);
+  }
+  for (const m of strippedSource.matchAll(/\b(?:import|require)\s*\(\s*["']([^"']+)["']/g)) {
     if (m[1] !== undefined) specs.push(m[1]);
   }
   return specs;
@@ -89,9 +96,16 @@ test("production extension sources import only node:/relative/host specifiers (z
   );
 });
 
-test("synthetic positive: a fabricated bare import is flagged", () => {
-  // Proves the extractor+classifier actually catches a real bare npm import (not vacuously green).
-  const fabricated = 'import nunjucks from "nunjucks";\nimport { parse } from "yaml";\n';
+test("synthetic positive: fabricated bare imports (static, side-effect, dynamic, require) are flagged", () => {
+  // Proves the extractor+classifier actually catches a real bare npm import (not vacuously green),
+  // across every scanned form — including dynamic import()/require() with a string-literal specifier.
+  const fabricated = [
+    'import nunjucks from "nunjucks";',
+    'import { parse } from "yaml";',
+    'import "side-effect-pkg";',
+    'const x = await import("dynamic-pkg");',
+    'const y = require("require-pkg");',
+  ].join("\n");
   const flagged = specifiersOf(stripComments(fabricated)).filter((s) => !isAllowed(s));
-  assert.deepEqual(flagged, ["nunjucks", "yaml"]);
+  assert.deepEqual(flagged, ["nunjucks", "yaml", "side-effect-pkg", "dynamic-pkg", "require-pkg"]);
 });
