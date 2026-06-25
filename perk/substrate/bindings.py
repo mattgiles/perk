@@ -42,7 +42,7 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # `binding_trigger="command:learn-docs"` override in perk/run/launch/. Commands that ARE registry
 # stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
-    {"objective-reconcile", "learn-docs", "pr-review"}
+    {"objective-reconcile", "objective-replan", "learn-docs", "pr-review"}
 )
 
 # Where an installed skill body lives. The `skills` CLI delivers every `perk-*` skill into

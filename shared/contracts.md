@@ -4050,3 +4050,75 @@ subsection **and** both guards.
 > **History.** The chronological per-node landing notes for this section (the seven
 > "prompt moved onto the seam" entries, Nodes 2.1–2.7) live in
 > [`contracts-history.md` §8.31](./contracts-history.md).
+
+## §8.32 · Objective replan — the superseding re-author cold door (`objective replan`)
+
+The objective analog of §8.27's plan-`replan`, but with a **different model**: where plan-`replan`
+rewrites the plan IN PLACE (`plan_save` is an upsert keyed on `run_id`), objective-`replan`
+**closes the old objective and creates a net-new one that supersedes it**. `create_objective` is
+find-then-return idempotent on `run_id` (NOT an upsert — see §8.24's "objective_save is not an
+upsert" residual), so an in-place objective rewrite has no storage primitive; the close-old/
+create-new shape sidesteps that gap. The structural siblings are §8.27 (replan engagement) and
+§8.30 (in-place adoption).
+
+**Surface.** `perk objective replan <N>` — a **dedicated cold door** (a launcher, not a registry
+stage) that *borrows* the `objective-author` stage for launch (exactly like `plan replan` borrows
+`plan` and `objective author --from` borrows `objective-author`). It mints a **fresh** `run_id`
+(the new objective is net-new — no `run_id_override`), refuses `--remote` (objective-author is
+`cold_remote:false`), and refuses a not-found / already-superseded / non-OPEN (GitHub) objective
+(`objective_not_found` / `objective_not_open`). `("replan", ())` joins the `objective` group in the
+parity-smoke `EXPECTED_SURFACE`.
+
+**The carry model.** Only the **unfinished** nodes carry forward (status ∈ {`pending`, `planning`,
+`in_progress`, `blocked`}); `done`/`skipped` nodes stay as **history on the closed old objective**
+(the new prose references the shipped phases). The cold door materializes the old objective's
+title + prose (`<untrusted_objective>`) and the unfinished nodes
+(`<untrusted_objective_unfinished_nodes>`) into a scratch file as DATA, seeds the unchanged
+`objective_draft → plan_review → objective_save` flow, and stashes `supersedes=<OLD>` in the run
+**handoff** so the link survives the save path (recovered by `_supersedes_from_handoff`, mirroring
+`_adopt_from_handoff`). Objective + node-issue engagement is read fail-soft (`render_objective_engagement`).
+
+**The lineage fields.** `ObjectiveHeader` gains `supersedes` and `superseded_by` (both
+`str | None`, in `OBJECTIVE_HEADER_FIELDS` + `to_data()`): `supersedes=#<OLD>` on the NEW header,
+`superseded_by=#<NEW>` on the OLD header. Bidirectional by construction; both `None` for a
+normally-authored objective.
+
+**The storage capability (`supersede_objective`).** A new `ObjectiveStore` method
+(keyword-only, returns `ObjectiveRef | None`) joins the no-op-family Protocol pattern (3
+implementers, ty-enforced; `None` = "this store doesn't support it", mirroring
+`adopt_source_as_objective`). Semantics: create a net-new objective (idempotent on `run_id`)
+carrying `supersedes`, then **close the old objective fail-open** (stamp `superseded_by`, post a
+best-effort status update — create-new-first, close-old-last; a close failure never fails the
+create — the §8.24 bookkeeping posture). `dry_run` → `None` (resolving the old objective needs a
+network read; the cold door's `--dry-run` is offline); an empty `roadmap_nodes` raises.
+
+**Backend-specific carry-forward.**
+- **GitHub** (a node is a row in one objective issue body): the new objective's roadmap rows are
+  authored fresh; the old issue is closed. `carry_map` is ignored (no child issues).
+  `objectives.supersede_objective_issue` extends `create_objective_issue` with a `supersedes`
+  header field, then fail-open closes the old issue.
+- **Linear project store** (a node *is* a live issue): `carry_map` (new-node-id →
+  existing-node-issue-id) **moves** each carried node-issue into the new project
+  (`issueUpdate(input:{projectId})`), re-stamps its `objective-node` block to the new node id, and
+  re-attaches it to the new phase milestone (identity / open PRs / discussion preserved);
+  non-carried nodes mint fresh. The old project: `superseded_by` stamped, **every dropped
+  (un-carried) still-open node-issue Canceled** (state type ∉ {completed, canceled} →
+  `_workflow_state_id("canceled")`), then marked complete. `done` node-issues are left untouched.
+  Flagged not-live-proven (verify at the Linear smoke gate).
+- **Issue-backed Linear store** (dormant): `supersede_objective → None` (the no-op-family signal).
+
+**The dispatch carrier (`objective create --supersedes`).** Structurally symmetric to
+`--adopt-from`: a `--supersedes` worker flag (recovered from the handoff via
+`_supersedes_from_handoff`; explicit flag wins) parses the carry map via the reused
+`objective.parse_adopt_mapping(raw_roadmap)` (the node→issue side-map, interpreted as **move**
+semantics here) and calls `store.supersede_objective(...)`; a `None` return raises
+`supersede_unsupported`. `--supersedes` and `--adopt-from` are **mutually exclusive** (`invalid_input`).
+
+**Binding + skill.** `command:objective-replan → perk-objective-replan` (nudge) joins
+`shared/bindings.yaml` (mirroring `command:objective-reconcile`) and `DELIVERABLE_COMMAND_TARGETS`
+(it fires via the cold `binding_trigger="command:objective-replan"` override). The
+`perk-objective-replan` skill is the re-author judgment layer (carry-only-unfinished, the
+`adopt_issue` Linear move, the don't-churn rule), cross-referencing `perk-objective-author` for the
+draft→review→save mechanics. The warm plane is unchanged — `objective_draft`/`objective_save`'s
+structured roadmap path already carries `adopt_issue` per node, and `supersedes` rides the handoff
+exactly as `adopt_from` does, so no TS schema edit is needed.

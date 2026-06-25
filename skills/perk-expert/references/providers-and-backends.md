@@ -107,6 +107,13 @@ Linear moves where canonical plan / learn / objective state lives.
   node is a node-issue attached to the project, **phases group under Project Milestones** (one per
   phase, keyed by the `### Phase N: …` header), and a fail-open **Project Update** posts on create /
   plan-land / reconcile. Both behaviors are additive and non-fatal, and neither exists on GitHub.
+- **Objective replan is backend-specific** — `perk objective replan <N>` re-authors an objective as
+  a net-new objective that supersedes and closes the old one (carrying forward only the unfinished
+  work; `supersedes`/`superseded_by` link the two headers bidirectionally). On **Linear** the
+  unfinished node-issues are **moved** into the new Project (identity / open PRs preserved) and
+  dropped open node-issues are **Canceled**; on **GitHub** carried nodes are re-authored as fresh
+  roadmap rows and the old issue is closed. The dormant issue-backed Linear store reports
+  "unsupported".
 
 ## Maturity caveat
 

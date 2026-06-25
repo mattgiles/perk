@@ -64,6 +64,22 @@ class _FakeObjectiveStore:
         # The minimal fake does not support in-place adoption (the "doesn't adopt" signal).
         return None
 
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        # The minimal fake does not support superseding (the "doesn't support it" signal).
+        return None
+
     def create_objective(
         self,
         *,

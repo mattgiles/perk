@@ -353,6 +353,23 @@ def test_objective_header_adopted_from_absent_by_default():
     assert data["adopted_from"] is None
 
 
+def test_objective_header_supersede_lineage_round_trips():
+    header = o.ObjectiveHeader(run_id="01RID", created="t", supersedes="#12", superseded_by="#34")
+    data = header.to_data()
+    assert data["supersedes"] == "#12" and data["superseded_by"] == "#34"
+    rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
+    parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
+    assert parsed is not None
+    assert parsed["supersedes"] == "#12" and parsed["superseded_by"] == "#34"
+    assert "supersedes" in o.OBJECTIVE_HEADER_FIELDS
+    assert "superseded_by" in o.OBJECTIVE_HEADER_FIELDS
+
+
+def test_objective_header_supersede_lineage_absent_by_default():
+    data = o.ObjectiveHeader(run_id="01RID", created="t").to_data()
+    assert data["supersedes"] is None and data["superseded_by"] is None
+
+
 def test_parse_adopt_mapping_bare_list_and_nodes_shape():
     bare = [
         {"id": "1.1", "description": "A", "adopt_issue": "ENG-1"},

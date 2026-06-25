@@ -56,6 +56,9 @@ bindings:
   - trigger: "command:objective-reconcile"
     skill: perk-objective-reconcile
     mode: nudge
+  - trigger: "command:objective-replan"
+    skill: perk-objective-replan
+    mode: nudge
   - trigger: "command:learn-docs"
     skill: perk-learn-docs
     mode: nudge

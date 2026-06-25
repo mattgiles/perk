@@ -47,6 +47,7 @@ _TEAM_UUID = "team-uuid-1"
 _STATES: list[dict[str, object]] = [
     {"id": "st-todo", "name": "Todo", "type": "unstarted", "position": 0},
     {"id": "st-done", "name": "Done", "type": "completed", "position": 1},
+    {"id": "st-canceled", "name": "Canceled", "type": "canceled", "position": 2},
 ]
 
 
@@ -342,6 +343,8 @@ class FakeLinearWorkspace(LinearClient):
                 issue["state_id"] = payload["stateId"]
             if "projectMilestoneId" in payload:
                 issue["milestone_id"] = payload["projectMilestoneId"]
+            if "projectId" in payload:
+                issue["project_id"] = payload["projectId"]
             return {"issueUpdate": {"success": True}}
         if "commentCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
@@ -390,6 +393,11 @@ class FakeLinearWorkspace(LinearClient):
             if "state" in payload:
                 project["state"] = payload["state"]
             return {"projectUpdate": {"success": True}}
+        if "projectUpdateCreate(" in query:
+            payload = cast("dict[str, object]", v["input"])
+            self.project_by_id(str(payload.get("projectId", "")))  # entity check
+            uid = f"pu-{uuid.uuid4().hex[:8]}"
+            return {"projectUpdateCreate": {"success": True, "projectUpdate": {"id": uid}}}
         if "projectMilestoneCreate(" in query:
             payload = cast("dict[str, object]", v["input"])
             mid = f"ms-{uuid.uuid4().hex[:8]}"
@@ -884,6 +892,118 @@ def test_foreign_linkback_comment_does_not_perturb_marker_scans(
         assert len(marked) == 1 and "done" in str(marked[0]["body"])
         foreign = [c for c in comments if "GitHub sync" in str(c["body"])]
         assert len(foreign) == 1 and "done" not in str(foreign[0]["body"])
+
+
+# ----------------------------------------------------------------------- supersede
+
+
+def test_supersede_objective_moves_carried_cancels_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        old_id = _seed_objective(
+            runner,
+            root,
+            nodes=[
+                {"id": "1.1", "description": "Done node"},
+                {"id": "1.2", "description": "Carried node"},
+                {"id": "1.3", "description": "Dropped node"},
+            ],
+        )
+        store = _project_store(root)
+        # node 1.1 (ENG-1) is finished history; node 1.2 (ENG-2) carries; node 1.3 (ENG-3) drops.
+        store.update_objective_node(
+            objective_id=old_id, node_id="1.1", status=objective.NodeStatus.DONE
+        )
+
+        new_nodes = [
+            objective.ObjectiveNode(
+                id="1.1", description="Carried forward", status=objective.NodeStatus.PENDING
+            ),
+            objective.ObjectiveNode(
+                id="1.2", description="Brand new", status=objective.NodeStatus.PENDING
+            ),
+        ]
+        ref = store.supersede_objective(
+            old_objective_id=old_id,
+            title="Successor objective",
+            prose="# Successor\n\nPhases 1 shipped under the old objective.",
+            run_id="01NEWOBJ",
+            roadmap_nodes=new_nodes,
+            carry_map={"1.1": "ENG-2"},  # new node 1.1 carries old node-issue ENG-2
+        )
+        assert ref is not None and ref.existed is False
+        new_id = ref.id
+
+        # the new project's header carries supersedes=<old>
+        new_header = plan.find_metadata_block(
+            str(ws.project_by_id(new_id)["content"]), objective.OBJECTIVE_HEADER_KEY
+        )
+        assert new_header is not None and new_header["supersedes"] == old_id
+
+        # the carried node-issue (ENG-2) was MOVED into the new project + re-stamped to node 1.1
+        carried = ws.issue_by_identifier("ENG-2")
+        assert carried["project_id"] == new_id
+        carried_block = plan.find_metadata_block(
+            str(carried["description"]), objective.OBJECTIVE_NODE_KEY
+        )
+        assert carried_block is not None and carried_block["id"] == "1.1"
+
+        # the new node 1.2 was minted fresh (a new node-issue, still on the new project)
+        new_state = store.get_objective(objective_id=new_id)
+        assert new_state is not None
+        assert sorted(n.id for n in new_state.nodes) == ["1.1", "1.2"]
+
+        # the dropped, still-open node-issue (ENG-3) is Canceled; the done one (ENG-1) untouched
+        assert ws.state_type(ws.issue_by_identifier("ENG-3")) == "canceled"
+        assert ws.state_type(ws.issue_by_identifier("ENG-1")) == "completed"
+
+        # the old project is completed + back-stamped superseded_by=<new>
+        assert ws.project_state(old_id) == "completed"
+        old_header = plan.find_metadata_block(
+            str(ws.project_by_id(old_id)["content"]), objective.OBJECTIVE_HEADER_KEY
+        )
+        assert old_header is not None and old_header["superseded_by"] == new_id
+
+
+def test_supersede_objective_idempotent_on_run_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = FakeLinearWorkspace()
+    _patch_linear(monkeypatch, ws)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _scaffold_repo(root)
+        old_id = _seed_objective(runner, root)
+        store = _project_store(root)
+        new_nodes = [
+            objective.ObjectiveNode(id="1.1", description="X", status=objective.NodeStatus.PENDING)
+        ]
+        first = store.supersede_objective(
+            old_objective_id=old_id,
+            title="S",
+            prose="# S\n\nprose",
+            run_id="01NEWOBJ",
+            roadmap_nodes=new_nodes,
+            carry_map={},
+        )
+        assert first is not None and first.existed is False
+        # a re-run on the same run_id finds the existing successor (no second project)
+        before = len(ws.projects)
+        again = store.supersede_objective(
+            old_objective_id=old_id,
+            title="S",
+            prose="# S\n\nprose",
+            run_id="01NEWOBJ",
+            roadmap_nodes=new_nodes,
+            carry_map={},
+        )
+        assert again is not None and again.existed is True and again.id == first.id
+        assert len(ws.projects) == before
 
 
 # ----------------------------------------------------------------------- manifest + drift

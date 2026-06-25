@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -110,6 +111,7 @@ def create_objective_issue(
     status: str = "active",
     base: str | None = None,
     roadmap_nodes: list[objective.ObjectiveNode] | None = None,
+    supersedes: str | None = None,
     dry_run: bool = False,
 ) -> ObjectiveIssue:
     """Create the ``perk:objective`` issue (the two-step create). ``body`` is the authored
@@ -156,6 +158,7 @@ def create_objective_issue(
         objective_comment_id=None,
         status=status,
         base=base,
+        supersedes=supersedes,
     )
     header_block = plan.render_metadata_block(objective.OBJECTIVE_HEADER_KEY, header.to_data())
     roadmap_block = plan.render_metadata_block(
@@ -291,6 +294,67 @@ def adopt_issue_as_objective(
         repo_root=repo_root,
     )
     return ObjectiveAdoption(number=number, url=src.url, existed=False, dry_run=False)
+
+
+def supersede_objective_issue(
+    *,
+    old_number: int,
+    title: str,
+    prose: str,
+    repo_root: Path,
+    run_id: str,
+    status: str = "active",
+    base: str | None = None,
+    roadmap_nodes: list[objective.ObjectiveNode],
+    dry_run: bool = False,
+) -> ObjectiveIssue:
+    """Create a net-new ``perk:objective`` issue that supersedes and closes ``old_number`` (the
+    GitHub arm of the supersede model).
+
+    Idempotent on ``run_id`` (find-then-return ``existed=True`` — no re-close). Otherwise: (1)
+    create the new objective issue exactly as :func:`create_objective_issue`, carrying
+    ``supersedes=#<old>`` in its header; (2) close the old issue **fail-open** — stamp
+    ``superseded_by=#<new>`` into the old header, then ``plans.close_issue(old)``; a failure there
+    is logged loud-but-non-fatal and never raised after the new issue exists. ``carry_map`` is not
+    applicable (GitHub objectives have no child issues — carried nodes are authored fresh rows).
+    ``dry_run`` returns early; an empty ``roadmap_nodes`` raises (the storage backstop)."""
+    if dry_run:
+        return ObjectiveIssue(number=0, url="(dry-run)", existed=False)
+
+    existing = find_objective_issue(run_id=run_id, repo_root=repo_root)
+    if existing is not None:
+        return existing
+
+    if not list(roadmap_nodes):
+        raise _exec.GitHubError("objective roadmap is empty: an objective needs at least one node")
+
+    created = create_objective_issue(
+        title=title,
+        body=prose,
+        repo_root=repo_root,
+        run_id=run_id,
+        status=status,
+        base=base,
+        roadmap_nodes=roadmap_nodes,
+        supersedes=objective.canonical_pr(old_number),
+    )
+
+    # Close the old objective LAST, fail-open: stamp the back-link then close. A failure here never
+    # fails the create (the new objective already exists) — the bookkeeping posture.
+    try:
+        update_objective_header(
+            number=old_number,
+            fields={"superseded_by": objective.canonical_pr(created.number)},
+            repo_root=repo_root,
+        )
+        plans.close_issue(number=old_number, repo_root=repo_root)
+    except _exec.GitHubError as exc:
+        print(
+            f"perk objective replan: closing superseded objective #{old_number} skipped "
+            f"(non-fatal): {exc}",
+            file=sys.stderr,
+        )
+    return created
 
 
 def get_objective(*, number: int, repo_root: Path) -> ObjectiveState | None:

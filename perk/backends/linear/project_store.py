@@ -15,6 +15,7 @@ from perk.backends.linear._helpers import (
 )
 from perk.backends.linear.client import (
     LinearClient,
+    _opt_dict,
     _opt_str,
     _require_dict,
     _require_list,
@@ -224,6 +225,210 @@ class LinearProjectObjectiveStore:
             self._create_dependency_relations(nodes, node_uuid)
 
             return objective_store.ObjectiveRef(id=source_id, url=project_url, existed=False)
+
+    def supersede_objective(
+        self,
+        *,
+        old_objective_id: str,
+        title: str,
+        prose: str,
+        run_id: str,
+        status: str = "active",
+        base: str | None = None,
+        roadmap_nodes: list[objective.ObjectiveNode],
+        carry_map: dict[str, str],
+        dry_run: bool = False,
+    ) -> objective_store.ObjectiveRef | None:
+        """Re-author the objective as a **net-new project** that supersedes + completes the old one.
+
+        Creates the new project (overview header carries ``supersedes=<old>``) and its node-issues,
+        **except** for ``carry_map`` nodes: instead of minting a fresh node-issue, the mapped
+        existing node-issue is **moved** into the new project (preserving identity / open PRs /
+        discussion), its ``objective-node`` block re-stamped to the new roadmap node id and
+        re-attached to the new project's phase milestone. Then closes the old project fail-open
+        (``superseded_by`` stamp, Cancel every dropped un-carried still-open node-issue, mark
+        complete). Idempotent on ``run_id``; ``dry_run`` → ``None``; an empty ``roadmap_nodes``
+        raises.
+
+        **Flagged not-live-proven** (mirrors the other project-store mutations) — verify at the
+        Linear smoke gate.
+        """
+        if dry_run:
+            return None
+        with _translate_objective():
+            existing = self.find_objective(run_id=run_id)
+            if existing is not None:
+                return existing
+
+            nodes = list(roadmap_nodes)
+            if not nodes:
+                raise IssueBackendError(
+                    "objective roadmap is empty: an objective needs at least one node"
+                )
+
+            # --- create the new (superseding) project + its overview ---
+            grouped = objective.group_nodes_by_phase(nodes)
+            names = objective.enrich_phase_names(prose, [key for key, _ in grouped])
+            overview = self._compose_objective_overview(
+                run_id=run_id,
+                status=status,
+                base=base,
+                body=prose,
+                nodes=nodes,
+                names=names,
+                supersedes=old_objective_id,
+            )
+            created = self._projects.create_project(name=title, content=overview)
+            project_id = created["id"]
+            assert isinstance(project_id, str)
+            url = created["url"]
+            assert isinstance(url, str)
+            overview = plan.prepend_callout(
+                overview,
+                objective.objective_callout(project_id),
+                command=f"perk objective plan {project_id}",
+            )
+            self._projects.update_project_content(project_id, overview)
+
+            known_milestones: dict[str, str] = {}
+            phase_milestone = self._resolve_phase_milestones(
+                project_id, grouped, names, known=known_milestones
+            )
+
+            node_label_id, _ = self._issue_ops._ensure_label_id(
+                objective.OBJECTIVE_NODE_LABEL,
+                color=objective.OBJECTIVE_NODE_LABEL_COLOR,
+                description=objective.OBJECTIVE_NODE_LABEL_DESCRIPTION,
+            )
+            node_uuid: dict[str, str] = {}
+            for node in sorted(nodes, key=lambda n: objective.node_sort_key(n.id)):
+                milestone_id = phase_milestone[objective.derive_phase(node.id)]
+                if node.id in carry_map:
+                    # Carried: MOVE the existing node-issue into the new project (identity / open
+                    # PRs / discussion preserved), re-stamp its node id, re-attach to the phase.
+                    node_uuid[node.id] = self._move_carried_node_issue(
+                        node,
+                        carry_map[node.id],
+                        new_project_id=project_id,
+                        milestone_id=milestone_id,
+                        label_id=node_label_id,
+                    )
+                else:
+                    # Non-carried: mint fresh (the create path).
+                    node_uuid[node.id] = self._materialize_node_issue(
+                        node,
+                        project_id=project_id,
+                        milestone_id=milestone_id,
+                        label_id=node_label_id,
+                    )
+            self._create_dependency_relations(nodes, node_uuid)
+
+            # --- close the old objective LAST, fail-open (bookkeeping never fails the create) ---
+            self._close_superseded_objective(
+                old_objective_id, new_id=project_id, carry_map=carry_map
+            )
+
+            return objective_store.ObjectiveRef(id=project_id, url=url, existed=False)
+
+    def _move_carried_node_issue(
+        self,
+        node: objective.ObjectiveNode,
+        source_issue_id: str,
+        *,
+        new_project_id: str,
+        milestone_id: str,
+        label_id: str,
+    ) -> str:
+        """Move an existing node-issue into the superseding project (the carry path): attach it to
+        the new project, re-stamp its ``objective-node`` block to ``node``'s id (form-preserving),
+        re-attach it to the phase milestone, add the node label additively. Returns the issue UUID
+        (for relation creation — ``issueRelationCreate`` is UUID-only)."""
+        self._projects.attach_issue_to_project(issue_id=source_issue_id, project_id=new_project_id)
+        full = self._issue_ops._get_issue(source_issue_id, "id description labels { nodes { id } }")
+        uuid = _require_str(full.get("id"), "issue id")
+        body = _opt_str(full.get("description")) or ""
+        node_block = objective.render_node_block(node)
+        if plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
+            new_desc = plan.replace_metadata_block(body, objective.OBJECTIVE_NODE_KEY, node_block)
+        else:
+            block = plan.render_metadata_block(
+                objective.OBJECTIVE_NODE_KEY, node_block, style="inline-code"
+            )
+            new_desc = to_linear_markdown(f"{body.rstrip()}\n\n{block}\n")
+        labels = _require_dict(full.get("labels"), "issue.labels")
+        label_ids = [
+            _require_str(_require_dict(raw, "label").get("id"), "label id")
+            for raw in _require_list(labels.get("nodes"), "issue.labels.nodes")
+        ]
+        if label_id not in label_ids:
+            label_ids = [*label_ids, label_id]
+        self._issue_ops._update_issue(
+            uuid,
+            {"description": new_desc, "labelIds": label_ids},
+            what="move carried node-issue",
+        )
+        self._projects.attach_issue_to_milestone(issue_id=uuid, milestone_id=milestone_id)
+        return uuid
+
+    def _close_superseded_objective(
+        self, old_objective_id: str, *, new_id: str, carry_map: dict[str, str]
+    ) -> None:
+        """Close the superseded objective fail-open: stamp ``superseded_by`` into the old overview
+        header, Cancel every dropped (un-carried) still-open node-issue, mark the old project
+        complete, and post a best-effort status update. A failure here NEVER fails the create (the
+        new objective already exists) — the bookkeeping posture (mirrors ``post_status_update``)."""
+        try:
+            project = self._projects.project_or_none(old_objective_id, "content")
+            if project is not None:
+                overview = _opt_str(project.get("content")) or ""
+                header = plan.find_metadata_block(overview, objective.OBJECTIVE_HEADER_KEY) or {}
+                new_overview = plan.replace_metadata_block(
+                    overview, objective.OBJECTIVE_HEADER_KEY, {**header, "superseded_by": new_id}
+                )
+                self._projects.update_project_content(old_objective_id, new_overview)
+            self._cancel_dropped_open_node_issues(old_objective_id, carry_map)
+            self._projects.set_project_state(old_objective_id, "completed")
+            self._projects.create_project_update(
+                project_id=old_objective_id,
+                body=(
+                    f"This objective was superseded and marked complete; unfinished work was "
+                    f"carried forward into the successor objective ({new_id})."
+                ),
+            )
+        except IssueBackendError as exc:
+            _note(f"closing superseded objective {old_objective_id!r} skipped (non-fatal): {exc}")
+
+    def _cancel_dropped_open_node_issues(
+        self, old_objective_id: str, carry_map: dict[str, str]
+    ) -> None:
+        """Cancel every dropped (un-carried) still-open node-issue on the old project — node-issues
+        whose Linear state type is neither ``completed`` nor ``canceled`` and whose id/identifier is
+        not a ``carry_map`` value (the carried issues have already been moved out). ``done``
+        node-issues are left untouched (history stays Done). Best-effort: a missing ``canceled``
+        team state leaves them open (no-op)."""
+        carried = set(carry_map.values())
+        canceled_state_id: str | None = None
+        canceled_resolved = False
+        for issue in self._projects.project_issues(old_objective_id):
+            body = _opt_str(issue.get("description")) or ""
+            if not plan.has_metadata_block(body, objective.OBJECTIVE_NODE_KEY):
+                continue  # foreign issue — not a roadmap node
+            uuid = _require_str(issue.get("id"), "issue id")
+            identifier = _require_str(issue.get("identifier"), "issue identifier")
+            if uuid in carried or identifier in carried:
+                continue
+            full = self._issue_ops._get_issue(uuid, "state { type }")
+            state = _opt_dict(full.get("state"))
+            state_type = _opt_str(state.get("type")) if state is not None else None
+            if state_type in ("completed", "canceled"):
+                continue
+            if not canceled_resolved:
+                canceled_state_id = self._issue_ops._workflow_state_id("canceled")
+                canceled_resolved = True
+            if canceled_state_id is not None:
+                self._issue_ops._update_issue(
+                    uuid, {"stateId": canceled_state_id}, what="cancel dropped node-issue"
+                )
 
     def create_objective(
         self,
@@ -716,6 +921,7 @@ class LinearProjectObjectiveStore:
         body: str,
         nodes: list[objective.ObjectiveNode],
         names: dict[tuple[int, str], str],
+        supersedes: str | None = None,
     ) -> str:
         """Compose a fresh objective's overview (`create_objective`): Reconcilable(prose) + header
         block + manifest block; NO roadmap table. Prose-first (Pillar 2) — the human Reconcilable
@@ -723,13 +929,15 @@ class LinearProjectObjectiveStore:
         Transcoded so the HTML Reconcilable markers become inline-code sentinels.
 
         The manifest block (the drift baseline) pins the intended roadmap's structural identity +
-        the canonical phase names; status/pr are excluded (live/observed state)."""
+        the canonical phase names; status/pr are excluded (live/observed state). ``supersedes`` is
+        stamped into the header for a re-authored (superseding) objective, else ``None``."""
         header = objective.ObjectiveHeader(
             run_id=run_id,
             created=plan.now_iso(),
             objective_comment_id=None,
             status=status,
             base=base,
+            supersedes=supersedes,
         )
         header_block = plan.render_metadata_block(
             objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
