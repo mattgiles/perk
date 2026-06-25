@@ -26,17 +26,98 @@ _BLOCK = re.compile(r"\{\{(.*?)\}\}|\{%(.*?)%\}|\{#(.*?)#\}")
 # A bare identifier — the only thing admitted inside `{{ }}` and the atom of a condition.
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# `include "<path>"` — double-quoted path only.
-_INCLUDE = re.compile(r'include\s+"[^"]*"')
+# `include "<path>"` — double-quoted path only, NO escapes (`[^"\\]*`, mirroring miniJinja). The
+# captured path is additionally checked for containment (non-empty / non-absolute / no `..`).
+_INCLUDE = re.compile(r'include\s+"([^"\\]*)"')
 
-# A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string, `==`} separated
-# by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers) leaves unrecognized
-# text → no full match → violation.
-_COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|==)\s*)+')
+# A whole `if`/`elif` condition: one-or-more of {identifier, double-quoted string (no escapes),
+# `==`} separated by whitespace. Anything else (parens, `!=`, `<`/`>`, filters, dots, numbers,
+# escaped quotes) leaves unrecognized text → no full match → violation. The string literal is
+# `[^"\\]*` to mirror miniJinja's reject-escapes rule.
+_COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+')
 
 # Bare-word tokens that LOOK like identifiers but are jinja operators outside the frozen subset.
 # (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
 _BANNED_COND_WORDS = {"in", "is"}
+
+# Matches one condition token: a double-quoted string (no escapes), `==`, or a bare word.
+_COND_TOKEN = re.compile(r'"[^"\\]*"|==|[A-Za-z_][A-Za-z0-9_]*')
+
+
+def _cond_shape_valid(cond: str) -> bool:
+    """True iff the condition is well-formed in miniJinja's grammar (`or` < `and` < `not` < `==`).
+
+    `_COND` gates the character set; THIS rejects malformed valid-token sequences — `a b` (adjacent
+    atoms), `a ==` / `== a` (missing operand), bare `not` — that the runtime renderer throws on,
+    keeping the author-time guard consistent with render time.
+    """
+    kinds: list[str] = []
+    for match in _COND_TOKEN.finditer(cond):
+        token = match.group(0)
+        if token == "==":
+            kinds.append("eq")
+        elif token in ("and", "or", "not"):
+            kinds.append(token)
+        else:
+            kinds.append("atom")  # identifier or double-quoted string
+    pos = 0
+
+    def peek() -> str | None:
+        return kinds[pos] if pos < len(kinds) else None
+
+    def atom() -> bool:
+        nonlocal pos
+        if peek() == "atom":
+            pos += 1
+            return True
+        return False
+
+    def eq() -> bool:
+        nonlocal pos
+        if not atom():
+            return False
+        if peek() == "eq":
+            pos += 1
+            return atom()
+        return True
+
+    def not_expr() -> bool:
+        nonlocal pos
+        if peek() == "not":
+            pos += 1
+            return not_expr()
+        return eq()
+
+    def and_expr() -> bool:
+        nonlocal pos
+        if not not_expr():
+            return False
+        while peek() == "and":
+            pos += 1
+            if not not_expr():
+                return False
+        return True
+
+    def or_expr() -> bool:
+        nonlocal pos
+        if not and_expr():
+            return False
+        while peek() == "or":
+            pos += 1
+            if not and_expr():
+                return False
+        return True
+
+    return or_expr() and pos == len(kinds)
+
+
+def _include_path_is_valid(p: str) -> bool:
+    """Mirror miniJinja's resolveTemplatePath containment: non-empty / non-absolute / no `..`."""
+    if not p:
+        return False
+    if p.startswith("/") or re.match(r"^[A-Za-z]:", p):  # absolute (posix or windows drive)
+        return False
+    return ".." not in re.split(r"[\\/]", p)
 
 
 def _block_is_valid(raw: str, is_variable: bool) -> bool:
@@ -48,8 +129,9 @@ def _block_is_valid(raw: str, is_variable: bool) -> bool:
     # `{% X %}` (catches `{%- … -%}` since the leading `-` breaks every branch below).
     if inner in {"else", "endif"}:
         return True
-    if _INCLUDE.fullmatch(inner):
-        return True
+    include = _INCLUDE.fullmatch(inner)
+    if include is not None:
+        return _include_path_is_valid(include.group(1))
     for keyword in ("if", "elif"):
         prefix = keyword + " "
         if inner.startswith(prefix):
@@ -57,8 +139,11 @@ def _block_is_valid(raw: str, is_variable: bool) -> bool:
             if not cond or not _COND.fullmatch(cond):
                 return False
             # Reject `in`/`is` operators (lexically identifiers) outside string literals.
-            words = _IDENT.findall(re.sub(r'"[^"]*"', " ", cond))
-            return not any(word in _BANNED_COND_WORDS for word in words)
+            words = _IDENT.findall(re.sub(r'"[^"\\]*"', " ", cond))
+            if any(word in _BANNED_COND_WORDS for word in words):
+                return False
+            # Reject malformed condition shapes the runtime renderer throws on.
+            return _cond_shape_valid(cond)
     return False
 
 
@@ -128,6 +213,17 @@ def test_validator_flags_out_of_subset_blocks() -> None:
         "{% if a != b %}",
         "{% if (a or b) %}",
         "{# comment #}",
+        # Escaped string literals + out-of-containment include paths the runtime rejects.
+        r'{% if a == "x\"y" %}',
+        '{% include "../x.md" %}',
+        '{% include "/x.md" %}',
+        '{% include "" %}',
+        '{% include "a/../b.md" %}',
+        # Malformed condition shapes the runtime throws on.
+        "{% if a b %}",
+        "{% if a == %}",
+        "{% if == a %}",
+        "{% if not %}",
     ]
     for block in bad:
         assert _violations(block, "synthetic.md"), f"expected violation for {block!r}"

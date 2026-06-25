@@ -48,6 +48,17 @@ def test_version_lockstep():
     assert __version__ == ssot
 
 
+def test_no_runtime_dependencies():
+    # The extension must load from a bare git clone (no `npm install`): pi resolves its imports
+    # through a fixed host-alias set plus `node_modules` walking, so a runtime npm dependency would
+    # be unresolvable. The render seam's former lone runtime dep (`nunjucks`) is now vendored
+    # (`extension/substrate/miniJinja.ts`); `package.json` must therefore carry no runtime
+    # `dependencies` (key absent or empty). The companion source-scan
+    # `extension/bareImportGuard.test.ts` proves no shipped source imports a bare npm package.
+    deps = _package_json().get("dependencies", {})
+    assert deps == {}, f"extension must have zero runtime dependencies, found: {deps}"
+
+
 def test_npm_pin_lockstep():
     # Beyond the `__version__` lockstep, both perk-owned `@mgiles/perk` install pins must track the
     # file SSOT (`pyproject.toml` version): the `perk init` *wired* pin (`_perk_npm_entry()` written
