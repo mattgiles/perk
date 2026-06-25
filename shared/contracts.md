@@ -3990,16 +3990,38 @@ string-only contract is enforced on BOTH planes:** the TS renderer throws lazily
 non-string; `perk/prompts.py::render` validates the whole var map eagerly (raising `TypeError`)
 before delegating to jinja2.
 
-**jinja2 is the reference engine.** The committed golden files under `prompts/_fixtures/golden/`
-ARE jinja2's rendered output. The golden harness — `prompts/_fixtures/cases.yaml` listing
-`(template, vars, golden)` cases with committed golden-output files — is the byte-parity proof:
-`tests/test_prompts.py` asserts `jinja2-render == golden`, and
-`extension/substrate/prompts.test.ts` asserts the vendored mini-jinja render `== golden`. The
-frozen subset is "the jinja subset"; the vendored TS renderer reproduces these same golden bytes.
-Golden outputs are **separate committed files** (not inline multiline YAML) because the TS harness
-reads `cases.yaml` through the vendored `miniYaml` reader, which throws on `|`/`>` block scalars;
-fixture vars are strings only (matching the string-only render contract, which also sidesteps any
-non-string rendering divergence).
+**jinja2 is the reference engine — verification is two decoupled tiers.** The cross-plane render
+seam is held in lockstep by two tiers that separate the frozen *contract* from real prompt *prose*:
+
+- **Tier A — contract snapshots (golden, sui generis).** `prompts/_fixtures/cases.yaml` lists
+  `(template, vars, golden)` cases over a small catalog of purpose-built FIXTURE templates under
+  `prompts/_fixtures/templates/`, each isolating one feature of the frozen render contract
+  (variable substitution, `{% include %}`, `if`/`else`, `elif` chain, `==`/`and`/`or`/`not`,
+  `trim_blocks` block-tag-on-own-line vs inline, trailing-newline preservation, no-trailing-newline
+  fragment). The committed golden files under `prompts/_fixtures/golden/` ARE jinja2's rendered
+  output for these fixtures; `tests/test_prompts.py` asserts `jinja2-render == golden` and
+  `extension/substrate/prompts.test.ts` asserts the vendored mini-jinja render `== golden`. These
+  goldens are stable — they change only when the render **contract** changes, never when a real
+  prompt's prose changes. Golden outputs are **separate committed files** (not inline multiline
+  YAML) because the TS harness reads `cases.yaml` through the vendored `miniYaml` reader, which
+  throws on `|`/`>` block scalars.
+- **Tier B — live cross-engine equality (no goldens).** `prompts/_fixtures/live.yaml` lists every
+  **real** template with representative vars and **no** `golden:` field. The Python-owned
+  `tests/test_prompt_parity.py` renders each real template with jinja2 natively, shells out once to
+  the dev-only node renderer `extension/testing/renderLive.ts` (which renders the same manifest with
+  mini-jinja and prints a JSON array in manifest order), and asserts the two outputs are byte-equal
+  per template — so editing a real prompt's prose touches **no** fixture. A coverage guard
+  (`test_live_manifest_covers_every_real_template`) asserts every real template appears in
+  `live.yaml`, so a newly-added prompt can't silently skip Tier B. The renderer lives under
+  `extension/testing/` so it is excluded from the npm tarball yet still typechecked/linted, and is
+  never picked up by `node --test` (it is not a `.test.ts`); the parity test **skips** when `node`
+  is absent.
+
+The frozen subset is "the jinja subset"; the vendored TS renderer reproduces jinja2's bytes for both
+tiers. Fixture and manifest vars are strings only (matching the string-only render contract, which
+also sidesteps any non-string rendering divergence); both `cases.yaml` and `live.yaml` are authored
+in the dual-parseable miniYaml subset (block maps/seqs, double-quoted strings, no `|`/`>` block
+scalars).
 
 **Environment-config parity baseline** (both engines): `autoescape` off (prompts are plain text,
 never HTML-escaped), `trim_blocks` **on** (as of Node 2.4) so a block tag on its own line emits no

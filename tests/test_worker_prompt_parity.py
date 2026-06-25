@@ -7,7 +7,7 @@ substrings here are the shared invariant: the SAME literals are asserted from th
 `extension/worker/worker.test.ts`, so a drift in EITHER plane (someone edits one prompt but not the
 other) fails CI here or there. The `address` body now renders from the canonical templates
 `prompts/stages/address/*` (contracts.md §8.31), so its cross-plane byte-parity is proved by the
-`address-*` golden cases; only the thin model-clause selection assertions remain here.
+`address-*` live-parity cases; only the thin model-clause selection assertions remain here.
 """
 
 from perk.run.launch import (
@@ -35,8 +35,8 @@ _PLAN_REF = {
 
 
 def test_implement_prompt_composes_template_with_read_cmd() -> None:
-    """Thin composition guard (the golden case proves cross-plane byte-identity of the template;
-    this proves the helper wires body + read_cmd + the inline progress paragraph)."""
+    """Thin composition guard (the live-parity case proves cross-plane byte-identity of the
+    template; this proves the helper wires body + read_cmd + the inline progress paragraph)."""
     prompt = _implement_prompt(_PLAN_REF)
     assert prompt.startswith("You are implementing perk plan github #148")
     assert "gh issue view 148 --comments" in prompt
@@ -61,7 +61,7 @@ def test_address_prompt_omits_model_clause_when_unconfigured() -> None:
 
 
 def test_plan_read_instruction_selects_arm_per_provider() -> None:
-    """Thin per-arm selection guard for the render-backed helper (the golden cases prove
+    """Thin per-arm selection guard for the render-backed helper (the live-parity cases prove
     cross-plane byte-identity; this proves code picks the right arm and render() is wired)."""
     assert _plan_read_instruction("github", "42", "u") == "gh issue view 42 --comments"
     linear = _plan_read_instruction("linear", "uuid-1", "https://linear.app/x/ENG-1")
@@ -98,7 +98,7 @@ def test_learn_prompt_linear_reads_via_tools_and_keeps_gh_pr_derivation() -> Non
     merged-PR derivation on `gh` — PRs are GitHub-universal under every issue backend.
 
     A thin selection test (cold renders the linear `read_cmd` + the `gh pr list --head plan-<pr_id>`
-    block); the four `learn-*` golden cases now carry the cross-plane byte-parity."""
+    block); the four `learn-*` live-parity cases now carry the cross-plane byte-parity."""
     prompt = _learn_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear learn prompt drifted — missing: {needle!r}"
