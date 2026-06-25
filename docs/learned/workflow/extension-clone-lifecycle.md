@@ -1,25 +1,29 @@
 ---
-title: The consumer extension-clone lifecycle — how pi loads perk, and perk's ownership of clone deps/freshness/materialization
-read_when: A consumer repo loads none of perk's tools or the extension fails at launch (Cannot find module / months-old code), you are touching extension-clone materialization (the launch warm-clone, init/doctor freshness reconcile), the vendored miniYaml reader, or you need pi's git:-package loading internals.
+title: The pi `git:`-package loading substrate (historical) + the retire-an-orphaned-lifecycle recipe
+read_when: You need pi's `git:`-package loading internals (how a `git:` extension is cloned/installed/loaded), OR you are retiring an orphaned substrate lifecycle (relocate-the-survivor + facade scrub + three-site doctor-check removal + the `_MIGRATIONS` filesystem-rmtree forward-migration seam). NOTE the git-clone extension lifecycle this doc once owned is RETIRED — perk now ships as `npm:@perk/pi`; the live extension-delivery story is in `distribution.md`.
 ---
 
-# The consumer extension-clone lifecycle
+# The pi `git:`-package loading substrate (historical) + the retire-recipe
 
-perk ships to consumer repos as a Pi `git:`-package **extension**. pi materializes that package as a
-git **clone** on the consumer's disk and loads the TS extension from it. Three distinct gaps in how
-pi manages that clone could leave a consumer loading *no* perk tools — or *months-old* perk code —
-while `perk doctor` reported green. This doc captures the root-cause substrate, the four-PR arc that
-made perk the **owner** of its own clone's deps/freshness/materialization, and the durable gotchas
-that generalize.
+> **Retired.** perk's own Pi extension moved from a `git:` package to **`npm:@perk/pi`**. The entire
+> git-clone extension lifecycle module (`perk/convergence/init/extension_clone.py`) and its
+> `extension-clone` doctor check were **removed**. The **live** extension-delivery lifecycle (the npm
+> install, owned by init/doctor/launch) now lives in **`distribution.md`**. This doc is retained for
+> two durable things: the **pi-`git:`-loading substrate** (still accurate for understanding *any*
+> `git:` package) and the **retire-an-orphaned-lifecycle recipe** the removal produced.
 
-## How pi loads the perk extension (the root-cause substrate)
+## How pi loads a `git:`-package extension (the root-cause substrate)
+
+perk *formerly* shipped as a Pi `git:` package; pi materialized it as a git **clone** on the
+consumer's disk and loaded the TS extension from it. This substrate is still exactly how pi loads
+**any** `git:` package, so it is kept here.
 
 pi loads a `git:`-package extension from a clone at `.pi/git/<host>/<path>/` via jiti, resolving the
 extension's imports through a **fixed host-alias set**
 (`@earendil-works/pi-coding-agent`/`-ai`/`-tui`, `@mariozechner/*`, `typebox`/`@sinclair/typebox`)
 **plus** native `node_modules` walking. The relevant internals live in
-`@earendil-works/pi-coding-agent/dist/core/package-manager.js`, where three distinct gaps forced
-perk to work around pi:
+`@earendil-works/pi-coding-agent/dist/core/package-manager.js`, where three distinct gaps could leave
+a consumer loading *no* tools or *months-old* code:
 
 - **(a) No self-heal install.** `installGit`/`ensureGitRef` run `npm install --omit=dev` **only**
   on a fresh clone OR when `localHead != targetHead`. A clone already present at the pinned ref
@@ -28,128 +32,70 @@ perk to work around pi:
 - **(b) Unlocked lazy clone race.** `resolvePackageSources` clones a missing `git:` package lazily
   and **UNLOCKED**. Two near-simultaneous launches against an absent clone race: the second sees the
   first's half-created dir, takes the `else` (collect) branch over an incomplete checkout, and the
-  extension **silently fails to load** — none of perk's tools appear, perk is absent from
+  extension **silently fails to load** — none of its tools appear, it is absent from
   `[Extensions]`, and a throwing extension lands only in pi's `errors[]`.
 - **(c) Frozen present clone.** A **present project-scoped** clone is left **frozen** — pi's branch
   for it only calls `collectPackageResources` with no `git fetch`/`reset`, so a months-old clone
   keeps loading months-old code (wrong import paths; a since-retired import → a hard load failure)
-  while `perk doctor` reported green.
+  while a static `doctor` reports green.
 
-## Three concerns the clone bundles — keep them separate
+These gaps are why perk, while it shipped as a `git:` package, had to own its clone's deps,
+freshness, and materialization itself. That ownership is **gone** with the npm move; only the
+substrate above survives.
 
-Dependency **installation**, commit **freshness**, and materialization **presence** are distinct
-concerns. A correct "nothing to install" fix can silently hide an uncovered "nothing keeps it
-current" — exactly the #639→#642 gap. **When retiring a check, separate the concerns it bundled**
-before deciding the surface is covered.
+## Where the live story went (and the dep-elimination)
 
-## The narrative arc (four PRs)
+The four-PR arc that made perk the owner of its own clone (deps / freshness / materialization),
+the `extension_clone_status` ownership recipe (init-converges / doctor-repairs / launch-warms), and
+the clone-specific gotchas it produced are **retired** — superseded by the npm-install lifecycle in
+**`distribution.md`** (which also records the four *mirror-breaks* where "just copy the git
+lifecycle" would be wrong). The one still-general piece of the deps story — **dropping an npm parser
+by vendoring a bounded reader** (`extension/substrate/miniYaml.ts`, scoped to perk's own files, so an
+unsupported edit throws loudly) — lives in `shared-contracts.md` and `prompt-templates.md`.
 
-Read as one story — each PR reframed the problem the prior one left open:
+## The retire-an-orphaned-lifecycle recipe (the durable removal value)
 
-- **#637 (band-aid): ref-aware package convergence.** `_merge_static_packages` was append-only and
-  ref-blind (dedup by git identity, which strips `@ref`); it now reconciles perk's **own** `git:`
-  ref forward, rewriting a stale string-form `@v0.0.1` → `@main` **in place** (list position
-  preserved) and collapsing duplicate perk entries to one canonical entry. This rides the existing
-  `settings-wiring` ManagedConvergence (ref drift = a `settings-wiring` FAIL that `--fix` repairs)
-  — **no new doctor wiring for the ref**. Plus a `dependencies`-only `extension-deps` doctor check
-  (peers are pi-bundled → checking them would false-positive). **Why a band-aid:** init never
-  installs and `doctor --fix` is a separate step — it never touched the `init → use` crash path.
-- **#639 (the real deps fix): eliminate the lone non-host import.** The only non-host runtime import
-  was `yaml`; it was replaced by a **bounded** vendored YAML-subset reader
-  (`extension/substrate/miniYaml.ts`). Once the extension imports only host-aliased packages + Node
-  builtins, pi's install behavior is irrelevant in **every** case (fresh/stale/partial/offline).
-  The now-dead `extension-deps` check was retired; root `package.json` ends with **zero runtime
-  `dependencies`**.
-- **#642 (freshness): perk owns clone commit-freshness.** Detection is a network op
-  (`git ls-remote refs/heads/main` vs the clone `HEAD`) → **verify-gated in BOTH planes** (the
-  doctor check + the init reconcile run only under `if verify:`; a regression guard asserts the
-  check's absence without verify). **Three-tier degrade, never a silent pass:** `stale → fail`
-  (+remediation `perk doctor --fix`), `unverifiable → warn` (carries the offline reason),
-  `fresh → ok`, `absent → info`, `self → info`. Repair = blow-away-and-reclone (filesystem-only /
-  no perk-side network, relying on pi's verified-absent → `git clone` path next launch).
-- **#655 (materialization + race fix): perk owns clone materialization.** New
-  `git.clone()`/`git.reset_hard()` primitives; `launch_stage` **warms the clone before
-  `os.execvpe`** under an `fcntl.flock` lock — serializing perk's own launches and removing the
-  missing-clone window (gap (b)). The blow-away reclone was **retired** in favor of an in-place
-  freshen.
+When a substrate lifecycle module is superseded and you remove it, this is the reusable recipe:
 
-## The ownership pattern (reusable recipe)
+- **Relocate the one surviving primitive to its dependency's home — don't keep the dead module alive
+  for it.** `consumer_git_clone_root` moved **verbatim** into `settings.py` **beside its sole
+  dependency `GIT_PACKAGE`**, re-exported through the `init/__init__.py` facade so the
+  `init.consumer_git_clone_root` attribute path keeps resolving for every consumer unchanged. The
+  facade is a real surface to scrub: drop the dead module's whole import block + its `__all__` entries,
+  re-add the relocated survivor to the settings import — **RUF022 isort-alphabetical in BOTH the import
+  list and `__all__`** — delete the orchestrator helper + its call site, and **fix the package
+  docstring** (it enumerated the now-gone submodule + a now-gone monkeypatch target).
+- **Removing a doctor check is a three-site edit:** the `_xxx_check` def in `checks.py`; the import +
+  `__all__` entry + `checks.append(...)` registration in `doctor/__init__.py` (reword the grouping
+  comment that paired it with a sibling); and the `elif check.name == "..."` fix branch in `fixes.py`.
+  Keep the sibling check (`extension-install`) intact.
+- **Dead substrate primitives go last, after proving sole-consumption.** `git.clone` / `reset_hard` /
+  `head_sha` / `ls_remote_sha` were verified (repo-wide grep) consumed **only** by the deleted module →
+  removed with their tests. **Shared** primitives (`git.fetch`, used by `worktree.py`) and shared
+  fixtures **stay** — prove sole-consumption before deleting.
+- **The `_MIGRATIONS` forward-migration seam (a filesystem `rmtree`).** `doctor --fix` migrates a former
+  consumer forward via `_remove_orphaned_git_clone(root)` appended to the `_MIGRATIONS` tuple
+  (`perk/convergence/doctor/fixes.py`): forward-only, **idempotent** (a genuine `([], [])` no-op once
+  the clone is absent), returns `(changes, errors)` so a failed `shutil.rmtree` lands on
+  `report.fix_errors` **loudly** (`OSError` → append to errors). Filesystem-only on a gitignored path
+  (no network); `_MIGRATIONS` runs **unconditionally** after the fix loop, so a
+  `run_doctor(fix=True, verify=False)` test exercises it without seeding a failing check.
 
-init-converges-forward / doctor-reports-and-repairs / launch-warms. A single
-`extension_clone_status(root, *, self_repo) -> (status, detail)` SSOT (in `init.py`, with a
-`Literal` `ExtensionCloneStatus`) feeds **both** the doctor check and the init reconcile, so the
-classification lives in one place. `consumer_git_clone_root(repo_root)` is the SSOT clone-path
-helper, derived from the **ref-less** `GIT_PACKAGE` constant — **never hardcode `.pi/git/...`
-segments**, and never desync the run-worker entry resolver from the doctor check. The comparison ref
-is always `@main` (perk pins its own package at `@main`; a hand-pinned other ref is out of scope —
-init rewrites it to `@main`).
+## A still-general gotcha (kept)
 
-Note the enabling asymmetry: `perk doctor`/`perk init` are **Python** CLIs that **never load the TS
-extension**. That is exactly what makes Python-plane ownership of a TS-extension-loading concern
-viable — they run fine against a clone too stale to even load, and repair it for the *next* launch.
-
-## Gotchas that generalize
-
-- **Idempotency forces a `str | None` reconcile signature.** A verify-gated init reconcile that
-  "always appends a status line" breaks `test_cli_idempotent_second_run` (a converged re-run must
-  yield `changes == []`). No-ops (`self`/`fresh`/offline `unverifiable`) must return `None` (stay
-  silent); only real changes (absent→cloned, stale→freshened) or a swallowed-`GitError` message
-  return a `str`; both call sites guard `if message is not None`. **Check the `changes == []`
-  idempotency tests before making an init/doctor reconcile always-append.**
-- **Warming-on-absent network-couples the whole test surface.** A reconcile that starts doing
-  network work on a previously-inert status (`absent`) silently turns every `verify=True` /
-  `launch_stage` test into a real `git clone github.com/mattgiles/perk`. **Census ALL such tests
-  and stub the network primitive in the shared `stub_env` fixture** — and make the clone stub
-  `mkdir(parents=True, exist_ok=True)` so a *second* verified init sees the clone present →
-  `extension_clone_status` returns `unverifiable` (non-git dir → no network) → no-op → idempotent.
-  `tests/test_launch.py` needs an **autouse** no-op stub of `ensure_extension_clone_present`.
-- **The lock lives in the clone's PARENT, gitignored.** `.pi/git/.perk-extension-clone.lock` (not
-  inside the clone dir) so a clone-dir removal never drops the lock; `.pi/git/` is already
-  gitignored. A double-checked `is_dir()` under the lock gives exactly-once cloning (race test: two
-  threads + `threading.Barrier` + a slow clone stub asserting `call_count == 1`). `fcntl` is
-  POSIX-only → guarded import with a no-op `@contextlib.contextmanager` lock fallback.
-- **The `extension-deps` retirement ripple.** Removing the dead doctor check required dropping the
-  now-unused `import subprocess` from `doctor.py`, removing its `_SANCTIONED_SUBPROCESS_WRAPPERS`
-  entry, and fixing **stale doc-comments** in `init.py`/`run_worker.py`. The ref-reconcile test was
-  **interleaved** between the extension-deps tests (two surgical edits around it, not one block
-  delete).
-- **The sanctioned-subprocess-wrapper guard fires on every new `subprocess.run` site.**
-  `tests/test_tooling.py::test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout`
-  AST-scans `perk/**/*.py` and fails CI on any direct `subprocess.run` outside the
-  `(module_stem, func_name)` set or missing explicit `check=`/`timeout=`. The npm-install repair and
-  each new clone primitive tripped it (see `docs/learned/toolchain/ruff.md` / dignified-python §1.9).
-- **ty gotchas in the infra.** `fcntl = None` after `import fcntl` trips `invalid-assignment` → use
-  `from types import ModuleType` + `fcntl: ModuleType | None` + `import fcntl as _fcntl;
-  fcntl = _fcntl`, placed **below all imports** (mid-imports triggers `E402`). A direct module-attr
-  assignment (`git_mod.clone = stub`) trips ty's implicit-function-shadowing → use
-  `monkeypatch.setattr(init_mod.git, "clone", stub)` (string-keyed, ty-invisible, thread-safe). An
-  event-recorder list holding tuples must be typed `list[object]` (ty checks `tests/` too).
-
-## The vendored-parser pattern (when to drop an npm parser)
-
-When a shared SSOT file (`shared/*.yaml`) is parsed on both planes, you can drop the TS npm parser
-by vendoring a **bounded** reader scoped to perk's **own** files — NOT a general parser. **Census
-the actual feature surface first** (block maps/seqs incl. `- id: x` map-as-seq-item, flow
-`{}`/`[]`, the scalar types perk's files use, comment handling); everything outside that surface
-**throws loudly** so a future unsupported edit fails CI rather than silently mis-parsing. Fidelity
-is pinned by a `node:test` deep-equal vs the reference lib (which survives **dev-only**, powering
-exactly that test). Self-containment is verified by grepping non-test `extension/**/*.ts` for bare
-imports outside the alias set (`.test.ts` is excluded from the published tarball, so a dev-only
-`import … from "yaml"` in a test is fine).
-
-**Residual:** the reader is pinned only against the current files; a future `shared/*.yaml` edit
-using an unsupported construct fails CI (intended) — the author must extend the **reader**, not just
-the YAML. The user opted OUT of an import-allowlist guard test, so nothing structurally prevents
-re-introducing a bare npm import except review + the indirect fidelity test.
+- **Test-insertion split-assert (F821 trap).** Inserting a new test function *between* two existing
+  tests with an `edit` `oldText` that stops at the prior test's first visible terminator (e.g. a
+  closing `]`) can orphan a trailing line that belonged to that test (a stranded
+  `assert report_to_dict(report)[...]` → `F821 Undefined name report`). When inserting between
+  functions, anchor on the prior test's **complete** boundary (its last statement), not the first
+  plausible-looking end.
 
 ## Cross-references
 
-- `perk/convergence/init.py` — `extension_clone_status`, `materialize_extension_clone`,
-  `ensure_extension_clone_present`, `consumer_git_clone_root`, `_merge_static_packages`
-- `perk/substrate/git.py` — `clone`, `reset_hard`, `head_sha`, `ls_remote_sha`
-- `perk/run/launch.py` — the launch warm-clone
-- `extension/substrate/miniYaml.ts` — the vendored bounded YAML reader
-- `@earendil-works/pi-coding-agent/dist/core/package-manager.js` — the root-cause pi internals
+- `docs/learned/workflow/distribution.md` — the **npm-install** extension-delivery lifecycle that
+  superseded the git-clone lifecycle (and the four mirror-breaks)
+- `perk/convergence/init/settings.py` — `consumer_git_clone_root` (the relocated survivor) + `GIT_PACKAGE`
+- `perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` + the `_MIGRATIONS` tuple
+- `@earendil-works/pi-coding-agent/dist/core/package-manager.js` — the pi `git:`-loading internals
 - `docs/learned/workflow/init-doctor.md` — managed-convergence + verify-gated reconcile SSOT
-- `docs/learned/workflow/cold-door-launch.md` — the launch seam + the `materialize_skills` sibling mirror
-- `docs/learned/workflow/shared-contracts.md` — the TS reader, now `miniYaml`
+- `docs/learned/workflow/shared-contracts.md` — the vendored `miniYaml` reader (the dropped npm parser)

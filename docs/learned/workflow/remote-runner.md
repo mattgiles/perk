@@ -1,6 +1,6 @@
 ---
 title: The remote-runner dispatch + CI execution seam
-read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, or the worker-entry resolver.
+read_when: You are working on `perk/run/runner.py` / `perk/run/run_worker.py`, the `perk-run.yml` workflow + `perk-remote-setup` composite action, the remote `--remote` dispatch path, the verify-by-discovery poll, or the worker-entry resolver (the three-candidate ladder, `consumer-git` retired) and the realized consumer worker-deps `@perk/pi` install (formerly a loud deferral).
 ---
 
 # The remote-runner dispatch + CI execution seam
@@ -131,22 +131,44 @@ Local dispatch JSON files (under `scratch/runs/<run_id>/dispatch.json`) are the 
 - **Auth model (a stated decision, recorded in `§8.14`).** The runner checks out + pushes with
   `PERK_GH_PAT` (a PAT), **not** `github.token` — only PAT-pushed commits trigger downstream CI;
   `GITHUB_TOKEN`-pushed commits don't.
-- **Worker-entry resolution is a four-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
-  `extension/workerMain.ts` → consumer git-package clone
-  (`.pi/git/<host>/<path>/extension/workerMain.ts`, `consumer-git`) → npm install
-  (`.pi/npm/node_modules/@mgiles/perk/...`, `consumer-npm`). The `consumer-git` path is **derived from
-  `GIT_PACKAGE`** (split on `/` after stripping `git:`) — never hardcoded segments, so a package-URL
-  change can't silently desync the resolver. Importing `GIT_PACKAGE` into `run_worker` is cycle-free
-  (`perk.convergence.init` does not import `perk.run.run_worker`).
+- **Worker-entry resolution is a three-candidate ladder:** `PERK_WORKER_ENTRY` (env) → self-repo
+  `extension/workerMain.ts` → npm install (`.pi/npm/node_modules/@perk/pi/...`, `consumer-npm`).
+  Verified anchor: `run_worker.py::resolve_worker_entry`'s `WorkerEntry.source` comment now reads
+  `"env" | "self" | "consumer-npm"`. **The `consumer-git` candidate** (the
+  `.pi/git/<host>/<path>/extension/workerMain.ts` clone path) **was retired** once the npm install path
+  superseded it — its `_git_clone_worker_entry` helper and the now-unused `from perk.convergence import
+  init` import in `run_worker.py` are gone.
+
+- **Resolver-candidate vs migration-helper have independent lifecycles.** Dropping the `consumer-git`
+  *candidate* does **not** mean retiring the clone-path SSOT: `consumer_git_clone_root` + `GIT_PACKAGE`
+  (now in `settings.py`) **stay**, because the doctor forward-migration `_remove_orphaned_git_clone`
+  (`perk/convergence/doctor/fixes.py`) still `rmtree`s an orphaned `.pi/git/<host>/<path>`. **Rule: a
+  resolver candidate for a retired path can go the moment a superseding path exists; the *cleanup
+  migration* for already-deployed consumers outlives it** — don't conflate "stop probing X" with
+  "delete the derivation of X's location." (See `extension-clone-lifecycle.md` for the migration seam.)
 
 ## Honest fiction vs. loud deferral
 
-Consumer remote drive genuinely can't run end-to-end in CI yet (`.pi/git` + `.pi/npm` are gitignored
-and nothing in the composite runs `pi` to trigger pi's git-package `npm install`). Per "don't author
-fiction": land the cheap/correct/unit-testable pieces now (the resolver candidate; the version-pinned
-`git+https@main` install mirroring `init._desired_skills_manifest`) but make the
-genuinely-unbuildable consumer worker-deps step a **loud `::error::` + `exit 1` deferral**, not a
-silently-broken `npm ci`. Self-repo keeps `npm ci`.
+Consumer remote drive genuinely can't run end-to-end in CI yet (`.pi/npm` is gitignored and nothing in
+the composite runs `pi` to trigger the extension load). The original posture (per "don't author
+fiction") landed the cheap/correct/unit-testable pieces and made the genuinely-unbuildable consumer
+worker-deps step a **loud `::error::` + `exit 1` deferral**, not a silently-broken `npm ci`.
+
+**Update — the deferral has since been realized.** Once perk owned the `.pi/npm` install, the
+`_WORKER_DEPS_CONSUMER` placeholder went from `echo "::error::…"; exit 1` to a real pinned
+`npm install @perk/pi@{__version__} --prefix .pi/npm --legacy-peer-deps` — the exact arg shape of
+`npm.install` / `extension_install._pinned_spec()` (`workflow_artifacts.py` derives `_NPM_NAME =
+NPM_PACKAGE.removeprefix("npm:")` from the same settings SSOT). Self-repo keeps `npm ci`. **Keep the
+honest note: end-to-end consumer remote drive is still execution-untested** (the
+`defaultCreateRuntime` disk-settings follow-up below) — downgrading a hard `exit 1` to a real-but-
+unverified path is **not** the same as claiming it proven.
+
+**Grep ALL contracts mentions when reconciling.** Retiring the deferral needed a **third** §8.14 site
+beyond the two obvious ones (the composite worker-deps bullet + the worker-entry ladder step) — the
+`smoke-test` parenthetical ("the consumer worker-deps step is a loud … deferral"). A
+`grep -n "consumer-git\|Node 2.4\|loud.*deferral\|\.pi/git"` across `contracts.md` surfaced it; the
+deferral was even labelled inconsistently ("Node-2.4" vs "Node-2.2") across sites — version labels are
+drift magnets (reinforces `doc-reconciliation.md`).
 
 ### Open follow-up: does a real remote launch load `@mgiles/perk` at all?
 
@@ -168,7 +190,11 @@ plan's surface — `--fix` converges the whole repo, not just your target artifa
 ## Cross-references
 
 - `perk/run/runner.py` — the `Runner` Protocol, value types, `GitHubActionsRunner`, `select_runner`
-- `perk/run/run_worker.py` — the CI worker entrypoint + the four-candidate worker-entry ladder
+- `perk/run/run_worker.py` — the CI worker entrypoint + the three-candidate worker-entry ladder
+- `perk/convergence/doctor/fixes.py` — `_remove_orphaned_git_clone` (the cleanup migration that
+  outlives the retired `consumer-git` resolver candidate)
+- `docs/learned/workflow/extension-clone-lifecycle.md` — the retired git-clone lifecycle + the
+  `_MIGRATIONS` filesystem-rmtree seam
 - `extension/workerMain.ts` — the worker entry the runner drives into
 - `shared/contracts.md` §8.13 (Runner contract + dispatch record) / §8.14 (Actions runner artifact +
   CI worker entrypoint)
