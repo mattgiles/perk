@@ -41,6 +41,68 @@ const COND = /^(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+$/;
 // (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
 const BANNED_COND_WORDS = new Set(["in", "is"]);
 
+// Classify a condition into its kind-tokens ("atom" = ident|string, "eq", "and"/"or"/"not").
+// Called only after COND.test has gated the character set, so only these tokens appear.
+function condTokenKinds(cond: string): string[] {
+  const kinds: string[] = [];
+  for (const m of cond.matchAll(/"[^"\\]*"|==|[A-Za-z_][A-Za-z0-9_]*/g)) {
+    const s = m[0];
+    if (s === "==") kinds.push("eq");
+    else if (s === "and" || s === "or" || s === "not") kinds.push(s);
+    else kinds.push("atom"); // identifier or double-quoted string
+  }
+  return kinds;
+}
+
+// True iff the condition is a well-formed expression in miniJinja's grammar (precedence
+// `or` < `and` < `not` < `==` < atom). COND gates the character set; THIS rejects malformed
+// valid-token sequences — `a b` (adjacent atoms), `a ==` / `== a` (missing operand), bare `not` —
+// that the runtime renderer throws on, keeping the author-time guard consistent with render time.
+function condShapeValid(cond: string): boolean {
+  const toks = condTokenKinds(cond);
+  let i = 0;
+  const peek = (): string | undefined => toks[i];
+  const atom = (): boolean => {
+    if (peek() === "atom") {
+      i++;
+      return true;
+    }
+    return false;
+  };
+  const eq = (): boolean => {
+    if (!atom()) return false;
+    if (peek() === "eq") {
+      i++;
+      return atom();
+    }
+    return true;
+  };
+  const notExpr = (): boolean => {
+    if (peek() === "not") {
+      i++;
+      return notExpr();
+    }
+    return eq();
+  };
+  const andExpr = (): boolean => {
+    if (!notExpr()) return false;
+    while (peek() === "and") {
+      i++;
+      if (!notExpr()) return false;
+    }
+    return true;
+  };
+  const orExpr = (): boolean => {
+    if (!andExpr()) return false;
+    while (peek() === "or") {
+      i++;
+      if (!andExpr()) return false;
+    }
+    return true;
+  };
+  return orExpr() && i === toks.length;
+}
+
 // An `{% include %}` path matches miniJinja's resolveTemplatePath containment: non-empty, not
 // absolute, and no `..` segment (the runtime additionally resolves against rootDir).
 function includePathIsValid(p: string): boolean {
@@ -67,7 +129,9 @@ function blockIsValid(raw: string, isVariable: boolean): boolean {
       if (cond === "" || !COND.test(cond)) return false;
       // Reject `in`/`is` operators (lexically identifiers) outside string literals.
       const words = cond.replace(/"[^"\\]*"/g, " ").match(IDENT_G) ?? [];
-      return !words.some((word) => BANNED_COND_WORDS.has(word));
+      if (words.some((word) => BANNED_COND_WORDS.has(word))) return false;
+      // Reject malformed condition shapes the runtime renderer throws on.
+      return condShapeValid(cond);
     }
   }
   return false;
@@ -151,6 +215,11 @@ test("validator flags out-of-subset blocks", () => {
     '{% include "/x.md" %}',
     '{% include "" %}',
     '{% include "a/../b.md" %}',
+    // Malformed condition shapes the runtime throws on (adjacent atoms / missing operand / bare op).
+    "{% if a b %}",
+    "{% if a == %}",
+    "{% if == a %}",
+    "{% if not %}",
   ];
   for (const block of bad) {
     assert.ok(violations(block, "synthetic.md").length > 0, `expected violation for ${block}`);

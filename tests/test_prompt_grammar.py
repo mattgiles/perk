@@ -40,6 +40,76 @@ _COND = re.compile(r'(?:\s*(?:[A-Za-z_][A-Za-z0-9_]*|"[^"\\]*"|==)\s*)+')
 # (The admitted keywords are exactly `and`/`or`/`not`; every other bare word is a variable name.)
 _BANNED_COND_WORDS = {"in", "is"}
 
+# Matches one condition token: a double-quoted string (no escapes), `==`, or a bare word.
+_COND_TOKEN = re.compile(r'"[^"\\]*"|==|[A-Za-z_][A-Za-z0-9_]*')
+
+
+def _cond_shape_valid(cond: str) -> bool:
+    """True iff the condition is well-formed in miniJinja's grammar (`or` < `and` < `not` < `==`).
+
+    `_COND` gates the character set; THIS rejects malformed valid-token sequences — `a b` (adjacent
+    atoms), `a ==` / `== a` (missing operand), bare `not` — that the runtime renderer throws on,
+    keeping the author-time guard consistent with render time.
+    """
+    kinds: list[str] = []
+    for match in _COND_TOKEN.finditer(cond):
+        token = match.group(0)
+        if token == "==":
+            kinds.append("eq")
+        elif token in ("and", "or", "not"):
+            kinds.append(token)
+        else:
+            kinds.append("atom")  # identifier or double-quoted string
+    pos = 0
+
+    def peek() -> str | None:
+        return kinds[pos] if pos < len(kinds) else None
+
+    def atom() -> bool:
+        nonlocal pos
+        if peek() == "atom":
+            pos += 1
+            return True
+        return False
+
+    def eq() -> bool:
+        nonlocal pos
+        if not atom():
+            return False
+        if peek() == "eq":
+            pos += 1
+            return atom()
+        return True
+
+    def not_expr() -> bool:
+        nonlocal pos
+        if peek() == "not":
+            pos += 1
+            return not_expr()
+        return eq()
+
+    def and_expr() -> bool:
+        nonlocal pos
+        if not not_expr():
+            return False
+        while peek() == "and":
+            pos += 1
+            if not not_expr():
+                return False
+        return True
+
+    def or_expr() -> bool:
+        nonlocal pos
+        if not and_expr():
+            return False
+        while peek() == "or":
+            pos += 1
+            if not and_expr():
+                return False
+        return True
+
+    return or_expr() and pos == len(kinds)
+
 
 def _include_path_is_valid(p: str) -> bool:
     """Mirror miniJinja's resolveTemplatePath containment: non-empty / non-absolute / no `..`."""
@@ -70,7 +140,10 @@ def _block_is_valid(raw: str, is_variable: bool) -> bool:
                 return False
             # Reject `in`/`is` operators (lexically identifiers) outside string literals.
             words = _IDENT.findall(re.sub(r'"[^"\\]*"', " ", cond))
-            return not any(word in _BANNED_COND_WORDS for word in words)
+            if any(word in _BANNED_COND_WORDS for word in words):
+                return False
+            # Reject malformed condition shapes the runtime renderer throws on.
+            return _cond_shape_valid(cond)
     return False
 
 
@@ -146,6 +219,11 @@ def test_validator_flags_out_of_subset_blocks() -> None:
         '{% include "/x.md" %}',
         '{% include "" %}',
         '{% include "a/../b.md" %}',
+        # Malformed condition shapes the runtime throws on.
+        "{% if a b %}",
+        "{% if a == %}",
+        "{% if == a %}",
+        "{% if not %}",
     ]
     for block in bad:
         assert _violations(block, "synthetic.md"), f"expected violation for {block!r}"
