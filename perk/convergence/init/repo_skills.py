@@ -1,5 +1,5 @@
 """Repo-authored-skills substrate: render the skills-CLI manifest fragment for a repo's *own*
-``.pi/skills/*/SKILL.md`` skills under a self-referential GitHub source.
+``.perk/skills/*/SKILL.md`` skills under a self-referential GitHub source.
 
 Dormant substrate: nothing in production calls this yet. A later node wires
 :func:`build_repo_skills_manifest` into ``perk init`` / ``perk doctor --fix`` as a managed
@@ -24,7 +24,7 @@ from perk.substrate import git, paths
 from perk.substrate.git import GitError
 from perk.substrate.paths import REPO_SKILLS_REL
 
-# The repo's own skills live under `.pi/skills/<name>/SKILL.md` (path construction via the
+# The repo's own skills live under `.perk/skills/<name>/SKILL.md` (path construction via the
 # `paths.repo_skills_dir` seam; `REPO_SKILLS_REL` is the display string). The rendered fragment
 # lives beside the perk-managed fragment in the standard `.d/` convention.
 REPO_SKILLS_MANIFEST_FILENAME = "perk-repo-skills.yaml"
@@ -145,11 +145,11 @@ def render_repo_skills_manifest(source: RepoSkillSource, skills: Sequence[RepoSk
 
 
 def discover_repo_skills(root: Path) -> tuple[list[tuple[str, dict]], list[str]]:
-    """Discover + parse each ``.pi/skills/<name>/SKILL.md`` frontmatter (filesystem only).
+    """Discover + parse each ``.perk/skills/<name>/SKILL.md`` frontmatter (filesystem only).
 
     Returns ``(parsed, errors)`` where ``parsed`` is ``[(dir_name, frontmatter), …]`` sorted by
     ``dir_name`` and ``errors`` accumulates each frontmatter-parse reason. An absent
-    ``.pi/skills/`` yields ``([], [])``.
+    ``.perk/skills/`` yields ``([], [])``.
     """
     skills_root = paths.repo_skills_dir(root)
     if not skills_root.is_dir():
@@ -211,7 +211,7 @@ def effective_manifest_source_keys(root: Path) -> set[str]:
 
 
 def other_tracked_skill_names(root: Path) -> set[str]:
-    """The frontmatter ``name``s of every *other* tracked ``SKILL.md`` (outside ``.pi/skills/``).
+    """The frontmatter ``name``s of every *other* tracked ``SKILL.md`` (outside ``.perk/skills/``).
 
     Used for the duplicate-name check. ``GitError`` propagates (the orchestrator treats a failed
     probe as fatal-by-exception → an error string).
@@ -331,7 +331,7 @@ def converge_repo_skills_manifest(root: Path, *, apply: bool = True) -> RepoSkil
       line ``"<path>: created|updated"`` only on a real delta.
     - **no skills, no errors** (``fragment is None`` and no ``errors``): remove a stale fragment if
       present (``apply``); a ``"<path>: removed"`` change line only when it existed. (Absent
-      ``.pi/skills/`` → no fragment; this also prunes a fragment left behind after the last skill
+      ``.perk/skills/`` → no fragment; this also prunes a fragment left behind after the last skill
       was deleted.)
     - **errors present** (``fragment is None`` and ``errors``): **never** write or remove — a
       transient bad edit must not clobber a previously-good fragment. The errors ride on

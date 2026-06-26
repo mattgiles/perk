@@ -275,9 +275,9 @@ skill = "house-style"
 mode = "nudge"
 ```
 
-### Repo-authored skills (`.pi/skills/`)
+### Repo-authored skills (`.perk/skills/`)
 
-A repo can author its **own** skills. Put each under `.pi/skills/<name>/SKILL.md` (a YAML
+A repo can author its **own** skills. Put each under `.perk/skills/<name>/SKILL.md` (a YAML
 frontmatter block with `name` matching the directory and a `description`). `perk init` and
 `perk doctor --fix` discover them and render a managed skills-CLI manifest fragment at
 `.agents/manifest.d/perk-repo-skills.yaml` under a source pointing at **your repo** (its GitHub
@@ -293,7 +293,7 @@ for the full recipe.
 Because the source resolves your skill from your repo's **default branch**, a freshly-added skill
 must be **committed and pushed** before the skills CLI can deliver it:
 
-1. Add `.pi/skills/<name>/SKILL.md`.
+1. Add `.perk/skills/<name>/SKILL.md`.
 2. Commit + push it to your default branch.
 3. Re-run `perk init` (or `perk doctor --fix`).
 

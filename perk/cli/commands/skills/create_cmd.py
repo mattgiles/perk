@@ -7,10 +7,10 @@ overrides ``binding_trigger="command:skills-create"`` so ``stage:save`` does not
 ``perk-skill-author`` skill is delivered instead. Borrowing ``save`` injects no save-stage behavior
 — the extension's authoring-context injection is gated on ``mode: read-only``.
 
-The door pre-scaffolds ``.pi/skills/NAME/`` (the same write ``perk skills scaffold`` performs) and
+The door pre-scaffolds ``.perk/skills/NAME/`` (the same write ``perk skills scaffold`` performs) and
 then launches an authoring session seeded to follow ``perk-skill-author``. There is no structural
-write-sandbox; the "scoped to ``.pi/skills/NAME/**``" instruction is a **soft scope** carried in the
-seed prompt. Committing is left to the user.
+write-sandbox; the "scoped to ``.perk/skills/NAME/**``" instruction is a **soft scope** carried in
+the seed prompt. Committing is left to the user.
 
 ``--dry-run`` does NOT pre-scaffold (no tracked-file mutation): it prints the seed + intended path
 and launches nothing. The existence-refusal still runs on every path (incl. ``--dry-run``).
@@ -68,7 +68,7 @@ def create_skill(
     as_json: bool,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Scaffold a repo-authored skill at `.pi/skills/NAME/`, then launch a session to author it.
+    """Scaffold a repo-authored skill at `.perk/skills/NAME/`, then launch a session to author it.
 
     \b
     Examples:

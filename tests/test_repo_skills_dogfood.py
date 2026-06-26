@@ -47,7 +47,7 @@ def test_scaffold_writes_a_sync_ready_fragment(git_repo, monkeypatch):
     assert result.exit_code == 0, result.output
 
     # 1. The skill itself is frontmatter-valid (the input the author then fills in).
-    skill_md = git_repo / ".pi" / "skills" / "demo" / "SKILL.md"
+    skill_md = git_repo / ".perk" / "skills" / "demo" / "SKILL.md"
     assert skill_md.is_file()
     mapping, reason = parse_skill_frontmatter(skill_md.read_text(encoding="utf-8"))
     assert reason is None
@@ -76,7 +76,7 @@ def test_refine_re_opens_without_sync(git_repo, monkeypatch):
     launches: list = []
     monkeypatch.setattr(refine_cmd.launch, "launch_stage", lambda **kw: launches.append(kw))
 
-    target = git_repo / ".pi" / "skills" / "demo"
+    target = git_repo / ".perk" / "skills" / "demo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("existing body", encoding="utf-8")
 

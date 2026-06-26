@@ -363,7 +363,7 @@ def run_init(
     warnings: list[str] = []
     if verify:
         # Converge the repo-authored-skills manifest fragment BEFORE the sync so the skills CLI
-        # sees the declared `.pi/skills/` source. A verify-gated network gesture (not a
+        # sees the declared `.perk/skills/` source. A verify-gated network gesture (not a
         # ManagedConvergence): structural errors are NON-FATAL here (init exits 0 and keeps
         # converging) and flow onto `InitReport.warnings`; only the sync-time remote
         # `missing-skill` stays fatal. Never touches `.agents/manifest.yaml`.

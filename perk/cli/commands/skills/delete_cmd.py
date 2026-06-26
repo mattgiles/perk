@@ -1,6 +1,6 @@
 """`perk skills delete NAME --yes` — remove a repo-authored skill + reconverge the fragment.
 
-Removes `.pi/skills/NAME/` in the **main checkout**, best-effort unlinks a dangling
+Removes `.perk/skills/NAME/` in the **main checkout**, best-effort unlinks a dangling
 `.agents/skills/NAME` symlink, then reconverges the `perk-repo-skills.yaml` fragment (skipping the
 heavy all-sources `skills update --sync`). Without `--yes`, prompts interactively when a TTY is
 present, otherwise refuses and prints the path that would be removed.
@@ -29,7 +29,7 @@ from perk.substrate.output import user_confirm, user_output
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def delete_skill(ctx: click.Context, *, name: str, yes: bool, as_json: bool) -> None:
-    """Remove a repo-authored skill (`.pi/skills/NAME/`) and reconverge the fragment.
+    """Remove a repo-authored skill (`.perk/skills/NAME/`) and reconverge the fragment.
 
     Operates on the main checkout. Without `--yes`, prompts interactively when a TTY is present;
     under `--json`/non-interactive it refuses. Best-effort unlinks a dangling `.agents/skills/NAME`

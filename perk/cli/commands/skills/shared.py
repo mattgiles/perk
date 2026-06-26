@@ -127,7 +127,7 @@ def managed_source_aliases(root: Path) -> set[str]:
 
 
 def repo_skills_root(ctx: click.Context) -> Path:
-    """The **main checkout** root that owns ``.pi/skills/`` (the `.pi/skills/` parent).
+    """The **main checkout** root that owns ``.perk/skills/`` (the `.perk/skills/` parent).
 
     Repo-authored skills live in the main working tree, not a linked worktree, so a
     ``perk skills scaffold``/``delete`` invoked from inside a worktree still targets the main
@@ -140,7 +140,7 @@ def repo_skills_root(ctx: click.Context) -> Path:
 def validate_skill_name(name: str) -> str:
     """Validate ``NAME`` as a single skill-directory segment, returning the cleaned name.
 
-    ``NAME`` becomes both the ``.pi/skills/<NAME>/`` directory and the frontmatter ``name`` (which
+    ``NAME`` becomes both the ``.perk/skills/<NAME>/`` directory and the frontmatter ``name`` (which
     the convergence requires to be equal), so it must be a single path segment: no ``/`` or ``\\``,
     not ``.``/``..``, no leading ``.``, and non-empty. Raises ``UserFacingCliError`` on a bad name.
     """
@@ -204,7 +204,7 @@ class ScaffoldOutcome:
 
 
 def perform_scaffold(root: Path, skill_name: str) -> ScaffoldOutcome:
-    """Write the TODO ``SKILL.md`` under ``.pi/skills/<skill_name>/`` and reconverge the fragment.
+    """Write the TODO ``SKILL.md`` under ``.perk/skills/<skill_name>/`` and reconverge the fragment.
 
     The shared scaffold step behind both ``perk skills scaffold`` (deterministic create-only) and
     ``perk skills create`` (the authoring cold door's pre-scaffold). The caller owns the

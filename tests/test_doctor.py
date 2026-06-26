@@ -657,6 +657,62 @@ def test_fix_removes_orphaned_git_clone(git_repo):
     assert not any("removed orphaned perk clone" in line for line in again.fixed)  # idempotent
 
 
+def test_fix_migrates_legacy_repo_skill_when_target_absent(git_repo):
+    # Legacy `.pi/skills/foo` with no `.perk/skills/foo` target → moved forward; idempotent.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text("---\nname: foo\n---\n", encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not legacy.exists()
+    moved = git_repo / ".perk" / "skills" / "foo" / "SKILL.md"
+    assert moved.is_file()
+    assert any(".pi/skills/foo: moved to .perk/skills/foo" in line for line in fixed.fixed)
+
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any(".pi/skills/foo" in line for line in again.fixed)  # idempotent
+
+
+def test_fix_removes_legacy_repo_skill_when_identical(git_repo):
+    # Legacy `.pi/skills/foo` byte-identical to an existing `.perk/skills/foo` → legacy dropped.
+    _scaffold(git_repo)
+    body = "---\nname: foo\n---\nbody\n"
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text(body, encoding="utf-8")
+    target = git_repo / ".perk" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text(body, encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not legacy.exists()
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == body
+    assert any(
+        ".pi/skills/foo: removed legacy (identical to .perk/skills/foo)" in line
+        for line in fixed.fixed
+    )
+
+
+def test_fix_reports_conflict_when_legacy_repo_skill_differs(git_repo):
+    # Legacy `.pi/skills/foo` differs from an existing `.perk/skills/foo` → not moved, error.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text("---\nname: foo\n---\nlegacy\n", encoding="utf-8")
+    target = git_repo / ".perk" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("---\nname: foo\n---\nnew\n", encoding="utf-8")
+
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert legacy.exists()  # left in place for manual resolution
+    assert any(
+        ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
+    )
+    assert report_to_dict(report)["fix_errors"] == report.fix_errors  # surfaced in the dict
+    assert any(".pi/skills/foo: conflicts" in line for line in report.fix_errors)
+
+
 def test_cache_gc_ok_when_no_prunable_state(git_repo):
     # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
     _scaffold(git_repo)
@@ -894,7 +950,7 @@ def _stub_repo_identity(monkeypatch):
 
 
 def _plant_repo_skill(root, dir_name, *, fm=None):
-    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill = root / ".perk" / "skills" / dir_name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text(fm or f"---\nname: {dir_name}\ndescription: A skill.\n---\n# body\n", "utf-8")
     return skill

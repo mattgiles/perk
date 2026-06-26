@@ -63,7 +63,7 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
 
   **perk-owned dot-path construction seam.** Construction of the four **perk-owned** dot-path
   families — the perk dir, the config files (`perk.toml`/`perk.local.toml`), the repo-skills dir
-  (`.pi/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
+  (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
   helper (Objective #878 migrates them to `.perk/` one phase at a time) — no path value changes
@@ -2044,8 +2044,8 @@ dangling-pointer warning, which stays a last-resort signal).
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
   still-broken state.
 
-**Repo-authored skills (the `.pi/skills/` → manifest-fragment convergence).** A repo may author
-its **own** skills under `.pi/skills/<name>/SKILL.md`; perk renders them into a second skills-CLI
+**Repo-authored skills (the `.perk/skills/` → manifest-fragment convergence).** A repo may author
+its **own** skills under `.perk/skills/<name>/SKILL.md`; perk renders them into a second skills-CLI
 manifest fragment `.agents/manifest.d/perk-repo-skills.yaml` (beside the perk-managed `perk.yaml`),
 under a self-referential GitHub source derived from the repo's identity (`github.repo_identity` →
 `perk-<repo>` alias, `url`, default-branch `ref`). The substrate is
@@ -2072,7 +2072,7 @@ it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is n
 - **Repo-aware sync remediation:** `sync_skills` takes the declared repo-authored skill **names**
   (`repo_skill_names`). They are folded into the post-sync presence loop (a free backstop for a CLI
   that exits 0 but skips an unresolvable skill) and gate one appended remediation clause on every
-  failure message — "commit + push the new `.pi/skills/` skill to your default branch, then re-run"
+  failure message — "commit + push the new `.perk/skills/` skill to your default branch, then re-run"
   — emitted **only when** repo-authored skills are declared (no per-skill stderr parsing).
 
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)

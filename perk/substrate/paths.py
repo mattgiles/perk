@@ -18,8 +18,8 @@ from pathlib import Path
 CONFIG_FILENAME = "perk.toml"
 LOCAL_CONFIG_FILENAME = "perk.local.toml"
 # Forward-slash relative string for display f-strings (kept byte-consistent with
-# ``repo_skills_dir`` below — same `.pi/skills` literal text).
-REPO_SKILLS_REL = ".pi/skills"
+# ``repo_skills_dir`` below — same `.perk/skills` literal text).
+REPO_SKILLS_REL = ".perk/skills"
 
 
 def perk_dir(root: Path) -> Path:
@@ -44,4 +44,4 @@ def local_config_file(root: Path) -> Path:
 
 def repo_skills_dir(root: Path) -> Path:
     """The repo-authored skill source root."""
-    return root / ".pi" / "skills"
+    return root / ".perk" / "skills"

@@ -1,5 +1,6 @@
 """The ``--fix`` repair layer: config re-seed, Linear labels, and the migration seam."""
 
+import filecmp
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -10,7 +11,7 @@ from perk.backends.linear import client as linear_client
 from perk.convergence import init
 from perk.convergence.doctor.data import Check
 from perk.convergence.doctor.linear_checks import _linear_selected
-from perk.substrate import git
+from perk.substrate import git, paths
 from perk.substrate.config import load_committed_issues_team
 
 # --- fixes ----------------------------------------------------------------------------------
@@ -89,6 +90,68 @@ def _remove_orphaned_git_clone(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
+def _dirs_identical(left: Path, right: Path) -> bool:
+    """True iff two directory trees hold the same relative files, every counterpart byte-identical.
+
+    Any structural divergence (a file present on only one side, a differing/unreadable file,
+    recursively) ⇒ not identical. Used to decide whether a legacy skill dir is redundant (safe to
+    drop) or conflicting (left in place, reported).
+    """
+    cmp = filecmp.dircmp(left, right)
+    if cmp.left_only or cmp.right_only or cmp.diff_files or cmp.funny_files:
+        return False
+    return all(_dirs_identical(left / sub, right / sub) for sub in cmp.common_dirs)
+
+
+def _migrate_legacy_repo_skills(root: Path) -> tuple[list[str], list[str]]:
+    """Migrate repo-authored skill source forward from legacy `.pi/skills/` to `.perk/skills/`.
+
+    Objective #878 moved the repo-skills source root from `.pi/skills/` to `.perk/skills/` (the
+    `paths.repo_skills_dir` seam). This forward-only, filesystem-only repair relocates any skill
+    still under the frozen legacy `.pi/skills/<name>` root:
+
+    - target absent → `shutil.move` it to `.perk/skills/<name>`;
+    - target present and byte-identical → drop the redundant legacy copy;
+    - target present and differing → leave it, report a conflict for manual resolution.
+
+    Idempotent (returns `([], [])` once `.pi/skills/` is gone). The fragment is re-rendered later by
+    the verify-gated repo-skills reconverge from the new location — no fragment bookkeeping here.
+    Returns ``(changes, errors)`` — failures land loudly on `fix_errors`, never swallowed.
+    """
+    changes: list[str] = []
+    errors: list[str] = []
+    legacy_root = root / ".pi/skills"
+    if not legacy_root.is_dir():
+        return changes, errors
+    target_root = paths.repo_skills_dir(root)
+    for child in sorted(p for p in legacy_root.iterdir() if p.is_dir()):
+        name = child.name
+        target = target_root / name
+        try:
+            if not target.exists():
+                target_root.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(child), str(target))
+                changes.append(f".pi/skills/{name}: moved to .perk/skills/{name}")
+            elif _dirs_identical(child, target):
+                shutil.rmtree(child)
+                changes.append(
+                    f".pi/skills/{name}: removed legacy (identical to .perk/skills/{name})"
+                )
+            else:
+                errors.append(
+                    f".pi/skills/{name}: conflicts with .perk/skills/{name} "
+                    "(not identical) — resolve manually"
+                )
+        except OSError as exc:
+            errors.append(f".pi/skills/{name}: migration failed: {exc}")
+    if legacy_root.is_dir() and not any(legacy_root.iterdir()):
+        try:
+            legacy_root.rmdir()
+        except OSError as exc:
+            errors.append(f".pi/skills: removal of empty legacy dir failed (rmdir): {exc}")
+    return changes, errors
+
+
 # The legacy/one-off migration seam.
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
 # cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
@@ -96,6 +159,7 @@ def _remove_orphaned_git_clone(root: Path) -> tuple[list[str], list[str]]:
 _MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
     _untrack_materialized_plan_cache,
     _remove_orphaned_git_clone,
+    _migrate_legacy_repo_skills,
 )
 
 
