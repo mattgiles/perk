@@ -11,7 +11,7 @@ node_modules/
 # BEGIN perk managed
 /.pi/npm/
 /.pi/git/
-/.pi/perk.local.toml
+/.perk/local.toml
 /.worktrees/
 /.pi/workflow/.perk-loaded
 /.pi/workflow/.perk-t3.json
