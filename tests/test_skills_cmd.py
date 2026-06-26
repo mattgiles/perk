@@ -374,3 +374,222 @@ def test_remove_restores_on_sync_oserror(monkeypatch, tmp_path):
     assert result.exit_code == 1
     assert "could not run `skills sync`" in result.output
     assert manifest.read_text(encoding="utf-8") == before
+
+
+# --- scaffold / delete (repo-authored skills) -------------------------------
+
+import json  # noqa: E402
+import types  # noqa: E402
+
+from perk.cli.commands.skills import delete_cmd, scaffold_cmd  # noqa: E402
+from perk.convergence.init.repo_skills import (  # noqa: E402
+    RepoSkill,
+    RepoSkillsConvergence,
+    RepoSkillsManifest,
+    parse_skill_frontmatter,
+    validate_skill,
+)
+
+
+def _fake_conv(
+    *, changes: list[str], errors: tuple[str, ...] = (), warnings: tuple[str, ...] = ()
+) -> RepoSkillsConvergence:
+    """A canned convergence so scaffold/delete tests stay offline (no `github.repo_identity`)."""
+    manifest = RepoSkillsManifest(fragment="...", skills=(), errors=errors, warnings=warnings)
+    return RepoSkillsConvergence(changes=list(changes), manifest=manifest)
+
+
+_DEFAULT_CHANGE = ".agents/manifest.d/perk-repo-skills.yaml: created"
+
+
+def _patch_repo_skills(monkeypatch, *, changes=None, errors=(), warnings=()):
+    """Pin the main checkout to tmp_path and stub the (network) reconvergence. Returns call log."""
+    monkeypatch.setattr(shared.git, "main_worktree_root", lambda _root: None)
+    resolved_changes = [_DEFAULT_CHANGE] if changes is None else changes
+    calls: list[bool] = []
+
+    def fake_converge(root, *, apply=True):
+        calls.append(apply)
+        return _fake_conv(changes=resolved_changes, errors=errors, warnings=warnings)
+
+    monkeypatch.setattr(scaffold_cmd, "converge_repo_skills_manifest", fake_converge)
+    monkeypatch.setattr(delete_cmd, "converge_repo_skills_manifest", fake_converge)
+    return calls
+
+
+def test_scaffold_happy_path(monkeypatch, tmp_path):
+    calls = _patch_repo_skills(monkeypatch)
+    result = CliRunner().invoke(cli, ["skills", "scaffold", "foo"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+
+    skill_md = tmp_path / ".pi" / "skills" / "foo" / "SKILL.md"
+    assert skill_md.is_file()
+    mapping, reason = parse_skill_frontmatter(skill_md.read_text(encoding="utf-8"))
+    assert reason is None
+    skill, vreason = validate_skill("foo", mapping)
+    assert vreason is None
+    assert isinstance(skill, RepoSkill)
+    assert calls == [True]
+
+
+def test_scaffold_refuses_existing(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "scaffold", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_exists"
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "preexisting"
+
+
+def test_scaffold_invalid_names(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    for bad in ("foo/bar", "", ".", "..", ".hidden"):
+        result = CliRunner().invoke(cli, ["skills", "scaffold", bad, "--json"], obj=_ctx(tmp_path))
+        assert result.exit_code == 1, bad
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "skills_invalid_name", bad
+    assert not (tmp_path / ".pi" / "skills").exists()
+
+
+def test_scaffold_json_success_shape(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    result = CliRunner().invoke(cli, ["skills", "scaffold", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "success": True,
+        "error_type": None,
+        "name": "foo",
+        "path": ".pi/skills/foo",
+        "fragment": "created",
+        "warnings": [],
+        "errors": [],
+    }
+
+
+def test_scaffold_reconverge_errors_nonfatal(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch, changes=[], errors=("boom",))
+    result = CliRunner().invoke(cli, ["skills", "scaffold", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["success"] is True
+    assert payload["errors"] == ["boom"]
+    assert payload["fragment"] == "none"
+    assert (tmp_path / ".pi" / "skills" / "foo" / "SKILL.md").is_file()
+
+
+def test_delete_yes_removes(monkeypatch, tmp_path):
+    calls = _patch_repo_skills(
+        monkeypatch, changes=[".agents/manifest.d/perk-repo-skills.yaml: removed"]
+    )
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "delete", "foo", "--yes"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert not target.exists()
+    assert calls == [True]
+
+
+def _fake_isatty(monkeypatch, *, value: bool):
+    """Swap delete_cmd's `sys` for a fake (CliRunner clobbers the real `sys.stdin` mid-invoke)."""
+    monkeypatch.setattr(
+        delete_cmd, "sys", types.SimpleNamespace(stdin=types.SimpleNamespace(isatty=lambda: value))
+    )
+
+
+def test_delete_non_interactive_refuses(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    _fake_isatty(monkeypatch, value=False)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "delete", "foo"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    assert ".pi/skills/foo" in result.output
+    assert target.exists()
+
+
+def test_delete_json_refuses_without_yes(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "delete", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "confirmation_required"
+    assert target.exists()
+
+
+def test_delete_interactive_declined(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    _fake_isatty(monkeypatch, value=True)
+    monkeypatch.setattr("perk.cli.commands.skills.delete_cmd.user_confirm", lambda *a, **k: False)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "delete", "foo"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    assert "aborted" in result.output
+    assert target.exists()
+
+
+def test_delete_absent_dir(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    result = CliRunner().invoke(
+        cli, ["skills", "delete", "foo", "--yes", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_not_found"
+
+
+def test_delete_unlinks_dangling_symlink(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+    links = tmp_path / ".agents" / "skills"
+    links.mkdir(parents=True)
+    (links / "foo").symlink_to(target)
+
+    result = CliRunner().invoke(
+        cli, ["skills", "delete", "foo", "--yes", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["symlink_removed"] is True
+    assert not (links / "foo").exists()
+    assert not (links / "foo").is_symlink()
+
+
+def test_delete_json_success_shape(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch, changes=[".agents/manifest.d/perk-repo-skills.yaml: removed"])
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("x", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli, ["skills", "delete", "foo", "--yes", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "success": True,
+        "error_type": None,
+        "name": "foo",
+        "path": ".pi/skills/foo",
+        "fragment": "removed",
+        "warnings": [],
+        "errors": [],
+        "symlink_removed": False,
+    }
