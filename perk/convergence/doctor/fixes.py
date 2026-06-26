@@ -98,7 +98,14 @@ def _dirs_identical(left: Path, right: Path) -> bool:
     drop) or conflicting (left in place, reported).
     """
     cmp = filecmp.dircmp(left, right)
-    if cmp.left_only or cmp.right_only or cmp.diff_files or cmp.funny_files:
+    # `common_funny` catches same-name type collisions (a dir on one side, a file on the other) —
+    # `dircmp` files those there, not in the other buckets, so they must be rejected explicitly.
+    if cmp.left_only or cmp.right_only or cmp.diff_files or cmp.funny_files or cmp.common_funny:
+        return False
+    # `dircmp`'s `diff_files` is a shallow (size+mtime) signature compare; force a byte-for-byte
+    # content compare so equal-stat-but-differing files are caught (D4 requires byte-identity).
+    _, mismatch, errors = filecmp.cmpfiles(left, right, cmp.common_files, shallow=False)
+    if mismatch or errors:
         return False
     return all(_dirs_identical(left / sub, right / sub) for sub in cmp.common_dirs)
 
