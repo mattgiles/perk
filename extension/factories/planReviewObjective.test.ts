@@ -25,8 +25,8 @@ import {
 } from "./planReview.ts";
 
 function selectPlanProvider(cwd: string, id: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), `[providers]\nplan = "${id}"\n`, "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), `[providers]\nplan = "${id}"\n`, "utf8");
 }
 
 // ------------------------------------------------------------------------------ shared fakes

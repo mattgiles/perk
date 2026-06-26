@@ -87,12 +87,24 @@ def _config_check(root: Path) -> Check:
     }
     missing = [name for name, path in files.items() if not path.is_file()]
     if missing:
+        # Diagnose an unmigrated legacy config distinctly from a genuinely-absent one, keyed on
+        # the committed marker: a present `.pi/perk.toml` with no `.perk/config.toml` means the
+        # repo predates the `.perk/` move — `doctor --fix` migrates it.
+        if CONFIG_FILENAME in missing and paths.legacy_config_file(root).is_file():
+            return Check(
+                "config",
+                "repository",
+                "fail",
+                "legacy config not migrated",
+                ".pi/perk.toml",
+                "perk doctor --fix",
+            )
         return Check(
             "config",
             "repository",
             "fail",
             "config missing",
-            ", ".join(f".pi/{n}" for n in missing),
+            ", ".join(f".perk/{n}" for n in missing),
             "perk doctor --fix",
         )
     try:
@@ -104,7 +116,7 @@ def _config_check(root: Path) -> Check:
             "fail",
             "config invalid (bad TOML)",
             str(exc),
-            "Fix .pi/perk.toml by hand (perk will not overwrite your edits).",
+            "Fix .perk/config.toml by hand (perk will not overwrite your edits).",
         )
     return Check("config", "repository", "ok", "config present + valid")
 
@@ -201,7 +213,7 @@ def _bindings_check(root: Path, self_repo: bool) -> Check:
         "warn",
         f"bindings: {len(problems)} problem(s)",
         shown,
-        "Fix .pi/perk.toml [[bindings]], or re-run 'perk init' / 'perk doctor --fix' to sync.",
+        "Fix .perk/config.toml [[bindings]], or re-run 'perk init' / 'perk doctor --fix' to sync.",
     )
 
 
@@ -263,7 +275,7 @@ def _providers_check(root: Path) -> Check:
         "warn",
         f"providers: {len(problems)} problem(s)",
         shown,
-        "Fix .pi/perk.toml [providers], or re-run 'perk init' / 'perk doctor --fix' to sync.",
+        "Fix .perk/config.toml [providers], or re-run 'perk init' / 'perk doctor --fix' to sync.",
     )
 
 
@@ -298,7 +310,7 @@ def _issues_check(root: Path) -> Check:
             "fail",
             str(exc),
             "",
-            'Fix .pi/perk.toml [issues] — backend must be "github" or "linear".',
+            'Fix .perk/config.toml [issues] — backend must be "github" or "linear".',
         )
     if backend_id == resolve.LINEAR_BACKEND_ID:
         team = load_committed_issues_team(root)
@@ -309,7 +321,7 @@ def _issues_check(root: Path) -> Check:
                 "fail",
                 '[issues] team is required when backend = "linear"',
                 "",
-                'Set [issues] team (the Linear team key, e.g. "ENG") in .pi/perk.toml.',
+                'Set [issues] team (the Linear team key, e.g. "ENG") in .perk/config.toml.',
             )
         return Check("issues-backend", "issues", "ok", f"issues backend: linear (team {team})")
     return Check("issues-backend", "issues", "ok", f"issues backend: {backend_id}")

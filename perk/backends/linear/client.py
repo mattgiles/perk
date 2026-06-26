@@ -273,7 +273,7 @@ def client_from_env(
 
     The env value **wins**: it is resolved first (stripped). Only when it is empty/blank **and**
     ``repo_root`` is given does the local-only ``config.load_local_linear_api_key(repo_root)``
-    fallback (the gitignored ``.pi/perk.local.toml`` ``[linear] api_key``) apply. ``repo_root=None``
+    fallback (the gitignored ``.perk/local.toml`` ``[linear] api_key``) apply. ``repo_root=None``
     (the default) preserves the env-only behavior for every existing caller. Still empty ⇒ the
     unchanged hinted ``IssueBackendError``.
     """

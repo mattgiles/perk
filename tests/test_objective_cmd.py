@@ -117,9 +117,9 @@ def _invoke_with_config(args, *, body, config):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        pi = Path(d) / ".pi"
-        pi.mkdir(parents=True, exist_ok=True)
-        (pi / "perk.toml").write_text(config, encoding="utf-8")
+        cfg = Path(d) / ".perk"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "config.toml").write_text(config, encoding="utf-8")
         bf = Path(d) / "obj.md"
         bf.write_text(body, encoding="utf-8")
         return runner.invoke(cli, [*args, "--body", str(bf)])

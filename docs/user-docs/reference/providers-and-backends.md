@@ -144,8 +144,8 @@ Selection lives in the flat `[providers]` table and is resolved by `resolve_prov
 ## Issue backend — Linear reference
 
 The `[issues] backend` vocabulary is `"github"` (default) or `"linear"`
-(`perk/backends/resolve.py`), read **committed-only** from `.pi/perk.toml` — a
-`.pi/perk.local.toml` value is silently ignored (this keeps the canonical issue store
+(`perk/backends/resolve.py`), read **committed-only** from `.perk/config.toml` — a
+`.perk/local.toml` value is silently ignored (this keeps the canonical issue store
 deterministic). Switching to Linear changes where canonical plan / learn / objective issues live.
 
 The one `[issues]` selection governs **two storage tiers**: the issue-tracking tier (plan / learn
@@ -157,12 +157,12 @@ under GitHub and Linear today.
 ### Auth
 
 - **`LINEAR_API_KEY`** — a personal Linear API key (linear.app → Settings → Security & access),
-  supplied as an **environment variable** or via the gitignored `.pi/perk.local.toml`
+  supplied as an **environment variable** or via the gitignored `.perk/local.toml`
   `[linear] api_key` (an exported env var wins); **never** in a committed file (contracts §8.21).
-  perk reads this from the **main checkout's** `.pi/perk.local.toml` even when a command runs
+  perk reads this from the **main checkout's** `.perk/local.toml` even when a command runs
   inside a linked worktree (the gitignored file is never copied into worktrees), so a single entry
   in the main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
-  Setting it in `perk.local.toml` feeds both perk's Linear backend and the in-session `linear_*`
+  Setting it in `local.toml` feeds both perk's Linear backend and the in-session `linear_*`
   tools.
 - The key is sent as a **plain `Authorization: <key>`** header — **not** `Bearer`-prefixed.
 

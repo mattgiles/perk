@@ -21,18 +21,18 @@ import {
   resolvedBindings,
 } from "./bindingDelivery.ts";
 
-/** Write a `.pi/perk.toml` with the given `[[bindings]]` rows. */
+/** Write a `.perk/config.toml` with the given `[[bindings]]` rows. */
 function writeBindings(
   cwd: string,
   rows: { trigger: string; skill: string; mode: string }[],
 ): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   const body = rows
     .map(
       (r) => `[[bindings]]\ntrigger = "${r.trigger}"\nskill = "${r.skill}"\nmode = "${r.mode}"\n`,
     )
     .join("\n");
-  writeFileSync(join(cwd, ".pi", "perk.toml"), body, "utf8");
+  writeFileSync(join(cwd, ".perk", "config.toml"), body, "utf8");
 }
 
 /** Write `.agents/skills/<skill>/SKILL.md`. */

@@ -29,7 +29,7 @@ def test_convergence_writes_handoff_and_capabilities(tmp_path):
 
 def test_force_reseeds_config(tmp_path):
     run_init(tmp_path, verify=False)
-    cfg = tmp_path / ".pi" / "perk.toml"
+    cfg = tmp_path / ".perk" / "config.toml"
     cfg.write_text("[worktree]\nroot = 'hacked'\n", encoding="utf-8")
 
     report = run_init(tmp_path, verify=False, force=True, interactive=False)
@@ -363,12 +363,12 @@ def test_cli_idempotent_second_run(tmp_path, stub_env):
 
 
 def _select_linear(root, *, team=True) -> None:
-    pi = root / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
+    cfg = root / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
     body = '[issues]\nbackend = "linear"\n'
     if team:
         body += 'team = "ENG"\n'
-    (pi / "perk.toml").write_text(body, encoding="utf-8")
+    (cfg / "config.toml").write_text(body, encoding="utf-8")
 
 
 def test_report_to_dict_linear_null_when_not_evaluated(tmp_path):

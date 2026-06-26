@@ -1,5 +1,5 @@
 // The minimal TS config port. Mirrors `perk/substrate/config.py`'s overlay: read
-// `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml` (gitignored, local wins). The only
+// `.perk/config.toml` (committed) overlaid by `.perk/local.toml` (gitignored, local wins). The only
 // setting consumed today is an optional `[workflow]` plan-authoring addendum, appended into the
 // `perk:plan-context` injection (extension/factories/planMode.ts) when present.
 //
@@ -207,7 +207,7 @@ function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
   return { tables, arrays };
 }
 
-/** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/substrate/config.py). */
+/** Load `.perk/config.toml` overlaid by `.perk/local.toml` from `cwd` (mirror of perk/substrate/config.py). */
 export function loadPerkConfig(cwd: string): PerkConfig {
   let merged: TomlSubset = emptySubset();
   for (const file of [configFile(cwd), localConfigFile(cwd)]) {
@@ -316,9 +316,9 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
 /**
  * The fail-safe TS mirror of the issue-backend selection.
  *
- * Reads ONLY committed `.pi/perk.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
+ * Reads ONLY committed `.perk/config.toml` — deliberately not `loadPerkConfig`'s overlay, mirroring
  * the Python committed-only read (the backend decides where canonical durable state is written;
- * a per-user `perk.local.toml` override would fragment the canonical store). Python
+ * a per-user `.perk/local.toml` override would fragment the canonical store). Python
  * (`perk/backends/issues.py::resolve_issue_backend_id`) is the AUTHORITATIVE validator and **raises** on
  * "linear"/unknown; this mirror is fail-safe (absence/unknown/any error → `"github"`) because
  * the TS plane only renders prompts — it never writes canonical issues.

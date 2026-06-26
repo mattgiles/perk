@@ -3,7 +3,8 @@
 This is the Python plane's reader of the *third* parsed cross-plane contract (the first two
 being `shared/registry.yaml` and `shared/bindings.yaml`). It is the **supported set** — the
 catalog of plan/todo/askuser/footer/web providers perk knows how to wire — distinct from the
-per-repo *selection* (the flat `[providers]` table in `.pi/perk.toml`, a pointer into this catalog).
+per-repo *selection* (the flat `[providers]` table in `.perk/config.toml`, a pointer into the
+catalog).
 The TS extension has an independent reader (`extension/substrate/providers.ts`) over the *same*
 bundled file.
 

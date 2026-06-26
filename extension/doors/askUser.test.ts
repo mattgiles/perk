@@ -205,9 +205,9 @@ test("resolvedAskUserProviderId: default repo resolves to perk-ask-user (referen
 
 test("resolvedAskUserProviderId: a foreign askuser selection resolves to juicesharp-ask-user", () => {
   const cwd = scaffoldRepo();
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
-    join(cwd, ".pi", "perk.toml"),
+    join(cwd, ".perk", "config.toml"),
     '[providers]\naskuser = "juicesharp-ask-user"\n',
     "utf8",
   );
@@ -230,9 +230,9 @@ test("registerAskUser: default repo registers the ask_user_question tool (zero b
 
 test("registerAskUser: a foreign askuser selection vacates (registers NO tool)", () => {
   const cwd = scaffoldRepo();
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
-    join(cwd, ".pi", "perk.toml"),
+    join(cwd, ".perk", "config.toml"),
     '[providers]\naskuser = "juicesharp-ask-user"\n',
     "utf8",
   );

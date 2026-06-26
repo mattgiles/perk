@@ -71,7 +71,7 @@ def _render_human(report: InitReport) -> None:
             error = report.linear.error or (readiness.error if readiness is not None else None)
             user_output(
                 click.style("⚠️", fg="yellow") + f" Linear not verified: {error}\n"
-                "  Export LINEAR_API_KEY and set [issues] team in .pi/perk.toml"
+                "  Export LINEAR_API_KEY and set [issues] team in .perk/config.toml"
                 "  (perk did not mutate Linear)"
             )
         project = report.linear.project

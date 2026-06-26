@@ -62,18 +62,30 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
 
   **perk-owned dot-path construction seam.** Construction of the four **perk-owned** dot-path
-  families — the perk dir, the config files (`perk.toml`/`perk.local.toml`), the repo-skills dir
+  families — the perk dir, the config files (`config.toml`/`local.toml`), the repo-skills dir
   (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
-  helper (the migration to `.perk/` lands one phase at a time): the **workflow family now resolves
-  to `.perk/workflow/`**, while config (`perk.toml`/`perk.local.toml`) and the repo-skills dir stay
-  `.pi/...` pending their own phases. The confinement is guard-tested in both planes
-  (`tests/test_paths_guard.py`, `extension/pathsGuard.test.ts`): a family-scoped source scan bans
-  the wrong root segment built adjacent to a perk-owned family follow-segment outside the seams —
-  each arm pinned to its family's current root (`.perk` for the workflow arm, `.pi` for the
-  config/skills arms until they move). **Pi-native** `.pi/...` paths
-  (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
+  helper (Objective #878 migrates them to `.perk/` one phase at a time). The **workflow family now
+  resolves to `.perk/workflow/`**. The **repo-skills family has moved**: it now resolves to
+  `.perk/skills` via `repo_skills_dir`. The **config family has moved**: it now resolves to
+  `.perk/config.toml` (committed) / `.perk/local.toml` (gitignored) on **both planes** —
+  `config_dir`/`configDir` return `root/".perk"` and the filename constants are
+  `config.toml`/`local.toml`. `.perk/config.toml` is the repo **initialization marker**: `perk init`
+  **refuses** a legacy-only repo (a committed `.pi/perk.toml` with no `.perk/config.toml`) with
+  `error_type="legacy_config"` (exit 2) and an actionable `perk doctor --fix` remediation — never
+  warn-and-seed over legacy. `perk doctor` diagnoses the legacy config ("legacy config not migrated")
+  and `perk doctor --fix` **migrates it secret-safely** (an idempotent `_MIGRATIONS` entry:
+  move-when-target-absent / remove-when-byte-identical / error-on-conflict; committed and local
+  migrate independently so the secret is never promoted into the committed file). The legacy
+  `.pi/perk.toml` / `.pi/perk.local.toml` paths are constructed only via the allowlisted
+  `paths.legacy_config_file` / `paths.legacy_local_config_file` helpers (Python; migration source
+  only — never read); the TS plane reads the `.perk/` target only and has no legacy helpers. The
+  confinement is guard-tested in both planes (`tests/test_paths_guard.py`,
+  `extension/pathsGuard.test.ts`): a family-scoped source scan bans a quoted `".pi"` segment built
+  adjacent to a legacy config follow-segment **and** a quoted `".perk"` segment adjacent to a current
+  perk-owned follow-segment, outside the seams. **Pi-native** `.pi/...` paths (`.pi/settings.json`,
+  `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
   explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
 
   **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
@@ -395,7 +407,7 @@ is active** and **never throwing** (logged-not-thrown, like checkpoints):
 - **Threshold-triggered compaction** (the `trigger-compact.ts` pattern) — on `turn_end`, **only
   when `active_objective != null`**, read `ctx.getContextUsage()` and call `ctx.compact({…})` when
   usage crosses a threshold (default `0.8`; overridable via `[objective] compact_threshold` in
-  `.pi/perk.toml`, read through `extension/substrate/config.ts` — written as a **quoted** value because the
+  `.perk/config.toml`, read through `extension/substrate/config.ts` — written as a **quoted** value because the
   TOML subset reads only strings). The decision is the pure `shouldCompact(usage, threshold)`;
   compaction is best-effort (`onError` logs and continues). The custom cheaper-model
   `session_before_compact` summary is **deferred** — T9 ships the simpler `ctx.compact` trigger.
@@ -591,7 +603,7 @@ hard gate); idempotent on resume (an already-correct symlink is left untouched, 
 entry is never clobbered). **After** materialization (and only when the cold door **freshly
 created** the worktree, never on idempotent reuse/dry-run), the cold door runs the project's
 `[worktree] setup` commands (`launch.run_worktree_setup`) — an ordered array of shell command lines
-read from `.pi/perk.toml` (overlay-aware) — each via `bash -lc` with `cwd` = the worktree and
+read from `.perk/config.toml` (overlay-aware) — each via `bash -lc` with `cwd` = the worktree and
 inherited stdio, **aborting the launch** (a `UserFacingCliError`) on any non-zero exit / timeout /
 missing `bash` (a half-built environment is worse than a clear failure; the worktree is left for a
 fixed re-run). This is **Python-plane-only** (no TS twin — the extension never creates worktrees);
@@ -754,7 +766,7 @@ a `/plan` command, a `Ctrl+Alt+P` shortcut, and a `--plan` flag all flip `gating
 hidden plan-authoring prompt layer under its own `perk:plan-context` customType (keyed off the
 read-only gate; stripped from `context` when off — the same hygiene T1 applies to
 `perk:mode-context`), optionally extended by a `[workflow] plan_authoring` addendum read from
-`.pi/perk.toml` + `perk.local.toml` (`extension/substrate/config.ts`, the TS twin of `perk/substrate/config.py`'s
+`.perk/config.toml` + `local.toml` (`extension/substrate/config.ts`, the TS twin of `perk/substrate/config.py`'s
 overlay). `isPlanModeActive` (in `extension/factories/planSave.ts`) now reads perk's own `mode == "read-only"`
 (the P1.T3b `plan-mode-state` soft coupling is gone). The `plan_save` **tool** is structurally
 unreachable while read-only (T1's allowlist excludes it), so there is no auto-exit on the tool path;
@@ -984,8 +996,8 @@ routes to `/land`.
   **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway, so the parent can never
   approve/request-changes.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
-  agent's model is configurable through one flat `[subagents]` table in `.pi/perk.toml` (overlaid by
-  `.pi/perk.local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
+  agent's model is configurable through one flat `[subagents]` table in `.perk/config.toml` (overlaid by
+  `.perk/local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
   `objective-explorer`, `conflict-resolver` (matching each def's `name:` frontmatter and the
   `perk.<name>` invocation).
   Each configured value is injected as a **per-call inline `model` override** on that agent's
@@ -1921,8 +1933,8 @@ non-empty `<id>`, and that no `trigger` repeats. They do **not** check that a `s
 target actually exists — that cross-contract, target-existence validation is **`doctor`**'s job.
 
 **Resolver — `shipped-defaults ⊕ user-bindings` (Node 1.2, pure + unit-tested both planes):** a
-user **skill-binding overlay** is authored in `.pi/perk.toml` as a `[[bindings]]` array-of-tables
-(`trigger`/`skill`/`mode` strings); `.pi/perk.local.toml` overlays it with a **whole-array replace**
+user **skill-binding overlay** is authored in `.perk/config.toml` as a `[[bindings]]` array-of-tables
+(`trigger`/`skill`/`mode` strings); `.perk/local.toml` overlays it with a **whole-array replace**
 (local wins — the local array supersedes the committed one entirely, never merged element-wise,
 mirroring the leaf-replace overlay for scalars). Both planes parse this into the same binding shape
 (`perk/substrate/config.py` → `Config.user_bindings`; `extension/substrate/config.ts` → `PerkConfig.bindings`) and
@@ -2085,7 +2097,7 @@ it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is n
 The **third parsed cross-plane contract**, `shared/providers.yaml` (sibling of `registry.yaml`
 and `bindings.yaml`), is the **supported set** — the catalog of plan/todo/askuser/footer/web *providers* perk
 knows how to wire — distinct from the per-repo **selection** (a flat `[providers]` table in
-`.pi/perk.toml`, which is just a pointer into the catalog). It is bundled automatically via the
+`.perk/config.toml`, which is just a pointer into the catalog). It is bundled automatically via the
 `shared/` force-include (wheel → `perk/_shared/`, npm tarball → `shared/`) and read by both planes
 through independent readers: **`perk/substrate/providers.py`** (`load_providers` / `validate` /
 `resolve_providers`, returning `ProviderSet`/`Provider` + the shared `Issue`/`FindingSeverity` findings,
@@ -2151,13 +2163,13 @@ untouched by the plan-seam deferral.
 check that any repo *selection* names a real provider — that cross-file validation is **`doctor`**'s
 job (mirroring how bindings target-existence lives in doctor, not the loaders).
 
-**The `[providers]` selection — flat string table in `.pi/perk.toml`:** a per-repo selection with
+**The `[providers]` selection — flat string table in `.perk/config.toml`:** a per-repo selection with
 one key per seam (`plan` / `todo` / `askuser` / `footer` / `web`), values are **bare provider-id strings** (the TS narrow-TOML
 reader `parseTomlSubset` reads string values only; richer structure lives in `providers.yaml`).
 Both planes parse it raw (`perk/substrate/config.py` → `Config.providers`; `extension/substrate/config.ts` →
 `PerkConfig.providers`); resolution against the supported set is `init`/`doctor` in Python and the
 `extension/substrate/providers.ts` `resolveProviders` resolver in TS (added Node 2.2, consumed by `planMode`). An **absent table or absent key → the seam's
-`default: true` provider** (zero behavior change, the no-config default). `perk.local.toml` overlay
+`default: true` provider** (zero behavior change, the no-config default). `local.toml` overlay
 wins (standard local-override precedence). The pure resolver
 `perk.substrate.providers.resolve_providers(selection, providers)` returns `ResolvedProviders { plan, todo,
 askuser, footer, web, issues }`: an absent key falls back to the default **silently**; an unknown id or a seam mismatch
@@ -2189,13 +2201,13 @@ _providers_check`). A `ProvidersError` on the *bundled* file is a `fail` (cannot
 install; "Reinstall perk"); an `ERROR` shape `Issue` on the bundled file is a `fail`. The repo
 selection is resolved against the supported set and any resolver `issue` (unknown id / seam
 mismatch) is a single **`warn`** (loud-but-non-fatal — `perk doctor` stays exit-0 over a selection
-typo), remediation pointing at `.pi/perk.toml [providers]` / `perk init`. There is **no** separate
+typo), remediation pointing at `.perk/config.toml [providers]` / `perk init`. There is **no** separate
 package-wired / orphan check — that drift is owned by the `settings-wiring` managed convergence
 (which `doctor` already dry-runs); `_providers_check` owns only what convergence cannot repair (an
 invalid bundled file, a selection naming a non-existent / wrong-seam provider).
 
 **`[compaction]` → `settings.json` `compaction` convergence (init-owned, #206):** a `[compaction]`
-table in `.pi/perk.toml` tunes pi's **interactive** global auto-compaction for `perk <stage>`
+table in `.perk/config.toml` tunes pi's **interactive** global auto-compaction for `perk <stage>`
 sessions by converging into the committed `.pi/settings.json` `compaction` object (pi reads that
 natively at session boot). It is **Python-plane-only** — the extension never reads it (pi consumes
 `settings.json` itself), so `extension/substrate/config.ts` is untouched. Three snake_case keys map to pi's
@@ -2207,14 +2219,14 @@ ill-typed/absent keys are dropped (pi fills defaults). The convergence composes 
 `perk/convergence/init/settings.py::_converge_compaction`), so it stays in the `settings-wiring` `ManagedConvergence` —
 `doctor` dry-runs/fixes it for free, **no** new check. **Committed-only read** (the deliberate
 divergence from `[providers]`' overlaid `load_config` read): `[compaction]` is read from committed
-`.pi/perk.toml` **only**, never the `perk.local.toml` overlay, so the committed `settings.json`
+`.perk/config.toml` **only**, never the `local.toml` overlay, so the committed `settings.json`
 stays a deterministic function of committed config (no stray per-user git diff). Per-user overrides
 belong in pi's native global `~/.pi/agent/settings.json` (pi merges it under project settings).
 **Write semantics are non-destructive write-when-present / leave-when-absent:** when `[compaction]`
 is present, its mapped keys merge over any existing `settings.json` `compaction` dict (perk keys
 win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults); when
 **absent**, `settings.json` is left untouched (perk cannot prove ownership of a bare `compaction`
-key, so removal is unsafe — removing `[compaction]` from `perk.toml` leaves a stale block to clean
+key, so removal is unsafe — removing `[compaction]` from `config.toml` leaves a stale block to clean
 up by hand). A malformed-TOML error defers to the config check (treated as empty here, mirroring
 `_converge_provider_packages`). perk's headless worker (`compaction: { enabled: false }`) and the
 objective threshold compaction (`[objective] compact_threshold`) are orthogonal and unaffected.
@@ -2337,7 +2349,7 @@ channel.
 > **Open dependency (carried risk).** The `address` drive's seeded prompt instructs the model to
 > spawn `perk.review-classifier` via the borrowed `pi-subagents` `subagent` tool. The worker's
 > address prompt now also injects the configured classifier model when `[subagents]
-> review-classifier` is set in the worktree's `.pi/perk.toml` (#196), as a per-call inline `model`
+> review-classifier` is set in the worktree's `.perk/config.toml` (#196), as a per-call inline `model`
 > override byte-identical to `_address_prompt`'s parity twin. The **subagent-under-worker live
 > smoke** stays the open-#6 dependency (§8.3, T6) **deferred to the Phase-3 `doctor workflow`**;
 > Node 1.2 does not prove it.
@@ -3036,11 +3048,11 @@ team = "ENG"         # the Linear team key — required when backend = "linear"
 ```
 
 **Committed-only read, both planes.** The selection (`backend` AND `team`) is read from committed
-`.pi/perk.toml` **only** — never the `perk.local.toml` overlay (Python:
+`.perk/config.toml` **only** — never the `local.toml` overlay (Python:
 `load_committed_issues_backend` / `load_committed_issues_team`; TS: `resolveIssueBackendId` reads
 only the committed file). Rationale: the backend decides where canonical durable state
 (plan/learn/objective issues) is *written*; a per-user override would fragment the canonical
-store. **`LINEAR_API_KEY` lives in the environment or the gitignored `.pi/perk.local.toml`
+store. **`LINEAR_API_KEY` lives in the environment or the gitignored `.perk/local.toml`
 `[linear] api_key`** (an exported env var wins over the config) — **never** in a committed file.
 The config read is local-file-only (`config.load_local_linear_api_key`, the inverse of the
 `load_committed_*` readers; fail-soft on malformed TOML — returns `None`, never raised). Two seams
@@ -3051,7 +3063,7 @@ inherit the session env) authenticate. The local file is read from the **main ch
 (the env dict is built before `os.chdir(worktree)`); because it is gitignored it is never copied
 into the linked worktree, so the env-seed is precisely the bridge that carries the key into the
 worktree-resident session and its cold-door workers — those consumers read it from the inherited
-env, never from a `perk.local.toml` in the worktree. This is a deliberate, documented relaxation of the
+env, never from a `local.toml` in the worktree. This is a deliberate, documented relaxation of the
 "secrets in the environment only" rule: the secret may live in the gitignored local file, never a
 version-controlled one. **Python-plane-only** — the TS plane reads no Linear key, so there is no
 cross-plane TS mirror (the `launch_stage` env-seed is what carries the key into the TS session).
@@ -3069,7 +3081,7 @@ Raising (not falling back) is deliberate: a silent fallback would write canonica
 wrong tracker. `resolve_issue_backend(repo_root)` resolves the id and constructs the matching
 backend; every issue-tier consumer already routes `IssueBackendError` through its existing error
 boundary. The **linear construction arm** raises a typed `IssueBackendError` when either
-requirement is missing: no committed `[issues] team` → remediation pointing at `.pi/perk.toml`;
+requirement is missing: no committed `[issues] team` → remediation pointing at `.perk/config.toml`;
 no/blank `LINEAR_API_KEY` → the hinted message from `client_from_env`. Construction is lazy (no
 network): the team key is bound and resolved to its UUID on first use.
 
@@ -3094,8 +3106,8 @@ user-owned config):
 | --- | --- | --- |
 | absent / `"github"` | `ok` | `issues backend: github` |
 | `"linear"` + committed `team` | `ok` | `issues backend: linear (team <key>)` |
-| `"linear"` without `team` | `fail` | offline-decidable; remediate: set `[issues] team` in `.pi/perk.toml` |
-| anything else | `fail` | `unknown issue backend '<x>'`; fix `.pi/perk.toml [issues]` |
+| `"linear"` without `team` | `fail` | offline-decidable; remediate: set `[issues] team` in `.perk/config.toml` |
+| anything else | `fail` | `unknown issue backend '<x>'`; fix `.perk/config.toml [issues]` |
 | malformed TOML | `warn` | selection not evaluated — defers to the config check (mirrors `providers`) |
 
 `fail` (not `warn`) for a bad selection is deliberate: unlike `[providers]` (graceful fallback →
@@ -3110,7 +3122,7 @@ init/doctor probe — report-shaped, never raises; phases short-circuit auth →
 
 - `linear-auth` — ok: `authenticated as <user>`; failure (or missing `LINEAR_API_KEY`): warn,
   remediation "export LINEAR_API_KEY (create a personal API key at linear.app Settings →
-  Security & access), or set [linear] api_key in .pi/perk.local.toml".
+  Security & access), or set [linear] api_key in .perk/local.toml".
 - `linear-team` — ok: `team <key> found`; failure: warn with the error detail.
 - `linear-labels` — all five perk labels present (`perk:plan`, `perk:learn`, `perk:consolidated`,
   `perk:objective`, `perk:objective-node`): ok; otherwise warn listing the missing names,
@@ -3191,7 +3203,7 @@ Linear **Project URL** + the read-only `linear_get_issue` / `linear_list_comment
 `open <url>` fallback when the url is known; the indirect `run \`perk objective show <id>\` for its
 URL` form when it is not); `github` (and any non-linear) → `""` (the `perk objective show` step
 already covers GitHub — no churn). The warm plane resolves the backend from
-`resolveIssueBackendId(ctx.cwd)` (committed `.pi/perk.toml` — authoritative since cross-backend
+`resolveIssueBackendId(ctx.cwd)` (committed `.perk/config.toml` — authoritative since cross-backend
 objectives are unsupported by policy) and fetches the Project URL via `perk objective show <id>
 --json` **only for `linear`** (github needs no clause → no fetch), **fail-open** (any fetch
 failure / missing url → the indirect form). The cold plane reads `store.backend_id` + `state.url`

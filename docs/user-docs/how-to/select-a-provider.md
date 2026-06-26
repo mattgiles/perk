@@ -41,7 +41,7 @@ want. The `[providers]` row shape is documented in the
    at runtime. The `web` seam has **no perk surface to vacate** (perk registers no web tools) —
    selection simply swaps the installed web package.
 
-3. **Write the `[providers]` row** in `.pi/perk.toml`. Set the seam key to the chosen id. Example —
+3. **Write the `[providers]` row** in `.perk/config.toml`. Set the seam key to the chosen id. Example —
    switch the plan seam to tombell and keep perk's checkpoints:
 
    ```toml

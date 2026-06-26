@@ -18,8 +18,8 @@ import {
 } from "./planAdapterTombell.ts";
 
 function selectTombell(cwd: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), '[providers]\nplan = "tombell-plan"\n', "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\nplan = "tombell-plan"\n', "utf8");
 }
 
 test("isTombellPlanSelected: true only when [providers] plan = tombell-plan", () => {

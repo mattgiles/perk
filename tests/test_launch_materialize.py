@@ -132,20 +132,20 @@ def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
 
 def test_launch_seeds_linear_key_from_local_config_when_env_absent(git_repo, monkeypatch):
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-    pi = git_repo / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
+    cfg = git_repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
     env = _launch_capturing_env(git_repo, monkeypatch)
     assert env["LINEAR_API_KEY"] == "lin_api_local"
 
 
 def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_repo, monkeypatch):
     # A `perk implement` launch rooted inside a linked worktree must still seed LINEAR_API_KEY
-    # from the MAIN checkout's gitignored `.pi/perk.local.toml` (never copied into worktrees).
+    # from the MAIN checkout's gitignored `.perk/local.toml` (never copied into worktrees).
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-    pi = git_repo / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_main"\n', encoding="utf-8")
+    cfg = git_repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "local.toml").write_text('[linear]\napi_key = "lin_api_main"\n', encoding="utf-8")
     wt = git_repo / ".worktrees" / "wt-launch"
     git_mod.worktree_add(git_repo, wt, branch="plan-launch", create_branch=True)
 
@@ -171,9 +171,9 @@ def test_launch_seeds_linear_key_from_main_checkout_when_rooted_in_worktree(git_
 
 def test_launch_exported_linear_key_wins_over_local_config(git_repo, monkeypatch):
     monkeypatch.setenv("LINEAR_API_KEY", "lin_api_env")
-    pi = git_repo / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
+    cfg = git_repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "local.toml").write_text('[linear]\napi_key = "lin_api_local"\n', encoding="utf-8")
     env = _launch_capturing_env(git_repo, monkeypatch)
     assert env["LINEAR_API_KEY"] == "lin_api_env"
 

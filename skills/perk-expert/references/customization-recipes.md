@@ -1,7 +1,7 @@
 # perk customization recipes
 
-Goal-oriented "change perk's behavior" recipes. All config lives in committed `.pi/perk.toml` (or
-the gitignored `.pi/perk.local.toml` overlay). After a change that converges packages or affects
+Goal-oriented "change perk's behavior" recipes. All config lives in committed `.perk/config.toml` (or
+the gitignored `.perk/local.toml` overlay). After a change that converges packages or affects
 resolution, run `perk init` to converge and `perk doctor` to validate.
 
 ## Attach a skill to a stage or command (`[[bindings]]`)
@@ -95,7 +95,7 @@ team = "ENG"        # the Linear team KEY, required
 ```
 
 Set `LINEAR_API_KEY` in the environment (or `[linear] api_key` in the gitignored
-`.pi/perk.local.toml`) — **never** committed. Run `perk init` (converges `npm:pi-mono-linear`,
+`.perk/local.toml`) — **never** committed. Run `perk init` (converges `npm:pi-mono-linear`,
 ensures the four `perk:*` labels) and `perk doctor --verify` (the network probes). See the Linear
 reference in [providers-and-backends.md](./providers-and-backends.md) (auth header, identifiers,
 maturity caveats).

@@ -1,20 +1,27 @@
-# perk configuration (`.pi/perk.toml`)
+# perk configuration (`.perk/config.toml`)
 
-perk reads two files under `.pi/`:
+perk reads two files under `.perk/`:
 
-- **`.pi/perk.toml`** — the committed project config, shared by everyone in the repo.
-- **`.pi/perk.local.toml`** — a per-user, **gitignored** overlay for personal overrides.
+- **`.perk/config.toml`** — the committed project config, shared by everyone in the repo. It is
+  also perk's repo **initialization marker**.
+- **`.perk/local.toml`** — a per-user, **gitignored** overlay for personal overrides.
 
 `perk init` scaffolds both with a commented template; `perk doctor` validates them.
 
+> **Migrating from `.pi/perk.toml`.** perk's config used to live at `.pi/perk.toml` /
+> `.pi/perk.local.toml`. A repo carrying only the legacy committed file makes `perk init` **refuse**
+> (with a `perk doctor --fix` remediation) rather than re-scaffold over it. `perk doctor --fix`
+> migrates the config to `.perk/` secret-safely (the gitignored secret moves to `.perk/local.toml`
+> and is never promoted into the committed file); then re-run `perk init`.
+
 ## Overlay semantics
 
-1. `.pi/perk.local.toml` overlays `.pi/perk.toml` — **local wins.** Tables merge recursively;
+1. `.perk/local.toml` overlays `.perk/config.toml` — **local wins.** Tables merge recursively;
    scalar leaves replace.
 2. A local `[[bindings]]` array **replaces the committed array wholesale** (arrays are leaves — not
    element-wise merged). Include every binding you want active, not just additions.
 3. **Committed-only tables ignore the overlay entirely.** `[issues]` and `[compaction]` are read
-   from `.pi/perk.toml` **only**; a local value for either is silently ignored (keeps the canonical
+   from `.perk/config.toml` **only**; a local value for either is silently ignored (keeps the canonical
    issue store and the converged `.pi/settings.json` deterministic).
 
 ## Value-type gotcha
@@ -127,7 +134,7 @@ team = "ENG"
 ### `[linear]`
 
 A personal Linear API key for perk's Linear backend **and** the in-session `linear_*` tools.
-**Gitignored-local-only** — read from `.pi/perk.local.toml`, never the committed file.
+**Gitignored-local-only** — read from `.perk/local.toml`, never the committed file.
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -136,12 +143,12 @@ A personal Linear API key for perk's Linear backend **and** the in-session `line
 An exported `LINEAR_API_KEY` env var **wins** over this (config is the fallback). When set here, perk
 seeds the launched session's environment with the key so worktree tools/workers inherit it (the file
 is gitignored, never copied into a worktree). perk also reads this key directly from the **main
-checkout's** `.pi/perk.local.toml` whenever a command runs inside a linked worktree (`/submit`,
+checkout's** `.perk/local.toml` whenever a command runs inside a linked worktree (`/submit`,
 `/land`, …), so a single entry in the main checkout authenticates every worktree session and
 cold-door even when the env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
 ```toml
-# .pi/perk.local.toml (gitignored)
+# .perk/local.toml (gitignored)
 [linear]
 api_key = "lin_api_…"
 ```

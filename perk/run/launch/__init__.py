@@ -256,7 +256,7 @@ def launch_stage(
         "PERK_RUN_ID": rid,
         "PERK_CLI_VERSION": __version__,
     }
-    # Seed LINEAR_API_KEY from the gitignored `.pi/perk.local.toml` `[linear] api_key` so the
+    # Seed LINEAR_API_KEY from the gitignored `.perk/local.toml` `[linear] api_key` so the
     # borrowed in-session `linear_*` tools and any `perk <stage> --json` cold-door worker the
     # session spawns (they inherit this env) can authenticate. Env wins: only fill it when the
     # environment does not already provide the key. Best-effort (fail-soft reader) — reached only

@@ -68,7 +68,7 @@ class PerkContext:
                 self._config = load_config(self.repo_root())
             except tomllib.TOMLDecodeError as exc:
                 raise UserFacingCliError(
-                    f".pi/perk.toml is not valid TOML ({exc})\nFix it, then re-run."
+                    f".perk/config.toml is not valid TOML ({exc})\nFix it, then re-run."
                 ) from exc
         return self._config
 

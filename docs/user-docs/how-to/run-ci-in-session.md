@@ -4,13 +4,13 @@ Run your project's configured CI checks from inside a `pi` session and read the 
 leaving the session. perk **runs and reports** — it executes the checks and surfaces pass/fail plus
 failure output; it **never auto-fixes**. You own the fix; perk is the oracle.
 
-**Prerequisite:** one or more `[[ci]]` checks in `.pi/perk.toml`. The block is commented out by
+**Prerequisite:** one or more `[[ci]]` checks in `.perk/config.toml`. The block is commented out by
 default after [`perk init`](../reference/cli.md#perk-init) — you define the named checks your
 project runs.
 
 ## Steps
 
-1. **Configure the checks.** Add `[[ci]]` rows to `.pi/perk.toml` — each row is a `name`, a
+1. **Configure the checks.** Add `[[ci]]` rows to `.perk/config.toml` — each row is a `name`, a
    `command`, and an optional `glob`. A check with a `glob` (a comma-separated pattern string,
    e.g. `glob = "*.py"`) is **skipped** when no changed file (vs the repo's trunk) matches it, so a
    docs-only change reports success fast; a row without a `glob` always runs.

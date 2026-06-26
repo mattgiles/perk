@@ -12,8 +12,19 @@ from perk.substrate.config import (
     load_local_linear_api_key,
 )
 
+# Map the legacy config filenames callers still pass to the `.perk/` target locations, so the
+# seeding helper writes where the readers now look (`.perk/config.toml` / `.perk/local.toml`).
+_NAME_MAP = {"perk.toml": "config.toml", "perk.local.toml": "local.toml"}
+
 
 def _write(repo: Path, name: str, text: str) -> None:
+    cfg = repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / _NAME_MAP.get(name, name)).write_text(text, encoding="utf-8")
+
+
+def _write_legacy(repo: Path, name: str, text: str) -> None:
+    """Seed a LEGACY config file at `.pi/<name>` (must be ignored by every reader)."""
     pi = repo / ".pi"
     pi.mkdir(parents=True, exist_ok=True)
     (pi / name).write_text(text, encoding="utf-8")
@@ -21,6 +32,25 @@ def _write(repo: Path, name: str, text: str) -> None:
 
 def test_defaults_when_absent(tmp_path):
     assert load_config(tmp_path).worktree_root == tmp_path / ".worktrees"
+
+
+def test_legacy_pi_config_is_ignored(tmp_path):
+    # A config left at the legacy `.pi/perk.toml` is never consumed: the readers resolve only the
+    # `.perk/` target. With no `.perk/config.toml`, load_config falls back to defaults.
+    _write_legacy(tmp_path, "perk.toml", '[worktree]\nroot = "legacy-wt"\n')
+    assert load_config(tmp_path).worktree_root == tmp_path / ".worktrees"
+    # And when both exist, the `.perk/` target wins (legacy is fully ignored, not overlaid).
+    _write(tmp_path, "perk.toml", '[worktree]\nroot = "new-wt"\n')
+    assert load_config(tmp_path).worktree_root == tmp_path / "new-wt"
+
+
+def test_legacy_pi_local_secret_is_ignored(tmp_path):
+    # The Linear secret reader resolves only `.perk/local.toml`; a legacy `.pi/perk.local.toml`
+    # secret is never read.
+    _write_legacy(tmp_path, "perk.local.toml", '[linear]\napi_key = "lin_legacy"\n')
+    assert load_local_linear_api_key(tmp_path) is None
+    _write(tmp_path, "perk.local.toml", '[linear]\napi_key = "lin_new"\n')
+    assert load_local_linear_api_key(tmp_path) == "lin_new"
 
 
 def test_relative_root_resolves_against_repo(tmp_path):

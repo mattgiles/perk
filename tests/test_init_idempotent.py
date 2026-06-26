@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -7,12 +8,65 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import run_init
 
 
+def _seed_cfg(pi_dir: Path) -> Path:
+    """The committed config path (`<root>/.perk/config.toml`), creating `.perk/` as needed.
+
+    Config moved out of `.pi/`; tests still derive the dir from the `pi_dir` (`.pi`) local.
+    """
+    cfg = pi_dir.parent / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    return cfg / "config.toml"
+
+
 def _snapshot(root):
     return {
         p.relative_to(root).as_posix(): p.read_text(encoding="utf-8")
         for p in root.rglob("*")
         if p.is_file() and ".git/" not in p.relative_to(root).as_posix()
     }
+
+
+def _write_legacy_config(root: Path) -> Path:
+    """Seed a legacy committed config at `<root>/.pi/perk.toml`."""
+    pi = root / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    legacy = pi / "perk.toml"
+    legacy.write_text('[worktree]\nroot = "legacy-wt"\n', encoding="utf-8")
+    return legacy
+
+
+def test_init_refuses_legacy_only_config(tmp_path):
+    # A repo carrying only the legacy committed config (`.pi/perk.toml`, no `.perk/config.toml`)
+    # makes init refuse (exit 2) with a `doctor --fix` remediation — never warn-and-seed over it.
+    legacy = _write_legacy_config(tmp_path)
+    report = run_init(tmp_path, verify=False)
+    assert not report.ok
+    assert report.error_type == "legacy_config"
+    assert report.exit_code == 2
+    assert "perk doctor --fix" in (report.message or "")
+    # Nothing seeded: the new target is not created and the legacy file is left untouched.
+    assert not (tmp_path / ".perk" / "config.toml").is_file()
+    assert legacy.read_text(encoding="utf-8") == '[worktree]\nroot = "legacy-wt"\n'
+
+
+def test_init_legacy_local_only_does_not_block(tmp_path):
+    # The refusal keys on the COMMITTED marker only: a lone legacy local file does not block init,
+    # which converges a fresh `.perk/config.toml`.
+    pi = tmp_path / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_x"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+    assert (tmp_path / ".perk" / "config.toml").is_file()
+
+
+def test_init_both_present_converges(tmp_path):
+    # A repo with BOTH the legacy and the new committed file is already migrated enough to not
+    # block (the marker exists) — init converges normally.
+    _write_legacy_config(tmp_path)
+    cfg = tmp_path / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text('[worktree]\nroot = "wt"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
 
 
 def test_init_converges_and_is_idempotent(tmp_path):
@@ -103,9 +157,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
     # Select the illustrative tombell-plan provider for the plan seam.
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nplan = "tombell-plan"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "tombell-plan"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -119,7 +171,7 @@ def test_init_selecting_a_provider_wires_then_deselecting_removes(tmp_path):
     assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@tombell/pi-plan" not in _identities(packages)
@@ -137,9 +189,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nplan = "plannotator-plan"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "plannotator-plan"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -158,7 +208,7 @@ def test_init_selecting_plannotator_plan_wires_then_deselecting_removes(tmp_path
     assert before == _snapshot(tmp_path)
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "perk-plan"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@plannotator/pi-extension" not in _identities(packages)
@@ -175,9 +225,7 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\ntodo = "juicesharp-todo"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\ntodo = "juicesharp-todo"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -192,9 +240,7 @@ def test_init_selecting_a_todo_provider_wires_then_deselecting_removes(tmp_path)
     assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\ntodo = "perk-checkpoints"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\ntodo = "perk-checkpoints"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@juicesharp/rpiv-todo" not in _identities(packages)
@@ -212,9 +258,7 @@ def test_init_selecting_an_askuser_provider_wires_then_deselecting_removes(tmp_p
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\naskuser = "juicesharp-ask-user"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\naskuser = "juicesharp-ask-user"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -233,9 +277,7 @@ def test_init_selecting_an_askuser_provider_wires_then_deselecting_removes(tmp_p
     assert before == _snapshot(tmp_path)
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\naskuser = "perk-ask-user"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\naskuser = "perk-ask-user"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@juicesharp/rpiv-ask-user-question" not in _identities(packages)
@@ -252,9 +294,7 @@ def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_pat
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nfooter = "pi-bar-footer"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nfooter = "pi-bar-footer"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -264,9 +304,7 @@ def test_init_selecting_a_footer_provider_wires_then_deselecting_removes(tmp_pat
     assert "npm:@tombell/pi-diff" in _identities(packages)  # borrowed package preserved
 
     # Deselect (back to the default) → the provider-managed entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nfooter = "perk-footer"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nfooter = "perk-footer"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:pi-bar" not in _identities(packages)
@@ -281,7 +319,7 @@ def test_init_governs_pi_status_and_pi_default_footers(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
     settings = pi_dir / "settings.json"
-    perk_toml = pi_dir / "perk.toml"
+    perk_toml = _seed_cfg(pi_dir)
 
     # (1) footer = "pi-status-footer" adds `npm:@tombell/pi-status` in object form.
     settings.write_text(json.dumps({"packages": ["npm:@me/custom"]}, indent=2) + "\n")
@@ -332,9 +370,7 @@ def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:pi-web-access"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nweb = "ollama-web-search"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nweb = "ollama-web-search"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -349,9 +385,7 @@ def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
     assert "npm:@me/custom" in _identities(packages)  # user package preserved
 
     # Revert to the default `pi-web-access` → ollama removed, pi-web-access re-added.
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nweb = "pi-web-access"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nweb = "pi-web-access"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:@ollama/pi-web-search" not in _identities(packages)
@@ -362,9 +396,7 @@ def test_init_selecting_a_web_provider_swaps_the_package(tmp_path):
 def test_init_provider_wiring_is_idempotent(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
-    pi_dir.joinpath("perk.toml").write_text(
-        '[providers]\nplan = "tombell-plan"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[providers]\nplan = "tombell-plan"\n', encoding="utf-8")
     assert run_init(tmp_path, verify=False).ok
     before = _snapshot(tmp_path)
     assert run_init(tmp_path, verify=False).ok
@@ -385,9 +417,7 @@ def test_init_selecting_linear_wires_then_deselecting_removes(tmp_path):
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"packages": ["npm:@me/custom", "npm:@tombell/pi-diff"]}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        '[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text('[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8")
 
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
@@ -397,7 +427,7 @@ def test_init_selecting_linear_wires_then_deselecting_removes(tmp_path):
     assert "npm:@tombell/pi-diff" in _identities(packages)
 
     # Deselect (back to github) → the entry is removed; others survive.
-    pi_dir.joinpath("perk.toml").write_text('[issues]\nbackend = "github"\n', encoding="utf-8")
+    _seed_cfg(pi_dir).write_text('[issues]\nbackend = "github"\n', encoding="utf-8")
     run_init(tmp_path, verify=False)
     packages = json.loads((pi_dir / "settings.json").read_text())["packages"]
     assert "npm:pi-mono-linear" not in _identities(packages)
@@ -408,7 +438,7 @@ def test_init_selecting_linear_wires_then_deselecting_removes(tmp_path):
 def test_init_linear_wiring_is_idempotent(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
-    pi_dir.joinpath("perk.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+    _seed_cfg(pi_dir).write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
     assert run_init(tmp_path, verify=False).ok
     before = _snapshot(tmp_path)
     assert run_init(tmp_path, verify=False).ok
@@ -430,7 +460,7 @@ def test_init_removes_hand_added_linear_package_without_selection(tmp_path):
 def test_init_writes_compaction_when_present(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
-    pi_dir.joinpath("perk.toml").write_text(
+    _seed_cfg(pi_dir).write_text(
         "[compaction]\nenabled = false\nreserve_tokens = 8192\n", encoding="utf-8"
     )
     assert run_init(tmp_path, verify=False).ok
@@ -450,9 +480,7 @@ def test_init_compaction_overwrites_perk_keys_preserving_others(tmp_path):
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"compaction": {"reserveTokens": 999, "customKey": 7}}, indent=2) + "\n"
     )
-    pi_dir.joinpath("perk.toml").write_text(
-        "[compaction]\nreserve_tokens = 8192\n", encoding="utf-8"
-    )
+    _seed_cfg(pi_dir).write_text("[compaction]\nreserve_tokens = 8192\n", encoding="utf-8")
     run_init(tmp_path, verify=False)
     compaction = json.loads((pi_dir / "settings.json").read_text())["compaction"]
     assert compaction["reserveTokens"] == 8192  # perk key overwrote
@@ -462,7 +490,7 @@ def test_init_compaction_overwrites_perk_keys_preserving_others(tmp_path):
 def test_init_compaction_absent_leaves_existing_untouched(tmp_path):
     pi_dir = tmp_path / ".pi"
     pi_dir.mkdir()
-    # No [compaction] in perk.toml → an existing settings.json `compaction` is never touched.
+    # No [compaction] in config.toml → an existing settings.json `compaction` is never touched.
     pi_dir.joinpath("settings.json").write_text(
         json.dumps({"compaction": {"reserveTokens": 999}}, indent=2) + "\n"
     )

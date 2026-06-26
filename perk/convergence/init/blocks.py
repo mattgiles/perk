@@ -14,7 +14,7 @@ GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
         "/.pi/git/",
-        f"/.pi/{LOCAL_CONFIG_FILENAME}",
+        f"/.perk/{LOCAL_CONFIG_FILENAME}",
         "/.worktrees/",
         "/.perk/workflow/",
     ]

@@ -1,7 +1,7 @@
 # Configuration files
 
-This page references perk's repo configuration: the `.pi/perk.toml` committed config and the
-`.pi/perk.local.toml` per-user overlay. It describes the surface — every table and key — so an
+This page references perk's repo configuration: the `.perk/config.toml` committed config and the
+`.perk/local.toml` per-user overlay. It describes the surface — every table and key — so an
 operator can look up any setting. It does not teach a task (those belong in
 [how-to/](../how-to/index.md)) or argue a design (those belong in
 [explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
@@ -14,28 +14,35 @@ and the `perk init` templates. Accuracy is the governing virtue.
 
 ## Orientation
 
-perk reads two files, both under `.pi/`:
+perk reads two files, both under `.perk/`:
 
-- **`.pi/perk.toml`** — the committed project config. Edit it freely; it is shared by everyone
-  working in the repo.
-- **`.pi/perk.local.toml`** — a per-user overlay. It is gitignored, so it never leaves your
+- **`.perk/config.toml`** — the committed project config. Edit it freely; it is shared by everyone
+  working in the repo. It is also perk's repo **initialization marker**.
+- **`.perk/local.toml`** — a per-user overlay. It is gitignored, so it never leaves your
   machine; use it for personal overrides.
 
 [`perk init`](./cli.md#perk-init) scaffolds both with a commented template, and
 [`perk doctor`](./cli.md#perk-doctor) validates them. The schema grows as perk does; the tables
 below are the live surface.
 
+> **Migrating from `.pi/perk.toml`.** perk's config used to live at `.pi/perk.toml` /
+> `.pi/perk.local.toml`. A repo still carrying only the legacy committed file makes `perk init`
+> **refuse** (with a `perk doctor --fix` remediation) rather than re-scaffold over it. Run
+> [`perk doctor --fix`](./cli.md#perk-doctor): it migrates the config to `.perk/` secret-safely
+> (your gitignored `.pi/perk.local.toml` secret moves to `.perk/local.toml` and is never promoted
+> into the committed file), then re-run `perk init`.
+
 ## Local overrides & overlay semantics
 
 How the two files combine:
 
-1. `.pi/perk.local.toml` overlays `.pi/perk.toml` — **local wins.** Tables merge recursively;
+1. `.perk/local.toml` overlays `.perk/config.toml` — **local wins.** Tables merge recursively;
    scalar leaves replace.
 2. A local `[[bindings]]` array **replaces the committed `[[bindings]]` array wholesale**
    (whole-array override, not element-wise merge) — arrays are leaves, so the local array
    substitutes for the committed one entirely.
 3. **Committed-only tables ignore the overlay entirely.** `[issues]` and `[compaction]` are read
-   from `.pi/perk.toml` **only**; a `.pi/perk.local.toml` value for either is silently ignored —
+   from `.perk/config.toml` **only**; a `.perk/local.toml` value for either is silently ignored —
    this keeps the canonical issue store and the committed `.pi/settings.json` deterministic. A
    per-user compaction override belongs in pi's global `~/.pi/agent/settings.json` instead.
 
@@ -48,7 +55,7 @@ Where `perk worktree create` and the cold-door stage launchers place worktrees.
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
 | `root` | string | `.worktrees` | A relative path resolves against the repo root; an absolute path is used as-is. |
-| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, timeout, or missing `bash` **aborts the launch** (the worktree is left for a fixed re-run). Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `perk.local.toml` `[worktree] setup` array replaces this one wholesale. |
+| `setup` | array of strings | _(none)_ | Shell commands run via `bash -lc`, in order, inside each **freshly created** worktree before `pi` starts (`cwd` = the worktree). A non-zero exit, timeout, or missing `bash` **aborts the launch** (the worktree is left for a fixed re-run). Skipped on resume/reuse, dry-runs, and the remote runner. Overlay-aware — a `local.toml` `[worktree] setup` array replaces this one wholesale. |
 
 ```toml
 [worktree]
@@ -133,7 +140,7 @@ web = "pi-web-access"
 ### `[issues]`
 
 Where canonical plan / learn / objective issues live. **Committed-only** — read from
-`.pi/perk.toml`, never the overlay (a per-user override would fragment the canonical store).
+`.perk/config.toml`, never the overlay (a per-user override would fragment the canonical store).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -141,7 +148,7 @@ Where canonical plan / learn / objective issues live. **Committed-only** — rea
 | `team` | string | _(none)_ | The Linear team key (e.g. `"ENG"`); required when `backend = "linear"`. |
 
 Selecting `linear` also requires a personal `LINEAR_API_KEY` — set it in the environment **or** in
-the gitignored `.pi/perk.local.toml` `[linear] api_key` (see [`[linear]`](#linear) below); never in
+the gitignored `.perk/local.toml` `[linear] api_key` (see [`[linear]`](#linear) below); never in
 this committed file. This is **config-key reference depth only**; the Linear backend reference
 (auth, labels, identifiers, maturity) is in the
 [providers & issue backends reference](./providers-and-backends.md#issue-backend--linear-reference),
@@ -156,8 +163,8 @@ team = "ENG"
 ### `[linear]`
 
 A personal Linear API key, used by **both** perk's Linear issue backend and the in-session
-`linear_*` tools. **Gitignored-local-only** — read from `.pi/perk.local.toml`, **never** the
-committed `.pi/perk.toml` (structurally preventing a committed secret).
+`linear_*` tools. **Gitignored-local-only** — read from `.perk/local.toml`, **never** the
+committed `.perk/config.toml` (structurally preventing a committed secret).
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -169,12 +176,12 @@ borrowed in-session `linear_*` tools authenticate too. The key is read from your
 at launch — since the file is gitignored it is never copied into a worktree, so this env-seed is
 what carries the key into the worktree session and any tools/workers it spawns (they inherit the
 seeded environment). perk also reads this key directly from the **main checkout's**
-`.pi/perk.local.toml` whenever a command runs inside a linked worktree (`/submit`, `/land`, …) —
+`.perk/local.toml` whenever a command runs inside a linked worktree (`/submit`, `/land`, …) —
 so a single entry in the main checkout authenticates every worktree session and cold-door, even
 when the launch env-seed did not fire. Malformed local TOML is ignored (fail-soft).
 
 ```toml
-# .pi/perk.local.toml (gitignored)
+# .perk/local.toml (gitignored)
 [linear]
 api_key = "lin_api_…"
 ```

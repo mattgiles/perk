@@ -26,11 +26,14 @@ from perk.backends.resolve import (
     resolve_objective_store_id,
 )
 
+# Map the legacy config filenames callers still pass to the `.perk/` target locations.
+_NAME_MAP = {"perk.toml": "config.toml", "perk.local.toml": "local.toml"}
+
 
 def _write_config(repo_root: Path, name: str, text: str) -> None:
-    pi = repo_root / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / name).write_text(text, encoding="utf-8")
+    cfg = repo_root / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / _NAME_MAP.get(name, name)).write_text(text, encoding="utf-8")
 
 
 class TestResolver:

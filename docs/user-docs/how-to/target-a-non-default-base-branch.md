@@ -18,7 +18,7 @@ There are two ways to declare a non-default base; they share one precedence chai
 ### Repo-wide default — `[workflow] base`
 
 Set the default target branch for every standalone plan (and every objective that does not
-override it) in committed `.pi/perk.toml`:
+override it) in committed `.perk/config.toml`:
 
 ```toml
 [workflow]
