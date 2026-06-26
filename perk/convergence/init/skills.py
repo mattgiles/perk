@@ -45,6 +45,11 @@ PERK_SKILLS_MANIFEST_DIR = ".agents/manifest.d"
 PERK_SKILLS_MANIFEST_FILENAME = "perk.yaml"
 PERK_GITHUB_URL = "https://github.com/mattgiles/perk"
 
+# The header line every perk-managed skills-CLI manifest fragment opens with. Shared so the
+# perk fragment (`perk.yaml`) and the repo-authored fragment (`perk-repo-skills.yaml`, rendered
+# by `repo_skills.py`) stay byte-identical in their header.
+MANAGED_HEADER = "# Managed by perk init — do not edit by hand.\n"
+
 
 # A skills-CLI manifest source: a named upstream repo + ref the skills CLI clones to resolve
 # skills. Same `@dataclass(frozen=True)` style as `_ProviderChanges`.
@@ -95,13 +100,7 @@ def _desired_skills_manifest(self_repo: bool) -> str:
     skills = sorted([("perk", name) for name in PERK_SKILLS] + list(REQUIRED_EXTERNAL_SKILLS))
     sources_block = "\n".join(f"  {s.key}:\n    url: {s.url}\n    ref: {s.ref}" for s in sources)
     skills_block = "\n".join(f"  - source: {src}\n    name: {name}" for src, name in skills)
-    return (
-        "# Managed by perk init — do not edit by hand.\n"
-        "sources:\n"
-        f"{sources_block}\n"
-        "skills:\n"
-        f"{skills_block}\n"
-    )
+    return f"{MANAGED_HEADER}sources:\n{sources_block}\nskills:\n{skills_block}\n"
 
 
 def _converge_skills_manifest(root: Path, self_repo: bool, *, apply: bool = True) -> list[str]:
