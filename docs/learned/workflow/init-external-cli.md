@@ -232,6 +232,44 @@ either "non-zero exit" or "exit-0-but-skipped" CLI behavior), and appends **one*
 remediation clause to every failure message, gated solely on "are repo-authored skills declared?"
 (a freshly-added `.pi/skills/` skill is unresolvable until committed + pushed to the default branch).
 
+### Substrate-build patterns (the dormant module beneath the gesture)
+
+Building `repo_skills.build_repo_skills_manifest` (discover/parse/validate/render + orchestrator)
+surfaced patterns that generalize beyond skills:
+
+- **Gate an early-return on BOTH items AND errors.** `discover_repo_skills` returns
+  `(parsed, fm_errors)`. An early-return keyed only on `parsed` empty silently drops parse errors —
+  a `SKILL.md` that fails frontmatter parse leaves `parsed==[]` but `fm_errors` non-empty, so a
+  bare `not parsed` guard would report a false clean "no skills". Gate on
+  `not parsed and not fm_errors` so genuine no-skills still short-circuits (and skips the network)
+  while parse errors fall through to surface as fatal `errors`. General lesson: when a discover step
+  returns `(items, errors)`, never early-return on `items` empty alone.
+- **Self-exclusion when scanning sibling fragments to detect collisions with your own output.**
+  `effective_manifest_source_keys` reads `.agents/manifest.yaml` + all `.agents/manifest.d/*.yaml`
+  **except** the repo-skills fragment it itself renders, so a re-render never flags itself as an
+  alias collision. Generalize: any "scan siblings to validate my managed artifact" convergence
+  needs this carve-out.
+- **Network-skip ordering driven by testability.** Accumulate every offline failure path
+  (frontmatter parse / validation / duplicate-name) and gate `if errors: return` **before** the
+  one GitHub `repo_identity` read (see `github-gateway.md`), so every fatal path except
+  no-GitHub-remote is exercisable offline — a test asserts the stubbed read records **zero** calls
+  on those paths.
+- **Byte-identical shared-constant extraction.** Factoring a literal (`MANAGED_HEADER`) into one
+  constant feeding a byte-stable renderer must be verified by **direct byte-equality** against the
+  live fragment, not just green CI: the ruff-format pre-commit hook reshaped a multi-line return
+  into one line **after** CI passed (output bytes unchanged, but you only know by checking against
+  the live `.agents/manifest.d/perk.yaml` + the manifest-drift doctor test).
+- **The seam-signature ripple was a no-op.** Widening `sync_skills` with a defaulted
+  `repo_skill_names` keyword needed **zero** stub edits because the existing monkeypatch stubs
+  already used `lambda root, changes, **kw: ...` (`conftest.stub_env` + the test_init_t5/test_doctor
+  monkeypatches) — a keyword-with-default is absorbed by `**kw` stubs. Contrast the earlier
+  breaking widenings (see the seam-signature note above); the absorbing shape is the cheap one.
+- **Residual: alias-grammar sanitization is intended but unbuilt.** The source alias is emitted as a
+  plain `perk-<repo-name>` with no sanitization to the `skills` grammar (`^[a-z0-9][a-z0-9_-]*$`);
+  a repo name with `.`/uppercase yields an invalid alias. Flagged as intended-future-work (not
+  contradicted reality) — whoever owns alias-correctness adds sanitization or softens the objective
+  prose.
+
 ## Cross-references
 
 - `perk/convergence/init.py` — `PERK_SKILLS`, `_desired_skills_manifest`, `_converge_skills_manifest`,
@@ -241,3 +279,4 @@ remediation clause to every failure message, gated solely on "are repo-authored 
 - `tests/conftest.py` — `stub_env` (the `_sync_skills` patch seam)
 - `tests/test_init_t5.py` — `test_cli_idempotent_second_run`
 - `init-doctor.md` — managed-convergence SSOT and the `changes`-delta idempotency rule
+- `github-gateway.md` — the `repo_identity` read shape this convergence is the sole consumer of

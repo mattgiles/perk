@@ -1,6 +1,6 @@
 ---
 title: The ObjectiveStore seam — splitting an objective tier off IssueBackend
-read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
+read_when: You are touching `perk/backends/objective_store.py` / `perk/backends/objective_stores.py`, an objective-storage consumer, the dormant-contract → atomic-removal recipe, the Linear facade-refactor pattern, the resolver single-sourced off `[issues]`, the `backend_id` import-cycle literal, the `close_issue`-vs-`close_objective` tier split, the node↔plan unification protocol on the objective-linked `plan-save` path, objective replan / `supersede_objective` (supersede ≠ upsert, the fail-open-close error boundary), the objective-keyed engagement reads + the node-keyed sibling, the adoption Protocol growth (`read_objective_source`/`adopt_source_as_objective`), the Protocol-method-count growth / three-implementers conformance rule, the `add_objective_node` re-render-vs-materialize split, or the no-op-return (`save_node_plan`/`post_status_update`/drift) family.
 ---
 
 # The ObjectiveStore seam
@@ -290,6 +290,47 @@ Linear specifics:
 **The deferral-comment-names-its-consumer rule:** when a stub carries a comment naming a future node,
 that node's plan should *consume* it (flip the stub + update the comment), not add a parallel surface.
 (See `human-engagement-reads.md` for the full subsystem.)
+
+## Objective replan: supersede ≠ upsert (#855)
+
+`perk objective replan <N>` re-authors an objective as a **superseding net-new** objective (the
+`supersede_objective` Protocol method), and the design hinges on a store-shape fact:
+
+- **supersede (close-old/create-new) ≠ in-place upsert.** plan-`replan` rewrites in place because
+  `plan_save` is a `run_id`-keyed **upsert**. objective-`replan` CANNOT mirror that:
+  `create_objective` is **find-then-return idempotent** on `run_id` (returns `existed=True`
+  *without* rewriting) — there is **no** in-place objective-rewrite primitive. The resolved shape is
+  close-old/create-new with a **fresh `run_id`**, **bidirectional lineage** (`supersedes` on the new
+  header / `superseded_by` on the old), and **create-new-first, close-old-last, fail-open on the
+  close** (the §8.24 bookkeeping posture). Durable: when a store op "isn't an upsert," reach for
+  close-old/create-new rather than inventing an in-place rewrite.
+- **The no-op-family Protocol growth → census the conformance fakes.** `supersede_objective`
+  (returns `ObjectiveRef | None`; `None` = "store doesn't support it") joins the no-op-family
+  (`adopt_source_as_objective` / `save_node_plan` / `post_status_update`). The non-obvious ripple:
+  `tests/test_objective_store.py::_FakeObjectiveStore` is a **structural conformer**, so whole-repo
+  `ty check` fails (`protocol member … not defined`) until the fake gains the method — the
+  per-method delegation tests do **not** catch a missing Protocol member. Always add a new method to
+  the minimal conformance fake.
+- **Fail-open close must use lower-level primitives, not the public store methods.** The
+  superseded-close (`_close_superseded_objective`) runs **inside** the outer `_translate_objective()`
+  CM and catches `IssueBackendError`. The public methods
+  (`update_objective_header`/`close_objective`/`post_status_update`) each open their OWN
+  `_translate_objective()` and raise `ObjectiveStoreError`, which an `except IssueBackendError`
+  would **NOT** catch — so the close-old work calls the lower-level `_projects`/`_issue_ops`
+  primitives directly (they raise `IssueBackendError`). Watch the error-type boundary when composing
+  fail-open bookkeeping out of would-be-public methods.
+- **Handoff-carrier symmetry.** The cold door stashes `supersedes=<OLD>` in the run handoff exactly
+  as `objective author --from` stashes `adopt_from` (`_supersedes_from_handoff` is a verbatim
+  structural copy of `_adopt_from_handoff`: explicit flag wins, malformed handoff never blocks a
+  save). The carried-node mapping **reuses `objective.parse_adopt_mapping` + the per-node
+  `adopt_issue` field** — interpreted as **MOVE** semantics in supersede context vs in-place **STAMP**
+  in adoption context (no TS schema edit; `adopt_issue` already flows through `ROADMAP_PARAM_SCHEMA`).
+  `create_cmd` dispatch went `if supersedes / elif adopt_from / else create`; `--supersedes` /
+  `--adopt-from` are **mutually exclusive** (incompatible models).
+- **Residual:** a Linear `pending` node-issue (no plan yet) reads back `pr=None`, so the cold-door
+  scratch can cite a node-issue ref only for in-flight nodes; the Linear MOVE path itself is flagged
+  **not-live-proven** (verify at the smoke gate). Cross-ref `in-place-adoption.md` (STAMP vs MOVE)
+  and `linear-backend.md` (the `FakeLinearWorkspace` routing/state additions supersede surfaced).
 
 ## Adoption Protocol growth + the no-op family (#708/#711)
 

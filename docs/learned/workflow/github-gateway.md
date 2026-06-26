@@ -84,6 +84,28 @@ Residual: the reviewer agent-def is hand-committed in `.pi/agents/`, and agent-d
 consumer repos is a known gap — a consumer running an old prompt against a new CLI gets a typed
 bad-batch error. Acceptable at 0.0.1; remember it when the delivery gap closes.
 
+## `repo_identity` — a third repo-view read shape (strict-on-incomplete)
+
+`perk/github/repo.py::repo_identity(repo_root) -> RepoIdentity(name, url, default_branch)` is a
+**third** repo-view read shape, distinct from the two that came before it:
+
+- `prs.default_branch` reads `defaultBranchRef` only;
+- `auth.check_repo_access` / `_exec._owner_repo` read `nameWithOwner` only;
+- `repo_identity` fetches all three at once via a single
+  `gh repo view --json name,url,defaultBranchRef`.
+
+It **reuses the lenient `_exec` parse helpers** (`_opt_str`/`_opt_dict`/`_parse_json`/`_failed`) but
+is **strict-on-incomplete**: a 0-exit payload missing any of the three required fields raises
+`GitHubError` rather than returning a partial identity. It is **GitHub-only by construction** —
+`gh repo view` resolves only a GitHub remote, so a remote-less / non-GitHub repo just exits non-zero
+and the lenient `_failed` path raises (no special-casing needed). The re-export from
+`perk/github/__init__.py` keeps `__all__` isort-sorted (`RepoIdentity` before `Review`,
+`repo_identity` before `rerun_workflow_run`).
+
+The read's **sole consumer** is the repo-authored-skills source derivation (`derive_repo_source`),
+so this read and `init-external-cli.md`'s "Repo-authored skills" section move together — see that
+doc for the network-skip-ordering and self-exclusion patterns that wrap this single read.
+
 ## gh GraphQL transport facts (#690)
 
 Extending the gateway to `gh api graphql` (for the honest engagement reads) surfaced transport facts
@@ -153,6 +175,8 @@ plumb-through — the `= False` defaults are audited and stay.
 ## Cross-references
 
 - `perk/github/` — the gateway and the helper family
+- `docs/learned/workflow/init-external-cli.md` — the repo-authored-skills convergence, sole consumer
+  of the `repo_identity` read (network-skip ordering, sibling-fragment self-exclusion)
 - `docs/learned/pi/extension-seams.md` — the TS sibling of idiom consolidation (minimal structural
   seams)
 - `docs/learned/toolchain/ruff.md` — the preview-rule enablement collateral from the same sweep

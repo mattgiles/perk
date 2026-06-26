@@ -1,14 +1,17 @@
 ---
-title: The cross-plane prompt-template seam — bundling tier, the byte-parity render config, the golden harness, and the prompt-move pattern
-read_when: You are bundling a new top-level resource dir, working the cross-plane jinja2/nunjucks render seam, the golden-fixture parity harness, or moving an inline prompt literal onto a canonical `prompts/` template (the unify-vs-split decision rule keyed on WHY the bodies differ, conditional templates and the `trim_blocks` whitespace gotcha, raw-var string coercion, single-file-vs-subdir, the single-arm subdirectory, demote-in-place substring constants, no-trailing-newline fragments, the byte-stability `/tmp`-capture de-risker).
+title: The cross-plane prompt-template seam — bundling tier, the frozen mini-jinja subset + author-time guard, the byte-parity render config (jinja2 + vendored miniJinja), the two-tier render-parity tests, and the prompt-move pattern
+read_when: You are bundling a new top-level resource dir, working the cross-plane jinja2/miniJinja render seam, the frozen mini-jinja subset + its author-time grammar guard, the two-tier render-parity tests (contract-snapshot goldens vs live cross-engine equality), the CRLF byte-parity hazard / string-only contract, the bare-import source-scan guard, or moving an inline prompt literal onto a canonical `prompts/` template (the unify-vs-split decision rule keyed on WHY the bodies differ, conditional templates and the `trim_blocks` whitespace gotcha, raw-var string coercion, single-file-vs-subdir, the single-arm subdirectory, demote-in-place substring constants, no-trailing-newline fragments, the byte-stability `/tmp`-capture de-risker).
 ---
 
 # Cross-plane prompt templates
 
 perk's prompts live as canonical templates under top-level `prompts/`, rendered on **both planes** —
-jinja2 in Python, nunjucks in the TS extension — from the **same** template bytes. This doc captures
-the seam's load-bearing decisions: which bundling tier a new resource dir joins, the exact render
-config that makes both engines byte-identical, the golden-fixture parity harness, and the
+jinja2 in Python, the **vendored zero-dependency `miniJinja`** in the TS extension
+(`extension/substrate/miniJinja.ts`) — from the **same** template bytes. This doc captures the
+seam's load-bearing decisions: which bundling tier a new resource dir joins, the **frozen mini-jinja
+subset** that is the renderer's input contract (and the author-time grammar guard that must match
+the runtime), the exact render config that makes both engines byte-identical, the **two-tier
+render-parity tests** (contract-snapshot goldens + live cross-engine equality), and the
 **prompt-move pattern** (the cornerstone — how to relocate an inline prompt literal onto a template
 without changing output).
 
@@ -29,46 +32,167 @@ cross-plane resolver is proven by a **four-test pattern**: Python editable + Pyt
 rule: templates load by **explicit name** via the resolver, never by scanning a dir, so the resolver
 test probes a committed `prompts/README.md` rather than a throwaway placeholder file.
 
-## The cross-plane render seam — the byte-parity Environment config
+## The vendored engine — miniJinja replaces nunjucks (the 2nd vendored-engine precedent)
+
+The TS plane renders via `extension/substrate/miniJinja.ts`, the **2nd vendored-engine precedent
+after `miniYaml`**: an **fs-coupled module that OWNS the filesystem** (`readFileSync` + `promptsDir`),
+with a header comment explaining *why it exists* (the zero-runtime-dep / bare-git-clone-loadable
+invariant) and the explicitly-unsupported scope (throw loudly on out-of-subset). Signature
+`render(name, vars, rootDir = promptsDir())`; the optional `rootDir` default makes it unit-testable
+(point it at a `mkdtempSync` dir of throwaway templates — the only way to test a renderer whose
+production input is guarded against the very out-of-subset cases you must test). The frozen render
+config is **baked in — no config object** (the subset is frozen, so a config object would be dead
+flexibility).
+
+**Removing the runtime dep means dropping the `dependencies` KEY ENTIRELY** (not `{}`) — the
+packaging guard accepts key-absent OR empty. The committed jinja2 goldens are the
+engine-independent byte-parity proof, so the removed engine is **NOT** kept as a dev-dep oracle
+(contrast `miniYaml` keeping `yaml`, where there's no committed golden for YAML parsing).
+
+## The byte-parity render config (data shape)
 
 The two engines are configured to render **byte-identically**. The exact config is recorded here as a
 **data shape** (a sanctioned exception to the One Code Rule — getting one flag wrong silently diverges
 the planes):
 
-- **jinja2:** `autoescape=False`, `trim_blocks=False`, `lstrip_blocks=False`,
+- **jinja2:** `autoescape=False`, `trim_blocks=True`, `lstrip_blocks=False`,
   `keep_trailing_newline=True`, `undefined=StrictUndefined`.
-- **nunjucks:** `{ autoescape: false, trimBlocks: false, lstripBlocks: false, throwOnUndefined: true }`.
+- **miniJinja:** `trimBlocks` on, `lstripBlocks` off, keep-trailing-newline on,
+  `throwOnUndefined` (the config is baked in, not a passed object).
 
-> **`trim_blocks` is the one default conditional templates flip on.** The table above records
-> `trim_blocks=False` / `trimBlocks:false` as the seam default. Templates that use **block tags**
-> (`{% if %}` on their own line) render with `trim_blocks`/`trimBlocks` **on** so the single newline
-> after each tag is swallowed and indented bullet content survives (see "Conditional templates"
-> below). This is keep-and-annotate, not a contradiction: the default stays `False`; conditional
-> templates opt in. `lstrip_blocks` stays off in both modes (tags sit at column 0).
+> **`trim_blocks` / `trimBlocks` is now GLOBAL `True`** (it used to be the default-`False`,
+> conditional-templates-opt-in shape — superseded). The reason the **env flag** does the trimming,
+> not a `{%- -%}` marker, is the whitespace-control gotcha: `{%- -%}` can't trim-newline-only (it
+> also eats the next line's leading indent). `trim_blocks` strips only the single newline after a
+> block tag, preserving indentation. `lstrip_blocks` stays **off** (tags sit at column 0).
 
 `keep_trailing_newline=True` is **load-bearing**: jinja2 otherwise strips one trailing `\n` while
-nunjucks keeps it, so omitting it diverges the planes on every template that ends in a newline.
+miniJinja keeps it, so omitting it diverges the planes on every template that ends in a newline.
 `{% include "<root-relative path>" %}` resolves **root-relative under `prompts/`** on both engines;
 watch the include-trailing-newline-plus-post-tag-newline **blank-line gotcha** (an included fragment's
 trailing newline plus the newline after the `%}` tag yields a blank line).
 
 **jinja2 is the reference engine** — the committed golden bytes ARE jinja2 output: generate once with
-jinja2, then assert nunjucks matches byte-for-byte.
+jinja2, then assert miniJinja matches byte-for-byte.
 
-## The golden-fixture parity harness
+## The frozen mini-jinja subset (the renderer's input contract)
 
-`cases.yaml` drives the parity harness, but it is read on the TS side via the vendored **`miniYaml`**
-subset (see `shared-contracts.md`), which **throws on `|` / `>` block scalars**. Consequences for
-authoring cases:
+The templates are restricted to a **frozen subset** — exactly four categories, documented in
+`shared/contracts.md §8.31` + `prompts/README.md`:
 
-- **Golden outputs are separate committed files** referenced by a `golden:` path — **never** inline
-  multiline YAML.
-- Author cases **within the miniYaml subset** (block maps/seqs, double-quoted strings).
-- **Vars are strings only**, to sidestep the jinja2-vs-nunjucks non-string divergence (`True`/`true`,
-  number formatting differ between engines).
+1. **bare-identifier `{{ ident }}` substitution** (no filters/dots/parens/literals/operators);
+2. **`{% include "<path>" %}`** (double-quoted, root-relative);
+3. **`{% if/elif/else/endif %}`** over bare identifiers / double-quoted strings / `==` /
+   `and`/`or`/`not`;
+4. **plain `{% %}` tags** — `{%- -%}` / `{{- -}}` whitespace-control markers are **OUT** (tag-line
+   trimming rides the env `trim_blocks` flag, not a marker).
 
-Dependency posture: nunjucks is a **runtime** dep that **deliberately breaks the zero-runtime-dep
-invariant** (see `extension-clone-lifecycle.md` / `distribution.md`) until the vendored-renderer node.
+## The author-time guard MUST be tightened to match the stricter runtime (the cross-cutting insight)
+
+A grammar guard MORE PERMISSIVE than the runtime lets a template pass author-time and fail later at
+render/golden time. The author-time guards (`extension/substrate/promptGrammar.test.ts` +
+`tests/test_prompt_grammar.py` — inline test-only validators, allowlist posture) were tightened
+into alignment with the miniJinja runtime:
+
+- **reject escaped string literals** (`[^"\\]*`, not `[^"]*`);
+- **reject out-of-containment include paths** (empty / absolute / `..`-segment);
+- **reject malformed condition SHAPES** via a recursive-descent shape validator mirroring the
+  runtime's precedence (`or < and < not < == < atom`) — catches `a b` adjacent atoms, `a ==` /
+  `== a` missing operand, bare `not`.
+
+**The regex char-set gate and the shape validator are complementary**: the regex gates the
+character SET (rejects parens / `!=` / numbers / dots), the validator gates the token SHAPE (rejects
+valid-token-but-malformed sequences the regex's `(token)+` repetition accepts). Neither alone
+suffices. The guard is now a **fourth lockstep surface**: widening the subset later amends
+`§8.31` + the runtime renderer (both planes) + **both** grammar guards.
+
+Guard gotchas: `{# … #}` comments contain neither `{{` nor `{%`, so an extractor silently MISSES
+them — add a third regex alternative purely to **REJECT** comments (a synthetic `{# comment #}`
+negative test catches this). `in`/`is` are lexically identifiers, so the condition regex admits
+them — after stripping string literals, re-scan identifiers and reject a banned-word set (`{in, is}`;
+the admitted keywords are exactly `and`/`or`/`not`, every other bare word is a legitimate variable
+name). Both guards self-check against a **vacuous scan** (assert non-empty + known anchors) and skip
+`README.md` (it deliberately carries out-of-subset example constructs as prose).
+
+## The CRLF byte-parity hazard (any cross-plane TS module byte-matching a Python file read)
+
+Python text-mode `open` does universal-newline translation (`\r\n`/`\r`→`\n`) **before** jinja2 sees
+the source; Node `readFileSync(f, "utf8")` does **NOT**. For byte-for-byte parity the TS renderer
+must `src.replace(/\r\n?/g, "\n")` at the top of `render`. Most visible via `trim_blocks` (it
+consumes the single `\n` after `%}` — on a CRLF checkout the next char is `\r`, so the newline isn't
+trimmed and the planes diverge). **A latent platform-specific divergence invisible on an LF dev
+machine** — worth a defensive normalize in any vendored file-reading renderer/parser that must match
+a Python twin.
+
+## String-only contract: lazy (TS) vs eager (Python), both planes
+
+The TS renderer throws **lazily** on a *referenced* non-string (at lookup, jinja2 `StrictUndefined`
+parity); Python validates the whole var map **eagerly** (`TypeError` before delegating to jinja2).
+"Reference engine unchanged" does NOT mean "skip enforcing the shared contract on that plane" — a
+documented cross-plane contract is mechanically enforced on **both** planes (the *when* may differ —
+lazy vs eager — as long as both forbid the `str(value)`/`String(value)` coercion divergence).
+
+## Two-tier render-parity replaces the prose-copy golden bridge
+
+**The golden file's only load-bearing role was the cross-process parity bridge.** jinja2 (Python)
+and miniJinja (TS) can't call each other in one process, so the committed `_fixtures/golden/*.txt`
+existed *only* so each engine could compare to the same frozen bytes (transitively proving the two
+engines agree). Because those goldens were copies of **real prompt prose**, every prose edit forced
+a paired golden hand-edit — and the golden was never an independent oracle of "correct prose"
+(rendering is mechanical var-substitution; the `.md` source is already reviewed). Recognizing that
+unlocks the split:
+
+- **Tier A — contract snapshots (golden, sui generis).** Goldens only for **purpose-built** fixture
+  templates that each isolate ONE feature of the frozen render contract (var subst, include,
+  if/else, elif chain, `==`/`and`/`or`/`not`, `trim_blocks` block-tag-on-own-line vs inline,
+  trailing-newline, no-trailing-newline fragment). Stable — change only when the **contract**
+  changes, never when prose changes; generated **by the reference engine** (jinja2) in a throwaway
+  scratch script (so the Python snapshot passes by construction), and the TS side confirms
+  byte-reproduction. Each conditional fixture renders **multiple var arms** so both branches are
+  pinned.
+- **Tier B — live cross-engine equality (NO goldens).** A `live.yaml` manifest lists every **real**
+  template with representative vars (no `golden:` field). A **Python-owned** test renders each
+  natively with jinja2, shells out **once** to a small node renderer
+  (`extension/testing/renderLive.ts`) that renders the same manifest with miniJinja, and asserts
+  byte-equality per template. Editing real prose touches **no** fixture. A coverage guard asserts
+  every real template appears in the manifest (subset check, not equality — multi-arm entries
+  repeat a template) so a new prompt can't silently skip Tier B.
+
+Mechanics:
+
+- **Node renderer placement = tarball exclusion + still typechecked.** `extension/testing/renderLive.ts`
+  (NOT a `.test.ts`) is excluded from the npm tarball by the existing `!extension/testing/` rule yet
+  is still covered by `tsc --noEmit` + `biome check extension`. It is invoked only by the Python
+  test (never by `node --test "extension/**/*.test.ts"` — wrong suffix); Node 26 runs a bare
+  `node extension/testing/renderLive.ts` via native type-stripping, printing `JSON.stringify(results)`
+  in **manifest order** so the Python side zips positionally.
+- The Python→node subprocess **skips** when `node` is absent (mirrors `test_packaging.py`'s
+  `shutil.which` skip). A `subprocess.run` inside a *test* file needs **no** sanctioned-subprocess-guard
+  entry — `tests/test_tooling.py::_SANCTIONED_SUBPROCESS_WRAPPERS` scans `perk/`, not `tests/`.
+- Both `cases.yaml` and `live.yaml` stay in the **miniYaml subset** (block maps/seqs, double-quoted
+  strings, **string-only vars**, the backtick-quoting rule, no `|`/`>` block scalars — empty flow
+  map `vars: {}` parses on both sides). Seed `live.yaml` **verbatim** from the old real-template
+  `vars` blocks (drop each `golden:` line) to preserve curated conditional-arm coverage (provider
+  arms, with-url/no-url, model-clause empty/populated) for free.
+- Selection-guard tests (`test_worker_prompt_parity.py`, `test_objective_prompt_parity.py`,
+  `worker.test.ts`, `objectivePlan.test.ts`) assert *which arm is selected*, never read goldens —
+  unaffected by the split (only their "golden cases" comments needed rewording to "live-parity
+  cases").
+
+## The bare-import source-scan guard (the bare-clone invariant)
+
+The vendored modules must stay zero-runtime-dependency so a bare git clone loads them. A source-scan
+guard enforces it:
+
+- **Strip block+line comments BEFORE scanning** — the vendored modules' own headers contain
+  explanatory `import … from "nunjucks"` / `"yaml"` text, so a naive scan false-positives on the
+  very module that removed the dep (mirrors `surfacesGuard`).
+- **Scan dynamic forms too**: `import("pkg")` / `require("pkg")` string-literal specifiers (a
+  computed specifier has no literal to scan, acceptably).
+- **Exclude both `*.test.ts` AND `testing/`** (only test-reachable, never in the runtime import
+  graph rooted at `index.ts`; the tarball ships neither).
+- Pair the TS scan with a Python `tests/test_packaging.py::test_no_runtime_dependencies`
+  (package.json runtime `dependencies` absent or empty) — two guards, two planes, one invariant.
 
 ## The prompt-move pattern (the cornerstone)
 
@@ -164,12 +288,13 @@ the gotcha that decides whether the output is byte-stable:
 
 - **`{%- -%}` whitespace-control markers CANNOT express "trim newline only."** `-%}` strips the
   following newline **and** the next line's leading indentation — so a `  - ` bullet indent gets eaten,
-  corrupting indented content. There is **no jinja/nunjucks marker for "trim newline only."**
-- **The fix is the env flag `trim_blocks` (jinja2) / `trimBlocks` (nunjucks).** It strips only the
-  single newline immediately after a block tag, **preserving indentation** — so plain `{% %}` tags sit
-  on their own lines and indented bullet content renders intact. `lstrip_blocks` stays **off** (tags at
-  column 0). nunjucks `trimBlocks` matches jinja2 `trim_blocks` **byte-for-byte** (the golden suite is
-  the proof; generate goldens with jinja2, the reference engine, then let the TS test confirm parity).
+  corrupting indented content. There is **no jinja/miniJinja marker for "trim newline only."**
+- **The fix is the env flag `trim_blocks` (jinja2) / `trimBlocks` (miniJinja), now GLOBAL on.** It
+  strips only the single newline immediately after a block tag, **preserving indentation** — so
+  plain `{% %}` tags sit on their own lines and indented bullet content renders intact.
+  `lstrip_blocks` stays **off** (tags at column 0). miniJinja `trimBlocks` matches jinja2
+  `trim_blocks` **byte-for-byte** (the Tier-A contract snapshots are the proof; generate goldens
+  with jinja2, the reference engine, then let the TS test confirm parity).
 - **Bounded blast radius of a render-env flip.** `trim_blocks` only affects templates **containing
   block tags** — before flipping a shared render env, `grep '{%' across prompts/` to bound the impact.
   Keep an affected fixture's golden byte-stable by editing the **template** (e.g. add an explicit blank
@@ -206,7 +331,10 @@ the gotcha that decides whether the output is byte-stable:
 - `docs/learned/workflow/shared-contracts.md` — the cross-plane SSOT prompt-fragment discipline + the
   vendored `miniYaml` reader (why `cases.yaml` must stay in the subset)
 - `docs/learned/workflow/extension-clone-lifecycle.md`, `docs/learned/workflow/distribution.md` — the
-  zero-runtime-dep invariant the nunjucks dep temporarily breaks
+  zero-runtime-dep invariant the vendored `miniJinja` now upholds (it removed the former nunjucks dep)
 - `docs/learned/toolchain/worktree-node-modules.md` — `npm ci` in a fresh worktree
 - `docs/learned/toolchain/biome.md` — `run_ci` green ≠ committed-format-green
-- `prompts/` — the canonical templates; `prompts/_fixtures/cases.yaml` — the golden parity harness
+- `extension/substrate/miniJinja.ts` — the vendored TS renderer; `extension/testing/renderLive.ts` —
+  the Tier-B node renderer
+- `prompts/` — the canonical templates; `prompts/_fixtures/cases.yaml` (Tier-A contract snapshots) +
+  `prompts/_fixtures/live.yaml` (Tier-B live cross-engine parity manifest)
