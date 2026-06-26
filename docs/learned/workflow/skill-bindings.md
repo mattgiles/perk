@@ -146,11 +146,14 @@ registry/config checks — don't double-fail).
 
 ### `DELIVERABLE_COMMAND_TARGETS` is the command-trigger vocabulary
 
-Only `command:objective-reconcile` and `command:learn-docs` have a binding-delivery surface (the two
-Mechanism-B `bindingSuffix` call sites + the cold `binding_trigger="command:learn-docs"` override).
+The set has grown to **`command:objective-reconcile`, `command:learn-docs`, `command:pr-review`, and
+`command:objective-replan`** — each a command with a binding-delivery surface (a Mechanism-B
+`bindingSuffix` call site, and for the cold doors a `binding_trigger="command:<id>"` override).
 Any other `command:<id>` binding **can never fire** and doctor reports it as such. Commands that *are*
 registry stages bind via `stage:<id>` (the kind-selection rule above). If a future command grows a
-delivery surface, this frozenset must be extended in lockstep.
+delivery surface, this **MANUALLY-curated** frozenset must be extended in lockstep — it is NOT
+derived from `bindings.yaml`. `command:objective-replan` (the superseding-objective cold door) is the
+latest instance and followed exactly the same checklist below. Mirrors `command:objective-reconcile`.
 
 #### Adding a `command:<id>` binding touches MANY sites (the checklist)
 

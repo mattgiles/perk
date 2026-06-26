@@ -21,6 +21,39 @@ second. Routing mirrors the replan cold door:
 
 In both, the adoption link is recovered via the run handoff (below), not carried as a save param.
 
+## Seed-from-file mode (a sibling to in-place adoption, NOT an in-place writer) (#862)
+
+Both adoption doors also accept a **local file path** (`plan from <file>` /
+`objective author --from <file>`) that seeds a fresh authoring session from the file's contents.
+This is distinct from in-place adoption — there is no foreign object to stamp — and the distinction
+is the whole design axis:
+
+- **"A file has no backend identity to stamp" is the design axis.** Because there is nothing to
+  adopt-in-place, file mode reuses the **bare authoring** path verbatim: it **omits the `adopt_from`
+  handoff** (saving mints a fresh issue) and **skips `require_github`** (the only read is local; the
+  backend write happens in-session at save time), while still keeping `require_repo`/`require_config`
+  (scratch dir + launch config) and the `resolve_target` `--remote` rejection (local-only).
+  Generalize: when an arg variant performs only a local read, **gate auth at the point of network
+  use**, not up front.
+- **Detection-before-parsing is the ordering contract.** The file disambiguator
+  (`Path(arg).expanduser().is_file()` → `.resolve()` else fall through) runs at the **TOP** of both
+  doors, **before** `require_github` and id parsing, because the id parser is hostile to path syntax
+  (`/` → `invalid_input`). "Existing readable file wins, else fall through unchanged" needs zero
+  new path-shape heuristics — a non-existent path just hits the existing resolver and errors as
+  today (`adopt_not_found`).
+- **Clean leaf separation.** The neutral wrapper (`<untrusted_seed_file>`) + the slash-free scratch
+  filename scheme (`seed-file-<safe-stem>-<sha1(abspath)[:8]>.md`) live in one **backend-free** leaf
+  (`perk/cli/seed_file.py`: `detect_seed_file` / `read_seed_file` / `render_seed_file_scratch`);
+  only the plan/objective-specific seed-prompt verbs live in each door's seed prompt. Both doors
+  mirror each other except the stage descriptor, the error renderer (`_fail` vs the objective
+  group's shared `fail`), and the seed verbs — keeping the leaf truly backend-free.
+- **Test gotcha: `CliRunner().isolated_filesystem()` already `chdir`s.** Adding `monkeypatch.chdir(d)`
+  on top makes monkeypatch record the temp dir as the cwd-to-restore; `isolated_filesystem` deletes
+  it on exit, then teardown `os.chdir`s to a now-deleted dir → `FileNotFoundError` in teardown (the
+  test reports as both passed AND errored — easy to misread the count). For cwd-relative file
+  detection, rely on the runner's own chdir — write the file as `Path(d, "notes.md")` and invoke
+  with the bare relative name; do **not** add `monkeypatch.chdir`.
+
 ## Surface shape is decided per-node, asymmetrically (#711)
 
 The two adoption surfaces deliberately differ in shape:

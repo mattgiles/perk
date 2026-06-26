@@ -202,6 +202,16 @@ every request the emitters compose without touching emitter code or the real cli
   gateway fakes. **One shared workspace threading the entire lifecycle in a single test** catches
   cross-command contract drift (e.g. the plan-body comment must be patched, not duplicated, on
   re-save) that per-command tests can't.
+- **A new mutation needs the fake to ROUTE it AND have the needed workflow states (#855).**
+  Exercising objective replan (supersede) surfaced three `FakeLinearWorkspace`
+  (`tests/test_linear_lifecycle.py`) gaps: (a) a **`"projectId"` arm in the `issueUpdate(` handler**
+  (attach-to-project was previously unrouted); (b) a **new `projectUpdateCreate(` arm** — the
+  fail-open status update previously hit the `unrouted` `AssertionError`, and `objective create`'s
+  status update only survived because its caller wraps it in `except Exception`; and (c) a
+  **`canceled`-type workflow state in `_STATES`** — without it `_workflow_state_id("canceled")`
+  returns `None`, so the cancel-dropped path is a silent no-op that can't be asserted. **General
+  rule:** when testing a new Linear mutation against the fake, confirm it actually routes the
+  operation AND has the workflow states the path needs.
 
 ## Backend-aware prompts (Node 3.1)
 
