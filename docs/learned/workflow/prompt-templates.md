@@ -198,6 +198,17 @@ guard enforces it:
 
 How to relocate an inline prompt string literal onto a canonical template **without changing output**:
 
+- **Single-plane prompts belong in `prompts/` too** (the cross-plane framing was a historical accident
+  of the seam's origin). The directory is the home for **all** externalized prompt prose, not only the
+  prompts both planes render. A **single-plane** template — a warm-door-only guidance prompt
+  (`prReviewGuidance`, `conflictResolutionGuidance`, `reconcileGuidance`, `objectiveSaveGuidance`) or a
+  cold-door-only seed prompt (objective-author / plan-from / replan / objective-replan) — is authored
+  in the same frozen subset and listed in `_fixtures/live.yaml`, where it rides **cross-engine parity
+  for free**: `live.yaml` renders every template on both engines and asserts byte-equality regardless
+  of which plane consumes it in production, so a single-plane move costs nothing extra (the subset is
+  shared). Reframing `prompts/README.md` + `contracts.md §8.31` to say so is a keep-and-annotate edit,
+  not a rewrite.
+
 - **Single inline file vs subdirectory-of-arm-files — the deciding factor is in-code BODY branching,
   not just var differences.** If the prompt **body** branches in code (a provider arm, preview-vs-action)
   → a **subdirectory** with one complete-body template per branch (branching is template *selection*

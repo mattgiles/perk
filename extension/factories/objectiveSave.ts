@@ -24,6 +24,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -180,20 +181,8 @@ const TOOL_GUIDELINES = [
  * here). Pure + exported for offline tests.
  */
 export function objectiveSaveGuidance(title?: string): string {
-  const named = title?.trim();
-  return [
-    "perk /objective-save — persist the objective the session converged on.",
-    "1. If the objective + roadmap are NOT yet decision-complete, finish converging first, then " +
-      "call the tool.",
-    "2. Call the `objective_save` tool NOW, passing `prose` (the decision-complete objective " +
-      "prose) and `roadmap` (the STRUCTURED roadmap as a JSON array of nodes, each with a stable " +
-      "`id` and `description`) — NEVER hand-write the roadmap as YAML.",
-    named
-      ? `3. Pass \`title: "${named}"\` as the objective title.`
-      : "3. `title` is optional (defaults to the prose's first heading).",
-    "4. The tool creates the perk:objective issue, activates it, starts budget tracking, and " +
-      "terminates the turn. Judgment + durable writes stay with you.",
-  ].join("\n");
+  const named = title?.trim() || "";
+  return render("stages/objective-save.md", { title: named });
 }
 
 /** Register the warm door: the `objective_save` tool (canonical) + the `/objective-save` twin. */
