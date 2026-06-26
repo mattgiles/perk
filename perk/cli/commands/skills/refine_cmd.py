@@ -27,6 +27,7 @@ from perk.cli.commands.skills.shared import (
 )
 from perk.cli.context import require_config
 from perk.cli.ensure import UserFacingCliError
+from perk.prompts import render
 from perk.run import launch
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
@@ -39,21 +40,13 @@ def _save_stage() -> Stage:
 
 def _seed_prompt(skill_path: str, skill_name: str) -> str:
     """The initial prompt for the write-capable refine session."""
-    return (
-        "You are running perk skills refine — improving an EXISTING repo-specific skill. Follow "
-        "the perk-skill-author skill.\n\n"
-        f"  1. Read the existing `SKILL.md` at `{skill_path}` and the relevant repo context.\n"
-        "  2. Improve it in place: sharpen the `description` triggers (the entire discovery "
-        "surface — name the tasks/phrases, not a vague topic), tighten/restructure the body, "
-        "move heavy/reference material into sibling `references/`/`scripts/` files (the delivery "
-        "symlink carries them for free), and re-validate the frontmatter (`name` must equal the "
-        f"directory segment `{skill_name}`; `description` non-empty).\n"
-        f"  3. Stay within the soft scope: `{REPO_SKILLS_REL}/{skill_name}/**` plus any "
-        "directly-required docs/bindings (add a binding only if the skill must fire at a "
-        "stage/command — reconcile the docs in the same change). Do NOT touch unrelated files.\n\n"
-        "  Improve the skill, then STOP — leave committing to the user. NEVER delegate the "
-        "judgment, authoring, or the commit decision.\n\n"
-        f"  Skill: {REPO_SKILLS_REL}/{skill_name}/SKILL.md"
+    return render(
+        "stages/skills/refine.md",
+        {
+            "repo_skills_rel": REPO_SKILLS_REL,
+            "skill_name": skill_name,
+            "skill_path": skill_path,
+        },
     )
 
 
