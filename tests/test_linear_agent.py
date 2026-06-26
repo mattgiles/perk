@@ -300,7 +300,7 @@ class TestAgentSessionCache:
     def test_round_trip(self, tmp_path: Path) -> None:
         data = {"session_id": "s", "issue": "ENG-1", "url": None}
         path = cache.write_agent_session(tmp_path, data)
-        assert path == tmp_path / ".pi" / "workflow" / "agent-session.json"
+        assert path == tmp_path / ".perk" / "workflow" / "agent-session.json"
         assert cache.read_agent_session(tmp_path) == data
 
     def test_absent_reads_none(self, tmp_path: Path) -> None:

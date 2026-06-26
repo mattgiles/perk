@@ -572,7 +572,7 @@ test("tool: plan_save stages the plan markdown in run scratch (mkdtemp retiremen
     const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
     const planFile = argv[argv.indexOf("--plan-file") + 1] ?? "";
     assert.ok(
-      planFile.includes(join(".pi", "workflow", "scratch", "runs", "01RID")),
+      planFile.includes(join(".perk", "workflow", "scratch", "runs", "01RID")),
       `plan staged under run scratch (got ${planFile})`,
     );
     // savePlan trims the plan before staging, hence the .trim() on the expectation.

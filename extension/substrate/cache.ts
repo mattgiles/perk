@@ -1,4 +1,4 @@
-// `.pi/workflow/` cache-tier I/O — the TS twin of perk/state/cache.py (contracts.md §8.1).
+// `.perk/workflow/` cache-tier I/O — the TS twin of perk/state/cache.py (contracts.md §8.1).
 //
 // Both planes read and write the SAME files; the cross-plane contract is the *files*, not a
 // shared module. State-tiering primitives only — no workflow semantics. Imports use no
@@ -18,7 +18,7 @@ export interface Handoff {
 }
 
 export function workflowDir(cwd: string): string {
-  return join(cwd, ".pi", "workflow");
+  return join(cwd, ".perk", "workflow");
 }
 
 // --- handoff -----------------------------------------------------------------------------

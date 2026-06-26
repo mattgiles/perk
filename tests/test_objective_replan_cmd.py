@@ -17,7 +17,7 @@ from perk.backends.objective_store import ObjectiveState
 from perk.cli.cli import cli
 from perk.run import launch
 
-_SCRATCH_REL = ".pi/workflow/scratch/objective-replan-42.md"
+_SCRATCH_REL = ".perk/workflow/scratch/objective-replan-42.md"
 
 
 def _git_init(path: str) -> None:

@@ -9,8 +9,8 @@ import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import { learnDocsGuidance } from "./learnDocs.ts";
 
 test("learnDocsGuidance names the inbox path", () => {
-  const text = learnDocsGuidance(".pi/workflow/scratch/learn-docs-inbox.md", ["45", "50"]);
-  assert.match(text, /\.pi\/workflow\/scratch\/learn-docs-inbox\.md/);
+  const text = learnDocsGuidance(".perk/workflow/scratch/learn-docs-inbox.md", ["45", "50"]);
+  assert.match(text, /\.perk\/workflow\/scratch\/learn-docs-inbox\.md/);
 });
 
 test("learnDocsGuidance carries the consumed learn numbers", () => {
@@ -29,7 +29,7 @@ const GATHER_JSON = JSON.stringify({
   success: true,
   error_type: null,
   message: null,
-  inbox_path: ".pi/workflow/scratch/learn-docs-inbox.md",
+  inbox_path: ".perk/workflow/scratch/learn-docs-inbox.md",
   learn_numbers: [45, 50],
   launched: false,
 });

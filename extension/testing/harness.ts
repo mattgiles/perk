@@ -140,7 +140,7 @@ export interface PerkSession {
 const TICK_MS = 50;
 const tick = () => new Promise((resolve) => setTimeout(resolve, TICK_MS));
 
-/** Create a temp cwd with a minimal `.pi/workflow/` scaffold (+ optional handoff). */
+/** Create a temp cwd with a minimal `.perk/workflow/` scaffold (+ optional handoff). */
 export function scaffoldRepo(
   opts: { handoff?: { runId: string; mode?: string; stage?: string } } = {},
 ): string {
@@ -249,7 +249,7 @@ export function gitInit(cwd: string, opts: { dirty: boolean }): void {
   // Mirror a real perk repo: the workflow cache is gitignored, and pi session files live in the
   // agent dir (not the repo tree) — the harness plants a `.jsonl` in cwd for convenience, so ignore
   // it too. Net: only real source edits (e.g. uncommitted.txt) dirty the tree.
-  writeFileSync(join(cwd, ".gitignore"), "/.pi/workflow/\n*.jsonl\nfake-perk.sh\n", "utf8");
+  writeFileSync(join(cwd, ".gitignore"), "/.perk/workflow/\n*.jsonl\nfake-perk.sh\n", "utf8");
   writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf8");
   g("add", "-A");
   g("commit", "-qm", "seed");

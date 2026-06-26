@@ -67,7 +67,7 @@ class TestPerkOwnedPathGuard:
 
     def test_pattern_matches_the_seams_themselves(self) -> None:
         """Non-vacuous self-check: the seams' own construction lines DO match the pattern
-        (cache.py carries `".pi" / "workflow"`; paths.py carries `".perk" / "skills"`)."""
+        (cache.py carries `".perk" / "workflow"`; paths.py carries `".perk" / "skills"`)."""
         cache_src = (_perk_dir() / "state" / "cache.py").read_text(encoding="utf-8")
         paths_src = (_perk_dir() / "substrate" / "paths.py").read_text(encoding="utf-8")
         assert any(PATTERN.search(line) for line in cache_src.splitlines()), (
@@ -80,6 +80,7 @@ class TestPerkOwnedPathGuard:
     def test_positive_each_family_arm_matches(self) -> None:
         """Per-arm positive asserts on synthetic strings — keeps the config/local arms honest even
         though the seam derives them from `config_dir`."""
+        assert PATTERN.search('root / ".perk" / "workflow"')
         assert PATTERN.search('root / ".pi" / "workflow"')
         assert PATTERN.search('root / ".pi" / "skills"')
         assert PATTERN.search('root / ".perk" / "skills"')

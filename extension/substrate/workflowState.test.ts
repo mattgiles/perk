@@ -294,7 +294,7 @@ test("appendWorkflowState: multi-field data verifies only the named field", () =
 
 test("deriveForkRunId: increments past existing siblings", () => {
   const dir = mkdtempSync(join(tmpdir(), "perk-fork-"));
-  const runs = join(dir, ".pi", "workflow", "scratch", "runs");
+  const runs = join(dir, ".perk", "workflow", "scratch", "runs");
   mkdirSync(join(runs, "01RID.1"), { recursive: true });
   mkdirSync(join(runs, "01RID.2"), { recursive: true });
   assert.equal(deriveForkRunId("01RID", dir), "01RID.3");

@@ -24,8 +24,9 @@ def test_init_via_cli(tmp_path, stub_env):
         result = runner.invoke(cli, ["init"])
         assert result.exit_code == 0
         assert (Path(d) / ".pi" / "settings.json").is_file()
-        assert (Path(d) / ".pi" / "workflow" / ".gitkeep").is_file()
-        assert (Path(d) / ".pi" / "workflow" / "post-init.md").is_file()
+        assert not (Path(d) / ".perk" / "workflow" / ".gitkeep").exists()
+        assert (Path(d) / ".perk" / "workflow" / "plans").is_dir()
+        assert (Path(d) / ".perk" / "workflow" / "post-init.md").is_file()
 
 
 def test_init_malformed_settings_errors_cleanly(tmp_path, stub_env):

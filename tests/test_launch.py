@@ -400,7 +400,7 @@ def test_dry_run_has_no_side_effects(tmp_path, capsys):
     assert data["stage"] == "plan"
     assert data["argv"] == ["pi", "-p", "x"]
     # no handoff written on a dry run
-    assert not (tmp_path / ".pi" / "workflow" / "handoff").exists()
+    assert not (tmp_path / ".perk" / "workflow" / "handoff").exists()
 
 
 def test_run_id_override_reuses_existing_run_id(tmp_path, capsys):
@@ -856,7 +856,8 @@ def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
     # The pinned base still drove the start-point...
     assert bases == ["origin/develop"]
     # ...but the named worktree's own cache.plan-ref was NOT written (no clobber).
-    assert not (clone / ".worktrees" / "custom-wt" / ".pi" / "workflow" / "plan-ref.json").exists()
+    named_ref = clone / ".worktrees" / "custom-wt" / ".perk" / "workflow" / "plan-ref.json"
+    assert not named_ref.exists()
 
 
 def test_dry_run_surfaces_base_without_fetching(git_repo_with_remote, monkeypatch, capsys):

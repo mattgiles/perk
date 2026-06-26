@@ -13,12 +13,14 @@ import { test } from "node:test";
 // The path-primitive seams: the only files allowed to carry the perk-owned family literals.
 const ALLOWLIST = ["substrate/paths.ts", "substrate/cache.ts"];
 
-// A `".pi"` segment in `join(...)` path construction (adjacent to a `,`) followed by a perk-owned
-// family follow-segment: the `"workflow"` literal, the config filename literals, or the imported
-// filename constants. Pi-native `.pi` + `npm`/`agents`/`settings.json`/`APPEND_SYSTEM.md` therefore
-// never match.
+// A `".pi"`/`".perk"` segment in `join(...)` path construction (adjacent to a `,`) followed by a
+// perk-owned family follow-segment: the `"workflow"` literal, the config filename literals, or the
+// imported filename constants. Both dot-dirs are guarded so a family stays guarded across its
+// migration from `.pi/` to `.perk/` (the workflow family now resolves to `.perk/workflow/`; config
+// stays `.pi/...` pending its own phase). Pi-native `.pi` + `npm`/`agents`/`settings.json`/
+// `APPEND_SYSTEM.md` therefore never match.
 const PATTERN =
-  /"\.pi"\s*,\s*("workflow"|"perk\.toml"|"perk\.local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)/;
+  /"\.(?:pi|perk)"\s*,\s*("workflow"|"perk\.toml"|"perk\.local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)/;
 
 /**
  * Discover production sources under extension/: every `.ts` file (recursively, so future
@@ -84,6 +86,7 @@ test("perk-owned config/workflow dot-paths are built only inside their seams", (
 
   // Per-arm positive asserts on synthetic strings (keeps the config arms honest even though the
   // seam derives them from `configDir`).
+  assert.ok(PATTERN.test('join(cwd, ".perk", "workflow")'));
   assert.ok(PATTERN.test('join(cwd, ".pi", "workflow")'));
   assert.ok(PATTERN.test('join(cwd, ".pi", CONFIG_FILENAME)'));
   assert.ok(PATTERN.test('join(cwd, ".pi", LOCAL_CONFIG_FILENAME)'));
@@ -94,6 +97,7 @@ test("perk-owned config/workflow dot-paths are built only inside their seams", (
   assert.ok(!PATTERN.test('join(cwd, ".pi", "npm")'));
   assert.ok(!PATTERN.test('join(cwd, ".pi", "agents")'));
   assert.ok(!PATTERN.test('join(cwd, ".pi", "APPEND_SYSTEM.md")'));
+  assert.ok(!PATTERN.test('join(cwd, ".perk", "npm")'));
 
   const violations = violationsOf(files);
   assert.deepEqual(

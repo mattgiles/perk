@@ -155,7 +155,7 @@ test("runCiChecks: huge failing output → full text in scratch, prose capped + 
   assert.equal(c.truncated, true);
   assert.equal(c.bytesTotal, 200_000);
   assert.ok(c.bytesShown <= 1000);
-  // Full output preserved in scratch (un-run-scoped path under .pi/workflow/scratch/ci/).
+  // Full output preserved in scratch (un-run-scoped path under .perk/workflow/scratch/ci/).
   assert.ok(c.scratchPath?.includes(join("scratch", "ci", "test.md")));
   assert.ok(c.scratchPath && existsSync(c.scratchPath));
   assert.equal(readFileSync(c.scratchPath, "utf8").length, 200_000);
@@ -199,8 +199,8 @@ test("runCiChecks: exec throw → fail-closed (exitCode:-1, passed:false, error 
 test("runCiChecks: scratch-verify failure → exit code still reported, no throw", async () => {
   // Point cwd at a path whose scratch dir cannot be created (a FILE where the dir should be).
   const cwd = tmpCwd();
-  mkdirSync(join(cwd, ".pi", "workflow", "scratch"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "workflow", "scratch", "ci"), "", "utf8"); // a file, not a dir
+  mkdirSync(join(cwd, ".perk", "workflow", "scratch"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "workflow", "scratch", "ci"), "", "utf8"); // a file, not a dir
   const report = await runCiChecks(
     { cwd, checks: [{ name: "test", command: "X" }] },
     { exec: fakeExec({ X: { code: 1, output: "fail output" } }) },

@@ -40,6 +40,7 @@ from perk.convergence.doctor.checks import (
     _extension_install_check,
     _gc_check,
     _issues_check,
+    _legacy_workflow_check,
     _managed_checks,
     _providers_check,
     _registry_check,
@@ -95,6 +96,7 @@ __all__ = [
     "_gc_check",
     "_github_checks",
     "_issues_check",
+    "_legacy_workflow_check",
     "_linear_checks",
     "_linear_selected",
     "_managed_checks",
@@ -173,6 +175,7 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))
+    checks.append(_legacy_workflow_check(root))
     return checks
 
 

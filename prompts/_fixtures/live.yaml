@@ -111,7 +111,7 @@
     model: "google/gemini-3.5-flash"
 - template: "stages/learn-docs.md"
   vars:
-    inbox_path: ".pi/workflow/scratch/learn-docs-inbox.md"
+    inbox_path: ".perk/workflow/scratch/learn-docs-inbox.md"
     num_list: "45, 50"
 - template: "stages/skills/create.md"
   vars:
