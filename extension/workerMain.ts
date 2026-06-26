@@ -11,7 +11,7 @@
 import { argv, env, exit, stderr, stdout } from "node:process";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { runEventsPath } from "./substrate/cache.ts";
+import { runEventsPath, workflowDir } from "./substrate/cache.ts";
 import {
   type DriveBudget,
   type DriveStage,
@@ -90,7 +90,7 @@ async function main(): Promise<number> {
   const initialPrompt = initialPromptForWorktree(parsed.worktree, parsed.stage);
   if (initialPrompt === null) {
     stderr.write(
-      `perk worker: no plan-ref under ${parsed.worktree}/.pi/workflow — cannot seed the ${parsed.stage} prompt.\n`,
+      `perk worker: no plan-ref under ${workflowDir(parsed.worktree)} — cannot seed the ${parsed.stage} prompt.\n`,
     );
     return 2;
   }

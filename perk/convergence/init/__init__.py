@@ -211,7 +211,7 @@ def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
     """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
     (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
     init creates it and ``perk doctor`` verifies the very same shape (D2)."""
-    workflow = root / ".pi" / "workflow"
+    workflow = cache.workflow_dir(root)
     gitkeep = workflow / ".gitkeep"
     need_gitkeep = not gitkeep.is_file()
     missing_subdirs = [sub for sub in cache.SUBDIRS if not (workflow / sub).is_dir()]
@@ -228,7 +228,7 @@ def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
 
 def _write_post_init(root: Path, self_repo: bool) -> str:
     """Write the agent-readable post-init handoff; return its repo-relative path."""
-    path = root / ".pi" / "workflow" / "post-init.md"
+    path = cache.workflow_dir(root) / "post-init.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = "self" if self_repo else "consumer"
     path.write_text(POST_INIT_TEMPLATE.format(mode=mode), encoding="utf-8")

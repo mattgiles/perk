@@ -30,10 +30,13 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
+from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
-_INBOX_REL = Path(".pi/workflow/scratch/learn-docs-inbox.md")
+# The inbox lives in the workflow cache scratch dir (the `cache.scratch_dir` seam owns the
+# `.pi/workflow/scratch` construction); this is just its filename.
+_INBOX_NAME = "learn-docs-inbox.md"
 
 
 def _plan_stage() -> Stage:
@@ -89,7 +92,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
             "Run /learn on some landed plans first, then re-run perk learn docs.",
             error_type="no_learn_issues",
         )
-    inbox_path = repo_root / _INBOX_REL
+    inbox_path = cache.scratch_dir(repo_root) / _INBOX_NAME
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
     inbox_path.write_text(_render_inbox(issues), encoding="utf-8")
     return inbox_path, issues

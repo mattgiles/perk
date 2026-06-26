@@ -11,11 +11,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from perk.substrate import git
+from perk.substrate import git, paths
 from perk.substrate.bindings import Binding, parse_user_bindings
 
-CONFIG_FILENAME = "perk.toml"
-LOCAL_CONFIG_FILENAME = "perk.local.toml"
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
 
@@ -64,10 +62,9 @@ def _overlay(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 def load_config(repo_root: Path) -> Config:
     """Load ``.pi/perk.toml`` overlaid by ``.pi/perk.local.toml`` from ``repo_root``."""
-    pi_dir = repo_root / ".pi"
     merged: dict[str, Any] = {}
-    for name in (CONFIG_FILENAME, LOCAL_CONFIG_FILENAME):
-        merged = _overlay(merged, _read_toml(pi_dir / name))
+    for path in (paths.config_file(repo_root), paths.local_config_file(repo_root)):
+        merged = _overlay(merged, _read_toml(path))
 
     worktree = merged.get("worktree")
     root_value = worktree.get("root") if isinstance(worktree, dict) else None
@@ -162,7 +159,7 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
     ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates (init guards it, deferring to
     the config check — mirrors ``_converge_provider_packages``).
     """
-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    raw = _read_toml(paths.config_file(repo_root))
     return parse_compaction_table(raw.get("compaction"))
 
 
@@ -191,7 +188,7 @@ def load_committed_issues_backend(repo_root: Path) -> str | None:
     ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check owns malformed
     TOML — mirrors ``load_committed_compaction``).
     """
-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    raw = _read_toml(paths.config_file(repo_root))
     return parse_issues_backend(raw.get("issues"))
 
 
@@ -219,7 +216,7 @@ def load_committed_issues_team(repo_root: Path) -> str | None:
     malformed-TOML ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check
     owns malformed TOML).
     """
-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
+    raw = _read_toml(paths.config_file(repo_root))
     return parse_issues_team(raw.get("issues"))
 
 
@@ -244,7 +241,7 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
     # when `repo_root` is not inside a git repo (tests / non-repo callers).
     root = git.main_worktree_root(repo_root) or repo_root
     try:
-        raw = _read_toml(root / ".pi" / LOCAL_CONFIG_FILENAME)
+        raw = _read_toml(paths.local_config_file(root))
     except tomllib.TOMLDecodeError:
         return None
     table = raw.get("linear")

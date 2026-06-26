@@ -2,8 +2,9 @@
 
 from pathlib import Path
 
-from perk.substrate.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+from perk.substrate import paths
 from perk.substrate.output import user_confirm
+from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 
 PERK_TOML_TEMPLATE = """\
 # perk project config (committed). Edit freely; per-user overrides go in
@@ -159,13 +160,14 @@ def converge_config(
     Seeded once; never overwritten — *unless* ``force`` re-seeds it back to the template
     (confirmed when ``interactive``). This is the one mildly-destructive init op.
     """
-    pi_dir = root / ".pi"
-    pi_dir.mkdir(parents=True, exist_ok=True)
-    for name, template in (
-        (CONFIG_FILENAME, PERK_TOML_TEMPLATE),
-        (LOCAL_CONFIG_FILENAME, PERK_LOCAL_TOML_TEMPLATE),
+    # Construct every config-family target through the `paths` seam (the single redirection point
+    # for the family) so a later move of the family is a localized edit there — no hand-built
+    # `.pi/...` here. The display strings stay `.pi/<name>` until the family actually moves.
+    paths.config_dir(root).mkdir(parents=True, exist_ok=True)
+    for name, path, template in (
+        (CONFIG_FILENAME, paths.config_file(root), PERK_TOML_TEMPLATE),
+        (LOCAL_CONFIG_FILENAME, paths.local_config_file(root), PERK_LOCAL_TOML_TEMPLATE),
     ):
-        path = pi_dir / name
         if not path.is_file():
             path.write_text(template, encoding="utf-8")
             changes.append(f".pi/{name}: created")

@@ -61,6 +61,18 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   dir artifacts and is declared in `writes` by the read-only authoring stages — `plan`,
   `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
 
+  **perk-owned dot-path construction seam.** Construction of the four **perk-owned** dot-path
+  families — the perk dir, the config files (`perk.toml`/`perk.local.toml`), the repo-skills dir
+  (`.pi/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
+  + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
+  `workflowDir` for the workflow family. Each family is independently redirectable from its single
+  helper (Objective #878 migrates them to `.perk/` one phase at a time) — no path value changes
+  today. The confinement is guard-tested in both planes (`tests/test_paths_guard.py`,
+  `extension/pathsGuard.test.ts`): a family-scoped source scan bans a quoted `".pi"` segment built
+  adjacent to a perk-owned family follow-segment outside the seams. **Pi-native** `.pi/...` paths
+  (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
+  explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
+
   **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
   twin) is the first session-data producer: it writes the working plan during read-only plan
   authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) as a **narrow

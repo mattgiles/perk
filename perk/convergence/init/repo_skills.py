@@ -20,12 +20,13 @@ import yaml
 from perk import github
 from perk.convergence.init.skills import MANAGED_HEADER, PERK_SKILLS_MANIFEST_DIR
 from perk.github import GitHubError
-from perk.substrate import git
+from perk.substrate import git, paths
 from perk.substrate.git import GitError
+from perk.substrate.paths import REPO_SKILLS_REL
 
-# The repo's own skills live under `.pi/skills/<name>/SKILL.md`; the rendered fragment lives beside
-# the perk-managed fragment in the standard `.d/` convention.
-REPO_SKILLS_DIR = ".pi/skills"
+# The repo's own skills live under `.pi/skills/<name>/SKILL.md` (path construction via the
+# `paths.repo_skills_dir` seam; `REPO_SKILLS_REL` is the display string). The rendered fragment
+# lives beside the perk-managed fragment in the standard `.d/` convention.
 REPO_SKILLS_MANIFEST_FILENAME = "perk-repo-skills.yaml"
 
 
@@ -113,7 +114,7 @@ def validate_skill(dir_name: str, frontmatter: dict) -> tuple[RepoSkill | None, 
             name=name,
             description=description,
             dir_name=dir_name,
-            rel_path=f"{REPO_SKILLS_DIR}/{dir_name}/SKILL.md",
+            rel_path=f"{REPO_SKILLS_REL}/{dir_name}/SKILL.md",
         ),
         None,
     )
@@ -150,7 +151,7 @@ def discover_repo_skills(root: Path) -> tuple[list[tuple[str, dict]], list[str]]
     ``dir_name`` and ``errors`` accumulates each frontmatter-parse reason. An absent
     ``.pi/skills/`` yields ``([], [])``.
     """
-    skills_root = root / REPO_SKILLS_DIR
+    skills_root = paths.repo_skills_dir(root)
     if not skills_root.is_dir():
         return [], []
     parsed: list[tuple[str, dict]] = []
@@ -217,7 +218,7 @@ def other_tracked_skill_names(root: Path) -> set[str]:
     """
     names: set[str] = set()
     for rel in git.tracked_paths(root, ["*SKILL.md"]):
-        if rel.startswith(f"{REPO_SKILLS_DIR}/"):
+        if rel.startswith(f"{REPO_SKILLS_REL}/"):
             continue
         path = root / rel
         if not path.is_file():

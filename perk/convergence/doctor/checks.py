@@ -10,14 +10,13 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence import capabilities, env, init
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.state import cache, gc
-from perk.substrate import bindings, git, providers, registry
+from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
-    CONFIG_FILENAME,
-    LOCAL_CONFIG_FILENAME,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_config,
 )
+from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 
 # --- group builders (impure: shells / file reads) -------------------------------------------
 
@@ -82,8 +81,11 @@ def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
 
 def _config_check(root: Path) -> Check:
     """Config is user-editable: present + parses + (defaulted) keys — never a content diff."""
-    pi = root / ".pi"
-    missing = [n for n in (CONFIG_FILENAME, LOCAL_CONFIG_FILENAME) if not (pi / n).is_file()]
+    files = {
+        CONFIG_FILENAME: paths.config_file(root),
+        LOCAL_CONFIG_FILENAME: paths.local_config_file(root),
+    }
+    missing = [name for name, path in files.items() if not path.is_file()]
     if missing:
         return Check(
             "config",

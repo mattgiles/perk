@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from perk import __version__
-from perk.substrate.config import LOCAL_CONFIG_FILENAME
+from perk.substrate.paths import LOCAL_CONFIG_FILENAME
 
 GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"

@@ -38,6 +38,7 @@ import {
   readHandoff,
   readPlanRef,
   setMarker,
+  workflowDir,
 } from "./substrate/cache.ts";
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
 import { perkVersion, sharedDir } from "./substrate/resources.ts";
@@ -69,7 +70,7 @@ function writeT3Sentinel(
   runMode: string | null,
 ): void {
   try {
-    const dir = join(cwd, ".pi", "workflow");
+    const dir = workflowDir(cwd);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, ".perk-t3.json"),
@@ -337,7 +338,7 @@ export default function (pi: ExtensionAPI) {
 
     if (process.env.PERK_SELFCHECK) {
       try {
-        const dir = join(ctx.cwd, ".pi", "workflow");
+        const dir = workflowDir(ctx.cwd);
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         // The gate sentinel (unchanged — those gates parse this line).
         writeFileSync(
