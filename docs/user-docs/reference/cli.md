@@ -487,7 +487,7 @@ Print the stages and their transitions (a dev/doctor convenience).
 Ergonomic sugar over the upstream [`skills`](https://github.com/mattgiles/skills) CLI for managing
 this repo's skills. **Every verb is a thin pass-through to the `skills` binary** (inheriting its
 stdio and propagating its exit code) **except `remove`** (edits `.agents/manifest.yaml` directly)
-**and the repo-authored-skill verbs `scaffold`/`delete`** (which manage this repo's *own*
+**and the repo-authored-skill verbs `scaffold`/`create`/`refine`/`delete`** (which manage this repo's *own*
 `.pi/skills/*/SKILL.md` skills and the perk-managed `.agents/manifest.d/perk-repo-skills.yaml`
 fragment). The `skills` CLI must
 be on `PATH` (and the repo initialized via `perk init`, which runs `skills init`); otherwise the
@@ -523,6 +523,15 @@ verbs surface a clean error.
   prompt, not a structural sandbox; committing is left to you. `--dry-run` prints the seed + intended
   path and scaffolds/launches nothing (the existence-refusal still runs). `--json` emits a stable
   report. Trailing args after `NAME` pass through to `pi`.
+- **`perk skills refine NAME`** — a write-capable cold door that re-opens an **existing**
+  repo-authored skill: it reads `.pi/skills/NAME/SKILL.md` in the **main checkout** and launches a
+  session seeded to improve it in place (following the `perk-skill-author` skill). Refuses if the
+  skill is absent, pointing at `perk skills create NAME`. Never scaffolds and skips sync (the file
+  already exists); the door is read-only on the filesystem until the launched session edits. The
+  refine scope (`.pi/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope**
+  in the seed prompt, not a structural sandbox; committing is left to you. `--dry-run` prints the
+  seed + intended path and launches nothing (the absent-skill refusal still runs). `--json` emits a
+  stable report. Trailing args after `NAME` pass through to `pi`.
 - **`perk skills delete NAME --yes`** — remove a repo-authored skill (`.pi/skills/NAME/`) in the
   **main checkout** and reconverge the fragment (skipping the heavy all-sources sync). Without
   `--yes` it prompts interactively when a TTY is present; under `--json`/non-interactive it refuses
