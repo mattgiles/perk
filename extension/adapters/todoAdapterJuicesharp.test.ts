@@ -31,7 +31,11 @@ const ACTIVE: Partial<WorkflowState> = {
 
 function selectJuicesharp(cwd: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\ntodo = "juicesharp-todo"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[providers]\ntodo = "juicesharp-todo"\n',
+    "utf8",
+  );
 }
 
 test("isJuicesharpTodoSelected: true only when [providers] todo = juicesharp-todo", () => {

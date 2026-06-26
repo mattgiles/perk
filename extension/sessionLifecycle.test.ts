@@ -44,7 +44,11 @@ for (const footerId of ["pi-bar-footer", "pi-status-footer", "pi-default"]) {
     // the `claim` test above.
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
     mkdirSync(join(cwd, ".perk"), { recursive: true });
-    writeFileSync(join(cwd, ".perk", "config.toml"), `[providers]\nfooter = "${footerId}"\n`, "utf8");
+    writeFileSync(
+      join(cwd, ".perk", "config.toml"),
+      `[providers]\nfooter = "${footerId}"\n`,
+      "utf8",
+    );
     const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
     try {
       assert.equal(

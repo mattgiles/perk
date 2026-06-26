@@ -480,7 +480,11 @@ test("harness: /ci command + run_ci tool registered; empty [ci] → inert report
 test("harness: run_ci with a configured [ci] runs it (flag-trusted, deterministic)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[[ci]]\nname = "ok"\ncommand = "true"\n',
+    "utf8",
+  );
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
     h.setFlag("allow-project-ci", true);
@@ -521,7 +525,11 @@ test("harness: headless run_ci with [trust] ci runs it (trust applies everywhere
 test("harness: headless run_ci with checks + no flag refuses (fail closed)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[[ci]]\nname = "ok"\ncommand = "true"\n',
+    "utf8",
+  );
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
   try {
     const result = await h.invokeTool("run_ci", {});
@@ -591,7 +599,11 @@ test("harness: run_ci with a mistyped check → bad_input, no check executed", a
   // Tool-boundary decode. A configured check exists but is never run.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[[ci]]\nname = "ok"\ncommand = "true"\n',
+    "utf8",
+  );
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
     h.setFlag("allow-project-ci", true);

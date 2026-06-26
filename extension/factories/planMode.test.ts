@@ -125,7 +125,11 @@ test("deferral: a foreign [providers] plan selection makes perk NOT register the
 test("partial vacate: a plannotator-plan selection keeps /plan + injection but drops --plan", async () => {
   const cwd = scaffoldRepo();
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\nplan = "plannotator-plan"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[providers]\nplan = "plannotator-plan"\n',
+    "utf8",
+  );
   // Registration-time branching resolves `process.cwd()` at factory time — point it at the scaffold.
   const savedCwd = process.cwd();
   process.chdir(cwd);

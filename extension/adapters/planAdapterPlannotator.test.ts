@@ -25,7 +25,11 @@ import {
 
 function selectPlannotator(cwd: string): void {
   mkdirSync(join(cwd, ".perk"), { recursive: true });
-  writeFileSync(join(cwd, ".perk", "config.toml"), '[providers]\nplan = "plannotator-plan"\n', "utf8");
+  writeFileSync(
+    join(cwd, ".perk", "config.toml"),
+    '[providers]\nplan = "plannotator-plan"\n',
+    "utf8",
+  );
 }
 
 /** A minimal in-memory event bus (the fake `pi.events` for the pure bridge tests). */
