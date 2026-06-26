@@ -40,8 +40,9 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
 # extension/doors/prReview.ts) plus the cold `binding_trigger=` overrides in perk/cli/commands/:
 # `command:learn-docs` (learn/docs_cmd.py) and `command:skills-create` (skills/create_cmd.py).
-# `command:skills-refine` is forward-declared for the `perk skills refine` cold door (node 3.2);
-# its binding simply never fires until that door wires the matching `binding_trigger` override.
+# `command:skills-refine` is forward-declared for the `perk skills refine` cold door (not yet
+# built); its binding simply never fires until that door wires the matching `binding_trigger`
+# override.
 # Commands that ARE registry stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are
 # deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
