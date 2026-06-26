@@ -22,6 +22,7 @@ import {
   stringField,
 } from "../substrate/coldDoor.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
+import { render } from "../substrate/prompts.ts";
 import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
 import { appendWorkflowState, branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
@@ -147,23 +148,12 @@ export function conflictResolutionGuidance(
   cap: number,
   model?: string,
 ): string {
-  const modelClause = model
-    ? `, and pass \`model: "${model}"\` on that call (the configured [subagents] conflict-resolver model)`
-    : " (no model override — the agent's default model is used)";
-  return [
-    `perk /submit — your PR has merge conflicts against \`${base}\`; resolve them before the work ` +
-      "is submitted for review. This is attempt " +
-      `${attempt} of ${cap}.`,
-    `1. Spawn the \`perk.conflict-resolver\` agent via the \`subagent\` tool with \`context: "fresh"\`${modelClause}. ` +
-      "A fresh context keeps this implementation session's history from biasing the resolution.",
-    `2. Tell it: rebase the PR branch onto \`${base}\` and **carefully** resolve all merge ` +
-      "conflicts so the resulting diff is **clean** (no stray markers, no unrelated churn) and " +
-      "**correct** (preserve the change's intent on both sides). The child reads its own plan + PR " +
-      "diff context first (it runs `perk pr review-context`) so it resolves with the change's " +
-      "intent in hand, verifies, and force-pushes — the raw diff never enters this session.",
-    "3. After the child reports success, call `/submit` again to re-verify mergeability. Do NOT " +
-      "edit or resolve conflicts yourself here — the child owns the rebase/resolve/push.",
-  ].join("\n");
+  return render("stages/conflict-resolution.md", {
+    base,
+    attempt: String(attempt),
+    cap: String(cap),
+    model: model ?? "",
+  });
 }
 
 /**

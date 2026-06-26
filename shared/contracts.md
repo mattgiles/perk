@@ -4010,11 +4010,21 @@ with a small, fixed feature surface — `{{ var }}` substitution, `{% include %}
 "The frozen template-grammar subset" subsection below and enforced by a cross-plane conformance
 guard. Every later node in this objective rides on this mechanism.
 
+**A template may be single-plane.** Two render seams exist (jinja2 on Python, vendored mini-jinja
+on TS), but a given *template* may be consumed in production by only one plane — e.g. a
+warm-door-only or cold-door-only injected seed/guidance prompt. `prompts/` is the canonical home
+for **every** externalized prompt string, single- or cross-plane; `live.yaml` renders **every**
+template on **both** engines and asserts byte-equality regardless of the production consumer, so a
+single-plane prompt still rides cross-engine parity for free (a portability guarantee that costs
+nothing, the subset being shared).
+
 - **Python:** `perk/prompts.py::render(name, variables)` over a module-level jinja2 `Environment`.
 - **TS:** `extension/substrate/prompts.ts::render(name, vars)`, delegating to the vendored,
   zero-dependency `extension/substrate/miniJinja.ts` renderer (the frozen-subset engine that
-  replaced nunjucks). The seam is LIVE: `render` is imported by the worker, the
-  learn/address/learnDocs/lifecycleGates doors, and the objective-plan factory.
+  replaced nunjucks). The seam is LIVE on both planes: `render` is imported by the worker, the
+  learn/address/learnDocs/lifecycleGates doors, the warm pr-review / submit / objective-save /
+  objective-reconcile doors, the objective-plan factory, and — on the Python side — the cold
+  plan-from / replan / objective-author / objective-replan doors.
 
 **Fail loudly on a missing var.** jinja2 uses `StrictUndefined` (raises `jinja2.UndefinedError`);
 the vendored `miniJinja` renderer matches it — a referenced name that is **absent OR non-string**

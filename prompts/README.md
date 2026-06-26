@@ -1,6 +1,14 @@
-# prompts — canonical cross-plane prompt templates
+# prompts — perk's externalized prompt prose
 
-perk's prompt templates, authored once and **bundled into every build artifact**
+This directory is the canonical home for **all** of perk's externalized prompt prose. A
+template may be **cross-plane** (rendered in production by both planes) or **single-plane**
+(rendered by only one plane — e.g. a warm-door-only or cold-door-only seed/guidance prompt);
+either way it is authored within the frozen mini-jinja subset below and listed in
+`_fixtures/live.yaml`, where it is rendered on **both** engines and asserted byte-equal
+regardless of which plane consumes it in production (a free cross-engine portability guarantee,
+costing nothing since the subset is shared).
+
+The templates are authored once and **bundled into every build artifact**
 (the Python wheel as package data `perk/_prompts/`; the npm package under `prompts/`),
 exactly like `shared/`. Each plane locates this directory at runtime through its own
 resolver — `prompts_dir()` (`perk/_resources.py`) and `promptsDir()`
