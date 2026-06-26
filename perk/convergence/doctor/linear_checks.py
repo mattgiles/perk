@@ -25,7 +25,7 @@ def _linear_selected(root: Path) -> bool:
 
 _LINEAR_KEY_REMEDIATION = (
     "export LINEAR_API_KEY (create a personal API key at linear.app Settings → Security & access), "
-    "or set [linear] api_key in .pi/perk.local.toml"
+    "or set [linear] api_key in .perk/local.toml"
 )
 
 
@@ -52,7 +52,7 @@ def _linear_team_check(readiness: linear.LinearReadiness, team: str) -> Check:
             "warn",
             f"team {team} not verified",
             readiness.error or "",
-            'Set [issues] team to your Linear team key (e.g. "ENG") in .pi/perk.toml.',
+            'Set [issues] team to your Linear team key (e.g. "ENG") in .perk/config.toml.',
         )
     return Check("linear-team", "linear", "ok", f"team {team} found")
 
@@ -163,7 +163,7 @@ def _linear_checks(root: Path) -> list[Check]:
                 "warn",
                 "[issues] team not set — readiness not checked",
                 "",
-                "Set [issues] team in .pi/perk.toml.",
+                "Set [issues] team in .perk/config.toml.",
             )
         ]
     readiness = linear.check_readiness(client, team_key=team, ensure_labels=False)

@@ -1,4 +1,4 @@
-"""perk's TOML config: `.pi/perk.toml` (committed) overlaid by `.pi/perk.local.toml`
+"""perk's TOML config: `.perk/config.toml` (committed) overlaid by `.perk/local.toml`
 (gitignored). Read-only via stdlib ``tomllib``; ``perk init`` *writes* the files.
 
 T4 needs only the worktree root; the ``Config`` dataclass grows as later turns add settings.
@@ -23,7 +23,7 @@ class Config:
 
     worktree_root: Path
     # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
-    # `pi` starts (overlay-aware, like `worktree_root` — a `perk.local.toml` array replaces this
+    # `pi` starts (overlay-aware, like `worktree_root` — a `local.toml` array replaces this
     # one wholesale). Empty when absent/ill-typed.
     worktree_setup: list[str] = field(default_factory=list)
     user_bindings: list[Binding] = field(default_factory=list)
@@ -61,7 +61,7 @@ def _overlay(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_config(repo_root: Path) -> Config:
-    """Load ``.pi/perk.toml`` overlaid by ``.pi/perk.local.toml`` from ``repo_root``."""
+    """Load ``.perk/config.toml`` overlaid by ``.perk/local.toml`` from ``repo_root``."""
     merged: dict[str, Any] = {}
     for path in (paths.config_file(repo_root), paths.local_config_file(repo_root)):
         merged = _overlay(merged, _read_toml(path))
@@ -151,9 +151,9 @@ def parse_compaction_table(raw: Any) -> dict[str, object]:
 
 
 def load_committed_compaction(repo_root: Path) -> dict[str, object]:
-    """Read the `[compaction]` table from **committed** `.pi/perk.toml` only (no local overlay).
+    """Read the `[compaction]` table from **committed** `.perk/config.toml` only (no local overlay).
 
-    Deliberately bypasses ``load_config`` (and thus ``perk.local.toml``) so the committed
+    Deliberately bypasses ``load_config`` (and thus ``local.toml``) so the committed
     `settings.json` stays a deterministic function of committed config — per-user compaction
     overrides belong in pi's native global `~/.pi/agent/settings.json`. A missing file yields
     ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates (init guards it, deferring to
@@ -180,9 +180,9 @@ def parse_issues_backend(raw: Any) -> str | None:
 
 
 def load_committed_issues_backend(repo_root: Path) -> str | None:
-    """Read the `[issues]` backend selection from **committed** `.pi/perk.toml` only (no overlay).
+    """Read the `[issues]` backend selection from **committed** `.perk/config.toml` (no overlay).
 
-    Deliberately bypasses ``load_config`` (and thus ``perk.local.toml``): the backend decides
+    Deliberately bypasses ``load_config`` (and thus ``local.toml``): the backend decides
     where canonical durable state (plan/learn/objective issues) is written — a per-user override
     would fragment the canonical store. A missing file yields ``None``; a malformed-TOML
     ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check owns malformed
@@ -208,10 +208,10 @@ def parse_issues_team(raw: Any) -> str | None:
 
 
 def load_committed_issues_team(repo_root: Path) -> str | None:
-    """Read the `[issues] team` key from **committed** `.pi/perk.toml` only (no local overlay).
+    """Read the `[issues] team` key from **committed** `.perk/config.toml` only (no local overlay).
 
     Mirrors ``load_committed_issues_backend`` exactly: deliberately bypasses ``load_config`` (and
-    thus ``perk.local.toml``) — the backend decides where canonical durable state is written, so a
+    thus ``local.toml``) — the backend decides where canonical durable state is written, so a
     per-user team override would fragment the canonical store. A missing file yields ``None``; a
     malformed-TOML ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check
     owns malformed TOML).
@@ -221,11 +221,11 @@ def load_committed_issues_team(repo_root: Path) -> str | None:
 
 
 def load_local_linear_api_key(repo_root: Path) -> str | None:
-    """Read `[linear] api_key` from **local** `.pi/perk.local.toml` only (the inverse of the
+    """Read `[linear] api_key` from **local** `.perk/local.toml` only (the inverse of the
     ``load_committed_*`` readers, which read the committed file only).
 
     A Linear personal API key is a secret, so it is read **only** from the gitignored
-    ``perk.local.toml`` — never the committed ``perk.toml`` — structurally preventing a committed
+    ``local.toml`` — never the committed ``config.toml`` — structurally preventing a committed
     secret. Not threaded through the merged ``Config`` dataclass for the same reason (that would
     make it readable from the committed file and widen the surface). Returns the stripped string
     when ``[linear]`` is a table and ``api_key`` is a non-blank ``str``; otherwise ``None`` (absent
@@ -234,9 +234,9 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
     **Fail-soft on malformed TOML**: a ``tomllib.TOMLDecodeError`` is caught and yields ``None``.
     This deliberately diverges from the ``load_committed_*`` readers, which *propagate*
     ``TOMLDecodeError`` (the config check maps it): a best-effort secret seed must never crash a
-    command, and malformed ``perk.local.toml`` is not surfaced anywhere else today.
+    command, and malformed ``local.toml`` is not surfaced anywhere else today.
     """
-    # The gitignored secret lives only in the MAIN checkout's `.pi/perk.local.toml` (never copied
+    # The gitignored secret lives only in the MAIN checkout's `.perk/local.toml` (never copied
     # into a linked worktree), so resolve the main worktree root first; fall back to the given root
     # when `repo_root` is not inside a git repo (tests / non-repo callers).
     root = git.main_worktree_root(repo_root) or repo_root

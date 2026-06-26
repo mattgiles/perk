@@ -74,7 +74,7 @@ export function loadDefaultBindings(): SkillBinding[] {
 }
 
 /**
- * Parse `.pi/perk.toml` `[[bindings]]` rows (string tables) into `SkillBinding`s. Tolerant like
+ * Parse `.perk/config.toml` `[[bindings]]` rows (string tables) into `SkillBinding`s. Tolerant like
  * the YAML reader: absent/ill-typed fields become empty strings so the *resolver* reports them.
  */
 export function parseUserBindings(rows: Array<Record<string, string>>): SkillBinding[] {

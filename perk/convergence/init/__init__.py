@@ -106,7 +106,7 @@ from perk.convergence.init.templates import (
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.run import workflow_artifacts
 from perk.state import cache
-from perk.substrate import git
+from perk.substrate import git, paths
 from perk.substrate.config import (
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -350,6 +350,18 @@ def run_init(
             )
 
     self_repo = is_self_repo(root)
+    # Legacy-only refusal: a repo carrying the legacy committed config (`.pi/perk.toml`) but not
+    # the new marker (`.perk/config.toml`) must be migrated by `doctor --fix` before init will
+    # converge it — never warn-and-seed a fresh template over an unmigrated legacy config. Keyed
+    # on the COMMITTED marker only (a lone legacy local file does not block). Unconditional: a
+    # fresh repo has neither file so it never fires there.
+    if not paths.config_file(root).is_file() and paths.legacy_config_file(root).is_file():
+        return InitReport.env_failure(
+            "legacy_config",
+            "Legacy perk config at .pi/perk.toml (no .perk/config.toml). Run 'perk doctor --fix' "
+            "to migrate it to .perk/, then re-run 'perk init'.",
+            checks,
+        )
     changes: list[str] = []
     for mc in managed_convergences(root, self_repo):
         changes.extend(mc.converge(True))
@@ -456,7 +468,7 @@ def _linear_readiness(root: Path) -> LinearReport | None:
         return LinearReport(
             readiness=None,
             error='[issues] team is required when backend = "linear" — '
-            "set the Linear team key in .pi/perk.toml",
+            "set the Linear team key in .perk/config.toml",
         )
     try:
         client = linear_client.client_from_env(repo_root=root)

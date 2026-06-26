@@ -122,7 +122,7 @@ def main_worktree_root(cwd: Path) -> Path | None:
 
     Resolves ``git rev-parse --git-common-dir`` (the shared ``.git`` of the main checkout) and
     returns its parent — equal to ``repo_root`` in the main checkout. ``None`` when ``cwd`` is
-    not inside a git repo. Used to locate the gitignored ``.pi/perk.local.toml`` secret, which
+    not inside a git repo. Used to locate the gitignored ``.perk/local.toml`` secret, which
     lives only in the main checkout and is never copied into a linked worktree.
     """
     try:

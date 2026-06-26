@@ -6,14 +6,20 @@ and ``perk/state/cache.py`` (workflow). Everything else goes through those helpe
 (``paths.config_file``/``paths.local_config_file``/``paths.repo_skills_dir``,
 ``cache.workflow_dir``, …).
 
-The pattern is scoped to *path construction* — a quoted ``".pi"``/``".perk"`` segment immediately
-adjacent to a ``/`` operator whose other segment is a perk-owned family follow-segment
-(``"workflow"``/``"skills"``/``CONFIG_FILENAME``/``LOCAL_CONFIG_FILENAME``/``"perk.toml"``/
-``"perk.local.toml"``).
+The config family now lives at ``.perk/`` (``config.toml``/``local.toml``); the legacy
+``.pi/perk.toml`` / ``.pi/perk.local.toml`` paths are constructed only via the allowlisted
+``paths.py`` ``legacy_*`` helpers (for the doctor migration). The scan therefore flags a quoted
+segment adjacent to a ``/`` operator in either of two shapes:
+
+- ``".pi"`` adjacent to a still-``.pi`` perk-owned follow-segment (``"workflow"``/``"skills"`` plus
+  the legacy ``"perk.toml"``/``"perk.local.toml"`` literals — legacy config construction stays
+  confined to the seam); or
+- ``".perk"`` adjacent to a config follow-segment (``"config.toml"``/``"local.toml"`` or the
+  ``CONFIG_FILENAME``/``LOCAL_CONFIG_FILENAME`` constants — now ``.perk``-adjacent).
+
 **Pi-native** ``.pi/...`` paths (``".pi" / "npm"``, ``".pi" / "agents"``, ``".pi" /
 "settings.json"``) and prose mentioning ``.pi/workflow`` therefore never false-positive. The TS
-twin is
-``extension/pathsGuard.test.ts``.
+twin is ``extension/pathsGuard.test.ts``.
 """
 
 import re
@@ -21,17 +27,24 @@ from pathlib import Path
 
 import perk
 
-# A perk-owned family follow-segment: a quoted family literal, the filename literals, or the
-# imported filename constants.
-_FOLLOW = (
-    r'("workflow"|"skills"|"perk\.toml"|"perk\.local\.toml"'
-    r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)"
-)
+# A still-`.pi` perk-owned follow-segment: the workflow/skills families plus the legacy config
+# filename literals (legacy config construction stays confined to the allowlisted seam).
+_PI_FOLLOW = r'("workflow"|"skills"|"perk\.toml"|"perk\.local\.toml")'
 
-# A quoted `".pi"`/`".perk"` segment in path construction (adjacent to a `/`) followed by a
-# perk-owned family follow-segment. Both dot-dirs are guarded so a family stays guarded across its
-# Objective #878 migration from `.pi/` to `.perk/`.
-PATTERN = re.compile(r"""["']\.(pi|perk)["']\s*/\s*""" + _FOLLOW)
+# A `.perk`-adjacent config follow-segment: the new filename literals or the imported constants.
+_PERK_FOLLOW = r'("config\.toml"|"local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)'
+
+# A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a still-`.pi`
+# perk-owned follow-segment.
+PI_PATTERN = re.compile(r"""["']\.pi["']\s*/\s*""" + _PI_FOLLOW)
+
+# A quoted `".perk"` segment in path construction (adjacent to a `/`) followed by a config
+# follow-segment.
+PERK_PATTERN = re.compile(r"""["']\.perk["']\s*/\s*""" + _PERK_FOLLOW)
+
+
+def _matches(line: str) -> bool:
+    return bool(PI_PATTERN.search(line) or PERK_PATTERN.search(line))
 
 ALLOWED = frozenset({"substrate/paths.py", "state/cache.py"})
 
@@ -55,7 +68,7 @@ class TestPerkOwnedPathGuard:
             if str(path.relative_to(perk_dir)) in ALLOWED:
                 continue
             for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-                if PATTERN.search(line):
+                if _matches(line):
                     offenders.append(
                         f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
                     )
@@ -67,30 +80,39 @@ class TestPerkOwnedPathGuard:
 
     def test_pattern_matches_the_seams_themselves(self) -> None:
         """Non-vacuous self-check: the seams' own construction lines DO match the pattern
-        (cache.py carries `".pi" / "workflow"`; paths.py carries `".perk" / "skills"`)."""
+        (cache.py carries `".pi" / "workflow"`; paths.py carries `".pi" / "skills"` and the
+        legacy `.pi` config helpers)."""
         cache_src = (_perk_dir() / "state" / "cache.py").read_text(encoding="utf-8")
         paths_src = (_perk_dir() / "substrate" / "paths.py").read_text(encoding="utf-8")
-        assert any(PATTERN.search(line) for line in cache_src.splitlines()), (
+        assert any(_matches(line) for line in cache_src.splitlines()), (
             "cache.py no longer matches the banned pattern — guard is vacuous"
         )
-        assert any(PATTERN.search(line) for line in paths_src.splitlines()), (
+        assert any(_matches(line) for line in paths_src.splitlines()), (
             "paths.py no longer matches the banned pattern — guard is vacuous"
         )
 
     def test_positive_each_family_arm_matches(self) -> None:
         """Per-arm positive asserts on synthetic strings — keeps the config/local arms honest even
         though the seam derives them from `config_dir`."""
-        assert PATTERN.search('root / ".pi" / "workflow"')
-        assert PATTERN.search('root / ".pi" / "skills"')
-        assert PATTERN.search('root / ".perk" / "skills"')
-        assert PATTERN.search('root / ".pi" / CONFIG_FILENAME')
-        assert PATTERN.search('root / ".pi" / LOCAL_CONFIG_FILENAME')
-        assert PATTERN.search('root / ".pi" / "perk.toml"')
-        assert PATTERN.search('root / ".pi" / "perk.local.toml"')
+        # Still-`.pi` arms: workflow/skills + the legacy config literals.
+        assert PI_PATTERN.search('root / ".pi" / "workflow"')
+        assert PI_PATTERN.search('root / ".pi" / "skills"')
+        assert PI_PATTERN.search('root / ".pi" / "perk.toml"')
+        assert PI_PATTERN.search('root / ".pi" / "perk.local.toml"')
+        # `.perk`-adjacent config arms.
+        assert PERK_PATTERN.search('root / ".perk" / CONFIG_FILENAME')
+        assert PERK_PATTERN.search('root / ".perk" / LOCAL_CONFIG_FILENAME')
+        assert PERK_PATTERN.search('root / ".perk" / "config.toml"')
+        assert PERK_PATTERN.search('root / ".perk" / "local.toml"')
 
     def test_negative_pi_native_paths_do_not_match(self) -> None:
-        """Pi-native `.pi/...` construction is out of scope and must not false-positive."""
-        assert not PATTERN.search('root / ".pi" / "npm"')
-        assert not PATTERN.search('root / ".pi" / "agents"')
-        assert not PATTERN.search('root / ".pi" / "settings.json"')
-        assert not PATTERN.search('root / ".perk" / "npm"')
+        """Pi-native `.pi/...` construction is out of scope and must not false-positive; and a
+        config filename is no longer `.pi`-adjacent (it moved to `.perk`)."""
+        assert not _matches('root / ".pi" / "npm"')
+        assert not _matches('root / ".pi" / "agents"')
+        assert not _matches('root / ".pi" / "settings.json"')
+        # Config constants are now `.perk`-adjacent, not `.pi`-adjacent.
+        assert not PI_PATTERN.search('root / ".pi" / CONFIG_FILENAME')
+        assert not PI_PATTERN.search('root / ".pi" / "config.toml"')
+        # Workflow/skills are not `.perk`-adjacent (not yet moved).
+        assert not PERK_PATTERN.search('root / ".perk" / "workflow"')

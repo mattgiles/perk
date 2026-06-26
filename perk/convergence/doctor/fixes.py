@@ -159,6 +159,47 @@ def _migrate_legacy_repo_skills(root: Path) -> tuple[list[str], list[str]]:
     return changes, errors
 
 
+def _migrate_legacy_config(root: Path) -> tuple[list[str], list[str]]:
+    """Migrate the legacy `.pi/perk.toml` / `.pi/perk.local.toml` config to `.perk/`.
+
+    Forward-only and idempotent (a no-op `([], [])` once converged). The committed and local
+    files migrate **independently** (committed↔committed, local↔local), so the gitignored local
+    secret is **never** copied into the committed file. Per file:
+
+    - legacy absent → skip (already migrated / never existed);
+    - target absent → move legacy → target (creating `.perk/`);
+    - target present and **byte-identical** → remove the redundant legacy file;
+    - target present and **differs** → error (resolve by hand) — never clobber either side.
+
+    Secret-safety is by construction: messages/errors carry **paths only**, never config values
+    (the byte-compare logs nothing); the local target is gitignored by the managed `.gitignore`
+    block (regenerated in the same `--fix`). Returns ``(changes, errors)``.
+    """
+    changes: list[str] = []
+    errors: list[str] = []
+    pairs = (
+        (paths.legacy_config_file(root), paths.config_file(root)),
+        (paths.legacy_local_config_file(root), paths.local_config_file(root)),
+    )
+    for legacy, target in pairs:
+        if not legacy.is_file():
+            continue
+        legacy_rel = legacy.relative_to(root)
+        target_rel = target.relative_to(root)
+        if not target.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(legacy), str(target))
+            changes.append(f"{legacy_rel}: migrated to {target_rel}")
+        elif legacy.read_bytes() == target.read_bytes():
+            legacy.unlink()
+            changes.append(f"{legacy_rel}: removed (identical to {target_rel})")
+        else:
+            errors.append(
+                f"{legacy_rel} and {target_rel} differ — resolve by hand, then remove {legacy_rel}"
+            )
+    return changes, errors
+
+
 # The legacy/one-off migration seam.
 # Forward-only repairs for oddities `init` does not undo (e.g. a previously-tracked transient
 # cache file). Each must be idempotent: a no-op (`([], [])`) once the repo is converged; each
@@ -167,6 +208,7 @@ _MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
     _untrack_materialized_plan_cache,
     _remove_orphaned_git_clone,
     _migrate_legacy_repo_skills,
+    _migrate_legacy_config,
 )
 
 

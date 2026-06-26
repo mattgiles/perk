@@ -72,7 +72,7 @@ BORROWED_PACKAGES = [
 ]
 
 # `pi-mono-linear` is the borrowed *Linear-tools Pi extension*, converged only when the repo
-# selects the linear issue backend (`[issues] backend = "linear"` in committed .pi/perk.toml) —
+# selects the linear issue backend (`[issues] backend = "linear"` in committed .perk/config.toml) —
 # two-directional like provider packages: added on select, removed on deselect (hand-adding it
 # without selecting linear is unsupported). Unpinned plain-string entry (the borrowed-set
 # convention); its bundled `linear` skill is accepted wholesale (no package_filter).
@@ -249,7 +249,7 @@ def _converge_settings(root: Path, self_repo: bool, *, apply: bool = True) -> li
 def _converge_compaction(root: Path, settings: dict[str, object]) -> list[str]:
     """Merge committed `[compaction]` over `settings["compaction"]` (write-when-present).
 
-    Reads **committed** `.pi/perk.toml` only (no local overlay; D2). When the parsed table is
+    Reads **committed** `.perk/config.toml` only (no local overlay; D2). When the parsed table is
     non-empty, its mapped keys are merged over any existing `compaction` dict (perk-specified
     keys win; unrelated hand-added keys survive; unspecified keys are left to pi's defaults). When
     empty/absent, `settings` is left untouched (perk cannot prove ownership of a bare `compaction`
@@ -295,7 +295,7 @@ def _converge_provider_packages(
     provider_set = load_providers()
     managed_identities = _managed_identities(provider_set)
 
-    # Guard a malformed perk.toml: defer surfacing to the config check (mirrors _bindings_check).
+    # Guard a malformed config.toml: defer surfacing to the config check (mirrors _bindings_check).
     try:
         selection = load_config(root).providers
     except tomllib.TOMLDecodeError:

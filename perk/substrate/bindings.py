@@ -229,7 +229,7 @@ class ResolvedBindings:
 
 
 def parse_user_bindings(raw: Any) -> list[Binding]:
-    """Parse a ``.pi/perk.toml`` ``[[bindings]]`` array-of-tables into ``Binding``s.
+    """Parse a ``.perk/config.toml`` ``[[bindings]]`` array-of-tables into ``Binding``s.
 
     Tolerant like ``_parse_binding``: absent/ill-typed fields become empty strings so the
     *resolver* reports them. A non-list ``raw`` (absent table) yields ``[]``.

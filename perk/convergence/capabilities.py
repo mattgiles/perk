@@ -36,7 +36,7 @@ CAPABILITIES: tuple[Capability, ...] = (
     ),
     Capability("settings-wiring", ".pi/settings.json package entries", required=True, scope="both"),
     Capability("workflow-dir", ".pi/workflow/ cache layout", required=True, scope="both"),
-    Capability("config", ".pi/perk.toml + perk.local.toml", required=True, scope="both"),
+    Capability("config", ".perk/config.toml + local.toml", required=True, scope="both"),
     Capability("gitignore-block", "managed .gitignore entries", required=True, scope="both"),
     Capability("agents-block", "managed AGENTS.md conventions", required=True, scope="both"),
     Capability(

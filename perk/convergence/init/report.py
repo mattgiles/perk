@@ -65,6 +65,7 @@ class InitReport:
             "missing_tool",
             "skills_conflict",
             "skills_sync_failed",
+            "legacy_config",
         ):
             return 2  # environment-not-ready (§3.2 supervisor taxonomy)
         return 1

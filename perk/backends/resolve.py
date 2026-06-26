@@ -6,7 +6,7 @@ door every issue-tier consumer goes through; the objective-tier resolvers
 (``resolve_objective_store_id`` / ``resolve_objective_store``) are the door every objective-tier
 consumer goes through.
 
-The resolver reads the **committed** ``.pi/perk.toml`` ``[issues]`` table and constructs the
+The resolver reads the **committed** ``.perk/config.toml`` ``[issues]`` table and constructs the
 matching backend (``GitHubIssueBackend`` from perk/backends/github/backend.py, or the Linear
 backend). It deliberately reads the committed config only — the backend decides where canonical
 durable state is written, so the local overlay is never consulted.
@@ -33,7 +33,7 @@ KNOWN_ISSUE_BACKENDS = (GITHUB_BACKEND_ID, LINEAR_BACKEND_ID)
 def resolve_issue_backend_id(repo_root: Path) -> str:
     """Resolve the repo's `[issues] backend` selection to a known backend id — or raise.
 
-    Reads the **committed** `.pi/perk.toml` only (``load_committed_issues_backend``; the local
+    Reads the **committed** `.perk/config.toml` only (``load_committed_issues_backend``; the local
     overlay is deliberately never read — the backend decides where canonical durable state is
     written). Absent or ``"github"`` → ``GITHUB_BACKEND_ID``; ``"linear"`` → ``LINEAR_BACKEND_ID``.
     Unknown values **raise** ``IssueBackendError`` (falling back silently would write canonical
@@ -44,7 +44,7 @@ def resolve_issue_backend_id(repo_root: Path) -> str:
         selected = config.load_committed_issues_backend(repo_root)
     except tomllib.TOMLDecodeError as exc:
         raise IssueBackendError(
-            f".pi/perk.toml is not valid TOML ({exc}); run `perk doctor`"
+            f".perk/config.toml is not valid TOML ({exc}); run `perk doctor`"
         ) from exc
     if selected is None or selected == GITHUB_BACKEND_ID:
         return GITHUB_BACKEND_ID
@@ -72,7 +72,7 @@ def resolve_issue_backend(repo_root: Path) -> issue_backend.IssueBackend:
         if team is None:
             raise IssueBackendError(
                 '[issues] team is required when backend = "linear" — '
-                "set the Linear team key in .pi/perk.toml"
+                "set the Linear team key in .perk/config.toml"
             )
         client = linear_client.client_from_env(repo_root=repo_root)
         return linear.LinearIssueBackend(client, team_key=team, repo_root=repo_root)
@@ -106,7 +106,7 @@ def resolve_objective_store(repo_root: Path) -> objective_store.ObjectiveStore:
         if team is None:
             raise IssueBackendError(
                 '[issues] team is required when backend = "linear" — '
-                "set the Linear team key in .pi/perk.toml"
+                "set the Linear team key in .perk/config.toml"
             )
         client = linear_client.client_from_env(repo_root=repo_root)
         return linear.LinearProjectObjectiveStore(client, team_key=team, repo_root=repo_root)

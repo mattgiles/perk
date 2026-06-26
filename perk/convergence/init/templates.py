@@ -8,7 +8,7 @@ from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 
 PERK_TOML_TEMPLATE = """\
 # perk project config (committed). Edit freely; per-user overrides go in
-# .pi/perk.local.toml (gitignored). The schema grows as perk does.
+# .perk/local.toml (gitignored). The schema grows as perk does.
 
 [worktree]
 # Where `perk worktree create` and cold-door stages place worktrees.
@@ -19,7 +19,7 @@ root = ".worktrees"
 # freshly created worktree before pi starts (via `bash -lc`, cwd = the worktree).
 # Use it to prepare the environment (dependency installs, codegen). A non-zero
 # exit ABORTS the launch (re-run after fixing — the worktree is reused). Skipped
-# on resume/reuse and on the remote runner. Overlay-aware (a perk.local.toml
+# on resume/reuse and on the remote runner. Overlay-aware (a local.toml
 # [worktree] setup array replaces this one wholesale).
 #
 # setup = ["uv sync", "npm ci"]
@@ -54,7 +54,7 @@ root = ".worktrees"
 
 # Per-agent subagent models — override the model each perk-owned subagent uses
 # (the frontmatter default in .pi/agents/<name>.md is used when unset). Set a
-# per-user override in .pi/perk.local.toml to avoid dirtying this file.
+# per-user override in .perk/local.toml to avoid dirtying this file.
 #
 # [subagents]
 # pr-reviewer = "anthropic/claude-sonnet-4-5"
@@ -89,7 +89,7 @@ root = ".worktrees"
 # Interactive auto-compaction — tunes pi's global compaction for `perk <stage>`
 # sessions by converging the specified keys into .pi/settings.json's `compaction`
 # object (pi reads that natively at session boot). Keys are committed-only (read
-# from THIS file, never the perk.local.toml overlay) so the committed settings.json
+# from THIS file, never the local.toml overlay) so the committed settings.json
 # stays deterministic; per-user overrides belong in pi's global ~/.pi/agent/settings.json.
 # Editing this requires re-running `perk init` (or `perk doctor --fix`) to converge.
 # Removing this block leaves a stale settings.json `compaction` to clean up by hand.
@@ -103,9 +103,9 @@ root = ".worktrees"
 # "github" (the default when unset) and "linear" are supported. Selecting
 # "linear" requires `team` (the Linear team key, e.g. "ENG") and a personal
 # LINEAR_API_KEY — set it in the environment, or in the gitignored
-# .pi/perk.local.toml [linear] api_key (an exported env var wins); never in
+# .perk/local.toml [linear] api_key (an exported env var wins); never in
 # THIS committed file. The `backend`/`team` keys below are committed-only: read
-# from THIS file, never from the perk.local.toml overlay (a per-user override
+# from THIS file, never from the local.toml overlay (a per-user override
 # would fragment the canonical issue store). `perk init` converges the
 # npm:pi-mono-linear Pi package when linear is selected (and removes it when
 # deselected).
@@ -116,7 +116,7 @@ root = ".worktrees"
 """
 
 PERK_LOCAL_TOML_TEMPLATE = """\
-# perk per-user local overrides (gitignored). Mirrors .pi/perk.toml's shape; values
+# perk per-user local overrides (gitignored). Mirrors .perk/config.toml's shape; values
 # here win over the committed config. Example:
 #   [worktree]
 #   root = "/abs/path/to/worktrees"
@@ -126,7 +126,7 @@ PERK_LOCAL_TOML_TEMPLATE = """\
 #
 # Linear API key (optional) — a personal Linear API key, used by perk's Linear
 # issue backend AND the in-session linear_* tools. ONLY read from this gitignored
-# file (never the committed perk.toml). An exported LINEAR_API_KEY env var wins.
+# file (never the committed config.toml). An exported LINEAR_API_KEY env var wins.
 #
 # [linear]
 # api_key = "lin_api_…"
@@ -162,17 +162,34 @@ def converge_config(
     """
     # Construct every config-family target through the `paths` seam (the single redirection point
     # for the family) so a later move of the family is a localized edit there — no hand-built
-    # `.pi/...` here. The display strings stay `.pi/<name>` until the family actually moves.
+    # `.perk/...` here.
     paths.config_dir(root).mkdir(parents=True, exist_ok=True)
-    for name, path, template in (
-        (CONFIG_FILENAME, paths.config_file(root), PERK_TOML_TEMPLATE),
-        (LOCAL_CONFIG_FILENAME, paths.local_config_file(root), PERK_LOCAL_TOML_TEMPLATE),
+    for name, path, template, legacy in (
+        (
+            CONFIG_FILENAME,
+            paths.config_file(root),
+            PERK_TOML_TEMPLATE,
+            paths.legacy_config_file(root),
+        ),
+        (
+            LOCAL_CONFIG_FILENAME,
+            paths.local_config_file(root),
+            PERK_LOCAL_TOML_TEMPLATE,
+            paths.legacy_local_config_file(root),
+        ),
     ):
+        # Legacy-safe seeding guard: never warn-and-seed a fresh template over an unmigrated
+        # legacy config (belt-and-suspenders for the doctor `_fix_config` path; init itself
+        # refuses legacy-only earlier). The doctor migration moves the legacy file first.
+        if not path.is_file() and legacy.is_file():
+            continue
         if not path.is_file():
             path.write_text(template, encoding="utf-8")
-            changes.append(f".pi/{name}: created")
+            changes.append(f".perk/{name}: created")
         elif force and path.read_text(encoding="utf-8") != template:
-            if interactive and not user_confirm(f"Re-seed .pi/{name} to defaults?", default=False):
+            if interactive and not user_confirm(
+                f"Re-seed .perk/{name} to defaults?", default=False
+            ):
                 continue
             path.write_text(template, encoding="utf-8")
-            changes.append(f".pi/{name}: re-seeded")
+            changes.append(f".perk/{name}: re-seeded")

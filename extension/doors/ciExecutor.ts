@@ -367,7 +367,7 @@ export function renderCiProse(report: CiReport): string {
     );
   }
   if (report.error_type === "no_checks_configured") {
-    return "No CI checks configured ([[ci]] in .pi/perk.toml is empty). Nothing to run.";
+    return "No CI checks configured ([[ci]] in .perk/config.toml is empty). Nothing to run.";
   }
   if (report.error_type === "unknown_check") {
     return `perk CI: ${report.error}`;
