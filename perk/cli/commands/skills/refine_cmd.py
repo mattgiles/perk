@@ -1,19 +1,18 @@
-"""``perk skills create NAME`` — pre-scaffold a repo skill, then launch a session to author it.
+"""``perk skills refine NAME`` — re-open an existing repo skill, then launch a session to improve.
 
-A **dedicated** write-capable cold door (not a registry stage), mirroring the ``plan replan`` /
-``plan from`` / ``learn docs`` cold doors: it borrows the ``save`` stage descriptor for launch
-(``mode: read-write``, ``worktree: none`` → the **main checkout**, ``cold_local: true``) and
-overrides ``binding_trigger="command:skills-create"`` so ``stage:save`` does not fire and the
-``perk-skill-author`` skill is delivered instead. Borrowing ``save`` injects no save-stage behavior
-— the extension's authoring-context injection is gated on ``mode: read-only``.
+The near-twin of ``perk skills create`` (the authoring cold door), but for an **existing**
+repo-authored skill: it borrows the same ``save`` stage descriptor for launch (``mode: read-write``,
+``worktree: none`` → the **main checkout**, ``cold_local: true``) and overrides
+``binding_trigger="command:skills-refine"`` so ``stage:save`` does not fire and the
+``perk-skill-author`` skill is delivered instead.
 
-The door pre-scaffolds ``.pi/skills/NAME/`` (the same write ``perk skills scaffold`` performs) and
-then launches an authoring session seeded to follow ``perk-skill-author``. There is no structural
-write-sandbox; the "scoped to ``.pi/skills/NAME/**``" instruction is a **soft scope** carried in the
-seed prompt. Committing is left to the user.
+Unlike ``create``, ``refine`` never scaffolds and never reconverges the fragment — the skill already
+exists (and was converged at create/scaffold time). The door is read-only on the filesystem until
+the launched session edits ``SKILL.md`` in place. It refuses (on every path, including
+``--dry-run``) when ``.pi/skills/NAME/SKILL.md`` is absent, pointing at ``perk skills create``.
 
-``--dry-run`` does NOT pre-scaffold (no tracked-file mutation): it prints the seed + intended path
-and launches nothing. The existence-refusal still runs on every path (incl. ``--dry-run``).
+``--dry-run`` prints the seed + intended path and launches nothing; the absent-skill refusal still
+runs first.
 """
 
 import json
@@ -22,7 +21,6 @@ import click
 
 from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
-    perform_scaffold,
     repo_skills_root,
     skills_fail,
     validate_skill_name,
@@ -41,9 +39,9 @@ def _save_stage() -> Stage:
 
 
 def _seed_prompt(skill_path: str, skill_name: str) -> str:
-    """The initial prompt for the write-capable authoring session."""
+    """The initial prompt for the write-capable refine session."""
     return render(
-        "stages/skills/create.md",
+        "stages/skills/refine.md",
         {
             "repo_skills_rel": REPO_SKILLS_REL,
             "skill_name": skill_name,
@@ -52,15 +50,13 @@ def _seed_prompt(skill_path: str, skill_name: str) -> str:
     )
 
 
-@click.command("create", context_settings={"ignore_unknown_options": True})
+@click.command("refine", context_settings={"ignore_unknown_options": True})
 @click.argument("name")
-@click.option(
-    "--dry-run", is_flag=True, help="Print the seed + intended path; scaffold + launch nothing."
-)
+@click.option("--dry-run", is_flag=True, help="Print the seed + intended path; launch nothing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
-def create_skill(
+def refine_skill(
     ctx: click.Context,
     *,
     name: str,
@@ -68,12 +64,12 @@ def create_skill(
     as_json: bool,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Scaffold a repo-authored skill at `.pi/skills/NAME/`, then launch a session to author it.
+    """Re-open an existing repo-authored skill (`.pi/skills/NAME/`), then launch a refine session.
 
     \b
     Examples:
-      perk skills create my-skill            # scaffold + launch an authoring session
-      perk skills create my-skill --dry-run  # print the seed + intended path, launch nothing
+      perk skills refine my-skill            # launch a session to improve the existing skill
+      perk skills refine my-skill --dry-run  # print the seed + intended path, launch nothing
     """
     try:
         root = repo_skills_root(ctx)
@@ -89,14 +85,14 @@ def create_skill(
         return
 
     target = root / REPO_SKILLS_REL / skill_name
-    if target.exists():
+    if not (target / "SKILL.md").exists():
         skills_fail(
             ctx,
             as_json=as_json,
-            error_type="skills_exists",
+            error_type="skills_not_found",
             message=(
-                f"{REPO_SKILLS_REL}/{skill_name} already exists \u2014 use "
-                f"`perk skills refine {skill_name}` to re-author an existing skill."
+                f"{REPO_SKILLS_REL}/{skill_name}/SKILL.md does not exist \u2014 use "
+                f"`perk skills create {skill_name}` to author a new skill."
             ),
         )
         return
@@ -118,22 +114,14 @@ def create_skill(
                 )
             )
         else:
-            user_output(click.style("skills create --dry-run (no scaffold; no launch)", dim=True))
+            user_output(click.style("skills refine --dry-run (no launch)", dim=True))
             user_output(f"  name={skill_name}  path={REPO_SKILLS_REL}/{skill_name}")
             user_output(click.style("── seed prompt ──", fg="bright_black"))
             user_output(seed)
         return
 
-    # Pre-scaffold the skill (offline-failable reconverge rides non-fatally), then surface its
-    # warnings/errors before launching (mirrors `scaffold`).
-    outcome = perform_scaffold(root, skill_name)
     if as_json:
-        user_output(f"scaffolded {REPO_SKILLS_REL}/{skill_name}; launching authoring session")
-    else:
-        for warning in outcome.warnings:
-            user_output(f"warning: {warning}")
-        for error in outcome.errors:
-            user_output(f"reconverge error: {error}")
+        user_output(f"refining {REPO_SKILLS_REL}/{skill_name}; launching session")
 
     # launch_stage exec's pi with the seeded prompt + a fresh run_id (cold_local mints). The
     # borrowed `save` stage is write-capable; binding_trigger delivers perk-skill-author, not save.
@@ -146,5 +134,5 @@ def create_skill(
         remote=None,
         pi_args=list(pi_args),
         prompt_override=seed,
-        binding_trigger="command:skills-create",
+        binding_trigger="command:skills-refine",
     )

@@ -381,7 +381,7 @@ def test_remove_restores_on_sync_oserror(monkeypatch, tmp_path):
 import json  # noqa: E402
 import types  # noqa: E402
 
-from perk.cli.commands.skills import create_cmd, delete_cmd  # noqa: E402
+from perk.cli.commands.skills import create_cmd, delete_cmd, refine_cmd  # noqa: E402
 from perk.convergence.init.repo_skills import (  # noqa: E402
     RepoSkill,
     RepoSkillsConvergence,
@@ -686,3 +686,94 @@ def test_create_refuses_existing_dry_run(monkeypatch, tmp_path):
     payload = json.loads(result.stdout)
     assert payload["error_type"] == "skills_exists"
     assert calls == []
+
+
+# --- refine (refine cold door) ----------------------------------------------
+
+
+def _stub_refine_launch(monkeypatch):
+    """Stub `launch.launch_stage` into a sink so refine records kwargs without exec'ing pi."""
+    calls: list[dict] = []
+
+    def fake_launch(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(refine_cmd.launch, "launch_stage", fake_launch)
+    return calls
+
+
+def _write_skill(tmp_path: Path, name: str = "foo", body: str = "existing") -> Path:
+    target = tmp_path / ".pi" / "skills" / name
+    target.mkdir(parents=True)
+    skill_md = target / "SKILL.md"
+    skill_md.write_text(body, encoding="utf-8")
+    return skill_md
+
+
+def test_refine_dry_run_does_not_launch(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_refine_launch(monkeypatch)
+    _write_skill(tmp_path)
+    result = CliRunner().invoke(
+        cli, ["skills", "refine", "foo", "--dry-run", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "success": True,
+        "error_type": None,
+        "name": "foo",
+        "path": ".pi/skills/foo",
+        "dry_run": True,
+    }
+    assert calls == []
+
+
+def test_refine_real_run_launches(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_refine_launch(monkeypatch)
+    skill_md = _write_skill(tmp_path)
+    result = CliRunner().invoke(cli, ["skills", "refine", "foo"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert kwargs["binding_trigger"] == "command:skills-refine"
+    assert kwargs["stage"].id == "save"
+    assert kwargs["worktree"] is None
+    assert kwargs["remote"] is None
+    # The door is read-only on the filesystem until the launched session edits.
+    assert skill_md.read_text(encoding="utf-8") == "existing"
+
+
+def test_refine_refuses_absent(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_refine_launch(monkeypatch)
+    result = CliRunner().invoke(cli, ["skills", "refine", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_not_found"
+    assert "create" in payload["message"]
+    assert calls == []
+
+
+def test_refine_refuses_absent_dry_run(monkeypatch, tmp_path):
+    # The absent-skill refusal runs on every path, including --dry-run.
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_refine_launch(monkeypatch)
+    result = CliRunner().invoke(
+        cli, ["skills", "refine", "foo", "--dry-run", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_not_found"
+    assert calls == []
+
+
+def test_refine_invalid_names(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    _stub_refine_launch(monkeypatch)
+    for bad in ("foo/bar", "", ".", "..", ".hidden"):
+        result = CliRunner().invoke(cli, ["skills", "refine", bad, "--json"], obj=_ctx(tmp_path))
+        assert result.exit_code == 1, bad
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "skills_invalid_name", bad

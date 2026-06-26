@@ -113,3 +113,13 @@
   vars:
     inbox_path: ".pi/workflow/scratch/learn-docs-inbox.md"
     num_list: "45, 50"
+- template: "stages/skills/create.md"
+  vars:
+    repo_skills_rel: ".pi/skills"
+    skill_name: "foo"
+    skill_path: ".pi/skills/foo/SKILL.md"
+- template: "stages/skills/refine.md"
+  vars:
+    repo_skills_rel: ".pi/skills"
+    skill_name: "foo"
+    skill_path: ".pi/skills/foo/SKILL.md"
