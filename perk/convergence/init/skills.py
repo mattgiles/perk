@@ -23,6 +23,7 @@ PERK_SKILLS: tuple[str, ...] = (
     "perk-plan",
     "perk-pr-review",
     "perk-replan",
+    "perk-skill-author",
 )
 
 # The skills CLI's managed runtime pathspecs, duplicated by value (no machine-readable export

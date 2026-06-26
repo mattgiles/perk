@@ -10,14 +10,13 @@ import click
 
 from perk.cli.commands.skills.shared import (
     REPO_SKILLS_REL,
+    perform_scaffold,
     repo_skills_root,
     skills_emit,
     skills_fail,
-    todo_skill_md,
     validate_skill_name,
 )
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence.init import converge_repo_skills_manifest
 from perk.substrate.output import user_output
 
 
@@ -57,30 +56,24 @@ def scaffold_skill(ctx: click.Context, *, name: str, as_json: bool) -> None:
         return
 
     # The file write is the primary deliverable; a true filesystem failure is fatal (raises here).
-    target.mkdir(parents=True)
-    (target / "SKILL.md").write_text(todo_skill_md(skill_name), encoding="utf-8")
-
-    # Reconverge the fragment (offline-failable GitHub read); errors/warnings ride non-fatally.
-    conv = converge_repo_skills_manifest(root, apply=True)
-    fragment = conv.changes[0].split(": ", 1)[1] if conv.changes else "none"
-    warnings = list(conv.manifest.warnings)
-    errors = list(conv.manifest.errors)
+    # Reconvergence is offline-failable (GitHub read) — its errors/warnings ride non-fatally.
+    outcome = perform_scaffold(root, skill_name)
 
     payload: dict[str, object] = {
         "success": True,
         "error_type": None,
         "name": skill_name,
         "path": f"{REPO_SKILLS_REL}/{skill_name}",
-        "fragment": fragment,
-        "warnings": warnings,
-        "errors": errors,
+        "fragment": outcome.fragment,
+        "warnings": outcome.warnings,
+        "errors": outcome.errors,
     }
     human = f"created {REPO_SKILLS_REL}/{skill_name}/SKILL.md"
-    if conv.changes:
-        human += f"\n{conv.changes[0]}"
+    if outcome.change_line:
+        human += f"\n{outcome.change_line}"
     skills_emit(payload, as_json=as_json, human=human)
     if not as_json:
-        for warning in warnings:
+        for warning in outcome.warnings:
             user_output(f"warning: {warning}")
-        for error in errors:
+        for error in outcome.errors:
             user_output(f"reconverge error: {error}")

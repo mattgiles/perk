@@ -44,6 +44,8 @@ EXPECTED_DEFAULTS = [
     ("command:objective-replan", "perk-objective-replan", "nudge"),
     ("command:learn-docs", "perk-learn-docs", "nudge"),
     ("command:pr-review", "perk-pr-review", "nudge"),
+    ("command:skills-create", "perk-skill-author", "nudge"),
+    ("command:skills-refine", "perk-skill-author", "nudge"),
 ]
 
 
@@ -205,7 +207,16 @@ def test_resolve_defaults_to_shipped_when_omitted():
 def test_deliverable_command_targets_are_the_two_mechanism_b_triggers():
     # The only command triggers perk's delivery layer fires; stage-named commands bind via stage:.
     assert (
-        frozenset({"objective-reconcile", "objective-replan", "learn-docs", "pr-review"})
+        frozenset(
+            {
+                "objective-reconcile",
+                "objective-replan",
+                "learn-docs",
+                "pr-review",
+                "skills-create",
+                "skills-refine",
+            }
+        )
         == DELIVERABLE_COMMAND_TARGETS
     )
 

@@ -18,7 +18,11 @@ import yaml
 
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
-from perk.convergence.init import PERK_SKILLS_MANIFEST_DIR, PERK_SKILLS_MANIFEST_FILENAME
+from perk.convergence.init import (
+    PERK_SKILLS_MANIFEST_DIR,
+    PERK_SKILLS_MANIFEST_FILENAME,
+    converge_repo_skills_manifest,
+)
 from perk.substrate import git
 from perk.substrate.output import machine_output, user_output
 
@@ -180,6 +184,46 @@ def todo_skill_md(name: str) -> str:
         "## Instructions\n"
         "\n"
         "TODO: The durable, repo-specific guidance an agent should follow.\n"
+    )
+
+
+@dataclass(frozen=True)
+class ScaffoldOutcome:
+    """The result of scaffolding a repo-authored skill + reconverging the fragment.
+
+    ``fragment`` is the convergence verb (``created``/``updated``/``none``); ``change_line`` is the
+    raw ``"<path>: <verb>"`` convergence change (or ``None`` when nothing changed) for the human
+    message; ``warnings``/``errors`` ride non-fatally (the offline GitHub read may fail).
+    """
+
+    fragment: str
+    change_line: str | None
+    warnings: list[str]
+    errors: list[str]
+
+
+def perform_scaffold(root: Path, skill_name: str) -> ScaffoldOutcome:
+    """Write the TODO ``SKILL.md`` under ``.pi/skills/<skill_name>/`` and reconverge the fragment.
+
+    The shared scaffold step behind both ``perk skills scaffold`` (deterministic create-only) and
+    ``perk skills create`` (the authoring cold door's pre-scaffold). The caller owns the
+    existence-refusal + name validation; this only writes (the file write is the primary
+    deliverable, so a true filesystem failure raises) and reconverges (offline-failable — errors
+    ride non-fatally in the outcome). Reconvergence is read through the module namespace so tests
+    can stub it.
+    """
+    target = root / REPO_SKILLS_REL / skill_name
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text(todo_skill_md(skill_name), encoding="utf-8")
+
+    conv = converge_repo_skills_manifest(root, apply=True)
+    change_line = conv.changes[0] if conv.changes else None
+    fragment = change_line.split(": ", 1)[1] if change_line else "none"
+    return ScaffoldOutcome(
+        fragment=fragment,
+        change_line=change_line,
+        warnings=list(conv.manifest.warnings),
+        errors=list(conv.manifest.errors),
     )
 
 

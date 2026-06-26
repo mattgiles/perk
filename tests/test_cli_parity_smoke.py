@@ -145,6 +145,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         "registry": [("check", ("ch",)), ("show", ("s",))],
         "skills": [
             ("add", ()),
+            ("create", ()),
             ("delete", ()),
             ("list", ("ls",)),
             ("remove", ("rm",)),

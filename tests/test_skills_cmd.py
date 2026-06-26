@@ -381,7 +381,7 @@ def test_remove_restores_on_sync_oserror(monkeypatch, tmp_path):
 import json  # noqa: E402
 import types  # noqa: E402
 
-from perk.cli.commands.skills import delete_cmd, scaffold_cmd  # noqa: E402
+from perk.cli.commands.skills import create_cmd, delete_cmd  # noqa: E402
 from perk.convergence.init.repo_skills import (  # noqa: E402
     RepoSkill,
     RepoSkillsConvergence,
@@ -412,7 +412,9 @@ def _patch_repo_skills(monkeypatch, *, changes=None, errors=(), warnings=()):
         calls.append(apply)
         return _fake_conv(changes=resolved_changes, errors=errors, warnings=warnings)
 
-    monkeypatch.setattr(scaffold_cmd, "converge_repo_skills_manifest", fake_converge)
+    # `scaffold`/`create` reconverge via `shared.perform_scaffold`, which reads the convergence
+    # through the `shared` namespace; `delete` keeps its own import.
+    monkeypatch.setattr(shared, "converge_repo_skills_manifest", fake_converge)
     monkeypatch.setattr(delete_cmd, "converge_repo_skills_manifest", fake_converge)
     return calls
 
@@ -593,3 +595,94 @@ def test_delete_json_success_shape(monkeypatch, tmp_path):
         "errors": [],
         "symlink_removed": False,
     }
+
+
+# --- create (authoring cold door) -------------------------------------------
+
+
+def _stub_launch(monkeypatch):
+    """Stub `launch.launch_stage` into a sink so create records kwargs without exec'ing pi."""
+    calls: list[dict] = []
+
+    def fake_launch(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(create_cmd.launch, "launch_stage", fake_launch)
+    return calls
+
+
+def test_create_dry_run_does_not_scaffold_or_launch(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    result = CliRunner().invoke(
+        cli, ["skills", "create", "foo", "--dry-run", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "success": True,
+        "error_type": None,
+        "name": "foo",
+        "path": ".pi/skills/foo",
+        "dry_run": True,
+    }
+    assert not (tmp_path / ".pi" / "skills" / "foo").exists()
+    assert calls == []
+
+
+def test_create_real_run_scaffolds_then_launches(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    result = CliRunner().invoke(cli, ["skills", "create", "foo"], obj=_ctx(tmp_path))
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".pi" / "skills" / "foo" / "SKILL.md").is_file()
+    assert len(calls) == 1
+    kwargs = calls[0]
+    assert kwargs["binding_trigger"] == "command:skills-create"
+    assert kwargs["stage"].id == "save"
+    assert kwargs["worktree"] is None
+    assert kwargs["remote"] is None
+
+
+def test_create_refuses_existing(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["skills", "create", "foo", "--json"], obj=_ctx(tmp_path))
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_exists"
+    assert "refine" in payload["message"]
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == "preexisting"
+    assert calls == []
+
+
+def test_create_invalid_names(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    _stub_launch(monkeypatch)
+    for bad in ("foo/bar", "", ".", "..", ".hidden"):
+        result = CliRunner().invoke(cli, ["skills", "create", bad, "--json"], obj=_ctx(tmp_path))
+        assert result.exit_code == 1, bad
+        payload = json.loads(result.stdout)
+        assert payload["error_type"] == "skills_invalid_name", bad
+    assert not (tmp_path / ".pi" / "skills").exists()
+
+
+def test_create_refuses_existing_dry_run(monkeypatch, tmp_path):
+    # The existence-refusal runs on every path, including --dry-run.
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    target = tmp_path / ".pi" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli, ["skills", "create", "foo", "--dry-run", "--json"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "skills_exists"
+    assert calls == []
