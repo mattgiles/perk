@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from perk.substrate.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 from perk.substrate.output import user_confirm
+from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
 
 PERK_TOML_TEMPLATE = """\
 # perk project config (committed). Edit freely; per-user overrides go in

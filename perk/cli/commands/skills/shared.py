@@ -23,10 +23,11 @@ from perk.convergence.init import (
     PERK_SKILLS_MANIFEST_FILENAME,
     converge_repo_skills_manifest,
 )
-from perk.substrate import git
+from perk.substrate import git, paths
 from perk.substrate.output import machine_output, user_output
-
-REPO_SKILLS_REL = ".pi/skills"
+from perk.substrate.paths import (
+    REPO_SKILLS_REL as REPO_SKILLS_REL,  # re-exported for the skills command modules
+)
 
 # Matches `sync_skills`' update timeout — `skills` resolves/syncs git sources, which is slow.
 SKILLS_TIMEOUT_S = 180
@@ -212,7 +213,7 @@ def perform_scaffold(root: Path, skill_name: str) -> ScaffoldOutcome:
     ride non-fatally in the outcome). Reconvergence is read through the module namespace so tests
     can stub it.
     """
-    target = root / REPO_SKILLS_REL / skill_name
+    target = paths.repo_skills_dir(root) / skill_name
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text(todo_skill_md(skill_name), encoding="utf-8")
 

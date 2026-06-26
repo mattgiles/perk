@@ -10,11 +10,8 @@
 // Dynamic `resources_discover` skill/prompt contribution is a flagged follow-up, not built here.
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseUserBindings, type SkillBinding } from "./bindings.ts";
-
-const CONFIG_FILENAME = "perk.toml";
-const LOCAL_CONFIG_FILENAME = "perk.local.toml";
+import { configFile, localConfigFile } from "./paths.ts";
 
 /**
  * One configured CI check (a `[[ci]]` array-of-tables row). `name`/`command` are required
@@ -212,10 +209,9 @@ function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
 
 /** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/substrate/config.py). */
 export function loadPerkConfig(cwd: string): PerkConfig {
-  const piDir = join(cwd, ".pi");
   let merged: TomlSubset = emptySubset();
-  for (const name of [CONFIG_FILENAME, LOCAL_CONFIG_FILENAME]) {
-    merged = overlay(merged, readTomlFile(join(piDir, name)));
+  for (const file of [configFile(cwd), localConfigFile(cwd)]) {
+    merged = overlay(merged, readTomlFile(file));
   }
 
   const planAuthoring = merged.tables.workflow?.plan_authoring;
@@ -329,7 +325,7 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
  */
 export function resolveIssueBackendId(cwd: string): IssueBackendId {
   try {
-    const committed = readTomlFile(join(cwd, ".pi", CONFIG_FILENAME));
+    const committed = readTomlFile(configFile(cwd));
     const backend = committed.tables.issues?.backend;
     if (backend === "github" || backend === "linear") return backend;
     return GITHUB_ISSUE_BACKEND_ID;
