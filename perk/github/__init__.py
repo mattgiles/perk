@@ -40,6 +40,10 @@ from perk.github.prs import (
     update_pr_body,
     validate_pr_body,
 )
+from perk.github.repo import (
+    RepoIdentity,
+    repo_identity,
+)
 from perk.github.reviews import (
     ADD_REVIEW_THREAD_REPLY_MUTATION,
     GET_PR_REVIEW_THREADS_QUERY,
@@ -88,6 +92,7 @@ __all__ = [
     "PrReviewContext",
     "PullRequest",
     "RepoAccess",
+    "RepoIdentity",
     "Review",
     "ReviewComment",
     "ReviewPostResult",
@@ -113,6 +118,7 @@ __all__ = [
     "mark_pr_ready",
     "merge_pr",
     "post_pr_review",
+    "repo_identity",
     "rerun_workflow_run",
     "resolve_review_threads",
     "secret_exists",
