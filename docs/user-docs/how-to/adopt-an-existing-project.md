@@ -59,6 +59,15 @@ child-issue mapping and no project concept — `adopt_issue` is ignored.
 - **is already a perk objective** — reconcile it with
   [`perk objective reconcile`](reconcile-an-objective.md) or plan its nodes normally instead.
 
+## From a local file
+
+`--from <source>` also accepts a path to a **local file** (relative or absolute):
+`perk objective author --from ./design.md`. This is **seed-from-file**, not in-place adoption — a
+file has no backend identity to stamp. perk reads the file as untrusted seed DATA, primes the
+read-only authoring session, and on save mints a **fresh** `perk:objective` issue (no `adopted_from`
+stamp). The file is never modified. A non-existent path falls through to the source-id path. (To
+stamp the objective onto an existing project/issue instead, pass its id.)
+
 > **Live validation** is preview-grade at this node; final live proof lands later. Offline behavior
 > is fully covered.
 

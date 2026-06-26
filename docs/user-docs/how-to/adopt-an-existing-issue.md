@@ -38,6 +38,16 @@ This runs in a **read-only** session and is **local-only**.
 > [`replan`](replan-an-open-plan.md) re-authors an existing **perk plan**. Reach for `from` when a
 > human already filed the issue and you want the plan to live *on that issue*.
 
+## From a local file
+
+`perk plan from` also accepts a path to a **local file** (relative to your shell, or absolute):
+`perk plan from ./notes.md`. This is **seed-from-file**, not in-place adoption — a file has no
+backend identity to stamp. perk reads the file's contents as untrusted seed DATA, primes the
+read-only authoring session with it, and on save mints a **fresh** `perk:plan` issue (no
+`adopted_from` stamp). The file on disk is never modified. A non-existent path falls through to the
+issue-id path unchanged. (To stamp the plan onto an existing issue instead, file the issue first and
+adopt it by id.)
+
 ---
 
 ← Back to the [how-to router](index.md).

@@ -197,6 +197,12 @@ human title/body verbatim and **never minting a second object**. Local-only (`co
 (use [`perk plan replan`](#perk-plan-replan-plan) for the latter). See
 [Adopt an existing issue as a plan](../how-to/adopt-an-existing-issue.md).
 
+`ISSUE` may also be a path to a **local file** (relative to your shell's cwd, or absolute). When the
+argument resolves to an existing file, perk runs **seed-from-file** mode instead: it reads the
+file's contents as untrusted seed DATA, primes the read-only authoring session with it, and on save
+mints a **fresh** `perk:plan` issue (no in-place adoption — the file on disk is never modified, and
+there is no `adopted_from` stamp). A non-existent path falls through to the issue-id path unchanged.
+
 ### `perk objective` (alias `obj`)
 
 The objective group. Help renders **Launchers** (each opens a primed `pi` session: `author`,
@@ -220,6 +226,11 @@ field maps it to an existing project issue (reused in place, title/body verbatim
 to a single issue (no child mapping). `--dry-run` materializes the source and prints the seed
 without launching. Refuses when the source is not found, not open (GitHub issues only), or already a
 perk objective. See [Adopt an existing project as an objective](../how-to/adopt-an-existing-project.md).
+
+`--from <source>` may also be a path to a **local file** (relative or absolute). When it resolves to
+an existing file, perk runs **seed-from-file** mode: it reads the file as untrusted seed DATA, primes
+the read-only authoring session, and on save mints a **fresh** `perk:objective` issue (no in-place
+adoption — the file is never modified). A non-existent path falls through to the source-id path.
 
 ### `perk objective save`
 
