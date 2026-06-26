@@ -777,6 +777,104 @@ def test_fix_reports_conflict_on_deep_nested_difference(git_repo):
     assert any(
         ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
     )
+# --- the legacy config migration (`.pi/perk.toml` -> `.perk/`) --------------------------------
+
+
+def _seed_legacy(repo, *, committed=None, local=None):
+    pi = repo / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    if committed is not None:
+        (pi / "perk.toml").write_text(committed, encoding="utf-8")
+    if local is not None:
+        (pi / "perk.local.toml").write_text(local, encoding="utf-8")
+
+
+def test_config_check_diagnoses_legacy_not_migrated(git_repo):
+    # A present legacy `.pi/perk.toml` with no `.perk/config.toml` is diagnosed distinctly from a
+    # genuinely-missing config ("legacy config not migrated", not "config missing").
+    _seed_legacy(git_repo, committed='[worktree]\nroot = "wt"\n')
+    report = run_doctor(git_repo, verify=False)
+    config = next(c for c in report.checks if c.name == "config")
+    assert config.status == "fail"
+    assert config.message == "legacy config not migrated"
+    assert config.detail == ".pi/perk.toml"
+    assert config.remediation == "perk doctor --fix"
+
+
+def test_fix_config_absent_seeds_template_without_migration(git_repo):
+    # No legacy, no target → `--fix` seeds the template (the normal scaffold), no migration line.
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert (git_repo / ".perk" / "config.toml").is_file()
+    assert (git_repo / ".perk" / "local.toml").is_file()
+    assert not any("migrated to" in line for line in fixed.fixed)
+
+
+def test_fix_migrates_legacy_only_config_secret_safely(git_repo):
+    # legacy-only: `--fix` moves `.pi/perk.toml` -> `.perk/config.toml` (and local likewise),
+    # secret-safely; a re-run is idempotent.
+    secret = "lin_secret_do_not_print"
+    _seed_legacy(
+        git_repo,
+        committed='[worktree]\nroot = "wt"\n',
+        local=f'[linear]\napi_key = "{secret}"\n',
+    )
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+
+    assert (git_repo / ".perk" / "config.toml").read_text(encoding="utf-8") == (
+        '[worktree]\nroot = "wt"\n'
+    )
+    assert (git_repo / ".perk" / "local.toml").read_text(encoding="utf-8") == (
+        f'[linear]\napi_key = "{secret}"\n'
+    )
+    assert not (git_repo / ".pi" / "perk.toml").exists()
+    assert not (git_repo / ".pi" / "perk.local.toml").exists()
+    assert any(".pi/perk.toml: migrated to .perk/config.toml" in line for line in fixed.fixed)
+    # Secret-safety: the value never appears in any rendered fix line / error.
+    assert all(secret not in line for line in (*fixed.fixed, *fixed.fix_errors))
+    # The local secret is NEVER promoted into the committed file.
+    assert "[linear]" not in (git_repo / ".perk" / "config.toml").read_text(encoding="utf-8")
+    # The migrated secret is readable from `.perk/local.toml`.
+    from perk.substrate.config import load_local_linear_api_key
+
+    assert load_local_linear_api_key(git_repo) == secret
+    # The managed gitignore now ignores the local file.
+    assert "/.perk/local.toml" in (git_repo / ".gitignore").read_text(encoding="utf-8")
+    # Idempotent: a second `--fix` re-migrates nothing.
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any("migrated to" in line for line in again.fixed)
+
+
+def test_fix_removes_identical_legacy_config(git_repo):
+    # both byte-identical: `--fix` removes the redundant legacy file; idempotent.
+    body = '[worktree]\nroot = "wt"\n'
+    _seed_legacy(git_repo, committed=body)
+    cfg = git_repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text(body, encoding="utf-8")
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not (git_repo / ".pi" / "perk.toml").exists()
+    assert (git_repo / ".perk" / "config.toml").read_text(encoding="utf-8") == body
+    assert any("removed (identical to .perk/config.toml)" in line for line in fixed.fixed)
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any("removed (identical" in line for line in again.fixed)
+
+
+def test_fix_reports_conflict_when_legacy_and_target_differ(git_repo):
+    # both present and differing: `--fix` reports a `fix_errors` entry (paths only), leaves both
+    # files, and repeats the error every run until resolved by hand.
+    _seed_legacy(git_repo, committed='[worktree]\nroot = "legacy"\n')
+    cfg = git_repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text('[worktree]\nroot = "new"\n', encoding="utf-8")
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert (git_repo / ".pi" / "perk.toml").exists()  # left untouched
+    assert any(
+        ".pi/perk.toml and .perk/config.toml differ — resolve by hand" in e
+        for e in fixed.fix_errors
+    )
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert any("differ — resolve by hand" in e for e in again.fix_errors)
+
 
 
 def test_cache_gc_ok_when_no_prunable_state(git_repo):

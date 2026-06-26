@@ -291,3 +291,22 @@ test("resolveIssueBackendId: a malformed file falls safe to github", () => {
   const cwd = repoWith({ "perk.toml": "[issues\nbackend = " });
   assert.equal(resolveIssueBackendId(cwd), "github");
 });
+
+// --- legacy `.pi/...` config is never consumed (the .perk/ move) ------------
+
+test("loadPerkConfig: a legacy .pi/perk.toml is ignored (reads only .perk/config.toml)", () => {
+  // Seed config at BOTH the legacy `.pi/perk.toml` and the new `.perk/config.toml`; the reader
+  // resolves only the `.perk/` target, so the legacy value never leaks in.
+  const cwd = repoWith({ "perk.toml": '[workflow]\nplan_authoring = "new"\n' });
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[workflow]\nplan_authoring = "legacy"\n', "utf8");
+  assert.equal(loadPerkConfig(cwd).planAuthoring, "new");
+});
+
+test("resolveIssueBackendId: a legacy .pi/perk.toml selection is ignored", () => {
+  // The legacy committed file selecting linear must NOT be read — only `.perk/config.toml` counts.
+  const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "perk.toml"), '[issues]\nbackend = "linear"\n', "utf8");
+  assert.equal(resolveIssueBackendId(cwd), "github");
+});

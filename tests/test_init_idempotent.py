@@ -26,6 +26,49 @@ def _snapshot(root):
     }
 
 
+def _write_legacy_config(root: Path) -> Path:
+    """Seed a legacy committed config at `<root>/.pi/perk.toml`."""
+    pi = root / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    legacy = pi / "perk.toml"
+    legacy.write_text('[worktree]\nroot = "legacy-wt"\n', encoding="utf-8")
+    return legacy
+
+
+def test_init_refuses_legacy_only_config(tmp_path):
+    # A repo carrying only the legacy committed config (`.pi/perk.toml`, no `.perk/config.toml`)
+    # makes init refuse (exit 2) with a `doctor --fix` remediation — never warn-and-seed over it.
+    legacy = _write_legacy_config(tmp_path)
+    report = run_init(tmp_path, verify=False)
+    assert not report.ok
+    assert report.error_type == "legacy_config"
+    assert report.exit_code == 2
+    assert "perk doctor --fix" in (report.message or "")
+    # Nothing seeded: the new target is not created and the legacy file is left untouched.
+    assert not (tmp_path / ".perk" / "config.toml").is_file()
+    assert legacy.read_text(encoding="utf-8") == '[worktree]\nroot = "legacy-wt"\n'
+
+
+def test_init_legacy_local_only_does_not_block(tmp_path):
+    # The refusal keys on the COMMITTED marker only: a lone legacy local file does not block init,
+    # which converges a fresh `.perk/config.toml`.
+    pi = tmp_path / ".pi"
+    pi.mkdir(parents=True, exist_ok=True)
+    (pi / "perk.local.toml").write_text('[linear]\napi_key = "lin_x"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+    assert (tmp_path / ".perk" / "config.toml").is_file()
+
+
+def test_init_both_present_converges(tmp_path):
+    # A repo with BOTH the legacy and the new committed file is already migrated enough to not
+    # block (the marker exists) — init converges normally.
+    _write_legacy_config(tmp_path)
+    cfg = tmp_path / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "config.toml").write_text('[worktree]\nroot = "wt"\n', encoding="utf-8")
+    assert run_init(tmp_path, verify=False).ok
+
+
 def test_init_converges_and_is_idempotent(tmp_path):
     # tmp_path has no `[tool.perk] self` marker -> consumer mode.
     # verify=False: pure convergence (no repo/tooling/GitHub shells).
