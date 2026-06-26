@@ -4144,3 +4144,34 @@ semantics here) and calls `store.supersede_objective(...)`; a `None` return rais
 draft→review→save mechanics. The warm plane is unchanged — `objective_draft`/`objective_save`'s
 structured roadmap path already carries `adopt_issue` per node, and `supersedes` rides the handoff
 exactly as `adopt_from` does, so no TS schema edit is needed.
+
+## §8.33 · Local-file seeding for the adoption cold doors (`plan from` / `objective author --from`)
+
+Both adoption cold doors **also** accept a relative or absolute path to a local file. This is a
+distinct **seed-from-file** mode, NOT in-place adoption: a file has no canonical backend identity,
+so there is nothing to stamp perk's metadata into (the §8.29/§8.30 in-place model does not apply).
+
+**Disambiguation (`seed_file.detect_seed_file`).** Both doors auto-detect an existing file
+**before** any id parsing / backend read: `Path(arg).expanduser()` (relative resolves against the
+invoking shell's cwd) — if it `is_file()`, file mode wins (using the `.resolve()`d path); otherwise
+the arg falls through to the existing issue/source-id path **unchanged**. A non-existent path-like
+arg (slash or not) always falls through (no new path-shape heuristics): `parse_plan_id` rejects
+`/`-bearing ids as `invalid_input`, and a clean-but-unresolvable id errors `adopt_not_found` as
+today.
+
+**Behavior.** The file is read as untrusted DATA (`seed_file.read_seed_file`) and materialized into
+a slash-free `seed-file-<safe-stem>-<hash8>.md` scratch (`seed_file.render_seed_file_scratch`; the
+absolute-path SHA1 hash keeps two same-named files in different dirs from colliding), wrapped in an
+`<untrusted_seed_file>` block. The read-only authoring session is primed with a file-mode seed
+prompt; saving mints a **fresh** `perk:plan` / `perk:objective` issue via the normal create path —
+**no `adopt_from` handoff, no `adopted_from` provenance, file untouched**.
+
+**Surface.** File mode skips `require_github` (the only read is local; the backend write happens
+in-session at save time, mirroring the bare authoring path) but keeps `require_repo` /
+`require_config` (scratch dir + launch config) and the `--remote` rejection (local-only, same as the
+doors it extends). Errors: `seed_file_error` (non-UTF-8 / unreadable / empty file). Stable exits
+unchanged (`0` ok · `1` op-failure/refusal · `2` not-a-repo).
+
+**Out of scope.** No in-place adoption of files (no backend identity), no change to `parse_plan_id`
+/ the `adopt_from` handoff / `adopted_from` provenance / any §8.29/§8.30 machinery, no
+directory/glob support (a single file only), no write-back to the seed file.

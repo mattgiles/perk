@@ -210,3 +210,81 @@ def test_refuses_issue_already_a_plan(monkeypatch):
         payload = json.loads(result.output)
         assert payload["error_type"] == "already_a_plan"
         assert "replan" in payload["message"]
+
+
+# --- seed-from-file mode (§8.33) ---
+
+
+def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
+    # No `_authed` stub: file mode must NOT require GitHub auth.
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "notes.md").write_text("build the widget", encoding="utf-8")
+        result = runner.invoke(cli, ["plan", "from", "notes.md", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage"] == "plan"
+    assert launched["handoff_extra"] is None  # FRESH issue — no adopt_from
+    prompt = launched["prompt"] or ""
+    assert "<untrusted_seed_file>" in prompt
+    assert "seed-file-notes-" in prompt
+    assert "perk-plan" in prompt
+    assert "plan_save" in prompt
+
+
+def test_file_mode_absolute_path(monkeypatch):
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        abs_path = Path(d, "notes.md")
+        abs_path.write_text("build the widget", encoding="utf-8")
+        result = runner.invoke(cli, ["plan", "from", str(abs_path), "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage"] == "plan"
+    assert launched["handoff_extra"] is None
+
+
+def test_file_mode_dry_run_json_emits_file_and_does_not_launch(monkeypatch):
+    def boom_launch(**k):
+        raise AssertionError("--dry-run must not launch")
+
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "notes.md").write_text("build the widget", encoding="utf-8")
+        result = runner.invoke(cli, ["plan", "from", "notes.md", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["success"] is True
+        assert payload["dry_run"] is True
+        assert payload["file"] == str(Path(d, "notes.md").resolve())
+        scratch = Path(payload["scratch_path"])
+        assert scratch.name.startswith("seed-file-notes-")
+        assert "<untrusted_seed_file>" in scratch.read_text(encoding="utf-8")
+
+
+def test_file_mode_empty_file_errors(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "empty.md").write_text("   \n", encoding="utf-8")
+        result = runner.invoke(cli, ["plan", "from", "empty.md", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["error_type"] == "seed_file_error"
+
+
+def test_file_mode_non_utf8_errors(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "bin.md").write_bytes(b"\xff\xfe\x00bad")
+        result = runner.invoke(cli, ["plan", "from", "bin.md", "--json"])
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["error_type"] == "seed_file_error"

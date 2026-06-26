@@ -280,3 +280,77 @@ def test_remote_rejected(monkeypatch):
         )
         assert result.exit_code == 1
         assert json.loads(result.output)["error_type"] == "remote_blocked"
+
+
+# --- seed-from-file mode (§8.33) ---
+
+
+def _stub_launch_only(monkeypatch, sink: dict) -> None:
+    monkeypatch.setattr(
+        launch,
+        "launch_stage",
+        lambda **k: sink.update(
+            stage=k["stage"].id,
+            prompt=k.get("prompt_override"),
+            handoff_extra=k.get("handoff_extra"),
+        ),
+    )
+
+
+def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
+    # No GitHub auth / store stub: file mode reads only the local file.
+    launched: dict = {}
+    _stub_launch_only(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "design.md").write_text("the goal to pursue", encoding="utf-8")
+        result = runner.invoke(cli, ["objective", "author", "--from", "design.md", "--json"])
+        assert result.exit_code == 0, result.output
+    assert launched["stage"] == "objective-author"
+    assert launched["handoff_extra"] is None  # FRESH objective — no adopt_from
+    prompt = launched["prompt"] or ""
+    assert "<untrusted_seed_file>" in prompt
+    assert "seed-file-design-" in prompt
+    assert "perk-objective-author" in prompt
+    assert "objective_save" in prompt
+
+
+def test_file_mode_dry_run_json(monkeypatch):
+    def boom(**k):
+        raise AssertionError("--dry-run must not launch")
+
+    monkeypatch.setattr(launch, "launch_stage", boom)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "design.md").write_text("the goal", encoding="utf-8")
+        result = runner.invoke(
+            cli, ["objective", "author", "--from", "design.md", "--dry-run", "--json"]
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["success"] is True and payload["dry_run"] is True
+        assert payload["file"] == str(Path(d, "design.md").resolve())
+
+
+def test_file_mode_empty_file_errors(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        Path(d, "empty.md").write_text("  \n", encoding="utf-8")
+        result = runner.invoke(cli, ["objective", "author", "--from", "empty.md", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "seed_file_error"
+
+
+def test_missing_file_falls_through_to_source_id(monkeypatch):
+    # A non-existent arg is handed to the store resolver, which errors adopt_not_found as today.
+    _authed(monkeypatch)
+    _stub(monkeypatch, store=_FakeStore(source=None))
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "author", "--from", "missing.md", "--json"])
+        assert result.exit_code == 1
+        assert json.loads(result.output)["error_type"] == "adopt_not_found"
