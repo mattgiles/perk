@@ -23,7 +23,7 @@ from perk.state.cache import (
 
 def test_ensure_layout_idempotent(tmp_path):
     wd = ensure_layout(tmp_path)
-    assert wd == workflow_dir(tmp_path) == tmp_path / ".pi" / "workflow"
+    assert wd == workflow_dir(tmp_path) == tmp_path / ".perk" / "workflow"
     assert (wd / "scratch" / "runs").is_dir()
     assert (wd / "handoff").is_dir()
     assert (wd / "markers").is_dir()

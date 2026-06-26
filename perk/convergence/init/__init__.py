@@ -208,22 +208,19 @@ def is_self_repo(root: Path) -> bool:
 
 
 def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
-    """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
-    (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
-    init creates it and ``perk doctor`` verifies the very same shape (D2)."""
+    """Converge the `.perk/workflow/` cache layout: the four (gitignored, on-demand) cache
+    subtrees. This *is* the ``workflow-dir`` capability, so init creates it and ``perk doctor``
+    verifies the very same shape (D2). The whole tree is gitignored cache — no committed
+    ``.gitkeep`` (a fresh clone has no tracked workflow artifact)."""
     workflow = cache.workflow_dir(root)
-    gitkeep = workflow / ".gitkeep"
-    need_gitkeep = not gitkeep.is_file()
     missing_subdirs = [sub for sub in cache.SUBDIRS if not (workflow / sub).is_dir()]
-    if not need_gitkeep and not missing_subdirs:
+    if not missing_subdirs:
         return []
     if apply:
         workflow.mkdir(parents=True, exist_ok=True)
-        if need_gitkeep:
-            gitkeep.write_text("", encoding="utf-8")
         for sub in missing_subdirs:
             (workflow / sub).mkdir(parents=True, exist_ok=True)
-    return [".pi/workflow/: created"]
+    return [".perk/workflow/: created"]
 
 
 def _write_post_init(root: Path, self_repo: bool) -> str:

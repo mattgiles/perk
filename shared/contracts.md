@@ -20,13 +20,13 @@ Source decisions: `Q1` (workflow-state), `Q2` (layout + run_id), `Q3` (verified 
 
 ---
 
-## §8.1 · `.pi/workflow/` layout (Q2)
+## §8.1 · `.perk/workflow/` layout (Q2)
 
 The local cache tier — written and read by **both** the CLI (exterior) and the extension
 (interior). Fixed layout:
 
 ```
-.pi/workflow/
+.perk/workflow/
 ├── plans/                  # materialized plan cache (canonical copy stays in GitHub)
 ├── plan.md                 # cache.plan: the materialized plan body (transient per-worktree mirror)
 ├── plan-ref.json           # cache.plan-ref: the active plan->branch ref pointer (local mirror)
@@ -66,10 +66,13 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
-  helper (Objective #878 migrates them to `.perk/` one phase at a time) — no path value changes
-  today. The confinement is guard-tested in both planes (`tests/test_paths_guard.py`,
-  `extension/pathsGuard.test.ts`): a family-scoped source scan bans a quoted `".pi"` segment built
-  adjacent to a perk-owned family follow-segment outside the seams. **Pi-native** `.pi/...` paths
+  helper (the migration to `.perk/` lands one phase at a time): the **workflow family now resolves
+  to `.perk/workflow/`**, while config (`perk.toml`/`perk.local.toml`) and the repo-skills dir stay
+  `.pi/...` pending their own phases. The confinement is guard-tested in both planes
+  (`tests/test_paths_guard.py`, `extension/pathsGuard.test.ts`): a family-scoped source scan bans
+  the wrong root segment built adjacent to a perk-owned family follow-segment outside the seams —
+  each arm pinned to its family's current root (`.perk` for the workflow arm, `.pi` for the
+  config/skills arms until they move). **Pi-native** `.pi/...` paths
   (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
   explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
 
@@ -162,14 +165,16 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   `--fix` arm**: deletion is *exclusively* `perk state prune`) and the `perk state prune`
   command (alias `gc`; `--dry-run`/`--max-age-days`/`--json`). Policy home: `perk/state/gc.py`
   (exterior-owned; no TS twin). (erk accumulated session dirs precisely because GC was undefined.)
-- `.gitignore`: `.pi/workflow/` transient subtrees are not committed; `plans/` may be cached
-  locally but GitHub is canonical. `init` manages the relevant `.gitignore` entries (incl.
-  `/.pi/workflow/plan-ref.json` and `/.pi/workflow/plan.md` — local mirrors; the canonical plan
-  lives in GitHub). The materialized `plan.md` body is transient and must never be tracked;
-  `perk doctor --fix` untracks a legacy-committed copy and drops any stray ungrouped ignore line
-  (#43).
+- `.gitignore`: the **whole `.perk/workflow/` cache tree** is gitignored (a single
+  `/.perk/workflow/` entry managed by `init`) — it is runtime/cache state, not durable source, so
+  there is **no committed `.gitkeep`**; a fresh clone has no tracked workflow artifact. The
+  canonical plan lives in GitHub; the materialized `plan.md` body and `plan-ref.json` mirror are
+  transient local copies and must never be tracked. `perk doctor --fix` untracks a legacy-committed
+  copy and drops any stray ungrouped ignore line, and migrates a legacy `.pi/workflow/` cache
+  forward (untracking a tracked `.gitkeep`, moving the `plan-ref.json`/`agent-session.json` mirrors
+  when the target is absent; disposable scratch is left for the user to delete).
 - **`plan-ref.json` (`cache.plan-ref`, T2b):** the provider-agnostic plan-ref payload (§8.4)
-  written verbatim. One active ref per checkout/worktree (`.pi/workflow/` is per-checkout). The
+  written verbatim. One active ref per checkout/worktree (`.perk/workflow/` is per-checkout). The
   **Python cold door** (`perk plan-save`) writes it on a real save; the **extension** reads it
   on `session_start` to reconcile `active_plan_ref` (§8.3). The cross-plane contract is the
   *file* (`perk/state/cache.py` ↔ `extension/substrate/cache.ts`), not a shared module.
@@ -572,7 +577,7 @@ append every advancing `turn_end`), and a separate entry avoids LWW-append smell
 record. The interior (`extension/checkpoints/checkpoints.ts`) seeds an ordered step list from the plan body's
 `## Steps` numbered list (read from the `cache.plan` body cache) on `session_start` — **only** in an
 active workflow (`active_plan_ref != null`), **only once** (a later session keeps the existing
-entry). The `cache.plan` body (`.pi/workflow/plan.md`) is **materialized by the Python cold door**:
+entry). The `cache.plan` body (`.perk/workflow/plan.md`) is **materialized by the Python cold door**:
 `perk implement` (`launch._materialize_plan_body`) fetches the plan body from GitHub
 (`github.get_plan_body` → the `plan-body` block in the issue's first comment, parsed by
 `plan.extract_plan_body`) and writes it into the worktree alongside the plan-ref + handoff
@@ -595,7 +600,7 @@ deliberately does **not** (CI environment setup belongs to the GHA composite act
 **opt-in + inert-by-default (D4)**: perk plans are prose, so when no `## Steps` list is
 present the checkpoint degrades to inert (no entry, no crash); the `perk-plan` skill documents the
 optional `## Steps` section as the forward path. Cross-plane contract: the **file** `cache.plan`
-(`.pi/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start`, `session_tree`, AND
+(`.perk/workflow/plan.md`), written by Python and read by TS. State is **rebuilt on `session_start`, `session_tree`, AND
 `session_compact`** (the `session_compact` re-render — rebuild + render only, NO re-seed, mirroring
 `session_tree` — was adapted from `@juicesharp/rpiv-todo`; its `catch` arm swallows the pi-core
 stale-`ctx` compaction race silently — the proxy `/stale after session replacement/` error fired
@@ -1414,7 +1419,7 @@ Linear, `perk init` / `doctor --fix` proactively ensure the five `perk:*` labels
 scope — §8.21.)
 
 **The `pending-learn` semaphore (P1.T5b; Q2/Q5).** An existence-only `cache.markers` file
-(`.pi/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
+(`.perk/workflow/markers/pending-learn`, name shared as `PENDING_LEARN` in both planes): **`land`
 sets it** (after a successful merge), **`learn` clears it**. While present it signals the
 land→learn cycle is open and the worktree is not yet releasable (a future `worktree remove` /
 `doctor` honors it). `learn` is **thin and TS-only** this phase — it clears the marker; the
@@ -1619,7 +1624,7 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
 
 - **The factory cold door + warm command.** `perk learn docs` (`commands/learn/docs_cmd.py`, no
   alias): `list_learn_issues` → materialize the inbox
-  `.pi/workflow/scratch/learn-docs-inbox.md` (a `## Learning #<n>` section per issue, each body in
+  `.perk/workflow/scratch/learn-docs-inbox.md` (a `## Learning #<n>` section per issue, each body in
   `<untrusted_learning>`) → `launch_stage(plan_stage, prompt_override=<seed>)` (a read-only
   plan-mode session). `--gather` materializes the inbox + emits `{ inbox_path, learn_numbers }`
   with no launch (the warm path + tests consume this); `--dry-run` gathers + prints; `--remote` is
@@ -1713,7 +1718,7 @@ already happened before the sync); `skills_conflict` short-circuits before any c
 ```
 
 The **post-init handoff** (`handoff`) is an *agent-readable* markdown at
-`.pi/workflow/post-init.md` (gitignored; regenerated each init) — distinct from the §8.1
+`.perk/workflow/post-init.md` (gitignored; regenerated each init) — distinct from the §8.1
 machine run-handoff JSON. It is the Phase-0 dogfood on-ramp.
 
 **Capability inventory.** `perk/convergence/capabilities.py` is the declared SSOT of what `init` manages
@@ -1768,7 +1773,7 @@ check; `--fix` also migrates a former git-clone consumer forward by removing the
 fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-skills fragment check
 — §8.9) · `bindings` / `providers` (rolled-up
 non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
-linear requires a committed `team` — §8.21) · `state` (the `.pi/workflow/` cache layout +
+linear requires a committed `team` — §8.21) · `state` (the `.perk/workflow/` cache layout +
 handoff-blob integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
 always run. Human render (stderr) follows the three-way condensed rule per group (collapse a clean
 group; else expand only its failures/warnings); `--verbose` expands every check.
@@ -1860,7 +1865,7 @@ checks the prompt** (the converged context actually reached the model via Pi's
 `getSystemPromptOptions()`, available only on a command context). selfcheck logs only derived
 booleans/counts — never the raw prompt text (the options expose the full system prompt).
 
-The `.pi/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
+The `.perk/workflow/.perk-t3.json` diagnostics sentinel additionally records **`run_mode`** — Pi's
 `ctx.mode` (`tui`/`rpc`/`json`/`print`) — distinct from the workflow **`mode`** (`read-only`/
 `read-write`) that drives tool gating. `run_mode` is observability `ctx.hasUI` (a binary) can't
 express; it is written from `ctx.mode` on both `session_start` and `session_tree`.
@@ -2259,7 +2264,7 @@ exactly as in a warm session (§8.4).
 | `worktree` | absolute path, already positioned | the cold-door/runner positioning (`perk/run/launch/__init__.py`), **not** the worker (Gap 7) |
 | `stage` | `"implement" \| "address"` | the only `doors.cold_remote: true` read-write stages (`shared/registry.yaml`) |
 | `run_id` | ULID, present as `PERK_RUN_ID` in env | minted by positioning; the worker **inherits** it and never re-mints |
-| handoff / plan-ref / plan-body | files under `<worktree>/.pi/workflow/` | materialized by positioning; the worker does not re-write them |
+| handoff / plan-ref / plan-body | files under `<worktree>/.perk/workflow/` | materialized by positioning; the worker does not re-write them |
 | `initialPrompt` | string | re-derived by `initialPromptFor(stage, planRef)` — the TS twin of `perk/run/launch/prompts.py._implement_prompt`/`_address_prompt` (parity asserted reciprocally in `extension/worker/worker.test.ts` + `tests/test_worker_prompt_parity.py`); the resolved skill-binding suffix is delivered by the cold door and is **deferred to Phase 2** |
 | `model` + `auth` | `Model` + `AuthStorage`/`ModelRegistry` | explicit worker input, else env-var key resolution (`ANTHROPIC_API_KEY` etc., Gap 5); **no model ⇒ a fail-soft `failed`/`no_model` outcome, never a throw** |
 | `budget` | `{ maxTurns, maxTokens, wallClockMs }` | worker input; the watchdog that drives abort (Gap 2) |
@@ -2379,8 +2384,8 @@ durable file out-of-process.
 - **Default sink** (when `eventSink` is absent) = a run-scoped NDJSON **file** sink built from
   `opts.worktree` + the resolved `run_id` (`env.PERK_RUN_ID`, the same source `assembleOutcome`
   uses). It appends one JSON object + `\n` per event to `runEventsPath(cwd, runId)` =
-  `<cwd>/.pi/workflow/scratch/runs/<runId>/events.ndjson` — a **cache-tier** artifact (the
-  `.pi/workflow/scratch/` tree is gitignored), co-located with the run's read-only-child scratch.
+  `<cwd>/.perk/workflow/scratch/runs/<runId>/events.ndjson` — a **cache-tier** artifact (the
+  `.perk/workflow/scratch/` tree is gitignored), co-located with the run's read-only-child scratch.
 - **No-op when `run_id` is empty** — keeps the offline drive tests (which set no `PERK_RUN_ID`)
   write-free; `workerMain` always has `PERK_RUN_ID`, so a real run always writes the file.
 - **Fail-soft** — each append (and the emitter's `sink(...)` call) is try/caught and swallowed with a
@@ -2443,9 +2448,9 @@ The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
 
 ### The dispatch record (the supervisor's correlation source)
 
-`DispatchRecord` is persisted at **`.pi/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
+`DispatchRecord` is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
 scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` already excludes
-`/.pi/workflow/scratch/`, so no layout/gitignore change). Shape:
+`/.perk/workflow/scratch/`, so no layout/gitignore change). Shape:
 
 ```jsonc
 { "run_id": "<ULID>",            // perk's canonical correlation key (authoritative on write)
@@ -2463,7 +2468,7 @@ The supervisor (Node 3.1) enumerates `scratch/runs/*/dispatch.json` to correlate
 `run_id ↔ plan ↔ PR` (the `perk workflow run list` read surface, §8.17); that enumeration is its
 work, not this node's. A **failed** record is kept
 (not deleted) for that visibility — until the §8.1 age rule reclaims it. GC of dispatch records
-rides the existing `.pi/workflow/` GC story (§8.1): records live *inside* `scratch/runs/<run_id>/`
+rides the existing `.perk/workflow/` GC story (§8.1): records live *inside* `scratch/runs/<run_id>/`
 and so are pruned wholesale with the run dir by `perk state prune` / the `cache-gc` check.
 
 ### Persist-then-trigger + read-back-verify (the establish-before-consume gate)
@@ -2716,7 +2721,7 @@ managed-artifact-present check and the live-spawn CI smoke. Node 2.4 adds checks
 The first command in the `perk workflow run` group: a deterministic, **read-only** supervisor
 surface that enumerates the durable dispatch records (§8.13) and correlates each
 `run_id ↔ plan ↔ PR`, overlaying live GitHub run state. It mutates nothing (no GitHub writes, no
-`.pi/workflow/` writes). `cancel`/`retry` (the `run` subgroup's mutating siblings) **shipped** in
+`.perk/workflow/` writes). `cancel`/`retry` (the `run` subgroup's mutating siblings) **shipped** in
 Node 3.2 — see §8.18.
 
 ### Command surface (`perk/cli/commands/workflow_cmd.py`)
@@ -2809,7 +2814,7 @@ fail-soft `list`), the shared `_resolve_target` helper resolves it:
   `run_id ↔ plan ↔ PR` linkage stay valid. **No new ULID, no `cache.write_dispatch`.**
 - **Neither command mutates the dispatch record.** The record's `status` is the *dispatch-attempt*
   lifecycle; live run state is observed via `Runner.observe` (surfaced by `list`'s overlay). No
-  `.pi/workflow/` writes in this node.
+  `.perk/workflow/` writes in this node.
 - **No pre-flight run-state gating.** The commands do not `observe` to decide cancellability/
   retryability — they pass through to gh and surface gh's own error (e.g. "cannot cancel a
   completed run") as a clean `cancel_failed`/`retry_failed`.
@@ -3245,7 +3250,7 @@ there is no TS twin).
   personal-key requests keep the plain header byte-identically). Environment only — never
   config/committed files. No new config keys, no doctor check — the live smoke gate
   is the verification surface.
-- **The file**: `.pi/workflow/agent-session.json` (cache tier, §8.1) —
+- **The file**: `.perk/workflow/agent-session.json` (cache tier, §8.1) —
   `{"session_id": str, "issue": str, "url": str | null}`, written at session create
   (`cache.write_agent_session`/`read_agent_session`). Absent at a follow-up hook → fail-soft
   skip with a stderr note (known consequence: a remote-run-created session is invisible to a
@@ -3763,7 +3768,7 @@ a `test_engagement.py` byte-stability assert).
 **Cold-only injection (no warm door).** `replan` is a dedicated cold door (no registry stage, no
 `objectivePlan.ts`-style warm half). It reads engagement up front — **including on `--dry-run`**,
 which materializes the real artifact (replan's dry run is not offline) — and **appends** the
-rendered block to the materialized `.pi/workflow/scratch/replan-<id>.md` after `</untrusted_plan>`
+rendered block to the materialized `.perk/workflow/scratch/replan-<id>.md` after `</untrusted_plan>`
 (the scratch-file-native home, vs §8.26's inline-seed injection — replan centers on the scratch
 file the session `read`s). The seed's step 1 points at the block only when present (empty → seed
 byte-unchanged).

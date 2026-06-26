@@ -134,7 +134,7 @@ test("runReadOnlyChild: double-delivery + route-don't-relay (full output only in
   assert.ok(handoff.structured.bytesTotal > handoff.structured.bytesShown);
 });
 
-test("runReadOnlyChild: run-scoped scratch path under .pi/workflow when runId given", async () => {
+test("runReadOnlyChild: run-scoped scratch path under .perk/workflow when runId given", async () => {
   const cwd = tmpCwd();
   const handoff = await runReadOnlyChild(
     { cwd, task: "explore", runId: "01RID", step: "ci" },
@@ -146,7 +146,7 @@ test("runReadOnlyChild: run-scoped scratch path under .pi/workflow when runId gi
   assert.equal(handoff.success, true);
   assert.ok(
     (handoff.scratchPath as string).endsWith(
-      join(".pi", "workflow", "scratch", "runs", "01RID", "ci.md"),
+      join(".perk", "workflow", "scratch", "runs", "01RID", "ci.md"),
     ),
     handoff.scratchPath ?? "(null)",
   );

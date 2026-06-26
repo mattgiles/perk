@@ -1,4 +1,4 @@
-"""GC policy for ``.pi/workflow/`` run state (contracts.md §8.1).
+"""GC policy for ``.perk/workflow/`` run state (contracts.md §8.1).
 
 ``scratch/runs/<run_id>/`` dirs and ``handoff/<run_id>.json`` blobs accumulate forever (the
 pitfall §8.1 cites — ``mark_handoff_consumed`` keeps the file as an audit + GC signal). This

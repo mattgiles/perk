@@ -152,7 +152,7 @@ test("tool: objective_save stages the prose in run scratch (mkdtemp retirement)"
     const argv = readFileSync(argvFile, "utf8").trimEnd().split("\n");
     const bodyFile = argv[argv.indexOf("--body") + 1] ?? "";
     assert.ok(
-      bodyFile.includes(join(".pi", "workflow", "scratch", "runs", "01RID")),
+      bodyFile.includes(join(".perk", "workflow", "scratch", "runs", "01RID")),
       `prose staged under run scratch (got ${bodyFile})`,
     );
     // saveObjective trims the prose before staging, hence the .trim() on the expectation.

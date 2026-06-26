@@ -15,7 +15,7 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
-_INBOX_REL = ".pi/workflow/scratch/learn-docs-inbox.md"
+_INBOX_REL = ".perk/workflow/scratch/learn-docs-inbox.md"
 
 
 def _git_init(path: str) -> None:

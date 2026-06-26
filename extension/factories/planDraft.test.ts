@@ -151,7 +151,7 @@ test("core: happy path writes the file, appends the pointer, returns provenance 
     assert.deepEqual(result.details, {
       ok: true,
       name: PLAN_DRAFT_ARTIFACT,
-      path: join(".pi", "workflow", "scratch", "runs", "RID", "data", PLAN_DRAFT_ARTIFACT),
+      path: join(".perk", "workflow", "scratch", "runs", "RID", "data", PLAN_DRAFT_ARTIFACT),
       digest: digestSessionData(PLAN_MD),
       bytes: Buffer.byteLength(PLAN_MD, "utf8"),
       run_id: "RID",

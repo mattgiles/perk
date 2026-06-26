@@ -35,7 +35,7 @@ class PlanSaveResult:
     issue_body: str
     body_comment: str
     dry_run: bool
-    cached: bool  # the plan-ref was written to .pi/workflow/plan-ref.json (real save only)
+    cached: bool  # the plan-ref was written to .perk/workflow/plan-ref.json (real save only)
     updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
     # The objective-node commit: `linked` true iff the node→plan backlink + in_progress
     # advance succeeded; `node`/`status` describe it; `error` carries a non-fatal link failure.

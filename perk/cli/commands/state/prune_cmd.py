@@ -1,4 +1,4 @@
-"""`perk state prune` (alias `gc`) — prune stale `.pi/workflow/` run state.
+"""`perk state prune` (alias `gc`) — prune stale `.perk/workflow/` run state.
 
 Executes the GC policy in ``perk/state/gc.py``: terminal-stage prune + age-based prune (default
 14d).
@@ -52,7 +52,7 @@ def _candidate_dict(candidate: gc.PruneCandidate) -> dict[str, Any]:
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable payload on stdout.")
 @click.pass_context
 def prune_run_state(ctx: click.Context, *, max_age_days: int, dry_run: bool, as_json: bool) -> None:
-    """Prune stale `.pi/workflow/` run dirs + handoff blobs (terminal-stage + age rules)."""
+    """Prune stale `.perk/workflow/` run dirs + handoff blobs (terminal-stage + age rules)."""
     try:
         root = require_repo(ctx)
     except UserFacingCliError as exc:

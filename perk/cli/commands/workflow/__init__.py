@@ -13,7 +13,7 @@ one-line stderr note; it never raises and never changes the exit code.
 deterministic, mutating supervisor commands that resolve a perk ``run_id`` to its dispatch record
 and act on the runner-native handle (cancel an in-flight run; re-run a completed/failed run, with
 ``--failed`` to re-run only the failed jobs). They require GitHub auth and surface gh's own error
-verbatim; they mutate no ``.pi/workflow/`` state.
+verbatim; they mutate no ``.perk/workflow/`` state.
 """
 
 import click

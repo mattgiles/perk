@@ -16,7 +16,7 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
-_SCRATCH_REL = ".pi/workflow/scratch/adopt-7.md"
+_SCRATCH_REL = ".perk/workflow/scratch/adopt-7.md"
 
 
 def _git_init(path: str) -> None:

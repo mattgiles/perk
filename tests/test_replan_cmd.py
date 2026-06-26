@@ -16,7 +16,7 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 
-_SCRATCH_REL = ".pi/workflow/scratch/replan-42.md"
+_SCRATCH_REL = ".perk/workflow/scratch/replan-42.md"
 _RUN_ID = "01ABCDEF0123456789ABCDEFGH"
 
 

@@ -29,7 +29,7 @@ test("readHandoff: missing returns null; consume is a no-op", () => {
 
 test("handoff: read + consume round-trip in the shape cache.py writes", () => {
   const dir = tmp();
-  mkdirSync(join(dir, ".pi", "workflow", "handoff"), { recursive: true });
+  mkdirSync(join(dir, ".perk", "workflow", "handoff"), { recursive: true });
   writeFileSync(
     handoffPath(dir, "RID"),
     JSON.stringify({ mode: "read-only", run_id: "RID", consumed: false }),

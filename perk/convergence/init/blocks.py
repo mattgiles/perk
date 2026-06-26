@@ -7,24 +7,16 @@ from perk.substrate.paths import LOCAL_CONFIG_FILENAME
 
 GITIGNORE_BEGIN = "# BEGIN perk managed"
 GITIGNORE_END = "# END perk managed"
-# Pi install caches + perk's transient tier-2 cache subtrees + per-user config +
-# worktrees. The `.pi/workflow/` dir itself stays tracked (via .gitkeep); only the
-# transient subtrees/sentinels are ignored (contracts.md §8.1) — including the
-# materialized `cache.plan` body (`plan.md`), a per-worktree mirror of the GitHub plan.
+# Pi install caches + perk's transient tier-2 cache tree + per-user config +
+# worktrees. The whole `.perk/workflow/` cache tree is gitignored (contracts.md §8.1) —
+# runtime/cache state, not durable source; no committed `.gitkeep`.
 GITIGNORE_BODY = "\n".join(
     [
         "/.pi/npm/",
         "/.pi/git/",
         f"/.pi/{LOCAL_CONFIG_FILENAME}",
         "/.worktrees/",
-        "/.pi/workflow/.perk-loaded",
-        "/.pi/workflow/.perk-t3.json",
-        "/.pi/workflow/post-init.md",
-        "/.pi/workflow/plan.md",
-        "/.pi/workflow/plan-ref.json",
-        "/.pi/workflow/handoff/",
-        "/.pi/workflow/scratch/",
-        "/.pi/workflow/markers/",
+        "/.perk/workflow/",
     ]
 )
 
