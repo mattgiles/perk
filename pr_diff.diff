@@ -1,0 +1,675 @@
+diff --git a/extension/index.ts b/extension/index.ts
+index 8fccfe0..8c2ad1c 100644
+--- a/extension/index.ts
++++ b/extension/index.ts
+@@ -38,6 +38,7 @@ import {
+   readHandoff,
+   readPlanRef,
+   setMarker,
++  workflowDir,
+ } from "./substrate/cache.ts";
+ import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
+ import { perkVersion, sharedDir } from "./substrate/resources.ts";
+@@ -69,7 +70,7 @@ function writeT3Sentinel(
+   runMode: string | null,
+ ): void {
+   try {
+-    const dir = join(cwd, ".pi", "workflow");
++    const dir = workflowDir(cwd);
+     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+     writeFileSync(
+       join(dir, ".perk-t3.json"),
+@@ -337,7 +338,7 @@ export default function (pi: ExtensionAPI) {
+ 
+     if (process.env.PERK_SELFCHECK) {
+       try {
+-        const dir = join(ctx.cwd, ".pi", "workflow");
++        const dir = workflowDir(ctx.cwd);
+         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+         // The gate sentinel (unchanged — those gates parse this line).
+         writeFileSync(
+diff --git a/extension/pathsGuard.test.ts b/extension/pathsGuard.test.ts
+new file mode 100644
+index 0000000..cbf53aa
+--- /dev/null
++++ b/extension/pathsGuard.test.ts
+@@ -0,0 +1,106 @@
++// perk-owned dot-path construction regression guard (contracts.md §8.1).
++// Production extension code may construct the perk-owned config family (`perk.toml`/
++// `perk.local.toml`) and the workflow family only inside their seams: substrate/paths.ts (config)
++// and substrate/cache.ts (workflow). Everything else goes through their helpers (`configFile`/
++// `localConfigFile`/`workflowDir`). The skills family is Python-only, so it is not mirrored here.
++// This source-scan test fails CI on drift. The Python twin is tests/test_paths_guard.py.
++
++import assert from "node:assert/strict";
++import { readdirSync, readFileSync } from "node:fs";
++import path from "node:path";
++import { test } from "node:test";
++
++// The path-primitive seams: the only files allowed to carry the perk-owned family literals.
++const ALLOWLIST = ["substrate/paths.ts", "substrate/cache.ts"];
++
++// A `".pi"` segment in `join(...)` path construction (adjacent to a `,`) followed by a perk-owned
++// family follow-segment: the `"workflow"` literal, the config filename literals, or the imported
++// filename constants. Pi-native `.pi` + `npm`/`agents`/`settings.json`/`APPEND_SYSTEM.md` therefore
++// never match.
++const PATTERN =
++  /"\.pi"\s*,\s*("workflow"|"perk\.toml"|"perk\.local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)/;
++
++/**
++ * Discover production sources under extension/: every `.ts` file (recursively, so future
++ * subdirectories are scanned by default) except test files and the testing/ fakes.
++ */
++function productionFiles(): string[] {
++  const entries = readdirSync(import.meta.dirname, { recursive: true }) as string[];
++  return entries
++    .map((entry) => entry.split(path.sep).join("/"))
++    .filter(
++      (entry) =>
++        entry.endsWith(".ts") && !entry.endsWith(".test.ts") && !entry.startsWith("testing/"),
++    )
++    .sort();
++}
++
++/**
++ * Strip block comments then line comments before matching. Deliberately naive — this would also
++ * eat `//` inside string literals — acceptable because the stripped text is only consumed for
++ * matching and a perk string/URL plausibly containing `//` would not also carry a quoted
++ * `.pi`+family construction on the same line.
++ */
++function stripComments(source: string): string {
++  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
++}
++
++/** Collect `«relative-path»:«1-based line»: «matched text»` violations. */
++function violationsOf(files: string[]): string[] {
++  const violations: string[] = [];
++  for (const file of files) {
++    if (ALLOWLIST.includes(file)) continue;
++    const stripped = stripComments(readFileSync(path.join(import.meta.dirname, file), "utf8"));
++    const lines = stripped.split("\n");
++    for (let i = 0; i < lines.length; i++) {
++      const line = lines[i];
++      if (line === undefined) continue;
++      const match = PATTERN.exec(line);
++      if (match) violations.push(`${file}:${i + 1}: ${match[0]}`);
++    }
++  }
++  return violations;
++}
++
++test("perk-owned config/workflow dot-paths are built only inside their seams", () => {
++  const files = productionFiles();
++  // Self-checks: a future path/layout change that silently empties the scan must fail loudly
++  // instead of passing vacuously.
++  assert.ok(files.length > 0, "production-file scan came up empty — guard is vacuous");
++  assert.ok(
++    files.includes("substrate/cache.ts"),
++    "scan missed substrate/cache.ts — guard is misaimed",
++  );
++  assert.ok(files.includes("index.ts"), "scan missed index.ts — guard is misaimed");
++
++  // Non-vacuous pattern check: the workflow seam itself DOES carry the literal the guard bans.
++  const cacheSource = stripComments(
++    readFileSync(path.join(import.meta.dirname, "substrate", "cache.ts"), "utf8"),
++  );
++  assert.ok(
++    PATTERN.test(cacheSource),
++    "substrate/cache.ts no longer matches the banned pattern — guard is vacuous",
++  );
++
++  // Per-arm positive asserts on synthetic strings (keeps the config arms honest even though the
++  // seam derives them from `configDir`).
++  assert.ok(PATTERN.test('join(cwd, ".pi", "workflow")'));
++  assert.ok(PATTERN.test('join(cwd, ".pi", CONFIG_FILENAME)'));
++  assert.ok(PATTERN.test('join(cwd, ".pi", LOCAL_CONFIG_FILENAME)'));
++  assert.ok(PATTERN.test('join(cwd, ".pi", "perk.toml")'));
++  assert.ok(PATTERN.test('join(cwd, ".pi", "perk.local.toml")'));
++
++  // Pi-native `.pi/...` construction is out of scope and must not false-positive.
++  assert.ok(!PATTERN.test('join(cwd, ".pi", "npm")'));
++  assert.ok(!PATTERN.test('join(cwd, ".pi", "agents")'));
++  assert.ok(!PATTERN.test('join(cwd, ".pi", "APPEND_SYSTEM.md")'));
++
++  const violations = violationsOf(files);
++  assert.deepEqual(
++    violations,
++    [],
++    "manual perk-owned dot-path construction outside the seams — go through substrate/paths.ts " +
++      "(configFile/localConfigFile) or substrate/cache.ts (workflowDir):\n" +
++      violations.join("\n"),
++  );
++});
+diff --git a/extension/substrate/config.ts b/extension/substrate/config.ts
+index 51d602e..ca9a01a 100644
+--- a/extension/substrate/config.ts
++++ b/extension/substrate/config.ts
+@@ -10,11 +10,8 @@
+ // Dynamic `resources_discover` skill/prompt contribution is a flagged follow-up, not built here.
+ 
+ import { existsSync, readFileSync } from "node:fs";
+-import { join } from "node:path";
+ import { parseUserBindings, type SkillBinding } from "./bindings.ts";
+-
+-const CONFIG_FILENAME = "perk.toml";
+-const LOCAL_CONFIG_FILENAME = "perk.local.toml";
++import { configFile, localConfigFile } from "./paths.ts";
+ 
+ /**
+  * One configured CI check (a `[[ci]]` array-of-tables row). `name`/`command` are required
+@@ -212,10 +209,9 @@ function overlay(base: TomlSubset, over: TomlSubset): TomlSubset {
+ 
+ /** Load `.pi/perk.toml` overlaid by `.pi/perk.local.toml` from `cwd` (mirror of perk/substrate/config.py). */
+ export function loadPerkConfig(cwd: string): PerkConfig {
+-  const piDir = join(cwd, ".pi");
+   let merged: TomlSubset = emptySubset();
+-  for (const name of [CONFIG_FILENAME, LOCAL_CONFIG_FILENAME]) {
+-    merged = overlay(merged, readTomlFile(join(piDir, name)));
++  for (const file of [configFile(cwd), localConfigFile(cwd)]) {
++    merged = overlay(merged, readTomlFile(file));
+   }
+ 
+   const planAuthoring = merged.tables.workflow?.plan_authoring;
+@@ -329,7 +325,7 @@ export const GITHUB_ISSUE_BACKEND_ID: IssueBackendId = "github";
+  */
+ export function resolveIssueBackendId(cwd: string): IssueBackendId {
+   try {
+-    const committed = readTomlFile(join(cwd, ".pi", CONFIG_FILENAME));
++    const committed = readTomlFile(configFile(cwd));
+     const backend = committed.tables.issues?.backend;
+     if (backend === "github" || backend === "linear") return backend;
+     return GITHUB_ISSUE_BACKEND_ID;
+diff --git a/extension/substrate/paths.ts b/extension/substrate/paths.ts
+new file mode 100644
+index 0000000..ced2a04
+--- /dev/null
++++ b/extension/substrate/paths.ts
+@@ -0,0 +1,36 @@
++// perk-owned dot-directory path construction — the TS twin of perk/substrate/paths.py
++// (contracts.md §8.1).
++//
++// The sole construction site for the perk-owned config family (`perk.toml`/`perk.local.toml`) and
++// the perk dir. The workflow family lives in the established cache seam (substrate/cache.ts's
++// `workflowDir`); together these two modules own every perk-owned `.pi/...` path on this plane.
++// Objective #878 migrates each family to `.perk/` one phase at a time — redirecting a family is a
++// single edit here. **Pi-native** `.pi/...` paths (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`,
++// `.pi/APPEND_SYSTEM.md`) are intentionally NOT owned here — `.pi/` is not generally perk-owned.
++//
++// No relative imports (only node builtins), so this module loads cleanly under `node --test`.
++
++import { join } from "node:path";
++
++export const CONFIG_FILENAME = "perk.toml";
++export const LOCAL_CONFIG_FILENAME = "perk.local.toml";
++
++/** The perk-owned dot-dir root (shared with Pi today). */
++export function perkDir(cwd: string): string {
++  return join(cwd, ".pi");
++}
++
++/** The single config-family redirection point (the file helpers derive from it). */
++export function configDir(cwd: string): string {
++  return join(cwd, ".pi");
++}
++
++/** The committed `perk.toml`. */
++export function configFile(cwd: string): string {
++  return join(configDir(cwd), CONFIG_FILENAME);
++}
++
++/** The gitignored `perk.local.toml`. */
++export function localConfigFile(cwd: string): string {
++  return join(configDir(cwd), LOCAL_CONFIG_FILENAME);
++}
+diff --git a/extension/workerMain.ts b/extension/workerMain.ts
+index 919d23e..07b2fab 100644
+--- a/extension/workerMain.ts
++++ b/extension/workerMain.ts
+@@ -11,7 +11,7 @@
+ import { argv, env, exit, stderr, stdout } from "node:process";
+ import type { Api, Model } from "@earendil-works/pi-ai";
+ import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+-import { runEventsPath } from "./substrate/cache.ts";
++import { runEventsPath, workflowDir } from "./substrate/cache.ts";
+ import {
+   type DriveBudget,
+   type DriveStage,
+@@ -90,7 +90,7 @@ async function main(): Promise<number> {
+   const initialPrompt = initialPromptForWorktree(parsed.worktree, parsed.stage);
+   if (initialPrompt === null) {
+     stderr.write(
+-      `perk worker: no plan-ref under ${parsed.worktree}/.pi/workflow — cannot seed the ${parsed.stage} prompt.\n`,
++      `perk worker: no plan-ref under ${workflowDir(parsed.worktree)} — cannot seed the ${parsed.stage} prompt.\n`,
+     );
+     return 2;
+   }
+diff --git a/perk/cli/commands/learn/docs_cmd.py b/perk/cli/commands/learn/docs_cmd.py
+index 4e11852..3fa0292 100644
+--- a/perk/cli/commands/learn/docs_cmd.py
++++ b/perk/cli/commands/learn/docs_cmd.py
+@@ -30,10 +30,13 @@
+ from perk.cli.ensure import UserFacingCliError
+ from perk.prompts import render
+ from perk.run import launch
++from perk.state import cache
+ from perk.substrate.output import machine_output, user_output
+ from perk.substrate.registry import Stage, load_registry
+ 
+-_INBOX_REL = Path(".pi/workflow/scratch/learn-docs-inbox.md")
++# The inbox lives in the workflow cache scratch dir (the `cache.scratch_dir` seam owns the
++# `.pi/workflow/scratch` construction); this is just its filename.
++_INBOX_NAME = "learn-docs-inbox.md"
+ 
+ 
+ def _plan_stage() -> Stage:
+@@ -89,7 +92,7 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
+             "Run /learn on some landed plans first, then re-run perk learn docs.",
+             error_type="no_learn_issues",
+         )
+-    inbox_path = repo_root / _INBOX_REL
++    inbox_path = cache.scratch_dir(repo_root) / _INBOX_NAME
+     inbox_path.parent.mkdir(parents=True, exist_ok=True)
+     inbox_path.write_text(_render_inbox(issues), encoding="utf-8")
+     return inbox_path, issues
+diff --git a/perk/cli/commands/skills/shared.py b/perk/cli/commands/skills/shared.py
+index 3fa263d..70dba03 100644
+--- a/perk/cli/commands/skills/shared.py
++++ b/perk/cli/commands/skills/shared.py
+@@ -23,10 +23,11 @@
+     PERK_SKILLS_MANIFEST_FILENAME,
+     converge_repo_skills_manifest,
+ )
+-from perk.substrate import git
++from perk.substrate import git, paths
+ from perk.substrate.output import machine_output, user_output
+-
+-REPO_SKILLS_REL = ".pi/skills"
++from perk.substrate.paths import (
++    REPO_SKILLS_REL as REPO_SKILLS_REL,  # re-exported for the skills command modules
++)
+ 
+ # Matches `sync_skills`' update timeout — `skills` resolves/syncs git sources, which is slow.
+ SKILLS_TIMEOUT_S = 180
+@@ -212,7 +213,7 @@ def perform_scaffold(root: Path, skill_name: str) -> ScaffoldOutcome:
+     ride non-fatally in the outcome). Reconvergence is read through the module namespace so tests
+     can stub it.
+     """
+-    target = root / REPO_SKILLS_REL / skill_name
++    target = paths.repo_skills_dir(root) / skill_name
+     target.mkdir(parents=True)
+     (target / "SKILL.md").write_text(todo_skill_md(skill_name), encoding="utf-8")
+ 
+diff --git a/perk/convergence/doctor/checks.py b/perk/convergence/doctor/checks.py
+index 964fee9..51385df 100644
+--- a/perk/convergence/doctor/checks.py
++++ b/perk/convergence/doctor/checks.py
+@@ -10,14 +10,13 @@
+ from perk.convergence import capabilities, env, init
+ from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
+ from perk.state import cache, gc
+-from perk.substrate import bindings, git, providers, registry
++from perk.substrate import bindings, git, paths, providers, registry
+ from perk.substrate.config import (
+-    CONFIG_FILENAME,
+-    LOCAL_CONFIG_FILENAME,
+     load_committed_issues_backend,
+     load_committed_issues_team,
+     load_config,
+ )
++from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+ 
+ # --- group builders (impure: shells / file reads) -------------------------------------------
+ 
+@@ -82,8 +81,11 @@ def _managed_checks(root: Path, self_repo: bool) -> list[Check]:
+ 
+ def _config_check(root: Path) -> Check:
+     """Config is user-editable: present + parses + (defaulted) keys — never a content diff."""
+-    pi = root / ".pi"
+-    missing = [n for n in (CONFIG_FILENAME, LOCAL_CONFIG_FILENAME) if not (pi / n).is_file()]
++    files = {
++        CONFIG_FILENAME: paths.config_file(root),
++        LOCAL_CONFIG_FILENAME: paths.local_config_file(root),
++    }
++    missing = [name for name, path in files.items() if not path.is_file()]
+     if missing:
+         return Check(
+             "config",
+diff --git a/perk/convergence/init/__init__.py b/perk/convergence/init/__init__.py
+index 47b9084..4859e73 100644
+--- a/perk/convergence/init/__init__.py
++++ b/perk/convergence/init/__init__.py
+@@ -211,7 +211,7 @@ def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
+     """Converge the full `.pi/workflow/` cache layout: the committed `.gitkeep` + the four
+     (gitignored, on-demand) cache subtrees. This *is* the ``workflow-dir`` capability, so
+     init creates it and ``perk doctor`` verifies the very same shape (D2)."""
+-    workflow = root / ".pi" / "workflow"
++    workflow = cache.workflow_dir(root)
+     gitkeep = workflow / ".gitkeep"
+     need_gitkeep = not gitkeep.is_file()
+     missing_subdirs = [sub for sub in cache.SUBDIRS if not (workflow / sub).is_dir()]
+@@ -228,7 +228,7 @@ def _converge_workflow_dir(root: Path, *, apply: bool = True) -> list[str]:
+ 
+ def _write_post_init(root: Path, self_repo: bool) -> str:
+     """Write the agent-readable post-init handoff; return its repo-relative path."""
+-    path = root / ".pi" / "workflow" / "post-init.md"
++    path = cache.workflow_dir(root) / "post-init.md"
+     path.parent.mkdir(parents=True, exist_ok=True)
+     mode = "self" if self_repo else "consumer"
+     path.write_text(POST_INIT_TEMPLATE.format(mode=mode), encoding="utf-8")
+diff --git a/perk/convergence/init/blocks.py b/perk/convergence/init/blocks.py
+index 469660c..41ba1be 100644
+--- a/perk/convergence/init/blocks.py
++++ b/perk/convergence/init/blocks.py
+@@ -3,7 +3,7 @@
+ from pathlib import Path
+ 
+ from perk import __version__
+-from perk.substrate.config import LOCAL_CONFIG_FILENAME
++from perk.substrate.paths import LOCAL_CONFIG_FILENAME
+ 
+ GITIGNORE_BEGIN = "# BEGIN perk managed"
+ GITIGNORE_END = "# END perk managed"
+diff --git a/perk/convergence/init/repo_skills.py b/perk/convergence/init/repo_skills.py
+index 6609d1c..98ba980 100644
+--- a/perk/convergence/init/repo_skills.py
++++ b/perk/convergence/init/repo_skills.py
+@@ -20,12 +20,13 @@
+ from perk import github
+ from perk.convergence.init.skills import MANAGED_HEADER, PERK_SKILLS_MANIFEST_DIR
+ from perk.github import GitHubError
+-from perk.substrate import git
++from perk.substrate import git, paths
+ from perk.substrate.git import GitError
++from perk.substrate.paths import REPO_SKILLS_REL
+ 
+-# The repo's own skills live under `.pi/skills/<name>/SKILL.md`; the rendered fragment lives beside
+-# the perk-managed fragment in the standard `.d/` convention.
+-REPO_SKILLS_DIR = ".pi/skills"
++# The repo's own skills live under `.pi/skills/<name>/SKILL.md` (path construction via the
++# `paths.repo_skills_dir` seam; `REPO_SKILLS_REL` is the display string). The rendered fragment
++# lives beside the perk-managed fragment in the standard `.d/` convention.
+ REPO_SKILLS_MANIFEST_FILENAME = "perk-repo-skills.yaml"
+ 
+ 
+@@ -113,7 +114,7 @@ def validate_skill(dir_name: str, frontmatter: dict) -> tuple[RepoSkill | None,
+             name=name,
+             description=description,
+             dir_name=dir_name,
+-            rel_path=f"{REPO_SKILLS_DIR}/{dir_name}/SKILL.md",
++            rel_path=f"{REPO_SKILLS_REL}/{dir_name}/SKILL.md",
+         ),
+         None,
+     )
+@@ -150,7 +151,7 @@ def discover_repo_skills(root: Path) -> tuple[list[tuple[str, dict]], list[str]]
+     ``dir_name`` and ``errors`` accumulates each frontmatter-parse reason. An absent
+     ``.pi/skills/`` yields ``([], [])``.
+     """
+-    skills_root = root / REPO_SKILLS_DIR
++    skills_root = paths.repo_skills_dir(root)
+     if not skills_root.is_dir():
+         return [], []
+     parsed: list[tuple[str, dict]] = []
+@@ -217,7 +218,7 @@ def other_tracked_skill_names(root: Path) -> set[str]:
+     """
+     names: set[str] = set()
+     for rel in git.tracked_paths(root, ["*SKILL.md"]):
+-        if rel.startswith(f"{REPO_SKILLS_DIR}/"):
++        if rel.startswith(f"{REPO_SKILLS_REL}/"):
+             continue
+         path = root / rel
+         if not path.is_file():
+diff --git a/perk/convergence/init/templates.py b/perk/convergence/init/templates.py
+index 26d92bf..e740576 100644
+--- a/perk/convergence/init/templates.py
++++ b/perk/convergence/init/templates.py
+@@ -2,8 +2,8 @@
+ 
+ from pathlib import Path
+ 
+-from perk.substrate.config import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+ from perk.substrate.output import user_confirm
++from perk.substrate.paths import CONFIG_FILENAME, LOCAL_CONFIG_FILENAME
+ 
+ PERK_TOML_TEMPLATE = """\
+ # perk project config (committed). Edit freely; per-user overrides go in
+diff --git a/perk/substrate/config.py b/perk/substrate/config.py
+index e300a25..beee2b6 100644
+--- a/perk/substrate/config.py
++++ b/perk/substrate/config.py
+@@ -11,11 +11,9 @@
+ from pathlib import Path
+ from typing import Any
+ 
+-from perk.substrate import git
++from perk.substrate import git, paths
+ from perk.substrate.bindings import Binding, parse_user_bindings
+ 
+-CONFIG_FILENAME = "perk.toml"
+-LOCAL_CONFIG_FILENAME = "perk.local.toml"
+ DEFAULT_WORKTREE_DIRNAME = ".worktrees"
+ 
+ 
+@@ -64,10 +62,9 @@ def _overlay(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+ 
+ def load_config(repo_root: Path) -> Config:
+     """Load ``.pi/perk.toml`` overlaid by ``.pi/perk.local.toml`` from ``repo_root``."""
+-    pi_dir = repo_root / ".pi"
+     merged: dict[str, Any] = {}
+-    for name in (CONFIG_FILENAME, LOCAL_CONFIG_FILENAME):
+-        merged = _overlay(merged, _read_toml(pi_dir / name))
++    for path in (paths.config_file(repo_root), paths.local_config_file(repo_root)):
++        merged = _overlay(merged, _read_toml(path))
+ 
+     worktree = merged.get("worktree")
+     root_value = worktree.get("root") if isinstance(worktree, dict) else None
+@@ -162,7 +159,7 @@ def load_committed_compaction(repo_root: Path) -> dict[str, object]:
+     ``{}``; a malformed-TOML ``tomllib.TOMLDecodeError`` propagates (init guards it, deferring to
+     the config check — mirrors ``_converge_provider_packages``).
+     """
+-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
++    raw = _read_toml(paths.config_file(repo_root))
+     return parse_compaction_table(raw.get("compaction"))
+ 
+ 
+@@ -191,7 +188,7 @@ def load_committed_issues_backend(repo_root: Path) -> str | None:
+     ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check owns malformed
+     TOML — mirrors ``load_committed_compaction``).
+     """
+-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
++    raw = _read_toml(paths.config_file(repo_root))
+     return parse_issues_backend(raw.get("issues"))
+ 
+ 
+@@ -219,7 +216,7 @@ def load_committed_issues_team(repo_root: Path) -> str | None:
+     malformed-TOML ``tomllib.TOMLDecodeError`` propagates (the resolver maps it; the config check
+     owns malformed TOML).
+     """
+-    raw = _read_toml(repo_root / ".pi" / CONFIG_FILENAME)
++    raw = _read_toml(paths.config_file(repo_root))
+     return parse_issues_team(raw.get("issues"))
+ 
+ 
+@@ -244,7 +241,7 @@ def load_local_linear_api_key(repo_root: Path) -> str | None:
+     # when `repo_root` is not inside a git repo (tests / non-repo callers).
+     root = git.main_worktree_root(repo_root) or repo_root
+     try:
+-        raw = _read_toml(root / ".pi" / LOCAL_CONFIG_FILENAME)
++        raw = _read_toml(paths.local_config_file(root))
+     except tomllib.TOMLDecodeError:
+         return None
+     table = raw.get("linear")
+diff --git a/perk/substrate/paths.py b/perk/substrate/paths.py
+new file mode 100644
+index 0000000..e65541f
+--- /dev/null
++++ b/perk/substrate/paths.py
+@@ -0,0 +1,47 @@
++"""perk-owned dot-directory path construction (contracts.md §8.1).
++
++This is the **sole** construction site for the four perk-owned dot-path families — the perk dir,
++the config files (`perk.toml`/`perk.local.toml`), and the repo-authored skills dir. The workflow
++family lives in the established cache seam (``perk/state/cache.py::workflow_dir``); together these
++two modules own every perk-owned `.pi/...` path. Objective #878 migrates each family to `.perk/`
++one phase at a time — redirecting a family is a single edit here (each family has its own
++redirection point; no shared switch couples them). **Pi-native** `.pi/...` paths
++(`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
++intentionally *not* owned here — `.pi/` is not generally perk-owned, so those stay hand-built at
++their Pi-native sites.
++
++pathlib-only, no perk imports (a leaf so the guards can allowlist it cleanly).
++"""
++
++from pathlib import Path
++
++CONFIG_FILENAME = "perk.toml"
++LOCAL_CONFIG_FILENAME = "perk.local.toml"
++# Forward-slash relative string for display f-strings (kept byte-consistent with
++# ``repo_skills_dir`` below — same `.pi/skills` literal text).
++REPO_SKILLS_REL = ".pi/skills"
++
++
++def perk_dir(root: Path) -> Path:
++    """The perk-owned dot-dir root (shared with Pi today)."""
++    return root / ".pi"
++
++
++def config_dir(root: Path) -> Path:
++    """The single config-family redirection point (the file helpers derive from it)."""
++    return root / ".pi"
++
++
++def config_file(root: Path) -> Path:
++    """The committed `perk.toml`."""
++    return config_dir(root) / CONFIG_FILENAME
++
++
++def local_config_file(root: Path) -> Path:
++    """The gitignored `perk.local.toml`."""
++    return config_dir(root) / LOCAL_CONFIG_FILENAME
++
++
++def repo_skills_dir(root: Path) -> Path:
++    """The repo-authored skill source root."""
++    return root / ".pi" / "skills"
+diff --git a/shared/contracts.md b/shared/contracts.md
+index b9f4898..ff4fe9a 100644
+--- a/shared/contracts.md
++++ b/shared/contracts.md
+@@ -61,6 +61,18 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
+   dir artifacts and is declared in `writes` by the read-only authoring stages — `plan`,
+   `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
+ 
++  **perk-owned dot-path construction seam.** Construction of the four **perk-owned** dot-path
++  families — the perk dir, the config files (`perk.toml`/`perk.local.toml`), the repo-skills dir
++  (`.pi/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
++  + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
++  `workflowDir` for the workflow family. Each family is independently redirectable from its single
++  helper (Objective #878 migrates them to `.perk/` one phase at a time) — no path value changes
++  today. The confinement is guard-tested in both planes (`tests/test_paths_guard.py`,
++  `extension/pathsGuard.test.ts`): a family-scoped source scan bans a quoted `".pi"` segment built
++  adjacent to a perk-owned family follow-segment outside the seams. **Pi-native** `.pi/...` paths
++  (`.pi/settings.json`, `.pi/agents/`, `.pi/npm`, `.pi/APPEND_SYSTEM.md`, `~/.pi/agent`) are
++  explicitly *not* perk-owned and stay hand-built at their Pi-native sites.
++
+   **The plan-draft file tool (Node 2.1).** The tool `plan_draft` (interior-only; no Python
+   twin) is the first session-data producer: it writes the working plan during read-only plan
+   authoring. It is allowlisted in `READ_ONLY_TOOLS` (`extension/substrate/toolGating.ts`) as a **narrow
+diff --git a/tests/test_paths_guard.py b/tests/test_paths_guard.py
+new file mode 100644
+index 0000000..d06d188
+--- /dev/null
++++ b/tests/test_paths_guard.py
+@@ -0,0 +1,92 @@
++"""perk-owned dot-path construction regression guard (contracts.md §8.1).
++
++Production Python code may construct the four **perk-owned** dot-path families — workflow, skills,
++and the two config files — only inside their seams: ``perk/substrate/paths.py`` (config + skills)
++and ``perk/state/cache.py`` (workflow). Everything else goes through those helpers
++(``paths.config_file``/``paths.local_config_file``/``paths.repo_skills_dir``,
++``cache.workflow_dir``, …).
++
++The pattern is scoped to *path construction* — a quoted ``".pi"`` segment immediately adjacent to a
++``/`` operator whose other segment is a perk-owned family follow-segment (``"workflow"``/
++``"skills"``/``CONFIG_FILENAME``/``LOCAL_CONFIG_FILENAME``/``"perk.toml"``/``"perk.local.toml"``).
++**Pi-native** ``.pi/...`` paths (``".pi" / "npm"``, ``".pi" / "agents"``, ``".pi" /
++"settings.json"``) and prose mentioning ``.pi/workflow`` therefore never false-positive. The TS
++twin is
++``extension/pathsGuard.test.ts``.
++"""
++
++import re
++from pathlib import Path
++
++import perk
++
++# A perk-owned family follow-segment: a quoted family literal, the filename literals, or the
++# imported filename constants.
++_FOLLOW = (
++    r'("workflow"|"skills"|"perk\.toml"|"perk\.local\.toml"'
++    r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)"
++)
++
++# A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a perk-owned family
++# follow-segment.
++PATTERN = re.compile(r"""["']\.pi["']\s*/\s*""" + _FOLLOW)
++
++ALLOWED = frozenset({"substrate/paths.py", "state/cache.py"})
++
++
++def _perk_dir() -> Path:
++    return Path(perk.__file__).parent
++
++
++class TestPerkOwnedPathGuard:
++    def test_no_production_module_builds_perk_owned_paths_directly(self) -> None:
++        """Source scan: outside the seams, no module under perk/ may construct a perk-owned
++        dot-path family (workflow/skills/config)."""
++        perk_dir = _perk_dir()
++        offenders: list[str] = []
++        files = sorted(perk_dir.rglob("*.py"))
++        # Self-checks: a layout change that empties the scan must fail loudly, not vacuously.
++        assert files, "production-file scan came up empty — guard is vacuous"
++        assert any(p.name == "paths.py" for p in files), "scan missed paths.py — guard is misaimed"
++        assert any(p.name == "cache.py" for p in files), "scan missed cache.py — guard is misaimed"
++        for path in files:
++            if str(path.relative_to(perk_dir)) in ALLOWED:
++                continue
++            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
++                if PATTERN.search(line):
++                    offenders.append(
++                        f"{path.relative_to(perk_dir.parent)}:{lineno}: {line.strip()}"
++                    )
++        assert not offenders, (
++            "manual perk-owned dot-path construction outside the seams — go through "
++            "perk/substrate/paths.py (config/skills) or perk/state/cache.py (workflow):\n"
++            + "\n".join(offenders)
++        )
++
++    def test_pattern_matches_the_seams_themselves(self) -> None:
++        """Non-vacuous self-check: the seams' own construction lines DO match the pattern
++        (cache.py carries `".pi" / "workflow"`; paths.py carries `".pi" / "skills"`)."""
++        cache_src = (_perk_dir() / "state" / "cache.py").read_text(encoding="utf-8")
++        paths_src = (_perk_dir() / "substrate" / "paths.py").read_text(encoding="utf-8")
++        assert any(PATTERN.search(line) for line in cache_src.splitlines()), (
++            "cache.py no longer matches the banned pattern — guard is vacuous"
++        )
++        assert any(PATTERN.search(line) for line in paths_src.splitlines()), (
++            "paths.py no longer matches the banned pattern — guard is vacuous"
++        )
++
++    def test_positive_each_family_arm_matches(self) -> None:
++        """Per-arm positive asserts on synthetic strings — keeps the config/local arms honest even
++        though the seam derives them from `config_dir`."""
++        assert PATTERN.search('root / ".pi" / "workflow"')
++        assert PATTERN.search('root / ".pi" / "skills"')
++        assert PATTERN.search('root / ".pi" / CONFIG_FILENAME')
++        assert PATTERN.search('root / ".pi" / LOCAL_CONFIG_FILENAME')
++        assert PATTERN.search('root / ".pi" / "perk.toml"')
++        assert PATTERN.search('root / ".pi" / "perk.local.toml"')
++
++    def test_negative_pi_native_paths_do_not_match(self) -> None:
++        """Pi-native `.pi/...` construction is out of scope and must not false-positive."""
++        assert not PATTERN.search('root / ".pi" / "npm"')
++        assert not PATTERN.search('root / ".pi" / "agents"')
++        assert not PATTERN.search('root / ".pi" / "settings.json"')
+
