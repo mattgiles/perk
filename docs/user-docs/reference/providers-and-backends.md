@@ -197,6 +197,12 @@ Linear issue ids are **strings** like `ENG-123` (vs GitHub's `#42`). The shape f
 - the worktree / branch name `plan-ENG-123`,
 - the land squash-commit footer `Plan: ENG-<n> — <url>` (no `Closes #N`, no Linear magic words).
 
+Anywhere a command accepts an id (`perk implement`, `perk plan resume/replan/from`, `perk objective
+plan/show/node/…`), you may paste the corresponding **issue/objective URL** instead — perk peels the
+id from it (GitHub `.../issues/N`; Linear `.../issue/IDENT` or `.../project/SLUG`). A `/pull/N` URL
+is deliberately not accepted (a PR is a different object than the plan-issue). The peeled id stays
+opaque — the configured backend remains the authority on whether it resolves.
+
 ### Doctor groups
 
 - **`issues-backend`** (group `issues`, offline) — validates the selection and, for Linear, that

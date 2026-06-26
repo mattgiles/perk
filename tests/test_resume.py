@@ -6,7 +6,7 @@ import pytest
 from click.testing import CliRunner
 
 from perk import github
-from perk.backends import issue_backend
+from perk.backends import issue_backend, resolve
 from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch, resume
@@ -105,6 +105,32 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
         assert data["plan_ref"]["pr_id"] == "7"
         # dry run writes no ref
         assert not cache.plan_ref_path(Path(d)).exists()
+
+
+def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
+    # A pasted Linear issue URL is peeled to SAV-9 before the backend read; the extracted id
+    # reaches the backend `get_plan` and appears verbatim in the dry-run report.
+    _authed(monkeypatch)
+    seen: dict[str, object] = {}
+
+    class _FakeBackend:
+        backend_id = "linear"
+
+        def get_plan(self, *, issue_id: str):
+            seen["issue_id"] = issue_id
+            return _neutral_state(header={"lifecycle_stage": "planned"})
+
+    monkeypatch.setattr(resolve, "resolve_issue_backend", lambda _root: _FakeBackend())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(
+            cli,
+            ["plan", "resume", "https://linear.app/acme/issue/SAV-9/x", "--dry-run", "--json"],
+        )
+        assert result.exit_code == 0, result.output
+        assert seen["issue_id"] == "SAV-9"
+        assert json.loads(result.output)["plan"] == "SAV-9"
 
 
 def test_real_resume_writes_ref_and_launches(monkeypatch):

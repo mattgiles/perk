@@ -145,6 +145,7 @@ def plan_objective(
       perk objective plan 7                 # plan the next actionable node of objective #7
       perk objective plan 7 --node 2.3      # plan a specific node
       perk objective plan 7 --dry-run       # resolve + print, mark/launch nothing
+      perk objective plan https://github.com/o/r/issues/7   # paste the URL instead of the id
     """
     try:
         repo_root = require_repo(ctx)
