@@ -9,7 +9,7 @@ repo-authored skill: it borrows the same ``save`` stage descriptor for launch (`
 Unlike ``create``, ``refine`` never scaffolds and never reconverges the fragment — the skill already
 exists (and was converged at create/scaffold time). The door is read-only on the filesystem until
 the launched session edits ``SKILL.md`` in place. It refuses (on every path, including
-``--dry-run``) when ``.pi/skills/NAME/SKILL.md`` is absent, pointing at ``perk skills create``.
+``--dry-run``) when ``.perk/skills/NAME/SKILL.md`` is absent, pointing at ``perk skills create``.
 
 ``--dry-run`` prints the seed + intended path and launches nothing; the absent-skill refusal still
 runs first.
@@ -64,7 +64,7 @@ def refine_skill(
     as_json: bool,
     pi_args: tuple[str, ...],
 ) -> None:
-    """Re-open an existing repo-authored skill (`.pi/skills/NAME/`), then launch a refine session.
+    """Re-open an existing repo-authored skill (`.perk/skills/NAME/`), then launch a refine session.
 
     \b
     Examples:

@@ -6,9 +6,10 @@ and ``perk/state/cache.py`` (workflow). Everything else goes through those helpe
 (``paths.config_file``/``paths.local_config_file``/``paths.repo_skills_dir``,
 ``cache.workflow_dir``, …).
 
-The pattern is scoped to *path construction* — a quoted ``".pi"`` segment immediately adjacent to a
-``/`` operator whose other segment is a perk-owned family follow-segment (``"workflow"``/
-``"skills"``/``CONFIG_FILENAME``/``LOCAL_CONFIG_FILENAME``/``"perk.toml"``/``"perk.local.toml"``).
+The pattern is scoped to *path construction* — a quoted ``".pi"``/``".perk"`` segment immediately
+adjacent to a ``/`` operator whose other segment is a perk-owned family follow-segment
+(``"workflow"``/``"skills"``/``CONFIG_FILENAME``/``LOCAL_CONFIG_FILENAME``/``"perk.toml"``/
+``"perk.local.toml"``).
 **Pi-native** ``.pi/...`` paths (``".pi" / "npm"``, ``".pi" / "agents"``, ``".pi" /
 "settings.json"``) and prose mentioning ``.pi/workflow`` therefore never false-positive. The TS
 twin is
@@ -27,9 +28,10 @@ _FOLLOW = (
     r"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)"
 )
 
-# A quoted `".pi"` segment in path construction (adjacent to a `/`) followed by a perk-owned family
-# follow-segment.
-PATTERN = re.compile(r"""["']\.pi["']\s*/\s*""" + _FOLLOW)
+# A quoted `".pi"`/`".perk"` segment in path construction (adjacent to a `/`) followed by a
+# perk-owned family follow-segment. Both dot-dirs are guarded so a family stays guarded across its
+# Objective #878 migration from `.pi/` to `.perk/`.
+PATTERN = re.compile(r"""["']\.(pi|perk)["']\s*/\s*""" + _FOLLOW)
 
 ALLOWED = frozenset({"substrate/paths.py", "state/cache.py"})
 
@@ -65,7 +67,7 @@ class TestPerkOwnedPathGuard:
 
     def test_pattern_matches_the_seams_themselves(self) -> None:
         """Non-vacuous self-check: the seams' own construction lines DO match the pattern
-        (cache.py carries `".pi" / "workflow"`; paths.py carries `".pi" / "skills"`)."""
+        (cache.py carries `".pi" / "workflow"`; paths.py carries `".perk" / "skills"`)."""
         cache_src = (_perk_dir() / "state" / "cache.py").read_text(encoding="utf-8")
         paths_src = (_perk_dir() / "substrate" / "paths.py").read_text(encoding="utf-8")
         assert any(PATTERN.search(line) for line in cache_src.splitlines()), (
@@ -80,6 +82,7 @@ class TestPerkOwnedPathGuard:
         though the seam derives them from `config_dir`."""
         assert PATTERN.search('root / ".pi" / "workflow"')
         assert PATTERN.search('root / ".pi" / "skills"')
+        assert PATTERN.search('root / ".perk" / "skills"')
         assert PATTERN.search('root / ".pi" / CONFIG_FILENAME')
         assert PATTERN.search('root / ".pi" / LOCAL_CONFIG_FILENAME')
         assert PATTERN.search('root / ".pi" / "perk.toml"')
@@ -90,3 +93,4 @@ class TestPerkOwnedPathGuard:
         assert not PATTERN.search('root / ".pi" / "npm"')
         assert not PATTERN.search('root / ".pi" / "agents"')
         assert not PATTERN.search('root / ".pi" / "settings.json"')
+        assert not PATTERN.search('root / ".perk" / "npm"')

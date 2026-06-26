@@ -1,6 +1,6 @@
 """`perk skills scaffold NAME` — create a repo-authored skill stub + reconverge the fragment.
 
-Deterministic and create-only: writes a TODO `SKILL.md` under `.pi/skills/NAME/` in the **main
+Deterministic and create-only: writes a TODO `SKILL.md` under `.perk/skills/NAME/` in the **main
 checkout**, refuses if the directory already exists (no overwrite flag), then reconverges the
 perk-managed `.agents/manifest.d/perk-repo-skills.yaml` fragment (skipping the heavy all-sources
 `skills update --sync`).
@@ -25,10 +25,10 @@ from perk.substrate.output import user_output
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
 def scaffold_skill(ctx: click.Context, *, name: str, as_json: bool) -> None:
-    """Scaffold a repo-authored skill stub at `.pi/skills/NAME/SKILL.md` (create-only).
+    """Scaffold a repo-authored skill stub at `.perk/skills/NAME/SKILL.md` (create-only).
 
     Writes a TODO `SKILL.md` in the main checkout and reconverges the `perk-repo-skills.yaml`
-    fragment. Refuses if `.pi/skills/NAME/` already exists. Skips the heavy all-sources sync.
+    fragment. Refuses if `.perk/skills/NAME/` already exists. Skips the heavy all-sources sync.
     """
     try:
         root = repo_skills_root(ctx)

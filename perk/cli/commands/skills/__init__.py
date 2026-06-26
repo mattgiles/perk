@@ -2,7 +2,7 @@
 
 Every verb is a thin pass-through to the `skills` binary EXCEPT `remove` (edits
 `.agents/manifest.yaml` directly) and the repo-authored-skill verbs `scaffold`/`delete` (manage the
-repo's own `.pi/skills/*/SKILL.md` skills + the perk-managed `perk-repo-skills.yaml` fragment).
+repo's own `.perk/skills/*/SKILL.md` skills + the perk-managed `perk-repo-skills.yaml` fragment).
 """
 
 import click

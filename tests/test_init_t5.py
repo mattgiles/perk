@@ -165,7 +165,7 @@ def test_sync_skills_fails_when_delivery_missing(tmp_path, monkeypatch):
     assert "did not deliver" in error and "perk-plan" in error
 
 
-_REPO_HINT = "If a skill under `.pi/skills/` was just added"
+_REPO_HINT = "If a skill under `.perk/skills/` was just added"
 
 
 def test_sync_skills_repo_hint_on_command_failure(tmp_path, monkeypatch):
@@ -242,7 +242,7 @@ def _stub_identity(monkeypatch):
 
 
 def _plant_repo_skill(root, dir_name, *, name=None, body_fm=None):
-    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill = root / ".perk" / "skills" / dir_name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     fm = body_fm or f"---\nname: {name or dir_name}\ndescription: A skill.\n---\n# body\n"
     skill.write_text(fm, encoding="utf-8")
@@ -294,7 +294,7 @@ def test_init_untracked_repo_skill_warns(git_repo, monkeypatch, stub_env):
 
 
 def test_init_no_repo_skills_no_warnings(git_repo, stub_env):
-    # No `.pi/skills/` → no fragment, no warnings, no repo-skills change (idempotency intact).
+    # No `.perk/skills/` → no fragment, no warnings, no repo-skills change (idempotency intact).
     report = run_init(git_repo, verify=True)
     assert report.ok and report.warnings == []
     assert not any("perk-repo-skills" in c for c in report.changes)

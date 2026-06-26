@@ -1,6 +1,6 @@
 # How to author a repo-specific skill
 
-Author a skill that lives in **this repo** under `.pi/skills/<name>/SKILL.md`, so its guidance
+Author a skill that lives in **this repo** under `.perk/skills/<name>/SKILL.md`, so its guidance
 travels with the repo and is delivered into sessions like any installed skill. perk converges a
 managed skills-CLI manifest fragment for these, so the only manual obligation is the
 commit-push-resync cycle (the source resolves from your default branch).
@@ -12,12 +12,12 @@ this how-to is the lifecycle, not the authoring craft.
 ## Steps
 
 1. **Scaffold or create.** Either
-   - `perk skills scaffold NAME` — writes the stub `.pi/skills/NAME/SKILL.md` and reconverges the
+   - `perk skills scaffold NAME` — writes the stub `.perk/skills/NAME/SKILL.md` and reconverges the
      fragment (a non-fatal "not committed — commit it" warning is expected for the fresh skill), or
    - `perk skills create NAME` — scaffolds **and** launches a write-capable authoring session
      following the `perk-skill-author` skill.
 
-   Both are **create-only**: they refuse if `.pi/skills/NAME/` already exists and point you at
+   Both are **create-only**: they refuse if `.perk/skills/NAME/` already exists and point you at
    `perk skills refine NAME` to re-open it.
 
 2. **Author the `SKILL.md`.** Follow the `perk-skill-author` skill for the judgment — a concrete
@@ -36,7 +36,7 @@ this how-to is the lifecycle, not the authoring craft.
    session and **skips sync** (the file already exists; there is no `--from` input in v1).
 
 6. **Delete** with `perk skills delete NAME --yes` when the skill is no longer wanted; it removes
-   `.pi/skills/NAME/` and reconverges the fragment.
+   `.perk/skills/NAME/` and reconverges the fragment.
 
 ## See also
 

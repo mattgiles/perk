@@ -5,7 +5,7 @@ description: Authoring a repo-specific skill via `perk skills create`/`refine` �
 
 # Authoring a repo-specific skill
 
-A repo-authored skill lives at `.pi/skills/NAME/SKILL.md` in the main checkout and is delivered to
+A repo-authored skill lives at `.perk/skills/NAME/SKILL.md` in the main checkout and is delivered to
 sessions through the skills-CLI manifest. `perk skills create NAME` pre-scaffolds the directory and
 launches a write-capable session (this one) to author it; `perk skills refine NAME` re-opens an
 existing skill to sharpen it. **This skill is the judgment layer** — what makes a skill discoverable,
@@ -13,7 +13,7 @@ lean, and self-contained. Judgment, authoring, and the decision to commit stay w
 
 ## The soft scope
 
-You are authoring **one skill**: `.pi/skills/NAME/SKILL.md` (already scaffolded) plus any sibling
+You are authoring **one skill**: `.perk/skills/NAME/SKILL.md` (already scaffolded) plus any sibling
 `references/`/`scripts/` files it needs, and — only when the skill must fire at a stage or command —
 the bindings/docs that wire it. perk has no structural write-sandbox, so this scope is a
 **discipline, not a sandbox**: don't touch unrelated files. **Leave committing to the user** — author
@@ -51,7 +51,7 @@ outside the skill directory exists at read time.
 
 The convergence enforces two rules — get them right or the skill won't render into the manifest:
 
-- **`name` must equal the directory segment** (`.pi/skills/NAME/` ⇒ `name: NAME`).
+- **`name` must equal the directory segment** (`.perk/skills/NAME/` ⇒ `name: NAME`).
 - **`description` must be non-empty** (and, per above, concrete).
 
 Replace the scaffold's `TODO` placeholder `description` before you finish — a left-over placeholder

@@ -202,7 +202,7 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
         # findings on the post-fix re-verify.
         if verify:
             # Re-converge the repo-authored-skills fragment BEFORE the sync (so the skills CLI
-            # sees the declared `.pi/skills/` source), mirroring init's order. Structural errors
+            # sees the declared `.perk/skills/` source), mirroring init's order. Structural errors
             # ride loudly on `fix_errors`; the post-fix re-verify re-runs `_repo_skills_check` so
             # the exit code reflects the post-fix state.
             conv = init.converge_repo_skills_manifest(root, apply=True)

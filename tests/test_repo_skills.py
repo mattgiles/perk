@@ -51,7 +51,7 @@ def test_validate_skill_ok():
     skill, reason = rs.validate_skill("foo", {"name": "foo", "description": "A foo skill."})
     assert reason is None
     assert skill == rs.RepoSkill(
-        name="foo", description="A foo skill.", dir_name="foo", rel_path=".pi/skills/foo/SKILL.md"
+        name="foo", description="A foo skill.", dir_name="foo", rel_path=".perk/skills/foo/SKILL.md"
     )
 
 
@@ -78,8 +78,8 @@ def test_validate_skill_name_mismatch():
 def test_render_sorts_by_name_and_byte_matches():
     source = rs.RepoSkillSource(alias="perk-acme", url="https://github.com/x/acme", ref="main")
     skills = [
-        rs.RepoSkill("zebra", "z", "zebra", ".pi/skills/zebra/SKILL.md"),
-        rs.RepoSkill("alpha", "a", "alpha", ".pi/skills/alpha/SKILL.md"),
+        rs.RepoSkill("zebra", "z", "zebra", ".perk/skills/zebra/SKILL.md"),
+        rs.RepoSkill("alpha", "a", "alpha", ".perk/skills/alpha/SKILL.md"),
     ]
     out = rs.render_repo_skills_manifest(source, skills)
     assert out == (
@@ -120,7 +120,7 @@ def test_derive_repo_source(monkeypatch):
 def _plant_skill(
     root: Path, dir_name: str, *, name: str | None = None, desc: str = "A skill."
 ) -> Path:
-    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill = root / ".perk" / "skills" / dir_name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text(f"---\nname: {name or dir_name}\ndescription: {desc}\n---\n# body\n", "utf-8")
     return skill
@@ -144,7 +144,7 @@ def test_orchestrator_happy_path(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
     _plant_skill(root, "beta")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     _stub_identity(monkeypatch)
     result = rs.build_repo_skills_manifest(root)
     assert result.errors == () and result.warnings == ()
@@ -174,7 +174,7 @@ def test_orchestrator_no_skills_skips_network(git_repo, monkeypatch):
 def test_orchestrator_no_github_remote(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
 
     def boom(root):
         raise GitHubError("no remote")
@@ -188,7 +188,7 @@ def test_orchestrator_no_github_remote(git_repo, monkeypatch):
 def test_orchestrator_alias_collision(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     manifest = root / ".agents" / "manifest.yaml"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text("sources:\n  perk-acme:\n    url: u\n    ref: main\nskills: []\n", "utf-8")
@@ -201,7 +201,7 @@ def test_orchestrator_alias_collision(git_repo, monkeypatch):
 def test_orchestrator_self_fragment_not_a_collision(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     # Our own previously-rendered fragment declaring the same alias must be self-excluded.
     frag = root / ".agents" / "manifest.d" / rs.REPO_SKILLS_MANIFEST_FILENAME
     frag.parent.mkdir(parents=True, exist_ok=True)
@@ -217,17 +217,17 @@ def test_orchestrator_untracked_warning(git_repo, monkeypatch):
     _stub_identity(monkeypatch)
     result = rs.build_repo_skills_manifest(root)
     assert result.fragment is not None and result.errors == ()
-    assert any(".pi/skills/alpha/SKILL.md" in w for w in result.warnings)
+    assert any(".perk/skills/alpha/SKILL.md" in w for w in result.warnings)
 
 
 def test_orchestrator_duplicate_name(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    # A tracked SKILL.md outside .pi/skills/ with the same frontmatter name.
+    # A tracked SKILL.md outside .perk/skills/ with the same frontmatter name.
     other = root / "skills" / "alpha" / "SKILL.md"
     other.parent.mkdir(parents=True, exist_ok=True)
     other.write_text("---\nname: alpha\ndescription: d\n---\n", "utf-8")
-    _commit(root, ".pi", "skills")
+    _commit(root, ".perk", "skills")
     _stub_identity(monkeypatch)
     result = rs.build_repo_skills_manifest(root)
     assert result.fragment is None
@@ -236,10 +236,10 @@ def test_orchestrator_duplicate_name(git_repo, monkeypatch):
 
 def test_orchestrator_frontmatter_error_skips_network(git_repo, monkeypatch):
     root = git_repo
-    skill = root / ".pi" / "skills" / "alpha" / "SKILL.md"
+    skill = root / ".perk" / "skills" / "alpha" / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text("no frontmatter here\n", "utf-8")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     calls: list = []
     _stub_identity(monkeypatch, calls=calls)
     result = rs.build_repo_skills_manifest(root)
@@ -296,7 +296,7 @@ def _fragment_path(root: Path) -> Path:
 def test_converge_creates_fragment(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     _stub_identity(monkeypatch)
     conv = rs.converge_repo_skills_manifest(root, apply=True)
     assert conv.changes == [f"{_FRAGMENT_REL}: created"]
@@ -306,7 +306,7 @@ def test_converge_creates_fragment(git_repo, monkeypatch):
 def test_converge_updates_fragment(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     _stub_identity(monkeypatch)
     path = _fragment_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -317,7 +317,7 @@ def test_converge_updates_fragment(git_repo, monkeypatch):
 
 
 def test_converge_removes_stale_fragment(git_repo, monkeypatch):
-    # No `.pi/skills/` at all, but a leftover fragment from a since-deleted skill.
+    # No `.perk/skills/` at all, but a leftover fragment from a since-deleted skill.
     root = git_repo
     path = _fragment_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -345,10 +345,10 @@ def test_converge_errors_do_not_clobber_existing_fragment(git_repo, monkeypatch)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("# previously good\n", encoding="utf-8")
     # A bad SKILL.md (no frontmatter) makes the manifest fatal → fragment is None + errors.
-    skill = root / ".pi" / "skills" / "alpha" / "SKILL.md"
+    skill = root / ".perk" / "skills" / "alpha" / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text("no frontmatter\n", encoding="utf-8")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     _stub_identity(monkeypatch)
     conv = rs.converge_repo_skills_manifest(root, apply=True)
     assert conv.changes == []
@@ -359,7 +359,7 @@ def test_converge_errors_do_not_clobber_existing_fragment(git_repo, monkeypatch)
 def test_converge_idempotent_and_dry_run_matches(git_repo, monkeypatch):
     root = git_repo
     _plant_skill(root, "alpha")
-    _commit(root, ".pi")
+    _commit(root, ".perk")
     _stub_identity(monkeypatch)
     # apply=False computes the same change list without writing.
     dry = rs.converge_repo_skills_manifest(root, apply=False)

@@ -657,6 +657,122 @@ def test_fix_removes_orphaned_git_clone(git_repo):
     assert not any("removed orphaned perk clone" in line for line in again.fixed)  # idempotent
 
 
+def test_fix_migrates_legacy_repo_skill_when_target_absent(git_repo):
+    # Legacy `.pi/skills/foo` with no `.perk/skills/foo` target → moved forward; idempotent.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text("---\nname: foo\n---\n", encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not legacy.exists()
+    moved = git_repo / ".perk" / "skills" / "foo" / "SKILL.md"
+    assert moved.is_file()
+    assert any(".pi/skills/foo: moved to .perk/skills/foo" in line for line in fixed.fixed)
+    # The now-empty legacy root is rmdir'd (D3 empty-dir cleanup).
+    assert not (git_repo / ".pi" / "skills").exists()
+
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any(".pi/skills/foo" in line for line in again.fixed)  # idempotent
+
+
+def test_fix_removes_legacy_repo_skill_when_identical(git_repo):
+    # Legacy `.pi/skills/foo` byte-identical to an existing `.perk/skills/foo` → legacy dropped.
+    _scaffold(git_repo)
+    body = "---\nname: foo\n---\nbody\n"
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text(body, encoding="utf-8")
+    target = git_repo / ".perk" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text(body, encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not legacy.exists()
+    assert (target / "SKILL.md").read_text(encoding="utf-8") == body
+    assert any(
+        ".pi/skills/foo: removed legacy (identical to .perk/skills/foo)" in line
+        for line in fixed.fixed
+    )
+
+
+def test_fix_reports_conflict_when_legacy_repo_skill_differs(git_repo):
+    # Legacy `.pi/skills/foo` differs from an existing `.perk/skills/foo` → not moved, error.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text("---\nname: foo\n---\nlegacy\n", encoding="utf-8")
+    target = git_repo / ".perk" / "skills" / "foo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("---\nname: foo\n---\nnew\n", encoding="utf-8")
+
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert legacy.exists()  # left in place for manual resolution
+    assert any(
+        ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
+    )
+    assert report_to_dict(report)["fix_errors"] == report.fix_errors  # surfaced in the dict
+    assert any(".pi/skills/foo: conflicts" in line for line in report.fix_errors)
+
+
+def test_fix_mixed_legacy_repo_skills_in_one_pass(git_repo):
+    # One pass over `.pi/skills/` with a move (absent target), an identical-drop, and a conflict:
+    # the loop processes all three, and the legacy root is RETAINED because the conflict remains.
+    _scaffold(git_repo)
+    legacy_root = git_repo / ".pi" / "skills"
+    target_root = git_repo / ".perk" / "skills"
+    # `mover` → target absent → moved.
+    (legacy_root / "mover").mkdir(parents=True)
+    (legacy_root / "mover" / "SKILL.md").write_text("---\nname: mover\n---\n", encoding="utf-8")
+    # `dup` → byte-identical target → legacy dropped.
+    dup_body = "---\nname: dup\n---\nbody\n"
+    (legacy_root / "dup").mkdir(parents=True)
+    (legacy_root / "dup" / "SKILL.md").write_text(dup_body, encoding="utf-8")
+    (target_root / "dup").mkdir(parents=True)
+    (target_root / "dup" / "SKILL.md").write_text(dup_body, encoding="utf-8")
+    # `clash` → differing target → conflict, left in place.
+    (legacy_root / "clash").mkdir(parents=True)
+    (legacy_root / "clash" / "SKILL.md").write_text(
+        "---\nname: clash\n---\nold\n", encoding="utf-8"
+    )
+    (target_root / "clash").mkdir(parents=True)
+    (target_root / "clash" / "SKILL.md").write_text(
+        "---\nname: clash\n---\nnew\n", encoding="utf-8"
+    )
+
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert (target_root / "mover" / "SKILL.md").is_file()  # moved
+    assert not (legacy_root / "mover").exists()
+    assert not (legacy_root / "dup").exists()  # dropped
+    assert (legacy_root / "clash").exists()  # conflict retained
+    assert any(".pi/skills/mover: moved to .perk/skills/mover" in line for line in report.fixed)
+    assert any(".pi/skills/dup: removed legacy" in line for line in report.fixed)
+    assert any(".pi/skills/clash: conflicts" in line for line in report.fix_errors)
+    # Legacy root is NOT removed while the conflicting skill still lives under it.
+    assert legacy_root.is_dir()
+
+
+def test_fix_reports_conflict_on_deep_nested_difference(git_repo):
+    # `_dirs_identical` must descend: a multi-file skill where a DEEP nested file differs is a
+    # conflict (not a redundant drop), even though shallower files match.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "skills" / "foo"
+    target = git_repo / ".perk" / "skills" / "foo"
+    for root in (legacy, target):
+        (root / "nested").mkdir(parents=True)
+        (root / "SKILL.md").write_text("---\nname: foo\n---\nbody\n", encoding="utf-8")
+        (root / "references.md").write_text("shared\n", encoding="utf-8")
+    # Only the deep nested file diverges.
+    (legacy / "nested" / "detail.md").write_text("legacy detail\n", encoding="utf-8")
+    (target / "nested" / "detail.md").write_text("new detail\n", encoding="utf-8")
+
+    report = run_doctor(git_repo, fix=True, verify=False)
+    assert legacy.exists()  # NOT dropped — the deep difference is a conflict
+    assert any(
+        ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
+    )
+
+
 def test_cache_gc_ok_when_no_prunable_state(git_repo):
     # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
     _scaffold(git_repo)
@@ -894,7 +1010,7 @@ def _stub_repo_identity(monkeypatch):
 
 
 def _plant_repo_skill(root, dir_name, *, fm=None):
-    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill = root / ".perk" / "skills" / dir_name / "SKILL.md"
     skill.parent.mkdir(parents=True, exist_ok=True)
     skill.write_text(fm or f"---\nname: {dir_name}\ndescription: A skill.\n---\n# body\n", "utf-8")
     return skill

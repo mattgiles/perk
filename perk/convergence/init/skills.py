@@ -168,14 +168,14 @@ def _repo_authored_hint(repo_skill_names: tuple[str, ...]) -> str:
     """The repo-authored remediation clause appended to every skills-sync failure message.
 
     Returns ``""`` unless repo-authored skills are declared (gated solely on "are there any?",
-    no per-skill stderr matching). A freshly-declared `.pi/skills/` skill is unresolvable until
+    no per-skill stderr matching). A freshly-declared `.perk/skills/` skill is unresolvable until
     it is committed + pushed to the repo's default branch — the most common first-appearance
     cause of a skills-sync failure once repo-authored skills exist.
     """
     if not repo_skill_names:
         return ""
     return (
-        "\nIf a skill under `.pi/skills/` was just added, commit + push it to your repo's "
+        "\nIf a skill under `.perk/skills/` was just added, commit + push it to your repo's "
         "default branch, then re-run `perk init` (or `perk doctor --fix`)."
     )
 

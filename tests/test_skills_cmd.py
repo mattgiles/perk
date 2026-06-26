@@ -424,7 +424,7 @@ def test_scaffold_happy_path(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli, ["skills", "scaffold", "foo"], obj=_ctx(tmp_path))
     assert result.exit_code == 0, result.output
 
-    skill_md = tmp_path / ".pi" / "skills" / "foo" / "SKILL.md"
+    skill_md = tmp_path / ".perk" / "skills" / "foo" / "SKILL.md"
     assert skill_md.is_file()
     mapping, reason = parse_skill_frontmatter(skill_md.read_text(encoding="utf-8"))
     assert reason is None
@@ -436,7 +436,7 @@ def test_scaffold_happy_path(monkeypatch, tmp_path):
 
 def test_scaffold_refuses_existing(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
 
@@ -454,7 +454,7 @@ def test_scaffold_invalid_names(monkeypatch, tmp_path):
         assert result.exit_code == 1, bad
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "skills_invalid_name", bad
-    assert not (tmp_path / ".pi" / "skills").exists()
+    assert not (tmp_path / ".perk" / "skills").exists()
 
 
 def test_scaffold_json_success_shape(monkeypatch, tmp_path):
@@ -466,7 +466,7 @@ def test_scaffold_json_success_shape(monkeypatch, tmp_path):
         "success": True,
         "error_type": None,
         "name": "foo",
-        "path": ".pi/skills/foo",
+        "path": ".perk/skills/foo",
         "fragment": "created",
         "warnings": [],
         "errors": [],
@@ -481,14 +481,14 @@ def test_scaffold_reconverge_errors_nonfatal(monkeypatch, tmp_path):
     assert payload["success"] is True
     assert payload["errors"] == ["boom"]
     assert payload["fragment"] == "none"
-    assert (tmp_path / ".pi" / "skills" / "foo" / "SKILL.md").is_file()
+    assert (tmp_path / ".perk" / "skills" / "foo" / "SKILL.md").is_file()
 
 
 def test_delete_yes_removes(monkeypatch, tmp_path):
     calls = _patch_repo_skills(
         monkeypatch, changes=[".agents/manifest.d/perk-repo-skills.yaml: removed"]
     )
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
 
@@ -508,19 +508,19 @@ def _fake_isatty(monkeypatch, *, value: bool):
 def test_delete_non_interactive_refuses(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
     _fake_isatty(monkeypatch, value=False)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
 
     result = CliRunner().invoke(cli, ["skills", "delete", "foo"], obj=_ctx(tmp_path))
     assert result.exit_code == 1
-    assert ".pi/skills/foo" in result.output
+    assert ".perk/skills/foo" in result.output
     assert target.exists()
 
 
 def test_delete_json_refuses_without_yes(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
 
@@ -535,7 +535,7 @@ def test_delete_interactive_declined(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
     _fake_isatty(monkeypatch, value=True)
     monkeypatch.setattr("perk.cli.commands.skills.delete_cmd.user_confirm", lambda *a, **k: False)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
 
@@ -557,7 +557,7 @@ def test_delete_absent_dir(monkeypatch, tmp_path):
 
 def test_delete_unlinks_dangling_symlink(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
     links = tmp_path / ".agents" / "skills"
@@ -576,7 +576,7 @@ def test_delete_unlinks_dangling_symlink(monkeypatch, tmp_path):
 
 def test_delete_json_success_shape(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch, changes=[".agents/manifest.d/perk-repo-skills.yaml: removed"])
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("x", encoding="utf-8")
 
@@ -589,7 +589,7 @@ def test_delete_json_success_shape(monkeypatch, tmp_path):
         "success": True,
         "error_type": None,
         "name": "foo",
-        "path": ".pi/skills/foo",
+        "path": ".perk/skills/foo",
         "fragment": "removed",
         "warnings": [],
         "errors": [],
@@ -623,10 +623,10 @@ def test_create_dry_run_does_not_scaffold_or_launch(monkeypatch, tmp_path):
         "success": True,
         "error_type": None,
         "name": "foo",
-        "path": ".pi/skills/foo",
+        "path": ".perk/skills/foo",
         "dry_run": True,
     }
-    assert not (tmp_path / ".pi" / "skills" / "foo").exists()
+    assert not (tmp_path / ".perk" / "skills" / "foo").exists()
     assert calls == []
 
 
@@ -635,7 +635,7 @@ def test_create_real_run_scaffolds_then_launches(monkeypatch, tmp_path):
     calls = _stub_launch(monkeypatch)
     result = CliRunner().invoke(cli, ["skills", "create", "foo"], obj=_ctx(tmp_path))
     assert result.exit_code == 0, result.output
-    assert (tmp_path / ".pi" / "skills" / "foo" / "SKILL.md").is_file()
+    assert (tmp_path / ".perk" / "skills" / "foo" / "SKILL.md").is_file()
     assert len(calls) == 1
     kwargs = calls[0]
     assert kwargs["binding_trigger"] == "command:skills-create"
@@ -647,7 +647,7 @@ def test_create_real_run_scaffolds_then_launches(monkeypatch, tmp_path):
 def test_create_refuses_existing(monkeypatch, tmp_path):
     _patch_repo_skills(monkeypatch)
     calls = _stub_launch(monkeypatch)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
 
@@ -668,14 +668,14 @@ def test_create_invalid_names(monkeypatch, tmp_path):
         assert result.exit_code == 1, bad
         payload = json.loads(result.stdout)
         assert payload["error_type"] == "skills_invalid_name", bad
-    assert not (tmp_path / ".pi" / "skills").exists()
+    assert not (tmp_path / ".perk" / "skills").exists()
 
 
 def test_create_refuses_existing_dry_run(monkeypatch, tmp_path):
     # The existence-refusal runs on every path, including --dry-run.
     _patch_repo_skills(monkeypatch)
     calls = _stub_launch(monkeypatch)
-    target = tmp_path / ".pi" / "skills" / "foo"
+    target = tmp_path / ".perk" / "skills" / "foo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("preexisting", encoding="utf-8")
 
@@ -703,7 +703,7 @@ def _stub_refine_launch(monkeypatch):
 
 
 def _write_skill(tmp_path: Path, name: str = "foo", body: str = "existing") -> Path:
-    target = tmp_path / ".pi" / "skills" / name
+    target = tmp_path / ".perk" / "skills" / name
     target.mkdir(parents=True)
     skill_md = target / "SKILL.md"
     skill_md.write_text(body, encoding="utf-8")
@@ -723,7 +723,7 @@ def test_refine_dry_run_does_not_launch(monkeypatch, tmp_path):
         "success": True,
         "error_type": None,
         "name": "foo",
-        "path": ".pi/skills/foo",
+        "path": ".perk/skills/foo",
         "dry_run": True,
     }
     assert calls == []

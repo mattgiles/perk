@@ -227,9 +227,9 @@ skill = "house-style"
 mode = "nudge"
 ```
 
-### Repo-authored skills (`.pi/skills/`)
+### Repo-authored skills (`.perk/skills/`)
 
-A repo can author its own skills under `.pi/skills/<name>/SKILL.md` (frontmatter `name` matching the
+A repo can author its own skills under `.perk/skills/<name>/SKILL.md` (frontmatter `name` matching the
 directory + a `description`). `perk init` / `perk doctor --fix` render a managed skills-CLI manifest
 fragment `.agents/manifest.d/perk-repo-skills.yaml` under a source pointing at the repo's own GitHub
 origin + default branch — `.agents/manifest.yaml` is never touched.
