@@ -284,6 +284,12 @@ frontmatter block with `name` matching the directory and a `description`). `perk
 origin + default branch). perk **never** edits `.agents/manifest.yaml` — only its own `.d/`
 fragment.
 
+The authoring lifecycle is driven by the `perk skills` verbs: **`scaffold NAME`** writes a stub
+`SKILL.md` and reconverges the fragment; **`create NAME`** scaffolds and launches a write-capable
+authoring session; **`refine NAME`** re-opens an existing skill (skipping sync); **`delete NAME`**
+removes it and reconverges. See [How to author a repo-specific skill](../how-to/author-a-repo-skill.md)
+for the full recipe.
+
 Because the source resolves your skill from your repo's **default branch**, a freshly-added skill
 must be **committed and pushed** before the skills CLI can deliver it:
 

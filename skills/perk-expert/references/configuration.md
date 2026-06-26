@@ -234,6 +234,10 @@ directory + a `description`). `perk init` / `perk doctor --fix` render a managed
 fragment `.agents/manifest.d/perk-repo-skills.yaml` under a source pointing at the repo's own GitHub
 origin + default branch — `.agents/manifest.yaml` is never touched.
 
+The `perk skills` verbs drive the authoring lifecycle: `scaffold NAME` writes a stub `SKILL.md` and
+reconverges the fragment; `create NAME` scaffolds and launches a write-capable authoring session;
+`refine NAME` re-opens an existing skill (skipping sync); `delete NAME` removes it and reconverges.
+
 Since the source resolves from the **default branch**, a new skill must be **committed + pushed**,
 then `perk init` (or `perk doctor --fix`) re-run, before the skills CLI delivers it. `init` reports
 a malformed SKILL.md / name collision / uncommitted skill as a **non-fatal warning** (exit 0);

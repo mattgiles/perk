@@ -493,6 +493,9 @@ fragment). The `skills` CLI must
 be on `PATH` (and the repo initialized via `perk init`, which runs `skills init`); otherwise the
 verbs surface a clean error.
 
+For the task-oriented lifecycle of the repo-authored verbs (scaffold → author → commit-push-resync →
+refine → delete), see [How to author a repo-specific skill](../how-to/author-a-repo-skill.md).
+
 - **`perk skills list` (alias `ls`)** — list skills discoverable across this repo's sources
   (→ `skills skill list`).
 - **`perk skills status`** — show installed skill link status for this repo (→ `skills status`).

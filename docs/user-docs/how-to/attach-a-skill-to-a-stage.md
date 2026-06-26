@@ -4,7 +4,10 @@ Bind your own installed skill to a stage or command so its guidance is delivered
 that session — either as a new trigger or as an override of one of perk's defaults.
 
 **Prerequisite:** the skill is installed under `.agents/skills/<name>/SKILL.md`. (perk's own
-`perk-*` skills are already installed there.) The `[[bindings]]` row shape is documented in the
+`perk-*` skills are already installed there.) A repo-authored `.pi/skills/<name>` skill qualifies
+too once it is committed + synced — it then lands under `.agents/skills/<name>/` and binds here
+exactly like any installed skill (see [How to author a repo-specific skill](./author-a-repo-skill.md)).
+The `[[bindings]]` row shape is documented in the
 [configuration reference](../reference/configuration.md#bindings).
 
 ## Steps
@@ -71,6 +74,8 @@ which knob controls …".
 
 ## See also
 
+- [How to author a repo-specific skill](./author-a-repo-skill.md) — scaffold and author the
+  `.pi/skills/<name>` skill you then bind here.
 - [Configuration reference — `[[bindings]]`](../reference/configuration.md#bindings) — the row shape
   and overlay semantics.
 - [`perk doctor`](../reference/cli.md#perk-doctor) — validates every binding's skill and target.
