@@ -443,6 +443,59 @@ def _skills_delivery_check(root: Path, self_repo: bool) -> Check:
     return Check("skills-delivery", "skills", "ok", "perk skills delivered via .agents/skills/")
 
 
+def _repo_skills_check(root: Path) -> Check:
+    """The repo-authored-skills manifest-fragment health check (group `skills`, verify-gated).
+
+    Reuses `init.converge_repo_skills_manifest` in dry-run (`apply=False`) — init and doctor share
+    one desired-state SSOT — so it surfaces the same structured diagnostics the fragment
+    convergence produces. Report-only (no `--fix` here; `run_doctor`'s fix path re-runs the
+    gesture with `apply=True`). First match wins:
+
+    (a) structural `errors` (bad SKILL.md / source collision / no GitHub remote) → **`fail`**,
+        consistent with skills-delivery being fail-level;
+    (b) on-disk fragment drift (`changes`, including a stale fragment to prune) → **`fail`**;
+    (c) untracked `warnings` (an uncommitted SKILL.md) → **`warn`**;
+    (d) declared+converged skills → **`ok`**;
+    (e) no repo-authored skills → **`ok`**.
+    """
+    conv = init.converge_repo_skills_manifest(root, apply=False)
+    manifest = conv.manifest
+    if manifest.errors:
+        return Check(
+            "repo-skills",
+            "skills",
+            "fail",
+            "repo-authored skills invalid",
+            "; ".join(manifest.errors),
+            "Fix the SKILL.md / source collision, then re-run 'perk init'.",
+        )
+    if conv.changes:
+        return Check(
+            "repo-skills",
+            "skills",
+            "fail",
+            "repo-skills-manifest drift",
+            "; ".join(conv.changes),
+            "Run 'perk doctor --fix' (or 'perk init').",
+        )
+    if manifest.warnings:
+        return Check(
+            "repo-skills",
+            "skills",
+            "warn",
+            "repo-authored skill(s) not committed",
+            "; ".join(manifest.warnings),
+        )
+    if manifest.skills:
+        return Check(
+            "repo-skills",
+            "skills",
+            "ok",
+            f"{len(manifest.skills)} repo-authored skill(s) declared",
+        )
+    return Check("repo-skills", "skills", "ok", "no repo-authored skills")
+
+
 def _bad_handoffs(workflow_dir: Path) -> list[str]:
     handoff_dir = workflow_dir / "handoff"
     if not handoff_dir.is_dir():

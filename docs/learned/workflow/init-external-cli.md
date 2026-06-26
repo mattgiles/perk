@@ -198,6 +198,40 @@ outdated CLI whose sync links nothing fails loudly instead of silently passing. 
 the skills CLI (under-/over-match of the pre-flight probe) remains possible; the generic post-sync
 net is the backstop.
 
+## Repo-authored skills: a second fragment, a verify-gated gesture (not a ManagedConvergence)
+
+A repo can author its **own** skills under `.pi/skills/<name>/SKILL.md`. perk renders them into a
+**second** skills-CLI manifest fragment, `.agents/manifest.d/perk-repo-skills.yaml`, beside the
+perk-managed `perk.yaml`, under a self-referential GitHub source derived from
+`github.repo_identity` (alias `perk-<repo>`, the repo `url`, its default-branch `ref`). The
+substrate is `repo_skills.build_repo_skills_manifest`; the wiring is
+`repo_skills.converge_repo_skills_manifest(root, *, apply)`.
+
+The load-bearing call: this is **NOT** a `ManagedConvergence`, even though it converges a committed
+fragment. Rendering a *valid* fragment does a GitHub read (`repo_identity`), and managed
+convergences run **unconditionally in offline unit tests** — so a managed convergence here would
+shell `gh` in every `run_init(verify=False)`. Instead it mirrors the **skills-delivery gesture**:
+init/doctor call it **under `verify` only**, right beside `sync_skills`, **before** the sync (so
+the skills CLI sees the declared `.pi/skills/` source). The deciding question repeats the
+init-doctor rule: *does this do network I/O on a valid input?* If yes → verify-gated gesture, never
+a `ManagedConvergence`. **`.agents/manifest.yaml` is never mutated** — only the `.d/` fragment.
+
+Posture split (the resolved grilling): structural errors + untracked warnings are **non-fatal in
+`init`** — it exits 0, keeps converging, and surfaces them on the new **`InitReport.warnings`**
+field (kept separate from `changes` so `changes` stays a pure delta list — the idempotency
+invariant). Only the sync-time remote `missing-skill` stays **fatal** (`skills_sync_failed`). In
+`doctor`, the verify-gated report-only **`repo-skills`** check (group `skills`) is fail-level for
+structural errors (incl. no-GitHub-remote, which the substrate folds into `errors`) **and** drift,
+warn-level for an untracked SKILL.md. `errors-present → never write or remove` keeps a
+previously-good fragment from being clobbered by a transient bad edit.
+
+The sync remediation is the **simplest** possible: no stderr parsing. `sync_skills` takes the
+declared repo-authored skill **names** (`repo_skill_names`), folds them into the existing post-sync
+presence loop (a free backstop for a CLI that exits 0 but skips an unresolvable skill — robust to
+either "non-zero exit" or "exit-0-but-skipped" CLI behavior), and appends **one** repo-aware
+remediation clause to every failure message, gated solely on "are repo-authored skills declared?"
+(a freshly-added `.pi/skills/` skill is unresolvable until committed + pushed to the default branch).
+
 ## Cross-references
 
 - `perk/convergence/init.py` — `PERK_SKILLS`, `_desired_skills_manifest`, `_converge_skills_manifest`,

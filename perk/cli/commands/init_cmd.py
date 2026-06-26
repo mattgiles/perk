@@ -26,6 +26,8 @@ def _render_human(report: InitReport) -> None:
             user_output("Converged before failure:")
             for change in report.changes:
                 user_output(f"  - {change}")
+        for warning in report.warnings:
+            user_output(click.style("⚠️ ", fg="yellow") + warning)
         return
 
     user_output(click.style("✓", fg="green") + f" perk init ({report.mode})")
@@ -44,6 +46,9 @@ def _render_human(report: InitReport) -> None:
             user_output(f"  - {change}")
     else:
         user_output("Already converged (no changes).")
+
+    for warning in report.warnings:
+        user_output(click.style("⚠️ ", fg="yellow") + warning)
 
     if report.github is not None:
         auth = report.github.auth

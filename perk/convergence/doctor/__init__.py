@@ -43,6 +43,7 @@ from perk.convergence.doctor.checks import (
     _managed_checks,
     _providers_check,
     _registry_check,
+    _repo_skills_check,
     _skills_delivery_check,
     _subagent_engine_check,
 )
@@ -99,6 +100,7 @@ __all__ = [
     "_managed_checks",
     "_providers_check",
     "_registry_check",
+    "_repo_skills_check",
     "_runner_checks",
     "_runner_enabled_check",
     "_runner_model_check",
@@ -157,6 +159,9 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
             checks.extend(_linear_checks(root))
         # Verify-gated like env/github: it shells git + validates external-CLI outcomes.
         checks.append(_skills_delivery_check(root, self_repo))
+        # Verify-gated beside skills-delivery: the repo-authored-skills fragment health (a
+        # GitHub read renders a valid fragment, so it cannot run as an offline managed check).
+        checks.append(_repo_skills_check(root))
         # Verify-gated like _skills_delivery_check / github: shells `npm` (a network op).
         checks.append(_extension_install_check(root, self_repo))
     checks.extend(_managed_checks(root, self_repo))
@@ -196,7 +201,19 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
         # tests; a sync that links missing skills clears the `bindings`/`skills-delivery`
         # findings on the post-fix re-verify.
         if verify:
-            sync_error = init.sync_skills(root, fixed, self_repo=self_repo)
+            # Re-converge the repo-authored-skills fragment BEFORE the sync (so the skills CLI
+            # sees the declared `.pi/skills/` source), mirroring init's order. Structural errors
+            # ride loudly on `fix_errors`; the post-fix re-verify re-runs `_repo_skills_check` so
+            # the exit code reflects the post-fix state.
+            conv = init.converge_repo_skills_manifest(root, apply=True)
+            fixed.extend(conv.changes)
+            fix_errors.extend(conv.manifest.errors)
+            sync_error = init.sync_skills(
+                root,
+                fixed,
+                self_repo=self_repo,
+                repo_skill_names=tuple(s.name for s in conv.manifest.skills),
+            )
             if sync_error is not None:
                 fix_errors.append(sync_error)
             # The Linear label repair gesture (verify-gated like sync_skills — network I/O;

@@ -165,6 +165,36 @@ def test_sync_skills_fails_when_delivery_missing(tmp_path, monkeypatch):
     assert "did not deliver" in error and "perk-plan" in error
 
 
+_REPO_HINT = "If a skill under `.pi/skills/` was just added"
+
+
+def test_sync_skills_repo_hint_on_command_failure(tmp_path, monkeypatch):
+    # The repo-aware remediation clause is appended whenever repo_skill_names is non-empty.
+    monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/skills")
+    monkeypatch.setattr(
+        init_mod.subprocess,
+        "run",
+        lambda args, **k: (
+            _Proc(2, "missing-skill: myskill") if args[:2] == ["skills", "update"] else _Proc()
+        ),
+    )
+    error = init_mod.sync_skills(tmp_path, [], repo_skill_names=("myskill",))
+    assert error is not None and _REPO_HINT in error
+    # Generic message (no repo-authored skills) carries no clause.
+    generic = init_mod.sync_skills(tmp_path, [])
+    assert generic is not None and _REPO_HINT not in generic
+
+
+def test_sync_skills_repo_hint_on_delivery_failure(tmp_path, monkeypatch):
+    # A declared repo skill that the sync did not install: presence-loop fold + repo hint.
+    monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/skills")
+    monkeypatch.setattr(init_mod.subprocess, "run", lambda *a, **k: _Proc())
+    _install_perk_skills(tmp_path)  # every MANAGED_SKILL_NAMES present …
+    error = init_mod.sync_skills(tmp_path, [], repo_skill_names=("myskill",))  # … but not myskill
+    assert error is not None
+    assert "did not deliver" in error and "myskill" in error and _REPO_HINT in error
+
+
 # --- env gates (verify=True) -------------------------------------------------
 
 
@@ -201,6 +231,73 @@ def test_sync_failure_is_fatal_and_preserves_changes(git_repo, monkeypatch, stub
     assert report.message == "sync exploded"
     assert report.changes  # convergence already happened and stays recorded
     assert report.github is None and report.handoff is None
+
+
+def _stub_identity(monkeypatch):
+    monkeypatch.setattr(
+        gh_mod,
+        "repo_identity",
+        lambda root: gh_mod.RepoIdentity("acme", "https://github.com/x/acme", "main"),
+    )
+
+
+def _plant_repo_skill(root, dir_name, *, name=None, body_fm=None):
+    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    fm = body_fm or f"---\nname: {name or dir_name}\ndescription: A skill.\n---\n# body\n"
+    skill.write_text(fm, encoding="utf-8")
+    return skill
+
+
+def _commit_all(root):
+    subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=root, check=True, capture_output=True)
+
+
+def test_init_writes_repo_skills_fragment_before_sync(git_repo, monkeypatch, stub_env):
+    # The fragment must exist on disk by the time sync_skills runs (so the CLI sees the source).
+    _plant_repo_skill(git_repo, "alpha")
+    _commit_all(git_repo)
+    _stub_identity(monkeypatch)
+    fragment = git_repo / ".agents" / "manifest.d" / "perk-repo-skills.yaml"
+    seen = {}
+    monkeypatch.setattr(
+        init_mod,
+        "sync_skills",
+        lambda root, changes, **kw: seen.update(
+            exists=fragment.is_file(), names=kw.get("repo_skill_names")
+        ),
+    )
+    report = run_init(git_repo, verify=True)
+    assert report.ok and seen["exists"] is True
+    assert seen["names"] == ("alpha",)
+    assert any("perk-repo-skills.yaml: created" in c for c in report.changes)
+
+
+def test_init_structural_errors_are_nonfatal_warnings(git_repo, monkeypatch, stub_env):
+    # A malformed SKILL.md is a NON-FATAL clear report: init exits 0, errors land on `warnings`.
+    _plant_repo_skill(git_repo, "alpha", body_fm="no frontmatter here\n")
+    _commit_all(git_repo)
+    _stub_identity(monkeypatch)
+    report = run_init(git_repo, verify=True)
+    assert report.ok and report.exit_code == 0
+    assert any("alpha" in w for w in report.warnings)
+
+
+def test_init_untracked_repo_skill_warns(git_repo, monkeypatch, stub_env):
+    # A planted-but-uncommitted skill renders the fragment but warns (exit 0).
+    _plant_repo_skill(git_repo, "alpha")  # NOT committed
+    _stub_identity(monkeypatch)
+    report = run_init(git_repo, verify=True)
+    assert report.ok and report.exit_code == 0
+    assert any("not committed" in w for w in report.warnings)
+
+
+def test_init_no_repo_skills_no_warnings(git_repo, stub_env):
+    # No `.pi/skills/` → no fragment, no warnings, no repo-skills change (idempotency intact).
+    report = run_init(git_repo, verify=True)
+    assert report.ok and report.warnings == []
+    assert not any("perk-repo-skills" in c for c in report.changes)
 
 
 def test_not_a_repo_is_exit_2(tmp_path):

@@ -20,6 +20,7 @@ from perk.convergence import doctor as doctor_mod
 from perk.convergence.doctor import (
     Check,
     DoctorReport,
+    _repo_skills_check,
     _runner_checks,
     _skills_delivery_check,
     report_to_dict,
@@ -875,6 +876,118 @@ def test_skills_delivery_absent_without_verify(git_repo):
     _scaffold(git_repo)
     report = run_doctor(git_repo, verify=False)
     assert "skills-delivery" not in {c.name for c in report.checks}
+
+
+# --- repo-authored-skills check ------------------------------------------------------
+
+
+def _repo_check(report):
+    return next(c for c in report.checks if c.name == "repo-skills")
+
+
+def _stub_repo_identity(monkeypatch):
+    monkeypatch.setattr(
+        github,
+        "repo_identity",
+        lambda root: github.RepoIdentity("acme", "https://github.com/x/acme", "main"),
+    )
+
+
+def _plant_repo_skill(root, dir_name, *, fm=None):
+    skill = root / ".pi" / "skills" / dir_name / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text(fm or f"---\nname: {dir_name}\ndescription: A skill.\n---\n# body\n", "utf-8")
+    return skill
+
+
+def test_repo_skills_ok_no_skills(git_repo, stub_env):
+    check = _repo_skills_check(git_repo)
+    assert check.status == "ok" and check.group == "skills"
+    assert check.message == "no repo-authored skills"
+
+
+def test_repo_skills_ok_when_declared_and_converged(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    init.converge_repo_skills_manifest(git_repo, apply=True)  # fragment on disk
+    check = _repo_skills_check(git_repo)
+    assert check.status == "ok" and "1 repo-authored skill" in check.message
+
+
+def test_repo_skills_warn_untracked(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha")  # NOT committed
+    _stub_repo_identity(monkeypatch)
+    init.converge_repo_skills_manifest(git_repo, apply=True)  # fragment rendered despite warning
+    check = _repo_skills_check(git_repo)
+    assert check.status == "warn" and "not committed" in check.message
+
+
+def test_repo_skills_fail_invalid(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha", fm="no frontmatter here\n")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "fail" and "invalid" in check.message
+
+
+def test_repo_skills_fail_no_github_remote(git_repo, monkeypatch, stub_env):
+    _plant_repo_skill(git_repo, "alpha")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+
+    def boom(root):
+        raise github.GitHubError("no remote")
+
+    monkeypatch.setattr(github, "repo_identity", boom)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "fail" and "invalid" in check.message
+
+
+def test_repo_skills_fail_on_drift(git_repo, monkeypatch, stub_env):
+    # Valid skills but no fragment on disk → the convergence reports a "created" delta → drift.
+    _plant_repo_skill(git_repo, "alpha")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    check = _repo_skills_check(git_repo)
+    assert check.status == "fail" and check.message == "repo-skills-manifest drift"
+
+
+def test_repo_skills_absent_without_verify(git_repo):
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert "repo-skills" not in {c.name for c in report.checks}
+
+
+def test_fix_converges_repo_skills_drift(
+    git_repo, monkeypatch, stub_env, converge_skills_workspace
+):
+    # A valid repo skill with no fragment on disk is drift; --fix writes it and the post-fix
+    # re-verify shows the repo-skills check ok.
+    _scaffold(git_repo)
+    converge_skills_workspace(git_repo)
+    _plant_repo_skill(git_repo, "alpha")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert any("perk-repo-skills.yaml: created" in f for f in report.fixed)
+    assert _repo_check(report).status == "ok"
+
+
+def test_fix_repo_skills_errors_land_on_fix_errors(git_repo, monkeypatch, stub_env):
+    # A malformed SKILL.md is loud on fix_errors; the post-fix repo-skills check stays fail.
+    _scaffold(git_repo)
+    _plant_repo_skill(git_repo, "alpha", fm="no frontmatter here\n")
+    subprocess.run(["git", "add", "."], cwd=git_repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=git_repo, check=True, capture_output=True)
+    _stub_repo_identity(monkeypatch)
+    report = run_doctor(git_repo, fix=True, verify=True)
+    assert any("alpha" in e for e in report.fix_errors)
+    assert _repo_check(report).status == "fail"
 
 
 def test_fix_sync_failure_carried_on_fix_errors(git_repo, monkeypatch, stub_env):
