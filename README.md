@@ -1,17 +1,16 @@
 # perk
 
-A Pi-native, plan-oriented engineering workflow — a Python `perk` CLI (the session
+A Pi-native, plan-oriented engineering workflow: a Python `perk` CLI (the session
 *exterior*) plus a TypeScript Pi extension (the session *interior*).
 
-> Start at [`docs/user-docs/`](docs/user-docs/index.md).
+> Inspired by `erk`, formely maintained by the team at [dagster](https://github.com/dagster-io/dagster)
 
-> Originally based on prior art `erk`, by the team at [dagster](https://github.com/dagster-io/dagster)
+perk was built with perk.
 
 ## What perk is
 
-perk implements a plan-oriented engineering workflow (explore read-only → save a plan →
-implement on a branch → submit → land → learn) to [Pi](https://github.com/earendil-works),
-split across **two planes**:
+perk implements a plan-oriented engineering workflow (plan → implement → submit → review →
+address → land → learn) for [Pi](https://github.com/earendil-works), split across **two planes**:
 
 - the **exterior** — a Python `perk` CLI that scaffolds repos, positions worktrees, mints
   run ids, and launches primed `pi` sessions (everything that happens *outside* a session);
@@ -19,10 +18,7 @@ split across **two planes**:
   *inside* a running session.
 
 A language-neutral [`shared/`](shared/) contract (the stage registry + cross-plane specs)
-is the single source both planes read, so the two stay in lockstep without a codegen step.
-
-perk is built to **bootstrap its own development**: each phase leaves perk capable of
-driving the next, and perk's own repo is the first thing it scaffolds.
+is the single source both planes read, hopefully staying in lockstep without codegen.
 
 ## Quickstart
 
@@ -42,8 +38,7 @@ For the guided first run, follow
 
 ## Documentation
 
-The operator-facing docs live under [`docs/user-docs/`](docs/user-docs/index.md), organized as
-the four [Divio](https://docs.divio.com/documentation-system/) quadrants:
+The operator-facing docs live under [`docs/user-docs/`](docs/user-docs/index.md), organized as:
 
 - **[Tutorials](docs/user-docs/tutorials/index.md)** — learning-oriented lessons; start with
   [Get started with perk](docs/user-docs/tutorials/get-started.md).
@@ -85,15 +80,6 @@ just typecheck    # ty + tsc
 just test         # pytest + node:test (the regression gate)
 just ci           # setup + lint + typecheck + test
 ```
-
-After `just setup` (or `just install-cli`), call `perk` directly — no `uv run`. The install is
-**editable**, so a `git pull` reflects Python changes live; re-run `just install-cli` after a
-dependency change. It lands in uv's tool bin (`~/.local/bin`) — if `perk` isn't found, that dir
-is not on your `PATH`; run `uv tool update-shell` (then restart your shell). Remove it with
-`uv tool uninstall perk`.
-
-Releasing perk → see [docs/releasing.md](docs/releasing.md) (version SSOT, dual-plane runbook,
-the `validate-release-versions` tag gate).
 
 `just setup` also runs `just hooks` (`prek install`), wiring a [prek](https://prek.j178.dev)
 pre-commit hook that runs `ruff check` on staged Python (config in `prek.toml`; the ruff
