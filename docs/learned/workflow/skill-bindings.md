@@ -68,7 +68,16 @@ through, so binding delivery wired there covers all launches uniformly. But the 
 `stage.id` alone would fire `plan`'s bindings for it. The fix is an explicit
 `binding_trigger: str | None = None` param; only `learn-docs` overrides it (to `command:learn-docs`).
 **Any future "borrows-a-stage" command must set `binding_trigger` or it silently fires the borrowed
-stage's bindings.**
+stage's bindings.** (The write-capable `perk skills create` / `refine` cold doors are later instances
+— they borrow the `save` stage and override `binding_trigger="command:skills-<verb>"`; cross-ref
+`write-capable-cold-doors.md`.)
+
+**Forward-declared bindings land ahead of their door.** A `command:<id>` binding + its
+`DELIVERABLE_COMMAND_TARGETS` entry can be added **before** the door that fires it exists (the
+`command:skills-refine` binding landed in the *create* node, ahead of the refine door). A binding
+with no firing call site is **harmless** — it simply never fires until a door wires the matching
+`binding_trigger`. The lockstep when growing the default set is unchanged (the checklist below already
+documents it).
 
 Two delivery-surface boundaries that held:
 
