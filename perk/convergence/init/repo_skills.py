@@ -295,3 +295,66 @@ def build_repo_skills_manifest(root: Path) -> RepoSkillsManifest:
 
     fragment = render_repo_skills_manifest(source, skills)
     return RepoSkillsManifest(fragment, tuple(skills), (), tuple(warnings))
+
+
+# ---------------------------------------------------------------------------
+# Convergence gesture (the init / doctor --fix wiring)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RepoSkillsConvergence:
+    """The result of converging ``.agents/manifest.d/perk-repo-skills.yaml``.
+
+    ``changes`` lists genuine filesystem deltas (``created``/``updated``/``removed``); it is empty
+    on a converged tree. ``manifest`` is the underlying :func:`build_repo_skills_manifest` result,
+    carrying the structured ``errors``/``warnings``/``skills`` for the init + doctor surfaces.
+    """
+
+    changes: list[str]
+    manifest: RepoSkillsManifest
+
+
+def converge_repo_skills_manifest(root: Path, *, apply: bool = True) -> RepoSkillsConvergence:
+    """Converge the repo-authored-skills manifest fragment (a verify-gated network gesture).
+
+    NOT a ``ManagedConvergence``: rendering a valid fragment does a GitHub read, and managed
+    convergences run unconditionally in offline unit tests. So this mirrors the *skills-delivery*
+    gesture instead — ``init`` / ``doctor --fix`` call it under ``verify`` only. Idempotent:
+    ``apply=True``/``False`` compute the same change list. **Never touches**
+    ``.agents/manifest.yaml`` — only the ``.d/`` fragment.
+
+    Three branches on :func:`build_repo_skills_manifest`'s result:
+
+    - **valid skills** (``fragment is not None``): write on a byte-difference (``apply``); a change
+      line ``"<path>: created|updated"`` only on a real delta.
+    - **no skills, no errors** (``fragment is None`` and no ``errors``): remove a stale fragment if
+      present (``apply``); a ``"<path>: removed"`` change line only when it existed. (Absent
+      ``.pi/skills/`` → no fragment; this also prunes a fragment left behind after the last skill
+      was deleted.)
+    - **errors present** (``fragment is None`` and ``errors``): **never** write or remove — a
+      transient bad edit must not clobber a previously-good fragment. The errors ride on
+      ``manifest.errors`` for the caller to surface.
+    """
+    manifest = build_repo_skills_manifest(root)
+    path = root / PERK_SKILLS_MANIFEST_DIR / REPO_SKILLS_MANIFEST_FILENAME
+    if manifest.fragment is not None:
+        current = path.read_text(encoding="utf-8") if path.is_file() else None
+        if current == manifest.fragment:
+            return RepoSkillsConvergence([], manifest)
+        if apply:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(manifest.fragment, encoding="utf-8")
+        verb = "created" if current is None else "updated"
+        return RepoSkillsConvergence(
+            [f"{PERK_SKILLS_MANIFEST_DIR}/{REPO_SKILLS_MANIFEST_FILENAME}: {verb}"], manifest
+        )
+    if manifest.errors:
+        return RepoSkillsConvergence([], manifest)
+    if path.is_file():
+        if apply:
+            path.unlink()
+        return RepoSkillsConvergence(
+            [f"{PERK_SKILLS_MANIFEST_DIR}/{REPO_SKILLS_MANIFEST_FILENAME}: removed"], manifest
+        )
+    return RepoSkillsConvergence([], manifest)

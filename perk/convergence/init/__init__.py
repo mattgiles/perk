@@ -47,6 +47,12 @@ from perk.convergence.init.extension_install import (
     installed_perk_version,
     materialize_extension_install,
 )
+from perk.convergence.init.repo_skills import (
+    RepoSkillsConvergence,
+    RepoSkillsManifest,
+    build_repo_skills_manifest,
+    converge_repo_skills_manifest,
+)
 from perk.convergence.init.report import (
     GitHubReport,
     InitReport,
@@ -133,6 +139,8 @@ __all__ = [
     "InitReport",
     "LinearReport",
     "ManagedConvergence",
+    "RepoSkillsConvergence",
+    "RepoSkillsManifest",
     "SkillSource",
     "_ProviderChanges",
     "_agents_inner",
@@ -161,10 +169,12 @@ __all__ = [
     "_skills_conflict_message",
     "_sync_failure",
     "_write_post_init",
+    "build_repo_skills_manifest",
     "consumer_git_clone_root",
     "consumer_npm_install_root",
     "consumer_perk_package_dir",
     "converge_config",
+    "converge_repo_skills_manifest",
     "ensure_extension_install_present",
     "extension_install_status",
     "git",
@@ -350,8 +360,20 @@ def run_init(
     # Gated on `verify`: the external `skills` shells run on real inits but not in unit tests.
     # Load-bearing: a sync failure is fatal (exit 2) — but convergence already happened,
     # so the failed report preserves `changes` (not `env_failure`, which zeroes them).
+    warnings: list[str] = []
     if verify:
-        sync_error = sync_skills(root, changes, self_repo=self_repo)
+        # Converge the repo-authored-skills manifest fragment BEFORE the sync so the skills CLI
+        # sees the declared `.pi/skills/` source. A verify-gated network gesture (not a
+        # ManagedConvergence): structural errors are NON-FATAL here (init exits 0 and keeps
+        # converging) and flow onto `InitReport.warnings`; only the sync-time remote
+        # `missing-skill` stays fatal. Never touches `.agents/manifest.yaml`.
+        conv = converge_repo_skills_manifest(root, apply=True)
+        changes.extend(conv.changes)
+        warnings.extend((*conv.manifest.warnings, *conv.manifest.errors))
+        repo_skill_names = tuple(s.name for s in conv.manifest.skills)
+        sync_error = sync_skills(
+            root, changes, self_repo=self_repo, repo_skill_names=repo_skill_names
+        )
         if sync_error is not None:
             return InitReport(
                 ok=False,
@@ -362,6 +384,7 @@ def run_init(
                 handoff=None,
                 error_type="skills_sync_failed",
                 message=sync_error,
+                warnings=warnings,
             )
         # Forward-reconcile perk's own @mgiles/perk npm install (install-if-absent /
         # reinstall-if-version-mismatch). Best-effort + non-fatal: a network op (verify-gated),
@@ -395,6 +418,7 @@ def run_init(
         handoff=handoff,
         capabilities=managed,
         linear=linear_report,
+        warnings=warnings,
     )
 
 

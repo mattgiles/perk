@@ -280,3 +280,93 @@ def test_repo_identity_missing_default_branch_raises(monkeypatch):
     )
     with pytest.raises(GitHubError):
         github.repo_identity(Path("/x"))
+
+
+# ---------------------------------------------------------------------------
+# Convergence gesture: converge_repo_skills_manifest
+# ---------------------------------------------------------------------------
+
+_FRAGMENT_REL = f".agents/manifest.d/{rs.REPO_SKILLS_MANIFEST_FILENAME}"
+
+
+def _fragment_path(root: Path) -> Path:
+    return root / ".agents" / "manifest.d" / rs.REPO_SKILLS_MANIFEST_FILENAME
+
+
+def test_converge_creates_fragment(git_repo, monkeypatch):
+    root = git_repo
+    _plant_skill(root, "alpha")
+    _commit(root, ".pi")
+    _stub_identity(monkeypatch)
+    conv = rs.converge_repo_skills_manifest(root, apply=True)
+    assert conv.changes == [f"{_FRAGMENT_REL}: created"]
+    assert _fragment_path(root).read_text(encoding="utf-8") == conv.manifest.fragment
+
+
+def test_converge_updates_fragment(git_repo, monkeypatch):
+    root = git_repo
+    _plant_skill(root, "alpha")
+    _commit(root, ".pi")
+    _stub_identity(monkeypatch)
+    path = _fragment_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# stale\n", encoding="utf-8")
+    conv = rs.converge_repo_skills_manifest(root, apply=True)
+    assert conv.changes == [f"{_FRAGMENT_REL}: updated"]
+    assert path.read_text(encoding="utf-8") == conv.manifest.fragment
+
+
+def test_converge_removes_stale_fragment(git_repo, monkeypatch):
+    # No `.pi/skills/` at all, but a leftover fragment from a since-deleted skill.
+    root = git_repo
+    path = _fragment_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# leftover\n", encoding="utf-8")
+    calls: list = []
+    _stub_identity(monkeypatch, calls=calls)
+    conv = rs.converge_repo_skills_manifest(root, apply=True)
+    assert conv.changes == [f"{_FRAGMENT_REL}: removed"]
+    assert not path.exists()
+    assert calls == []  # no skills → no network
+
+
+def test_converge_no_skills_no_fragment_is_noop(git_repo, monkeypatch):
+    root = git_repo
+    _stub_identity(monkeypatch)
+    conv = rs.converge_repo_skills_manifest(root, apply=True)
+    assert conv.changes == []
+    assert not _fragment_path(root).exists()
+
+
+def test_converge_errors_do_not_clobber_existing_fragment(git_repo, monkeypatch):
+    root = git_repo
+    # A previously-good fragment on disk.
+    path = _fragment_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("# previously good\n", encoding="utf-8")
+    # A bad SKILL.md (no frontmatter) makes the manifest fatal → fragment is None + errors.
+    skill = root / ".pi" / "skills" / "alpha" / "SKILL.md"
+    skill.parent.mkdir(parents=True, exist_ok=True)
+    skill.write_text("no frontmatter\n", encoding="utf-8")
+    _commit(root, ".pi")
+    _stub_identity(monkeypatch)
+    conv = rs.converge_repo_skills_manifest(root, apply=True)
+    assert conv.changes == []
+    assert conv.manifest.errors
+    assert path.read_text(encoding="utf-8") == "# previously good\n"  # untouched
+
+
+def test_converge_idempotent_and_dry_run_matches(git_repo, monkeypatch):
+    root = git_repo
+    _plant_skill(root, "alpha")
+    _commit(root, ".pi")
+    _stub_identity(monkeypatch)
+    # apply=False computes the same change list without writing.
+    dry = rs.converge_repo_skills_manifest(root, apply=False)
+    assert dry.changes == [f"{_FRAGMENT_REL}: created"]
+    assert not _fragment_path(root).exists()
+    # First apply writes; second apply is a no-op (idempotent).
+    first = rs.converge_repo_skills_manifest(root, apply=True)
+    assert first.changes == [f"{_FRAGMENT_REL}: created"]
+    second = rs.converge_repo_skills_manifest(root, apply=True)
+    assert second.changes == []

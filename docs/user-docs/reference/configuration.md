@@ -275,6 +275,29 @@ skill = "house-style"
 mode = "nudge"
 ```
 
+### Repo-authored skills (`.pi/skills/`)
+
+A repo can author its **own** skills. Put each under `.pi/skills/<name>/SKILL.md` (a YAML
+frontmatter block with `name` matching the directory and a `description`). `perk init` and
+`perk doctor --fix` discover them and render a managed skills-CLI manifest fragment at
+`.agents/manifest.d/perk-repo-skills.yaml` under a source pointing at **your repo** (its GitHub
+origin + default branch). perk **never** edits `.agents/manifest.yaml` — only its own `.d/`
+fragment.
+
+Because the source resolves your skill from your repo's **default branch**, a freshly-added skill
+must be **committed and pushed** before the skills CLI can deliver it:
+
+1. Add `.pi/skills/<name>/SKILL.md`.
+2. Commit + push it to your default branch.
+3. Re-run `perk init` (or `perk doctor --fix`).
+
+`perk init` is forgiving here: a malformed `SKILL.md`, a name/source collision, or an uncommitted
+skill is reported as a **non-fatal warning** (init still exits 0 and converges everything else).
+[`perk doctor`](./cli.md#perk-doctor) surfaces the same diagnostics as a **`repo-skills`** check
+(`fail` on an invalid SKILL.md / no GitHub remote / fragment drift; `warn` on an uncommitted
+skill). The only fatal case is the skills CLI failing to resolve a declared skill at sync time —
+which the commit-push-resync sequence above fixes.
+
 ## A note on value types
 
 The TypeScript config reader consumes **string leaf values only**, so `[trust] ci` and

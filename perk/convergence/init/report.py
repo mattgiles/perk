@@ -1,6 +1,6 @@
 """Init-time report dataclasses + the ``--json`` serialization."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from perk.backends import linear
 from perk.convergence.env import EnvCheck
@@ -51,6 +51,10 @@ class InitReport:
     error_type: str | None = None
     message: str | None = None
     linear: LinearReport | None = None
+    # Non-fatal clear-report lines (e.g. repo-authored-skills structural errors / untracked
+    # warnings). Kept separate from `changes` so `changes` stays a pure delta list (the
+    # idempotency invariant: a converged re-run reports no changes).
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
@@ -116,6 +120,7 @@ def report_to_dict(report: InitReport) -> dict[str, object]:
         "linear": _linear_to_dict(report.linear),
         "capabilities": list(report.capabilities),
         "changes": report.changes,
+        "warnings": report.warnings,
         "handoff": report.handoff,
     }
 

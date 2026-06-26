@@ -1694,6 +1694,9 @@ already happened before the sync); `skills_conflict` short-circuits before any c
                         missing_state_types[], states_error } | null },  # null unless auth_ok && team_ok; non-fatal
   capabilities: string[],                                  # the managed inventory (perk/convergence/capabilities.py)
   changes: string[],                                       # converged/seeded pieces ([] ⇒ already converged)
+  warnings: string[],                                      # non-fatal clear-report lines (e.g. repo-authored-skills
+                                                          #   structural errors / untracked SKILL.md); kept separate
+                                                          #   from `changes` so `changes` stays a pure delta list
   handoff: string|null }                                   # path to the post-init markdown on-ramp
 ```
 
@@ -1750,7 +1753,8 @@ labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal �
 check; `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
-fail-level `skills-delivery` substrate check — §8.9) · `bindings` / `providers` (rolled-up
+fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-skills fragment check
+— §8.9) · `bindings` / `providers` (rolled-up
 non-fatal config checks — §8.9/§8.10) · `issues` (the fail-level `[issues]` selection check:
 linear requires a committed `team` — §8.21) · `state` (the `.pi/workflow/` cache layout +
 handoff-blob integrity). Managed-piece checks are filtered by `capabilities.applicable(self_repo)`; infra checks
@@ -2027,6 +2031,37 @@ dangling-pointer warning, which stays a last-resort signal).
   `DoctorReport.fix_errors` (rendered loudly; `fix_errors` in the `--json` report — §8.6); the
   post-fix re-verify keeps the failing `skills-delivery` check so the exit code reflects the
   still-broken state.
+
+**Repo-authored skills (the `.pi/skills/` → manifest-fragment convergence).** A repo may author
+its **own** skills under `.pi/skills/<name>/SKILL.md`; perk renders them into a second skills-CLI
+manifest fragment `.agents/manifest.d/perk-repo-skills.yaml` (beside the perk-managed `perk.yaml`),
+under a self-referential GitHub source derived from the repo's identity (`github.repo_identity` →
+`perk-<repo>` alias, `url`, default-branch `ref`). The substrate is
+`repo_skills.build_repo_skills_manifest`; the wiring is a **verify-gated convergence gesture**
+`converge_repo_skills_manifest(root, *, apply)` — **not** a `ManagedConvergence` (rendering a valid
+fragment does a GitHub read, and managed convergences run unconditionally in offline unit tests), so
+it runs beside `sync_skills` under `verify` only. **`.agents/manifest.yaml` is never mutated.**
+
+- **Convergence:** valid skills → write the fragment on a byte-difference (`<path>: created|updated`
+  only on a real delta); no skills + no errors → remove a stale fragment (`<path>: removed`);
+  errors present → **never** write or remove (a transient bad edit never clobbers a previously-good
+  fragment). Idempotent (`apply=True/False` compute the same change list).
+- **`perk init` posture:** the fragment is converged **before** `sync_skills` (so the skills CLI
+  sees the declared source). Structural errors + untracked warnings are **non-fatal** — `init`
+  exits 0 and keeps converging, surfacing them on the new **`InitReport.warnings`** field (§8.5).
+  Only the sync-time remote `missing-skill` stays fatal (`skills_sync_failed`, exit 2).
+- **`doctor` check:** a verify-gated **`repo-skills`** check (group `skills`, report-only, beside
+  `skills-delivery`). First match wins: structural `errors` (bad SKILL.md / source-alias collision /
+  no GitHub remote) → **`fail`**; on-disk fragment drift (incl. a stale fragment to prune) →
+  **`fail`**; untracked SKILL.md → **`warn`**; declared+converged → **`ok`**; no repo-authored
+  skills → **`ok`**.
+- **`doctor --fix`:** re-converges the fragment (`apply=True`) **before** the sync; structural
+  errors ride loudly on `DoctorReport.fix_errors`; the post-fix re-verify re-runs `repo-skills`.
+- **Repo-aware sync remediation:** `sync_skills` takes the declared repo-authored skill **names**
+  (`repo_skill_names`). They are folded into the post-sync presence loop (a free backstop for a CLI
+  that exits 0 but skips an unresolvable skill) and gate one appended remediation clause on every
+  failure message — "commit + push the new `.pi/skills/` skill to your default branch, then re-run"
+  — emitted **only when** repo-authored skills are declared (no per-skill stderr parsing).
 
 ## §8.10 · Provider selection (the supported-set registry + the `[providers]` selection)
 

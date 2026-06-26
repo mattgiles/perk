@@ -163,15 +163,38 @@ def _skill_link_state(root: Path) -> dict[str, str]:
     return state
 
 
-def _sync_failure(command: str, reason: str) -> str:
+def _repo_authored_hint(repo_skill_names: tuple[str, ...]) -> str:
+    """The repo-authored remediation clause appended to every skills-sync failure message.
+
+    Returns ``""`` unless repo-authored skills are declared (gated solely on "are there any?",
+    no per-skill stderr matching). A freshly-declared `.pi/skills/` skill is unresolvable until
+    it is committed + pushed to the repo's default branch — the most common first-appearance
+    cause of a skills-sync failure once repo-authored skills exist.
+    """
+    if not repo_skill_names:
+        return ""
+    return (
+        "\nIf a skill under `.pi/skills/` was just added, commit + push it to your repo's "
+        "default branch, then re-run `perk init` (or `perk doctor --fix`)."
+    )
+
+
+def _sync_failure(command: str, reason: str, repo_skill_names: tuple[str, ...] = ()) -> str:
     return (
         f"skills delivery failed: `{command}` {reason}\n"
         "perk's skills reach sessions only through the `skills` CLI-managed `.agents/skills/`;\n"
         "fix the failure above, then re-run `perk init` (or `perk doctor --fix`)."
+        f"{_repo_authored_hint(repo_skill_names)}"
     )
 
 
-def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> str | None:
+def sync_skills(
+    root: Path,
+    changes: list[str],
+    *,
+    self_repo: bool = False,
+    repo_skill_names: tuple[str, ...] = (),
+) -> str | None:
     """Materialize the declared skills via the skills CLI (both self-repo and consumer trees).
 
     The ``skills`` CLI is the single delivery path for perk's own skills: the ``..``/``git:`` Pi
@@ -188,12 +211,18 @@ def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> s
     (no-op once initialized); ``skills update --sync`` enforces the declared state by (re)linking
     ``.agents/skills/*``. A ``changes`` entry is appended only when the link set actually changes,
     so a converged repo reports no churn.
+
+    ``repo_skill_names`` are the declared repo-authored skill names (from
+    ``converge_repo_skills_manifest``). They are folded into the post-sync presence loop (a free
+    backstop for a CLI that exits 0 but skips an unresolvable skill) and gate a single repo-aware
+    remediation clause appended to every failure message (commit + push the new skill).
     """
     # Defense in depth — env gating already fails exit 2 before this on verified runs.
     if shutil.which("skills") is None:
         return (
             "skills delivery failed: the `skills` CLI is not on PATH — "
             "install it, then re-run `perk init`."
+            f"{_repo_authored_hint(repo_skill_names)}"
         )
     before = _skill_link_state(root)
     for command, timeout in (("skills init --cache=local", 30), ("skills update --sync", 180)):
@@ -207,21 +236,22 @@ def sync_skills(root: Path, changes: list[str], *, self_repo: bool = False) -> s
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            return _sync_failure(command, f"timed out after {timeout}s")
+            return _sync_failure(command, f"timed out after {timeout}s", repo_skill_names)
         except OSError as exc:
-            return _sync_failure(command, f"could not run: {exc}")
+            return _sync_failure(command, f"could not run: {exc}", repo_skill_names)
         if proc.returncode != 0:
             stderr = "\n".join((proc.stderr or "").strip().splitlines()[:5]) or "(no stderr)"
-            return _sync_failure(command, f"exited {proc.returncode}:\n{stderr}")
+            return _sync_failure(command, f"exited {proc.returncode}:\n{stderr}", repo_skill_names)
     missing = [
         name
-        for name in MANAGED_SKILL_NAMES
+        for name in (*MANAGED_SKILL_NAMES, *repo_skill_names)
         if not bindings.is_skill_installed(root, name, self_repo=self_repo)
     ]
     if missing:
         return (
             f"skills sync completed but did not deliver: {', '.join(missing)}\n"
             "the installed `skills` CLI may be outdated — upgrade it, then re-run `perk init`."
+            f"{_repo_authored_hint(repo_skill_names)}"
         )
     if _skill_link_state(root) != before:
         changes.append(".agents/skills/: synchronized via skills update --sync")

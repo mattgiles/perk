@@ -227,6 +227,19 @@ skill = "house-style"
 mode = "nudge"
 ```
 
+### Repo-authored skills (`.pi/skills/`)
+
+A repo can author its own skills under `.pi/skills/<name>/SKILL.md` (frontmatter `name` matching the
+directory + a `description`). `perk init` / `perk doctor --fix` render a managed skills-CLI manifest
+fragment `.agents/manifest.d/perk-repo-skills.yaml` under a source pointing at the repo's own GitHub
+origin + default branch — `.agents/manifest.yaml` is never touched.
+
+Since the source resolves from the **default branch**, a new skill must be **committed + pushed**,
+then `perk init` (or `perk doctor --fix`) re-run, before the skills CLI delivers it. `init` reports
+a malformed SKILL.md / name collision / uncommitted skill as a **non-fatal warning** (exit 0);
+`perk doctor`'s **`repo-skills`** check is `fail` on invalid SKILL.md / no GitHub remote / fragment
+drift and `warn` on an uncommitted skill.
+
 ---
 
 *Canonical source: `docs/user-docs/reference/configuration.md`.*
