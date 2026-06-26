@@ -515,6 +515,14 @@ verbs surface a clean error.
   the heavy all-sources sync. `--json` emits a stable report. (The freshly-scaffolded skill is
   uncommitted, so the reconverge surfaces a non-fatal "not committed — commit it" warning; that is
   expected.)
+- **`perk skills create NAME`** — a write-capable authoring cold door: pre-scaffolds
+  `.pi/skills/NAME/SKILL.md` in the **main checkout** (the same write as `scaffold`), then launches a
+  session seeded to author the skill (following the `perk-skill-author` skill). Refuses if
+  `.pi/skills/NAME/` already exists, pointing at `perk skills refine NAME`. The authoring scope
+  (`.pi/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope** in the seed
+  prompt, not a structural sandbox; committing is left to you. `--dry-run` prints the seed + intended
+  path and scaffolds/launches nothing (the existence-refusal still runs). `--json` emits a stable
+  report. Trailing args after `NAME` pass through to `pi`.
 - **`perk skills delete NAME --yes`** — remove a repo-authored skill (`.pi/skills/NAME/`) in the
   **main checkout** and reconverge the fragment (skipping the heavy all-sources sync). Without
   `--yes` it prompts interactively when a TTY is present; under `--json`/non-interactive it refuses

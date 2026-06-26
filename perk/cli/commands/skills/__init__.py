@@ -9,6 +9,7 @@ import click
 
 from perk.cli.alias import AliasGroup, alias, register_with_aliases
 from perk.cli.commands.skills.add_cmd import add_skill
+from perk.cli.commands.skills.create_cmd import create_skill
 from perk.cli.commands.skills.delete_cmd import delete_skill
 from perk.cli.commands.skills.list_cmd import list_skills
 from perk.cli.commands.skills.rm_cmd import remove_skill
@@ -28,5 +29,6 @@ register_with_aliases(skills_group, status_skills)
 register_with_aliases(skills_group, add_skill)
 register_with_aliases(skills_group, remove_skill)
 register_with_aliases(skills_group, scaffold_skill)
+register_with_aliases(skills_group, create_skill)
 register_with_aliases(skills_group, delete_skill)
 register_with_aliases(skills_group, sync_skills_cmd)

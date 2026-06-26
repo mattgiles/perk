@@ -38,11 +38,22 @@ MODES: tuple[str, ...] = ("nudge", "transclude")
 # A `command:<id>` outside this set has no delivery surface, so the binding can never fire — the
 # only deliverable command triggers are the Mechanism-B call sites (`bindingSuffix` in
 # extension/factories/objectivePlan.ts + extension/doors/learnDocs.ts +
-# extension/doors/prReview.ts) plus the cold
-# `binding_trigger="command:learn-docs"` override in perk/run/launch/. Commands that ARE registry
-# stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are deliberately excluded here.
+# extension/doors/prReview.ts) plus the cold `binding_trigger=` overrides in perk/cli/commands/:
+# `command:learn-docs` (learn/docs_cmd.py) and `command:skills-create` (skills/create_cmd.py).
+# `command:skills-refine` is forward-declared for the `perk skills refine` cold door (not yet
+# built); its binding simply never fires until that door wires the matching `binding_trigger`
+# override.
+# Commands that ARE registry stages bind via `stage:<id>` (the kind-selection rule, §8.9) and are
+# deliberately excluded here.
 DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
-    {"objective-reconcile", "objective-replan", "learn-docs", "pr-review"}
+    {
+        "objective-reconcile",
+        "objective-replan",
+        "learn-docs",
+        "pr-review",
+        "skills-create",
+        "skills-refine",
+    }
 )
 
 # Where an installed skill body lives. The `skills` CLI delivers every `perk-*` skill into
