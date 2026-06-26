@@ -19,8 +19,8 @@ labels, identifiers, doctor groups, maturity) is the
 
 ## Steps
 
-1. **Set the `[issues]` table** in `.pi/perk.toml`. This is **committed-only** — a
-   `.pi/perk.local.toml` value is ignored, so the canonical store stays deterministic for the whole
+1. **Set the `[issues]` table** in `.perk/config.toml`. This is **committed-only** — a
+   `.perk/local.toml` value is ignored, so the canonical store stays deterministic for the whole
    repo.
 
    ```toml
@@ -38,16 +38,16 @@ labels, identifiers, doctor groups, maturity) is the
    export LINEAR_API_KEY=lin_api_…
    ```
 
-   or set it in the **gitignored** `.pi/perk.local.toml` (never the committed `.pi/perk.toml`):
+   or set it in the **gitignored** `.perk/local.toml` (never the committed `.perk/config.toml`):
 
    ```toml
    [linear]
    api_key = "lin_api_…"
    ```
 
-   An exported env var wins over the config. Setting it in `perk.local.toml` also feeds the
+   An exported env var wins over the config. Setting it in `local.toml` also feeds the
    in-session `linear_*` tools (perk seeds the launched session's environment with the key). perk
-   reads this from the **main checkout's** `.pi/perk.local.toml` even when a command runs inside a
+   reads this from the **main checkout's** `.perk/local.toml` even when a command runs inside a
    linked worktree (the gitignored file is never copied into worktrees), so a single entry in the
    main checkout authenticates every worktree session and cold-door (`/submit`, `/land`, …).
 
@@ -94,7 +94,7 @@ personal API key), not as a Linear Agent — full Agent integration is a separat
 
 ## Switching back
 
-Set `backend = "github"` (and drop `team`) in `.pi/perk.toml`, then run `perk init` — convergence is
+Set `backend = "github"` (and drop `team`) in `.perk/config.toml`, then run `perk init` — convergence is
 two-directional, so the `npm:pi-mono-linear` package is removed when Linear is deselected.
 
 ## See also

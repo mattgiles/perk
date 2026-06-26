@@ -80,7 +80,7 @@ perk init
 ```
 
 `perk init` scaffolds perk's Pi wiring (`.pi/settings.json` and the `.pi/workflow/` cache),
-writes managed blocks into `.gitignore` and `AGENTS.md`, and drops a `.pi/perk.toml` config
+writes managed blocks into `.gitignore` and `AGENTS.md`, and drops a `.perk/config.toml` config
 (with the `[[ci]]` checks block **commented out** by default). It is idempotent — re-running it
 on an already-wired repo is a no-op.
 

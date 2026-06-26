@@ -29,7 +29,7 @@ The `[[bindings]]` row shape is documented in the
    - `transclude` inlines the full `SKILL.md` body into the prompt (heavier context, but guaranteed
      present). Pick it to force the body in.
 
-3. **Add a `[[bindings]]` row** to `.pi/perk.toml` for a new trigger. A row at a trigger perk does
+3. **Add a `[[bindings]]` row** to `.perk/config.toml` for a new trigger. A row at a trigger perk does
    not already bind is **appended**. Example — attach your skill to the `submit` stage (which has no
    default binding):
 
@@ -57,7 +57,7 @@ The `[[bindings]]` row shape is documented in the
 
 ## Per-user variant (optional)
 
-Put the rows in `.pi/perk.local.toml` instead to keep them off the committed config. Note: a local
+Put the rows in `.perk/local.toml` instead to keep them off the committed config. Note: a local
 `[[bindings]]` array **replaces the committed array wholesale** — it is not merged element-wise, so
 include every binding you want active, not just your additions. See the
 [overlay semantics](../reference/configuration.md#local-overrides--overlay-semantics) in the
@@ -67,7 +67,7 @@ configuration reference.
 
 Alongside the workflow `perk-*` skills (which orchestrate individual stages), perk delivers a
 `perk-expert` skill that Pi **auto-discovers by description** — no `[[bindings]]` row needed. It is
-the on-demand expert on configuring and customizing perk (the `.pi/perk.toml` tables, provider
+the on-demand expert on configuring and customizing perk (the `.perk/config.toml` tables, provider
 seams, the issue backend, CI checks, subagent overrides), carrying self-contained references that
 travel into your repo. Pi invokes it when a task matches "how does perk … / how do I configure … /
 which knob controls …".

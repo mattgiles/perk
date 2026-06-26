@@ -1,6 +1,6 @@
 ---
 name: perk-expert
-description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.pi/perk.toml` tables and the local overlay, the five provider seams (plan/todo/askuser/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[[ci]]`), subagent model overrides (`[subagents]`), trust, and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
+description: Expert guidance on how perk works and how to configure and customize it in a repo that uses perk — `.perk/config.toml` tables and the local overlay, the five provider seams (plan/todo/askuser/footer/web), the GitHub vs Linear issue backend, skill bindings (`[[bindings]]`), CI checks (`[[ci]]`), subagent model overrides (`[subagents]`), trust, and worktree/base-branch settings. Use when answering "how does perk … / how do I configure … / which knob controls …" questions about a repo using perk, or when shaping perk's workflow behavior via config.
 references:
   - references/mental-model
   - references/configuration
@@ -13,7 +13,7 @@ references:
 perk is a **plan-oriented workflow on Pi**: work is organized around a written, reviewed plan that
 travels a fixed spine (*objective → plan → save → implement → submit → address → land → learn*). This
 skill is the on-demand expert on **how a repo configures and customizes perk's behavior** — the
-`.pi/perk.toml` surface, provider seams, the issue backend, skill bindings, CI checks, subagent model
+`.perk/config.toml` surface, provider seams, the issue backend, skill bindings, CI checks, subagent model
 overrides, and worktree/base-branch settings. It carries light orientation so a knob can be placed in
 context.
 
@@ -30,7 +30,7 @@ The references describe the **shape** of perk's surface. For the **exact current
 prefer asking perk itself over reciting commands from memory:
 
 - `perk --help` / `perk <group> --help` — the live CLI surface (commands, groups, flags).
-- `perk doctor` — validates `.pi/perk.toml` + `[[bindings]]`, and reports provider/backend
+- `perk doctor` — validates `.perk/config.toml` + `[[bindings]]`, and reports provider/backend
   resolution (`plan=… todo=… askuser=… footer=… web=…`, the issue backend, Linear groups).
 - `perk registry show` — the stage graph (the stages + their doors).
 - In-session warm `/…` commands — the interior surface (e.g. `/plan`, `/submit`, `/ci`); list them
@@ -44,8 +44,8 @@ Use these to confirm details rather than fabricating command/flag specifics.
   planes (Python CLI exterior / TypeScript extension interior); the three state tiers (GitHub
   canonical / `.pi/workflow/` cache / session transient); stages + the warm/cold two-door model; the
   spine. Read first for "how does perk work / what is a stage / a door / a plane" questions.
-- [Configuration](./references/configuration.md) — the `.pi/perk.toml` committed config + the
-  `.pi/perk.local.toml` overlay and its semantics, then every table (`[worktree]`, `[workflow]`,
+- [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
+  `.perk/local.toml` overlay and its semantics, then every table (`[worktree]`, `[workflow]`,
   `[[ci]]`, `[providers]`, `[issues]`, `[linear]`, `[subagents]`, `[trust]`, `[compaction]`,
   `[objective]`, `[[bindings]]`) with key/type/default/notes. Read for "which key / what table /
   what default / how do the two files combine" questions.

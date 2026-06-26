@@ -4,12 +4,12 @@ Declare `[worktree] setup` commands once and have every **freshly created** perk
 in order, before `pi` starts — so a new session begins with a ready environment (dependencies
 installed, codegen done, etc.).
 
-**Prerequisite:** a `.pi/perk.toml` (run [`perk init`](../reference/cli.md#perk-init) once if you
+**Prerequisite:** a `.perk/config.toml` (run [`perk init`](../reference/cli.md#perk-init) once if you
 have not). The `[worktree]` table is written there by default.
 
 ## Steps
 
-1. **Declare the commands.** Add a `setup` array to the `[worktree]` table in `.pi/perk.toml` — an
+1. **Declare the commands.** Add a `setup` array to the `[worktree]` table in `.perk/config.toml` — an
    ordered list of shell command lines:
 
    ```toml
@@ -34,7 +34,7 @@ have not). The `[worktree]` table is written there by default.
    left in place — fix the problem, then re-run the same stage: the existing worktree is reused
    (idempotent) and setup runs again.
 
-4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `perk.local.toml`
+4. **Override per-user (optional).** `[worktree] setup` is overlay-aware: a `local.toml`
    `[worktree] setup` array **replaces** the committed one wholesale (e.g. to point at a personal
    absolute path). It is not merged element-by-element.
 
