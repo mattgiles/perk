@@ -13,16 +13,16 @@ import { test } from "node:test";
 // The path-primitive seams: the only files allowed to carry the perk-owned family literals.
 const ALLOWLIST = ["substrate/paths.ts", "substrate/cache.ts"];
 
-// A `".pi"` segment in `join(...)` path construction (adjacent to a `,`) followed by a still-`.pi`
-// perk-owned follow-segment: the `"workflow"` literal plus the legacy config filename literals
-// (legacy config construction is banned everywhere on this plane — TS reads the `.perk/` target
-// only). Pi-native `.pi` + `npm`/`agents`/`settings.json`/`APPEND_SYSTEM.md` therefore never match.
-const PI_PATTERN = /"\.pi"\s*,\s*("workflow"|"perk\.toml"|"perk\.local\.toml")/;
+// A `".pi"` segment in `join(...)` path construction (adjacent to a `,`) followed by a legacy
+// config filename literal. Legacy config construction is banned on this plane: TS reads the
+// `.perk/` target only. Pi-native `.pi` + `npm`/`agents`/`settings.json`/`APPEND_SYSTEM.md`
+// therefore never match.
+const PI_PATTERN = /"\.pi"\s*,\s*("perk\.toml"|"perk\.local\.toml")/;
 
-// A `".perk"` segment followed by a config follow-segment: the new filename literals or the
-// imported constants (the config family now lives under `.perk/`).
+// A `".perk"` segment followed by a current perk-owned follow-segment: workflow plus the config
+// filename literals or imported constants.
 const PERK_PATTERN =
-  /"\.perk"\s*,\s*("config\.toml"|"local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)/;
+  /"\.perk"\s*,\s*("workflow"|"config\.toml"|"local\.toml"|CONFIG_FILENAME|LOCAL_CONFIG_FILENAME)/;
 
 function matches(line: string): boolean {
   return PI_PATTERN.test(line) || PERK_PATTERN.test(line);
@@ -86,15 +86,15 @@ test("perk-owned config/workflow dot-paths are built only inside their seams", (
     readFileSync(path.join(import.meta.dirname, "substrate", "cache.ts"), "utf8"),
   );
   assert.ok(
-    PI_PATTERN.test(cacheSource),
+    PERK_PATTERN.test(cacheSource),
     "substrate/cache.ts no longer matches the banned pattern — guard is vacuous",
   );
 
   // Per-arm positive asserts on synthetic strings (keeps the config arms honest even though the
   // seam derives them from `configDir`).
-  assert.ok(PI_PATTERN.test('join(cwd, ".pi", "workflow")'));
   assert.ok(PI_PATTERN.test('join(cwd, ".pi", "perk.toml")'));
   assert.ok(PI_PATTERN.test('join(cwd, ".pi", "perk.local.toml")'));
+  assert.ok(PERK_PATTERN.test('join(cwd, ".perk", "workflow")'));
   assert.ok(PERK_PATTERN.test('join(cwd, ".perk", CONFIG_FILENAME)'));
   assert.ok(PERK_PATTERN.test('join(cwd, ".perk", LOCAL_CONFIG_FILENAME)'));
   assert.ok(PERK_PATTERN.test('join(cwd, ".perk", "config.toml")'));
@@ -106,7 +106,8 @@ test("perk-owned config/workflow dot-paths are built only inside their seams", (
   assert.ok(!matches('join(cwd, ".pi", "agents")'));
   assert.ok(!matches('join(cwd, ".pi", "APPEND_SYSTEM.md")'));
   assert.ok(!PI_PATTERN.test('join(cwd, ".pi", CONFIG_FILENAME)'));
-  assert.ok(!PERK_PATTERN.test('join(cwd, ".perk", "workflow")'));
+  assert.ok(!PI_PATTERN.test('join(cwd, ".pi", "workflow")'));
+  assert.ok(!PERK_PATTERN.test('join(cwd, ".perk", "npm")'));
 
   const violations = violationsOf(files);
   assert.deepEqual(

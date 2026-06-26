@@ -72,7 +72,7 @@ class RunObservation:
 
 @dataclass(frozen=True)
 class DispatchRecord:
-    """The durable ``run_id → plan`` linkage persisted under ``.pi/workflow/`` (contracts.md
+    """The durable ``run_id → plan`` linkage persisted under ``.perk/workflow/`` (contracts.md
     §8.13). The supervisor enumerates these to correlate ``run_id ↔ plan ↔ PR``."""
 
     run_id: str  # the perk ULID (canonical correlation key)

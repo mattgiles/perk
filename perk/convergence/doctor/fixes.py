@@ -11,6 +11,7 @@ from perk.backends.linear import client as linear_client
 from perk.convergence import init
 from perk.convergence.doctor.data import Check
 from perk.convergence.doctor.linear_checks import _linear_selected
+from perk.state import cache
 from perk.substrate import git, paths
 from perk.substrate.config import load_committed_issues_team
 
@@ -40,12 +41,13 @@ def _strip_ungrouped_ignore_line(text: str, line: str) -> str:
 def _untrack_materialized_plan_cache(root: Path) -> tuple[list[str], list[str]]:
     """Repair the legacy tracked `cache.plan` body + its stray ungrouped `.gitignore` line.
 
-    `.pi/workflow/plan.md` is a transient materialized cache (contracts.md §8.1) — it must be
-    gitignored (now in the managed block) and never tracked. Early repos committed it and
-    hand-added an ungrouped `/.pi/workflow/plan.md` ignore line *outside* the managed block.
-    This forward-only repair removes the stray line and `git rm --cached`s the file; it is a
-    no-op (returns `([], [])`) once converged, so `--fix` stays idempotent. Returns
-    ``(changes, errors)`` — a failed untrack is reported, never swallowed.
+    `.pi/workflow/plan.md` is a transient materialized cache (contracts.md §8.1) — it was always
+    gitignored and never tracked. Post-move the managed block no longer ignores it (the whole
+    `.perk/workflow/` tree is gitignored instead), so a hand-added ungrouped
+    `/.pi/workflow/plan.md` ignore line is now a fully-legacy stray (no longer a managed
+    duplicate). This forward-only repair removes the stray line and `git rm --cached`s a tracked
+    legacy file; it is a no-op (returns `([], [])`) once converged, so `--fix` stays idempotent.
+    Returns ``(changes, errors)`` — a failed untrack is reported, never swallowed.
     """
     changes: list[str] = []
     errors: list[str] = []
@@ -63,6 +65,47 @@ def _untrack_materialized_plan_cache(root: Path) -> tuple[list[str], list[str]]:
             changes.append(".pi/workflow/plan.md: untracked (transient cache.plan body)")
         except git.GitError as exc:
             errors.append(f"{rel}: untrack failed (git rm --cached): {exc}")
+    return changes, errors
+
+
+def _migrate_legacy_workflow_cache(root: Path) -> tuple[list[str], list[str]]:
+    """Migrate a legacy `.pi/workflow/` cache forward to `.perk/workflow/`.
+
+    The workflow cache root moved from `.pi/workflow/` to `.perk/workflow/`
+    (the `cache.workflow_dir` seam). This forward-only, filesystem-only repair handles only the
+    durable/active remnants (mirrors `_legacy_workflow_check`):
+
+    - a tracked `.pi/workflow/.gitkeep` (the old committed layout sentinel) → `git rm --cached`;
+    - the simple active root mirrors (`plan-ref.json`/`agent-session.json`) → `shutil.move` to
+      `.perk/workflow/` **only when the target is absent** (never clobber a live target).
+
+    Disposable scratch (run dirs, handoff blobs, markers) is **never** merged/moved/deleted — it is
+    gitignored cache the user may delete at leisure (the roadmap's workflow-cache rule). Idempotent
+    (returns `([], [])` once converged). Legacy paths are flat-string literals (exempt from the
+    operator-adjacency `paths` guard). Returns ``(changes, errors)`` — failures land loudly on
+    `fix_errors`, never swallowed.
+    """
+    changes: list[str] = []
+    errors: list[str] = []
+    legacy = root / ".pi/workflow"
+    target = cache.workflow_dir(root)
+    gitkeep_rel = ".pi/workflow/.gitkeep"
+    if git.is_tracked(root, gitkeep_rel):
+        try:
+            git.rm_cached(root, gitkeep_rel)
+            changes.append(f"{gitkeep_rel}: untracked (legacy committed layout sentinel)")
+        except git.GitError as exc:
+            errors.append(f"{gitkeep_rel}: untrack failed (git rm --cached): {exc}")
+    for name in ("plan-ref.json", "agent-session.json"):
+        src = legacy / name
+        dst = target / name
+        if src.is_file() and not dst.exists():
+            try:
+                target.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+                changes.append(f".pi/workflow/{name}: moved to .perk/workflow/{name}")
+            except OSError as exc:
+                errors.append(f".pi/workflow/{name}: migration failed: {exc}")
     return changes, errors
 
 
@@ -206,6 +249,7 @@ def _migrate_legacy_config(root: Path) -> tuple[list[str], list[str]]:
 # returns `(changes, errors)` so failures land loudly on `fix_errors`.
 _MIGRATIONS: tuple[Callable[[Path], tuple[list[str], list[str]]], ...] = (
     _untrack_materialized_plan_cache,
+    _migrate_legacy_workflow_cache,
     _remove_orphaned_git_clone,
     _migrate_legacy_repo_skills,
     _migrate_legacy_config,

@@ -46,7 +46,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert (wt / ".git").exists()  # a real linked worktree
     # plan-ref + handoff materialized into the worktree
     assert cache.read_plan_ref(wt) == _PLAN_REF
-    handoffs = list((wt / ".pi" / "workflow" / "handoff").glob("*.json"))
+    handoffs = list((wt / ".perk" / "workflow" / "handoff").glob("*.json"))
     assert len(handoffs) == 1
     assert execs and execs[0][0] == "pi"
 

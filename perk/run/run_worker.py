@@ -3,7 +3,7 @@
 The CI entrypoint the managed ``perk-run.yml`` workflow invokes after it checks out the plan
 branch. It is the runner's positioning job: reconstruct the ``cache.plan-ref`` from the
 plan's GitHub state, materialize the handoff/plan-ref/plan-body into the checkout's
-``.pi/workflow/``, then spawn the Node headless worker (``extension/workerMain.ts``) for
+``.perk/workflow/``, then spawn the Node headless worker (``extension/workerMain.ts``) for
 the dispatched stage with ``PERK_RUN_ID`` in the env. The worker inherits the prepared worktree and
 never re-mints.
 

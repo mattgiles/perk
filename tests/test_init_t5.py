@@ -22,8 +22,8 @@ def _git_init(path) -> None:
 def test_convergence_writes_handoff_and_capabilities(tmp_path):
     report = run_init(tmp_path, verify=False)
     assert report.ok and report.github is None
-    assert report.handoff == ".pi/workflow/post-init.md"
-    assert (tmp_path / ".pi" / "workflow" / "post-init.md").is_file()
+    assert report.handoff == ".perk/workflow/post-init.md"
+    assert (tmp_path / ".perk" / "workflow" / "post-init.md").is_file()
     assert "settings-wiring" in report.capabilities
 
 
@@ -337,7 +337,7 @@ def test_cli_json_success(tmp_path, stub_env):
         payload = json.loads(result.stdout)
         assert payload["success"] is True and payload["mode"] == "consumer"
         assert payload["github"]["auth"]["ok"] is False  # stubbed unauthed (non-fatal)
-        assert payload["handoff"] == ".pi/workflow/post-init.md"
+        assert payload["handoff"] == ".perk/workflow/post-init.md"
 
 
 def test_cli_json_not_a_repo(tmp_path):

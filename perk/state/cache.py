@@ -1,4 +1,4 @@
-"""``.pi/workflow/`` cache-tier I/O (contracts.md §8.1).
+"""``.perk/workflow/`` cache-tier I/O (contracts.md §8.1).
 
 Free functions over an explicit repo ``root``. **Both
 planes read and write the same files**; the TS twin is ``extension/substrate/cache.ts``. These are
@@ -14,7 +14,7 @@ from typing import Any
 
 from perk.substrate.output import user_output
 
-# The canonical `.pi/workflow/` subtrees (public so `perk doctor` can verify the layout).
+# The canonical `.perk/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
 
 # The land->learn semaphore: `land` sets it, `learn` clears it; while present it
@@ -24,12 +24,12 @@ PENDING_LEARN = "pending-learn"
 
 
 def workflow_dir(root: Path) -> Path:
-    """The ``.pi/workflow/`` directory under ``root``."""
-    return root / ".pi" / "workflow"
+    """The ``.perk/workflow/`` directory under ``root``."""
+    return root / ".perk" / "workflow"
 
 
 def ensure_layout(root: Path) -> Path:
-    """Idempotently create the four ``.pi/workflow/`` subtrees; return the dir."""
+    """Idempotently create the four ``.perk/workflow/`` subtrees; return the dir."""
     wd = workflow_dir(root)
     for sub in SUBDIRS:
         (wd / sub).mkdir(parents=True, exist_ok=True)
@@ -45,7 +45,7 @@ def ensure_layout(root: Path) -> Path:
 
 
 def scratch_dir(root: Path) -> Path:
-    """The ``.pi/workflow/scratch/`` directory under ``root``."""
+    """The ``.perk/workflow/scratch/`` directory under ``root``."""
     return workflow_dir(root) / "scratch"
 
 

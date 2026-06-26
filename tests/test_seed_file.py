@@ -69,7 +69,7 @@ def test_render_scratch_writes_wrapped_data(tmp_path: Path):
     scratch = render_seed_file_scratch(repo, src, "the seed content")
     assert scratch.name.startswith("seed-file-notes-")
     assert "/" not in scratch.name
-    assert scratch.parent == repo / ".pi" / "workflow" / "scratch"
+    assert scratch.parent == repo / ".perk" / "workflow" / "scratch"
     text = scratch.read_text(encoding="utf-8")
     assert "<untrusted_seed_file>" in text and "</untrusted_seed_file>" in text
     assert "the seed content" in text

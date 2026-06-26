@@ -86,7 +86,11 @@ def test_init_converges_and_is_idempotent(tmp_path):
     # via the provider path (object form on a fresh init), so it still lands in `packages`.
     assert "npm:pi-web-access" in _identities(packages)
 
-    assert (tmp_path / ".pi" / "workflow" / ".gitkeep").is_file()
+    # The whole `.perk/workflow/` cache tree is gitignored — no committed `.gitkeep`; init creates
+    # the four cache subtrees on demand.
+    assert not (tmp_path / ".perk" / "workflow" / ".gitkeep").exists()
+    for sub in ("plans", "scratch/runs", "handoff", "markers"):
+        assert (tmp_path / ".perk" / "workflow" / sub).is_dir()
     # perk-owned agent-definitions home (committed `.gitkeep`).
     assert (tmp_path / ".pi" / "agents" / ".gitkeep").is_file()
     # perk's three agent defs are delivered into the perk-owned `.pi/agents/perk/` subdir.
@@ -96,8 +100,8 @@ def test_init_converges_and_is_idempotent(tmp_path):
         assert (tmp_path / ".pi" / "agents" / "perk" / f"{name}.md").is_file()
     gitignore = (tmp_path / ".gitignore").read_text()
     assert "/.pi/npm/" in gitignore
-    assert "/.pi/workflow/plan-ref.json" in gitignore  # cache.plan-ref local mirror
-    assert "/.pi/workflow/plan.md" in gitignore  # cache.plan materialized body (transient, #43)
+    # The whole `.perk/workflow/` cache tree is gitignored wholesale (no per-file entries).
+    assert "/.perk/workflow/" in gitignore
     agents_md = (tmp_path / "AGENTS.md").read_text()
     assert "perk conventions" in agents_md
     # The managed block carries the ambient gh guidance.

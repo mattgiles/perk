@@ -137,8 +137,9 @@ def test_wipe_dirty_guard(git_repo, monkeypatch):
 
 
 def test_wipe_pending_learn_guard(git_repo, monkeypatch):
-    # perk init gitignores .pi/ in real repos; mirror that so the marker alone is the signal.
-    (git_repo / ".git" / "info" / "exclude").write_text(".pi/\n", encoding="utf-8")
+    # perk init gitignores the .perk/workflow/ cache tree in real repos; mirror that so the
+    # pending-learn marker alone is the signal (not an untracked-file dirty state).
+    (git_repo / ".git" / "info" / "exclude").write_text(".perk/\n", encoding="utf-8")
     wt = _add_plan_wt(git_repo, 1)
     cache.set_marker(wt, cache.PENDING_LEARN)
     monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))

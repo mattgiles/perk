@@ -524,7 +524,7 @@ def _bad_handoffs(workflow_dir: Path) -> list[str]:
 
 
 def _cache_check(root: Path) -> Check:
-    """Handoff-blob integrity. (The `.pi/workflow/` *layout* is the workflow-dir convergence.)"""
+    """Handoff-blob integrity. (The `.perk/workflow/` *layout* is the workflow-dir convergence.)"""
     bad = _bad_handoffs(cache.workflow_dir(root))
     if bad:
         return Check("cache-handoff", "state", "warn", "unreadable handoff blob(s)", ", ".join(bad))
@@ -551,3 +551,41 @@ def _gc_check(root: Path) -> Check:
         detail,
         "perk state prune",
     )
+
+
+# The simple active root mirrors `doctor --fix` can safely relocate from a legacy `.pi/workflow/`
+# to `.perk/workflow/` (target-absent only). Disposable scratch (run dirs, handoffs, markers) is
+# never moved — it is gitignored cache the user may delete at leisure.
+_LEGACY_WORKFLOW_MIRRORS: tuple[str, ...] = ("plan-ref.json", "agent-session.json")
+
+
+def _legacy_workflow_check(root: Path) -> Check:
+    """Flag a stale `.pi/workflow/` the move to `.perk/workflow/` left behind, but only when
+    ``perk doctor --fix`` has something actionable to do (mirrors the legacy-workflow migration):
+
+    - a **tracked** legacy `.pi/workflow/.gitkeep` (the old committed layout sentinel), or
+    - a movable active mirror (`plan-ref.json`/`agent-session.json`) present at the legacy path
+      while the `.perk/workflow/` target is absent.
+
+    Pure disposable scratch (run dirs, handoffs, markers) is deliberately **not** flagged — it is
+    gitignored cache the user may delete at leisure, and flagging it forever would be noise that
+    never converges to ``ok``. Remediation: ``perk doctor --fix``.
+    """
+    legacy = root / ".pi/workflow"
+    target = cache.workflow_dir(root)
+    actionable: list[str] = []
+    if git.is_tracked(root, ".pi/workflow/.gitkeep"):
+        actionable.append(".gitkeep (tracked)")
+    for name in _LEGACY_WORKFLOW_MIRRORS:
+        if (legacy / name).is_file() and not (target / name).exists():
+            actionable.append(name)
+    if actionable:
+        return Check(
+            "legacy-workflow",
+            "state",
+            "warn",
+            "legacy .pi/workflow/ cache present",
+            ", ".join(actionable),
+            "perk doctor --fix",
+        )
+    return Check("legacy-workflow", "state", "ok", "no legacy .pi/workflow/ cache")

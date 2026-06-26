@@ -50,7 +50,7 @@ test("tool: a failing land does not set pending-learn (soft fail)", async () => 
     assert.equal(details.error_type, "exec_failed");
     assert.notEqual(result.terminate, true);
     assert.ok(
-      !existsSync(join(cwd, ".pi", "workflow", "markers", PENDING_LEARN)),
+      !existsSync(join(cwd, ".perk", "workflow", "markers", PENDING_LEARN)),
       "no marker on failure",
     );
   } finally {
@@ -304,7 +304,7 @@ test("tool: success:true with a malformed pr fails as bad_output (unexpected pay
     assert.equal(details.error_type, "bad_output");
     assert.match(details.error ?? "", /unexpected payload/);
     assert.ok(
-      !existsSync(join(cwd, ".pi", "workflow", "markers", PENDING_LEARN)),
+      !existsSync(join(cwd, ".perk", "workflow", "markers", PENDING_LEARN)),
       "no marker on a bad payload",
     );
   } finally {

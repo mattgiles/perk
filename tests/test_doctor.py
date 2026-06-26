@@ -602,12 +602,14 @@ def test_drift_detected_and_fixed_idempotently(git_repo):
 
 
 def test_legacy_tracked_plan_md_is_repaired(git_repo):
-    # #43: `.pi/workflow/plan.md` is a transient cache.plan body. A legacy repo committed it and
-    # hand-added a stray ungrouped ignore line. `--fix` untracks the file + removes the stray
-    # line (the managed block already owns it), idempotently.
+    # `.pi/workflow/plan.md` is a legacy transient cache.plan body. A legacy repo committed it and
+    # hand-added a stray ungrouped ignore line. Post-move the managed block no longer ignores it
+    # (the whole `.perk/workflow/` tree is gitignored instead), so the line is now a fully-legacy
+    # stray. `--fix` untracks the file + removes the stray line idempotently.
     _scaffold(git_repo)
     rel = ".pi/workflow/plan.md"
     plan_md = git_repo / rel
+    plan_md.parent.mkdir(parents=True, exist_ok=True)
     plan_md.write_text("# materialized plan body\n", encoding="utf-8")
     # Simulate the legacy stray ungrouped ignore line (outside the managed block).
     gitignore = git_repo / ".gitignore"
@@ -620,17 +622,19 @@ def test_legacy_tracked_plan_md_is_repaired(git_repo):
 
     fixed = run_doctor(git_repo, fix=True, verify=False)
     assert fixed.healthy and fixed.fixed
-    # The file is untracked but left on disk (cache, not deleted); the stray line is gone, and
-    # exactly one managed occurrence of the ignore line remains.
+    # The file is untracked but left on disk (cache, not deleted); the stray line is gone, and no
+    # occurrence of the legacy ignore line remains (the managed block no longer owns it).
     assert not git.is_tracked(git_repo, rel)
     assert plan_md.is_file()
-    assert gitignore.read_text(encoding="utf-8").count(f"/{rel}\n") == 1
+    assert gitignore.read_text(encoding="utf-8").count(f"/{rel}\n") == 0
     again = run_doctor(git_repo, fix=True, verify=False)
     assert again.healthy and again.fixed == []  # repair is idempotent
 
 
 def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
-    # The migration's `git rm --cached` failure is reported on `fix_errors`, never swallowed.
+    # The migrations' `git rm --cached` failures are reported on `fix_errors`, never swallowed.
+    # With everything reported tracked, both the legacy plan.md untrack and the legacy `.gitkeep`
+    # untrack fail loudly.
     _scaffold(git_repo)
     monkeypatch.setattr(git, "is_tracked", lambda root, rel: True)
 
@@ -639,10 +643,94 @@ def test_untrack_failure_carried_on_fix_errors(git_repo, monkeypatch):
 
     monkeypatch.setattr(git, "rm_cached", boom)
     report = run_doctor(git_repo, fix=True, verify=False)
-    assert report.fix_errors == [
+    assert (
         ".pi/workflow/plan.md: untrack failed (git rm --cached): rm --cached exploded"
-    ]
+        in report.fix_errors
+    )
+    assert (
+        ".pi/workflow/.gitkeep: untrack failed (git rm --cached): rm --cached exploded"
+        in report.fix_errors
+    )
     assert report_to_dict(report)["fix_errors"] == report.fix_errors
+
+
+def test_legacy_workflow_check_warns_then_ok_after_fix(git_repo):
+    # A stale tracked `.pi/workflow/.gitkeep` (the old committed layout sentinel) makes the
+    # `legacy-workflow` check `warn`; `--fix` untracks it and the check converges to `ok`.
+    _scaffold(git_repo)
+    gitkeep = git_repo / ".pi" / "workflow" / ".gitkeep"
+    gitkeep.parent.mkdir(parents=True, exist_ok=True)
+    gitkeep.write_text("", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", ".pi/workflow/.gitkeep"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
+
+    report = run_doctor(git_repo, verify=False)
+    legacy = {c.name: c for c in report.checks}["legacy-workflow"]
+    assert legacy.status == "warn"
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
+    assert {c.name: c for c in fixed.checks}["legacy-workflow"].status == "ok"
+
+
+def test_migrate_legacy_workflow_cache(git_repo):
+    # The forward migration: untrack a tracked legacy `.gitkeep`, move the simple active mirrors
+    # (`plan-ref.json`/`agent-session.json`) to `.perk/workflow/` only when the target is absent,
+    # and never touch disposable scratch (run dirs / handoff blobs). Idempotent.
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "workflow"
+    (legacy / "handoff").mkdir(parents=True, exist_ok=True)
+    (legacy / ".gitkeep").write_text("", encoding="utf-8")
+    (legacy / "plan-ref.json").write_text('{"pr_id": "1"}\n', encoding="utf-8")
+    (legacy / "agent-session.json").write_text('{"session_id": "s"}\n', encoding="utf-8")
+    # Disposable scratch + a handoff blob that must be left untouched.
+    (legacy / "scratch" / "runs" / "01RID").mkdir(parents=True, exist_ok=True)
+    (legacy / "scratch" / "runs" / "01RID" / "diff.txt").write_text("x", encoding="utf-8")
+    (legacy / "handoff" / "01RID.json").write_text("{}\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", ".pi/workflow/.gitkeep"],
+        cwd=git_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    assert not git.is_tracked(git_repo, ".pi/workflow/.gitkeep")
+    target = git_repo / ".perk" / "workflow"
+    assert (target / "plan-ref.json").is_file() and not (legacy / "plan-ref.json").exists()
+    assert (target / "agent-session.json").is_file()
+    assert not (legacy / "agent-session.json").exists()
+    # Disposable scratch + handoff blobs are left where they are (gitignored cache).
+    assert (legacy / "scratch" / "runs" / "01RID" / "diff.txt").is_file()
+    assert (legacy / "handoff" / "01RID.json").is_file()
+    assert any(".pi/workflow/plan-ref.json: moved" in line for line in fixed.fixed)
+
+    again = run_doctor(git_repo, fix=True, verify=False)
+    assert not any(".pi/workflow/" in line for line in again.fixed)  # idempotent
+
+
+def test_migrate_legacy_workflow_cache_keeps_present_target(git_repo):
+    # A movable mirror is NOT moved when the `.perk/workflow/` target already exists (no clobber).
+    _scaffold(git_repo)
+    legacy = git_repo / ".pi" / "workflow"
+    legacy.mkdir(parents=True, exist_ok=True)
+    (legacy / "plan-ref.json").write_text('{"pr_id": "legacy"}\n', encoding="utf-8")
+    target = git_repo / ".perk" / "workflow"
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "plan-ref.json").write_text('{"pr_id": "live"}\n', encoding="utf-8")
+
+    fixed = run_doctor(git_repo, fix=True, verify=False)
+    # The live target is untouched; the legacy copy is left in place (manual cleanup).
+    assert (target / "plan-ref.json").read_text(encoding="utf-8") == '{"pr_id": "live"}\n'
+    assert (legacy / "plan-ref.json").is_file()
+    assert not any(".pi/workflow/plan-ref.json: moved" in line for line in fixed.fixed)
 
 
 def test_fix_removes_orphaned_git_clone(git_repo):
@@ -777,6 +865,8 @@ def test_fix_reports_conflict_on_deep_nested_difference(git_repo):
     assert any(
         ".pi/skills/foo: conflicts with .perk/skills/foo" in line for line in report.fix_errors
     )
+
+
 # --- the legacy config migration (`.pi/perk.toml` -> `.perk/`) --------------------------------
 
 
@@ -876,7 +966,6 @@ def test_fix_reports_conflict_when_legacy_and_target_differ(git_repo):
     assert any("differ — resolve by hand" in e for e in again.fix_errors)
 
 
-
 def test_cache_gc_ok_when_no_prunable_state(git_repo):
     # A converged repo with no run state → `cache-gc` is `ok` (group `state`, no remediation).
     _scaffold(git_repo)
@@ -927,11 +1016,11 @@ def test_skills_manifest_drift_detected_and_fixed(git_repo):
 
 def test_missing_workflow_subdir_is_fixed(git_repo):
     _scaffold(git_repo)
-    shutil.rmtree(git_repo / ".pi" / "workflow" / "handoff")
+    shutil.rmtree(git_repo / ".perk" / "workflow" / "handoff")
     report = run_doctor(git_repo, verify=False)
     assert "workflow-dir" in {c.name for c in report.checks if c.status == "fail"}
     fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert (git_repo / ".pi" / "workflow" / "handoff").is_dir() and fixed.healthy
+    assert (git_repo / ".perk" / "workflow" / "handoff").is_dir() and fixed.healthy
 
 
 def test_config_user_edit_is_not_drift(git_repo):

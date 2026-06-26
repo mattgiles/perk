@@ -27,7 +27,7 @@ state_keys:
     - comments        # discussion comments
     - review-threads  # review threads (distinct API from comments)
     - learn           # the perk:learn knowledge-capture issue (P2.T8b)
-  # Tier 2 · .pi/workflow/ — the local cache (see contracts.md §8.1).
+  # Tier 2 · .perk/workflow/ — the local cache (see contracts.md §8.1).
   cache:
     - plan            # materialized plan body cache
     - plan-ref        # provider-agnostic plan->branch ref (see contracts.md §8.4)

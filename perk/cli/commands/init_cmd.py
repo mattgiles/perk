@@ -103,7 +103,7 @@ def init_perk(ctx: click.Context, *, force: bool, no_interactive: bool, as_json:
     """Scaffold/converge this repo for perk (idempotent; safe to re-run).
 
     Verifies the environment, wires `.pi/settings.json` + the borrowed package set, creates
-    the `.pi/workflow/` cache, scaffolds config, manages `.gitignore` + the `AGENTS.md` block,
+    the `.perk/workflow/` cache, scaffolds config, manages `.gitignore` + the `AGENTS.md` block,
     verifies GitHub (never mutating), and writes the post-init handoff.
 
     \b

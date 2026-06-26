@@ -35,7 +35,7 @@ from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 # The inbox lives in the workflow cache scratch dir (the `cache.scratch_dir` seam owns the
-# `.pi/workflow/scratch` construction); this is just its filename.
+# `.perk/workflow/scratch` construction); this is just its filename.
 _INBOX_NAME = "learn-docs-inbox.md"
 
 

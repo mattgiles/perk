@@ -13,14 +13,7 @@ node_modules/
 /.pi/git/
 /.perk/local.toml
 /.worktrees/
-/.pi/workflow/.perk-loaded
-/.pi/workflow/.perk-t3.json
-/.pi/workflow/post-init.md
-/.pi/workflow/plan.md
-/.pi/workflow/plan-ref.json
-/.pi/workflow/handoff/
-/.pi/workflow/scratch/
-/.pi/workflow/markers/
+/.perk/workflow/
 # END perk managed
 
 # BEGIN skills managed runtime artifacts

@@ -19,7 +19,7 @@ Contents (authored in **T2**):
   `adapter` / `default` / optional `package_filter`). Read by both planes
   (`perk/substrate/providers.py`, `extension/substrate/providers.ts`); see `contracts.md` §8.10.
 - **`contracts.md`** — the four *prose* specs implemented once per plane: the
-  `.pi/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
+  `.perk/workflow/` layout, the `PERK_RUN_ID` protocol, the `perk:workflow-state`
   schema, and the GitHub gateway contract.
 - **`contracts-history.md`** — the relocated chronological `Status (…)` changelog
   sibling of the prose spec, grouped by `§N.M` anchor (keeps `contracts.md` a compact

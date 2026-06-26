@@ -88,7 +88,7 @@ test("run_id present: dir resolution + write/read round-trip under scratch/runs/
     const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
     assert.equal(activeSessionRunId(ctx), "RID");
 
-    const expected = join(cwd, ".pi", "workflow", "scratch", "runs", "RID", "data");
+    const expected = join(cwd, ".perk", "workflow", "scratch", "runs", "RID", "data");
     assert.equal(activeSessionDataDir(ctx), expected);
     assert.equal(expected, sessionDataDir(cwd, "RID"));
     // Pure path: nothing is created by resolution alone.
@@ -161,15 +161,15 @@ test("a throwing getBranch degrades to null (no stamp fallback, unlike coldDoor.
 
 test("write failure (read-only parent) returns null without throwing", () => {
   const cwd = tempCwd();
-  const piDir = join(cwd, ".pi");
+  const perkDir = join(cwd, ".perk");
   try {
     const ctx = fakeCtx(cwd, [runIdEntry("RID")]);
-    mkdirSync(piDir, { recursive: true });
-    chmodSync(piDir, 0o444);
+    mkdirSync(perkDir, { recursive: true });
+    chmodSync(perkDir, 0o444);
     assert.equal(ensureSessionDataDir(ctx), null);
     assert.equal(writeSessionData(ctx, "draft.md", "x"), null);
   } finally {
-    chmodSync(piDir, 0o755);
+    chmodSync(perkDir, 0o755);
     rmSync(cwd, { recursive: true, force: true });
   }
 });
@@ -193,7 +193,7 @@ test("artifact round-trip: pointer recorded, read returns content + derived path
     assert.equal(pointer.digest, digestSessionData("hello"));
     assert.equal(
       pointer.path,
-      join(".pi", "workflow", "scratch", "runs", "RID", "data", "draft.md"),
+      join(".perk", "workflow", "scratch", "runs", "RID", "data", "draft.md"),
     );
     assert.ok(!Number.isNaN(Date.parse(pointer.at)));
 
@@ -373,16 +373,16 @@ test("no identity: artifact helpers degrade to null, nothing appended, nothing o
 
 test("file-write failure: writer returns null and appends no pointer", () => {
   const cwd = tempCwd();
-  const piDir = join(cwd, ".pi");
+  const perkDir = join(cwd, ".perk");
   try {
     const branch: unknown[] = [runIdEntry("RID")];
     const ctx = reportableCtx(cwd, branch);
-    mkdirSync(piDir, { recursive: true });
-    chmodSync(piDir, 0o444);
+    mkdirSync(perkDir, { recursive: true });
+    chmodSync(perkDir, 0o444);
     assert.equal(writeSessionArtifact(fakeSink(branch), ctx, "draft.md", "x"), null);
     assert.equal(branch.length, 1); // only the run_id entry — no pointer
   } finally {
-    chmodSync(piDir, 0o755);
+    chmodSync(perkDir, 0o755);
     rmSync(cwd, { recursive: true, force: true });
   }
 });

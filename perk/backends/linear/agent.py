@@ -19,7 +19,7 @@ OAuth ``Authorization: Bearer <token>`` form (``LinearClient(bearer=True)``).
 host command's result/exit code; a failure prints one loud-but-non-fatal stderr note
 (``perk linear-agent: <what> skipped (non-fatal): <exc>``).
 
-**Session-id persistence**: ``.pi/workflow/agent-session.json`` (cache tier, §8.1/§8.22).
+**Session-id persistence**: ``.perk/workflow/agent-session.json`` (cache tier, §8.1/§8.22).
 A hook that needs the session but finds the file absent fail-soft skips with a stderr note.
 
 **Offline-test limitation (flagged)**: the GraphQL operations here (``agentSessionCreateOnIssue``,

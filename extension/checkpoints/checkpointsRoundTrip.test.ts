@@ -266,7 +266,7 @@ function plantStepsArtifact(
   return {
     run_id: "01RID",
     name: STEPS_ARTIFACT_NAME,
-    path: join(".pi", "workflow", "scratch", "runs", "01RID", "data", STEPS_ARTIFACT_NAME),
+    path: join(".perk", "workflow", "scratch", "runs", "01RID", "data", STEPS_ARTIFACT_NAME),
     digest: digestSessionData(content),
     at: new Date().toISOString(),
   };

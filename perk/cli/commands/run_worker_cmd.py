@@ -45,7 +45,7 @@ def run_worker_cmd(
 
     \b
     Reconstructs the plan-ref from the plan's GitHub state, materializes the handoff/plan-ref/
-    plan-body into the checkout's .pi/workflow/, then spawns the Node worker with PERK_RUN_ID set.
+    plan-body into the checkout's .perk/workflow/, then spawns the Node worker with PERK_RUN_ID set.
     Exits with the worker's exit code.
     """
     repo_root = require_repo(ctx)

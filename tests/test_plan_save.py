@@ -243,7 +243,7 @@ def test_plan_save_writes_cache_plan_ref(monkeypatch):
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
-        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+        ref = json.loads((Path(d) / ".perk" / "workflow" / "plan-ref.json").read_text())
     assert ref == {
         "provider": "github",
         "pr_id": "123",
@@ -282,7 +282,7 @@ def test_plan_save_stamps_provider_from_resolved_backend(monkeypatch):
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, ["--plan-file", "plan.md"], obj=PerkContext(cwd=Path(d)))
         assert result.exit_code == 0
-        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+        ref = json.loads((Path(d) / ".perk" / "workflow" / "plan-ref.json").read_text())
     assert ref["provider"] == "linear"
 
 
@@ -309,7 +309,7 @@ def test_plan_save_objective_id_threads_into_header_and_ref(monkeypatch):
             obj=PerkContext(cwd=Path(d)),
         )
         assert result.exit_code == 0, result.output
-        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+        ref = json.loads((Path(d) / ".perk" / "workflow" / "plan-ref.json").read_text())
     assert "objective_id: '7'" in captured["body"]
     assert ref["objective_id"] == "7"
 
@@ -549,7 +549,7 @@ def _run_with_config(monkeypatch, args, *, config):
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
         ref = None
-        ref_path = Path(d) / ".pi" / "workflow" / "plan-ref.json"
+        ref_path = Path(d) / ".perk" / "workflow" / "plan-ref.json"
         if ref_path.exists():
             ref = json.loads(ref_path.read_text())
     return result, ref
@@ -690,7 +690,7 @@ def test_plan_save_dry_run_does_not_write_cache(monkeypatch):
         )
         assert result.exit_code == 0
         assert json.loads(result.stdout)["cached"] is False
-        assert not (Path(d) / ".pi" / "workflow" / "plan-ref.json").exists()
+        assert not (Path(d) / ".perk" / "workflow" / "plan-ref.json").exists()
 
 
 def test_plan_save_unauthed_exit_1(monkeypatch):
@@ -885,7 +885,7 @@ def test_plan_save_unified_node_issue_path(monkeypatch):
         )
         assert result.exit_code == 0, result.output
         payload = json.loads(result.stdout)
-        ref = json.loads((Path(d) / ".pi" / "workflow" / "plan-ref.json").read_text())
+        ref = json.loads((Path(d) / ".perk" / "workflow" / "plan-ref.json").read_text())
     assert payload["issue"]["id"] == "ENG-7"
     assert payload["issue"]["existed"] is True
     assert payload["updated"] is True

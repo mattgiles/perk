@@ -169,7 +169,7 @@ test("core: happy path writes the JSON artifact, appends the pointer, returns pr
     assert.deepEqual(result.details, {
       ok: true,
       name: OBJECTIVE_DRAFT_ARTIFACT,
-      path: join(".pi", "workflow", "scratch", "runs", "RID", "data", OBJECTIVE_DRAFT_ARTIFACT),
+      path: join(".perk", "workflow", "scratch", "runs", "RID", "data", OBJECTIVE_DRAFT_ARTIFACT),
       digest: digestSessionData(content),
       bytes: Buffer.byteLength(content, "utf8"),
       run_id: "RID",

@@ -338,7 +338,7 @@ test("stdin channel stages content in run scratch and appends [flag, path] to ar
       stdin: { flag: "--batch", content: '[{"thread_id": "t1"}]', filename: "batch.json" },
     });
     assert.equal(r.ok, true);
-    const expectedPath = join(cwd, ".pi", "workflow", "scratch", "runs", "run-abc", "batch.json");
+    const expectedPath = join(cwd, ".perk", "workflow", "scratch", "runs", "run-abc", "batch.json");
     assert.deepEqual(calls[0]?.args, ["pr-resolve-threads", "--json", "--batch", expectedPath]);
     assert.equal(readFileSync(expectedPath, "utf8"), '[{"thread_id": "t1"}]');
   } finally {
@@ -380,10 +380,10 @@ test("an unwritable scratch path fails soft as scratch_failed", async (t) => {
     return;
   }
   const cwd = tempCwd();
-  // Make `.pi` read-only so ensureRunScratch's mkdir fails beneath it.
-  const piDir = join(cwd, ".pi");
-  mkdirSync(piDir);
-  chmodSync(piDir, 0o444);
+  // Make `.perk` read-only so ensureRunScratch's mkdir fails beneath it.
+  const perkDir = join(cwd, ".perk");
+  mkdirSync(perkDir);
+  chmodSync(perkDir, 0o444);
   try {
     const { host, calls } = fakeExec({ stdout: '{"success": true}' });
     const r = await runColdDoor(host, fakeCtx(cwd), ["learn", "--json"], {
@@ -398,7 +398,7 @@ test("an unwritable scratch path fails soft as scratch_failed", async (t) => {
     }
     assert.equal(calls.length, 0); // never exec'd
   } finally {
-    chmodSync(piDir, 0o755);
+    chmodSync(perkDir, 0o755);
     rmSync(cwd, { recursive: true, force: true });
   }
 });
