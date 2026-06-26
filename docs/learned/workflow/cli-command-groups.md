@@ -117,6 +117,15 @@ Folds must keep JSON shapes, `error_type`s, and exit codes byte-identical:
   above (resume/replan absent from the diff).
 - **Keep tests driving through the `cli` object** unless they genuinely unit-test a helper — only
   three test files imported command modules directly, which made the six-group migration cheap.
+- **CliRunner clobbers `sys.stdin` mid-invoke.** A command that gates on `sys.stdin.isatty()` (here
+  `delete`'s interactive-confirm vs non-interactive-refuse split) **cannot** be tested by
+  monkeypatching `sys.stdin.isatty` — Click's `CliRunner.invoke` REPLACES `sys.stdin` with its own
+  (always non-tty) stream for the duration of the call. The working recipe: swap the command
+  module's whole `sys` reference for a fake —
+  `monkeypatch.setattr(delete_cmd, "sys", SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)))`
+  — so the module's `sys.stdin.isatty()` reads the fake. Pair it with monkeypatching `user_confirm`
+  for the declined path; pass `--yes` / `--json` to exercise the other branches. Generalizes to any
+  Click command forking on `isatty()` under `CliRunner`.
 - When renaming a module used in `monkeypatch.setattr(module, ...)`, grep the **bare module name**,
   not just `module.` — a sed rewrite on `module.` misses the no-trailing-dot usage.
 - Test files keep their flat names across folds — only invocations and monkeypatch import paths
@@ -185,6 +194,12 @@ dict is precisely the artifact a later enactment node *edits* — the diff is th
 the merge factory itself via **one unregistered construction** over a real stage+worker pair
 (`make_merged_command(submit_stage, submit_pr)`), no live registration needed. Reusable for any
 dormant-substrate node.
+
+**The `EXPECTED_SURFACE` fingerprint is alphabetically SORTED — ignore any positional instruction in a
+plan.** `_surface_fingerprint` sorts the verbs, so a new verb row goes in TRUE alphabetical order
+regardless of registration order or where a plan says to put it (e.g. `refine` lands between `list`
+and `remove`, since `refi < remo` — not where "add it after create" would suggest).
+`test_live_surface_matches_canonical_fingerprint` is the catch if you guess wrong.
 
 ### `MergedCommand` mechanics (conceptually)
 
@@ -348,6 +363,11 @@ omit it). Per the parity-smoke rule above, a new worker must be added to `EXPECT
 - The multi-surface noun-group lockstep (`register_with_aliases` + `COMMAND_GROUPS` +
   `EXPECTED_SURFACE` + the help-sections assertion + docs) is already documented above — `perk skills`
   is one more instance.
+- **Group self-containment over cross-group sharing.** The group got its own ~5-line
+  `skills_fail` / `skills_emit` in `skills/shared.py` rather than importing `objective/shared.fail`.
+  The `--json` fail/emit **shape** is the contract — mirror it per group, don't share the helper
+  across groups (this matches the `EXIT_FOR_TYPE` mixed-reality residual below: each group owns its
+  copy).
 
 ## Warm-plane ids are decoupled from cold spellings
 
