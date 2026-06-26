@@ -12,11 +12,15 @@ from perk.substrate.config import (
     load_local_linear_api_key,
 )
 
+# Map the legacy config filenames callers still pass to the `.perk/` target locations, so the
+# seeding helper writes where the readers now look (`.perk/config.toml` / `.perk/local.toml`).
+_NAME_MAP = {"perk.toml": "config.toml", "perk.local.toml": "local.toml"}
+
 
 def _write(repo: Path, name: str, text: str) -> None:
-    pi = repo / ".pi"
-    pi.mkdir(parents=True, exist_ok=True)
-    (pi / name).write_text(text, encoding="utf-8")
+    cfg = repo / ".perk"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / _NAME_MAP.get(name, name)).write_text(text, encoding="utf-8")
 
 
 def test_defaults_when_absent(tmp_path):

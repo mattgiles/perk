@@ -423,10 +423,10 @@ test("tool: objective_node — a success:false envelope at non-zero exit surface
 
 // --- the warm handlers fetch the url only for linear, fail-open to the indirect form ---
 
-/** Write a committed `.pi/perk.toml` selecting the issue backend (resolveIssueBackendId reads it). */
+/** Write a committed `.perk/config.toml` selecting the issue backend (resolveIssueBackendId reads it). */
 function writeBackend(cwd: string, backend: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), `[issues]\nbackend = "${backend}"\n`, "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), `[issues]\nbackend = "${backend}"\n`, "utf8");
 }
 
 /** Replace the live `sendUserMessage` with a capturing spy; returns the recorded messages. */

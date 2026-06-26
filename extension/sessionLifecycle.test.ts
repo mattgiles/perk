@@ -43,8 +43,8 @@ for (const footerId of ["pi-bar-footer", "pi-status-footer", "pi-default"]) {
     // `pi-default`) as the sole surface. The default-repo case (factory installed) is proven by
     // the `claim` test above.
     const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only" } });
-    mkdirSync(join(cwd, ".pi"), { recursive: true });
-    writeFileSync(join(cwd, ".pi", "perk.toml"), `[providers]\nfooter = "${footerId}"\n`, "utf8");
+    mkdirSync(join(cwd, ".perk"), { recursive: true });
+    writeFileSync(join(cwd, ".perk", "config.toml"), `[providers]\nfooter = "${footerId}"\n`, "utf8");
     const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
     try {
       assert.equal(

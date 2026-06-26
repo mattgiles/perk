@@ -479,8 +479,8 @@ test("harness: /ci command + run_ci tool registered; empty [ci] → inert report
 
 test("harness: run_ci with a configured [ci] runs it (flag-trusted, deterministic)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
     h.setFlag("allow-project-ci", true);
@@ -496,9 +496,9 @@ test("harness: run_ci with a configured [ci] runs it (flag-trusted, deterministi
 
 test("harness: headless run_ci with [trust] ci runs it (trust applies everywhere)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
-    join(cwd, ".pi", "perk.toml"),
+    join(cwd, ".perk", "config.toml"),
     '[[ci]]\nname = "ok"\ncommand = "true"\n\n[trust]\nci = "true"\n',
     "utf8",
   );
@@ -520,8 +520,8 @@ test("harness: headless run_ci with [trust] ci runs it (trust applies everywhere
 
 test("harness: headless run_ci with checks + no flag refuses (fail closed)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" }, headful: false });
   try {
     const result = await h.invokeTool("run_ci", {});
@@ -536,9 +536,9 @@ test("harness: headless run_ci with checks + no flag refuses (fail closed)", asy
 test("harness: globbed [[ci]] in a non-git cwd fails open — the check still runs", async () => {
   // No git repo ⇒ changedFiles errors ⇒ fail-open ⇒ the globbed check runs (never a false skip).
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
-    join(cwd, ".pi", "perk.toml"),
+    join(cwd, ".perk", "config.toml"),
     '[[ci]]\nname = "py"\ncommand = "true"\nglob = "*.py"\n',
     "utf8",
   );
@@ -559,9 +559,9 @@ test("harness: globbed [[ci]] in a non-git cwd fails open — the check still ru
 
 test("harness: globbed [[ci]] skips end-to-end when only non-matching files changed (real git)", async () => {
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   writeFileSync(
-    join(cwd, ".pi", "perk.toml"),
+    join(cwd, ".perk", "config.toml"),
     '[[ci]]\nname = "py"\ncommand = "true"\nglob = "*.py"\n',
     "utf8",
   );
@@ -590,8 +590,8 @@ test("harness: globbed [[ci]] skips end-to-end when only non-matching files chan
 test("harness: run_ci with a mistyped check → bad_input, no check executed", async () => {
   // Tool-boundary decode. A configured check exists but is never run.
   const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), '[[ci]]\nname = "ok"\ncommand = "true"\n', "utf8");
   const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID" } });
   try {
     h.setFlag("allow-project-ci", true);

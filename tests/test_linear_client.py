@@ -256,9 +256,9 @@ class TestConstructorAndEnv:
 
     @staticmethod
     def _write_local_key(repo: Path, key: str) -> None:
-        pi = repo / ".pi"
-        pi.mkdir(parents=True, exist_ok=True)
-        (pi / "perk.local.toml").write_text(f'[linear]\napi_key = "{key}"\n', encoding="utf-8")
+        cfg = repo / ".perk"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "local.toml").write_text(f'[linear]\napi_key = "{key}"\n', encoding="utf-8")
 
     def test_client_from_env_falls_back_to_local_config(self, tmp_path: Path) -> None:
         self._write_local_key(tmp_path, "lin_api_local")
@@ -269,7 +269,7 @@ class TestConstructorAndEnv:
         self, git_repo: Path
     ) -> None:
         # The gitignored secret lives ONLY in the main checkout; a linked worktree must still
-        # authenticate by reading the main checkout's `.pi/perk.local.toml` (passes after the fix).
+        # authenticate by reading the main checkout's `.perk/local.toml` (passes after the fix).
         self._write_local_key(git_repo, "lin_api_main")
         from perk.substrate import git as gitmod
 

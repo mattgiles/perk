@@ -443,9 +443,9 @@ class FakeLinearWorkspace(LinearClient):
 
 def _scaffold_repo(root: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    pi = root / ".pi"
-    pi.mkdir()
-    (pi / "perk.toml").write_text(
+    cfg = root / ".perk"
+    cfg.mkdir()
+    (cfg / "config.toml").write_text(
         f'[issues]\nbackend = "linear"\nteam = "{_TEAM_KEY}"\n', encoding="utf-8"
     )
 

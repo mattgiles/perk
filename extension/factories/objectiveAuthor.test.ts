@@ -19,8 +19,8 @@ import { PLAN_CONTEXT_TYPE } from "./planMode.ts";
 const ADDENDUM_TOML = '[workflow]\nplan_authoring = "House rule: cite a file path per change."\n';
 
 function writeAddendumConfig(cwd: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), ADDENDUM_TOML, "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), ADDENDUM_TOML, "utf8");
 }
 
 test("objectiveAuthoringContextContent: carries the authoring contract; appends the config addendum", () => {

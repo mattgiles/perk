@@ -11,8 +11,8 @@ import { scaffoldRepo } from "../testing/harness.ts";
 import { isPerkFooterReferenceSelected, resolvedFooterProviderId } from "./footerProvider.ts";
 
 function writePerkToml(cwd: string, body: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), body, "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), body, "utf8");
 }
 
 test("resolvedFooterProviderId: default repo resolves to perk-footer (reference selected)", () => {
@@ -49,7 +49,7 @@ test("isPerkFooterReferenceSelected: a foreign footer selection is NOT the refer
 
 test("isPerkFooterReferenceSelected: a corrupt config fails safe to the reference (perk installs)", () => {
   const cwd = scaffoldRepo();
-  // A malformed perk.toml: resolution throws → the helper's try/catch returns perk-footer so perk
+  // A malformed config.toml: resolution throws → the helper's try/catch returns perk-footer so perk
   // keeps installing its own footer (the default path is the hard guarantee).
   writePerkToml(cwd, "[providers\nfooter = ");
   assert.equal(isPerkFooterReferenceSelected(cwd), true);

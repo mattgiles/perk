@@ -539,17 +539,17 @@ def test_plan_save_handoff_without_consumed_learn_is_empty(monkeypatch):
 
 
 def _run_with_config(monkeypatch, args, *, config):
-    """Run plan-save in an isolated repo seeded with a committed `.pi/perk.toml` (base)."""
+    """Run plan-save in an isolated repo seeded with a committed `.perk/config.toml` (base)."""
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        pi = Path(d) / ".pi"
-        pi.mkdir(parents=True, exist_ok=True)
-        (pi / "perk.toml").write_text(config, encoding="utf-8")
+        cfg = Path(d) / ".perk"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "config.toml").write_text(config, encoding="utf-8")
         (Path(d) / "plan.md").write_text(PLAN, encoding="utf-8")
         result = runner.invoke(plan_save, args, obj=PerkContext(cwd=Path(d)))
         ref = None
-        ref_path = pi / "workflow" / "plan-ref.json"
+        ref_path = Path(d) / ".pi" / "workflow" / "plan-ref.json"
         if ref_path.exists():
             ref = json.loads(ref_path.read_text())
     return result, ref

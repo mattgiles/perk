@@ -156,10 +156,10 @@ test("rebuildCheckpoint: scan-after-marker ignores stale [DONE:n] before the see
 
 // --- todo-provider deferral --------------------------------------------------
 
-/** Write a `[providers]` selection into `cwd`'s `.pi/perk.toml`. */
+/** Write a `[providers]` selection into `cwd`'s `.perk/config.toml`. */
 function writeProvidersSelection(cwd: string, body: string): void {
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
-  writeFileSync(join(cwd, ".pi", "perk.toml"), body, "utf8");
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
+  writeFileSync(join(cwd, ".perk", "config.toml"), body, "utf8");
 }
 
 test("resolvedTodoProviderId / isPerkCheckpointsReferenceSelected: default + foreign + unknown", () => {

@@ -1,4 +1,4 @@
-// The minimal config port (D1b): the narrow TOML-subset reader + the perk.toml/local
+// The minimal config port (D1b): the narrow TOML-subset reader + the .perk/config.toml/local
 // overlay. Pure, offline, no network. See config.ts.
 
 import assert from "node:assert/strict";
@@ -8,11 +8,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { loadPerkConfig, parseCiChecks, parseTomlSubset, resolveIssueBackendId } from "./config.ts";
 
+// Map the legacy config filenames the cases still pass to the `.perk/` target locations, so the
+// seeding helper writes where the readers now look (`.perk/config.toml` / `.perk/local.toml`).
+const NAME_MAP: Record<string, string> = {
+  "perk.toml": "config.toml",
+  "perk.local.toml": "local.toml",
+};
+
 function repoWith(files: Record<string, string>): string {
   const cwd = mkdtempSync(join(tmpdir(), "perk-config-"));
-  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  mkdirSync(join(cwd, ".perk"), { recursive: true });
   for (const [name, content] of Object.entries(files)) {
-    writeFileSync(join(cwd, ".pi", name), content, "utf8");
+    writeFileSync(join(cwd, ".perk", NAME_MAP[name] ?? name), content, "utf8");
   }
   return cwd;
 }

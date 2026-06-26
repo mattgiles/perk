@@ -139,7 +139,9 @@ def test_providers_check_ok_on_default_repo(git_repo):
 def test_providers_check_warns_on_unknown_selection(git_repo):
     # A selection naming a non-existent provider is a loud-but-non-fatal warn (exit still 0).
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text('[providers]\nplan = "ghost"\n', encoding="utf-8")
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[providers]\nplan = "ghost"\n', encoding="utf-8"
+    )
     report = run_doctor(git_repo, verify=False)
     providers = next(c for c in report.checks if c.name == "providers")
     assert providers.status == "warn"
@@ -159,7 +161,7 @@ def test_issues_check_ok_on_default_repo(git_repo):
 def test_issues_check_ok_on_linear_with_team(git_repo):
     # linear + a committed team is a live, valid selection → ok (with the team in the message).
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         '[issues]\nbackend = "linear"\nteam = "ENG"\n', encoding="utf-8"
     )
     report = run_doctor(git_repo, verify=False)
@@ -172,7 +174,9 @@ def test_issues_check_fails_on_linear_without_team(git_repo):
     # Offline-decidable misconfiguration: linear without a team hard-breaks every
     # issue-touching command → fail.
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text('[issues]\nbackend = "linear"\n', encoding="utf-8")
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[issues]\nbackend = "linear"\n', encoding="utf-8"
+    )
     report = run_doctor(git_repo, verify=False)
     check = next(c for c in report.checks if c.name == "issues-backend")
     assert check.status == "fail"
@@ -183,7 +187,9 @@ def test_issues_check_fails_on_linear_without_team(git_repo):
 
 def test_issues_check_fails_on_unknown_selection(git_repo):
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text('[issues]\nbackend = "jira"\n', encoding="utf-8")
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[issues]\nbackend = "jira"\n', encoding="utf-8"
+    )
     report = run_doctor(git_repo, verify=False)
     check = next(c for c in report.checks if c.name == "issues-backend")
     assert check.status == "fail"
@@ -193,7 +199,7 @@ def test_issues_check_fails_on_unknown_selection(git_repo):
 def test_issues_check_warns_on_malformed_committed_toml(git_repo):
     # Malformed TOML is the config check's finding; the issues check defers (mirrors providers).
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text("[issues\nbackend =", encoding="utf-8")
+    (git_repo / ".perk" / "config.toml").write_text("[issues\nbackend =", encoding="utf-8")
     report = run_doctor(git_repo, verify=False)
     check = next(c for c in report.checks if c.name == "issues-backend")
     assert check.status == "warn"
@@ -221,7 +227,7 @@ def _select_linear(repo, *, team=True):
     body = '[issues]\nbackend = "linear"\n'
     if team:
         body += 'team = "ENG"\n'
-    (repo / ".pi" / "perk.toml").write_text(body, encoding="utf-8")
+    (repo / ".perk" / "config.toml").write_text(body, encoding="utf-8")
 
 
 def _linear_group(report):
@@ -267,12 +273,12 @@ def test_linear_checks_ok_when_ready(git_repo, stub_env, monkeypatch):
 
 
 def test_linear_checks_ok_with_key_from_local_config(git_repo, stub_env, monkeypatch):
-    # The key supplied via .pi/perk.local.toml [linear] api_key (env unset) is threaded through
+    # The key supplied via .perk/local.toml [linear] api_key (env unset) is threaded through
     # to client_from_env(repo_root=...), so the auth check passes without an exported var.
     _scaffold(git_repo)
     _select_linear(git_repo)
     monkeypatch.delenv("LINEAR_API_KEY", raising=False)
-    (git_repo / ".pi" / "perk.local.toml").write_text(
+    (git_repo / ".perk" / "local.toml").write_text(
         '[linear]\napi_key = "lin_api_local"\n', encoding="utf-8"
     )
     monkeypatch.setattr(
@@ -832,7 +838,7 @@ def test_missing_workflow_subdir_is_fixed(git_repo):
 
 def test_config_user_edit_is_not_drift(git_repo):
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         "[worktree]\nroot = 'custom-wt'\n", encoding="utf-8"
     )
     report = run_doctor(git_repo, verify=False)
@@ -842,11 +848,11 @@ def test_config_user_edit_is_not_drift(git_repo):
 
 def test_missing_config_is_reseeded(git_repo):
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").unlink()
+    (git_repo / ".perk" / "config.toml").unlink()
     report = run_doctor(git_repo, verify=False)
     assert "config" in {c.name for c in report.checks if c.status == "fail"}
     fixed = run_doctor(git_repo, fix=True, verify=False)
-    assert (git_repo / ".pi" / "perk.toml").is_file() and fixed.healthy
+    assert (git_repo / ".perk" / "config.toml").is_file() and fixed.healthy
 
 
 def test_no_silent_pass_on_unverifiable_check(git_repo):
@@ -861,7 +867,7 @@ def test_compaction_drift_detected_and_fixed(git_repo):
     # `[compaction]` converges inside `settings-wiring`, so doctor dry-runs/fixes it for
     # free. Select a compaction policy that diverges from settings.json → drift → `--fix` repairs.
     _scaffold(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         "[compaction]\nenabled = false\nreserve_tokens = 8192\n", encoding="utf-8"
     )
     report = run_doctor(git_repo, verify=False)
@@ -1162,7 +1168,7 @@ def test_bindings_check_ok_when_defaults_installed(git_repo):
 def test_bindings_check_warns_on_missing_skill_but_stays_healthy(git_repo):
     _scaffold(git_repo)
     _install_default_skills(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "stage:plan"\nskill = "ghost-skill"\nmode = "nudge"\n',
         encoding="utf-8",
     )
@@ -1175,7 +1181,7 @@ def test_bindings_check_warns_on_missing_skill_but_stays_healthy(git_repo):
 def test_bindings_check_warns_on_unknown_stage_target(git_repo):
     _scaffold(git_repo)
     _install_default_skills(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "stage:nope"\nskill = "perk-plan"\nmode = "nudge"\n',
         encoding="utf-8",
     )
@@ -1186,7 +1192,7 @@ def test_bindings_check_warns_on_unknown_stage_target(git_repo):
 def test_bindings_check_warns_on_command_without_delivery_surface(git_repo):
     _scaffold(git_repo)
     _install_default_skills(git_repo)
-    (git_repo / ".pi" / "perk.toml").write_text(
+    (git_repo / ".perk" / "config.toml").write_text(
         '[[bindings]]\ntrigger = "command:ci"\nskill = "perk-plan"\nmode = "nudge"\n',
         encoding="utf-8",
     )
