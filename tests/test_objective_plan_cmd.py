@@ -308,6 +308,22 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         assert payload["skipped_claims"] == []  # always present, empty when no claims exist
 
 
+def test_url_argument_peeled_to_objective_id(monkeypatch):
+    # A pasted GitHub issue URL is peeled to its id before resolution; the dry-run payload
+    # carries the extracted "7" (the parser is pure — the backend still authorities resolution).
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(
+            cli,
+            ["objective", "plan", "https://github.com/o/r/issues/7", "--dry-run", "--json"],
+        )
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["objective"] == "7"
+
+
 def test_objective_required_when_number_omitted(monkeypatch):
     _authed(monkeypatch)
     runner = CliRunner()

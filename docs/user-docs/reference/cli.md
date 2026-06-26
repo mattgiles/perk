@@ -112,7 +112,9 @@ passthrough `pi_args` are forwarded to `pi`.
 ### `perk implement [PLAN]` (alias `impl`)
 
 Do the work on a branch; requires fresh context (cold-only). `PLAN` is an optional plan issue id
-(`42`, `#42`, or `ENG-123`); omit it to implement the active saved plan in this repo. The worktree
+(`42`, `#42`, or `ENG-123`) — or the plan's **issue URL** (GitHub `.../issues/N`; Linear
+`.../issue/IDENT` or `.../project/SLUG`), which is peeled to the id; omit it to implement the active
+saved plan in this repo. The worktree
 branch is cut from the plan's pinned base (`origin/<base>`) when the plan declared one, else
 `origin/<trunk>` (see
 [Target a non-default base branch](../how-to/target-a-non-default-base-branch.md)). Adds `--base`
@@ -166,18 +168,22 @@ GitHub default) and pinned — there is no `--base` flag here; see
 When a plan issue is first created, perk prepends a **copyable command callout** to the top of the
 issue body — a one-click-copy ` ```perk impl <id>``` ` block (where `<id>` is the plan's ref id:
 the GitHub issue number, a Linear `ENG-N` identifier, or a Linear project UUID) — so opening the
-plan surfaces the exact command to start implementing it. It renders with a copy button on both
+plan surfaces the exact command to start implementing it. Anywhere perk accepts an id, you may paste
+the issue/objective **URL** instead (GitHub `.../issues/N`; Linear `.../issue/IDENT` or
+`.../project/SLUG`) — perk peels the id from it. It renders with a copy button on both
 GitHub and Linear and is added only once (re-saving never duplicates it).
 
 ### `perk plan resume PLAN`
 
-Resume `PLAN` (a plan issue id) at its current lifecycle stage, relaunching it with fresh context.
+Resume `PLAN` (a plan issue id, or the plan's issue URL) at its current lifecycle stage, relaunching
+it with fresh context.
 `--dry-run` resolves and prints the stage without launching; `--remote` dispatches to CI; `--json`
 emits a machine-readable report.
 
 ### `perk plan replan PLAN`
 
-Re-author the open plan `PLAN` against the current codebase, in place (read-only). Local-only
+Re-author the open plan `PLAN` (a plan issue id or its issue URL) against the current codebase, in
+place (read-only). Local-only
 (`cold_remote:false`); `--dry-run` materializes the prior plan and prints the seed without
 launching; `--worktree` and `--json` are also accepted. The materialized prior plan also includes
 the plan issue's human engagement (comments + description edits) as untrusted DATA when present
@@ -186,8 +192,8 @@ feedback, not only landed PRs.
 
 ### `perk plan from ISSUE`
 
-Adopt a pre-existing, human-authored issue `ISSUE` (a GitHub number or a Linear identifier like
-`PER-45`) **in place** as a perk plan: perk reads the issue's title/body (and any human discussion)
+Adopt a pre-existing, human-authored issue `ISSUE` (a GitHub number, a Linear identifier like
+`PER-45`, or the issue's URL) **in place** as a perk plan: perk reads the issue's title/body (and any human discussion)
 as untrusted seed DATA, authors a plan over it in a read-only session, and on save stamps the plan
 metadata **additively** into the *same* issue — the plan-header block (with `adopted_from`
 provenance), the `perk:plan` label, the impl callout, and the plan-body comment — preserving the
@@ -216,7 +222,7 @@ Draft a new objective and roadmap in a read-only authoring session. Local-only
 (`cold_remote:false`); adds `--json`.
 
 With **`--from <source>`** it instead **adopts a pre-existing source IN PLACE** as the objective: a
-Linear project UUID or a GitHub issue id. perk reads the source's prose + existing issues (and any
+Linear project UUID, a GitHub issue id, or the source's URL. perk reads the source's prose + existing issues (and any
 human discussion) as untrusted seed DATA, authors an objective + roadmap over it in a read-only
 session, and on save stamps the objective metadata **additively** into the *same* source — the
 `objective-header` block (with `adopted_from` provenance), the `objective-manifest`, the
@@ -240,8 +246,8 @@ Persist the drafted objective to GitHub — the read-only → read-write objecti
 ### `perk objective plan [NUMBER]`
 
 Select the next objective node and author a bounded plan (read-only). `NUMBER` is the objective
-issue id (required — a cold session has no active objective); `--node` plans a specific node id
-instead of the next actionable one. Local-only; adds `--json`.
+issue id, or the objective's **URL** (required — a cold session has no active objective); `--node`
+plans a specific node id instead of the next actionable one. Local-only; adds `--json`.
 
 ### `perk objective create` (alias `new`)
 

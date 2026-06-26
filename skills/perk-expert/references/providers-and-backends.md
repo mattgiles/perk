@@ -98,7 +98,10 @@ Linear moves where canonical plan / learn / objective state lives.
   `perk:learn`, `perk:consolidated`, `perk:objective`.
 - **Identifier shape** — Linear ids are **strings** like `ENG-123` (vs GitHub's `#42`); flows
   through `cache.plan-ref.provider == "linear"`, the branch name `plan-ENG-123`, and the land
-  squash footer `Plan: ENG-<n> — <url>` (no `Closes #N`).
+  squash footer `Plan: ENG-<n> — <url>` (no `Closes #N`). Anywhere a command takes an id you may
+  paste the issue/objective **URL** instead (GitHub `.../issues/N`; Linear `.../issue/IDENT` or
+  `.../project/SLUG`) — perk peels the id from it; the peeled id stays opaque, the backend remains
+  the authority on whether it resolves (`/pull/N` is deliberately not accepted).
 - **Doctor groups** — `issues-backend` (group `issues`, offline) validates the selection (+ `team`
   for Linear); `linear-auth` / `linear-team` / `linear-labels` (group `linear`, verify-gated,
   non-fatal `warn`) are the network probes; `linear-project-scopes` / `linear-workflow-states`
