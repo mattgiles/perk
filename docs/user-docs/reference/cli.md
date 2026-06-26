@@ -486,8 +486,10 @@ Print the stages and their transitions (a dev/doctor convenience).
 
 Ergonomic sugar over the upstream [`skills`](https://github.com/mattgiles/skills) CLI for managing
 this repo's skills. **Every verb is a thin pass-through to the `skills` binary** (inheriting its
-stdio and propagating its exit code) **except `remove`**, which the upstream CLI does not support and
-which perk therefore implements by editing `.agents/manifest.yaml` directly. The `skills` CLI must
+stdio and propagating its exit code) **except `remove`** (edits `.agents/manifest.yaml` directly)
+**and the repo-authored-skill verbs `scaffold`/`delete`** (which manage this repo's *own*
+`.pi/skills/*/SKILL.md` skills and the perk-managed `.agents/manifest.d/perk-repo-skills.yaml`
+fragment). The `skills` CLI must
 be on `PATH` (and the repo initialized via `perk init`, which runs `skills init`); otherwise the
 verbs surface a clean error.
 
@@ -506,6 +508,18 @@ verbs surface a clean error.
   `.agents/manifest.d/perk.yaml` — re-run `perk init` after editing perk's source set instead), and
   restores the original bytes if `skills sync` fails. Note: the rewrite uses `yaml.safe_dump`, so
   the main manifest's comments/layout are not preserved.
+- **`perk skills scaffold NAME`** — scaffold a repo-authored skill stub at `.pi/skills/NAME/SKILL.md`
+  in the **main checkout** (resolved even when invoked from a linked worktree). Create-only —
+  refuses if `.pi/skills/NAME/` already exists (no overwrite flag; edit the existing `SKILL.md`
+  directly). Writes a TODO template, then reconverges the `perk-repo-skills.yaml` fragment, skipping
+  the heavy all-sources sync. `--json` emits a stable report. (The freshly-scaffolded skill is
+  uncommitted, so the reconverge surfaces a non-fatal "not committed — commit it" warning; that is
+  expected.)
+- **`perk skills delete NAME --yes`** — remove a repo-authored skill (`.pi/skills/NAME/`) in the
+  **main checkout** and reconverge the fragment (skipping the heavy all-sources sync). Without
+  `--yes` it prompts interactively when a TTY is present; under `--json`/non-interactive it refuses
+  and prints the path that would be removed. Best-effort unlinks a dangling `.agents/skills/NAME`
+  symlink. `--json` emits a stable report (with `symlink_removed`).
 - **`perk skills sync`** — update all sources to newer commits and re-sync links
   (→ `skills update --sync`).
 
