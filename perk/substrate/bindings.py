@@ -24,10 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from perk._resources import shared_dir
-from perk.boundary import StrictBoundaryModel, translate_validation_errors
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.substrate.registry import FindingSeverity, Issue
 
 BINDINGS_FILENAME = "bindings.yaml"
@@ -66,14 +66,33 @@ _SELF_REPO_SKILLS_DIR = Path("skills")
 SKILL_FILENAME = "SKILL.md"
 
 
-class Binding(StrictBoundaryModel):
-    """One trigger->skill delivery binding.
+class BindingEntry(LenientParseModel):
+    """Tolerant parse shape for one stored ``bindings.yaml`` entry.
 
-    The model itself is the tolerant parser: a ``model_validator(mode="before")`` collapses
-    any raw input down to exactly the three declared keys, each run through ``_str`` (absent
-    or non-str -> ``""``). So a mistyped scalar is a sentinel-collapse, not a hard failure —
-    every content finding still surfaces through ``validate()`` (the validator owns content).
-    Unknown keys are dropped before ``extra="forbid"`` is reached.
+    Lenient base: unknown keys dropped (``extra="ignore"``); absent keys default to ``""`` so
+    ``validate()`` reports them as content findings. A present non-string scalar is a genuine
+    type error and raises (translated to ``BindingsError`` at the load boundary).
+    """
+
+    trigger: str = ""
+    skill: str = ""
+    mode: str = ""
+
+
+class BindingsFile(LenientParseModel):
+    """Whole-file parse shape.
+
+    ``schema_version`` stays OUT of the model (a structural pre-check in ``load_bindings`` owns
+    its byte-identical message; ``extra="ignore"`` drops the key here). A non-list ``bindings:``
+    raises.
+    """
+
+    bindings: list[BindingEntry] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Binding:
+    """One trigger->skill delivery binding (frozen domain object).
 
     ``kind``/``target_id`` are read-only properties: the parsed halves of ``trigger`` (split
     on the first ``:``); a trigger with no ``:`` yields ``kind=""``, ``target_id=""`` so the
@@ -84,12 +103,6 @@ class Binding(StrictBoundaryModel):
     skill: str
     mode: str
 
-    @model_validator(mode="before")
-    @classmethod
-    def _tolerate(cls, raw: object) -> dict[str, str]:
-        d: dict[Any, Any] = raw if isinstance(raw, dict) else {}
-        return {key: _str(d.get(key)) for key in ("trigger", "skill", "mode")}
-
     @property
     def kind(self) -> str:
         return _split_trigger(self.trigger)[0]
@@ -99,10 +112,10 @@ class Binding(StrictBoundaryModel):
         return _split_trigger(self.trigger)[1]
 
 
-class BindingSet(StrictBoundaryModel):
+@dataclass(frozen=True)
+class BindingSet:
     schema_version: int
     bindings: list[Binding]
-    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
 
 class BindingsError(Exception):
@@ -138,8 +151,16 @@ def load_bindings(path: Path | None = None) -> BindingSet:
         )
 
     with translate_validation_errors(BindingsError, source=str(bindings_path)):
-        bindings = [Binding.model_validate(raw) for raw in _as_list(data.get("bindings"))]
-        return BindingSet(schema_version=schema_version, bindings=bindings, raw=data)
+        parsed = BindingsFile.model_validate(data)
+    return BindingSet(
+        schema_version=schema_version,
+        bindings=[_to_binding(entry) for entry in parsed.bindings],
+    )
+
+
+def _to_binding(entry: BindingEntry) -> Binding:
+    """Explicit field-for-field conversion of a parsed entry into the frozen domain object."""
+    return Binding(trigger=entry.trigger, skill=entry.skill, mode=entry.mode)
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -154,7 +175,14 @@ def _split_trigger(trigger: str) -> tuple[str, str]:
     return kind, target_id
 
 
-def _str(value: Any) -> str:
+def _coerce_user_str(value: Any) -> str:
+    """Deliberate user-config forgiveness (NOT a boundary collapse).
+
+    Used only on the ``parse_user_bindings`` user-overlay path: an absent or non-string
+    ``[[bindings]]`` scalar coerces to ``""`` so the *resolver* flags it loud-but-non-fatal,
+    never crashing config-load and never silently dropping the entry. The domain ``Binding`` is
+    a plain dataclass, so this defeats no ``extra="forbid"`` — it is honest user-config leniency.
+    """
     return value if isinstance(value, str) else ""
 
 
@@ -231,10 +259,20 @@ class ResolvedBindings:
 def parse_user_bindings(raw: Any) -> list[Binding]:
     """Parse a ``.perk/config.toml`` ``[[bindings]]`` array-of-tables into ``Binding``s.
 
-    Tolerant like ``Binding._tolerate``: absent/ill-typed fields become empty strings so the
-    *resolver* reports them. A non-list ``raw`` (absent table) yields ``[]``.
+    Deliberately forgiving (the user-config boundary): absent/ill-typed fields coerce to ``""``
+    via ``_coerce_user_str`` so the *resolver* reports them loud-but-non-fatal — never crashes
+    config-load, never silently drops. A non-list ``raw`` (absent table) yields ``[]``; a
+    non-dict element is skipped.
     """
-    return [Binding.model_validate(item) for item in _as_list(raw)]
+    return [
+        Binding(
+            trigger=_coerce_user_str(item.get("trigger")),
+            skill=_coerce_user_str(item.get("skill")),
+            mode=_coerce_user_str(item.get("mode")),
+        )
+        for item in _as_list(raw)
+        if isinstance(item, dict)
+    ]
 
 
 def resolve_bindings(

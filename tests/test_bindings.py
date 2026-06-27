@@ -7,18 +7,18 @@ mirroring test_registry.py) exercise the shape checks. A test also asserts the s
 the loader itself stays registry-free (target-existence is doctor's job).
 """
 
+from dataclasses import FrozenInstanceError
+
 import pytest
-from pydantic import ValidationError
 
 from perk.substrate.bindings import (
     DELIVERABLE_COMMAND_TARGETS,
-    MODES,
     Binding,
     BindingsError,
-    BindingSet,
     FindingSeverity,
     is_skill_installed,
     load_bindings,
+    parse_user_bindings,
     resolve_bindings,
     validate,
 )
@@ -126,32 +126,50 @@ def test_unsupported_schema_version_raises(tmp_path):
 # --------------------------------------------------------------------- malformed input (model)
 
 
-def test_wrong_scalars_collapse_to_empty_and_stay_content_findings():
-    # A mistyped scalar is a sentinel-collapse (not a hard failure): the before-validator runs
-    # every field through _str, so a non-str becomes "" rather than raising.
-    binding = Binding.model_validate({"trigger": 5, "skill": None, "mode": ["x"]})
-    assert binding.trigger == "" and binding.skill == "" and binding.mode == ""
-    # Such a binding surfaces its findings through validate(), never through construction.
-    issues = validate(BindingSet(schema_version=1, bindings=[binding]))
-    messages = " | ".join(i.message for i in issues)
-    assert "skill" in messages
-    assert "trigger" in messages
-    assert MODES[0] in messages or "mode" in messages
+def test_non_string_scalar_in_stored_file_raises(tmp_path):
+    # A non-string scalar in the stored file is a genuine type error: the lenient parse model
+    # cannot coerce int->str, so it raises (translated to BindingsError at the load boundary).
+    bad = GOOD.replace('trigger: "stage:plan"', "trigger: 5")
+    with pytest.raises(BindingsError):
+        load_bindings(_write(tmp_path, bad))
 
 
-def test_unknown_key_is_dropped_not_forbidden():
-    # The before-validator strips stray keys before extra="forbid" is reached.
-    binding = Binding.model_validate(
-        {"trigger": "stage:plan", "skill": "x", "mode": "nudge", "bogus": "y"}
+def test_absent_field_stays_a_content_finding(tmp_path):
+    # An *absent* field defaults to "" and surfaces through validate() (structural/content split
+    # preserved) — it never raises at the load boundary.
+    missing_mode = GOOD.replace("    skill: perk-plan\n    mode: nudge\n", "    skill: perk-plan\n")
+    issues = validate(load_bindings(_write(tmp_path, missing_mode)))
+    assert "mode" in " | ".join(i.message for i in issues)
+
+
+def test_user_overlay_ill_typed_scalar_is_loud_but_non_fatal():
+    # U3: an ill-typed user [[bindings]] scalar coerces to "" (never crashes config-load) and the
+    # resolver records the resulting shape Issue (never silently drops).
+    user = parse_user_bindings([{"trigger": 5, "skill": "x", "mode": "nudge"}])
+    assert user[0].trigger == ""
+    resolved = resolve_bindings(user, defaults=DEFAULTS)
+    assert resolved.bindings == DEFAULTS  # the invalid user binding is dropped
+    assert resolved.issues  # ...and reported
+
+
+def test_unknown_key_is_dropped_not_forbidden(tmp_path):
+    # A stray key on a stored binding is dropped (extra="ignore"): the file loads clean and the
+    # resulting Binding exposes only trigger/skill/mode.
+    with_stray = GOOD.replace(
+        "    skill: perk-plan\n    mode: nudge",
+        "    skill: perk-plan\n    mode: nudge\n    bogus: y",
     )
-    assert not hasattr(binding, "bogus")
-    assert binding.trigger == "stage:plan"
+    bindings = load_bindings(_write(tmp_path, with_stray))
+    assert validate(bindings) == []
+    first = bindings.bindings[0]
+    assert (first.trigger, first.skill, first.mode) == ("stage:plan", "perk-plan", "nudge")
+    assert not hasattr(first, "bogus")
 
 
 def test_binding_is_frozen():
     binding = Binding(trigger="stage:plan", skill="x", mode="nudge")
-    with pytest.raises(ValidationError):
-        binding.skill = "y"
+    with pytest.raises(FrozenInstanceError):
+        binding.skill = "y"  # ty: ignore[invalid-assignment]
 
 
 def test_kind_and_target_id_derive_from_trigger():
