@@ -445,9 +445,7 @@ def test_config_rejects_non_coercible_field():
 
 def test_config_user_bindings_round_trip():
     # `list[Binding]` validation passes existing instances through unchanged (not rebuilt).
-    binding = Binding(
-        trigger="stage:plan", kind="stage", target_id="plan", skill="perk-plan", mode="nudge"
-    )
+    binding = Binding(trigger="stage:plan", skill="perk-plan", mode="nudge")
     config = Config(worktree_root=Path("/tmp/x"), user_bindings=[binding])
     assert config.user_bindings == [binding]
     assert config.user_bindings[0] is binding

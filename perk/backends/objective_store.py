@@ -362,7 +362,8 @@ class ObjectiveStore(Protocol):
         Returns the **node-issue** ``ObjectiveRef`` (``existed=True`` - an in-place write into an
         existing issue).
 
-        ``header_fields`` is the already-composed ``plan.PlanHeader(...).to_data()`` dict (the store
+        ``header_fields`` is the already-composed ``plan.PlanHeader(...).model_dump(mode="json")``
+        dict (the store
         is handed data, not asked to know ``plan-save``'s schema beyond rendering it).
 
         **Returns ``None`` for a store that does NOT unify node + plan** - the single, unambiguous
