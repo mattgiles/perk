@@ -93,6 +93,37 @@ had a `provider != "github"` early-return that skipped Linear; both gates had to
 shape lives in `extension/substrate/toolParams.ts` (`idParam`/`idArrayParam` — see
 `pi/tool-param-decode.md`).
 
+### URL-peeling in the shared id parser (the single chokepoint)
+
+`perk/cli/commands/plan/resume_cmd.py::parse_plan_id` is the **single chokepoint** every plan/objective
+id-taking command routes through: `perk implement`, `perk plan resume`/`replan`/`from`, and all
+`perk objective` verbs (via the thin `parse_objective_id` alias in `objective/shared.py`). So a
+pure-function change there gained all ~15 commands the URL-acceptance feature **uniformly** — the
+payoff of one shared opaque-id parser.
+
+Durable design decisions:
+
+- **Scheme-gate-first ordering.** Consult the URL helper (the module-level pure `_id_from_url`)
+  only when the input's scheme is `http`/`https`, so a bare id stays **byte-for-byte unchanged**.
+  This is the key to a zero-regression *additive* parser.
+- **Key on path SHAPE, not host string.** `/issues/<digits>` transparently covers GitHub
+  Enterprise with **no host allowlist**; Linear is `/issue/IDENT` and `/project/SLUG`.
+- **`/pull/N` is deliberately REJECTED.** A PR number is a *different object* than the plan-issue —
+  silently resolving it would be a wrong-object footgun. Reject it with an `invalid_input` URL
+  message.
+- **The peeled id stays OPAQUE past the parser.** No backend-host validation: a GitHub URL pasted
+  into a Linear repo extracts a token that the configured backend then fails with the normal
+  not-found error. This keeps the parser pure / backend-agnostic and usable *before* backend
+  resolution. (Linear project URLs resolve because `project(id:)` accepts the slug.)
+
+Testing recipe: a pure unit module exercises the parser directly (the right tier for a pure string
+fn); the resume integration test monkeypatches `resolve.resolve_issue_backend` to a tiny fake,
+because the GitHub backend's `get_plan` does `int(issue_id)` and can't take a Linear-shaped id.
+
+This is **Python-plane only** — no `shared/contracts.md` change. Warm doors operate on ids already
+in `cache.plan-ref`, never a user-pasted URL. (The TS `idParam`/`idArrayParam` opaque-id shape lives
+in `pi/tool-param-decode.md`, already cross-referenced below.)
+
 ## Per-backend land closure
 
 GitHub keeps `Closes #N` in the squash body byte-identically; non-github backends get a
