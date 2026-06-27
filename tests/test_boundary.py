@@ -7,12 +7,16 @@ untyped dict/list shape YAML/JSON actually produces) so the boundary coercion �
 not python kwargs typing — is what's exercised.
 """
 
+from dataclasses import FrozenInstanceError, dataclass
+
 import pytest
 from pydantic import Field
 
 from perk.boundary import (
-    LenientApiModel,
+    LenientParseModel,
+    OutputModel,
     StrictBoundaryModel,
+    StrictInputModel,
     StrTuple,
     ValidationError,
     format_validation_error,
@@ -20,23 +24,23 @@ from perk.boundary import (
 )
 
 
-class _Strict(StrictBoundaryModel):
+class _Strict(StrictInputModel):
     n: int
 
 
-class _StrictTuple(StrictBoundaryModel):
+class _StrictTuple(StrictInputModel):
     items: tuple[str, ...]
 
 
-class _StrTupleModel(StrictBoundaryModel):
+class _StrTupleModel(StrictInputModel):
     items: StrTuple
 
 
-class _Lenient(LenientApiModel):
+class _Lenient(LenientParseModel):
     n: int
 
 
-class _Aliased(LenientApiModel):
+class _Aliased(LenientParseModel):
     field_name: str = Field(alias="camelCase")
 
 
@@ -151,3 +155,109 @@ def test_translate_validation_errors_clean_block() -> None:
 
     with translate_validation_errors(_Boom):
         _Strict.model_validate({"n": 5})
+
+
+# --- OutputModel: trusted snapshot serialized via model_dump(mode="json") ---
+
+
+class _Output(OutputModel):
+    name: str
+    count: int
+
+
+def test_output_frozen() -> None:
+    model = _Output.model_validate({"name": "x", "count": 1})
+    with pytest.raises(ValidationError):
+        model.count = 2
+
+
+def test_output_forbids_extra() -> None:
+    with pytest.raises(ValidationError):
+        _Output.model_validate({"name": "x", "count": 1, "unknown": "y"})
+
+
+def test_output_dump_json_round_trips() -> None:
+    model = _Output.model_validate({"name": "x", "count": 1})
+    assert model.model_dump(mode="json") == {"name": "x", "count": 1}
+
+
+# --- Legacy StrictBoundaryModel still behaves strictly (config unchanged) ---
+
+
+class _LegacyStrict(StrictBoundaryModel):
+    n: int
+
+
+def test_legacy_strict_rejects_string_scalar() -> None:
+    with pytest.raises(ValidationError):
+        _LegacyStrict.model_validate({"n": "5"})
+
+
+def test_legacy_strict_forbids_extra() -> None:
+    with pytest.raises(ValidationError):
+        _LegacyStrict.model_validate({"n": 5, "unknown": "x"})
+
+
+# --- Canonical pattern reference: lenient parse → frozen dataclass → validate ---
+#
+# Executable documentation of perk's boundary discipline. A messy external dict is
+# parsed leniently (coercion + unknown-key drop), converted into a frozen dataclass
+# domain object, then run through a separate content-finding pass. Content problems
+# surface as returned findings — never as a parse-time raise.
+
+
+class _RawTask(LenientParseModel):
+    """The parse model: tolerant of the messy shape the boundary actually sees."""
+
+    title: str
+    priority: int
+
+
+@dataclass(frozen=True)
+class _Task:
+    """The domain object: a frozen dataclass, immutable past construction."""
+
+    title: str
+    priority: int
+
+
+def _to_task(raw: _RawTask) -> _Task:
+    """Explicit conversion from the validated parse model to the domain object."""
+    return _Task(title=raw.title, priority=raw.priority)
+
+
+def _validate_task(task: _Task) -> list[str]:
+    """The content pass: returns findings, never raises."""
+    findings: list[str] = []
+    if not task.title.strip():
+        findings.append("title is empty")
+    if task.priority < 0:
+        findings.append("priority is negative")
+    return findings
+
+
+def test_canonical_pattern_lenient_parse_tolerates_messy_input() -> None:
+    # "3" coerces to int; the unknown "legacy_field" is dropped — neither raises.
+    raw = _RawTask.model_validate({"title": "ship it", "priority": "3", "legacy_field": "ignored"})
+    assert raw.priority == 3
+    assert not hasattr(raw, "legacy_field")
+
+
+def test_canonical_pattern_domain_object_is_frozen() -> None:
+    raw = _RawTask.model_validate({"title": "ship it", "priority": 3})
+    task = _to_task(raw)
+    with pytest.raises(FrozenInstanceError):
+        task.priority = 4  # ty: ignore[invalid-assignment]
+
+
+def test_canonical_pattern_content_findings_surface_via_validate() -> None:
+    # A structurally-valid but content-poor task parses clean and converts clean;
+    # the problems surface only as findings from the content pass.
+    raw = _RawTask.model_validate({"title": "  ", "priority": -1})
+    task = _to_task(raw)
+    assert _validate_task(task) == ["title is empty", "priority is negative"]
+
+
+def test_canonical_pattern_clean_task_has_no_findings() -> None:
+    raw = _RawTask.model_validate({"title": "ship it", "priority": 3})
+    assert _validate_task(_to_task(raw)) == []
