@@ -199,7 +199,7 @@ def test_refuses_non_open_issue(monkeypatch):
 def test_refuses_issue_already_a_plan(monkeypatch):
     _authed(monkeypatch)
     header = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id="R", created="t").to_data()
+        plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id="R", created="t").model_dump(mode="json")
     )
     _stub_issue(monkeypatch, issue=_issue(body=f"prose\n\n{header}\n"))
     runner = CliRunner()

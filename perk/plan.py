@@ -14,12 +14,13 @@ Storage shape (perk-namespaced):
   ``<details>``.
 """
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
 import yaml
+
+from perk.boundary import StrictBoundaryModel, StrTuple
 
 PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
@@ -81,23 +82,25 @@ class LifecycleStage(StrEnum):
     IMPL = "impl"
 
 
-@dataclass(frozen=True)
-class PlanHeader:
+class PlanHeader(StrictBoundaryModel):
     """Compact, queryable metadata stored in the issue *body* (contracts.md §8.4).
 
     ``branch``/``pr`` are **staged** — null during planning, populated at submit
     ("commands must handle missing fields gracefully").
     """
 
+    # Field declaration order is load-bearing: ``model_dump(mode="json")`` emits in this
+    # order and ``render_metadata_block`` renders it verbatim into the stored YAML, so this
+    # order must stay byte-stable to avoid churning existing plan-issue bodies on re-save.
     run_id: str
-    created: str  # ISO-8601 UTC (see :func:`now_iso`)
     lifecycle_stage: LifecycleStage = LifecycleStage.PLANNED
     branch: str | None = None
     pr: str | None = None
+    created: str  # ISO-8601 UTC (see :func:`now_iso`)
     objective_id: str | None = None
     # The perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
     # Linear "ENG-45"; contracts §8.21).
-    consumed_learn: tuple[str, ...] = ()
+    consumed_learn: StrTuple = ()
     # The pinned PR merge target / worktree start-point branch. `None` ⇒ fall back to the
     # GitHub default branch (byte-identical to prior behavior).
     base: str | None = None
@@ -107,22 +110,8 @@ class PlanHeader:
     # body/title are verbatim human content" signal. `None` for a normally-authored plan.
     adopted_from: str | None = None
 
-    def to_data(self) -> dict[str, object]:
-        return {
-            "run_id": self.run_id,
-            "lifecycle_stage": self.lifecycle_stage.value,
-            "branch": self.branch,
-            "pr": self.pr,
-            "created": self.created,
-            "objective_id": self.objective_id,
-            "consumed_learn": list(self.consumed_learn),
-            "base": self.base,
-            "adopted_from": self.adopted_from,
-        }
 
-
-@dataclass(frozen=True)
-class PlanRef:
+class PlanRef(StrictBoundaryModel):
     """The provider-agnostic plan→branch ref (contracts.md §8.4).
 
     ``pr_id`` is a **string** (allows non-numeric ids like Jira ``PROJ-123``); during
@@ -132,23 +121,12 @@ class PlanRef:
     provider: str
     pr_id: str
     url: str
-    labels: tuple[str, ...]
+    labels: StrTuple
     objective_id: str | None = None
     # Consumed perk:learn issue ids (opaque strings; closed on land).
-    consumed_learn: tuple[str, ...] = ()
+    consumed_learn: StrTuple = ()
     # The pinned PR merge target / worktree start-point branch; `None` ⇒ GitHub default.
     base: str | None = None
-
-    def to_data(self) -> dict[str, object]:
-        return {
-            "provider": self.provider,
-            "pr_id": self.pr_id,
-            "url": self.url,
-            "labels": list(self.labels),
-            "objective_id": self.objective_id,
-            "consumed_learn": list(self.consumed_learn),
-            "base": self.base,
-        }
 
 
 # --------------------------------------------------------------------- block engine
