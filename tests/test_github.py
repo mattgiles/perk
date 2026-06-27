@@ -10,10 +10,12 @@ from pathlib import Path
 import click
 import pytest
 from _github_fakes import ROOT, _GhDispatch, _has, _Proc
+from pydantic import ValidationError
 
 from perk import github
 from perk.cli.context import PerkContext, require_github
 from perk.cli.ensure import UserFacingCliError
+from perk.github import prs, workflows
 
 
 def test_check_auth_authed(monkeypatch):
@@ -409,6 +411,133 @@ def test_validate_pr_body_html_details_embed_is_fine():
         "`gh pr checkout 42`\n"
     )
     assert github.validate_pr_body(body, pr_number=42) == ()
+
+
+# --- PullRequestModel (boundary parse) -------------------------------------
+
+
+def test_pull_request_model_rest_payload_happy():
+    pr = prs.PullRequestModel.model_validate(
+        {"number": 10, "html_url": "u/10", "draft": True, "state": "open", "base": {"ref": "main"}}
+    ).to_domain(existed=False)
+    assert pr.number == 10 and pr.url == "u/10" and pr.is_draft is True
+    assert pr.state == "OPEN" and pr.base_ref == "main" and pr.existed is False
+
+
+def test_pull_request_model_url_alias_and_extra_key_ignored():
+    # `url` (the create-PR --jq shape uses html_url; a raw REST object may use either) + a
+    # vendor-specific extra key is dropped by the lenient base.
+    pr = prs.PullRequestModel.model_validate(
+        {"number": 3, "url": "u/3", "vendor_extra": "x"}
+    ).to_domain(existed=True)
+    assert pr.url == "u/3" and pr.number == 3
+
+
+def test_pull_request_model_missing_number_raises():
+    with pytest.raises(ValidationError):
+        prs.PullRequestModel.model_validate({"html_url": "u"})
+
+
+def test_pull_request_model_state_normalization():
+    merged = prs.PullRequestModel.model_validate(
+        {"number": 1, "merged_at": "2024-01-01T00:00:00Z"}
+    ).to_domain(existed=True)
+    assert merged.state == "MERGED"
+    closed = prs.PullRequestModel.model_validate({"number": 1, "state": "closed"}).to_domain(
+        existed=True
+    )
+    assert closed.state == "CLOSED"
+
+
+def test_create_pr_malformed_payload_raises_labelled(monkeypatch):
+    rec = _GhDispatch(
+        [
+            (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+            (_has("pulls", "GET"), _Proc(0, "[]")),
+            (_has("pulls", "POST"), _Proc(0, json.dumps({"html_url": "u"}))),  # no number
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="create PR"):
+        github.create_pr(head="plan-7", base="main", title="t", body="b", repo_root=ROOT)
+
+
+def test_get_pr_malformed_payload_raises_labelled(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("pulls/42"), _Proc(0, json.dumps({"html_url": "u"})))]),
+    )
+    with pytest.raises(github.GitHubError, match="read PR #42"):
+        github.get_pr(number=42, repo_root=ROOT)
+
+
+def test_get_pr_not_found_still_returns_none(monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: _Proc(1, stderr="gh: Not Found (HTTP 404)")
+    )
+    assert github.get_pr(number=42, repo_root=ROOT) is None
+
+
+# --- WorkflowRunModel (boundary parse) -------------------------------------
+
+
+def test_workflow_run_model_alias_choices():
+    # `databaseId` (gh run view) and `id` (REST list) both populate id; url/html_url both work.
+    a = workflows.WorkflowRunModel.model_validate(
+        {"databaseId": 7, "url": "u", "status": "queued"}
+    ).to_domain()
+    assert a.id == "7" and a.url == "u"
+    b = workflows.WorkflowRunModel.model_validate(
+        {"id": 9, "html_url": "h", "conclusion": ""}
+    ).to_domain()
+    assert b.id == "9" and b.url == "h" and b.conclusion is None  # empty normalizes to None
+
+
+def test_get_workflow_run_soft_miss_returns_none(monkeypatch):
+    # A 0-exit run-view with no databaseId is a lookup miss, not a malformed-raise.
+    monkeypatch.setattr(
+        subprocess, "run", _GhDispatch([(_has("run", "view"), _Proc(0, json.dumps({"url": "u"})))])
+    )
+    assert github.get_workflow_run(run_id="7", repo_root=ROOT) is None
+
+
+def test_get_workflow_run_malformed_raises_labelled(monkeypatch):
+    # databaseId present but non-coercible to int -> ValidationError -> labelled GitHubError.
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("run", "view"), _Proc(0, json.dumps({"databaseId": "nope"})))]),
+    )
+    with pytest.raises(github.GitHubError, match="read workflow run 7"):
+        github.get_workflow_run(run_id="7", repo_root=ROOT)
+
+
+def test_get_workflow_run_happy(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (
+                    _has("run", "view"),
+                    _Proc(
+                        0,
+                        json.dumps(
+                            {
+                                "databaseId": 7,
+                                "url": "u",
+                                "status": "completed",
+                                "conclusion": "success",
+                            }
+                        ),
+                    ),
+                )
+            ]
+        ),
+    )
+    wr = github.get_workflow_run(run_id="7", repo_root=ROOT)
+    assert wr == github.WorkflowRun(id="7", url="u", status="completed", conclusion="success")
 
 
 # --- workflow dispatch (contracts.md §8.13) --------------------------------

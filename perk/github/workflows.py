@@ -3,6 +3,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
+
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
 
 # ===========================================================================
@@ -23,6 +26,29 @@ class WorkflowRun:
     url: str
     status: str  # "queued" | "in_progress" | "completed" | …
     conclusion: str | None  # "success" | "failure" | "cancelled" | … | None
+
+
+class WorkflowRunModel(LenientParseModel):
+    """Lenient parse of a GitHub Actions run payload, shared by both producers.
+
+    ``get_workflow_run`` (``gh run view`` — camelCase ``databaseId``/``url``) and
+    ``trigger_workflow`` (REST list — ``id``/``html_url``) feed the same frozen
+    :class:`WorkflowRun` via ``AliasChoices``. ``id`` is the run identity and is required; a
+    present-but-malformed payload raises a ``ValidationError`` the call site labels.
+    """
+
+    id: int = Field(validation_alias=AliasChoices("databaseId", "id"))
+    url: str = Field("", validation_alias=AliasChoices("url", "html_url"))
+    status: str = ""
+    conclusion: str | None = None
+
+    def to_domain(self) -> WorkflowRun:
+        return WorkflowRun(
+            id=str(self.id),
+            url=self.url,
+            status=self.status,
+            conclusion=self.conclusion or None,
+        )
 
 
 def trigger_workflow(
@@ -74,12 +100,10 @@ def trigger_workflow(
                         f"workflow {workflow!r} run was {conclusion} (run {run.get('id')!r}, "
                         f"title {title!r}) — a job-level condition was likely not met"
                     )
-                return WorkflowRun(
-                    id=str(run.get("id", "")),
-                    url=str(run.get("html_url", "")),
-                    status=str(run.get("status", "")),
-                    conclusion=conclusion if isinstance(conclusion, str) else None,
-                )
+                with translate_validation_errors(
+                    _exec.GitHubError, source=f"discover workflow run for {workflow!r}"
+                ):
+                    return WorkflowRunModel.model_validate(run).to_domain()
         if attempt < max_attempts - 1:
             sleep(min(2**attempt, 8))
     recent = ", ".join(repr(t) for t in titles[:10]) or "(none)"
@@ -100,13 +124,8 @@ def get_workflow_run(*, run_id: str, repo_root: Path) -> WorkflowRun | None:
     data = _exec._parse_json(proc, source="`gh run view`", default="{}")
     if not isinstance(data, dict) or "databaseId" not in data:
         return None
-    conclusion = data.get("conclusion")
-    return WorkflowRun(
-        id=str(data.get("databaseId", "")),
-        url=str(data.get("url", "")),
-        status=str(data.get("status", "")),
-        conclusion=conclusion if isinstance(conclusion, str) and conclusion else None,
-    )
+    with translate_validation_errors(_exec.GitHubError, source=f"read workflow run {run_id}"):
+        return WorkflowRunModel.model_validate(data).to_domain()
 
 
 def cancel_workflow_run(*, run_id: str, repo_root: Path) -> None:

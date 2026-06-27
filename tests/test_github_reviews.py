@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 from _github_fakes import ROOT, _GhDispatch, _has, _Proc
+from pydantic import ValidationError
 
 from perk import github
 from perk.github import _exec, reviews
@@ -249,3 +250,70 @@ def test_parse_reviews_partial_payload_is_none_safe():
     (review,) = reviews._parse_reviews(payload)
     assert review.review_id == "R_1" and review.state == "COMMENTED"
     assert review.author is None and review.submitted_at is None and review.body == ""
+
+
+# --- boundary models (camelCase aliases + identity sharpening) --------------
+
+
+def test_review_models_camelcase_aliases_map():
+    comment = reviews.ReviewCommentModel.model_validate(
+        {
+            "databaseId": 99,
+            "body": "b",
+            "author": {"login": "rev"},
+            "path": "p.py",
+            "line": 3,
+            "createdAt": "2024-01-01T00:00:00Z",
+        }
+    ).to_domain()
+    assert comment.comment_id == 99 and comment.author == "rev"
+    assert comment.created_at == "2024-01-01T00:00:00Z"
+
+    thread = reviews.ReviewThreadModel.model_validate(
+        {"id": "PRRT_1", "isResolved": True, "isOutdated": True}
+    ).to_domain(comments=())
+    assert (
+        thread.thread_id == "PRRT_1" and thread.is_resolved is True and thread.is_outdated is True
+    )
+
+    review = reviews.ReviewModel.model_validate(
+        {"id": "R_1", "author": {"login": "rev"}, "state": "APPROVED", "submittedAt": "t"}
+    ).to_domain()
+    assert review.review_id == "R_1" and review.author == "rev" and review.submitted_at == "t"
+
+
+def test_review_comment_no_database_id_keeps_tolerance():
+    # databaseId is not the thread identity, so its absence stays None (not a raise).
+    comment = reviews.ReviewCommentModel.model_validate({"body": "a comment"}).to_domain()
+    assert comment.comment_id is None and comment.author is None
+
+
+def test_review_thread_missing_id_raises():
+    with pytest.raises(ValidationError):
+        reviews.ReviewThreadModel.model_validate({"isResolved": True})
+
+
+def test_get_pr_feedback_malformed_thread_raises_labelled(monkeypatch):
+    malformed = json.dumps(
+        {
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        # a thread node missing its required `id`
+                        "reviewThreads": {"nodes": [{"isResolved": False}]}
+                    }
+                }
+            }
+        }
+    )
+    rec = _GhDispatch(
+        [
+            (_has("repo", "view", "nameWithOwner"), _Proc(0, "octo/repo\n")),
+            (_has("graphql", "reviewThreads"), _Proc(0, malformed)),
+            (_has("graphql", "reviews"), _Proc(0, _REVIEWS_PAYLOAD)),
+            (_has("issues/42/comments"), _Proc(0, _COMMENTS_PAYLOAD)),
+        ]
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    with pytest.raises(github.GitHubError, match="parse review threads for PR #42"):
+        github.get_pr_feedback(pr_number=42, repo_root=ROOT)

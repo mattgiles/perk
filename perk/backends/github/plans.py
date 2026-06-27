@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from perk import plan
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec, prs
 
 # ===========================================================================
@@ -340,6 +341,30 @@ class IssueRead:
     state: str
 
 
+class IssueReadModel(LenientParseModel):
+    """Lenient parse of a ``gh issue view`` payload (the ``read_issue`` boundary).
+
+    ``number`` is the issue identity and is required — ``gh issue view`` always returns it on a
+    0-exit read, so a present-but-malformed payload raises a ``ValidationError`` the call site
+    maps to a labelled ``GitHubError``. The keys are already snake/lower (no ``Field`` aliases).
+    """
+
+    number: int
+    url: str = ""
+    title: str = ""
+    body: str = ""
+    state: str = ""
+
+    def to_domain(self) -> IssueRead:
+        return IssueRead(
+            number=self.number,
+            url=self.url,
+            title=self.title,
+            body=self.body,
+            state=self.state,
+        )
+
+
 def read_issue(*, number: int, repo_root: Path) -> IssueRead | None:
     """Read *any* issue's raw title + body + state for in-place adoption (§8.29).
 
@@ -356,13 +381,8 @@ def read_issue(*, number: int, repo_root: Path) -> IssueRead | None:
     )
     if data is None:
         return None
-    return IssueRead(
-        number=int(data["number"]) if "number" in data else number,
-        url=str(data.get("url", "")),
-        title=str(data.get("title", "")),
-        body=str(data.get("body", "")),
-        state=str(data.get("state", "")),
-    )
+    with translate_validation_errors(_exec.GitHubError, source=f"read issue #{number}"):
+        return IssueReadModel.model_validate(data).to_domain()
 
 
 def add_issue_label(*, issue: int, label: str, repo_root: Path, dry_run: bool = False) -> bool:
