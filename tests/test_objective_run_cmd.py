@@ -293,7 +293,13 @@ def _record(*, objective_id="137", run_id="01RUN", with_handle=True):
         {
             "run_id": run_id,
             "stage": "implement",
-            "plan_ref": {"pr_id": "7", "objective_id": objective_id},
+            "plan_ref": {
+                "provider": "github",
+                "pr_id": "7",
+                "url": "u/7",
+                "labels": ["perk:plan"],
+                "objective_id": objective_id,
+            },
             "runner": "",
             "kind": "github-actions",
             "status": "dispatched",

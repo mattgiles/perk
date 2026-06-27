@@ -5,7 +5,7 @@ prerequisites a static check cannot: that the managed workflow is dispatchable, 
 starts a job, and the secrets are readable **in the Actions context**. It triggers the managed
 ``perk-run.yml`` **directly** with a ``smoke=true`` short-circuit (the workflow validates secrets,
 echoes a smoke-ok line, then exits success — no plan checkout, no composite setup, no worker drive,
-no model spend), persisting **no** ``DispatchRecord`` and creating **no** GitHub artifacts (no
+no model spend), persisting **no** dispatch record and creating **no** GitHub artifacts (no
 branch/PR/issue). So `perk workflow run list` is unaffected, and there is no ``cleanup``
 command to write (perk's smoke leaves nothing durable) — the only real leftover is an in-flight run
 on a poll timeout, which ``smoke-test --wait`` self-cancels.
@@ -35,7 +35,7 @@ POLL_INTERVAL_S = 15
 
 @dataclass(frozen=True)
 class SmokeDispatch:
-    """A successful dispatch — the verified run handle (no DispatchRecord is written)."""
+    """A successful dispatch — the verified run handle (no dispatch record is written)."""
 
     run_id: str
     run_ref: str
@@ -67,7 +67,7 @@ def dispatch_smoke(
 
     Mints a fresh ``run_id``, resolves the default branch (fallback ``"main"`` on a ``GitHubError``,
     with a stderr note — mirrors ``launch._drive_remote_target``), then dispatches + verifies by
-    discovery. Writes **no** ``DispatchRecord``. A ``GitHubError`` (including the
+    discovery. Writes **no** dispatch record. A ``GitHubError`` (including the
     ``PERK_ENABLED=false`` job-skipped case, which ``smoke-test`` pre-checks before reaching here)
     is returned as a ``SmokeError``.
     """

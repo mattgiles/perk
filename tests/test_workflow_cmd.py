@@ -20,7 +20,12 @@ def _git_init(path: str) -> None:
 def _record(run_id: str, *, dispatched_at: str, **over) -> dict:
     base = {
         "stage": "implement",
-        "plan_ref": {"provider": "github", "pr_id": "42", "url": "u/issues/42"},
+        "plan_ref": {
+            "provider": "github",
+            "pr_id": "42",
+            "url": "u/issues/42",
+            "labels": ["perk:plan"],
+        },
         "runner": "",
         "kind": "github-actions",
         "status": "dispatched",

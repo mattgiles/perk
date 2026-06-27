@@ -52,13 +52,12 @@ def _row_to_dict(
     pr: github.PullRequest | None,
 ) -> dict[str, Any]:
     """Assemble one run's JSON dict from the record + the (possibly ``None``) overlays."""
-    plan_ref = record.plan_ref or {}
-    pr_id = str(plan_ref.get("pr_id", "")).strip()
-    handle = record.run_handle or {}
+    plan_ref = record.plan_ref
+    pr_id = plan_ref.pr_id.strip()
     run_block: dict[str, Any] | None = None
     if run_obs is not None:
         run_block = {
-            "run_ref": str(handle.get("run_ref", "")),
+            "run_ref": record.run_handle.run_ref if record.run_handle else "",
             "url": run_obs.url,
             "status": run_obs.status,
             "conclusion": run_obs.conclusion,
@@ -74,7 +73,7 @@ def _row_to_dict(
         "dispatch_status": record.status,
         "dispatched_at": record.dispatched_at,
         "error": record.error,
-        "plan": {"pr_id": pr_id, "url": str(plan_ref.get("url", ""))},
+        "plan": {"pr_id": pr_id, "url": plan_ref.url},
         "pr": pr_block,
         "run": run_block,
     }
@@ -89,10 +88,9 @@ def _overlay(
     """Best-effort live overlay for one record: (run observation, correlated PR). Each read is
     fail-soft — a failure degrades to ``None`` with a one-line stderr note, never raises."""
     run_obs: runner.RunObservation | None = None
-    handle_data = record.run_handle
-    if handle_data:
+    handle = record.run_handle
+    if handle is not None:
         try:
-            handle = runner.RunHandle.from_data(handle_data)
             run_obs = runner.select_runner(record.runner).observe(handle, repo_root=repo_root)
         except runner.RunnerError as exc:
             user_output(f"note: run state unavailable for {record.run_id}: {exc}")
@@ -100,7 +98,7 @@ def _overlay(
 
     pr: github.PullRequest | None = None
     # Plan ids are opaque strings (contracts §8.21): any non-empty id resolves via the backend.
-    pr_id = str((record.plan_ref or {}).get("pr_id", "")).strip()
+    pr_id = record.plan_ref.pr_id.strip()
     if pr_id:
         if pr_id in plan_cache:
             plan_state = plan_cache[pr_id]

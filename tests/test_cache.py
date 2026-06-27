@@ -2,9 +2,11 @@ import json
 
 import pytest
 
+from perk.boundary import ValidationError
 from perk.state.cache import (
     AgentSessionCache,
     CacheError,
+    DispatchCache,
     PlanRefCache,
     clear_marker,
     dispatch_path,
@@ -37,7 +39,7 @@ from perk.state.cache import (
 def _dispatch(run_id: str = "01RID", **over: object) -> dict:
     base = {
         "stage": "implement",
-        "plan_ref": {"provider": "github", "pr_id": "7"},
+        "plan_ref": {"provider": "github", "pr_id": "7", "url": "u/7", "labels": ["perk:plan"]},
         "runner": "",
         "kind": "github-actions",
         "status": "dispatched",
@@ -219,6 +221,84 @@ def test_dispatch_round_trip_and_required_fields(tmp_path):
     bad.write_text('{"run_id": "01RID", "stage": "implement"}\n', encoding="utf-8")
     with pytest.raises(CacheError):
         read_dispatch(tmp_path, "01RID")
+
+
+def test_dispatch_nested_round_trip_is_typed(tmp_path):
+    """The nested plan_ref/run_handle are validated + read back as typed models."""
+    write_dispatch(
+        tmp_path,
+        "01RID",
+        _dispatch(
+            run_id="01RID",
+            run_handle={"runner": "ci", "kind": "github-actions", "run_ref": "7", "url": "u"},
+        ),
+    )
+    back = read_dispatch(tmp_path, "01RID")
+    assert back is not None
+    assert isinstance(back.plan_ref, PlanRefCache) and back.plan_ref.pr_id == "7"
+    assert back.run_handle is not None and back.run_handle.run_ref == "7"
+
+
+def test_dispatch_rejects_malformed_nested_plan_ref(tmp_path):
+    """A nested plan_ref missing required url/labels on disk -> CacheError from read_dispatch."""
+    bad = dispatch_path(tmp_path, "01bad")
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    # model_validate (the boundary) raises a raw ValidationError; the cache reader translates it.
+    with pytest.raises(ValidationError):
+        DispatchCache.model_validate(
+            {
+                "run_id": "01bad",
+                "stage": "implement",
+                "plan_ref": {"provider": "github", "pr_id": "7"},
+                "runner": "",
+                "kind": "github-actions",
+                "status": "dispatched",
+                "dispatched_at": "2024-01-01T00:00:00Z",
+            }
+        )
+    bad.write_text(
+        json.dumps(
+            {
+                "run_id": "01bad",
+                "stage": "implement",
+                "plan_ref": {"provider": "github", "pr_id": "7"},
+                "runner": "",
+                "kind": "github-actions",
+                "status": "dispatched",
+                "dispatched_at": "2024-01-01T00:00:00Z",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CacheError):
+        read_dispatch(tmp_path, "01bad")
+
+
+def test_list_dispatch_records_skips_malformed_nested(tmp_path, capsys):
+    write_dispatch(tmp_path, "01good", _dispatch(run_id="01good"))
+    bad = run_scratch_dir(tmp_path, "01bad") / "dispatch.json"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    # A nested run_handle missing required keys -> skipped loudly, not fatal.
+    bad.write_text(
+        json.dumps(
+            {
+                "run_id": "01bad",
+                "stage": "implement",
+                "plan_ref": {"provider": "github", "pr_id": "7", "url": "u", "labels": []},
+                "runner": "",
+                "kind": "github-actions",
+                "status": "dispatched",
+                "dispatched_at": "2024-01-01T00:00:00Z",
+                "run_handle": {"run_ref": "7"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    records = list_dispatch_records(tmp_path)
+    assert [r.run_id for r in records] == ["01good"]
+    assert "skipping unreadable dispatch record" in capsys.readouterr().err
 
 
 def test_list_dispatch_records_skips_invalid_loudly(tmp_path, capsys):

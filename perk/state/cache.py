@@ -15,6 +15,7 @@ from typing import Any
 from pydantic import ConfigDict
 
 from perk.boundary import StrictBoundaryModel, StrTuple, translate_validation_errors
+from perk.run.runner import RunHandle
 from perk.substrate.output import user_output
 
 # The canonical `.perk/workflow/` subtrees (public so `perk doctor` can verify the layout).
@@ -53,24 +54,6 @@ class HandoffCache(StrictBoundaryModel):
     consumed_learn: StrTuple = ()
 
 
-class DispatchCache(StrictBoundaryModel):
-    """The durable ``run_id -> plan`` dispatch record (``scratch/runs/*/dispatch.json``).
-
-    ``plan_ref``/``run_handle`` stay opaque dicts here — their nested shape is owned by the
-    ``DispatchRecord``/``RunHandle`` domain models, not validated at this tier.
-    """
-
-    run_id: str
-    stage: str
-    plan_ref: dict[str, Any]
-    runner: str
-    kind: str
-    status: str
-    dispatched_at: str
-    run_handle: dict[str, Any] | None = None
-    error: str | None = None
-
-
 class PlanRefCache(StrictBoundaryModel):
     """The active plan->branch ref pointer (``plan-ref.json``, §8.4)."""
 
@@ -82,6 +65,24 @@ class PlanRefCache(StrictBoundaryModel):
     objective_id: str | None = None
     consumed_learn: StrTuple = ()
     base: str | None = None
+
+
+class DispatchCache(StrictBoundaryModel):
+    """The durable ``run_id -> plan`` dispatch record (``scratch/runs/*/dispatch.json``).
+
+    The nested ``plan_ref`` (a ``PlanRefCache`` snapshot) and ``run_handle`` (a ``RunHandle``) are
+    validated here — this is the on-disk read boundary that owns the dispatch record's shape.
+    """
+
+    run_id: str
+    stage: str
+    plan_ref: PlanRefCache
+    runner: str
+    kind: str
+    status: str
+    dispatched_at: str
+    run_handle: RunHandle | None = None
+    error: str | None = None
 
 
 class AgentSessionCache(StrictBoundaryModel):

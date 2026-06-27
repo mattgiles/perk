@@ -56,7 +56,7 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
     target = number
     runs = turns = tokens = elapsed = 0
     for record in cache.list_dispatch_records(repo_root):
-        oid = (record.plan_ref or {}).get("objective_id")
+        oid = record.plan_ref.objective_id
         if _canon_objective(oid) != target:
             continue
         runs += 1
@@ -83,12 +83,11 @@ def _in_flight_record(
     """
     target = number
     for record in cache.list_dispatch_records(repo_root):  # newest-first
-        if _canon_objective((record.plan_ref or {}).get("objective_id")) != target:
+        if _canon_objective(record.plan_ref.objective_id) != target:
             continue
-        handle_data = record.run_handle
-        if not handle_data:
+        handle = record.run_handle
+        if handle is None:
             continue
-        handle = runner.RunHandle.from_data(handle_data)
         runner_obj = runner.select_runner(record.runner)
         try:
             obs = runner_obj.observe(handle, repo_root=repo_root)

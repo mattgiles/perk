@@ -6,7 +6,7 @@ prereq layer (`doctor.workflow_checks` — GitHub readiness ⊕ runner prereqs �
 cannot give — it dispatches a throwaway CI run with a `smoke=true` short-circuit (validate secrets +
 confirm the runner started, then exit success; no plan checkout, no worker drive, no model spend),
 optionally polls it to completion, and self-cancels its own run on a poll timeout. The smoke writes
-**no** `DispatchRecord` and creates **no** GitHub artifacts, so it stays a pure doctor diagnostic
+**no** dispatch record and creates **no** GitHub artifacts, so it stays a pure doctor diagnostic
 (`perk workflow run list` is unaffected) — there is no `cleanup` command (perk's smoke leaves
 nothing durable).
 """
