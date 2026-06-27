@@ -4,12 +4,12 @@ from perk import github, plan
 from perk.backends import engagement, issue_backend
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear._helpers import (
+    LinearIssueNodeModel,
     _agent_activity,
     _agent_session_read,
     _description_edit,
     _engagement_comment,
     _note,
-    _require_issue_node,
     to_linear_markdown,
 )
 from perk.backends.linear.client import (
@@ -20,6 +20,7 @@ from perk.backends.linear.client import (
     _require_str,
 )
 from perk.backends.linear.issue_ops import _LinearIssueOps
+from perk.boundary import translate_validation_errors
 from perk.github import GitHubError
 
 
@@ -162,8 +163,9 @@ class LinearIssueBackend:
         )
         if issue is None:
             return None
-        node = _require_issue_node(issue)
-        body = node["description"] or ""
+        with translate_validation_errors(IssueBackendError, source=f"read plan issue {issue_id!r}"):
+            node = LinearIssueNodeModel.model_validate(issue)
+        body = node.description or ""
         header = plan.find_metadata_block(body, plan.PLAN_HEADER_KEY) or {}
         pr_field = header.get("pr")
         pr = (
@@ -171,14 +173,13 @@ class LinearIssueBackend:
             if isinstance(pr_field, str | int) and str(pr_field).strip() and str(pr_field) != "None"
             else None
         )
-        state_type = node["state"]["type"]
         return issue_backend.PlanState(
-            id=node["identifier"],
-            url=node["url"],
-            title=node["title"],
+            id=node.identifier,
+            url=node.url,
+            title=node.title,
             header=header,
             pr=pr,
-            state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
+            state=node.normalized_state(),
         )
 
     def _get_pr(self, number: int) -> github.PullRequest | None:
@@ -214,14 +215,14 @@ class LinearIssueBackend:
         )
         if issue is None:
             return None
-        node = _require_issue_node(issue)
-        state_type = node["state"]["type"]
+        with translate_validation_errors(IssueBackendError, source=f"read issue {issue_id!r}"):
+            node = LinearIssueNodeModel.model_validate(issue)
         return issue_backend.AdoptableIssue(
-            id=node["identifier"],
-            url=node["url"],
-            title=node["title"],
-            body=node["description"] or "",
-            state="CLOSED" if state_type in ("completed", "canceled") else "OPEN",
+            id=node.identifier,
+            url=node.url,
+            title=node.title,
+            body=node.description or "",
+            state=node.normalized_state(),
         )
 
     def adopt_issue_as_plan(
