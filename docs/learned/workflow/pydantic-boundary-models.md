@@ -1,209 +1,234 @@
 ---
-title: Pydantic boundary-model conversion (the strict/lenient parse boundaries)
-read_when: Converting a frozen-dataclass parse boundary (registry/bindings/providers/config/plan-metadata/cache) to a Pydantic v2 model, deciding strict vs lenient, relocating a tolerant parser into a validator, preserving byte-stable stored YAML, or writing ty-clean negative tests against a typed pydantic model.
+title: Pydantic boundary↔domain conversion (Pydantic at the edges, frozen `@dataclass` domain)
+read_when: Converting a registry/bindings/providers/config/plan-metadata/objective/cache boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, deciding read-into-the-type vs serialize-only direction, preserving byte-stable stored YAML/JSON, or writing ty-clean negative tests against a frozen dataclass + its Pydantic boundary model.
 ---
 
-# Pydantic boundary-model conversion
+# Pydantic boundary↔domain conversion
 
-perk's input boundaries were hand-rolled frozen dataclasses with separate tolerant parse functions
-(`_parse_*` + `_str`/`_map`/`_str_list` helpers that collapsed absent/wrong-type values to
-`""`/empty). The boundary-first objective replaced them with Pydantic v2 models anchored on one
-leaf, `perk/boundary.py`, which exports the two base configs (`StrictBoundaryModel`,
-`LenientApiModel`), the `StrTuple` coercion type, and the `format_validation_error` /
-`translate_validation_errors` error-translation seam. This doc is the reusable recipe + the
-decisions and gotchas that recur across every conversion.
+This **supersedes** the earlier "strict Pydantic model AS the frozen domain" philosophy this doc once
+documented. The boundary↔domain reshape inverts it: **Pydantic lives ONLY at the parse/serialize
+edge; the domain object is a frozen `@dataclass`** that imports no pydantic. A lenient parse model
+reads the untrusted edge, an explicit converter copies into the frozen dataclass, and the existing
+`validate() -> list[Issue]` content pass is unchanged. Nothing internal depends on pydantic.
 
-## The two-base decision: strict vs lenient
+If you are reading the old framing anywhere (a node's roadmap prose, a stale comment): the model is
+**not** the domain, "the model IS the tolerant parser" `@model_validator(mode="before")` relocation
+is **removed**, the context-gated set-level validator is **removed**, and frozen mutation now raises
+`dataclasses.FrozenInstanceError` (not `pydantic.ValidationError`) — and ty statically flags the
+mutation line.
 
-The single most load-bearing call is **which base a boundary extends**, and it tracks **who authors
-the input**:
+## The three role-named bases in `perk/boundary.py`
 
-- **`StrictBoundaryModel`** (`frozen` + `extra="forbid"` + `strict=True`) — for **perk-authored
-  contract shapes** we control: the registry, bindings, providers, and plan/objective/cache
-  metadata. Strict mode rejects implicit scalar coercion and bool-as-int by default, and
-  `extra="forbid"` rejects unknown keys. These boundaries *want* to sharpen: a wrong field type or
-  a stray key is a real defect, not tolerable drift.
-- **A plain frozen `pydantic.BaseModel`** (NOT strict) — for the **deliberately forgiving** boundary.
-  `Config` is the canonical example: it accepts already-coerced / pre-validated values (a `Path`,
-  lenient overlay output) and must not fight the silent-omit semantics. The node text said
-  "BaseModel" (generic) precisely to mark this contrast with its strict siblings.
-- **`LenientApiModel`** (`populate_by_name=True`, additive-tolerant) — for **external API responses**
-  (GitHub / Linear) whose schemas grow additively and must not raise on unknown fields.
+`perk/boundary.py` exports three **role-named** bases plus the kept legacy `StrictBoundaryModel`. The
+canonical recipe lives as an executable **reference test** in `tests/test_boundary.py` (a throwaway
+`LenientParseModel` → `_to_X` converter → frozen `@dataclass` → `_validate -> list[str]` content
+pass) — mirror that test's shape, not reproduced code here:
 
-"No Pydantic Settings" ≠ "no Pydantic": it means do not adopt the `pydantic-settings` library
-(auto env/file reading). The hand-rolled `_read_toml` / `_overlay` / secret-reader pipeline stays.
+- **`LenientParseModel`** — `frozen=True, extra="ignore", strict=False, populate_by_name=True`. The
+  read boundary for **perk's own stored files AND external API responses** (the role broadened from
+  the old `LenientApiModel`, which it renames — no deprecated alias kept). `extra="ignore"` drops
+  sibling keys natively; lax coercion tolerates `"true"`/`1` → `True` and a YAML list → tuple. It has
+  **no `str ← int/bool/None` coercion row**, so a bad-typed field still raises — the malformed-edge
+  message contract survives.
+- **`StrictInputModel`** — `frozen=True, extra="forbid", strict=True`. **Config-identical to**
+  `StrictBoundaryModel`; the differentiation is role-naming for machine-authored CLI batch inputs
+  where a typo must fail loudly.
+- **`OutputModel`** — `frozen=True, extra="forbid"` (no `strict` — coercion is irrelevant because it
+  is built from trusted domain values). For `--json` snapshots and stored-block serialization dumped
+  via `model_dump(mode="json")`.
+- **`StrictBoundaryModel`** — KEPT (docstring re-marked legacy/transitional), plus the `StrTuple`
+  coercion type and the `format_validation_error` / `translate_validation_errors` / `ValidationError`
+  re-exports.
 
-## The model validates the assembled result; it does NOT replace the `_parse_*` layer
+## The canonical per-model recipe
 
-For a lenient boundary, the real semantic contract — silent-omit (`base=7`→None, unknown
-`[subagents]` key dropped, mixed `setup` filtered), overlay-wins — lives in the `_parse_*` helpers
-**before** the model is constructed. Those stay byte-identical; the model is a typed, frozen
-structural backstop at the final construction point. The existing parse-layer test suite is the
-regression guard that the semantics didn't move.
+Every per-model conversion follows the same seam (registry, bindings, providers, objective metadata,
+cache all mirror it):
 
-For a strict boundary, the choice between **`Model.model_validate(raw)`** and **explicit-kwarg
-construction** (`Registry(id=..., stages=...)`) is the lever controlling whether `extra="forbid"`
-bites: `model_validate(dict)` enforces it (unknown keys raise), explicit kwargs do not. Decide it
-deliberately per object — per-element/per-stage validation typically uses `model_validate(raw)`
-(so unknown sub-keys raise) while a top-level container built from explicit kwargs keeps top-level
-extra keys tolerated.
+1. A lenient `*File` / `*Entry` / `*Model` parse model (on `LenientParseModel`, via
+   `Model.model_validate(raw)`) at the **read** boundary.
+2. An **explicit field-by-field** `_to_X()` / `to_domain()` converter into the frozen `@dataclass`
+   domain object — collections become `tuple` / `frozenset`, and the domain object carries its own
+   methods.
+3. The existing `validate() -> list[Issue]` content pass, unchanged.
 
-## The structural/content split is preserved by DEFAULTING fields, not requiring them
+This deletes the old `_tolerate` `@model_validator(mode="before")` collapses and the
+`StrTuple`/`BeforeValidator` strict shims; the lenient base does natively what those shims did under
+strict.
 
-The pre-existing two-tier contract is: **structural** failures raise the domain error
-(`RegistryError`/`BindingsError`/`ProvidersError`); **content** failures are returned by
-`validate() -> list[Issue]` and never raise. The old parsers defaulted *absent* fields to `""`/empty
-so `validate()` (not the parser) reported them. To keep that intact, **every model field gets a
-default** — a *missing* key stays a content Issue, not a structural raise. The strict model sharpens
-the boundary only where intended: **wrong field types** and **unknown keys** now raise (were silently
-defaulted/dropped). Choosing defaults over required-fields is deliberate: required fields would move
-absent-field handling from content→structural and break `validate()`'s findings.
+## The boundary-DIRECTION decision (the big recurring correction)
 
-Corollary: **keep value-untyped fields untyped to keep `validate()`'s checks live.** Fields whose
-*values* carry vocabulary semantics (`mode`, `worktree`, free-form `doors`/`run_id` dicts) stay
-plain `str` / `dict[str, Any]` so strict mode only checks the structural shape and defers all
-enum/value-vocabulary checks to `validate()`. Typing `mode` as an enum would relocate a content
-Issue into a structural raise (e.g. a test feeding a *valid str, invalid enum value* must stay a
-content Issue). The same reasoning keeps list fields plain `list[str]` (not `StrTuple`/tuple) where
-tests assert list equality and consumers index them.
+Whether a model is a `LenientParseModel` (**read-into-the-type**) or an `OutputModel`
+(**serialize-only**) is decided by **whether a real read-into-the-type consumer exists** — not by the
+roadmap's framing. Two arc nodes (Config; PlanHeader/PlanRef) had roadmap prose asserting a "lenient
+parse model at the boundary" that the code disproved: the stored block was read back as a raw
+`dict`, never re-parsed into the type. **When no read consumer exists, realize the boundary as an
+`OutputModel` with an explicit `from_domain`, and do NOT author a read-parser with no consumer**
+("don't author fiction for unbuilt components"). The planner's "Correction to the node framing
+(verified against the code)" section is doing real work — **trust the code over the roadmap prose.**
 
-## The "model IS the tolerant parser" pattern
+## Explicit field copy over `**model_dump()` (the settled "1:1 no-op" objection)
 
-When a frozen dataclass had a separate tolerant parse function that coerced every field through a
-sentinel-collapse helper (absent/wrong-type → `""`), **relocate the tolerance into a
-`@model_validator(mode="before") @classmethod`** that returns a dict of exactly the declared keys,
-each run through the retained `_str` helper. Delete the standalone parse function; its call sites
-become `Model.model_validate(raw)`. This keeps a single tolerant parse surface and preserves the
-two-tier contract — the model **never raises for content** because every field comes out the right
-type.
+When the parse model and the domain dataclass have the identical fields, the hand-rolled field-by-field
+copy looks like a crazy no-op. The owner-settled rationale to keep the explicit split:
 
-Why `strict=False` does NOT substitute for the `_str` helper: per the pydantic v2 conversion table,
-a `str` target accepts only `str←str` and `str←bytes/bytearray` — there is **no `str←int/float/
-bool/None` row**, so pydantic raises on a non-string scalar for a `str` field in **both** strict and
-lax modes. `_str()` is a *sentinel-collapse* (absent/wrong-type→`""`), not a coercion any strict
-toggle provides. The tolerance must be relocated, never replaced by a config flag.
+- It keeps pydantic types **out of the domain** (dignified-pydantic rule 1).
+- It is NOT purely a no-op — it is where `set → frozenset`, `list → tuple`, frozen-mutation becomes
+  `FrozenInstanceError`, and the domain's own methods attach.
+- Template consistency: several siblings (providers, objective) are NOT 1:1, so a uniform
+  parse→frozen-dataclass seam pays off; the 1:1 cases eat the boilerplate for that consistency.
+- Prefer it over `X(**entry.model_dump())`: `model_dump()` is `dict[str, Any]`, so a `**`-spread
+  type-checks as `Any` and **loses per-field ty checking** (dignified-pydantic §38). Explicit is the
+  ty-safe form.
 
-Two structural consequences:
+## `from_domain` + TWO decoupled field orderings
 
-- **Because the before-validator returns ONLY the declared keys, a stray key is stripped before
-  `extra="forbid"` is reached** — so unknown keys are silently dropped exactly as the old parser did
-  (no robustness regression on a user overlay like `[[bindings]]`). Worth an explicit
-  `not hasattr(obj, "bogus")` test.
-- **Derived fields become `@property`, not declared fields.** Values that were always pure functions
-  of another field (e.g. `kind`/`target_id` split from `trigger`) drop out of the declared fields
-  and become read-only properties computed from the retained split helper — single source of truth.
-  This shrinks the model to its real input fields and forces positional test constructors to drop the
-  derived args (keyword-only construction).
+The serialize-only `OutputModel` (e.g. `PlanHeaderOut`/`PlanRefOut`) carries an explicit
+`from_domain(cls, x) -> Out` that maps every field (no `**dataclasses.asdict`). Two **separate**
+orderings, each with its own constraint:
 
-Vocabulary and uniqueness checks (known modes, known trigger kinds, duplicate-trigger detection)
-deliberately stay in `validate()` returning `Issue`s — encoding them as model constraints would
-relocate findings off the `validate()` path and break the two-tier contract.
+- **Domain dataclass field order is FREE** — declared required-first to obey "no required field after
+  a defaulted field"; it does not control serialization.
+- **The `OutputModel` field-declaration order IS load-bearing** — `model_dump(mode="json")` emits in
+  declaration order → `render_metadata_block` renders verbatim → must match the prior emission order
+  byte-for-byte. Pydantic v2 permits a required field **after** defaulted fields, so the `OutputModel`
+  keeps the exact legacy emission order even when the dataclass can't. **The load-bearing comment
+  moves onto the `OutputModel`,** not the dataclass.
 
-## Context-gated set-level validator (lenient at load, surfaced in `validate()`)
+A **serialize-only header** (`ObjectiveHeader`, plan-header) needs **no read model at all** — only an
+explicit `render_*_block(header) -> dict` builder. Byte-identity holds because all fields are flat
+scalars: `model_dump(mode="json")` emits them in declaration order with no JSON transform, so a
+hand-written dict in the same declaration order is byte-for-byte identical. Node-mutation sites revert
+`model_copy(update=...)` → `dataclasses.replace`.
 
-A set-level invariant that must stay lenient at load but surface as `Issue`s in `validate()` (the
-providers "exactly-one-`default:true`-per-seam" rule) uses a reusable pattern:
+## The `.model_dump()` blast radius — the recurring undercount + the ty oracle
 
-- The invariant lives **once** as `@model_validator(mode="after")` on the set model, but **only
-  raises when the caller opts in** via pydantic validation context
-  (`if info.context and info.context.get("enforce_single_default"): raise ValueError(...)`).
-- **Load stays lenient**: plain `ProviderSet(...)` construction → `info.context is None` → the
-  validator skips → only *structural* failures raise the domain error.
-- **`validate()` opts in**: it re-runs the validator via
-  `Model.model_validate(model.model_dump(), context={...})`, catches `ValidationError`, and converts
-  `exc.errors()[i]["msg"]` → `Issue` records.
-- **Constraint that travels with the pattern**: because `validate()` re-validates the *dumped* model
-  and `model_dump()` emits a **list**, the re-validated collection field must be `list[Provider]`,
-  not a strict `tuple`/`StrTuple` (a strict tuple field would reject the dumped list). If a future
-  sibling wants `StrTuple`, the re-validation-of-the-dump path must be reconciled with it.
+Converting a Pydantic model → dataclass **removes `.model_dump()`**, so EVERY `<Type>.model_dump()`
+call site breaks — including test files / fixtures with inline `Type(...).model_dump()`. A
+writer-signature flip (`write_plan_ref(dict)` → `write_plan_ref(PlanRef)`) ALSO breaks dict-literal
+call sites with **no type name to grep**. The plan's enumerated test-file list **undercounts** every
+time (one node listed 11, actual ~20). **Whole-tree `ty check tests perk` is the completeness
+oracle** — it flags every `unresolved-attribute … has no attribute model_dump` at once; grep does
+not. The mechanical fixes for the ripple:
 
-Lenient per-field coercion is expressed as module-private `Annotated` types with **named**
-before-validator functions (no bare lambdas, per dignified-python). Semantics: an *absent* key falls
-to the field default (the before-validator does **not** run); a *present-but-ill-typed* value runs
-the coercer, which returns a real value of the strict target type so strict validation then accepts
-it.
+- module-level `_REF = {...}` dict consumed only by the writer → a `PlanRef(...)` dataclass;
+- `{**_REF, "base": "develop"}` spread → `dataclasses.replace(_REF, base="develop")`;
+- where a test still needs the dict (a dry-run `--json` assertion), keep a separate
+  `_PLAN_REF_JSON = PlanRefOut.from_domain(_PLAN_REF).model_dump(mode="json")`;
+- a shared override helper → `PlanRefModel.model_validate({**_REF, **over}).to_domain()`.
 
-## Byte-stable stored YAML depends on field-declaration ORDER
+The `--json` / dry-run output paths **can't `model_dump` a dataclass** → wrap as
+`XOut.from_domain(ref).model_dump(mode="json")`. The **runner Protocol boundary stays dict-typed**, so
+the caller keeps `plan_ref_data = PlanRefOut.from_domain(...).model_dump(...)` as the dict it passes.
 
-For any model whose `model_dump(mode="json")` output is rendered into a stored issue body
-(`render_metadata_block` does `yaml.safe_dump(sort_keys=False)`), **`model_dump` emits in
-field-declaration order**, rendered verbatim. The old hand-written `to_data()` often **reordered**
-fields versus the dataclass declaration. So when converting a dataclass-with-`to_data()`, declare
-the model fields in the **old `to_data()` emission order, NOT the dataclass field order** — otherwise
-every existing stored body churns on next save. Pin it with an order-guard test (assert the rendered
-YAML key positions are strictly increasing). Pydantic v2 imposes **no** "required-after-default"
-ordering rule (unlike dataclasses), so required-no-default fields may legally sit among/after
-defaulted fields — every caller uses kwargs, so the only reason for the order is serialization
-parity. Leave a load-bearing comment on the field block.
+## The ty `invalid-assignment` frozen-mutation gotcha (EVERY node hits it)
 
-## Error translation stays at the boundary seam
+A frozen `@dataclass` field is **statically read-only**, so ty flags `obj.field = x` as
+`invalid-assignment` (`Property '…' is read-only`) — even though ty does NOT flag the equivalent
+assignment on a frozen Pydantic model (it treats the model's fields as settable). So a frozen-mutation
+negative test, flipped from `pytest.raises(ValidationError)` → `pytest.raises(FrozenInstanceError)`,
+also needs **`# ty: ignore[invalid-assignment]` on each mutating line** (mypy-style `# type: ignore`
+does NOT suppress ty — see `toolchain/ty.md`). Whole-tree `typecheck-py` is the gate that catches it;
+the per-model pytest suite stays green without it. **Don't trust a plan that says "no suppression
+needed"** — node 1.4 explicitly disproved its own plan's "runtime-only, no ty suppression" claim.
 
-Wrap model construction at a read/parse boundary in
-`translate_validation_errors(<DomainError>, source=str(path))` so any per-element `ValidationError`
-becomes the domain error with a dotted field-path message. Keep the explicit structural pre-checks
-(file exists / top-level mapping / `schema_version`) — they carry specific helpful messages and
-pydantic does no I/O; the model's typed `schema_version: int` only types the value, it does not own
-the version gate.
+## `str = ""` vs `str | None = None` on a parse field
 
-For models built from **code-controlled** values (e.g. `PlanHeader`/`PlanRef`, or a `Config(...)`
-constructed from already-parsed helper output), do **not** add an error-translation wrapper: a
-`ValidationError` there can only mean a perk bug (a helper returned a wrong-typed value), so let it
-surface loud. The two-tier `translate_validation_errors` seam is the boundary contract for inputs we
-do *not* control.
+When a parse field has a test feeding YAML `null` (`id:`) AND the domain wants a non-optional `str`:
+type the parse field **`str | None = None`** and normalize `None → ""` in the converter
+(`id=entry.id or ""`). `LenientParseModel` (strict=False) given `None` for a `str` field still
+**raises** — there is no `None → str` coercion row — which would wrongly turn a missing-id *content
+Issue* into a structural raise. `str = ""` is safe **only** when there is no `id: null` test (e.g.
+registry's `StageEntry.id: str = ""`).
 
-`frozen` carries over, but the raised type changes: mutating a frozen pydantic model raises
-`pydantic.ValidationError` (not the dataclass `FrozenInstanceError`). Frozen-contract tests import
-`ValidationError` (re-exported from `perk/boundary.py`) and assert `pytest.raises(ValidationError)`
-on attribute assignment.
+## One lenient parse model, two read consumers
 
-## Testing gotchas (ty + pydantic + ruff)
+A single `*Entry(LenientParseModel)` + `to_domain()` can back two read paths at once (objective's
+`ObjectiveNodeEntry` backs both the roadmap-block and the manifest-block paths). `extra="ignore"`
+drops the keys each path doesn't want (the manifest path injects `status=PENDING.value` then lets
+`extra="ignore"` drop `pr`) — exactly what the deleted `_tolerate` used to do. Bad-type field-path
+errors still raise (no `str ← int` row preserves the malformed-edge message contract).
 
-- **Test runtime validation through `Model.model_validate({...})`, never typed kwargs.** ty
-  type-checks `tests/` (`[tool.ty.src] include = ["perk", "tests"]`) and statically flags every
-  deliberately-invalid kwarg against a typed pydantic model (`invalid-argument-type`,
-  `unknown-argument`, `missing-argument`). `model_validate` takes `Any`, so ty stays clean — AND it
-  is the *real* boundary-usage shape (the untyped dict/list that YAML/JSON actually produces). This
-  is the idiomatic way to exercise strict rejection / coercion under a strict type-checker.
-- **When a typed-kwarg negative test is unavoidable, suppress per-diagnostic with
-  `# ty: ignore[<rule>]`** — mypy-style `# type: ignore` does NOT suppress ty (see
-  `docs/learned/toolchain/ty.md`). A frozen-mutation reassignment (`model.field = x` with a
-  type-valid value) is a *runtime-only* constraint and is NOT ty-flagged — no suppression needed.
-- **Pydantic lax coercion picks the negative-test target.** On a non-strict model, a `str`→`Path`
-  coercion IS accepted, so a non-coercible negative case must target a field that genuinely cannot
-  coerce (e.g. a bare `str` where `list[str]` is required). Confirm each field's lax behavior before
-  writing the negative.
-- **Pydantic models reject positional args** — grep for positional model constructors when
-  converting a dataclass and switch them to keyword construction.
-- **ty narrowing across separate calls**: `set.default_for("x").id` fails ty (`X | None` has no
-  `.id`) even right after an `is not None` on a *separate* call — bind to a local first. This often
-  surfaces only in `run_ci`, not local pytest.
-- **The `mode="before"` dict needs an explicit annotation**: `d = raw if isinstance(raw, dict) else
-  {}` makes ty infer the `{}` arm as `dict[Never, Never]` (so `d.get(key)` fails "Expected Never") —
-  annotate `d: dict[Any, Any] = ...`.
-- **ruff isort is case-sensitive** — `BindingsError` sorts before `BindingSet`,
-  `StrictBoundaryModel` before `StrTuple`; let `ruff check --fix` settle import order rather than
-  guessing. Replacing `.to_data()` with `.model_dump(mode="json")` and widening keyword constructors
-  lengthens lines (E501) — `ruff format` rewrites the module *after* CI is green, so always run the
-  formatter before committing.
+## Invariant relocation + the removed context-gated dance
 
-## Whole-tree ty gate caveat
+The providers "exactly-one-`default:true`-per-seam" invariant moved **OUT of** the context-gated
+`@model_validator(mode="after")` + `model_dump()`-then-revalidate dance and **INTO** `validate()` as
+a direct extend. The finding's core text is byte-identical, but it now surfaces as **one Issue per
+violating seam WITHOUT pydantic's `"Value error, "` prefix** (both were artifacts of the removed
+dance); existing substring assertions still pass. The **whole context-gated machinery is GONE** under
+the inversion — set-level invariants live in `validate()`, not in a model validator.
 
-`typecheck-py` runs `uv run ty check` over the **whole tree** (not change-scoped), so any `.py` touch
-trips it. A latent test-construction bug an earlier PR left in `tests/` (a typed-model kwarg that ty
-rejects) lands red on main and blocks an unrelated PR's gate. Expect to clear pre-existing ty debt in
-`tests/` when doing a conversion; commit the repair separately as a clearly-scoped pre-existing fix,
-and verify it predates your change with the git-stash diagnostic.
+## Config degrades to lenient-parse → frozen-dataclass (no `validate()` step)
+
+Config has no content `validate()` pass, so the pattern degrades to **lenient-parse → frozen
+dataclass** (`ConfigModel(LenientParseModel)` built then converted to a frozen `@dataclass Config`):
+
+- Do **not** wrap the `ConfigModel(...)` construction in `translate_validation_errors` — it is built
+  from code-controlled, already-`_parse_*`-typed values, so a `ValidationError` there can only be a
+  perk bug and must surface loud. (Error translation belongs only at **uncontrolled** boundaries.)
+- **Never `Config(**model.model_dump())`** — `model_dump()` recursively dicts nested `Binding` models
+  and corrupts `user_bindings`. Use **explicit attribute access**; with pydantic's default
+  `revalidate_instances="never"`, `model.user_bindings` holds the original `Binding` instances by
+  identity (tests assert `config.user_bindings[0] is binding`).
+
+## Byte-identity discipline
+
+The on-disk blob is the only durable contract, so the conversion must keep it byte-identical:
+
+- `exclude_unset` is retained **ONLY** where the on-disk blob is intentionally minimal (the handoff
+  cache). Elsewhere serialize the **FULL** domain dataclass — byte-identical **because production
+  always wrote full shapes** (the partial-key shapes were test-only; confirm that premise first).
+- A consume/mutate writer that previously did `model_copy(update=...)` + `exclude_unset` must **re-read
+  the raw JSON through the Model directly** (the read path now returns a dataclass with no
+  `model_copy`).
+- Nested cache records recurse: `DispatchModel` nests `PlanRefModel` + `RunHandleModel`; `to_domain` /
+  `from_domain` recurse. Open-ended keys ride an `extra: Mapping` field with `extra="allow"` (folded
+  on `to_domain`, spread back on `from_domain`).
+- A lenient read boundary is an **intended edge shift**: a malformed `consumed: 1` now coerces to
+  `True` instead of raising (matches pre-pydantic behavior). Document the coerced read in the test.
+- **Verification that works:** generate every blob from a scratch dir on the branch AND on a `main`
+  checkout, then `diff` the captured outputs — proves byte-identity in one shot.
 
 ## Cross-plane / docs posture
 
-These conversions are **Python-internal validation tightening with byte-identical observable
-behavior** — the TS twins (`extension/substrate/registry.ts`, `config.ts`, etc.) read the same
-`shared/` files independently and parse semantics are unchanged. So they touch **neither**
-`shared/contracts.md` **nor** `docs/user-docs/`. This is the rule, not the exception, for a parse-
-internals refactor: which surface reports what is preserved, so there is nothing cross-plane to
-reconcile.
+These conversions are **Python-internal validation refactors with byte-identical observable
+behavior** — stored YAML/JSON and the `validate()` findings are unchanged, and the TS twins read the
+same `shared/` files independently. So they touch **neither `shared/contracts.md` nor
+`docs/user-docs/`**. This is the rule, not the exception, for a parse-internals refactor.
+
+## Process + toolchain reaffirmations
+
+- **Objective-node linkage at save.** A plan saved as a *standalone* GitHub plan (not linked to the
+  objective node) means `/land`'s deterministic auto-mark doesn't fire (status stays `planning`,
+  `pr` stays `null`) and `/objective-reconcile` must do the mechanical mark. Save objective-node work
+  **through the objective-plan factory** so land's auto-mark works.
+- **Comment hygiene applies to freshly-authored docstrings too** — describe a migration's *nature*
+  (`in-progress migration`), never its plan-phase label (`Phase N`).
+- **E501 ripple:** a longer symbol (`render_header_block(header)` vs `header.model_dump(...)`,
+  `Model.model_validate(...).to_domain()` chains) pushes lines over 100 cols — run `ruff format`
+  before commit.
+- **CI green ≠ committable:** pre-commit `ruff-format` can reflow a call AFTER `run_ci` passed —
+  re-stage and re-commit.
+- **Test exit 143 (SIGTERM) with no FAILED line is a transient kill** — rerun before debugging.
+- **Whole-tree `typecheck-py` (ty) is change-unscoped:** a sibling node's latent `tests/` ty debt
+  lands red on `main` and blocks an unrelated PR — clear it separately, proving it pre-existing via
+  the git-stash diagnostic.
+
+## Testing gotchas (ty + pydantic + ruff)
+
+- **Exercise lenient rejection / coercion through `Model.model_validate({...})`, never typed kwargs.**
+  ty type-checks `tests/` and statically flags every deliberately-invalid kwarg against a typed
+  pydantic model (`invalid-argument-type`/`unknown-argument`/`missing-argument`); `model_validate`
+  takes `Any` and is the *real* boundary shape the untyped dict/JSON produces.
+- **The unavoidable frozen-mutation negative** flips `ValidationError` → `FrozenInstanceError` and
+  needs `# ty: ignore[invalid-assignment]` per line (above).
+- **A tolerant-construction site dropping the model** (`.model_validate(item)`) must re-add the
+  non-dict element guard (`if isinstance(item, dict)`) the model had handled implicitly.
+- **Pydantic models reject positional args** — grep for positional constructors when converting and
+  switch to keyword construction.
 
 ## Sources
 
-- Pydantic v2 conversion table (the `str` target accepts only `str`/`bytes`, no scalar rows) —
+- Pydantic v2 conversion table (the `str` target accepts only `str`/`bytes`, no scalar rows — why a
+  `None`/`int` for a `str` parse field still raises under `strict=False`) —
   https://docs.pydantic.dev/latest/concepts/conversion_table/
