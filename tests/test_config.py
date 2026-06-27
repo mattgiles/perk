@@ -2,9 +2,12 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from perk.convergence.init import PERK_TOML_TEMPLATE
+from perk.substrate.bindings import Binding
 from perk.substrate.config import (
+    Config,
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -420,3 +423,31 @@ def test_local_linear_api_key_malformed_toml_is_none(tmp_path):
     # Diverges from the committed-only readers: fail-soft (returns None, never raises).
     _write(tmp_path, "perk.local.toml", "[linear\napi_key =")
     assert load_local_linear_api_key(tmp_path) is None
+
+
+# --- Pydantic model validation at the assembled `Config` boundary ----------------------------
+
+
+def test_config_is_frozen():
+    # Frozen Pydantic enforcement replaces the implicit dataclass `FrozenInstanceError`.
+    config = Config(worktree_root=Path("/tmp/x"))
+    with pytest.raises(ValidationError):
+        config.workflow_base = "x"
+
+
+def test_config_rejects_non_coercible_field():
+    # A bare `str` where `list[str]` is required cannot be coerced -> ValidationError. (A
+    # `str`->`Path` coercion for `worktree_root` IS accepted, so the negative case targets a
+    # non-coercible field.)
+    with pytest.raises(ValidationError):
+        Config(worktree_root=Path("/tmp/x"), worktree_setup="oops")  # ty: ignore[invalid-argument-type]
+
+
+def test_config_user_bindings_round_trip():
+    # `list[Binding]` validation passes existing instances through unchanged (not rebuilt).
+    binding = Binding(
+        trigger="stage:plan", kind="stage", target_id="plan", skill="perk-plan", mode="nudge"
+    )
+    config = Config(worktree_root=Path("/tmp/x"), user_bindings=[binding])
+    assert config.user_bindings == [binding]
+    assert config.user_bindings[0] is binding
