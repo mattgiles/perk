@@ -7,26 +7,26 @@ translated to a ``UserFacingCliError`` at the CLI boundary (``require_config``).
 """
 
 import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field
 
+from perk.boundary import LenientParseModel
 from perk.substrate import git, paths
 from perk.substrate.bindings import Binding, parse_user_bindings
 
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
 
-class Config(BaseModel):
-    """Resolved perk config. ``worktree_root`` is absolute.
+class ConfigModel(LenientParseModel):
+    """Lenient parse / structural backstop over the *assembled* config.
 
-    A frozen Pydantic ``BaseModel`` (not ``StrictBoundaryModel``): config is the deliberately
-    *forgiving* boundary, so the model is a typed, frozen structural backstop validating the
-    *assembled* result after the lenient ``_parse_*`` overlay pipeline — it does not replace it.
+    Validates the post-``_overlay`` ``_parse_*`` outputs as a typed, frozen structural backstop
+    inside ``load_config`` — it does **not** replace the overlay layer (that semantic lives in the
+    ``_parse_*`` helpers). The frozen ``Config`` dataclass is the domain object built from it.
     """
-
-    model_config = ConfigDict(frozen=True)
 
     worktree_root: Path
     # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
@@ -47,6 +47,23 @@ class Config(BaseModel):
     # and target when no objective-level override is set. `None` (absent/non-string) ⇒ fall back
     # to the GitHub default branch (byte-identical to prior behavior). The sibling
     # `[workflow] plan_authoring` key is TS-read and untouched.
+    workflow_base: str | None = None
+
+
+@dataclass(frozen=True)
+class Config:
+    """The immutable resolved-config domain object returned by ``load_config``.
+
+    ``worktree_root`` is absolute. ``ConfigModel`` is its boundary backstop; this frozen dataclass
+    holds the parsed values directly (e.g. ``user_bindings`` carries the ``parse_user_bindings``
+    output without Pydantic re-validation).
+    """
+
+    worktree_root: Path
+    worktree_setup: list[str] = field(default_factory=list)
+    user_bindings: list[Binding] = field(default_factory=list)
+    subagents: dict[str, str] = field(default_factory=dict)
+    providers: dict[str, str | None] = field(default_factory=dict)
     workflow_base: str | None = None
 
 
@@ -78,13 +95,24 @@ def load_config(repo_root: Path) -> Config:
     root = Path(root_value) if isinstance(root_value, str) else Path(DEFAULT_WORKTREE_DIRNAME)
     if not root.is_absolute():
         root = repo_root / root
-    return Config(
+    model = ConfigModel(
         worktree_root=root,
         worktree_setup=_parse_worktree_setup(worktree),
         user_bindings=parse_user_bindings(merged.get("bindings")),
         providers=_parse_providers_selection(merged.get("providers")),
         subagents=_parse_subagents_selection(merged.get("subagents")),
         workflow_base=_parse_workflow_base(merged.get("workflow")),
+    )
+    # Explicit field-by-field conversion (never ``Config(**model.model_dump())``: model_dump
+    # would recursively turn nested ``Binding`` models into plain dicts and corrupt
+    # ``user_bindings``). Attribute access preserves the original ``Binding`` instances by identity.
+    return Config(
+        worktree_root=model.worktree_root,
+        worktree_setup=model.worktree_setup,
+        user_bindings=model.user_bindings,
+        subagents=model.subagents,
+        providers=model.providers,
+        workflow_base=model.workflow_base,
     )
 
 

@@ -1,4 +1,6 @@
+import dataclasses
 import tomllib
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,7 @@ from perk.convergence.init import PERK_TOML_TEMPLATE
 from perk.substrate.bindings import Binding
 from perk.substrate.config import (
     Config,
+    ConfigModel,
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -429,23 +432,35 @@ def test_local_linear_api_key_malformed_toml_is_none(tmp_path):
 
 
 def test_config_is_frozen():
-    # Frozen Pydantic enforcement replaces the implicit dataclass `FrozenInstanceError`.
+    # The domain object is a frozen dataclass: mutation raises `FrozenInstanceError`.
     config = Config(worktree_root=Path("/tmp/x"))
-    with pytest.raises(ValidationError):
-        config.workflow_base = "x"
+    with pytest.raises(FrozenInstanceError):
+        config.workflow_base = "x"  # ty: ignore[invalid-assignment]
+
+
+def test_config_is_dataclass():
+    # The domain-object-is-a-dataclass contract: both the type and a freshly loaded instance.
+    assert dataclasses.is_dataclass(Config)
+
+
+def test_load_config_returns_dataclass(tmp_path: Path):
+    assert dataclasses.is_dataclass(load_config(tmp_path))
 
 
 def test_config_rejects_non_coercible_field():
-    # A bare `str` where `list[str]` is required cannot be coerced -> ValidationError. (A
-    # `str`->`Path` coercion for `worktree_root` IS accepted, so the negative case targets a
-    # non-coercible field.)
+    # Runtime field validation lives in the `ConfigModel` parse model, not the dataclass. A bare
+    # `str` where `list[str]` is required cannot be coerced -> ValidationError. (A `str`->`Path`
+    # coercion for `worktree_root` IS accepted, so the negative case targets a non-coercible field.)
     with pytest.raises(ValidationError):
-        Config(worktree_root=Path("/tmp/x"), worktree_setup="oops")  # ty: ignore[invalid-argument-type]
+        ConfigModel.model_validate({"worktree_root": "/tmp/x", "worktree_setup": "oops"})
 
 
 def test_config_user_bindings_round_trip():
-    # `list[Binding]` validation passes existing instances through unchanged (not rebuilt).
+    # The frozen dataclass carries the `Binding` list by identity (not rebuilt).
     binding = Binding(trigger="stage:plan", skill="perk-plan", mode="nudge")
     config = Config(worktree_root=Path("/tmp/x"), user_bindings=[binding])
     assert config.user_bindings == [binding]
     assert config.user_bindings[0] is binding
+    # The parse-model boundary preserves a passed-in `Binding` instance too.
+    model = ConfigModel.model_validate({"worktree_root": "/tmp/x", "user_bindings": [binding]})
+    assert model.user_bindings[0] is binding
