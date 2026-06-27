@@ -19,13 +19,15 @@ so callers decide how to surface them; ``BindingsError`` is reserved for structu
 failures. LBYL throughout (dignified-python): shapes are checked before use.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import Field, model_validator
 
 from perk._resources import shared_dir
+from perk.boundary import StrictBoundaryModel, translate_validation_errors
 from perk.substrate.registry import FindingSeverity, Issue
 
 BINDINGS_FILENAME = "bindings.yaml"
@@ -64,27 +66,43 @@ _SELF_REPO_SKILLS_DIR = Path("skills")
 SKILL_FILENAME = "SKILL.md"
 
 
-@dataclass(frozen=True)
-class Binding:
+class Binding(StrictBoundaryModel):
     """One trigger->skill delivery binding.
 
-    ``kind``/``target_id`` are the parsed halves of ``trigger`` (split on the first ``:``);
-    a trigger with no ``:`` parses to ``kind=""``, ``target_id=""`` so the validator can
-    report it.
+    The model itself is the tolerant parser: a ``model_validator(mode="before")`` collapses
+    any raw input down to exactly the three declared keys, each run through ``_str`` (absent
+    or non-str -> ``""``). So a mistyped scalar is a sentinel-collapse, not a hard failure —
+    every content finding still surfaces through ``validate()`` (the validator owns content).
+    Unknown keys are dropped before ``extra="forbid"`` is reached.
+
+    ``kind``/``target_id`` are read-only properties: the parsed halves of ``trigger`` (split
+    on the first ``:``); a trigger with no ``:`` yields ``kind=""``, ``target_id=""`` so the
+    validator can report it.
     """
 
     trigger: str
-    kind: str
-    target_id: str
     skill: str
     mode: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate(cls, raw: object) -> dict[str, str]:
+        d: dict[Any, Any] = raw if isinstance(raw, dict) else {}
+        return {key: _str(d.get(key)) for key in ("trigger", "skill", "mode")}
 
-@dataclass(frozen=True)
-class BindingSet:
+    @property
+    def kind(self) -> str:
+        return _split_trigger(self.trigger)[0]
+
+    @property
+    def target_id(self) -> str:
+        return _split_trigger(self.trigger)[1]
+
+
+class BindingSet(StrictBoundaryModel):
     schema_version: int
     bindings: list[Binding]
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
 
 class BindingsError(Exception):
@@ -119,31 +137,13 @@ def load_bindings(path: Path | None = None) -> BindingSet:
             f"(this perk understands {SUPPORTED_SCHEMA_VERSION}). Run 'perk doctor'."
         )
 
-    bindings = [_parse_binding(raw) for raw in _as_list(data.get("bindings"))]
-    return BindingSet(schema_version=schema_version, bindings=bindings, raw=data)
+    with translate_validation_errors(BindingsError, source=str(bindings_path)):
+        bindings = [Binding.model_validate(raw) for raw in _as_list(data.get("bindings"))]
+        return BindingSet(schema_version=schema_version, bindings=bindings, raw=data)
 
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def _parse_binding(raw: Any) -> Binding:
-    """Coerce one raw binding mapping into a ``Binding``, tolerating absent fields.
-
-    Missing/ill-typed fields become empty strings so the *validator* (not the parser)
-    reports them — keeping all consistency findings in one place (matches
-    ``registry._parse_stage``).
-    """
-    raw = raw if isinstance(raw, dict) else {}
-    trigger = _str(raw.get("trigger"))
-    kind, target_id = _split_trigger(trigger)
-    return Binding(
-        trigger=trigger,
-        kind=kind,
-        target_id=target_id,
-        skill=_str(raw.get("skill")),
-        mode=_str(raw.get("mode")),
-    )
 
 
 def _split_trigger(trigger: str) -> tuple[str, str]:
@@ -231,10 +231,10 @@ class ResolvedBindings:
 def parse_user_bindings(raw: Any) -> list[Binding]:
     """Parse a ``.perk/config.toml`` ``[[bindings]]`` array-of-tables into ``Binding``s.
 
-    Tolerant like ``_parse_binding``: absent/ill-typed fields become empty strings so the
+    Tolerant like ``Binding._tolerate``: absent/ill-typed fields become empty strings so the
     *resolver* reports them. A non-list ``raw`` (absent table) yields ``[]``.
     """
-    return [_parse_binding(item) for item in _as_list(raw)]
+    return [Binding.model_validate(item) for item in _as_list(raw)]
 
 
 def resolve_bindings(

@@ -11,8 +11,8 @@ from perk.substrate.binding_delivery import _HEADER, render_cold_bindings
 from perk.substrate.bindings import Binding, load_bindings
 
 _DEFAULTS = [
-    Binding("stage:implement", "stage", "implement", "perk-implement", "nudge"),
-    Binding("stage:plan", "stage", "plan", "perk-plan", "nudge"),
+    Binding(trigger="stage:implement", skill="perk-implement", mode="nudge"),
+    Binding(trigger="stage:plan", skill="perk-plan", mode="nudge"),
 ]
 
 
@@ -24,8 +24,7 @@ def test_binding_header_is_the_cross_plane_dedup_marker():
 
 
 def _user(trigger: str, skill: str, mode: str) -> Binding:
-    kind, target_id = trigger.split(":", 1)
-    return Binding(trigger, kind, target_id, skill, mode)
+    return Binding(trigger=trigger, skill=skill, mode=mode)
 
 
 def _write_skill(repo_root: Path, skill: str, body: str) -> None:

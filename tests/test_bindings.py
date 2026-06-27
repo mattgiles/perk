@@ -8,11 +8,14 @@ the loader itself stays registry-free (target-existence is doctor's job).
 """
 
 import pytest
+from pydantic import ValidationError
 
 from perk.substrate.bindings import (
     DELIVERABLE_COMMAND_TARGETS,
+    MODES,
     Binding,
     BindingsError,
+    BindingSet,
     FindingSeverity,
     is_skill_installed,
     load_bindings,
@@ -120,17 +123,54 @@ def test_unsupported_schema_version_raises(tmp_path):
         load_bindings(_write(tmp_path, bad))
 
 
+# --------------------------------------------------------------------- malformed input (model)
+
+
+def test_wrong_scalars_collapse_to_empty_and_stay_content_findings():
+    # A mistyped scalar is a sentinel-collapse (not a hard failure): the before-validator runs
+    # every field through _str, so a non-str becomes "" rather than raising.
+    binding = Binding.model_validate({"trigger": 5, "skill": None, "mode": ["x"]})
+    assert binding.trigger == "" and binding.skill == "" and binding.mode == ""
+    # Such a binding surfaces its findings through validate(), never through construction.
+    issues = validate(BindingSet(schema_version=1, bindings=[binding]))
+    messages = " | ".join(i.message for i in issues)
+    assert "skill" in messages
+    assert "trigger" in messages
+    assert MODES[0] in messages or "mode" in messages
+
+
+def test_unknown_key_is_dropped_not_forbidden():
+    # The before-validator strips stray keys before extra="forbid" is reached.
+    binding = Binding.model_validate(
+        {"trigger": "stage:plan", "skill": "x", "mode": "nudge", "bogus": "y"}
+    )
+    assert not hasattr(binding, "bogus")
+    assert binding.trigger == "stage:plan"
+
+
+def test_binding_is_frozen():
+    binding = Binding(trigger="stage:plan", skill="x", mode="nudge")
+    with pytest.raises(ValidationError):
+        binding.skill = "y"
+
+
+def test_kind_and_target_id_derive_from_trigger():
+    binding = Binding(trigger="stage:plan", skill="x", mode="nudge")
+    assert (binding.kind, binding.target_id) == ("stage", "plan")
+    no_colon = Binding(trigger="noColon", skill="x", mode="nudge")
+    assert (no_colon.kind, no_colon.target_id) == ("", "")
+
+
 # --------------------------------------------------------------------------- resolver
 
 DEFAULTS = [
-    Binding("stage:plan", "stage", "plan", "perk-plan", "nudge"),
-    Binding("stage:implement", "stage", "implement", "perk-implement", "nudge"),
+    Binding(trigger="stage:plan", skill="perk-plan", mode="nudge"),
+    Binding(trigger="stage:implement", skill="perk-implement", mode="nudge"),
 ]
 
 
 def _b(trigger, skill, mode):
-    kind, _, target_id = trigger.partition(":")
-    return Binding(trigger, kind, target_id, skill, mode)
+    return Binding(trigger=trigger, skill=skill, mode=mode)
 
 
 def test_resolve_empty_user_returns_defaults_unchanged():

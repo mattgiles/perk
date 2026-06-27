@@ -26,8 +26,7 @@ from perk.substrate.git import GitError
 
 
 def _binding(trigger: str, skill: str, mode: str = "nudge") -> "Binding":
-    kind, target_id = trigger.split(":", 1)
-    return Binding(trigger, kind, target_id, skill, mode)
+    return Binding(trigger=trigger, skill=skill, mode=mode)
 
 
 def test_sweep_removes_stale_lock_files(tmp_path):
