@@ -6,6 +6,8 @@ authoring error (zero/double default per seam, duplicate/empty id, bad seam). Th
 Negative fixtures use a GOOD constant + per-test single-line mutation (mirroring test_bindings.py).
 """
 
+import dataclasses
+
 import pydantic
 import pytest
 
@@ -13,8 +15,10 @@ from perk.substrate.providers import (
     SEAMS,
     FindingSeverity,
     Provider,
+    ProviderEntry,
     ProvidersError,
     ProviderSet,
+    _to_provider,
     load_providers,
     resolve_providers,
     validate,
@@ -341,64 +345,73 @@ def test_provider_set_is_constructible_directly():
     # by_id / default_for over a hand-built set (no file). Pydantic models are keyword-only.
     ps = ProviderSet(
         schema_version=1,
-        providers=[
+        providers=(
             Provider(
                 id="a", seam="plan", package=None, adapter=None, default=True, package_filter=None
-            )
-        ],
-        raw={},
+            ),
+        ),
     )
     plan = ps.default_for("plan")
     assert plan is not None and plan.id == "a"
     assert ps.default_for("todo") is None
 
 
-# --- boundary-model behavior (StrictBoundaryModel) ------------------------------------------
+# --- boundary behavior (lenient parse model + frozen dataclass) -----------------------------
 
 
 def test_models_are_frozen():
-    provider = Provider(id="a", seam="plan")
-    with pytest.raises(pydantic.ValidationError):
-        provider.id = "b"
-    ps = ProviderSet(schema_version=1)
-    with pytest.raises(pydantic.ValidationError):
-        ps.schema_version = 2
+    provider = Provider(
+        id="a", seam="plan", package=None, adapter=None, default=False, package_filter=None
+    )
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        provider.id = "b"  # ty: ignore[invalid-assignment]
+    ps = ProviderSet(schema_version=1, providers=(provider,))
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        ps.schema_version = 2  # ty: ignore[invalid-assignment]
 
 
 def test_lenient_field_coercion_is_preserved():
-    empty = Provider.model_validate({})
+    empty = _to_provider(ProviderEntry.model_validate({}))
     assert empty.id == "" and empty.seam == ""
     assert empty.package is None and empty.adapter is None
     assert empty.default is False and empty.package_filter is None
-    # Only literal True is truthy; a string "true" coerces to False (today's `... is True`).
-    assert Provider.model_validate({"default": "true"}).default is False
-    # An ill-typed scalar coerces to the lenient empty rather than raising.
-    assert Provider.model_validate({"id": None}).id == ""
-
-
-def test_extra_keys_are_forbidden():
+    # An explicit null id normalizes to "" through the converter (a content Issue, not a raise).
+    assert _to_provider(ProviderEntry.model_validate({"id": None})).id == ""
+    # The lenient base now lax-coerces the flag: "true"/1 -> True (was: only literal True).
+    assert ProviderEntry.model_validate({"default": "true"}).default is True
+    # A genuinely ill-typed scalar now raises (was: silently collapsed to the lenient empty).
     with pytest.raises(pydantic.ValidationError):
-        Provider.model_validate({"id": "x", "seam": "plan", "bogus": 1})
+        ProviderEntry.model_validate({"id": 123})
 
 
-def test_stray_key_in_a_provider_entry_raises_at_load(tmp_path):
+def test_extra_keys_are_ignored():
+    result = ProviderEntry.model_validate({"id": "x", "seam": "plan", "bogus": 1})
+    assert result.id == "x" and result.seam == "plan"
+    assert not hasattr(result, "bogus")
+
+
+def test_stray_key_in_a_provider_entry_loads_cleanly(tmp_path):
+    # A stray key is now silently dropped (extra="ignore"); the set still loads + validates.
     text = GOOD.replace(
         "  - id: perk-plan\n    seam: plan\n",
         "  - id: perk-plan\n    seam: plan\n    bogus: 1\n",
     )
+    providers = load_providers(_write(tmp_path, text))
+    assert validate(providers) == []
+
+
+def test_single_default_invariant_moved_to_validate(tmp_path):
+    # A wrong default-count loads WITHOUT raising (load is lenient); validate() surfaces it.
+    text = GOOD.replace(
+        "    default: true\n  - id: perk-checkpoints",
+        "    default: false\n  - id: perk-checkpoints",
+    )
+    providers = load_providers(_write(tmp_path, text))
+    messages = [i.message for i in validate(providers)]
+    assert any("seam `plan` must have exactly one" in m for m in messages)
+
+
+def test_non_list_providers_raises_at_load(tmp_path):
+    # A non-list `providers:` now raises ProvidersError (the 1.2-aligned `_as_list` removal).
     with pytest.raises(ProvidersError):
-        load_providers(_write(tmp_path, text))
-
-
-def test_single_default_validator_is_context_gated():
-    # One plan default only (every other seam has zero) violates the invariant.
-    payload = {
-        "schema_version": 1,
-        "providers": [{"id": "a", "seam": "plan", "default": True}],
-    }
-    with pytest.raises(pydantic.ValidationError):
-        ProviderSet.model_validate(payload, context={"enforce_single_default": True})
-    # The same payload WITHOUT the context builds successfully (proving load-time leniency).
-    ps = ProviderSet.model_validate(payload)
-    plan = ps.default_for("plan")
-    assert plan is not None and plan.id == "a"
+        load_providers(_write(tmp_path, "schema_version: 1\nproviders: nope\n"))

@@ -20,25 +20,25 @@ The selection substrate is **consumed**: runtime consumption of the selection (i
 two-directional `[providers]` settings wiring + `doctor`'s selection checks, and the extension's
 plan-seam registration-time vacating / todo-seam runtime deferral) is live.
 
-The validator returns structured ``Issue`` records (it never raises for invalid *content*) so
-callers decide how to surface them; ``ProvidersError`` is reserved for structural load failures.
+The boundary follows the canonical lenient-parse → frozen-dataclass → `validate()` pattern: the
+untrusted file is parsed through tolerant ``LenientParseModel`` models (``ProvidersFile`` /
+``ProviderEntry``), converted into frozen ``@dataclass`` domain objects (``ProviderSet`` /
+``Provider``), and only then does ``validate(ProviderSet) -> [Issue]`` run the content checks. The
+validator returns structured ``Issue`` records (it never raises for invalid *content*) so callers
+decide how to surface them; ``ProvidersError`` is reserved for structural load failures.
 LBYL throughout (dignified-python): shapes are checked before use.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import yaml
-from pydantic import BeforeValidator, Field, ValidationInfo, model_validator
+from pydantic import Field
 
 from perk._resources import shared_dir
-from perk.boundary import (
-    StrictBoundaryModel,
-    ValidationError,
-    translate_validation_errors,
-)
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.substrate.registry import FindingSeverity, Issue
 
 PROVIDERS_FILENAME = "providers.yaml"
@@ -47,56 +47,59 @@ SUPPORTED_SCHEMA_VERSION = 1
 SEAMS: tuple[str, ...] = ("plan", "todo", "askuser", "footer", "web")
 
 
-def _as_text(v: object) -> object:
-    """Lenient string coercion: a non-str (incl. absent→None) becomes ``""`` (today's `_str`)."""
-    return v if isinstance(v, str) else ""
+class ProviderEntry(LenientParseModel):
+    """The lenient per-entry parse model at the file boundary.
+
+    ``id``/``seam`` are typed ``str | None`` (not ``str = ""``) so an explicit YAML ``null`` parses
+    cleanly; the converter normalizes ``None -> ""`` and ``validate()`` then surfaces the
+    missing-``id`` / bad-``seam`` content findings. Other fields coerce leniently (drop unknown
+    keys, coerce ordinary scalars) per the lenient base — content findings are the *validator*'s
+    job, never construction's.
+    """
+
+    id: str | None = None
+    seam: str | None = None
+    package: str | None = None
+    adapter: str | None = None
+    default: bool = False
+    package_filter: dict[str, Any] | None = None
 
 
-def _as_opt_text(v: object) -> object:
-    """Lenient optional-string coercion: a non-str becomes ``None`` (today's `_opt_str`)."""
-    return v if isinstance(v, str) else None
+class ProvidersFile(LenientParseModel):
+    """The lenient whole-file parse model.
+
+    ``schema_version`` is deliberately NOT a field: it stays a structural pre-check in
+    ``load_providers`` (it must run before generic validation and raise its own message).
+    ``extra="ignore"`` drops it (and any other top-level key) from this model.
+    """
+
+    providers: list[ProviderEntry] = Field(default_factory=list)
 
 
-def _as_flag(v: object) -> object:
-    """Lenient flag coercion: only literal ``True`` is truthy (today's `... is True`)."""
-    return v is True
-
-
-def _as_opt_dict(v: object) -> object:
-    """Lenient optional-dict coercion: a non-dict becomes ``None``."""
-    return v if isinstance(v, dict) else None
-
-
-_Text = Annotated[str, BeforeValidator(_as_text)]
-_OptText = Annotated[str | None, BeforeValidator(_as_opt_text)]
-_Flag = Annotated[bool, BeforeValidator(_as_flag)]
-_OptDict = Annotated[dict[str, Any] | None, BeforeValidator(_as_opt_dict)]
-
-
-class Provider(StrictBoundaryModel):
-    """One supported-set provider entry.
+@dataclass(frozen=True)
+class Provider:
+    """One supported-set provider entry (frozen domain object).
 
     ``package``/``adapter`` are ``None`` for perk's own bundled reference providers (nothing to
     add to ``packages``; perk produces the contract natively). ``package_filter`` is the optional
-    Pi object-form filter merged into a foreign package's ``packages`` entry.
-
-    Fields are leniently coerced (missing/ill-typed → ``""``/``None``/``False``) so the *validator*
-    (not construction) owns content findings — except a stray key, which ``extra="forbid"`` rejects
-    at load (a boundary-first tightening over today's silent ignore).
+    Pi object-form filter merged into a foreign package's ``packages`` entry. Every field is always
+    set by the converter (no defaults).
     """
 
-    id: _Text = ""
-    seam: _Text = ""
-    package: _OptText = None
-    adapter: _OptText = None
-    default: _Flag = False
-    package_filter: _OptDict = None
+    id: str
+    seam: str
+    package: str | None
+    adapter: str | None
+    default: bool
+    package_filter: dict[str, Any] | None
 
 
-class ProviderSet(StrictBoundaryModel):
+@dataclass(frozen=True)
+class ProviderSet:
+    """The loaded supported set (frozen domain object)."""
+
     schema_version: int
-    providers: list[Provider] = Field(default_factory=list)
-    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
+    providers: tuple[Provider, ...] = ()
 
     def by_id(self) -> dict[str, Provider]:
         """Map ``id -> Provider`` (last wins on a duplicate id; the validator flags duplicates)."""
@@ -108,21 +111,6 @@ class ProviderSet(StrictBoundaryModel):
             if provider.seam == seam and provider.default:
                 return provider
         return None
-
-    @model_validator(mode="after")
-    def _enforce_single_default(self, info: ValidationInfo) -> "ProviderSet":
-        """Raise iff the caller opts in via ``context["enforce_single_default"]``.
-
-        Gated so ``load_providers()`` (no context) stays lenient — default-count stays a
-        ``validate()`` ``Issue`` — while ``validate()`` opts in and converts the raised
-        ``ValidationError`` back into ``Issue`` records. Direct construction (``info.context is
-        None``) never raises.
-        """
-        if info.context and info.context.get("enforce_single_default"):
-            problems = _one_default_per_seam_problems(self.providers)
-            if problems:
-                raise ValueError("; ".join(problems))
-        return self
 
 
 def _one_default_per_seam_problems(providers: Sequence[Provider]) -> list[str]:
@@ -171,17 +159,28 @@ def load_providers(path: Path | None = None) -> ProviderSet:
         )
 
     with translate_validation_errors(ProvidersError, source=str(providers_path)):
-        entries = [
-            Provider.model_validate(raw if isinstance(raw, dict) else {})
-            for raw in _as_list(data.get("providers"))
-        ]
-        # Direct ``ProviderSet(...)`` construction has ``info.context is None`` → the
-        # single-default validator skips, keeping load lenient on default-count.
-        return ProviderSet(schema_version=schema_version, providers=entries, raw=data)
+        parsed = ProvidersFile.model_validate(data)
+        return ProviderSet(
+            # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
+            schema_version=SUPPORTED_SCHEMA_VERSION,
+            providers=tuple(_to_provider(e) for e in parsed.providers),
+        )
 
 
-def _as_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
+def _to_provider(entry: ProviderEntry) -> Provider:
+    """Explicit field-for-field conversion of a parsed entry into the frozen domain object.
+
+    Normalizes an absent/``null`` ``id``/``seam`` to ``""`` so ``validate()`` surfaces the
+    missing-``id`` / bad-``seam`` content findings (rather than the parse model raising).
+    """
+    return Provider(
+        id=entry.id or "",
+        seam=entry.seam or "",
+        package=entry.package,
+        adapter=entry.adapter,
+        default=entry.default,
+        package_filter=entry.package_filter,
+    )
 
 
 # ----------------------------------------------------------------------- validate
@@ -210,13 +209,12 @@ def validate(providers: ProviderSet) -> list[Issue]:
         if provider.seam not in SEAMS:
             issues.append(Issue(FindingSeverity.ERROR, where, f"`seam` must be one of {SEAMS}"))
 
-    # The exactly-one-default-per-seam invariant lives once, as the context-gated
-    # ``ProviderSet`` validator; surface it here via catch-and-convert (gains pydantic's
-    # "Value error, " prefix, and per-seam violations combine into one ``Issue``).
-    try:
-        ProviderSet.model_validate(providers.model_dump(), context={"enforce_single_default": True})
-    except ValidationError as exc:
-        issues.extend(Issue(FindingSeverity.ERROR, "providers", err["msg"]) for err in exc.errors())
+    # The exactly-one-default-per-seam invariant lives once, in
+    # ``_one_default_per_seam_problems`` (the single source) — one Issue per violating seam.
+    issues.extend(
+        Issue(FindingSeverity.ERROR, "providers", msg)
+        for msg in _one_default_per_seam_problems(providers.providers)
+    )
 
     return issues
 
