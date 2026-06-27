@@ -7,9 +7,10 @@ translated to a ``UserFacingCliError`` at the CLI boundary (``require_config``).
 """
 
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from perk.substrate import git, paths
 from perk.substrate.bindings import Binding, parse_user_bindings
@@ -17,25 +18,31 @@ from perk.substrate.bindings import Binding, parse_user_bindings
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
 
-@dataclass(frozen=True)
-class Config:
-    """Resolved perk config. ``worktree_root`` is absolute."""
+class Config(BaseModel):
+    """Resolved perk config. ``worktree_root`` is absolute.
+
+    A frozen Pydantic ``BaseModel`` (not ``StrictBoundaryModel``): config is the deliberately
+    *forgiving* boundary, so the model is a typed, frozen structural backstop validating the
+    *assembled* result after the lenient ``_parse_*`` overlay pipeline — it does not replace it.
+    """
+
+    model_config = ConfigDict(frozen=True)
 
     worktree_root: Path
     # The `[worktree] setup` ordered shell commands run inside a freshly created worktree before
     # `pi` starts (overlay-aware, like `worktree_root` — a `local.toml` array replaces this
     # one wholesale). Empty when absent/ill-typed.
-    worktree_setup: list[str] = field(default_factory=list)
-    user_bindings: list[Binding] = field(default_factory=list)
+    worktree_setup: list[str] = Field(default_factory=list)
+    user_bindings: list[Binding] = Field(default_factory=list)
     # The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
     # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`), injected as a
     # per-call inline `model` override on that agent's spawn. Absent keys mean "use the agent's
     # frontmatter default". Only known agent keys with string values are kept (mirrors `providers`).
-    subagents: dict[str, str] = field(default_factory=dict)
+    subagents: dict[str, str] = Field(default_factory=dict)
     # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
     # raw — resolution against the supported set happens in `init`/`providers` (mirroring how
     # `user_bindings` is raw and `resolve_bindings` resolves it).
-    providers: dict[str, str | None] = field(default_factory=dict)
+    providers: dict[str, str | None] = Field(default_factory=dict)
     # The `[workflow] base` default target branch: the trunk that plans/objectives base off
     # and target when no objective-level override is set. `None` (absent/non-string) ⇒ fall back
     # to the GitHub default branch (byte-identical to prior behavior). The sibling
