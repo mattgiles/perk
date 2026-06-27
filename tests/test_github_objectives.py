@@ -15,7 +15,7 @@ def _obj_header(run_id: str, comment_id=None) -> str:
         objective.OBJECTIVE_HEADER_KEY,
         objective.ObjectiveHeader(
             run_id=run_id, created="t", objective_comment_id=comment_id
-        ).to_data(),
+        ).model_dump(mode="json"),
     )
 
 

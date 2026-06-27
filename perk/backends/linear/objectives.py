@@ -140,7 +140,7 @@ class LinearObjectiveStore:
                 base=base,
             )
             header_block = plan.render_metadata_block(
-                objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+                objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
             )
             roadmap_block = plan.render_metadata_block(
                 objective.OBJECTIVE_ROADMAP_KEY,

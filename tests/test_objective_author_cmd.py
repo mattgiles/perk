@@ -155,7 +155,7 @@ def test_refuses_already_an_objective(monkeypatch):
     _authed(monkeypatch)
     header = plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY,
-        objective.ObjectiveHeader(run_id="R", created="t").to_data(),
+        objective.ObjectiveHeader(run_id="R", created="t").model_dump(mode="json"),
     )
     _stub(monkeypatch, store=_FakeStore(source=_source(prose=f"prose\n\n{header}\n")))
     runner = CliRunner()

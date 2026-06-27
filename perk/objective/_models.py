@@ -11,7 +11,11 @@ helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``).
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Annotated, cast
 
+from pydantic import BeforeValidator, model_validator
+
+from perk.boundary import StrictBoundaryModel, StrTuple
 from perk.plan import has_metadata_block
 
 OBJECTIVE_LABEL = "perk:objective"
@@ -135,8 +139,27 @@ IN_FLIGHT: frozenset[NodeStatus] = frozenset({NodeStatus.PLANNING, NodeStatus.IN
 _VALID_STATUS_VALUES = frozenset(s.value for s in NodeStatus)
 
 
-@dataclass(frozen=True)
-class ObjectiveNode:
+def _coerce_node_status(value: object) -> object:
+    """Allowlisted string→:class:`NodeStatus` coercion under strict mode (mirrors ``StrTuple``).
+
+    Strict mode does NOT value-lookup a ``StrEnum`` from a bare string, but stored roadmap/manifest
+    YAML carries the value (``"done"``). Coerce a known value to its singleton member (so ``is``
+    identity holds); leave anything else untouched so the strict per-field validator rejects it
+    with a ``status`` field-path error.
+    """
+    if isinstance(value, str) and not isinstance(value, NodeStatus):
+        try:
+            return NodeStatus(value)
+        except ValueError:
+            return value
+    return value
+
+
+NodeStatusField = Annotated[NodeStatus, BeforeValidator(_coerce_node_status)]
+"""The named string→:class:`NodeStatus` coercion allowlist for objective node ``status`` fields."""
+
+
+class ObjectiveNode(StrictBoundaryModel):
     """A single node in an objective roadmap.
 
     ``depends_on`` is ``None`` (unspecified → infer sequential deps) vs ``()`` (explicitly no
@@ -145,15 +168,32 @@ class ObjectiveNode:
 
     id: str
     description: str
-    status: NodeStatus
+    status: NodeStatusField
     pr: str | None = None
-    depends_on: tuple[str, ...] | None = None
+    depends_on: StrTuple | None = None
     slug: str | None = None
     comment: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate(cls, raw: object) -> dict[str, object]:
+        """Collapse any raw input to exactly the 7 declared keys, dropping sibling keys.
 
-@dataclass(frozen=True)
-class ObjectiveHeader:
+        The structured-roadmap path feeds raw create-time nodes straight through — they carry an
+        ``adopt_issue`` sibling key (consumed separately by ``parse_adopt_mapping``). Dropping
+        unknown keys before ``extra="forbid"`` is reached preserves the old isinstance ladder's
+        silent tolerance. Absent keys become ``None`` (required ``id``/``description``/``status``
+        then fail validation; optional fields keep their ``None`` default). Tradeoff: the direct
+        kwargs-construction sites lose typo-protection (a typo'd kwarg is silently dropped).
+        """
+        d: dict[str, object] = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
+        return {
+            k: d.get(k)
+            for k in ("id", "description", "status", "pr", "depends_on", "slug", "comment")
+        }
+
+
+class ObjectiveHeader(StrictBoundaryModel):
     """Compact, queryable objective metadata stored in the issue *body* (the
     ``objective-header`` block). ``status`` is the objective-level rollup, stored explicitly
     (never inferred from PR state). ``objective_comment_id`` is backfilled in the two-step
@@ -180,18 +220,6 @@ class ObjectiveHeader:
     # construction (create-new-first, close-old-last, fail-open on the close).
     supersedes: str | None = None
     superseded_by: str | None = None
-
-    def to_data(self) -> dict[str, object]:
-        return {
-            "run_id": self.run_id,
-            "created": self.created,
-            "objective_comment_id": self.objective_comment_id,
-            "status": self.status,
-            "base": self.base,
-            "adopted_from": self.adopted_from,
-            "supersedes": self.supersedes,
-            "superseded_by": self.superseded_by,
-        }
 
 
 def _has_block(text: str, key: str) -> bool:
