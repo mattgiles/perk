@@ -94,9 +94,10 @@ class StrictBoundaryModel(BaseModel):
 
     Config-identical to ``StrictInputModel`` (``frozen``, ``extra="forbid"``,
     ``strict``). Still backs the per-model domain shapes (registry / bindings /
-    providers / plan / objective / cache / runner) during the Phase-1 migration
-    onto the role-named bases (``LenientParseModel`` / ``StrictInputModel`` /
-    ``OutputModel``); to be removed once every consumer has moved off it.
+    providers / plan / objective / cache / runner) during the in-progress
+    migration onto the role-named bases (``LenientParseModel`` /
+    ``StrictInputModel`` / ``OutputModel``); to be removed once every consumer has
+    moved off it.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
