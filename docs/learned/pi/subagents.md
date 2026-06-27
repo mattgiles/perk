@@ -59,6 +59,27 @@ fan-out side.
   prefer the read-only reviewer for parallel angle coverage; a GitHub-**posting** agent run in
   parallel would spam duplicate reactions/reviews (the parent posts once, after reconciling).
 
+## Subagent context artifacts get swept by `git add -A` (recurring process hazard)
+
+The `/pr-review` and `/address` flows spawn subagents that run `perk pr review-context --json` and
+fetch the raw diff; these land as `formatted_context.json` and `pr_diff.diff` in the **worktree
+CWD**. A later `git add -A` (used in implement/address commit steps) **silently sweeps both into the
+commit** and pushes them — caught only in `/learn` before merge.
+
+Mitigations for future agents:
+
+- Prefer `git add <explicit paths>` over `git add -A` in worktree sessions where subagents may drop
+  files.
+- Inspect `git status` before committing.
+- These well-known artifact names are good candidates for a repo `.gitignore` entry, or for the
+  cold-door context fetch to write under the workflow scratch dir instead of CWD.
+
+`formatted_context.json` is the `perk pr review-context` envelope (data-format shape:
+`{success, error_type, message, branch, pr, base_ref, head_ref, title, …}`).
+
+This reinforces the existing **stage only intended files explicitly / don't `git add -A`** gotcha
+already captured under the `perk init` worktree notes below.
+
 ## Isolation knob: `context: "fresh"` vs `"fork"`
 
 `context: "fresh"` is a clean session (for independence — reviews want this); `context: "fork"`

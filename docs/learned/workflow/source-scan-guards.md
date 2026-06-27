@@ -43,6 +43,28 @@ When banning a *string literal* (vs a call site), two additions:
   word may be a legitimate dict key elsewhere. The two planes' patterns may deliberately differ —
   match each plane's actual hazard, don't force symmetry.
 
+## Guarding a path family across a phased migration
+
+When a perk-owned dot-directory path root moves in phases (the `.pi/`→`.perk/` arc — see
+`dot-directory-migration.md`), widen the family guard to cover BOTH homes so the family stays
+guarded throughout the migration:
+
+- **Widen the segment alternation** `".pi"` → `(".pi"|".perk")` so an operator-adjacent dot-segment
+  matches at either the old or the new home.
+- **Flip the non-vacuous self-check to the new reality.** Assert `paths.py` now matches via
+  `".perk" / "skills"` while `cache.py` still matches via `".pi" / "workflow"` (the workflow cache
+  hasn't moved) — plus a positive `.perk/skills` arm and a negative `.perk/npm` arm (`.pi/npm` is a
+  discovery namespace, not a guarded family).
+- **Keep synthetic positive guard asserts honest.** Once production no longer contains
+  `".pi" / CONFIG_FILENAME` (the config helpers derive from `config_dir`), a synthetic positive arm
+  keeps the derived-construction pattern exercised.
+
+The cross-cutting reaffirmation: the guard's operator-adjacency match is a regression **backstop, not
+a completeness proof** — split-across-variables construction (`d = root / ".pi"` then `d / name`) and
+single-string forms (`".pi/workflow"`) escape it, so a manual census is still required. The
+family-scoped guard also doubles as a **consumer-census oracle**: its first run enumerates the
+production consumers a plan census missed.
+
 ## Limits
 
 - The guard is **textual, not semantic** — a banned call inside a template literal or a
@@ -68,3 +90,4 @@ everywhere (charter D5 rescinded). The convention is recorded in three places �
 - `extension/surfacesGuard.test.ts` — the founding instance
 - `docs/learned/pi/tui-surfaces.md` — the surfaces module the rich-UI guard protects
 - `docs/learned/workflow/session-data.md` — the accessor seam the path guards confine
+- `docs/learned/workflow/dot-directory-migration.md` — the `.pi/`→`.perk/` arc the path-family guard widens across
