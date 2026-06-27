@@ -161,7 +161,7 @@ def create_objective_issue(
         supersedes=supersedes,
     )
     header_block = plan.render_metadata_block(
-        objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json")
+        objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header)
     )
     roadmap_block = plan.render_metadata_block(
         objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(nodes)
@@ -262,7 +262,7 @@ def adopt_issue_as_objective(
         adopted_from=objective.canonical_pr(number),
     )
     header_block = plan.render_metadata_block(
-        objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json")
+        objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header)
     )
     roadmap_block = plan.render_metadata_block(
         objective.OBJECTIVE_ROADMAP_KEY, objective.render_roadmap_block(nodes)

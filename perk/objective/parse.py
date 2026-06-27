@@ -16,6 +16,7 @@ from perk.objective._models import (
     OBJECTIVE_SCHEMA_VERSION,
     NodeStatus,
     ObjectiveNode,
+    ObjectiveNodeEntry,
     _has_block,
 )
 from perk.plan import find_metadata_block
@@ -30,8 +31,9 @@ def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list
 
     Envelope checks (``schema_version`` / ``nodes`` is-a-list / per-item is-a-mapping) stay
     hand-written for byte-identical messages; only the per-node field validation runs on pydantic
-    (:meth:`ObjectiveNode.model_validate`), which drops sibling keys like ``adopt_issue`` via the
-    model's ``_tolerate`` before-validator and bails on the first failing node.
+    (:meth:`ObjectiveNodeEntry.model_validate`), whose ``extra="ignore"`` drops sibling keys like
+    ``adopt_issue`` (consumed separately by ``parse_adopt_mapping``), bailing on the first failing
+    node before converting to the frozen :class:`ObjectiveNode` domain object.
     """
     errors: list[str] = []
     schema_version = data.get("schema_version")
@@ -51,7 +53,7 @@ def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list
         if not isinstance(raw_item, dict):
             return [], [f"node {i} is not a mapping"]
         try:
-            nodes.append(ObjectiveNode.model_validate(raw_item))
+            nodes.append(ObjectiveNodeEntry.model_validate(raw_item).to_domain())
         except ValidationError as exc:
             return [], [format_validation_error(exc, source=f"node {i}")]
     return nodes, errors

@@ -1,9 +1,9 @@
 """Pure-mechanics tests for perk/objective.py (no network, no Click)."""
 
+import dataclasses
 from typing import cast
 
 import pytest
-from pydantic import ValidationError
 
 from perk import objective as o
 from perk.plan import find_metadata_block, render_metadata_block
@@ -319,7 +319,7 @@ def test_render_table_depends_on_column():
 
 def test_objective_header_to_data():
     header = o.ObjectiveHeader(run_id="01RID", created="t", objective_comment_id=5, status="active")
-    data = header.model_dump(mode="json")
+    data = o.render_header_block(header)
     assert (
         data["run_id"] == "01RID"
         and data["objective_comment_id"] == 5
@@ -330,7 +330,7 @@ def test_objective_header_to_data():
 
 def test_objective_header_base_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", base="develop")
-    data = header.model_dump(mode="json")
+    data = o.render_header_block(header)
     assert data["base"] == "develop"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -343,7 +343,7 @@ def test_objective_header_base_round_trips():
 
 def test_objective_header_adopted_from_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", adopted_from="uuid-xyz")
-    data = header.model_dump(mode="json")
+    data = o.render_header_block(header)
     assert data["adopted_from"] == "uuid-xyz"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -352,13 +352,13 @@ def test_objective_header_adopted_from_round_trips():
 
 
 def test_objective_header_adopted_from_absent_by_default():
-    data = o.ObjectiveHeader(run_id="01RID", created="t").model_dump(mode="json")
+    data = o.render_header_block(o.ObjectiveHeader(run_id="01RID", created="t"))
     assert data["adopted_from"] is None
 
 
 def test_objective_header_supersede_lineage_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", supersedes="#12", superseded_by="#34")
-    data = header.model_dump(mode="json")
+    data = o.render_header_block(header)
     assert data["supersedes"] == "#12" and data["superseded_by"] == "#34"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -369,7 +369,7 @@ def test_objective_header_supersede_lineage_round_trips():
 
 
 def test_objective_header_supersede_lineage_absent_by_default():
-    data = o.ObjectiveHeader(run_id="01RID", created="t").model_dump(mode="json")
+    data = o.render_header_block(o.ObjectiveHeader(run_id="01RID", created="t"))
     assert data["supersedes"] is None and data["superseded_by"] is None
 
 
@@ -526,7 +526,7 @@ def test_objective_header_string_comment_id_round_trips():
     header = o.ObjectiveHeader(
         run_id="01RID", created="t", objective_comment_id="comment-uuid-1", status="active"
     )
-    data = header.model_dump(mode="json")
+    data = o.render_header_block(header)
     assert data["objective_comment_id"] == "comment-uuid-1"
 
 
@@ -710,8 +710,8 @@ def test_validate_roadmap_bad_type_node_reports_field_path():
 
 
 def test_parse_structured_roadmap_tolerates_adopt_issue_sibling_key():
-    # The `adopt_issue` create-time sibling key (consumed separately) is dropped by `_tolerate`,
-    # so the node still validates.
+    # The `adopt_issue` create-time sibling key (consumed separately) is dropped by the parse
+    # model's `extra="ignore"`, so the node still validates.
     nodes, errors = o.parse_structured_roadmap(
         [{"id": "1.1", "description": "a", "adopt_issue": "#42"}]
     )
@@ -734,15 +734,15 @@ def test_validate_manifest_bad_type_node_reports_field_path():
     assert "node 0" in errors[0] and "id" in errors[0]
 
 
-def test_objective_node_is_frozen_pydantic_model():
+def test_objective_node_is_frozen_dataclass():
     node = o.ObjectiveNode(id="1.1", description="a", status=N.PENDING)
-    with pytest.raises(ValidationError):
-        node.id = "1.2"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        node.id = "1.2"  # ty: ignore[invalid-assignment]
 
 
-def test_objective_node_model_copy_round_trips_single_field():
+def test_objective_node_replace_round_trips_single_field():
     node = o.ObjectiveNode(id="1.1", description="a", status=N.PENDING)
-    updated = node.model_copy(update={"status": N.DONE})
+    updated = dataclasses.replace(node, status=N.DONE)
     assert updated.status is N.DONE
     assert updated.id == "1.1" and updated.description == "a"
     # The original is unchanged (immutable copy).

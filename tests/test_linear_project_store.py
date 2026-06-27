@@ -45,7 +45,7 @@ def _overview_for(run_id: str) -> str:
         run_id=run_id, created="t", objective_comment_id=None, status="active"
     )
     return plan.render_metadata_block(
-        objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
+        objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header), style="inline-code"
     )
 
 
@@ -146,7 +146,7 @@ def _overview_with_region(run_id: str, prose: str) -> str:
         run_id=run_id, created="t", objective_comment_id=None, status="active"
     )
     header_block = plan.render_metadata_block(
-        objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
+        objective.OBJECTIVE_HEADER_KEY, objective.render_header_block(header), style="inline-code"
     )
     reconcilable = (
         f"{objective.OBJECTIVE_RECONCILABLE_MARKER_START}\n"
@@ -241,7 +241,7 @@ class TestLinearProjectObjectiveStore:
         assert not _queries(fake, "UuidForIssue")
 
     def test_create_objective_persists_base_into_overview_header(self) -> None:
-        # The project-backed overview header composer (header.model_dump) carries `base`.
+        # The project-backed overview header composer (render_header_block) carries `base`.
         store, fake = _make_project_store(self._create_responses())
         store.create_objective(
             title="Big Objective",

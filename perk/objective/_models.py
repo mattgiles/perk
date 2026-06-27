@@ -11,11 +11,8 @@ helpers (``_inline_marker`` / ``_find_marker_pair`` / ``_has_block``).
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, cast
 
-from pydantic import BeforeValidator, model_validator
-
-from perk.boundary import StrictBoundaryModel, StrTuple
+from perk.boundary import LenientParseModel
 from perk.plan import has_metadata_block
 
 OBJECTIVE_LABEL = "perk:objective"
@@ -139,27 +136,38 @@ IN_FLIGHT: frozenset[NodeStatus] = frozenset({NodeStatus.PLANNING, NodeStatus.IN
 _VALID_STATUS_VALUES = frozenset(s.value for s in NodeStatus)
 
 
-def _coerce_node_status(value: object) -> object:
-    """Allowlisted string→:class:`NodeStatus` coercion under strict mode (mirrors ``StrTuple``).
+class ObjectiveNodeEntry(LenientParseModel):
+    """Tolerant parse shape for one stored/structured roadmap node.
 
-    Strict mode does NOT value-lookup a ``StrEnum`` from a bare string, but stored roadmap/manifest
-    YAML carries the value (``"done"``). Coerce a known value to its singleton member (so ``is``
-    identity holds); leave anything else untouched so the strict per-field validator rejects it
-    with a ``status`` field-path error.
+    Lenient base: unknown keys dropped (extra="ignore", replacing the old `_tolerate`
+    sibling-key collapse — e.g. the structured-roadmap `adopt_issue` key, consumed separately
+    by parse_adopt_mapping); `status` value-looks-up the NodeStatus StrEnum natively; a
+    `depends_on` YAML list coerces to a tuple natively. Required id/description/status; absent
+    optionals default to None.
     """
-    if isinstance(value, str) and not isinstance(value, NodeStatus):
-        try:
-            return NodeStatus(value)
-        except ValueError:
-            return value
-    return value
+
+    id: str
+    description: str
+    status: NodeStatus
+    pr: str | None = None
+    depends_on: tuple[str, ...] | None = None
+    slug: str | None = None
+    comment: str | None = None
+
+    def to_domain(self) -> "ObjectiveNode":
+        return ObjectiveNode(
+            id=self.id,
+            description=self.description,
+            status=self.status,
+            pr=self.pr,
+            depends_on=self.depends_on,
+            slug=self.slug,
+            comment=self.comment,
+        )
 
 
-NodeStatusField = Annotated[NodeStatus, BeforeValidator(_coerce_node_status)]
-"""The named string→:class:`NodeStatus` coercion allowlist for objective node ``status`` fields."""
-
-
-class ObjectiveNode(StrictBoundaryModel):
+@dataclass(frozen=True)
+class ObjectiveNode:
     """A single node in an objective roadmap.
 
     ``depends_on`` is ``None`` (unspecified → infer sequential deps) vs ``()`` (explicitly no
@@ -168,36 +176,22 @@ class ObjectiveNode(StrictBoundaryModel):
 
     id: str
     description: str
-    status: NodeStatusField
+    status: NodeStatus
     pr: str | None = None
-    depends_on: StrTuple | None = None
+    depends_on: tuple[str, ...] | None = None
     slug: str | None = None
     comment: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _tolerate(cls, raw: object) -> dict[str, object]:
-        """Collapse any raw input to exactly the 7 declared keys, dropping sibling keys.
 
-        The structured-roadmap path feeds raw create-time nodes straight through — they carry an
-        ``adopt_issue`` sibling key (consumed separately by ``parse_adopt_mapping``). Dropping
-        unknown keys before ``extra="forbid"`` is reached preserves the old isinstance ladder's
-        silent tolerance. Absent keys become ``None`` (required ``id``/``description``/``status``
-        then fail validation; optional fields keep their ``None`` default). Tradeoff: the direct
-        kwargs-construction sites lose typo-protection (a typo'd kwarg is silently dropped).
-        """
-        d: dict[str, object] = cast("dict[str, object]", raw) if isinstance(raw, dict) else {}
-        return {
-            k: d.get(k)
-            for k in ("id", "description", "status", "pr", "depends_on", "slug", "comment")
-        }
-
-
-class ObjectiveHeader(StrictBoundaryModel):
+@dataclass(frozen=True)
+class ObjectiveHeader:
     """Compact, queryable objective metadata stored in the issue *body* (the
     ``objective-header`` block). ``status`` is the objective-level rollup, stored explicitly
     (never inferred from PR state). ``objective_comment_id`` is backfilled in the two-step
-    create (it is unknown until the body comment is posted)."""
+    create (it is unknown until the body comment is posted).
+
+    Field DECLARATION ORDER is load-bearing for serialization: ``render_header_block`` emits the
+    8 keys in this order to keep the stored ``objective-header`` block byte-identical."""
 
     run_id: str
     created: str  # ISO-8601 UTC (see plan.now_iso)
