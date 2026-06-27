@@ -7,6 +7,7 @@ fail-softness (a raising transport propagates nothing, one stderr note), the
 ``agent-session.json`` round-trip, and the missing-session-file skip.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -14,19 +15,19 @@ from typing import Any
 import httpx
 import pytest
 
+from perk import plan
 from perk.backends.linear import agent as linear_agent
 from perk.state import cache
-from perk.state.cache import AgentSessionCache, PlanRefCache
 
 _TOKEN_ENV = {"LINEAR_AGENT_TOKEN": "lin_oauth_agent"}
 
-_LINEAR_PLAN_REF = PlanRefCache(
+_LINEAR_PLAN_REF = plan.PlanRef(
     provider="linear",
     pr_id="ENG-123",
     url="https://linear.app/acme/issue/ENG-123",
     labels=("perk:plan",),
 )
-_GITHUB_PLAN_REF = _LINEAR_PLAN_REF.model_copy(update={"provider": "github"})
+_GITHUB_PLAN_REF = dataclasses.replace(_LINEAR_PLAN_REF, provider="github")
 
 _CREATE_RESPONSE = {
     "data": {
@@ -75,9 +76,10 @@ def _raising_environ(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _seed_session(root: Path) -> None:
-    cache.write_plan_ref(root, _LINEAR_PLAN_REF.model_dump(mode="json", exclude_unset=True))
+    cache.write_plan_ref(root, _LINEAR_PLAN_REF)
     cache.write_agent_session(
-        root, {"session_id": "sess-1", "issue": "ENG-123", "url": "https://linear.app/s/1"}
+        root,
+        cache.AgentSession(session_id="sess-1", issue="ENG-123", url="https://linear.app/s/1"),
     )
 
 
@@ -111,8 +113,10 @@ class TestGating:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = _recording_environ(monkeypatch)
-        cache.write_plan_ref(tmp_path, _GITHUB_PLAN_REF.model_dump(mode="json", exclude_unset=True))
-        cache.write_agent_session(tmp_path, {"session_id": "sess-1", "issue": "X", "url": None})
+        cache.write_plan_ref(tmp_path, _GITHUB_PLAN_REF)
+        cache.write_agent_session(
+            tmp_path, cache.AgentSession(session_id="sess-1", issue="X", url=None)
+        )
         linear_agent.emit_pr_opened(
             tmp_path, pr_number=7, pr_url="u", branch="b", environ=_TOKEN_ENV
         )
@@ -151,7 +155,7 @@ class TestRunStarted:
         assert seen[0].headers["Authorization"] == "Bearer lin_oauth_agent"
         # The session pointer round-trips through agent-session.json.
         session = cache.read_agent_session(tmp_path)
-        assert session == AgentSessionCache(
+        assert session == cache.AgentSession(
             session_id="sess-1",
             issue="ENG-123",
             url="https://linear.app/acme/agents/sess-1",
@@ -224,9 +228,7 @@ class TestPrOpened:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         seen = _recording_environ(monkeypatch)
-        cache.write_plan_ref(
-            tmp_path, _LINEAR_PLAN_REF.model_dump(mode="json", exclude_unset=True)
-        )  # gate open, but no session file
+        cache.write_plan_ref(tmp_path, _LINEAR_PLAN_REF)  # gate open, but no session file
         linear_agent.emit_pr_opened(
             tmp_path, pr_number=42, pr_url="u", branch="b", environ=_TOKEN_ENV
         )
@@ -299,12 +301,12 @@ class TestRunFailed:
         assert "run-failed emission skipped (non-fatal):" in capsys.readouterr().err
 
 
-class TestAgentSessionCache:
+class TestAgentSession:
     def test_round_trip(self, tmp_path: Path) -> None:
-        data = {"session_id": "s", "issue": "ENG-1", "url": None}
-        path = cache.write_agent_session(tmp_path, data)
+        session = cache.AgentSession(session_id="s", issue="ENG-1", url=None)
+        path = cache.write_agent_session(tmp_path, session)
         assert path == tmp_path / ".perk" / "workflow" / "agent-session.json"
-        assert cache.read_agent_session(tmp_path) == AgentSessionCache.model_validate(data)
+        assert cache.read_agent_session(tmp_path) == session
 
     def test_absent_reads_none(self, tmp_path: Path) -> None:
         assert cache.read_agent_session(tmp_path) is None

@@ -9,22 +9,26 @@ underscore so pytest does not collect this module.
 
 import pytest
 
+from perk import plan
 from perk.run import launch
-from perk.state.cache import PlanRefCache
 from perk.substrate.config import Config
 from perk.substrate.registry import Stage, load_registry
 
-_PLAN_REF = {
-    "provider": "github",
-    "pr_id": "42",
-    "url": "https://gh/o/r/issues/42",
-    "labels": ["perk:plan"],
-    "objective_id": None,
-}
+_PLAN_REF = plan.PlanRef(
+    provider="github",
+    pr_id="42",
+    url="https://gh/o/r/issues/42",
+    labels=("perk:plan",),
+    objective_id=None,
+)
 
-# The same plan-ref as a validated cache model, for the seams the dict-→model thread retyped
-# (resolve_plan_worktree_name / _initial_prompt / ResolvedWorktree.plan_ref).
-_PLAN_REF_MODEL = PlanRefCache.model_validate(_PLAN_REF)
+# Backwards-compat alias: the durable plan-ref domain object is now a frozen `plan.PlanRef`
+# dataclass everywhere (the seams the dict-→model thread retyped accept it directly).
+_PLAN_REF_MODEL = _PLAN_REF
+
+# The plan-ref as the on-disk / `--json` dict (the full 7-key PlanRefOut shape), for asserting
+# the dry-run JSON payload.
+_PLAN_REF_JSON = plan.PlanRefOut.from_domain(_PLAN_REF).model_dump(mode="json")
 
 
 @pytest.fixture(autouse=True)

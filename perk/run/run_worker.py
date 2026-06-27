@@ -17,6 +17,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from perk import plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
@@ -24,7 +25,6 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init.extension_install import consumer_perk_package_dir
 from perk.run import launch, resume, run_report
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import user_output
 from perk.substrate.registry import Stage, load_registry
 
@@ -86,7 +86,7 @@ def resolve_worker_entry(repo_root: Path, environ: dict[str, str]) -> WorkerEntr
 
 
 def position_worktree(
-    repo_root: Path, *, run_id: str, stage: Stage, plan_ref: PlanRefCache
+    repo_root: Path, *, run_id: str, stage: Stage, plan_ref: plan.PlanRef
 ) -> None:
     """Materialize the worktree the Node worker consumes (handoff + plan-ref + plan-body).
 
@@ -96,7 +96,7 @@ def position_worktree(
     """
     cache.ensure_layout(repo_root)
     cache.write_handoff(repo_root, run_id, {"stage": stage.id, "mode": stage.mode})
-    cache.write_plan_ref(repo_root, plan_ref.model_dump(mode="json", exclude_unset=True))
+    cache.write_plan_ref(repo_root, plan_ref)
     launch.materialize_plan_body(repo_root, repo_root, plan_ref)
 
 

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from perk import plan
 from perk.cli.cli import cli
 from perk.cli.context import PerkContext
 from perk.substrate.config import Config
@@ -139,13 +140,13 @@ def test_implement_remote_dry_run_is_dispatch_preview(git_repo):
 
     cache.write_plan_ref(
         git_repo,
-        {
-            "provider": "github",
-            "pr_id": "42",
-            "url": "u/42",
-            "labels": ["perk:plan"],
-            "objective_id": None,
-        },
+        plan.PlanRef(
+            provider="github",
+            pr_id="42",
+            url="u/42",
+            labels=("perk:plan",),
+            objective_id=None,
+        ),
     )
     result = CliRunner().invoke(cli, ["implement", "--remote", "--dry-run"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
@@ -205,13 +206,13 @@ def _seed_plan_ref(repo):
 
     cache.write_plan_ref(
         repo,
-        {
-            "provider": "github",
-            "pr_id": "42",
-            "url": "u/42",
-            "labels": ["perk:plan"],
-            "objective_id": None,
-        },
+        plan.PlanRef(
+            provider="github",
+            pr_id="42",
+            url="u/42",
+            labels=("perk:plan",),
+            objective_id=None,
+        ),
     )
 
 

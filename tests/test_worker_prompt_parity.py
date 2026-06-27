@@ -10,13 +10,13 @@ other) fails CI here or there. The `address` body now renders from the canonical
 `address-*` live-parity cases; only the thin model-clause selection assertions remain here.
 """
 
+from perk import plan
 from perk.run.launch import (
     _address_prompt,
     _implement_prompt,
     _learn_prompt,
     _plan_read_instruction,
 )
-from perk.state.cache import PlanRefCache
 
 # Keep in lockstep with ADDRESS_SUBSTRINGS in extension/worker/worker.test.ts.
 # The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
@@ -28,7 +28,7 @@ LINEAR_READ_SUBSTRINGS = [
     "if the linear tools are unavailable, open ",
 ]
 
-_PLAN_REF = PlanRefCache(
+_PLAN_REF = plan.PlanRef(
     provider="github",
     pr_id="148",
     url="https://github.com/mattgiles/perk/issues/148",
@@ -75,11 +75,11 @@ def test_plan_read_instruction_selects_arm_per_provider() -> None:
 
 
 def test_implement_prompt_non_github_uses_open_url() -> None:
-    ref = PlanRefCache(provider="gitlab", pr_id="9", url="https://gl/x", labels=("perk:plan",))
+    ref = plan.PlanRef(provider="gitlab", pr_id="9", url="https://gl/x", labels=("perk:plan",))
     assert "open https://gl/x" in _implement_prompt(ref)
 
 
-_LINEAR_PLAN_REF = PlanRefCache(
+_LINEAR_PLAN_REF = plan.PlanRef(
     provider="linear",
     pr_id="a1b2c3d4-0000-0000-0000-000000000000",
     url="https://linear.app/acme/issue/ENG-123",

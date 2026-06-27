@@ -14,7 +14,6 @@ from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import runner
 from perk.state import cache
-from perk.state.cache import DispatchCache
 from perk.substrate.output import machine_output, user_output
 
 # Per-column display clamps for the human table (the full RUN_ID is never clamped).
@@ -46,7 +45,7 @@ def _format_age(dispatched_at: str) -> str:
 
 
 def _row_to_dict(
-    record: DispatchCache,
+    record: cache.Dispatch,
     *,
     run_obs: runner.RunObservation | None,
     pr: github.PullRequest | None,
@@ -80,7 +79,7 @@ def _row_to_dict(
 
 
 def _overlay(
-    record: DispatchCache,
+    record: cache.Dispatch,
     repo_root: Any,
     *,
     plan_cache: dict[str, issue_backend.PlanState | None],

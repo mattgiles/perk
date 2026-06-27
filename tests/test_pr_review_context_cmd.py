@@ -4,10 +4,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.cli.cli import cli
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 
 _REF = {
     "provider": "github",
@@ -44,7 +43,7 @@ def test_context_success_json(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 0
     data = json.loads(result.output)
@@ -69,7 +68,7 @@ def test_context_no_pr_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "no_pr"
@@ -93,7 +92,7 @@ def test_context_github_error_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         result = runner.invoke(cli, ["pr", "review-context", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "github_error"
@@ -113,7 +112,7 @@ def test_resolve_plan_body_prefers_cache_mirror(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _no_backend
     )
-    body = _resolve_plan_body(tmp_path, PlanRefCache.model_validate(_REF))
+    body = _resolve_plan_body(tmp_path, plan.PlanRefModel.model_validate(_REF).to_domain())
     assert body is not None and body.startswith("# Mirror plan")
 
 
@@ -134,6 +133,8 @@ def test_resolve_plan_body_falls_back_to_resolver_for_linear_id(monkeypatch, tmp
         "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
         lambda _root: _Backend(),
     )
-    ref = PlanRefCache.model_validate({**_REF, "provider": "linear", "pr_id": "ENG-123"})
+    ref = plan.PlanRefModel.model_validate(
+        {**_REF, "provider": "linear", "pr_id": "ENG-123"}
+    ).to_domain()
     assert _resolve_plan_body(tmp_path, ref) == "# Linear plan body"
     assert seen["issue_id"] == "ENG-123"

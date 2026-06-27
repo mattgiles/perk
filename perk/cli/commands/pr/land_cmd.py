@@ -17,7 +17,7 @@ from typing import cast
 
 import click
 
-from perk import github, objective
+from perk import github, objective, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
@@ -27,7 +27,6 @@ from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
@@ -253,7 +252,7 @@ def _close_plan_issue_on_land(
         return False
 
 
-def _reconcile_objective_on_land(*, plan_ref: PlanRefCache, repo_root: Path) -> ObjectiveLandUpdate:
+def _reconcile_objective_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> ObjectiveLandUpdate:
     """Mechanical auto-on-merge node-done: mark the objective node(s) backlinked to the
     just-merged plan ``done``.
 
@@ -357,7 +356,7 @@ def _post_landed_update(
         )
 
 
-def _consume_learn_on_land(*, plan_ref: PlanRefCache, repo_root: Path) -> LearnConsumeUpdate:
+def _consume_learn_on_land(*, plan_ref: plan.PlanRef, repo_root: Path) -> LearnConsumeUpdate:
     """Consume the ``perk:learn`` issues a learned-docs plan consolidated: close each +
     label it ``perk:consolidated``.
 

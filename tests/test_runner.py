@@ -1,13 +1,13 @@
 """Tests for the runner-agnostic dispatch contract (contracts.md §8.13)."""
 
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from perk import github
-from perk.boundary import ValidationError
+from perk import github, plan
 from perk.run import runner
 from perk.state import cache
 
@@ -47,12 +47,18 @@ def _gh_dispatch_fake(*, runs_payload, dispatch_rc=0, dispatch_stderr=""):
 
 def test_run_handle_round_trip():
     h = runner.RunHandle(runner="ci", kind="github-actions", run_ref="7", url="u")
-    assert runner.RunHandle.model_validate(h.model_dump(mode="json")) == h
+    assert runner.RunHandleModel.from_domain(h).to_domain() == h
+    assert (
+        runner.RunHandleModel.model_validate(
+            runner.RunHandleModel.from_domain(h).model_dump(mode="json")
+        ).to_domain()
+        == h
+    )
 
 
 def test_run_handle_is_frozen():
     h = runner.RunHandle(runner="ci", kind="github-actions", run_ref="7", url="u")
-    with pytest.raises(ValidationError):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         h.run_ref = "8"  # ty: ignore[invalid-assignment]
 
 
@@ -189,15 +195,15 @@ def test_write_then_read_dispatch_round_trips_and_forces_run_id(tmp_path):
     cache.write_dispatch(
         tmp_path,
         "01RID",
-        {
-            "run_id": "WRONG",
-            "stage": "implement",
-            "plan_ref": {"provider": "github", "pr_id": "7", "url": "u/7", "labels": []},
-            "runner": "",
-            "kind": "github-actions",
-            "status": "dispatched",
-            "dispatched_at": "2024-01-01T00:00:00Z",
-        },
+        cache.Dispatch(
+            run_id="WRONG",
+            stage="implement",
+            plan_ref=plan.PlanRef(provider="github", pr_id="7", url="u/7", labels=()),
+            runner="",
+            kind="github-actions",
+            status="dispatched",
+            dispatched_at="2024-01-01T00:00:00Z",
+        ),
     )
     back = cache.read_dispatch(tmp_path, "01RID")
     assert back is not None and back.run_id == "01RID" and back.stage == "implement"

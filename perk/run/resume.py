@@ -9,7 +9,6 @@ actionable stage**. The launcher then materializes the ref + launches that stage
 
 from perk import plan
 from perk.backends import issue_backend
-from perk.state.cache import PlanRefCache
 
 
 def resolve_resume_stage(
@@ -35,7 +34,7 @@ def resolve_resume_stage(
     return None
 
 
-def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) -> PlanRefCache:
+def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) -> plan.PlanRef:
     """Rebuild the `cache.plan-ref` payload from a plan's issue-backend state (provider-agnostic).
 
     ``provider`` is the resolved issue backend's ``backend_id`` (contracts.md §8.21) — callers
@@ -43,7 +42,7 @@ def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) 
     """
     raw_consumed = plan_state.header.get("consumed_learn")
     consumed = tuple(str(x) for x in raw_consumed) if isinstance(raw_consumed, list) else ()
-    return PlanRefCache(
+    return plan.PlanRef(
         provider=provider,
         pr_id=plan_state.id,
         url=plan_state.url,

@@ -74,7 +74,7 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
 
 def _in_flight_record(
     repo_root: Path, number: str
-) -> tuple[cache.DispatchCache, runner.RunHandle, runner.Runner] | None:
+) -> tuple[cache.Dispatch, runner.RunHandle, runner.Runner] | None:
     """The newest in-flight dispatch for this objective, or ``None``.
 
     A record is in-flight when its ``run_handle`` is present and a live ``observe`` returns
@@ -190,7 +190,7 @@ def _dispatch_stage_remote(
     )
     if dry_run:
         return None
-    cache.write_plan_ref(repo_root, plan_ref.model_dump(mode="json", exclude_unset=True))
+    cache.write_plan_ref(repo_root, plan_ref)
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         launch.launch_stage(
