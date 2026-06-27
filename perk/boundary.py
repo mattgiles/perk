@@ -1,12 +1,24 @@
-"""The boundary-validation layer for perk's inputs.
+"""The boundary-validation layer for perk's inputs and outputs.
 
-Strict models validate perk-authored inputs we control (registry / bindings /
-providers / plan / objective / cache); lenient models tolerate external API
-responses (GitHub / Linear) whose schemas grow additively. Both share one
-`ValidationError` → error-domain translation seam so every consumer keeps
-surfacing its own domain error (RegistryError / BindingsError / ProvidersError /
-GitHubError / IssueBackendError / UserFacingCliError) rather than a raw pydantic
-error.
+Pydantic lives at the edges; the domain is frozen dataclasses. Three role-named
+base classes name the three boundary roles:
+
+- ``LenientParseModel`` — perk's stored files AND external API responses (GitHub /
+  Linear), whose schemas grow additively. Tolerant: drop unknown keys, coerce
+  ordinary scalars.
+- ``StrictInputModel`` — machine-authored CLI batch inputs where a typo must fail
+  loudly: unknown keys raise, no implicit scalar coercion.
+- ``OutputModel`` — ``--json`` serialization snapshots, built from trusted internal
+  domain values and dumped via ``model_dump(mode="json")``.
+
+The canonical pattern: parse untrusted input through a ``LenientParseModel`` via
+``model_validate(raw)``, convert the validated result into a
+``@dataclass(frozen=True)`` domain object, then run a separate
+``validate(domain) -> [findings]`` content pass (content problems are findings, not
+parse raises). All three share one ``ValidationError`` → error-domain translation
+seam so every consumer keeps surfacing its own domain error (RegistryError /
+BindingsError / ProvidersError / GitHubError / IssueBackendError /
+UserFacingCliError) rather than a raw pydantic error.
 
 No I/O: this is pure schema + helpers, a leaf importing only ``pydantic`` and
 stdlib ``contextlib``.
@@ -24,17 +36,37 @@ from pydantic import (
 )
 
 __all__ = [
-    "LenientApiModel",
+    "LenientParseModel",
+    "OutputModel",
     "StrTuple",
     "StrictBoundaryModel",
+    "StrictInputModel",
     "ValidationError",
     "format_validation_error",
     "translate_validation_errors",
 ]
 
 
-class StrictBoundaryModel(BaseModel):
-    """Base for perk-authored inputs we control.
+class LenientParseModel(BaseModel):
+    """Base for tolerant parsing of perk's stored files AND external API responses.
+
+    Covers perk's own stored YAML/JSON files and external API responses (GitHub /
+    Linear) whose schemas grow additively. ``frozen`` → immutable;
+    ``extra="ignore"`` → additive/unknown fields are silently dropped;
+    ``strict=False`` → ordinary coercion for reliable JSON scalar shapes;
+    ``populate_by_name`` → a model may be built from either a ``Field(alias=...)``
+    or its python field name (foundation for camelCase response mapping).
+
+    The canonical first step of the parse→dataclass→validate pattern: parse the
+    untrusted dict via ``model_validate(raw)``, then convert into a frozen
+    dataclass domain object.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="ignore", strict=False, populate_by_name=True)
+
+
+class StrictInputModel(BaseModel):
+    """Base for machine-authored CLI batch inputs where a typo must fail loudly.
 
     ``frozen`` → immutable + hashable; ``extra="forbid"`` → unknown keys raise;
     ``strict`` → no implicit scalar coercion (``"5"``/``True``/``1.0`` are all
@@ -45,17 +77,30 @@ class StrictBoundaryModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
 
-class LenientApiModel(BaseModel):
-    """Base for external API responses (GitHub / Linear).
+class OutputModel(BaseModel):
+    """Base for ``--json`` serialization snapshots, built from trusted domain values.
 
-    ``frozen`` → immutable; ``extra="ignore"`` → additive/unknown response
-    fields are silently dropped; ``strict=False`` → ordinary coercion for
-    reliable JSON scalar shapes; ``populate_by_name`` → a model may be built from
-    either a ``Field(alias=...)`` or its python field name (foundation for the
-    camelCase response mapping later nodes add).
+    Coercion is irrelevant — the fields are filled from trusted internal domain
+    values, never untrusted input. ``extra="forbid"`` because perk authors the
+    ``--json`` schema; ``frozen`` → an immutable snapshot. Serialized via
+    ``model_dump(mode="json")``.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore", strict=False, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class StrictBoundaryModel(BaseModel):
+    """Legacy/transitional base — use the role-named bases instead.
+
+    Config-identical to ``StrictInputModel`` (``frozen``, ``extra="forbid"``,
+    ``strict``). Still backs the per-model domain shapes (registry / bindings /
+    providers / plan / objective / cache / runner) during the in-progress
+    migration onto the role-named bases (``LenientParseModel`` /
+    ``StrictInputModel`` / ``OutputModel``); to be removed once every consumer has
+    moved off it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
 
 def _coerce_sequence_to_tuple(value: object) -> object:
