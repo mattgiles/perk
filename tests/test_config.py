@@ -140,7 +140,7 @@ def test_workflow_base_local_overrides_committed(tmp_path):
 
 
 def test_seeded_template_is_inert(tmp_path):
-    # The seeded `.pi/perk.toml` carries a *commented* [[bindings]] example; it must
+    # The seeded `.perk/config.toml` carries a *commented* [[bindings]] example; it must
     # parse to zero user bindings (guards the comment-only invariant against edits).
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_config(tmp_path).user_bindings == []
@@ -255,7 +255,7 @@ def test_compaction_absent_is_empty(tmp_path):
 
 
 def test_compaction_seeded_template_is_inert(tmp_path):
-    # The seeded `.pi/perk.toml` carries only a *commented* [compaction] example.
+    # The seeded `.perk/config.toml` carries only a *commented* [compaction] example.
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_committed_compaction(tmp_path) == {}
 
@@ -304,7 +304,7 @@ def test_issues_backend_absent_file_is_none(tmp_path):
 
 
 def test_issues_backend_seeded_template_is_inert(tmp_path):
-    # The seeded `.pi/perk.toml` carries only a *commented* [issues] example.
+    # The seeded `.perk/config.toml` carries only a *commented* [issues] example.
     _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
     assert load_committed_issues_backend(tmp_path) is None
 
