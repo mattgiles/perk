@@ -338,6 +338,17 @@ the gotcha that decides whether the output is byte-stable:
   `trim_blocks` eats the first `\n` and leaves the structural one intact. (Contrast: a whole-line
   conditional where both arms share a label uses **own-line** `{% if %}` / `{% else %}` / `{% endif %}`
   block tags, each on its own line, mirroring `seed.md`'s `node_engagement` block.)
+- **Adding a SECOND optional free-form `{% if %}` var to a warm command needs no new mechanism.**
+  Thread it exactly like the existing optional `model` var: widen the pure door helper signature
+  (`prReviewGuidance(model?, directive?)`, pass `directive ?? ""`), flip the handler from `_args` to
+  `args` (`const directive = (args ?? "").trim()`) — no new tool/registry/door. The StrictUndefined
+  surface ripple forces the new var into **both** existing `live.yaml` arms **plus one new true-arm**
+  (string-only per the miniYaml subset) or the parity render throws. A runtime value substituted for
+  `{{ directive }}` is **not** re-parsed as grammar, so operator text containing `{% %}` can't inject.
+  **Doc-mirror scope for a command-argument change:** `shared/contracts.md` + the
+  `docs/user-docs/reference/in-session.md` command section + the **bound skill** (`skills/<…>/SKILL.md`
+  source, not the materialized `.agents/skills/` copy) — **NOT** the `perk-expert` references (that
+  mirror is config/provider/backend only).
 - **The stale-claim ripple (cross-ref `doc-reconciliation.md`).** A render-env or grammar change can
   flip *standing claims* in earlier nodes' LANDED notes ("trim/lstrip off"; "the frozen subset has no
   conditionals"). Record the **supersession in the node that caused it** — do **not** rewrite the
