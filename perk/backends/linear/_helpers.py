@@ -2,7 +2,6 @@ import re
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import TypedDict
 
 from perk.backends import engagement, issue_backend, objective_store
 from perk.backends.issue_backend import IssueBackendError
@@ -12,10 +11,10 @@ from perk.backends.linear.client import (
     _is_entity_not_found,
     _opt_dict,
     _opt_str,
-    _require_dict,
     _require_str,
 )
 from perk.backends.objective_store import ObjectiveStoreError
+from perk.boundary import LenientParseModel
 
 _PAGE_SIZE = 50
 
@@ -26,39 +25,37 @@ def _note(message: str) -> None:
     print(f"perk linear: {message}", file=sys.stderr)
 
 
-class LinearStateNode(TypedDict):
-    """The ``state { type }`` sub-selection of the recurring issue node."""
+class _IssueStateNode(LenientParseModel):
+    """The ``state { type }`` sub-selection of the recurring issue node. ``type`` defaults to
+    ``""`` (an absent/malformed workflow state normalizes to ``"OPEN"``)."""
 
-    type: str
+    type: str = ""
 
 
-class LinearIssueNode(TypedDict):
-    """The recurring 6-field issue selection ``id identifier url title description state { type }``
-    (``backend.get_plan`` / ``backend.read_issue``). The pilot ``TypedDict``: the runtime
-    shape guard runs once in :func:`_require_issue_node`, then call sites read typed fields directly
-    instead of repeating the ``_require_str`` / ``_require_dict`` narrowing."""
+class LinearIssueNodeModel(LenientParseModel):
+    """Lenient parse of the recurring 6-field issue selection
+    ``id identifier url title description state { type }`` (``backend.get_plan`` /
+    ``backend.read_issue``). The successor to the pilot ``LinearIssueNode`` TypedDict.
 
-    id: str
+    ``identifier`` is the boundary identity these domain objects use (``PlanState.id`` /
+    ``AdoptableIssue.id``) and is required — a present-but-malformed payload missing it raises a
+    ``ValidationError`` the call site maps to a labelled ``IssueBackendError``. Every other field
+    keeps a tolerant default so the happy path is byte-identical to ``_require_issue_node``.
+    ``description`` stays ``str | None`` (Linear leaves it unset on a description-less issue)."""
+
     identifier: str
-    url: str
-    title: str
-    description: str | None
-    state: LinearStateNode
+    id: str = ""
+    url: str = ""
+    title: str = ""
+    description: str | None = None
+    state: _IssueStateNode | None = None
 
-
-def _require_issue_node(raw: dict[str, object]) -> LinearIssueNode:
-    """Narrow a raw issue payload into a :class:`LinearIssueNode`, running the existing raising
-    ``_require_*`` guards once (a malformed shape ⇒ :class:`IssueBackendError`). ``description`` is
-    tolerant (``None`` when absent/non-str — Linear leaves it unset on a description-less issue)."""
-    state = _require_dict(raw.get("state"), "issue.state")
-    return LinearIssueNode(
-        id=_require_str(raw.get("id"), "issue id"),
-        identifier=_require_str(raw.get("identifier"), "issue identifier"),
-        url=_require_str(raw.get("url"), "issue url"),
-        title=_require_str(raw.get("title"), "issue title"),
-        description=_opt_str(raw.get("description")),
-        state=LinearStateNode(type=_require_str(state.get("type"), "issue.state.type")),
-    )
+    def normalized_state(self) -> str:
+        """Normalize the workflow-state ``type`` into the contract's ``"OPEN" | "CLOSED"``
+        vocabulary (``completed``/``canceled`` → ``CLOSED``; everything else, incl. an absent
+        state, → ``OPEN``)."""
+        state_type = self.state.type if self.state else ""
+        return "CLOSED" if state_type in ("completed", "canceled") else "OPEN"
 
 
 # Every perk HTML-comment marker — metadata-block delimiters AND the run-report marker —

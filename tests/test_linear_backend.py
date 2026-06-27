@@ -30,13 +30,14 @@ from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import (
     to_linear_markdown,
 )
-from perk.backends.linear._helpers import _require_issue_node
+from perk.backends.linear._helpers import LinearIssueNodeModel
 from perk.backends.linear.client import (
     LinearGraphQLError,
     _opt_dict,
     _opt_list,
     _opt_str,
 )
+from perk.boundary import ValidationError
 from perk.github import GitHubError
 from perk.run import run_report
 
@@ -618,6 +619,26 @@ class TestGetPlan:
             {"issue(id": [LinearGraphQLError("Linear GraphQL error: rate limited", codes=())]}
         )
         with pytest.raises(IssueBackendError, match="rate limited"):
+            backend.get_plan(issue_id="iss-1")
+
+    def test_malformed_payload_maps_validation_error_to_issue_backend_error(self) -> None:
+        # A present-but-malformed issue (missing the required `identifier`) raises a
+        # ValidationError the call site maps to a labelled IssueBackendError.
+        backend, _ = _make_backend(
+            {
+                "issue(id": [
+                    {
+                        "issue": {
+                            "id": "iss-1",
+                            "url": "u",
+                            "title": "T",
+                            "state": {"type": "started"},
+                        }
+                    }
+                ]
+            }
+        )
+        with pytest.raises(IssueBackendError, match="read plan issue"):
             backend.get_plan(issue_id="iss-1")
 
     @pytest.mark.parametrize(
@@ -1215,12 +1236,13 @@ class TestOptionalAwareHelpers:
         assert _opt_str(None) is None
 
 
-class TestRequireIssueNode:
-    """The pilot `LinearIssueNode` TypedDict's narrowing helper (D2/D3): runs the raising
-    `_require_*` guards once, then call sites read typed fields directly."""
+class TestLinearIssueNodeModel:
+    """The lenient response model for the recurring 6-field issue selection: ``identifier`` is the
+    required boundary identity; every other field tolerant; the happy path is byte-identical to the
+    retired `_require_issue_node`."""
 
-    def test_builds_typed_record_from_well_formed_payload(self) -> None:
-        node = _require_issue_node(
+    def test_builds_from_well_formed_payload(self) -> None:
+        node = LinearIssueNodeModel.model_validate(
             {
                 "id": "uuid-1",
                 "identifier": "ENG-1",
@@ -1230,16 +1252,26 @@ class TestRequireIssueNode:
                 "state": {"type": "started"},
             }
         )
-        assert node["id"] == "uuid-1"
-        assert node["identifier"] == "ENG-1"
-        assert node["url"] == "https://linear.app/x/issue/ENG-1"
-        assert node["title"] == "A title"
-        assert node["description"] == "the body"
-        assert node["state"]["type"] == "started"
+        assert node.id == "uuid-1"
+        assert node.identifier == "ENG-1"
+        assert node.url == "https://linear.app/x/issue/ENG-1"
+        assert node.title == "A title"
+        assert node.description == "the body"
+        assert node.normalized_state() == "OPEN"
+
+    @pytest.mark.parametrize(
+        ("state_type", "expected"),
+        [("started", "OPEN"), ("completed", "CLOSED"), ("canceled", "CLOSED")],
+    )
+    def test_normalized_state(self, state_type: str, expected: str) -> None:
+        node = LinearIssueNodeModel.model_validate(
+            {"identifier": "ENG-1", "state": {"type": state_type}}
+        )
+        assert node.normalized_state() == expected
 
     def test_tolerates_absent_description(self) -> None:
         # Linear leaves `description` unset on a description-less issue: tolerant `None`.
-        node = _require_issue_node(
+        node = LinearIssueNodeModel.model_validate(
             {
                 "id": "uuid-1",
                 "identifier": "ENG-1",
@@ -1249,23 +1281,19 @@ class TestRequireIssueNode:
                 "state": {"type": "unstarted"},
             }
         )
-        assert node["description"] is None
+        assert node.description is None
 
-    def test_raises_on_missing_required_field(self) -> None:
-        with pytest.raises(IssueBackendError, match="issue identifier"):
-            _require_issue_node(
+    def test_absent_state_normalizes_to_open(self) -> None:
+        # Edge loosening (NEW posture): an absent/None state no longer raises; it normalizes to
+        # OPEN, and absent url/title default to "".
+        node = LinearIssueNodeModel.model_validate({"identifier": "ENG-1"})
+        assert node.normalized_state() == "OPEN"
+        assert node.url == ""
+        assert node.title == ""
+        assert node.description is None
+
+    def test_raises_on_missing_identifier(self) -> None:
+        with pytest.raises(ValidationError):
+            LinearIssueNodeModel.model_validate(
                 {"id": "uuid-1", "url": "u", "title": "t", "state": {"type": "unstarted"}}
-            )
-
-    def test_raises_on_malformed_state(self) -> None:
-        with pytest.raises(IssueBackendError, match=r"issue\.state"):
-            _require_issue_node(
-                {
-                    "id": "uuid-1",
-                    "identifier": "ENG-1",
-                    "url": "u",
-                    "title": "t",
-                    "description": "b",
-                    "state": None,
-                }
             )
