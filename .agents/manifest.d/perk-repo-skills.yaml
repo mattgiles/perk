@@ -1,0 +1,8 @@
+# Managed by perk init — do not edit by hand.
+sources:
+  perk-perk:
+    url: https://github.com/mattgiles/perk
+    ref: main
+skills:
+  - source: perk-perk
+    name: dignified-pydantic
