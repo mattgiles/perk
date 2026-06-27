@@ -36,7 +36,7 @@ description both read independently.
   objectives, learnings). On a **Linear** backend the canonical issue tier moves to Linear and
   objectives live as **Linear Projects**, while PRs / review threads / CI / merge stay
   GitHub-universal. When tiers disagree, the canonical issue tier wins.
-- **`.pi/workflow/` — cache.** A local, per-repo, gitignored mirror (materialized plan body, the
+- **`.perk/workflow/` — cache.** A local, per-repo, gitignored mirror (materialized plan body, the
   active-plan→branch pointer). Derivable from and reconcilable against the canonical tier; safe to
   lose and repairable.
 - **Session entries — transient.** In-session working state (current stage, read-only vs read-write)

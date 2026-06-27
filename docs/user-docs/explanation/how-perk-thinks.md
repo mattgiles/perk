@@ -90,7 +90,7 @@ which one is authoritative when they disagree.
   If two tiers ever disagree, the canonical issue tier wins, full stop. This is *why* the work is resumable from
   anywhere and shareable with a team: the truth is not sitting on one laptop waiting to be lost.
 
-- **`.pi/workflow/` — cache.** A local, per-repo mirror that lets a session work quickly without
+- **`.perk/workflow/` — cache.** A local, per-repo mirror that lets a session work quickly without
   round-tripping to GitHub for every read — things like the materialized plan body and the
   pointer from the active plan to its branch. The important word is *cache*: it is derivable from
   and reconcilable against GitHub, safe to lose, and — being machine-local — git-ignored rather

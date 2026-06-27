@@ -2,7 +2,9 @@
 
 This page references perk's repo configuration: the `.perk/config.toml` committed config and the
 `.perk/local.toml` per-user overlay. It describes the surface — every table and key — so an
-operator can look up any setting. It does not teach a task (those belong in
+operator can look up any setting. It also carries the canonical [repository layout
+contract](#repository-layout--the-dot-directory-contract) — every perk-relevant path with its
+owner and lifecycle. It does not teach a task (those belong in
 [how-to/](../how-to/index.md)) or argue a design (those belong in
 [explanation/](../explanation/index.md)). See the [user-docs router](../index.md) for how this
 quadrant fits the whole.
@@ -31,6 +33,40 @@ below are the live surface.
 > [`perk doctor --fix`](./cli.md#perk-doctor): it migrates the config to `.perk/` secret-safely
 > (your gitignored `.pi/perk.local.toml` secret moves to `.perk/local.toml` and is never promoted
 > into the committed file), then re-run `perk init`.
+
+## Repository layout — the dot-directory contract
+
+This is the canonical file-location reference for a perk-wired repo: every perk-relevant path,
+who owns it, and how it lives in git. It is the single source of truth for "where does X live?"
+questions; the rest of perk's docs link here rather than re-deriving the topology.
+
+**Ownership vs. discovery.** `.perk/` is the authoritative, **perk-owned** dot-directory — perk's
+committed source (`config.toml`, repo-authored `skills/`) plus its local cache (`workflow/`,
+`local.toml`). `.pi/` and `.agents/` are **discovery** namespaces owned by their host tools — Pi
+and the skills CLI, respectively. perk writes a few **generated materializations** into those
+namespaces because that is where the host tool looks for them, but `.pi/` is **not** generally
+perk-owned: it is Pi's directory with a perk-managed slice.
+
+| Path | Owner | Lifecycle | Versioned |
+| --- | --- | --- | --- |
+| `.perk/config.toml` | maintainer / perk (the init marker) | committed | yes |
+| `.perk/local.toml` | user | gitignored | no |
+| `.perk/workflow/` | perk | gitignored (runtime cache) | no |
+| `.perk/skills/<name>/SKILL.md` | maintainer / perk | committed | yes |
+| `.pi/settings.json` | Pi (perk-managed slice) | committed | yes |
+| `.pi/npm/`, `.pi/git/` | Pi | gitignored | no |
+| `.pi/agents/perk/*.md` | perk-generated (Pi materialization) | committed | yes |
+| `.pi/APPEND_SYSTEM.md` | perk-generated (committed ambient index) | committed | yes |
+| `.agents/manifest.yaml` | user / skills CLI | committed | yes |
+| `.agents/manifest.d/perk*.yaml` | perk-generated (skills materialization) | committed | yes |
+| `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
+| `.worktrees/` | perk (worktrees) | gitignored | no |
+
+**Pi-native materializations.** Two committed perk outputs live in Pi's namespace rather than
+under `.perk/`, because Pi discovers them there: `.pi/APPEND_SYSTEM.md` (the generated ambient
+routing index appended to every session's system prompt) and `.pi/agents/perk/` (perk's owned
+slice of Pi's project-agent namespace). They are perk-generated and committed, but they are
+framed as materializations into a host tool's directory — not evidence that `.pi/` is perk-owned.
 
 ## Local overrides & overlay semantics
 
