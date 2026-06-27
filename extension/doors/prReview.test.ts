@@ -76,6 +76,18 @@ test("prReviewGuidance does not hardcode the perk-pr-review skill pointer (bindi
   assert.doesNotMatch(text, /Follow the perk-pr-review skill/);
 });
 
+test("prReviewGuidance injects the operator directive when set (within the invariants)", () => {
+  const text = prReviewGuidance("", "focus on the dignified-python skill");
+  assert.match(text, /Operator focus for this run/);
+  assert.match(text, /focus on the dignified-python skill/);
+  assert.match(text, /Plan-fidelity angle stays mandatory/);
+});
+
+test("prReviewGuidance is byte-stable when the directive is empty/absent", () => {
+  assert.equal(prReviewGuidance("m"), prReviewGuidance("m", ""));
+  assert.doesNotMatch(prReviewGuidance("", ""), /Operator focus for this run/);
+});
+
 // --- decodePostParams: strict decode (a GitHub mutation — whole-batch refusal on any drift) --
 
 test("decodePostParams accepts a valid clean verdict (no comments)", () => {

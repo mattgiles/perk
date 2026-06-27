@@ -126,9 +126,15 @@
 - template: "stages/pr-review.md"
   vars:
     model: ""
+    directive: ""
 - template: "stages/pr-review.md"
   vars:
     model: "google/gemini-3.5-flash"
+    directive: ""
+- template: "stages/pr-review.md"
+  vars:
+    model: ""
+    directive: "have one reviewer focus on the dignified-python skill"
 - template: "stages/conflict-resolution.md"
   vars:
     base: "main"

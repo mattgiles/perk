@@ -995,6 +995,13 @@ routes to `/land`.
   to `perk pr review-post` (the existing cold door) via `runColdDoor` (stdin `--batch`). The review is
   **advisory `COMMENT` only** — `event` is hardcoded `COMMENT` in the gateway, so the parent can never
   approve/request-changes.
+- **Optional ad-hoc operator directive.** Everything after `/pr-review` is captured verbatim as a
+  **free-form operator directive** and threaded into the angle-selection step of the seed guidance
+  (the same inline-conditional mechanism the template uses for the optional `model` var — no new
+  tool, registry, or door change). It biases **angle selection and per-reviewer emphasis only**,
+  honored as DATA from the human: Plan-fidelity stays mandatory, the **2–3-reviewer cap** holds, and
+  the **clean/actionable posting bar is unchanged**. An empty directive (no args) renders the
+  byte-identical seed as before.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
   agent's model is configurable through one flat `[subagents]` table in `.perk/config.toml` (overlaid by
   `.perk/local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,

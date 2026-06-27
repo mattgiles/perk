@@ -219,6 +219,12 @@ runs an explicit **plan-conformance pass** — verifying the diff implements wha
 and flagging forgotten items (and noting when no plan body was found) — so a clean verdict means
 *no actionable findings after a genuine hunt*, not a rubber stamp.
 
+You can pass an **optional free-form focus note** after the command (everything after `/pr-review`),
+e.g. `/pr-review have one reviewer focus on the dignified-python skill`. It is threaded into the
+reviewer-angle selection step and steers angle selection/emphasis **within** the door's invariants
+— Plan fidelity stays mandatory, the 2–3-reviewer cap holds, and the clean/actionable posting bar
+is unchanged.
+
 - **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
   `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
 
