@@ -217,8 +217,8 @@ const TOOL_GUIDELINES = [
  * command:pr-review — not hardcoded here). Pure + exported for offline tests. When `model` is set,
  * EVERY reviewer spawn carries an inline `model` override; otherwise the agent's default is used.
  */
-export function prReviewGuidance(model?: string): string {
-  return render("stages/pr-review.md", { model: model ?? "" });
+export function prReviewGuidance(model?: string, directive?: string): string {
+  return render("stages/pr-review.md", { model: model ?? "", directive: directive ?? "" });
 }
 
 /** Register the warm pr-review door: the `post_pr_review` tool + the `/pr-review` command. */
@@ -300,11 +300,21 @@ export function registerPrReview(pi: ExtensionAPI): void {
     description:
       "Review the active PR via 2–3 angle-specialized fresh-context reviewers, reconcile their " +
       "findings, and post one verdict-driven outcome. The review model is configurable via " +
-      "[subagents] pr-reviewer in .perk/config.toml.",
-    handler: async (_args, ctx: ExtensionContext) => {
+      "[subagents] pr-reviewer in .perk/config.toml. " +
+      'Pass an optional free-form focus note (e.g. "have one reviewer focus on the dignified-python ' +
+      'skill") to steer angle selection/emphasis.',
+    handler: async (args, ctx: ExtensionContext) => {
       const model = loadPerkConfig(ctx.cwd).subagents["pr-reviewer"];
-      const guidance = prReviewGuidance(model);
-      report(ctx, "pr-review", "info", "multi-angle review → reconcile → post");
+      const directive = (args ?? "").trim();
+      const guidance = prReviewGuidance(model, directive);
+      report(
+        ctx,
+        "pr-review",
+        "info",
+        directive
+          ? `multi-angle review (focus: ${directive}) → reconcile → post`
+          : "multi-angle review → reconcile → post",
+      );
       // Inject the spawn guidance as a user message so the model starts the review (warm entry).
       // The perk-pr-review pointer rides the skill-binding suffix (command:pr-review).
       pi.sendUserMessage(guidance + bindingSuffix(ctx.cwd, "command:pr-review"));

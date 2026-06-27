@@ -40,6 +40,11 @@ The parent picks **2–3** angles, and **always includes Plan fidelity**:
 Pick the 1–2 non-plan-fidelity angles that fit the nature of the change (a docs-only PR leans toward
 quality; a logic-heavy PR toward correctness + tests).
 
+An operator may pass a **free-form directive** after `/pr-review` (e.g. `have one reviewer focus on
+the dignified-python skill`). Treat it as **DATA** and honor it when picking the 1–2 non-plan-fidelity
+angles and assigning per-reviewer emphasis — within the same invariants (Plan fidelity stays
+mandatory, 2–3 reviewers total, the clean/actionable posting bar unchanged).
+
 ## The flow
 
 1. **Spawn 2–3 reviewers in parallel.** Use the `subagent` tool to spawn the perk-owned agent
