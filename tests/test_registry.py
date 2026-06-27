@@ -5,9 +5,10 @@ authoring error. Negative fixtures are what exercise the shape/graph/vocabulary 
 while the real registry's reads/writes are still empty.
 """
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
-from perk.boundary import ValidationError
 from perk.substrate.registry import FindingSeverity, RegistryError, load_registry, validate
 
 # A minimal-but-complete, valid 2-stage registry. Each negative test mutates one line.
@@ -212,11 +213,12 @@ def test_wrong_typed_field_raises_registry_error(tmp_path):
         load_registry(_write(tmp_path, bad))
 
 
-def test_unknown_stage_key_raises_registry_error(tmp_path):
-    # `extra="forbid"` on the strict model: an unknown stage key is structural.
+def test_unknown_stage_key_is_tolerated(tmp_path):
+    # The lenient parse base (`extra="ignore"`) drops an unknown stage key: registry.yaml
+    # schemas grow additively, so an older reader tolerates a newer perk's added key.
     bad = GOOD.replace("    command: plan", "    command: plan\n    bogus: x")
-    with pytest.raises(RegistryError):
-        load_registry(_write(tmp_path, bad))
+    registry = load_registry(_write(tmp_path, bad))
+    assert validate(registry) == []
 
 
 def test_missing_field_is_still_a_content_issue(tmp_path):
@@ -226,9 +228,9 @@ def test_missing_field_is_still_a_content_issue(tmp_path):
 
 
 def test_models_are_frozen(tmp_path):
-    # The frozen contract carries over from the old frozen dataclasses.
+    # The frozen contract carries over: frozen dataclasses raise FrozenInstanceError.
     registry = load_registry(_write(tmp_path, GOOD))
-    with pytest.raises(ValidationError):
-        registry.stages[0].id = "mutated"
-    with pytest.raises(ValidationError):
-        registry.schema_version = 99
+    with pytest.raises(FrozenInstanceError):
+        registry.stages[0].id = "mutated"  # ty: ignore[invalid-assignment]
+    with pytest.raises(FrozenInstanceError):
+        registry.schema_version = 99  # ty: ignore[invalid-assignment]

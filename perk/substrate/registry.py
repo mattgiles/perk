@@ -10,7 +10,7 @@ The validator returns structured ``Issue`` records (it never raises for invalid
 LBYL throughout (dignified-python): shapes are checked before use.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -19,7 +19,7 @@ import yaml
 from pydantic import Field
 
 from perk._resources import shared_dir
-from perk.boundary import StrictBoundaryModel, translate_validation_errors
+from perk.boundary import LenientParseModel, translate_validation_errors
 
 REGISTRY_FILENAME = "registry.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
@@ -47,7 +47,13 @@ class Issue:
         return f"[{self.severity.value}] {self.where}: {self.message}"
 
 
-class Stage(StrictBoundaryModel):
+class StageEntry(LenientParseModel):
+    """The lenient per-stage parse model at the file boundary.
+
+    Same fields/defaults as the ``Stage`` domain dataclass; tolerant parsing
+    (drop unknown keys, coerce ordinary scalars) per the lenient base.
+    """
+
     id: str = ""
     summary: str = ""
     mode: str = ""
@@ -64,11 +70,44 @@ class Stage(StrictBoundaryModel):
     successors: list[str] = Field(default_factory=list)
 
 
-class Registry(StrictBoundaryModel):
+class RegistryFile(LenientParseModel):
+    """The lenient whole-file parse model.
+
+    ``schema_version`` is deliberately NOT a field: it stays a structural
+    pre-check in ``load_registry`` (it must run before generic validation and
+    raise its own message). ``extra="ignore"`` drops it (and any other top-level
+    key) from this model.
+    """
+
+    state_keys: dict[str, Any] = Field(default_factory=dict)
+    stages: list[StageEntry] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Stage:
+    """A single stage in the registry (frozen domain object)."""
+
+    id: str = ""
+    summary: str = ""
+    mode: str = ""
+    worktree: str = ""
+    doors: dict[str, Any] = field(default_factory=dict)
+    run_id: dict[str, Any] = field(default_factory=dict)
+    command: str = ""
+    requires: list[str] = field(default_factory=list)
+    reads: list[str] = field(default_factory=list)
+    writes: list[str] = field(default_factory=list)
+    predecessors: list[str] = field(default_factory=list)
+    successors: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Registry:
+    """The loaded registry (frozen domain object)."""
+
     schema_version: int
-    state_keys: set[str] = Field(default_factory=set)  # flattened "<tier>.<key>" vocabulary
-    stages: list[Stage] = Field(default_factory=list)
-    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
+    state_keys: frozenset[str] = frozenset()  # flattened "<tier>.<key>" vocabulary
+    stages: tuple[Stage, ...] = ()
 
     def stage_ids(self) -> set[str]:
         return {s.id for s in self.stages}
@@ -107,18 +146,31 @@ def load_registry(path: Path | None = None) -> Registry:
         )
 
     with translate_validation_errors(RegistryError, source=str(registry_path)):
-        stages = [Stage.model_validate(raw) for raw in _as_list(data.get("stages"))]
+        parsed = RegistryFile.model_validate(data)
         return Registry(
             # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
             schema_version=SUPPORTED_SCHEMA_VERSION,
-            state_keys=_flatten_state_keys(data.get("state_keys")),
-            stages=stages,
-            raw=data,
+            state_keys=frozenset(_flatten_state_keys(parsed.state_keys)),
+            stages=tuple(_to_stage(s) for s in parsed.stages),
         )
 
 
-def _as_list(value: object) -> list[Any]:
-    return value if isinstance(value, list) else []
+def _to_stage(entry: StageEntry) -> Stage:
+    """Explicit field-for-field conversion of a parsed entry into the frozen domain object."""
+    return Stage(
+        id=entry.id,
+        summary=entry.summary,
+        mode=entry.mode,
+        worktree=entry.worktree,
+        doors=entry.doors,
+        run_id=entry.run_id,
+        command=entry.command,
+        requires=entry.requires,
+        reads=entry.reads,
+        writes=entry.writes,
+        predecessors=entry.predecessors,
+        successors=entry.successors,
+    )
 
 
 def _flatten_state_keys(raw: object) -> set[str]:
