@@ -25,13 +25,20 @@ callers decide how to surface them; ``ProvidersError`` is reserved for structura
 LBYL throughout (dignified-python): shapes are checked before use.
 """
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
+from pydantic import BeforeValidator, Field, ValidationInfo, model_validator
 
 from perk._resources import shared_dir
+from perk.boundary import (
+    StrictBoundaryModel,
+    ValidationError,
+    translate_validation_errors,
+)
 from perk.substrate.registry import FindingSeverity, Issue
 
 PROVIDERS_FILENAME = "providers.yaml"
@@ -40,28 +47,56 @@ SUPPORTED_SCHEMA_VERSION = 1
 SEAMS: tuple[str, ...] = ("plan", "todo", "askuser", "footer", "web")
 
 
-@dataclass(frozen=True)
-class Provider:
+def _as_text(v: object) -> object:
+    """Lenient string coercion: a non-str (incl. absent→None) becomes ``""`` (today's `_str`)."""
+    return v if isinstance(v, str) else ""
+
+
+def _as_opt_text(v: object) -> object:
+    """Lenient optional-string coercion: a non-str becomes ``None`` (today's `_opt_str`)."""
+    return v if isinstance(v, str) else None
+
+
+def _as_flag(v: object) -> object:
+    """Lenient flag coercion: only literal ``True`` is truthy (today's `... is True`)."""
+    return v is True
+
+
+def _as_opt_dict(v: object) -> object:
+    """Lenient optional-dict coercion: a non-dict becomes ``None``."""
+    return v if isinstance(v, dict) else None
+
+
+_Text = Annotated[str, BeforeValidator(_as_text)]
+_OptText = Annotated[str | None, BeforeValidator(_as_opt_text)]
+_Flag = Annotated[bool, BeforeValidator(_as_flag)]
+_OptDict = Annotated[dict[str, Any] | None, BeforeValidator(_as_opt_dict)]
+
+
+class Provider(StrictBoundaryModel):
     """One supported-set provider entry.
 
     ``package``/``adapter`` are ``None`` for perk's own bundled reference providers (nothing to
     add to ``packages``; perk produces the contract natively). ``package_filter`` is the optional
     Pi object-form filter merged into a foreign package's ``packages`` entry.
+
+    Fields are leniently coerced (missing/ill-typed → ``""``/``None``/``False``) so the *validator*
+    (not construction) owns content findings — except a stray key, which ``extra="forbid"`` rejects
+    at load (a boundary-first tightening over today's silent ignore).
     """
 
-    id: str
-    seam: str
-    package: str | None
-    adapter: str | None
-    default: bool
-    package_filter: dict[str, Any] | None
+    id: _Text = ""
+    seam: _Text = ""
+    package: _OptText = None
+    adapter: _OptText = None
+    default: _Flag = False
+    package_filter: _OptDict = None
 
 
-@dataclass(frozen=True)
-class ProviderSet:
+class ProviderSet(StrictBoundaryModel):
     schema_version: int
-    providers: list[Provider]
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+    providers: list[Provider] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
     def by_id(self) -> dict[str, Provider]:
         """Map ``id -> Provider`` (last wins on a duplicate id; the validator flags duplicates)."""
@@ -73,6 +108,34 @@ class ProviderSet:
             if provider.seam == seam and provider.default:
                 return provider
         return None
+
+    @model_validator(mode="after")
+    def _enforce_single_default(self, info: ValidationInfo) -> "ProviderSet":
+        """Raise iff the caller opts in via ``context["enforce_single_default"]``.
+
+        Gated so ``load_providers()`` (no context) stays lenient — default-count stays a
+        ``validate()`` ``Issue`` — while ``validate()`` opts in and converts the raised
+        ``ValidationError`` back into ``Issue`` records. Direct construction (``info.context is
+        None``) never raises.
+        """
+        if info.context and info.context.get("enforce_single_default"):
+            problems = _one_default_per_seam_problems(self.providers)
+            if problems:
+                raise ValueError("; ".join(problems))
+        return self
+
+
+def _one_default_per_seam_problems(providers: Sequence[Provider]) -> list[str]:
+    """One message per seam whose ``default: true`` count ``!= 1`` (the single invariant source)."""
+    counts: dict[str, int] = {seam: 0 for seam in SEAMS}
+    for provider in providers:
+        if provider.seam in counts and provider.default:
+            counts[provider.seam] += 1
+    return [
+        f"seam `{seam}` must have exactly one `default: true` provider (found {counts[seam]})"
+        for seam in SEAMS
+        if counts[seam] != 1
+    ]
 
 
 class ProvidersError(Exception):
@@ -107,38 +170,18 @@ def load_providers(path: Path | None = None) -> ProviderSet:
             f"(this perk understands {SUPPORTED_SCHEMA_VERSION}). Run 'perk doctor'."
         )
 
-    providers = [_parse_provider(raw) for raw in _as_list(data.get("providers"))]
-    return ProviderSet(schema_version=schema_version, providers=providers, raw=data)
+    with translate_validation_errors(ProvidersError, source=str(providers_path)):
+        entries = [
+            Provider.model_validate(raw if isinstance(raw, dict) else {})
+            for raw in _as_list(data.get("providers"))
+        ]
+        # Direct ``ProviderSet(...)`` construction has ``info.context is None`` → the
+        # single-default validator skips, keeping load lenient on default-count.
+        return ProviderSet(schema_version=schema_version, providers=entries, raw=data)
 
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
-
-
-def _parse_provider(raw: Any) -> Provider:
-    """Coerce one raw provider mapping into a ``Provider``, tolerating absent fields.
-
-    Missing/ill-typed fields become empty/``None``/``False`` so the *validator* (not the parser)
-    reports them — keeping all consistency findings in one place (matches ``_parse_binding``).
-    """
-    raw = raw if isinstance(raw, dict) else {}
-    package_filter = raw.get("package_filter")
-    return Provider(
-        id=_str(raw.get("id")),
-        seam=_str(raw.get("seam")),
-        package=_opt_str(raw.get("package")),
-        adapter=_opt_str(raw.get("adapter")),
-        default=raw.get("default") is True,
-        package_filter=package_filter if isinstance(package_filter, dict) else None,
-    )
-
-
-def _str(value: Any) -> str:
-    return value if isinstance(value, str) else ""
-
-
-def _opt_str(value: Any) -> str | None:
-    return value if isinstance(value, str) else None
 
 
 # ----------------------------------------------------------------------- validate
@@ -153,7 +196,6 @@ def validate(providers: ProviderSet) -> list[Issue]:
     """
     issues: list[Issue] = []
     seen: set[str] = set()
-    default_counts: dict[str, int] = {seam: 0 for seam in SEAMS}
 
     for provider in providers.providers:
         where = provider.id or "providers"
@@ -167,19 +209,14 @@ def validate(providers: ProviderSet) -> list[Issue]:
 
         if provider.seam not in SEAMS:
             issues.append(Issue(FindingSeverity.ERROR, where, f"`seam` must be one of {SEAMS}"))
-        elif provider.default:
-            default_counts[provider.seam] += 1
 
-    for seam in SEAMS:
-        count = default_counts[seam]
-        if count != 1:
-            issues.append(
-                Issue(
-                    FindingSeverity.ERROR,
-                    "providers",
-                    f"seam `{seam}` must have exactly one `default: true` provider (found {count})",
-                )
-            )
+    # The exactly-one-default-per-seam invariant lives once, as the context-gated
+    # ``ProviderSet`` validator; surface it here via catch-and-convert (gains pydantic's
+    # "Value error, " prefix, and per-seam violations combine into one ``Issue``).
+    try:
+        ProviderSet.model_validate(providers.model_dump(), context={"enforce_single_default": True})
+    except ValidationError as exc:
+        issues.extend(Issue(FindingSeverity.ERROR, "providers", err["msg"]) for err in exc.errors())
 
     return issues
 
