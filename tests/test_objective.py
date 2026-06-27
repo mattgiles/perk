@@ -2,6 +2,9 @@
 
 from typing import cast
 
+import pytest
+from pydantic import ValidationError
+
 from perk import objective as o
 from perk.plan import find_metadata_block, render_metadata_block
 
@@ -316,7 +319,7 @@ def test_render_table_depends_on_column():
 
 def test_objective_header_to_data():
     header = o.ObjectiveHeader(run_id="01RID", created="t", objective_comment_id=5, status="active")
-    data = header.to_data()
+    data = header.model_dump(mode="json")
     assert (
         data["run_id"] == "01RID"
         and data["objective_comment_id"] == 5
@@ -327,7 +330,7 @@ def test_objective_header_to_data():
 
 def test_objective_header_base_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", base="develop")
-    data = header.to_data()
+    data = header.model_dump(mode="json")
     assert data["base"] == "develop"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -340,7 +343,7 @@ def test_objective_header_base_round_trips():
 
 def test_objective_header_adopted_from_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", adopted_from="uuid-xyz")
-    data = header.to_data()
+    data = header.model_dump(mode="json")
     assert data["adopted_from"] == "uuid-xyz"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -349,13 +352,13 @@ def test_objective_header_adopted_from_round_trips():
 
 
 def test_objective_header_adopted_from_absent_by_default():
-    data = o.ObjectiveHeader(run_id="01RID", created="t").to_data()
+    data = o.ObjectiveHeader(run_id="01RID", created="t").model_dump(mode="json")
     assert data["adopted_from"] is None
 
 
 def test_objective_header_supersede_lineage_round_trips():
     header = o.ObjectiveHeader(run_id="01RID", created="t", supersedes="#12", superseded_by="#34")
-    data = header.to_data()
+    data = header.model_dump(mode="json")
     assert data["supersedes"] == "#12" and data["superseded_by"] == "#34"
     rendered = render_metadata_block(o.OBJECTIVE_HEADER_KEY, data)
     parsed = find_metadata_block(rendered, o.OBJECTIVE_HEADER_KEY)
@@ -366,7 +369,7 @@ def test_objective_header_supersede_lineage_round_trips():
 
 
 def test_objective_header_supersede_lineage_absent_by_default():
-    data = o.ObjectiveHeader(run_id="01RID", created="t").to_data()
+    data = o.ObjectiveHeader(run_id="01RID", created="t").model_dump(mode="json")
     assert data["supersedes"] is None and data["superseded_by"] is None
 
 
@@ -523,7 +526,7 @@ def test_objective_header_string_comment_id_round_trips():
     header = o.ObjectiveHeader(
         run_id="01RID", created="t", objective_comment_id="comment-uuid-1", status="active"
     )
-    data = header.to_data()
+    data = header.model_dump(mode="json")
     assert data["objective_comment_id"] == "comment-uuid-1"
 
 
@@ -690,3 +693,57 @@ def test_objective_callout_content_and_routing():
         "perk objective plan ENG-7",
         "Run from the repo root to plan the next actionable node.",
     )
+
+
+# --- Pydantic boundary-model behavior (ObjectiveNode / Manifest) ---
+
+
+def test_validate_roadmap_bad_type_node_reports_field_path():
+    # A bad-typed required field (id: 5) yields a pydantic field-path error message.
+    block = render_metadata_block(
+        o.OBJECTIVE_ROADMAP_KEY,
+        {"schema_version": "1", "nodes": [{"id": 5, "description": "x", "status": "pending"}]},
+    )
+    nodes, errors = o.parse_roadmap_nodes(block)
+    assert nodes == [] and errors
+    assert "node 0" in errors[0] and "id" in errors[0]
+
+
+def test_parse_structured_roadmap_tolerates_adopt_issue_sibling_key():
+    # The `adopt_issue` create-time sibling key (consumed separately) is dropped by `_tolerate`,
+    # so the node still validates.
+    nodes, errors = o.parse_structured_roadmap(
+        [{"id": "1.1", "description": "a", "adopt_issue": "#42"}]
+    )
+    assert errors == []
+    assert [n.id for n in nodes] == ["1.1"]
+    assert nodes[0].status is N.PENDING
+
+
+def test_validate_manifest_bad_type_node_reports_field_path():
+    bad = render_metadata_block(
+        o.OBJECTIVE_MANIFEST_KEY,
+        {
+            "schema_version": "1",
+            "nodes": [{"id": 5, "slug": "a", "description": "x", "depends_on": []}],
+            "phases": {"1": "Phase 1"},
+        },
+    )
+    manifest, errors = o.parse_manifest(bad)
+    assert manifest is None and errors
+    assert "node 0" in errors[0] and "id" in errors[0]
+
+
+def test_objective_node_is_frozen_pydantic_model():
+    node = o.ObjectiveNode(id="1.1", description="a", status=N.PENDING)
+    with pytest.raises(ValidationError):
+        node.id = "1.2"
+
+
+def test_objective_node_model_copy_round_trips_single_field():
+    node = o.ObjectiveNode(id="1.1", description="a", status=N.PENDING)
+    updated = node.model_copy(update={"status": N.DONE})
+    assert updated.status is N.DONE
+    assert updated.id == "1.1" and updated.description == "a"
+    # The original is unchanged (immutable copy).
+    assert node.status is N.PENDING

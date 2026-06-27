@@ -45,7 +45,7 @@ def _inline_objective_description(
         run_id=run_id, created="t", objective_comment_id=comment_id, status="active"
     )
     header_block = plan.render_metadata_block(
-        objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+        objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
     )
     roadmap_block = plan.render_metadata_block(
         objective.OBJECTIVE_ROADMAP_KEY,

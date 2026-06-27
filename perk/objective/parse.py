@@ -8,8 +8,10 @@ structured-roadmap path), and :func:`parse_adopt_mapping` (the in-place adoption
 
 from typing import cast
 
+from pydantic import ValidationError
+
+from perk.boundary import format_validation_error
 from perk.objective._models import (
-    _VALID_STATUS_VALUES,
     OBJECTIVE_ROADMAP_KEY,
     OBJECTIVE_SCHEMA_VERSION,
     NodeStatus,
@@ -25,6 +27,11 @@ def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list
     Returns ``(nodes, errors)``; on any error ``nodes`` is ``[]``. Required per-node fields:
     ``id``/``description``/``status`` (typed, ``status`` a valid :class:`NodeStatus`). Optional:
     ``pr``/``depends_on``/``slug``/``comment``.
+
+    Envelope checks (``schema_version`` / ``nodes`` is-a-list / per-item is-a-mapping) stay
+    hand-written for byte-identical messages; only the per-node field validation runs on pydantic
+    (:meth:`ObjectiveNode.model_validate`), which drops sibling keys like ``adopt_issue`` via the
+    model's ``_tolerate`` before-validator and bails on the first failing node.
     """
     errors: list[str] = []
     schema_version = data.get("schema_version")
@@ -43,58 +50,10 @@ def validate_roadmap(data: dict[str, object]) -> tuple[list[ObjectiveNode], list
     for i, raw_item in enumerate(raw_nodes):
         if not isinstance(raw_item, dict):
             return [], [f"node {i} is not a mapping"]
-        # `isinstance(x, dict)` narrows an `object` to `dict[Unknown, Unknown]` (key type Never);
-        # the cast restores usable `str` keys (no `Any`). Every value is isinstance-checked below.
-        raw = cast(dict[str, object], raw_item)
-        for field in ("id", "description", "status"):
-            if field not in raw:
-                return [], [f"node {i} missing required field: {field}"]
-        node_id = raw["id"]
-        description = raw["description"]
-        status = raw["status"]
-        if not isinstance(node_id, str):
-            return [], [f"node {i} field 'id' must be a string"]
-        if not isinstance(description, str):
-            return [], [f"node {i} field 'description' must be a string"]
-        if not isinstance(status, str) or status not in _VALID_STATUS_VALUES:
-            return [], [
-                f"node {i} field 'status' must be one of: {', '.join(sorted(_VALID_STATUS_VALUES))}"
-            ]
-
-        raw_pr = raw.get("pr")
-        if raw_pr is not None and not isinstance(raw_pr, str):
-            return [], [f"node {i} field 'pr' must be a string or null"]
-
-        raw_depends = raw.get("depends_on")
-        depends_on: tuple[str, ...] | None = None
-        if raw_depends is not None:
-            if not isinstance(raw_depends, list):
-                return [], [f"node {i} field 'depends_on' must be a list or null"]
-            deps: list[str] = []
-            for j, item in enumerate(raw_depends):
-                if not isinstance(item, str):
-                    return [], [f"node {i} field 'depends_on' item {j} must be a string"]
-                deps.append(item)
-            depends_on = tuple(deps)
-
-        raw_slug = raw.get("slug")
-        if raw_slug is not None and not isinstance(raw_slug, str):
-            return [], [f"node {i} field 'slug' must be a string or null"]
-        raw_comment = raw.get("comment")
-        if raw_comment is not None and not isinstance(raw_comment, str):
-            return [], [f"node {i} field 'comment' must be a string or null"]
-
-        nodes.append(
-            ObjectiveNode(
-                id=node_id,
-                description=description,
-                status=NodeStatus(status),
-                pr=raw_pr,
-                depends_on=depends_on,
-                slug=raw_slug,
-                comment=raw_comment,
-            )
-        )
+        try:
+            nodes.append(ObjectiveNode.model_validate(raw_item))
+        except ValidationError as exc:
+            return [], [format_validation_error(exc, source=f"node {i}")]
     return nodes, errors
 
 

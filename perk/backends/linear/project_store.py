@@ -1,5 +1,4 @@
 from contextlib import suppress
-from dataclasses import replace
 from pathlib import Path
 
 from perk import objective, plan
@@ -570,7 +569,9 @@ class LinearProjectObjectiveStore:
             for identifier, node in parsed:
                 blockers = self._projects.issue_blocked_by(uuid_by_identifier[identifier])
                 dep_ids = [identifier_to_node[b] for b in blockers if b in identifier_to_node]
-                resolved.append(replace(node, depends_on=tuple(dep_ids) if dep_ids else None))
+                resolved.append(
+                    node.model_copy(update={"depends_on": tuple(dep_ids) if dep_ids else None})
+                )
 
             sorted_nodes = sorted(resolved, key=lambda n: objective.node_sort_key(n.id))
             return objective_store.ObjectiveState(
@@ -940,7 +941,7 @@ class LinearProjectObjectiveStore:
             supersedes=supersedes,
         )
         header_block = plan.render_metadata_block(
-            objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+            objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
         )
         manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
         manifest_block = plan.render_metadata_block(
@@ -980,7 +981,7 @@ class LinearProjectObjectiveStore:
             adopted_from=source_id,
         )
         header_block = plan.render_metadata_block(
-            objective.OBJECTIVE_HEADER_KEY, header.to_data(), style="inline-code"
+            objective.OBJECTIVE_HEADER_KEY, header.model_dump(mode="json"), style="inline-code"
         )
         manifest_names = {f"{key[0]}{key[1]}": value for key, value in names.items()}
         manifest_block = plan.render_metadata_block(
@@ -1137,7 +1138,8 @@ class LinearProjectObjectiveStore:
         if manifest is None or all(n.id != node_id for n in manifest.nodes):
             return
         new_nodes = [
-            replace(n, description=description) if n.id == node_id else n for n in manifest.nodes
+            n.model_copy(update={"description": description}) if n.id == node_id else n
+            for n in manifest.nodes
         ]
         data = objective.render_manifest_block(new_nodes, manifest.phase_names)
         new_overview = plan.replace_metadata_block(overview, objective.OBJECTIVE_MANIFEST_KEY, data)

@@ -7,9 +7,11 @@ The cohesive manifest concern: the :class:`Manifest` dataclass plus its renderer
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from typing import cast
 
+from pydantic import ValidationError
+
+from perk.boundary import StrictBoundaryModel, format_validation_error
 from perk.objective._models import (
     OBJECTIVE_MANIFEST_KEY,
     OBJECTIVE_SCHEMA_VERSION,
@@ -20,8 +22,7 @@ from perk.objective._models import (
 from perk.plan import find_metadata_block
 
 
-@dataclass(frozen=True)
-class Manifest:
+class Manifest(StrictBoundaryModel):
     """The persisted drift baseline of an objective's intended roadmap.
 
     Structural identity only: ``nodes`` reuse :class:`ObjectiveNode` but only their
@@ -84,41 +85,13 @@ def _validate_manifest(data: dict[str, object]) -> tuple[Manifest | None, list[s
     for i, raw_item in enumerate(raw_nodes):
         if not isinstance(raw_item, dict):
             return None, [f"node {i} is not a mapping"]
-        # `isinstance(x, dict)` narrows an `object` to `dict[Unknown, Unknown]` (key type Never);
-        # the cast restores usable `str` keys (no `Any`). Every value is isinstance-checked below.
+        # Inject `status` (the manifest excludes it) to satisfy the required field; the model's
+        # `_tolerate` before-validator drops anything the manifest doesn't declare (e.g. `pr`).
         raw = cast(dict[str, object], raw_item)
-        for field in ("id", "description"):
-            if field not in raw:
-                return None, [f"node {i} missing required field: {field}"]
-        node_id = raw["id"]
-        description = raw["description"]
-        if not isinstance(node_id, str):
-            return None, [f"node {i} field 'id' must be a string"]
-        if not isinstance(description, str):
-            return None, [f"node {i} field 'description' must be a string"]
-        raw_slug = raw.get("slug")
-        if raw_slug is not None and not isinstance(raw_slug, str):
-            return None, [f"node {i} field 'slug' must be a string or null"]
-        raw_depends = raw.get("depends_on")
-        depends_on: tuple[str, ...] = ()
-        if raw_depends is not None:
-            if not isinstance(raw_depends, list):
-                return None, [f"node {i} field 'depends_on' must be a list or null"]
-            deps: list[str] = []
-            for j, item in enumerate(raw_depends):
-                if not isinstance(item, str):
-                    return None, [f"node {i} field 'depends_on' item {j} must be a string"]
-                deps.append(item)
-            depends_on = tuple(deps)
-        nodes.append(
-            ObjectiveNode(
-                id=node_id,
-                description=description,
-                status=NodeStatus.PENDING,
-                depends_on=depends_on,
-                slug=raw_slug,
-            )
-        )
+        try:
+            nodes.append(ObjectiveNode.model_validate({**raw, "status": NodeStatus.PENDING.value}))
+        except ValidationError as exc:
+            return None, [format_validation_error(exc, source=f"node {i}")]
 
     raw_phases = data.get("phases")
     if raw_phases is None:
