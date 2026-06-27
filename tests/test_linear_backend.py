@@ -820,9 +820,9 @@ class TestReadIssueAndAdopt:
                 ],
             }
         )
-        header_fields = plan.PlanHeader(run_id="RID", created="t", adopted_from="ENG-7").model_dump(
-            mode="json"
-        )
+        header_fields = plan.PlanHeaderOut.from_domain(
+            plan.PlanHeader(run_id="RID", created="t", adopted_from="ENG-7")
+        ).model_dump(mode="json")
         ref = backend.adopt_issue_as_plan(
             issue_id="ENG-7",
             header_fields=header_fields,

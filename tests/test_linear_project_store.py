@@ -917,7 +917,9 @@ class TestLinearProjectObjectiveStore:
             id="1.1", description="Alpha", status=objective.NodeStatus.IN_PROGRESS, slug="a"
         )
         store, fake = _make_project_store(self._save_node_responses(node=node))
-        header_fields = plan.PlanHeader(run_id="01RUN", created="t").model_dump(mode="json")
+        header_fields = plan.PlanHeaderOut.from_domain(
+            plan.PlanHeader(run_id="01RUN", created="t")
+        ).model_dump(mode="json")
         ref = store.save_node_plan(
             objective_id="proj-1",
             node_id="1.1",
@@ -957,7 +959,9 @@ class TestLinearProjectObjectiveStore:
         store.save_node_plan(
             objective_id="proj-1",
             node_id="1.1",
-            header_fields=plan.PlanHeader(run_id="01RUN", created="t").model_dump(mode="json"),
+            header_fields=plan.PlanHeaderOut.from_domain(
+                plan.PlanHeader(run_id="01RUN", created="t")
+            ).model_dump(mode="json"),
             plan_markdown="# New\n\nnew body\n",
         )
         # Idempotent: the existing plan-body comment is PATCHed, never a duplicate create.
@@ -996,7 +1000,9 @@ class TestLinearProjectObjectiveStore:
         store.save_node_plan(
             objective_id="proj-1",
             node_id="1.1",
-            header_fields=plan.PlanHeader(run_id="01RUN", created="t").model_dump(mode="json"),
+            header_fields=plan.PlanHeaderOut.from_domain(
+                plan.PlanHeader(run_id="01RUN", created="t")
+            ).model_dump(mode="json"),
             plan_markdown="# My Plan\n\nbody\n",
         )
         [(_, uvars)] = _queries(fake, "issueUpdate(")
