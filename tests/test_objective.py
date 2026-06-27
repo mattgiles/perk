@@ -710,14 +710,30 @@ def test_validate_roadmap_bad_type_node_reports_field_path():
 
 
 def test_parse_structured_roadmap_tolerates_adopt_issue_sibling_key():
-    # The `adopt_issue` create-time sibling key (consumed separately) is dropped by the parse
-    # model's `extra="ignore"`, so the node still validates.
+    # The `adopt_issue` create-time sibling key (consumed separately by parse_adopt_mapping) is a
+    # DECLARED field on the strict StructuredRoadmapNode, dropped in to_domain (not extra="ignore"),
+    # so the node still validates under the otherwise-strict additionalProperties:false model.
     nodes, errors = o.parse_structured_roadmap(
         [{"id": "1.1", "description": "a", "adopt_issue": "#42"}]
     )
     assert errors == []
     assert [n.id for n in nodes] == ["1.1"]
     assert nodes[0].status is N.PENDING
+
+
+def test_parse_structured_roadmap_rejects_unknown_key():
+    # The structured/--roadmap path now mirrors the TS additionalProperties:false contract: an
+    # unknown key fails loudly with the key in the field path (today it was silently dropped).
+    nodes, errors = o.parse_structured_roadmap([{"id": "1.1", "description": "a", "bogus": 1}])
+    assert nodes == [] and errors
+    assert "node 0" in errors[0] and "bogus" in errors[0]
+
+
+def test_parse_structured_roadmap_rejects_ill_typed_field():
+    # An ill-typed field (id: 5) fails with a field path on the structured path too.
+    nodes, errors = o.parse_structured_roadmap([{"id": 5, "description": "x", "status": "pending"}])
+    assert nodes == [] and errors
+    assert "node 0" in errors[0] and "id" in errors[0]
 
 
 def test_validate_manifest_bad_type_node_reports_field_path():

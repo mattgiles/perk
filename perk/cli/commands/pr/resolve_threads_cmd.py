@@ -12,11 +12,12 @@ unauthed / bad batch file / op failure · 2 not-a-repo.
 
 import json
 from pathlib import Path
-from typing import cast
 
 import click
+from pydantic import ConfigDict, RootModel
 
 from perk import github
+from perk.boundary import StrictInputModel, ValidationError, format_validation_error
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -74,34 +75,35 @@ def resolve_threads_pr(
         _render_human(result, dry_run=dry_run)
 
 
-def _load_batch(batch_file: Path) -> list[dict[str, object]]:
+class ResolveThreadInput(StrictInputModel):
+    """One strict batch item (`{thread_id, comment?}`); a typo/wrong type fails loudly."""
+
+    thread_id: str
+    comment: str | None = None
+
+
+class ResolveThreadsBatch(RootModel[list[ResolveThreadInput]]):
+    """The strict batch root: a JSON array of thread items (a non-array fails loudly)."""
+
+    model_config = ConfigDict(strict=True)
+
+
+def _load_batch(batch_file: Path) -> list[github.ResolveThreadRequest]:
     try:
         data = json.loads(batch_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise UserFacingCliError(
             f"Could not read the batch file: {exc}", error_type="bad_batch"
         ) from exc
-    if not isinstance(data, list):
-        raise UserFacingCliError("Batch must be a JSON array", error_type="bad_batch")
-    batch: list[dict[str, object]] = []
-    for idx, raw in enumerate(data):
-        if not isinstance(raw, dict) or "thread_id" not in raw:
-            raise UserFacingCliError(
-                f"Batch item {idx} must be an object with a 'thread_id'", error_type="bad_batch"
-            )
-        item = cast("dict[str, object]", raw)
-        thread_id = item["thread_id"]
-        comment = item.get("comment")
-        if not isinstance(thread_id, str):
-            raise UserFacingCliError(
-                f"Batch item {idx} has a non-string 'thread_id'", error_type="bad_batch"
-            )
-        if comment is not None and not isinstance(comment, str):
-            raise UserFacingCliError(
-                f"Batch item {idx} has a non-string 'comment'", error_type="bad_batch"
-            )
-        batch.append({"thread_id": thread_id, "comment": comment})
-    return batch
+    try:
+        model = ResolveThreadsBatch.model_validate(data)
+    except ValidationError as exc:
+        raise UserFacingCliError(
+            format_validation_error(exc, source="batch"), error_type="bad_batch"
+        ) from exc
+    return [
+        github.ResolveThreadRequest(thread_id=i.thread_id, comment=i.comment) for i in model.root
+    ]
 
 
 def _result_to_dict(result: github.BatchResolveResult, *, dry_run: bool) -> dict[str, object]:

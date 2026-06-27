@@ -121,7 +121,7 @@ def test_resolve_review_threads_reply_then_resolve(monkeypatch):
     )
     monkeypatch.setattr(subprocess, "run", rec)
     result = github.resolve_review_threads(
-        batch=[{"thread_id": "PRRT_1", "comment": "Fixed"}], repo_root=ROOT
+        batch=[github.ResolveThreadRequest(thread_id="PRRT_1", comment="Fixed")], repo_root=ROOT
     )
     assert result.success is True
     assert result.results[0].comment_added is True and result.results[0].success is True
@@ -132,7 +132,9 @@ def test_resolve_review_threads_reply_then_resolve(monkeypatch):
 def test_resolve_review_threads_no_comment_skips_reply(monkeypatch):
     rec = _GhDispatch([(_has("graphql", "resolveReviewThread"), _Proc(0, "{}"))])
     monkeypatch.setattr(subprocess, "run", rec)
-    result = github.resolve_review_threads(batch=[{"thread_id": "PRRT_1"}], repo_root=ROOT)
+    result = github.resolve_review_threads(
+        batch=[github.ResolveThreadRequest(thread_id="PRRT_1")], repo_root=ROOT
+    )
     assert result.success is True and result.results[0].comment_added is False
 
 
@@ -140,7 +142,7 @@ def test_resolve_review_threads_per_item_error_captured(monkeypatch):
     rec = _GhDispatch([(_has("graphql", "resolveReviewThread"), _Proc(1, stderr="bad thread"))])
     monkeypatch.setattr(subprocess, "run", rec)
     result = github.resolve_review_threads(
-        batch=[{"thread_id": "BAD", "comment": None}], repo_root=ROOT
+        batch=[github.ResolveThreadRequest(thread_id="BAD", comment=None)], repo_root=ROOT
     )
     assert result.success is False
     assert result.results[0].success is False and "bad thread" in (result.results[0].error or "")
@@ -158,7 +160,11 @@ def test_resolve_review_threads_batch_success_is_all(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     result = github.resolve_review_threads(
-        batch=[{"thread_id": "PRRT_1"}, {"thread_id": "PRRT_2"}], repo_root=ROOT
+        batch=[
+            github.ResolveThreadRequest(thread_id="PRRT_1"),
+            github.ResolveThreadRequest(thread_id="PRRT_2"),
+        ],
+        repo_root=ROOT,
     )
     assert result.success is False
     assert result.results[0].success is True and result.results[1].success is False
@@ -170,7 +176,9 @@ def test_resolve_review_threads_dry_run_does_not_shell(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", boom)
     result = github.resolve_review_threads(
-        batch=[{"thread_id": "PRRT_1", "comment": "x"}], repo_root=ROOT, dry_run=True
+        batch=[github.ResolveThreadRequest(thread_id="PRRT_1", comment="x")],
+        repo_root=ROOT,
+        dry_run=True,
     )
     assert result.success is True and result.results[0].comment_added is True
 
