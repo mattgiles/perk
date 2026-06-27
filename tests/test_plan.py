@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from perk import plan
@@ -17,7 +19,9 @@ def test_plan_header_byte_order_is_stable():
         base="develop",
         adopted_from="7",
     )
-    rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.model_dump(mode="json"))
+    rendered = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    )
     order = [
         "run_id",
         "lifecycle_stage",
@@ -34,40 +38,16 @@ def test_plan_header_byte_order_is_stable():
     assert positions == sorted(positions)
 
 
-def test_plan_header_list_coerces_to_tuple():
-    header = plan.PlanHeader(run_id="r", created="t", consumed_learn=["45", "50"])  # ty: ignore[invalid-argument-type]
-    assert header.consumed_learn == ("45", "50")
-    assert header.model_dump(mode="json")["consumed_learn"] == ["45", "50"]
-
-
-def test_plan_ref_labels_coerce_to_tuple():
-    ref = plan.PlanRef(provider="github", pr_id="1", url="u", labels=["perk:plan"])  # ty: ignore[invalid-argument-type]
-    assert ref.labels == ("perk:plan",)
-
-
-def test_plan_header_strict_scalar_rejection():
+def test_plan_header_out_strict_scalar_rejection():
+    # The validate edge: PlanHeaderOut rejects a non-str `run_id` even under lax coercion.
     with pytest.raises(ValidationError):
-        plan.PlanHeader(run_id=5, created="t")  # ty: ignore[invalid-argument-type]
-    with pytest.raises(ValidationError):
-        plan.PlanHeader(run_id="r", created="t", consumed_learn=("45", 5))  # ty: ignore[invalid-argument-type]
+        plan.PlanHeaderOut.model_validate({"run_id": 5, "created": "t"})
 
 
-def test_plan_header_required_fields():
-    with pytest.raises(ValidationError):
-        plan.PlanHeader(created="t")  # ty: ignore[missing-argument]
-
-
-def test_plan_ref_required_labels():
-    with pytest.raises(ValidationError):
-        plan.PlanRef(provider="github", pr_id="1", url="u")  # ty: ignore[missing-argument]
-
-
-def test_plan_header_frozen_and_extra_forbid():
-    with pytest.raises(ValidationError):
-        plan.PlanHeader(run_id="r", created="t", bogus=1)  # ty: ignore[unknown-argument]
+def test_plan_header_frozen():
     header = plan.PlanHeader(run_id="r", created="t")
-    with pytest.raises(ValidationError):
-        header.run_id = "x"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        header.run_id = "x"  # ty: ignore[invalid-assignment]
 
 
 def test_metadata_block_round_trips():
@@ -103,7 +83,7 @@ def test_find_malformed_block_is_none():
 
 def test_plan_header_to_data_shape():
     header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z")
-    data = header.model_dump(mode="json")
+    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
     assert data["run_id"] == "01R"
     assert data["lifecycle_stage"] == "planned"  # StrEnum -> value
     assert data["branch"] is None and data["pr"] is None and data["objective_id"] is None
@@ -115,7 +95,7 @@ def test_plan_header_consumed_learn_round_trips():
     header = plan.PlanHeader(
         run_id="01R", created="2026-05-30T00:00:00Z", consumed_learn=("45", "50")
     )
-    data = header.model_dump(mode="json")
+    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
     assert data["consumed_learn"] == ["45", "50"]
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -131,12 +111,12 @@ def test_plan_ref_consumed_learn_in_to_data():
         labels=(plan.PLAN_LABEL,),
         consumed_learn=("7", "9"),
     )
-    assert ref.model_dump(mode="json")["consumed_learn"] == ["7", "9"]
+    assert plan.PlanRefOut.from_domain(ref).model_dump(mode="json")["consumed_learn"] == ["7", "9"]
 
 
 def test_plan_ref_to_data_pr_id_is_string():
     ref = plan.PlanRef(provider="github", pr_id="123", url="u", labels=(plan.PLAN_LABEL,))
-    data = ref.model_dump(mode="json")
+    data = plan.PlanRefOut.from_domain(ref).model_dump(mode="json")
     assert data == {
         "provider": "github",
         "pr_id": "123",  # string, not int
@@ -150,7 +130,7 @@ def test_plan_ref_to_data_pr_id_is_string():
 
 def test_plan_header_base_round_trips():
     header = plan.PlanHeader(run_id="01R", created="2026-05-30T00:00:00Z", base="develop")
-    data = header.model_dump(mode="json")
+    data = plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
     assert data["base"] == "develop"
     rendered = plan.render_metadata_block(plan.PLAN_HEADER_KEY, data)
     parsed = plan.find_metadata_block(rendered, plan.PLAN_HEADER_KEY)
@@ -166,7 +146,7 @@ def test_plan_ref_base_in_to_data():
         labels=(plan.PLAN_LABEL,),
         base="develop",
     )
-    assert ref.model_dump(mode="json")["base"] == "develop"
+    assert plan.PlanRefOut.from_domain(ref).model_dump(mode="json")["base"] == "develop"
 
 
 def test_render_plan_body_keeps_markdown_verbatim():
@@ -191,7 +171,10 @@ def test_extract_plan_body_absent_or_malformed_is_none():
 
 def test_extract_run_id_from_header():
     rendered = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id="01RID", created="t").model_dump(mode="json")
+        plan.PLAN_HEADER_KEY,
+        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="01RID", created="t")).model_dump(
+            mode="json"
+        ),
     )
     assert plan.extract_run_id(rendered) == "01RID"
 
@@ -199,7 +182,10 @@ def test_extract_run_id_from_header():
 def test_extract_run_id_absent_or_empty_is_none():
     assert plan.extract_run_id("nothing") is None
     empty = plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id="", created="t").model_dump(mode="json")
+        plan.PLAN_HEADER_KEY,
+        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id="", created="t")).model_dump(
+            mode="json"
+        ),
     )
     assert plan.extract_run_id(empty) is None
 

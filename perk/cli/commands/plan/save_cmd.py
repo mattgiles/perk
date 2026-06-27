@@ -343,7 +343,9 @@ def _plan_save_impl(
         # the source issue); its presence marks the issue body/title as verbatim human content.
         adopted_from=adopt_from,
     )
-    issue_body = plan.render_metadata_block(plan.PLAN_HEADER_KEY, header.model_dump(mode="json"))
+    issue_body = plan.render_metadata_block(
+        plan.PLAN_HEADER_KEY, plan.PlanHeaderOut.from_domain(header).model_dump(mode="json")
+    )
     body_comment = plan.render_plan_body(plan_markdown)
 
     # Unification: an objective-linked REAL save writes the plan INTO the existing
@@ -356,7 +358,7 @@ def _plan_save_impl(
         unified_ref = store.save_node_plan(
             objective_id=str(objective_id).lstrip("#"),
             node_id=node_id,
-            header_fields=header.model_dump(mode="json"),
+            header_fields=plan.PlanHeaderOut.from_domain(header).model_dump(mode="json"),
             plan_markdown=plan_markdown,
         )
 
@@ -367,7 +369,7 @@ def _plan_save_impl(
     if not dry_run and adopt_from:
         adopt_ref = backend.adopt_issue_as_plan(
             issue_id=adopt_from,
-            header_fields=header.model_dump(mode="json"),
+            header_fields=plan.PlanHeaderOut.from_domain(header).model_dump(mode="json"),
             plan_markdown=plan_markdown,
             callout=plan.plan_callout(adopt_from),
             command=f"perk impl {adopt_from}",
@@ -457,7 +459,9 @@ def _plan_save_impl(
     # Persist the ref as the cache.plan-ref pointer: the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.
     if not dry_run:
-        cache.write_plan_ref(repo_root, plan_ref.model_dump(mode="json"))
+        cache.write_plan_ref(
+            repo_root, plan.PlanRefOut.from_domain(plan_ref).model_dump(mode="json")
+        )
 
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
@@ -512,7 +516,7 @@ def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
             "url": result.issue.url,
             "existed": result.issue.existed,  # warm /plan-save surfaces this in details
         },
-        "plan_ref": result.plan_ref.model_dump(mode="json"),
+        "plan_ref": plan.PlanRefOut.from_domain(result.plan_ref).model_dump(mode="json"),
         "cached": result.cached,
         "updated": result.updated,
         "objective_node": result.objective_node,

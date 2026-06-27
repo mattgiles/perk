@@ -14,13 +14,14 @@ Storage shape (perk-namespaced):
   ``<details>``.
 """
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
 import yaml
 
-from perk.boundary import StrictBoundaryModel, StrTuple
+from perk.boundary import OutputModel
 
 PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
@@ -82,25 +83,27 @@ class LifecycleStage(StrEnum):
     IMPL = "impl"
 
 
-class PlanHeader(StrictBoundaryModel):
+@dataclass(frozen=True)
+class PlanHeader:
     """Compact, queryable metadata stored in the issue *body* (contracts.md §8.4).
 
-    ``branch``/``pr`` are **staged** — null during planning, populated at submit
-    ("commands must handle missing fields gracefully").
+    Frozen domain object. ``branch``/``pr`` are **staged** — null during planning,
+    populated at submit ("commands must handle missing fields gracefully").
+
+    Dataclass field order is FREE (required-first, to obey "no required field after a
+    defaulted field") and does NOT control serialization order — the stored-YAML emission
+    order lives on :class:`PlanHeaderOut`.
     """
 
-    # Field declaration order is load-bearing: ``model_dump(mode="json")`` emits in this
-    # order and ``render_metadata_block`` renders it verbatim into the stored YAML, so this
-    # order must stay byte-stable to avoid churning existing plan-issue bodies on re-save.
     run_id: str
+    created: str  # ISO-8601 UTC (see :func:`now_iso`)
     lifecycle_stage: LifecycleStage = LifecycleStage.PLANNED
     branch: str | None = None
     pr: str | None = None
-    created: str  # ISO-8601 UTC (see :func:`now_iso`)
     objective_id: str | None = None
     # The perk:learn issue ids this docs plan consumes — opaque strings (GitHub "45",
     # Linear "ENG-45"; contracts §8.21).
-    consumed_learn: StrTuple = ()
+    consumed_learn: tuple[str, ...] = ()
     # The pinned PR merge target / worktree start-point branch. `None` ⇒ fall back to the
     # GitHub default branch (byte-identical to prior behavior).
     base: str | None = None
@@ -111,22 +114,90 @@ class PlanHeader(StrictBoundaryModel):
     adopted_from: str | None = None
 
 
-class PlanRef(StrictBoundaryModel):
+@dataclass(frozen=True)
+class PlanRef:
     """The provider-agnostic plan→branch ref (contracts.md §8.4).
 
-    ``pr_id`` is a **string** (allows non-numeric ids like Jira ``PROJ-123``); during
-    planning it carries the *issue* id, with ``branch``/``pr`` staged null in the header.
+    Frozen domain object. ``pr_id`` is a **string** (allows non-numeric ids like Jira
+    ``PROJ-123``); during planning it carries the *issue* id, with ``branch``/``pr`` staged
+    null in the header.
     """
 
     provider: str
     pr_id: str
     url: str
-    labels: StrTuple
+    labels: tuple[str, ...]
     objective_id: str | None = None
     # Consumed perk:learn issue ids (opaque strings; closed on land).
-    consumed_learn: StrTuple = ()
+    consumed_learn: tuple[str, ...] = ()
     # The pinned PR merge target / worktree start-point branch; `None` ⇒ GitHub default.
     base: str | None = None
+
+
+class PlanHeaderOut(OutputModel):
+    """The stored ``plan-header`` serialization boundary (the OUTPUT edge of
+    :class:`PlanHeader`).
+
+    Field declaration order is load-bearing: ``model_dump(mode="json")`` emits in this
+    order and ``render_metadata_block`` renders it verbatim into the stored YAML, so this
+    order must stay byte-stable to avoid churning existing plan-issue bodies on re-save.
+    Pydantic permits the required ``created`` field after defaulted fields; every caller
+    builds this via :meth:`from_domain`, so the only reason for this order is byte parity.
+    """
+
+    run_id: str
+    lifecycle_stage: LifecycleStage = LifecycleStage.PLANNED
+    branch: str | None = None
+    pr: str | None = None
+    created: str
+    objective_id: str | None = None
+    consumed_learn: tuple[str, ...] = ()
+    base: str | None = None
+    adopted_from: str | None = None
+
+    @classmethod
+    def from_domain(cls, header: PlanHeader) -> "PlanHeaderOut":
+        """Project the frozen :class:`PlanHeader` onto the serialization boundary."""
+        return cls(
+            run_id=header.run_id,
+            lifecycle_stage=header.lifecycle_stage,
+            branch=header.branch,
+            pr=header.pr,
+            created=header.created,
+            objective_id=header.objective_id,
+            consumed_learn=header.consumed_learn,
+            base=header.base,
+            adopted_from=header.adopted_from,
+        )
+
+
+class PlanRefOut(OutputModel):
+    """The ``cache.plan-ref`` / ``--json`` serialization boundary (the OUTPUT edge of
+    :class:`PlanRef`).
+
+    Field declaration order is load-bearing — see :class:`PlanHeaderOut`.
+    """
+
+    provider: str
+    pr_id: str
+    url: str
+    labels: tuple[str, ...]
+    objective_id: str | None = None
+    consumed_learn: tuple[str, ...] = ()
+    base: str | None = None
+
+    @classmethod
+    def from_domain(cls, ref: PlanRef) -> "PlanRefOut":
+        """Project the frozen :class:`PlanRef` onto the serialization boundary."""
+        return cls(
+            provider=ref.provider,
+            pr_id=ref.pr_id,
+            url=ref.url,
+            labels=ref.labels,
+            objective_id=ref.objective_id,
+            consumed_learn=ref.consumed_learn,
+            base=ref.base,
+        )
 
 
 # --------------------------------------------------------------------- block engine

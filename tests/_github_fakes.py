@@ -44,7 +44,10 @@ class _GhRecorder:
 
 def _header(run_id: str) -> str:
     return plan.render_metadata_block(
-        plan.PLAN_HEADER_KEY, plan.PlanHeader(run_id=run_id, created="t").model_dump(mode="json")
+        plan.PLAN_HEADER_KEY,
+        plan.PlanHeaderOut.from_domain(plan.PlanHeader(run_id=run_id, created="t")).model_dump(
+            mode="json"
+        ),
     )
 
 
