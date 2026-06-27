@@ -1,8 +1,10 @@
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
+from pydantic import AliasChoices, Field
+
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
 
 # ===========================================================================
@@ -43,22 +45,48 @@ def _owner(repo_root: Path) -> str:
     return proc.stdout.strip()
 
 
-def _pr_state(pr: dict[str, Any]) -> str:
-    """Normalize a REST PR object's state into OPEN | MERGED | CLOSED."""
-    if pr.get("merged") is True or pr.get("merged_at"):
-        return "MERGED"
-    return "OPEN" if pr.get("state") == "open" else "CLOSED"
+class _BaseRef(LenientParseModel):
+    """The nested ``base`` object of a REST PR payload (only ``ref`` is consumed)."""
+
+    ref: str = ""
 
 
-def _pull_request(pr: dict[str, Any], *, existed: bool) -> PullRequest:
-    return PullRequest(
-        number=int(pr["number"]),
-        url=str(pr.get("html_url", "")),
-        is_draft=bool(pr.get("draft", False)),
-        state=_pr_state(pr),
-        existed=existed,
-        base_ref=str((pr.get("base") or {}).get("ref", "")),
-    )
+class PullRequestModel(LenientParseModel):
+    """Lenient parse of a REST PR payload (the ``_pull_request`` boundary).
+
+    Crosses the ``gh api pulls`` boundary into the frozen :class:`PullRequest`. ``number`` is
+    the PR identity and is required — a malformed/absent number raises a ``ValidationError`` that
+    the call site maps to a labelled ``GitHubError``. Every other field keeps a tolerant default
+    so the happy path is byte-identical to the prior hand-rolled converter.
+    """
+
+    number: int
+    url: str = Field("", validation_alias=AliasChoices("html_url", "url"))
+    draft: bool = False
+    raw_state: str = Field("", validation_alias=AliasChoices("state"))
+    merged: bool | None = None
+    merged_at: str | None = None
+    base: _BaseRef | None = None
+
+    def _normalized_state(self) -> str:
+        """Normalize the REST state into OPEN | MERGED | CLOSED."""
+        if self.merged is True or self.merged_at:
+            return "MERGED"
+        return "OPEN" if self.raw_state == "open" else "CLOSED"
+
+    def to_domain(self, *, existed: bool) -> PullRequest:
+        return PullRequest(
+            number=self.number,
+            url=self.url,
+            is_draft=self.draft,
+            state=self._normalized_state(),
+            existed=existed,
+            base_ref=(self.base.ref if self.base else ""),
+        )
+
+
+def _pull_request(pr: object, *, existed: bool) -> PullRequest:
+    return PullRequestModel.model_validate(pr).to_domain(existed=existed)
 
 
 def default_branch(repo_root: Path) -> str:
@@ -91,7 +119,8 @@ def find_pr_for_branch(*, branch: str, repo_root: Path) -> PullRequest | None:
     if not isinstance(items, list) or not items:
         return None
     chosen = next((p for p in items if p.get("state") == "open"), items[0])
-    return _pull_request(chosen, existed=True)
+    with translate_validation_errors(_exec.GitHubError, source=f"list PRs for {branch!r}"):
+        return _pull_request(chosen, existed=True)
 
 
 def create_pr(
@@ -131,9 +160,8 @@ def create_pr(
             cwd=repo_root,
             timeout=_exec._WRITE_TIMEOUT,
         )
-    if not isinstance(data, dict):
-        raise _exec.GitHubError(f"unexpected create-PR payload: {data!r}")
-    return _pull_request(data, existed=False)
+    with translate_validation_errors(_exec.GitHubError, source="create PR"):
+        return _pull_request(data, existed=False)
 
 
 def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
@@ -147,7 +175,8 @@ def get_pr(*, number: int, repo_root: Path) -> PullRequest | None:
     )
     if data is None:
         return None
-    return _pull_request(data, existed=True)
+    with translate_validation_errors(_exec.GitHubError, source=f"read PR #{number}"):
+        return _pull_request(data, existed=True)
 
 
 def get_pr_body(*, number: int, repo_root: Path) -> str | None:

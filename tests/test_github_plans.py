@@ -357,6 +357,18 @@ def test_read_issue_none_when_not_found(monkeypatch):
     assert plans.read_issue(number=7, repo_root=ROOT) is None
 
 
+def test_read_issue_malformed_payload_raises_labelled(monkeypatch):
+    # `number` present but non-coercible to int -> ValidationError -> labelled GitHubError.
+    payload = json.dumps({"number": "not-an-int", "title": "t"})
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch([(_has("view", "number,title,body,state,url"), _Proc(0, payload))]),
+    )
+    with pytest.raises(github.GitHubError, match="read issue #7"):
+        plans.read_issue(number=7, repo_root=ROOT)
+
+
 def test_add_issue_label_posts_additively(monkeypatch):
     rec = _GhDispatch([(_has("issues/7/labels", "POST"), _Proc(0, "{}"))])
     monkeypatch.setattr(subprocess, "run", rec)

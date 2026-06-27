@@ -3,6 +3,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
+
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.github import _exec
 
 # ===========================================================================
@@ -92,6 +95,37 @@ class ReviewComment:
     created_at: str | None
 
 
+class _Actor(LenientParseModel):
+    """A GraphQL ``Actor`` selection (``{login}``); ``login`` is null when the actor is absent."""
+
+    login: str | None = None
+
+
+class ReviewCommentModel(LenientParseModel):
+    """Lenient parse of a GraphQL review-thread comment node (camelCase keys).
+
+    ``comment_id`` (the node's ``databaseId``) stays ``int | None`` — it is documented as
+    absent on some nodes and is NOT the thread's identity, so its tolerance is preserved.
+    """
+
+    comment_id: int | None = Field(None, validation_alias=AliasChoices("databaseId"))
+    body: str = ""
+    author: _Actor | None = None
+    path: str | None = None
+    line: int | None = None
+    created_at: str | None = Field(None, validation_alias=AliasChoices("createdAt"))
+
+    def to_domain(self) -> ReviewComment:
+        return ReviewComment(
+            comment_id=self.comment_id,
+            body=self.body,
+            author=(self.author.login if self.author else None),
+            path=self.path,
+            line=self.line,
+            created_at=self.created_at,
+        )
+
+
 @dataclass(frozen=True)
 class ReviewThread:
     """A PR review thread (inline conversation). ``thread_id`` is the GraphQL node id."""
@@ -102,6 +136,31 @@ class ReviewThread:
     path: str | None
     line: int | None
     comments: tuple[ReviewComment, ...]
+
+
+class ReviewThreadModel(LenientParseModel):
+    """Lenient parse of a GraphQL review-thread node (camelCase keys).
+
+    ``id`` is the thread identity and is required — a malformed/absent id raises a
+    ``ValidationError`` the call site maps to a labelled ``GitHubError``. ``comments`` are
+    validated and converted separately by the caller, then passed into ``to_domain``.
+    """
+
+    id: str
+    is_resolved: bool = Field(False, validation_alias=AliasChoices("isResolved"))
+    is_outdated: bool = Field(False, validation_alias=AliasChoices("isOutdated"))
+    path: str | None = None
+    line: int | None = None
+
+    def to_domain(self, *, comments: tuple[ReviewComment, ...]) -> ReviewThread:
+        return ReviewThread(
+            thread_id=self.id,
+            is_resolved=self.is_resolved,
+            is_outdated=self.is_outdated,
+            path=self.path,
+            line=self.line,
+            comments=comments,
+        )
 
 
 @dataclass(frozen=True)
@@ -123,6 +182,29 @@ class Review:
     body: str
     state: str
     submitted_at: str | None
+
+
+class ReviewModel(LenientParseModel):
+    """Lenient parse of a GraphQL PR-review node (camelCase keys).
+
+    ``id`` is the review identity and is required; all other fields keep tolerant defaults so the
+    happy path is byte-identical to the prior hand-rolled converter.
+    """
+
+    id: str
+    author: _Actor | None = None
+    body: str = ""
+    state: str = ""
+    submitted_at: str | None = Field(None, validation_alias=AliasChoices("submittedAt"))
+
+    def to_domain(self) -> Review:
+        return Review(
+            review_id=self.id,
+            author=(self.author.login if self.author else None),
+            body=self.body,
+            state=self.state,
+            submitted_at=self.submitted_at,
+        )
 
 
 @dataclass(frozen=True)
@@ -195,12 +277,6 @@ def _graphql(
     return data
 
 
-def _login(raw: object) -> str | None:
-    """The ``login`` of a GraphQL ``Actor`` selection (None when the actor node is absent)."""
-    node = _exec._opt_dict(raw)
-    return _exec._opt_str(node.get("login")) if node is not None else None
-
-
 def _nodes(obj: object, *path: str) -> list[dict[str, object]]:
     """Walk ``obj[path...]`` (None-safe) to a ``{nodes: [...]}`` and return its node list."""
     cur = _exec._opt_dict(obj)
@@ -223,41 +299,15 @@ def _parse_review_threads(payload: dict[str, object]) -> tuple[ReviewThread, ...
     threads: list[ReviewThread] = []
     for node in _nodes(pr, "reviewThreads"):
         comments = tuple(
-            ReviewComment(
-                comment_id=_exec._opt_int(c.get("databaseId")),
-                body=str(c.get("body", "")),
-                author=_login(c.get("author")),
-                path=_exec._opt_str(c.get("path")),
-                line=_exec._opt_int(c.get("line")),
-                created_at=_exec._opt_str(c.get("createdAt")),
-            )
-            for c in _nodes(node, "comments")
+            ReviewCommentModel.model_validate(c).to_domain() for c in _nodes(node, "comments")
         )
-        threads.append(
-            ReviewThread(
-                thread_id=str(node.get("id", "")),
-                is_resolved=bool(node.get("isResolved", False)),
-                is_outdated=bool(node.get("isOutdated", False)),
-                path=_exec._opt_str(node.get("path")),
-                line=_exec._opt_int(node.get("line")),
-                comments=comments,
-            )
-        )
+        threads.append(ReviewThreadModel.model_validate(node).to_domain(comments=comments))
     return tuple(threads)
 
 
 def _parse_reviews(payload: dict[str, object]) -> tuple[Review, ...]:
     pr = _pr_node(payload)
-    return tuple(
-        Review(
-            review_id=str(node.get("id", "")),
-            author=_login(node.get("author")),
-            body=str(node.get("body", "")),
-            state=str(node.get("state", "")),
-            submitted_at=_exec._opt_str(node.get("submittedAt")),
-        )
-        for node in _nodes(pr, "reviews")
-    )
+    return tuple(ReviewModel.model_validate(node).to_domain() for node in _nodes(pr, "reviews"))
 
 
 def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
@@ -297,11 +347,19 @@ def get_pr_feedback(*, pr_number: int, repo_root: Path) -> PrFeedback:
         for c in (raw_comments if isinstance(raw_comments, list) else [])
         if isinstance(c, dict) and "id" in c
     )
+    with translate_validation_errors(
+        _exec.GitHubError, source=f"parse review threads for PR #{pr_number}"
+    ):
+        review_threads = _parse_review_threads(threads_payload)
+    with translate_validation_errors(
+        _exec.GitHubError, source=f"parse reviews for PR #{pr_number}"
+    ):
+        reviews = _parse_reviews(reviews_payload)
     return PrFeedback(
         pr_number=pr_number,
-        review_threads=_parse_review_threads(threads_payload),
+        review_threads=review_threads,
         discussion_comments=discussion,
-        reviews=_parse_reviews(reviews_payload),
+        reviews=reviews,
     )
 
 
