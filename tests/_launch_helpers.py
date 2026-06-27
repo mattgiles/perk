@@ -10,6 +10,7 @@ underscore so pytest does not collect this module.
 import pytest
 
 from perk.run import launch
+from perk.state.cache import PlanRefCache
 from perk.substrate.config import Config
 from perk.substrate.registry import Stage, load_registry
 
@@ -20,6 +21,10 @@ _PLAN_REF = {
     "labels": ["perk:plan"],
     "objective_id": None,
 }
+
+# The same plan-ref as a validated cache model, for the seams the dict-→model thread retyped
+# (resolve_plan_worktree_name / _initial_prompt / ResolvedWorktree.plan_ref).
+_PLAN_REF_MODEL = PlanRefCache.model_validate(_PLAN_REF)
 
 
 @pytest.fixture(autouse=True)

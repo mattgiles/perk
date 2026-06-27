@@ -505,7 +505,7 @@ def test_plan_save_recovers_consumed_learn_from_handoff(monkeypatch):
     result = _run_with_handoff(
         monkeypatch,
         ["--plan-file", "plan.md", "--json"],
-        {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
+        {"stage": "plan", "mode": "read-only", "consumed_learn": ["45", "50"]},
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -519,7 +519,7 @@ def test_plan_save_explicit_consumed_learn_overrides_handoff(monkeypatch):
     result = _run_with_handoff(
         monkeypatch,
         ["--plan-file", "plan.md", "--consumed-learn", "7,9", "--json"],
-        {"stage": "plan", "mode": "read-only", "consumed_learn": [45, 50]},
+        {"stage": "plan", "mode": "read-only", "consumed_learn": ["45", "50"]},
     )
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["plan_ref"]["consumed_learn"] == ["7", "9"]

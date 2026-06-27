@@ -12,10 +12,85 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import ConfigDict
+
+from perk.boundary import StrictBoundaryModel, StrTuple, translate_validation_errors
 from perk.substrate.output import user_output
 
 # The canonical `.perk/workflow/` subtrees (public so `perk doctor` can verify the layout).
 SUBDIRS: tuple[str, ...] = ("plans", "scratch/runs", "handoff", "markers")
+
+
+class CacheError(ValueError):
+    """A durable ``.perk/workflow/`` cache file failed schema validation.
+
+    Subclasses ``ValueError`` (documented, deliberate) so the best-effort
+    ``except (OSError, ValueError)`` cache readers across the codebase keep their
+    fail-soft behavior (a malformed cache never blocks a save) without edits, and
+    so it sits alongside ``json.JSONDecodeError`` (itself a ``ValueError``).
+    """
+
+
+class HandoffCache(StrictBoundaryModel):
+    """The pre-session CLI->extension handoff blob (``handoff/<run_id>.json``).
+
+    Open-ended (``extra="allow"``): the handoff carries arbitrary ``handoff_extra``
+    keys (and whatever ``perk state new-run --handoff`` writes), recovered downstream
+    by ``plan-save``/``objective create``. The known keys below are declared so those
+    recovery sites get typed attribute access; undeclared keys still round-trip.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow", strict=True)
+    run_id: str
+    consumed: bool
+    mode: str | None = None
+    stage: str | None = None
+    pi_session_id: str | None = None
+    objective_id: str | None = None
+    node_id: str | None = None
+    adopt_from: str | None = None
+    supersedes: str | None = None
+    consumed_learn: StrTuple = ()
+
+
+class DispatchCache(StrictBoundaryModel):
+    """The durable ``run_id -> plan`` dispatch record (``scratch/runs/*/dispatch.json``).
+
+    ``plan_ref``/``run_handle`` stay opaque dicts here — their nested shape is owned by the
+    ``DispatchRecord``/``RunHandle`` domain models, not validated at this tier.
+    """
+
+    run_id: str
+    stage: str
+    plan_ref: dict[str, Any]
+    runner: str
+    kind: str
+    status: str
+    dispatched_at: str
+    run_handle: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class PlanRefCache(StrictBoundaryModel):
+    """The active plan->branch ref pointer (``plan-ref.json``, §8.4)."""
+
+    provider: str
+    pr_id: str
+    url: str
+    # StrTuple (not a strict ``tuple[str, ...]``): the on-disk shape is a JSON list.
+    labels: StrTuple
+    objective_id: str | None = None
+    consumed_learn: StrTuple = ()
+    base: str | None = None
+
+
+class AgentSessionCache(StrictBoundaryModel):
+    """The Linear ``AgentSession`` pointer for this worktree (``agent-session.json``, §8.22)."""
+
+    session_id: str
+    issue: str
+    url: str | None = None
+
 
 # The land->learn semaphore: `land` sets it, `learn` clears it; while present it
 # signals the worktree is not yet releasable. Single source of the name across planes (the TS
@@ -157,16 +232,22 @@ def write_handoff(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     path = handoff_path(root, run_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {**data, "run_id": run_id, "consumed": False}
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    with translate_validation_errors(CacheError, source=str(path)):
+        model = HandoffCache.model_validate(payload)
+    path.write_text(
+        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def read_handoff(root: Path, run_id: str) -> dict[str, Any] | None:
-    """Read a handoff blob, or ``None`` if it does not exist."""
+def read_handoff(root: Path, run_id: str) -> HandoffCache | None:
+    """Read + validate a handoff blob, or ``None`` if it does not exist."""
     path = handoff_path(root, run_id)
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    with translate_validation_errors(CacheError, source=str(path)):
+        return HandoffCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None = None) -> None:
@@ -177,10 +258,14 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
     data = read_handoff(root, run_id)
     if data is None:
         return
-    data["consumed"] = True
+    update: dict[str, Any] = {"consumed": True}
     if pi_session_id is not None:
-        data["pi_session_id"] = pi_session_id
-    handoff_path(root, run_id).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        update["pi_session_id"] = pi_session_id
+    updated = data.model_copy(update=update)
+    handoff_path(root, run_id).write_text(
+        json.dumps(updated.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 # --- dispatch: the durable run_id->plan linkage for a remote drive (§8.13) -----
@@ -201,19 +286,25 @@ def write_dispatch(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "dispatch.json"
     payload = {**data, "run_id": run_id}
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    with translate_validation_errors(CacheError, source=str(path)):
+        model = DispatchCache.model_validate(payload)
+    path.write_text(
+        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def read_dispatch(root: Path, run_id: str) -> dict[str, Any] | None:
-    """Read a dispatch record, or ``None`` if it does not exist."""
+def read_dispatch(root: Path, run_id: str) -> DispatchCache | None:
+    """Read + validate a dispatch record, or ``None`` if it does not exist."""
     path = dispatch_path(root, run_id)
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    with translate_validation_errors(CacheError, source=str(path)):
+        return DispatchCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
-def list_dispatch_records(root: Path) -> list[dict[str, Any]]:
+def list_dispatch_records(root: Path) -> list[DispatchCache]:
     """All dispatch records under ``scratch/runs/*/dispatch.json``, newest-first.
 
     Reads every run's ``dispatch.json``; skips a missing/unparseable file (loud-but-non-fatal
@@ -221,21 +312,20 @@ def list_dispatch_records(root: Path) -> list[dict[str, Any]]:
     ``dispatched_at`` descending (empty/missing timestamps sort last). An absent ``scratch/runs/``
     dir is the normal pre-dispatch state and yields ``[]``.
     """
-    records: list[dict[str, Any]] = []
+    records: list[DispatchCache] = []
     for run_id in list_run_ids(root):
         path = run_scratch_dir(root, run_id) / "dispatch.json"
         if not path.is_file():
             continue
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            with translate_validation_errors(CacheError, source=str(path)):
+                records.append(
+                    DispatchCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+                )
+        except (OSError, json.JSONDecodeError, CacheError) as exc:
             user_output(f"warning: skipping unreadable dispatch record {path}: {exc}")
             continue
-        if not isinstance(data, dict):
-            user_output(f"warning: skipping non-object dispatch record {path}")
-            continue
-        records.append(data)
-    records.sort(key=lambda d: str(d.get("dispatched_at", "")), reverse=True)
+    records.sort(key=lambda d: d.dispatched_at, reverse=True)
     return records
 
 
@@ -248,19 +338,29 @@ def plan_ref_path(root: Path) -> Path:
 
 
 def write_plan_ref(root: Path, data: dict[str, Any]) -> Path:
-    """Write the provider-agnostic plan ref (§8.4) to ``plan-ref.json``; return its path."""
+    """Write the provider-agnostic plan ref (§8.4) to ``plan-ref.json``; return its path.
+
+    ``exclude_unset`` preserves the input key set verbatim (the full real 7-key shape and the
+    synthetic partial shape alike) — the on-disk shape is unchanged.
+    """
     path = plan_ref_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    with translate_validation_errors(CacheError, source=str(path)):
+        model = PlanRefCache.model_validate(data)
+    path.write_text(
+        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def read_plan_ref(root: Path) -> dict[str, Any] | None:
-    """Read the plan ref, or ``None`` if it does not exist."""
+def read_plan_ref(root: Path) -> PlanRefCache | None:
+    """Read + validate the plan ref, or ``None`` if it does not exist."""
     path = plan_ref_path(root)
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    with translate_validation_errors(CacheError, source=str(path)):
+        return PlanRefCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 def plan_body_path(root: Path) -> Path:
@@ -293,16 +393,22 @@ def write_agent_session(root: Path, data: dict[str, Any]) -> Path:
     """
     path = agent_session_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    with translate_validation_errors(CacheError, source=str(path)):
+        model = AgentSessionCache.model_validate(data)
+    path.write_text(
+        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
-def read_agent_session(root: Path) -> dict[str, Any] | None:
-    """Read the agent-session pointer, or ``None`` if it does not exist."""
+def read_agent_session(root: Path) -> AgentSessionCache | None:
+    """Read + validate the agent-session pointer, or ``None`` if it does not exist."""
     path = agent_session_path(root)
     if not path.is_file():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    with translate_validation_errors(CacheError, source=str(path)):
+        return AgentSessionCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------

@@ -48,10 +48,11 @@ import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from perk.backends.linear.client import LinearClient
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 
 AGENT_TOKEN_ENV = "LINEAR_AGENT_TOKEN"
 """The env var carrying the OAuth ``actor=app`` agent token (the emission gate's second half)."""
@@ -83,11 +84,11 @@ mutation AgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
 """
 
 
-def emission_enabled(plan_ref: dict[str, Any] | None, environ: Mapping[str, str]) -> bool:
+def emission_enabled(plan_ref: PlanRefCache | None, environ: Mapping[str, str]) -> bool:
     """The gate: stamped ``provider == "linear"`` AND a non-empty ``LINEAR_AGENT_TOKEN``."""
     if plan_ref is None:
         return False
-    if str(plan_ref.get("provider", "")) != "linear":
+    if plan_ref.provider != "linear":
         return False
     return bool(environ.get(AGENT_TOKEN_ENV, "").strip())
 
@@ -102,7 +103,7 @@ def agent_client_from_env(environ: Mapping[str, str]) -> LinearClient:
 def emit_run_started(
     worktree: Path,
     *,
-    plan_ref: dict[str, Any] | None,
+    plan_ref: PlanRefCache | None,
     run_id: str,
     environ: Mapping[str, str] | None = None,
     external_urls: Sequence[tuple[str, str]] = (),
@@ -116,7 +117,7 @@ def emit_run_started(
         return
     try:
         client = agent_client_from_env(env)
-        issue = str(plan_ref.get("pr_id", ""))
+        issue = plan_ref.pr_id
         create_input: dict[str, object] = {"issueId": issue}
         if external_urls:
             create_input["externalUrls"] = [
@@ -228,7 +229,7 @@ def _enabled_session(worktree: Path, env: Mapping[str, str], *, what: str) -> st
     if not emission_enabled(cache.read_plan_ref(worktree), env):
         return None
     session = cache.read_agent_session(worktree)
-    session_id = str(session.get("session_id", "")) if isinstance(session, dict) else ""
+    session_id = session.session_id if session is not None else ""
     if not session_id:
         _note(f"{what} skipped (non-fatal): no agent-session.json in this worktree")
         return None

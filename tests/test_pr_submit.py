@@ -10,6 +10,7 @@ from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
 from perk.state import cache
+from perk.state.cache import AgentSessionCache
 from perk.substrate import git
 
 _REF = {
@@ -309,7 +310,11 @@ def test_linear_agent_failure_leaves_submit_payload_byte_identical(monkeypatch):
     assert baseline.exit_code == 0
 
     monkeypatch.setattr(linear_agent, "emission_enabled", lambda *_a, **_k: True)
-    monkeypatch.setattr(cache, "read_agent_session", lambda _r: {"session_id": "sess-1"})
+    monkeypatch.setattr(
+        cache,
+        "read_agent_session",
+        lambda _r: AgentSessionCache(session_id="sess-1", issue="7"),
+    )
 
     def boom(_environ):
         raise RuntimeError("agent substrate down")

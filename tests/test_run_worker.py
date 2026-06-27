@@ -59,12 +59,12 @@ def test_positioning_materializes_handoff_plan_ref_and_body(tmp_path, fake_githu
     # The worker consumes a prepared worktree: handoff + plan-ref + plan-body materialized.
     handoff = cache.read_handoff(tmp_path, "RID123")
     assert handoff is not None
-    assert handoff["stage"] == "implement"
-    assert handoff["mode"] == "read-write"
+    assert handoff.stage == "implement"
+    assert handoff.mode == "read-write"
     ref = cache.read_plan_ref(tmp_path)
     assert ref is not None
-    assert ref["pr_id"] == "42"
-    assert ref["provider"] == "github"
+    assert ref.pr_id == "42"
+    assert ref.provider == "github"
     assert cache.plan_body_path(tmp_path).read_text(encoding="utf-8") == "# plan body\n"
 
 
@@ -157,7 +157,7 @@ def test_linear_agent_hooks_bracket_the_spawn(tmp_path, fake_github, monkeypatch
     assert code == 5
     assert len(started) == 1
     assert started[0]["run_id"] == "RIDL"
-    assert started[0]["plan_ref"]["pr_id"] == "42"
+    assert started[0]["plan_ref"].pr_id == "42"
     assert started[0]["external_urls"] == [
         ("GitHub Actions run", "https://github.com/o/r/actions/runs/123")
     ]

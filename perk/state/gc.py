@@ -145,10 +145,10 @@ def _consumed_terminal_stage(root: Path, candidate: str, terminals: frozenset[st
         data = cache.read_handoff(root, candidate)
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or data.get("consumed") is not True:
+    if data is None or data.consumed is not True:
         return None
-    stage = data.get("stage")
-    if isinstance(stage, str) and stage in terminals:
+    stage = data.stage
+    if stage is not None and stage in terminals:
         return stage
     return None
 

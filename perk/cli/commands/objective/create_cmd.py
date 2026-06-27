@@ -37,9 +37,9 @@ def _adopt_from_handoff(
         handoff = cache.read_handoff(repo_root, run_id_value)
     except (OSError, ValueError):
         return adopt_from
-    if not handoff:
+    if handoff is None:
         return adopt_from
-    ho_adopt = handoff.get("adopt_from")
+    ho_adopt = handoff.adopt_from
     if ho_adopt:
         return str(ho_adopt)
     return adopt_from
@@ -63,9 +63,9 @@ def _supersedes_from_handoff(
         handoff = cache.read_handoff(repo_root, run_id_value)
     except (OSError, ValueError):
         return supersedes
-    if not handoff:
+    if handoff is None:
         return supersedes
-    ho_supersedes = handoff.get("supersedes")
+    ho_supersedes = handoff.supersedes
     if ho_supersedes:
         return str(ho_supersedes)
     return supersedes

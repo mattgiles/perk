@@ -194,9 +194,21 @@ def test_select_runner_carries_ref(ref):
 
 
 def test_write_then_read_dispatch_round_trips_and_forces_run_id(tmp_path):
-    cache.write_dispatch(tmp_path, "01RID", {"run_id": "WRONG", "stage": "implement"})
+    cache.write_dispatch(
+        tmp_path,
+        "01RID",
+        {
+            "run_id": "WRONG",
+            "stage": "implement",
+            "plan_ref": {"pr_id": "7"},
+            "runner": "",
+            "kind": "github-actions",
+            "status": "dispatched",
+            "dispatched_at": "2024-01-01T00:00:00Z",
+        },
+    )
     back = cache.read_dispatch(tmp_path, "01RID")
-    assert back is not None and back["run_id"] == "01RID" and back["stage"] == "implement"
+    assert back is not None and back.run_id == "01RID" and back.stage == "implement"
 
 
 def test_read_dispatch_absent_is_none(tmp_path):

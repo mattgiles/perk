@@ -45,7 +45,7 @@ def test_list_dispatch_records_newest_first(tmp_path: Path):
     cache.write_dispatch(tmp_path, "b", _record("b", dispatched_at="2026-06-07T12:00:00Z"))
     cache.write_dispatch(tmp_path, "c", _record("c", dispatched_at="2026-06-07T11:00:00Z"))
     records = cache.list_dispatch_records(tmp_path)
-    assert [r["run_id"] for r in records] == ["b", "c", "a"]
+    assert [r.run_id for r in records] == ["b", "c", "a"]
 
 
 def test_list_dispatch_records_empty(tmp_path: Path):
@@ -58,7 +58,7 @@ def test_list_dispatch_records_skips_corrupt(tmp_path: Path):
     bad.parent.mkdir(parents=True, exist_ok=True)
     bad.write_text("{not json", encoding="utf-8")
     records = cache.list_dispatch_records(tmp_path)
-    assert [r["run_id"] for r in records] == ["good"]
+    assert [r.run_id for r in records] == ["good"]
 
 
 # --- command -------------------------------------------------------------------------

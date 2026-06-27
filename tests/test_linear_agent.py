@@ -16,14 +16,17 @@ import pytest
 
 from perk.backends.linear import agent as linear_agent
 from perk.state import cache
+from perk.state.cache import AgentSessionCache, PlanRefCache
 
 _TOKEN_ENV = {"LINEAR_AGENT_TOKEN": "lin_oauth_agent"}
 
-_LINEAR_PLAN_REF: dict[str, Any] = {
-    "provider": "linear",
-    "pr_id": "ENG-123",
-    "url": "https://linear.app/acme/issue/ENG-123",
-}
+_LINEAR_PLAN_REF = PlanRefCache(
+    provider="linear",
+    pr_id="ENG-123",
+    url="https://linear.app/acme/issue/ENG-123",
+    labels=("perk:plan",),
+)
+_GITHUB_PLAN_REF = _LINEAR_PLAN_REF.model_copy(update={"provider": "github"})
 
 _CREATE_RESPONSE = {
     "data": {
@@ -72,7 +75,7 @@ def _raising_environ(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _seed_session(root: Path) -> None:
-    cache.write_plan_ref(root, _LINEAR_PLAN_REF)
+    cache.write_plan_ref(root, _LINEAR_PLAN_REF.model_dump(mode="json", exclude_unset=True))
     cache.write_agent_session(
         root, {"session_id": "sess-1", "issue": "ENG-123", "url": "https://linear.app/s/1"}
     )
@@ -91,7 +94,7 @@ class TestGating:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = _recording_environ(monkeypatch)
-        github_ref = {**_LINEAR_PLAN_REF, "provider": "github"}
+        github_ref = _GITHUB_PLAN_REF
         linear_agent.emit_run_started(
             tmp_path, plan_ref=github_ref, run_id="r1", environ=_TOKEN_ENV
         )
@@ -108,7 +111,7 @@ class TestGating:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = _recording_environ(monkeypatch)
-        cache.write_plan_ref(tmp_path, {**_LINEAR_PLAN_REF, "provider": "github"})
+        cache.write_plan_ref(tmp_path, _GITHUB_PLAN_REF.model_dump(mode="json", exclude_unset=True))
         cache.write_agent_session(tmp_path, {"session_id": "sess-1", "issue": "X", "url": None})
         linear_agent.emit_pr_opened(
             tmp_path, pr_number=7, pr_url="u", branch="b", environ=_TOKEN_ENV
@@ -121,9 +124,7 @@ class TestGating:
         assert linear_agent.emission_enabled(_LINEAR_PLAN_REF, _TOKEN_ENV)
         assert not linear_agent.emission_enabled(_LINEAR_PLAN_REF, {})
         assert not linear_agent.emission_enabled(_LINEAR_PLAN_REF, {"LINEAR_AGENT_TOKEN": "   "})
-        assert not linear_agent.emission_enabled(
-            {**_LINEAR_PLAN_REF, "provider": "github"}, _TOKEN_ENV
-        )
+        assert not linear_agent.emission_enabled(_GITHUB_PLAN_REF, _TOKEN_ENV)
         assert not linear_agent.emission_enabled(None, _TOKEN_ENV)
 
 
@@ -150,11 +151,11 @@ class TestRunStarted:
         assert seen[0].headers["Authorization"] == "Bearer lin_oauth_agent"
         # The session pointer round-trips through agent-session.json.
         session = cache.read_agent_session(tmp_path)
-        assert session == {
-            "session_id": "sess-1",
-            "issue": "ENG-123",
-            "url": "https://linear.app/acme/agents/sess-1",
-        }
+        assert session == AgentSessionCache(
+            session_id="sess-1",
+            issue="ENG-123",
+            url="https://linear.app/acme/agents/sess-1",
+        )
         thought = json.loads(seen[1].content)
         assert "agentActivityCreate" in thought["query"]
         content = thought["variables"]["input"]["content"]
@@ -223,7 +224,9 @@ class TestPrOpened:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         seen = _recording_environ(monkeypatch)
-        cache.write_plan_ref(tmp_path, _LINEAR_PLAN_REF)  # gate open, but no session file
+        cache.write_plan_ref(
+            tmp_path, _LINEAR_PLAN_REF.model_dump(mode="json", exclude_unset=True)
+        )  # gate open, but no session file
         linear_agent.emit_pr_opened(
             tmp_path, pr_number=42, pr_url="u", branch="b", environ=_TOKEN_ENV
         )
@@ -301,7 +304,7 @@ class TestAgentSessionCache:
         data = {"session_id": "s", "issue": "ENG-1", "url": None}
         path = cache.write_agent_session(tmp_path, data)
         assert path == tmp_path / ".perk" / "workflow" / "agent-session.json"
-        assert cache.read_agent_session(tmp_path) == data
+        assert cache.read_agent_session(tmp_path) == AgentSessionCache.model_validate(data)
 
     def test_absent_reads_none(self, tmp_path: Path) -> None:
         assert cache.read_agent_session(tmp_path) is None

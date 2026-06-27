@@ -11,6 +11,7 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch, resume
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 
 
 def _pr(state: str) -> github.PullRequest:
@@ -55,21 +56,21 @@ def test_reconstruct_plan_ref():
     ref = resume.reconstruct_plan_ref(
         _neutral_state(header={"objective_id": "O1"}), provider="github"
     )
-    assert ref == {
-        "provider": "github",
-        "pr_id": "7",
-        "url": "https://gh/o/r/issues/7",
-        "labels": ["perk:plan"],
-        "objective_id": "O1",
-        "consumed_learn": [],
-        "base": None,
-    }
+    assert ref == PlanRefCache(
+        provider="github",
+        pr_id="7",
+        url="https://gh/o/r/issues/7",
+        labels=("perk:plan",),
+        objective_id="O1",
+        consumed_learn=(),
+        base=None,
+    )
 
 
 def test_reconstruct_plan_ref_carries_base():
     # The pinned base is recovered from the canonical plan-header.
     ref = resume.reconstruct_plan_ref(_neutral_state(header={"base": "develop"}), provider="github")
-    assert ref["base"] == "develop"
+    assert ref.base == "develop"
 
 
 # --- the CLI (CliRunner; get_plan + launch_stage stubbed) ------------------------------

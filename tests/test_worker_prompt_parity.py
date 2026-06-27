@@ -16,6 +16,7 @@ from perk.run.launch import (
     _learn_prompt,
     _plan_read_instruction,
 )
+from perk.state.cache import PlanRefCache
 
 # Keep in lockstep with ADDRESS_SUBSTRINGS in extension/worker/worker.test.ts.
 # The linear plan-read instruction — keep in lockstep with LINEAR_READ_SUBSTRINGS in
@@ -27,11 +28,12 @@ LINEAR_READ_SUBSTRINGS = [
     "if the linear tools are unavailable, open ",
 ]
 
-_PLAN_REF = {
-    "provider": "github",
-    "pr_id": "148",
-    "url": "https://github.com/mattgiles/perk/issues/148",
-}
+_PLAN_REF = PlanRefCache(
+    provider="github",
+    pr_id="148",
+    url="https://github.com/mattgiles/perk/issues/148",
+    labels=("perk:plan",),
+)
 
 
 def test_implement_prompt_composes_template_with_read_cmd() -> None:
@@ -73,15 +75,16 @@ def test_plan_read_instruction_selects_arm_per_provider() -> None:
 
 
 def test_implement_prompt_non_github_uses_open_url() -> None:
-    ref = {"provider": "gitlab", "pr_id": "9", "url": "https://gl/x"}
+    ref = PlanRefCache(provider="gitlab", pr_id="9", url="https://gl/x", labels=("perk:plan",))
     assert "open https://gl/x" in _implement_prompt(ref)
 
 
-_LINEAR_PLAN_REF = {
-    "provider": "linear",
-    "pr_id": "a1b2c3d4-0000-0000-0000-000000000000",
-    "url": "https://linear.app/acme/issue/ENG-123",
-}
+_LINEAR_PLAN_REF = PlanRefCache(
+    provider="linear",
+    pr_id="a1b2c3d4-0000-0000-0000-000000000000",
+    url="https://linear.app/acme/issue/ENG-123",
+    labels=("perk:plan",),
+)
 
 
 def test_implement_prompt_linear_carries_linear_read_substrings() -> None:
@@ -102,4 +105,4 @@ def test_learn_prompt_linear_reads_via_tools_and_keeps_gh_pr_derivation() -> Non
     prompt = _learn_prompt(_LINEAR_PLAN_REF)
     for needle in LINEAR_READ_SUBSTRINGS:
         assert needle in prompt, f"linear learn prompt drifted — missing: {needle!r}"
-    assert f"gh pr list --head plan-{_LINEAR_PLAN_REF['pr_id']} --state merged" in prompt
+    assert f"gh pr list --head plan-{_LINEAR_PLAN_REF.pr_id} --state merged" in prompt

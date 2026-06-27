@@ -9,11 +9,11 @@ paired parity suites.
 """
 
 from pathlib import Path
-from typing import Any
 
 from perk.prompts import render
 from perk.run.launch.worktree import ResolvedWorktree
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 from perk.substrate.binding_delivery import render_cold_bindings
 from perk.substrate.config import Config
 from perk.substrate.output import user_output
@@ -22,7 +22,7 @@ from perk.substrate.registry import Stage
 
 def _initial_prompt(
     stage: Stage,
-    plan_ref: dict[str, Any] | None,
+    plan_ref: PlanRefCache | None,
     config: Config | None = None,
     preview: bool = False,
 ) -> str | None:
@@ -63,7 +63,7 @@ def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
     return render("common/plan-read/other.md", {"pr_id": pr_id, "url": url})
 
 
-def _implement_prompt(plan_ref: dict[str, Any]) -> str:
+def _implement_prompt(plan_ref: PlanRefCache) -> str:
     """The implement-stage primer. The wording lives in the canonical template
     ``prompts/stages/implement.md``, rendered identically by both planes via the shared render seam
     (contracts.md §8.31); branching stays in code — only the ``read_cmd`` var (the provider-selected
@@ -72,9 +72,9 @@ def _implement_prompt(plan_ref: dict[str, Any]) -> str:
     "Progress markers:" tail — the prior shorter near-copy omission is removed). One golden case
     (`implement-github`) plus the thin per-plane composition tests replace the substring parity.
     """
-    provider = str(plan_ref.get("provider", ""))
-    pr_id = str(plan_ref.get("pr_id", ""))
-    url = str(plan_ref.get("url", ""))
+    provider = plan_ref.provider
+    pr_id = plan_ref.pr_id
+    url = plan_ref.url
     read_cmd = _plan_read_instruction(provider, pr_id, url)
     return render(
         "stages/implement.md",
@@ -82,9 +82,7 @@ def _implement_prompt(plan_ref: dict[str, Any]) -> str:
     )
 
 
-def _address_prompt(
-    plan_ref: dict[str, Any], model: str | None = None, preview: bool = False
-) -> str:
+def _address_prompt(plan_ref: PlanRefCache, model: str | None = None, preview: bool = False) -> str:
     """Prime the address stage: classify feedback in an isolated child, fix only actionable items,
     then resolve the threads. The perk-address skill (the judgment layer) is delivered by
     the skill-binding mechanism, not hardcoded here.
@@ -102,9 +100,9 @@ def _address_prompt(
     and the classifier present/absent split builds the ``model_clause`` render var. All three
     address consumers (this builder, the worker's ``initialPromptFor("address")``, and the warm
     ``addressGuidance``) converge on the same two templates."""
-    provider = str(plan_ref.get("provider", ""))
-    pr_id = str(plan_ref.get("pr_id", ""))
-    url = str(plan_ref.get("url", ""))
+    provider = plan_ref.provider
+    pr_id = plan_ref.pr_id
+    url = plan_ref.url
     model_clause = (
         f', passing `model: "{model}"` on that call '
         "(the configured [subagents] review-classifier model)"
@@ -117,7 +115,7 @@ def _address_prompt(
     return render("stages/address/action.md", variables)
 
 
-def _learn_prompt(plan_ref: dict[str, Any]) -> str:
+def _learn_prompt(plan_ref: PlanRefCache) -> str:
     """Prime the learn stage: investigate the just-landed change and capture durable learnings.
     The perk-learn skill (the judgment layer) is delivered by the skill-binding
     mechanism, not hardcoded here.
@@ -132,9 +130,9 @@ def _learn_prompt(plan_ref: dict[str, Any]) -> str:
     ``lifecycleGates``/``learn.ts::learnGuidance`` (no worker twin — learn has only cold + warm).
     Four ``learn-*`` golden cases per provider arm replace the dedicated substring parity.
     """
-    provider = str(plan_ref.get("provider", ""))
-    pr_id = str(plan_ref.get("pr_id", ""))
-    url = str(plan_ref.get("url", ""))
+    provider = plan_ref.provider
+    pr_id = plan_ref.pr_id
+    url = plan_ref.url
     read_cmd = _plan_read_instruction(provider, pr_id, url)
     return render(
         "stages/learn.md",

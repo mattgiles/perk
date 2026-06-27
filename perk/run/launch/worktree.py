@@ -9,10 +9,10 @@ The pure-ish resolution layer: the
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 from perk.substrate import git
 from perk.substrate.config import Config
 from perk.substrate.git import GitError
@@ -25,7 +25,7 @@ class ResolvedWorktree:
     """The worktree a stage runs in, plus the plan-ref to materialize into it (if derived)."""
 
     path: Path
-    plan_ref: dict[str, Any] | None
+    plan_ref: PlanRefCache | None
     base: str | None = None  # the start-point the create path used (None => off local HEAD)
     # True only when this resolution **freshly created** the worktree (the `git.worktree_add`
     # branch) — not idempotent reuse, a dry run, or a `worktree: none` stage. Gates the
@@ -62,13 +62,13 @@ def resolve_target(stage: Stage, remote: str | None) -> Target:
     return Target(is_remote=True, runner=remote)
 
 
-def resolve_plan_worktree_name(plan_ref: dict[str, Any]) -> str:
+def resolve_plan_worktree_name(plan_ref: PlanRefCache) -> str:
     """Deterministic, re-derivable worktree/branch name for a plan (D1).
 
     ``pr_id`` stays a string (provider-agnostic): ``42 -> plan-42``, ``PROJ-123 ->
     plan-PROJ-123``. Rejects ids that cannot be a single path segment.
     """
-    pr_id = str(plan_ref.get("pr_id", "")).strip()
+    pr_id = plan_ref.pr_id.strip()
     Ensure.invariant(
         bool(pr_id) and "/" not in pr_id and pr_id not in (".", ".."),
         f"plan-ref pr_id unusable as a worktree name: {pr_id!r}",
@@ -126,9 +126,9 @@ def resolve_worktree(
     if stage.worktree == "none":
         return ResolvedWorktree(path=repo_root, plan_ref=None)
 
-    plan_ref: dict[str, Any] | None = None
+    plan_ref: PlanRefCache | None = None
     name = worktree
-    base_ref: dict[str, Any] | None = None
+    base_ref: PlanRefCache | None = None
     if name is None:  # D2/D3: derive the name from the active plan-ref
         plan_ref = cache.read_plan_ref(repo_root)
         if plan_ref is None:
@@ -146,8 +146,8 @@ def resolve_worktree(
         # worktree's own cache.plan-ref). A missing ref simply leaves plan_base=None.
         base_ref = cache.read_plan_ref(repo_root)
 
-    plan_base = base_ref.get("base") if base_ref else None
-    plan_base = plan_base if isinstance(plan_base, str) and plan_base.strip() else None
+    plan_base = base_ref.base if base_ref else None
+    plan_base = plan_base if plan_base and plan_base.strip() else None
 
     Ensure.invariant(
         "/" not in name and name not in ("", ".", ".."),

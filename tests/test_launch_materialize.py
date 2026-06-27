@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _launch_helpers import _PLAN_REF, _config, _stage
+from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
 
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
@@ -45,7 +45,7 @@ def test_implement_materializes_worktree_and_is_idempotent(git_repo, monkeypatch
     assert wt.is_dir()
     assert (wt / ".git").exists()  # a real linked worktree
     # plan-ref + handoff materialized into the worktree
-    assert cache.read_plan_ref(wt) == _PLAN_REF
+    assert cache.read_plan_ref(wt) == _PLAN_REF_MODEL
     handoffs = list((wt / ".perk" / "workflow" / "handoff").glob("*.json"))
     assert len(handoffs) == 1
     assert execs and execs[0][0] == "pi"
@@ -630,7 +630,7 @@ def test_implement_calls_linear_agent_run_started_once(git_repo, monkeypatch):
     assert len(calls) == 1
     wt, kw = calls[0]
     assert wt == config.worktree_root / "plan-42"
-    assert kw["plan_ref"] == _PLAN_REF
+    assert kw["plan_ref"] == _PLAN_REF_MODEL
     assert kw["run_id"]  # the minted PERK_RUN_ID
 
 

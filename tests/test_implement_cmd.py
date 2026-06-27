@@ -16,6 +16,7 @@ from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 
 _PLAN_REF = {
     "provider": "github",
@@ -54,7 +55,7 @@ def test_implement_with_plan_writes_active_ref_and_launches(monkeypatch):
         assert result.exit_code == 0, result.output
         assert launched["stage"] == "implement"
         # #7 is now the active plan (mirrors resume): the ref is materialized at the repo root.
-        assert cache.read_plan_ref(Path(d)) == _PLAN_REF
+        assert cache.read_plan_ref(Path(d)) == PlanRefCache.model_validate(_PLAN_REF)
 
 
 def test_implement_with_plan_dry_run_does_not_write_or_launch(monkeypatch):

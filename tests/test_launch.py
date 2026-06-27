@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _launch_helpers import _PLAN_REF, _config, _stage
+from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
 
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
@@ -19,6 +19,7 @@ from perk.run.launch import (
     resolve_worktree,
 )
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
 from perk.substrate.config import Config
@@ -130,13 +131,14 @@ def test_resolve_base_resumed_branch_wins_over_plan_base(monkeypatch, tmp_path):
     [("42", "plan-42"), ("PROJ-123", "plan-PROJ-123")],
 )
 def test_resolve_plan_worktree_name(pr_id, expected):
-    assert resolve_plan_worktree_name({"pr_id": pr_id}) == expected
+    ref = _PLAN_REF_MODEL.model_copy(update={"pr_id": pr_id})
+    assert resolve_plan_worktree_name(ref) == expected
 
 
 @pytest.mark.parametrize("pr_id", ["", "a/b", ".", ".."])
 def test_resolve_plan_worktree_name_rejects_unusable(pr_id):
     with pytest.raises(UserFacingCliError, match="unusable as a worktree name"):
-        resolve_plan_worktree_name({"pr_id": pr_id})
+        resolve_plan_worktree_name(_PLAN_REF_MODEL.model_copy(update={"pr_id": pr_id}))
 
 
 def test_implement_no_plan_ref_errors(tmp_path):
@@ -161,7 +163,7 @@ def test_implement_derives_name_from_active_plan_ref(tmp_path):
         materialize=False,  # dry-run: derive without creating
     )
     assert resolved.path == _config(tmp_path).worktree_root / "plan-42"
-    assert resolved.plan_ref == _PLAN_REF
+    assert resolved.plan_ref == _PLAN_REF_MODEL
 
 
 def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
@@ -301,24 +303,24 @@ def test_prompt_override_overrides_initial_prompt(tmp_path, capsys):
 
 def test_initial_prompt_primes_implement_and_address():
     """Implement and address are primed; other stages launch unprimed."""
-    impl = _initial_prompt(_stage("implement"), _PLAN_REF)
+    impl = _initial_prompt(_stage("implement"), _PLAN_REF_MODEL)
     assert impl is not None and "gh issue view 42 --comments" in impl and "/submit" in impl
     # The implement prompt teaches the marker protocol; the perk-implement skill pointer is NOT
     # hardcoded here anymore (it rides the skill-binding mechanism).
     assert "[DONE:" in impl and "[WIP:" in impl and "perk-implement" not in impl
-    addr = _initial_prompt(_stage("address"), _PLAN_REF)
+    addr = _initial_prompt(_stage("address"), _PLAN_REF_MODEL)
     assert addr is not None and "perk-address" not in addr and "review-classifier" in addr
-    assert _initial_prompt(_stage("plan"), _PLAN_REF) is None
+    assert _initial_prompt(_stage("plan"), _PLAN_REF_MODEL) is None
     assert _initial_prompt(_stage("implement"), None) is None
     assert _initial_prompt(_stage("address"), None) is None
     # The new defaulted `preview` param leaves the non-preview address prompt unchanged.
-    assert _initial_prompt(_stage("address"), _PLAN_REF, preview=False) == addr
+    assert _initial_prompt(_stage("address"), _PLAN_REF_MODEL, preview=False) == addr
 
 
 def test_address_prompt_preview_is_classification_only():
     """The cold `--preview` flag shapes the address seed to classify-only (no action),
     mirroring the warm `addressGuidance(preview=true)` shape; non-preview body is unchanged."""
-    preview = _address_prompt(_PLAN_REF, preview=True)
+    preview = _address_prompt(_PLAN_REF_MODEL, preview=True)
     assert "PREVIEWING" in preview
     assert "take NO action" in preview and "preview only" in preview
     # The fix→resolve→land tail is omitted in preview.
@@ -327,8 +329,8 @@ def test_address_prompt_preview_is_classification_only():
     # Preview takes no action, so Plan File Mode (an action step) is omitted.
     assert "Plan File Mode" not in preview
     # The non-preview body (the default) keeps the full loop.
-    full = _address_prompt(_PLAN_REF)
-    assert _address_prompt(_PLAN_REF, preview=False) == full
+    full = _address_prompt(_PLAN_REF_MODEL)
+    assert _address_prompt(_PLAN_REF_MODEL, preview=False) == full
     assert "resolve_review_threads" in full and "PREVIEWING" not in full
     # The converged body upgrades cold/worker with warm's Plan File Mode step.
     assert "Plan File Mode" in full
@@ -338,9 +340,9 @@ def test_initial_prompt_injects_classifier_model_from_config():
     """A configured `[subagents] review-classifier` model is injected into the address
     prompt's spawn clause; an absent key (or no config) leaves it unset."""
     config = Config(worktree_root=Path("/tmp/x"), subagents={"review-classifier": "test/model"})
-    primed = _initial_prompt(_stage("address"), _PLAN_REF, config)
+    primed = _initial_prompt(_stage("address"), _PLAN_REF_MODEL, config)
     assert primed is not None and 'model: "test/model"' in primed
-    bare = _initial_prompt(_stage("address"), _PLAN_REF, Config(worktree_root=Path("/tmp/x")))
+    bare = _initial_prompt(_stage("address"), _PLAN_REF_MODEL, Config(worktree_root=Path("/tmp/x")))
     assert bare is not None and "passing `model:" not in bare
 
 
@@ -348,7 +350,7 @@ def test_initial_prompt_primes_learn():
     """The learn stage is primed — it derives the merged PR from the plan-<pr_id> head
     branch and stays unprimed without a plan-ref (the perk-learn pointer rides the binding
     mechanism — not the hardcoded prompt)."""
-    learn = _initial_prompt(_stage("learn"), _PLAN_REF)
+    learn = _initial_prompt(_stage("learn"), _PLAN_REF_MODEL)
     assert learn is not None
     assert "perk-learn" not in learn  # the skill pointer rides the binding mechanism
     assert "plan-42" in learn  # the derived head branch (pr_id is the plan-issue number)
@@ -358,11 +360,12 @@ def test_initial_prompt_primes_learn():
     assert _initial_prompt(_stage("learn"), None) is None
 
 
-_LINEAR_PLAN_REF = {
-    "provider": "linear",
-    "pr_id": "a1b2c3d4-0000-0000-0000-000000000000",
-    "url": "https://linear.app/acme/issue/ENG-123",
-}
+_LINEAR_PLAN_REF = PlanRefCache(
+    provider="linear",
+    pr_id="a1b2c3d4-0000-0000-0000-000000000000",
+    url="https://linear.app/acme/issue/ENG-123",
+    labels=("perk:plan",),
+)
 
 
 def test_implement_prompt_linear_uses_linear_tools_with_url_fallback():
@@ -382,7 +385,7 @@ def test_learn_prompt_linear_keeps_gh_pr_derivation():
     prompt = _initial_prompt(_stage("learn"), _LINEAR_PLAN_REF)
     assert prompt is not None
     assert "linear_get_issue" in prompt and "linear_list_comments" in prompt
-    assert f"gh pr list --head plan-{_LINEAR_PLAN_REF['pr_id']} --state merged" in prompt
+    assert f"gh pr list --head plan-{_LINEAR_PLAN_REF.pr_id} --state merged" in prompt
 
 
 def test_dry_run_has_no_side_effects(tmp_path, capsys):

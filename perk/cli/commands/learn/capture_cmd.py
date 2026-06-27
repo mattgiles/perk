@@ -86,7 +86,7 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
             "No saved plan in this worktree\nRun /plan-save then perk implement first.",
             error_type="no_plan_ref",
         )
-    issue = str(plan_ref["pr_id"])
+    issue = plan_ref.pr_id
     body_text = body_path.read_text(encoding="utf-8").strip()
     if not body_text:
         raise UserFacingCliError(
