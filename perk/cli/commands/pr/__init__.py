@@ -8,8 +8,8 @@ Sections its ``--help`` (via :class:`SectionedAliasGroup`) into **Launchers** / 
   launcher-only (L) —
   it has a launcher half + the warm review flow but no deterministic worker.
 - **Workers** — ``check`` / ``feedback`` / ``ready`` / ``resolve-threads`` / ``review-context`` /
-  ``review-post``: deterministic cold doors the warm TS doors delegate to. Each is a supervisor
-  surface: ``--json`` → stdout, human text → stderr, stable exit codes
+  ``review-post`` / ``url``: deterministic cold doors the warm TS doors delegate to. Each is a
+  supervisor surface: ``--json`` → stdout, human text → stderr, stable exit codes
   (``0`` ok · ``1`` invalid/op-failure · ``2`` not-a-repo).
 
 ``submit`` / ``land`` / ``address`` are also exported as the module-level command objects
@@ -30,6 +30,7 @@ from perk.cli.commands.pr.resolve_threads_cmd import resolve_threads_pr
 from perk.cli.commands.pr.review_context_cmd import review_context_pr
 from perk.cli.commands.pr.review_post_cmd import review_post_pr
 from perk.cli.commands.pr.submit_cmd import submit_pr
+from perk.cli.commands.pr.url_cmd import url_pr
 from perk.cli.stages import make_merged_command
 from perk.substrate.registry import RegistryError, load_registry
 
@@ -73,6 +74,7 @@ mark_kind(feedback_pr, "worker")
 mark_kind(resolve_threads_pr, "worker")
 mark_kind(review_context_pr, "worker")
 mark_kind(review_post_pr, "worker")
+mark_kind(url_pr, "worker")
 
 pr_group.add_command(pr_submit_command, name="submit")
 pr_group.add_command(pr_land_command, name="land")
@@ -83,3 +85,4 @@ pr_group.add_command(feedback_pr)
 pr_group.add_command(resolve_threads_pr)
 pr_group.add_command(review_context_pr)
 pr_group.add_command(review_post_pr)
+pr_group.add_command(url_pr)
