@@ -19,6 +19,7 @@ import { registerLearn } from "./doors/learn.ts";
 import { registerLearnDocs } from "./doors/learnDocs.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
+import { registerPrReviewLocal } from "./doors/prReviewLocal.ts";
 import { registerReady } from "./doors/ready.ts";
 import { registerSelfcheck } from "./doors/selfcheck.ts";
 import { registerSubmit } from "./doors/submit.ts";
@@ -406,6 +407,10 @@ export default function (pi: ExtensionAPI) {
   // The warm `/pr-review` door: automated code review in a FRESH, isolated subagent that
   // POSTS its review to the PR (the deliberate departure from /address's read-only-child rule).
   registerPrReview(pi);
+
+  // The warm `/pr-review-local` command: open the plannotator browser code review on the active
+  // PR (URL filled in implicitly) by bridging to plannotator's published `code-review` event.
+  registerPrReviewLocal(pi);
 
   // The read-only CI executor: the `run_ci` tool + `/ci` command + `--allow-project-ci`
   // flag. Runs the project's `[ci]` named checks deterministically and reports (never fixes/loops).

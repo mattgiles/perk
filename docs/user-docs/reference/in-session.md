@@ -228,6 +228,19 @@ is unchanged.
 - **`post_pr_review`** — post the reconciled multi-angle review to the PR (delegates to
   `perk pr review-post`; records `last_pr_review` in workflow-state). *Non-terminating.*
 
+### `/pr-review-local`
+
+Open the **plannotator browser code-review UI** on the active worktree's PR, with the GitHub PR
+URL filled in **automatically** (no copy-paste) — the same result as plannotator's own
+`/plannotator-review <pr-url>`. perk resolves the active PR from the worktree's plan-ref branch
+(via the read-only `perk pr url` worker) and bridges to plannotator's published `code-review`
+`pi.events` action, which opens the identical browser UI. Requires the
+`@plannotator/pi-extension` package installed (detected by its `/plannotator-review` command,
+independent of which plan provider is selected) and an interactive session. The review runs in the
+background; when you finish, any feedback and annotations route back into the session as a
+follow-up turn (a short triage note is appended when there are annotations), and approving with no
+changes shows a notification only. This is a plain warm command — no stage, no model tool.
+
 ### `/learn-docs`
 
 Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author a
