@@ -62,7 +62,7 @@ is non-empty but useless for discovery.
 Most skills are **ambient**: Pi discovers them by `description` match, with no wiring. Add a binding
 **only when the skill must fire deterministically** at a perk stage or command:
 
-- Add a `[[bindings]]` entry (repo overlay in `.pi/perk.toml`) or a `shared/bindings.yaml` entry
+- Add a `[[bindings]]` entry (repo overlay in `.perk/config.toml`) or a `shared/bindings.yaml` entry
   (a shipped default) with the right `trigger` (`stage:<id>` / `command:<id>`) and `mode`
   (`nudge`/`transclude`).
 - When you touch user-facing behavior, **reconcile the docs in the same change** — don't let them

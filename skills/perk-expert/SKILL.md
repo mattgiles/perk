@@ -42,7 +42,7 @@ Use these to confirm details rather than fabricating command/flag specifics.
 
 - [Mental model](./references/mental-model.md) — orientation: plan-oriented unit of work; the two
   planes (Python CLI exterior / TypeScript extension interior); the three state tiers (GitHub
-  canonical / `.pi/workflow/` cache / session transient); stages + the warm/cold two-door model; the
+  canonical / `.perk/workflow/` cache / session transient); stages + the warm/cold two-door model; the
   spine. Read first for "how does perk work / what is a stage / a door / a plane" questions.
 - [Configuration](./references/configuration.md) — the `.perk/config.toml` committed config + the
   `.perk/local.toml` overlay and its semantics, then every table (`[worktree]`, `[workflow]`,

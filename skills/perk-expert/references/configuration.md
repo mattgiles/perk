@@ -24,6 +24,32 @@ perk reads two files under `.perk/`:
    from `.perk/config.toml` **only**; a local value for either is silently ignored (keeps the canonical
    issue store and the converged `.pi/settings.json` deterministic).
 
+## Repository layout — the dot-directory contract
+
+**Ownership vs. discovery.** `.perk/` is the authoritative, **perk-owned** dot-directory (committed
+source + local cache). `.pi/` and `.agents/` are **discovery** namespaces owned by Pi and the skills
+CLI; perk writes a few **generated materializations** into them because that is where the host tool
+looks. `.pi/` is **not** generally perk-owned — it is Pi's directory with a perk-managed slice.
+
+| Path | Owner | Lifecycle | Versioned |
+| --- | --- | --- | --- |
+| `.perk/config.toml` | maintainer / perk (init marker) | committed | yes |
+| `.perk/local.toml` | user | gitignored | no |
+| `.perk/workflow/` | perk | gitignored (runtime cache) | no |
+| `.perk/skills/<name>/SKILL.md` | maintainer / perk | committed | yes |
+| `.pi/settings.json` | Pi (perk-managed slice) | committed | yes |
+| `.pi/npm/`, `.pi/git/` | Pi | gitignored | no |
+| `.pi/agents/perk/*.md` | perk-generated (Pi materialization) | committed | yes |
+| `.pi/APPEND_SYSTEM.md` | perk-generated (committed ambient index) | committed | yes |
+| `.agents/manifest.yaml` | user / skills CLI | committed | yes |
+| `.agents/manifest.d/perk*.yaml` | perk-generated (skills materialization) | committed | yes |
+| `.agents/skills/`, `.agents/cache/` | skills CLI (runtime) | gitignored | no |
+| `.worktrees/` | perk (worktrees) | gitignored | no |
+
+**Pi-native materializations.** `.pi/APPEND_SYSTEM.md` (generated ambient routing index) and
+`.pi/agents/perk/` (perk's slice of Pi's project-agent namespace) are perk-generated and committed,
+but they live where Pi discovers them — not evidence that `.pi/` is perk-owned.
+
 ## Value-type gotcha
 
 The **TypeScript** config reader consumes **string leaf values only**, so `[trust] ci` and

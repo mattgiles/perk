@@ -98,8 +98,8 @@ is a clean follow-up — but it is **not** built here.
 
 ## Configuring the review model
 
-The reviewer model is set by `[subagents] pr-reviewer` in `.pi/perk.toml` (overlaid by the gitignored
-`.pi/perk.local.toml` for a per-user override that doesn't dirty committed files). When set,
+The reviewer model is set by `[subagents] pr-reviewer` in `.perk/config.toml` (overlaid by the gitignored
+`.perk/local.toml` for a per-user override that doesn't dirty committed files). When set,
 `/pr-review` passes it as a per-call inline `model` override on **every** reviewer spawn; when unset,
 the `perk.pr-reviewer` agent's committed default model is used. (`[subagents]` is the unified,
 agent-keyed table that also configures `review-classifier` and `objective-explorer`.)

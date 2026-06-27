@@ -24,6 +24,7 @@ See the [user-docs router](../index.md) for how this quadrant fits the overall s
 - **[Objectives — the roadmap model](./objectives.md)** — the objective command recap, the
   roadmap node schema, node statuses, and the objective metadata blocks.
 - **[Configuration files](./configuration.md)** — every `.perk/config.toml` table and the
-  `.perk/local.toml` per-user overlay, with overlay semantics.
+  `.perk/local.toml` per-user overlay, with overlay semantics and the canonical repository layout
+  (dot-directory) contract.
 - **[Providers & issue backends](./providers-and-backends.md)** — the supported provider set (plan
   and todo seams) and the Linear issue-backend reference (auth, labels, identifiers, maturity).

@@ -48,7 +48,7 @@ Aliases are noted inline next to each command. Common flags: launcher commands a
 ### `perk init`
 
 Scaffold or converge the current repo for perk (idempotent; safe to re-run). Wires
-`.pi/settings.json` and the borrowed package set, creates the `.pi/workflow/` cache, scaffolds
+`.pi/settings.json` and the borrowed package set, creates the `.perk/workflow/` cache, scaffolds
 config, manages `.gitignore` and the `AGENTS.md` managed block, and verifies GitHub access
 without mutating it. It converges a skills-manifest fragment (`.agents/manifest.d/perk.yaml`)
 declaring perk's own skills **plus a set of required external skills** (from upstream sources),
@@ -470,7 +470,7 @@ it to list all.
 
 ### `perk state prune` (alias `gc`)
 
-Prune stale `.pi/workflow/` run dirs and handoff blobs (terminal-stage and age rules).
+Prune stale `.perk/workflow/` run dirs and handoff blobs (terminal-stage and age rules).
 `--max-age-days` sets the age threshold (default 14); `--dry-run` previews removals; `--json`
 emits a machine-readable payload.
 
