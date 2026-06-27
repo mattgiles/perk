@@ -7,6 +7,7 @@ while the real registry's reads/writes are still empty.
 
 import pytest
 
+from perk.boundary import ValidationError
 from perk.substrate.registry import FindingSeverity, RegistryError, load_registry, validate
 
 # A minimal-but-complete, valid 2-stage registry. Each negative test mutates one line.
@@ -202,3 +203,32 @@ def test_unsupported_schema_version_raises(tmp_path):
     bad = GOOD.replace("schema_version: 1", "schema_version: 99")
     with pytest.raises(RegistryError):
         load_registry(_write(tmp_path, bad))
+
+
+def test_wrong_typed_field_raises_registry_error(tmp_path):
+    # A wrong-typed field is now structural (was: silently defaulted, then a content Issue).
+    bad = GOOD.replace("    mode: read-only", "    mode: 5")
+    with pytest.raises(RegistryError):
+        load_registry(_write(tmp_path, bad))
+
+
+def test_unknown_stage_key_raises_registry_error(tmp_path):
+    # `extra="forbid"` on the strict model: an unknown stage key is structural.
+    bad = GOOD.replace("    command: plan", "    command: plan\n    bogus: x")
+    with pytest.raises(RegistryError):
+        load_registry(_write(tmp_path, bad))
+
+
+def test_missing_field_is_still_a_content_issue(tmp_path):
+    # An absent field stays content (defaulted to ""), reported by validate() — not structural.
+    bad = GOOD.replace("    summary: draft\n", "")
+    assert "summary" in _messages(tmp_path, bad)
+
+
+def test_models_are_frozen(tmp_path):
+    # The frozen contract carries over from the old frozen dataclasses.
+    registry = load_registry(_write(tmp_path, GOOD))
+    with pytest.raises(ValidationError):
+        registry.stages[0].id = "mutated"
+    with pytest.raises(ValidationError):
+        registry.schema_version = 99

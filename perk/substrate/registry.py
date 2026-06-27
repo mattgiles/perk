@@ -10,14 +10,16 @@ The validator returns structured ``Issue`` records (it never raises for invalid
 LBYL throughout (dignified-python): shapes are checked before use.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import yaml
+from pydantic import Field
 
 from perk._resources import shared_dir
+from perk.boundary import StrictBoundaryModel, translate_validation_errors
 
 REGISTRY_FILENAME = "registry.yaml"
 SUPPORTED_SCHEMA_VERSION = 1
@@ -45,30 +47,28 @@ class Issue:
         return f"[{self.severity.value}] {self.where}: {self.message}"
 
 
-@dataclass(frozen=True)
-class Stage:
-    id: str
-    summary: str
-    mode: str
-    worktree: str
+class Stage(StrictBoundaryModel):
+    id: str = ""
+    summary: str = ""
+    mode: str = ""
+    worktree: str = ""
     # doors/run_id values are parsed leniently and checked by the validator, so they are
     # typed Any here (the parser never trusts them; `validate()` reports bad shapes).
-    doors: dict[str, Any]
-    run_id: dict[str, Any]
-    command: str
-    requires: list[str]
-    reads: list[str]
-    writes: list[str]
-    predecessors: list[str]
-    successors: list[str]
+    doors: dict[str, Any] = Field(default_factory=dict)
+    run_id: dict[str, Any] = Field(default_factory=dict)
+    command: str = ""
+    requires: list[str] = Field(default_factory=list)
+    reads: list[str] = Field(default_factory=list)
+    writes: list[str] = Field(default_factory=list)
+    predecessors: list[str] = Field(default_factory=list)
+    successors: list[str] = Field(default_factory=list)
 
 
-@dataclass(frozen=True)
-class Registry:
+class Registry(StrictBoundaryModel):
     schema_version: int
-    state_keys: set[str]  # flattened "<tier>.<key>" vocabulary
-    stages: list[Stage]
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+    state_keys: set[str] = Field(default_factory=set)  # flattened "<tier>.<key>" vocabulary
+    stages: list[Stage] = Field(default_factory=list)
+    raw: dict[str, Any] = Field(default_factory=dict, repr=False)
 
     def stage_ids(self) -> set[str]:
         return {s.id for s in self.stages}
@@ -106,9 +106,15 @@ def load_registry(path: Path | None = None) -> Registry:
             f"(this perk understands {SUPPORTED_SCHEMA_VERSION}). Run 'perk doctor'."
         )
 
-    state_keys = _flatten_state_keys(data.get("state_keys"))
-    stages = [_parse_stage(raw) for raw in _as_list(data.get("stages"))]
-    return Registry(schema_version=schema_version, state_keys=state_keys, stages=stages, raw=data)
+    with translate_validation_errors(RegistryError, source=str(registry_path)):
+        stages = [Stage.model_validate(raw) for raw in _as_list(data.get("stages"))]
+        return Registry(
+            # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
+            schema_version=SUPPORTED_SCHEMA_VERSION,
+            state_keys=_flatten_state_keys(data.get("state_keys")),
+            stages=stages,
+            raw=data,
+        )
 
 
 def _as_list(value: object) -> list[Any]:
@@ -124,41 +130,6 @@ def _flatten_state_keys(raw: object) -> set[str]:
         if isinstance(tier, str) and isinstance(names, list):
             keys.update(f"{tier}.{name}" for name in names if isinstance(name, str))
     return keys
-
-
-def _parse_stage(raw: object) -> Stage:
-    """Coerce one raw stage mapping into a ``Stage``, tolerating absent fields.
-
-    Missing/ill-typed fields become empty defaults so the *validator* (not the parser)
-    reports them — that keeps all consistency findings in one place.
-    """
-    data: dict[str, Any] = cast(dict[str, Any], raw) if isinstance(raw, dict) else {}
-    return Stage(
-        id=_str(data.get("id")),
-        summary=_str(data.get("summary")),
-        mode=_str(data.get("mode")),
-        worktree=_str(data.get("worktree")),
-        doors=_map(data.get("doors")),
-        run_id=_map(data.get("run_id")),
-        command=_str(data.get("command")),
-        requires=_str_list(data.get("requires")),
-        reads=_str_list(data.get("reads")),
-        writes=_str_list(data.get("writes")),
-        predecessors=_str_list(data.get("predecessors")),
-        successors=_str_list(data.get("successors")),
-    )
-
-
-def _str(value: object) -> str:
-    return value if isinstance(value, str) else ""
-
-
-def _map(value: object) -> dict[str, Any]:
-    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
-
-
-def _str_list(value: object) -> list[str]:
-    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
 # ----------------------------------------------------------------------- validate
