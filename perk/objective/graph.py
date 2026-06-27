@@ -9,6 +9,7 @@ The :class:`DependencyGraph` / :class:`PlanSelection` dataclasses themselves liv
 """
 
 import re
+from dataclasses import replace
 from typing import Any
 
 from perk.objective._models import DependencyGraph, NodeStatus, ObjectiveNode
@@ -127,7 +128,7 @@ def update_node(
             changes["slug"] = slug
         if comment is not None:
             changes["comment"] = comment
-        updated.append(node.model_copy(update=changes))
+        updated.append(replace(node, **changes))
     return updated if found else None
 
 
@@ -208,7 +209,7 @@ def _graph_from_sequential(nodes: list[ObjectiveNode]) -> DependencyGraph:
                 deps = (prev_id,)
             else:
                 deps = ()
-            resolved.append(node.model_copy(update={"depends_on": deps}))
+            resolved.append(replace(node, depends_on=deps))
             prev_id = node.id
         if phase_nodes:
             last_of_prev_phase = phase_nodes[-1].id
@@ -220,7 +221,7 @@ def build_graph(nodes: list[ObjectiveNode]) -> DependencyGraph:
     (``None`` → ``()``); otherwise infer sequential deps from phase ordering."""
     if any(node.depends_on is not None for node in nodes):
         return DependencyGraph(
-            nodes=tuple(n.model_copy(update={"depends_on": n.depends_on or ()}) for n in nodes)
+            nodes=tuple(replace(n, depends_on=n.depends_on or ()) for n in nodes)
         )
     return _graph_from_sequential(nodes)
 

@@ -7,22 +7,25 @@ The cohesive manifest concern: the :class:`Manifest` dataclass plus its renderer
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import cast
 
 from pydantic import ValidationError
 
-from perk.boundary import StrictBoundaryModel, format_validation_error
+from perk.boundary import format_validation_error
 from perk.objective._models import (
     OBJECTIVE_MANIFEST_KEY,
     OBJECTIVE_SCHEMA_VERSION,
     NodeStatus,
     ObjectiveNode,
+    ObjectiveNodeEntry,
     _has_block,
 )
 from perk.plan import find_metadata_block
 
 
-class Manifest(StrictBoundaryModel):
+@dataclass(frozen=True)
+class Manifest:
     """The persisted drift baseline of an objective's intended roadmap.
 
     Structural identity only: ``nodes`` reuse :class:`ObjectiveNode` but only their
@@ -85,11 +88,15 @@ def _validate_manifest(data: dict[str, object]) -> tuple[Manifest | None, list[s
     for i, raw_item in enumerate(raw_nodes):
         if not isinstance(raw_item, dict):
             return None, [f"node {i} is not a mapping"]
-        # Inject `status` (the manifest excludes it) to satisfy the required field; the model's
-        # `_tolerate` before-validator drops anything the manifest doesn't declare (e.g. `pr`).
+        # Inject `status` (the manifest excludes it) to satisfy the required field; the parse
+        # model's `extra="ignore"` drops anything the manifest doesn't declare (e.g. `pr`).
         raw = cast(dict[str, object], raw_item)
         try:
-            nodes.append(ObjectiveNode.model_validate({**raw, "status": NodeStatus.PENDING.value}))
+            nodes.append(
+                ObjectiveNodeEntry.model_validate(
+                    {**raw, "status": NodeStatus.PENDING.value}
+                ).to_domain()
+            )
         except ValidationError as exc:
             return None, [format_validation_error(exc, source=f"node {i}")]
 

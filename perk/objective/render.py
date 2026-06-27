@@ -21,6 +21,7 @@ from perk.objective._models import (
     OBJECTIVE_SCHEMA_VERSION,
     ROADMAP_TABLE_MARKER_END,
     ROADMAP_TABLE_MARKER_START,
+    ObjectiveHeader,
     ObjectiveNode,
     _find_marker_pair,
 )
@@ -44,6 +45,25 @@ def render_adopted_overview_note(original: str) -> str:
         "preserved verbatim.\n\n"
         f"{body}"
     )
+
+
+def render_header_block(header: ObjectiveHeader) -> dict[str, object]:
+    """Build the data dict for ``render_metadata_block(OBJECTIVE_HEADER_KEY, …)``.
+
+    Emits the 8 :class:`ObjectiveHeader` fields in DECLARATION order — byte-identical to the
+    former ``header.model_dump(mode="json")`` (all fields are flat scalars, dumped in declaration
+    order with no JSON transform), keeping the stored ``objective-header`` block unchanged.
+    """
+    return {
+        "run_id": header.run_id,
+        "created": header.created,
+        "objective_comment_id": header.objective_comment_id,
+        "status": header.status,
+        "base": header.base,
+        "adopted_from": header.adopted_from,
+        "supersedes": header.supersedes,
+        "superseded_by": header.superseded_by,
+    }
 
 
 def render_roadmap_block(nodes: list[ObjectiveNode]) -> dict[str, object]:

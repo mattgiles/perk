@@ -13,9 +13,9 @@ from perk.backends.github import objectives
 def _obj_header(run_id: str, comment_id=None) -> str:
     return plan.render_metadata_block(
         objective.OBJECTIVE_HEADER_KEY,
-        objective.ObjectiveHeader(
-            run_id=run_id, created="t", objective_comment_id=comment_id
-        ).model_dump(mode="json"),
+        objective.render_header_block(
+            objective.ObjectiveHeader(run_id=run_id, created="t", objective_comment_id=comment_id)
+        ),
     )
 
 
