@@ -2448,7 +2448,9 @@ class Runner(Protocol):
   re-runs only the failed jobs. `GitHubActionsRunner.retry` shells `github.rerun_workflow_run`
   (`gh run rerun [--failed]`), wrapping `github.GitHubError` as `RunnerError` exactly as `cancel`.
 
-The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
+The value types: `RunHandle` is a frozen Pydantic model (`StrictBoundaryModel`), JSON-stable via
+`model_dump(mode="json")`/`model_validate`; `RunObservation` stays a frozen dataclass; the dispatch
+record is modeled by `cache.DispatchCache` (the on-disk read boundary, below):
 
 - **`RunHandle`** — `runner` (the routed ref, `""` ⇒ default), `kind` (`"github-actions"`),
   `run_ref` (the runner-native run id — GitHub Actions' numeric id as a string), `url`. Stored
@@ -2456,11 +2458,12 @@ The value types (all frozen dataclasses, JSON-stable via `to_data`/`from_data`):
   `run_id` is the canonical, runner-agnostic correlation key; `run_ref` is the runner-side handle.
 - **`RunObservation`** — `status` (`"queued"|"in_progress"|"completed"|"unknown"`), `conclusion`
   (`"success"|"failure"|"cancelled"|…|None`), `url`.
-- **`DispatchRecord`** — the durable linkage (below).
+- **`cache.DispatchCache`** — the durable linkage (below); its nested `plan_ref` (a `PlanRefCache`)
+  and `run_handle` (a `RunHandle`) are validated at the on-disk read boundary.
 
 ### The dispatch record (the supervisor's correlation source)
 
-`DispatchRecord` is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
+`cache.DispatchCache` is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
 scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` already excludes
 `/.perk/workflow/scratch/`, so no layout/gitignore change). Shape:
 
@@ -2472,7 +2475,7 @@ scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` alr
   "kind": "github-actions",
   "status": "dispatching" | "dispatched" | "failed",
   "dispatched_at": "<ISO-8601 UTC>",
-  "run_handle": { /* RunHandle.to_data() */ } | null,
+  "run_handle": { /* RunHandle model_dump */ } | null,
   "error": "<string>" | null }
 ```
 
@@ -2494,7 +2497,7 @@ and so are pruned wholesale with the run dir by `perk state prune` / the `cache-
    silent).
 4. **`--dry-run` ⇒ a side-effect-free dispatch preview** (`success:true`, `dry_run:true`, an
    `inputs` preview; **no** persist, **no** trigger) — mirroring the local dry-run.
-5. **Persist** the `DispatchRecord` (`status:"dispatching"`) via `cache.write_dispatch`, then
+5. **Persist** the `cache.DispatchCache` record (`status:"dispatching"`) via `cache.write_dispatch`, then
    **read it back** and assert `run_id` + `plan_ref.pr_id` round-tripped; a mismatch raises a
    **hard** `UserFacingCliError(dispatch_state_unverified)` (never a silent `pass`).
 6. **Trigger** via the selected runner's `dispatch`. On `RunnerError`/`GitHubError`: rewrite the
@@ -2757,7 +2760,7 @@ Node 3.2 — see §8.18.
 - **PR correlation** derives the PR through `github.get_plan(number=int(pr_id)).pr` (memoized per
   `pr_id`), since the draft PR is separate from the plan issue.
 - **Run state** overlays via the `Runner.observe` contract (§8.13): when the record's `run_handle`
-  is non-null, `runner.select_runner(record.runner).observe(RunHandle.from_data(...))` yields the
+  is non-null, `runner.select_runner(record.runner).observe(record.run_handle)` yields the
   `RunObservation` (`status`/`conclusion`/`url`). A null `run_handle` (records still
   `dispatching`/`failed`) ⇒ no GitHub call.
 
@@ -2816,7 +2819,7 @@ fail-soft `list`), the shared `_resolve_target` helper resolves it:
 1. `record = cache.read_dispatch(root, run_id)`; `None` ⇒ `run_not_found` (exit 1).
 2. `record.run_handle` falsy (still `dispatching`/`failed`, never triggered) ⇒ `run_not_dispatched`
    (exit 1) — nothing to act on.
-3. otherwise reconstruct `RunHandle.from_data(...)` + `select_runner(record.runner)`; the runner op
+3. otherwise use the typed `record.run_handle` + `select_runner(record.runner)`; the runner op
    acts on the runner-native `run_ref`.
 
 ### No local mutation, no pre-gate (Corrections)
@@ -2881,7 +2884,7 @@ Flow: `require_repo` + `require_github`; run `workflow_checks` (rendered like `c
 verify-by-discovery would raise). PAT/model **warns do not block** — the live run is what verifies
 them. Then `dispatch_smoke` triggers the managed workflow **directly** (`trigger_workflow` with
 `stage=smoke`, `plan=smoke`, `smoke="true"`, ref/`base` = `default_branch` with a `"main"` fallback),
-verifying by discovery on the minted `run_id`. It writes **no** `DispatchRecord` and creates **no**
+verifying by discovery on the minted `run_id`. It writes **no** dispatch record and creates **no**
 GitHub artifacts (no branch/PR/issue), so `perk workflow run list` (§8.17) is unaffected and the smoke
 stays a pure doctor diagnostic. Without `--wait`: print the run URL, **exit 0**. With `--wait`:
 `poll_smoke` loops to `completed` or `POLL_TIMEOUT_S` (600s, every `POLL_INTERVAL_S`=15s) —

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from perk import github
+from perk.boundary import ValidationError
 from perk.run import runner
 from perk.state import cache
 
@@ -46,22 +47,13 @@ def _gh_dispatch_fake(*, runs_payload, dispatch_rc=0, dispatch_stderr=""):
 
 def test_run_handle_round_trip():
     h = runner.RunHandle(runner="ci", kind="github-actions", run_ref="7", url="u")
-    assert runner.RunHandle.from_data(h.to_data()) == h
+    assert runner.RunHandle.model_validate(h.model_dump(mode="json")) == h
 
 
-def test_dispatch_record_round_trip():
-    rec = runner.DispatchRecord(
-        run_id="01ABC",
-        stage="implement",
-        plan_ref=_PLAN_REF,
-        runner="ci",
-        kind="github-actions",
-        status="dispatched",
-        dispatched_at="2026-01-01T00:00:00+00:00",
-        run_handle={"run_ref": "7"},
-        error=None,
-    )
-    assert runner.DispatchRecord.from_data(rec.to_data()) == rec
+def test_run_handle_is_frozen():
+    h = runner.RunHandle(runner="ci", kind="github-actions", run_ref="7", url="u")
+    with pytest.raises(ValidationError):
+        h.run_ref = "8"  # ty: ignore[invalid-assignment]
 
 
 # --- GitHubActionsRunner.dispatch -----------------------------------------------------
@@ -200,7 +192,7 @@ def test_write_then_read_dispatch_round_trips_and_forces_run_id(tmp_path):
         {
             "run_id": "WRONG",
             "stage": "implement",
-            "plan_ref": {"pr_id": "7"},
+            "plan_ref": {"provider": "github", "pr_id": "7", "url": "u/7", "labels": []},
             "runner": "",
             "kind": "github-actions",
             "status": "dispatched",
@@ -209,6 +201,7 @@ def test_write_then_read_dispatch_round_trips_and_forces_run_id(tmp_path):
     )
     back = cache.read_dispatch(tmp_path, "01RID")
     assert back is not None and back.run_id == "01RID" and back.stage == "implement"
+    assert back.plan_ref.pr_id == "7"
 
 
 def test_read_dispatch_absent_is_none(tmp_path):

@@ -77,8 +77,8 @@ def resolve_target(
             message=f"no dispatched run with run_id {run_id!r}",
         )
         return None
-    handle_data = record.run_handle
-    if not handle_data:
+    handle = record.run_handle
+    if handle is None:
         fail(
             ctx,
             as_json=as_json,
@@ -86,6 +86,5 @@ def resolve_target(
             message=f"run {run_id!r} was never triggered (no run handle); nothing to {action}",
         )
         return None
-    handle = runner.RunHandle.from_data(handle_data)
     runner_obj = runner.select_runner(record.runner)
     return repo_root, record, handle, runner_obj

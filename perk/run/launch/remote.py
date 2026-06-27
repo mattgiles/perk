@@ -7,7 +7,6 @@ nothing locally; it persists + verifies the ``run_id→plan`` linkage (establish
 """
 
 import json
-from dataclasses import replace
 from pathlib import Path
 
 from perk import github
@@ -86,7 +85,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
 
     # Persist the intent (the verified linkage), then read it back and assert the round-trip
     # established before consuming — the establish-before-consume gate (§8.2).
-    record = runner.DispatchRecord(
+    record = cache.DispatchCache(
         run_id=rid,
         stage=stage.id,
         plan_ref=plan_ref_data,
@@ -97,9 +96,9 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
         run_handle=None,
         error=None,
     )
-    cache.write_dispatch(repo_root, rid, record.to_data())
+    cache.write_dispatch(repo_root, rid, record.model_dump(mode="json", exclude_unset=True))
     back = cache.read_dispatch(repo_root, rid)
-    if back is None or back.run_id != rid or (back.plan_ref or {}).get("pr_id") != pr_id:
+    if back is None or back.run_id != rid or back.plan_ref.pr_id != pr_id:
         raise UserFacingCliError(
             f"dispatch state for run {rid} did not verify after write — refusing to trigger.",
             error_type="dispatch_state_unverified",
@@ -111,8 +110,8 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
             stage=stage.id, plan_ref=plan_ref_data, run_id=rid, base=base, repo_root=repo_root
         )
     except (runner.RunnerError, GitHubError) as exc:
-        failed = replace(record, status="failed", error=str(exc))
-        cache.write_dispatch(repo_root, rid, failed.to_data())
+        failed = record.model_copy(update={"status": "failed", "error": str(exc)})
+        cache.write_dispatch(repo_root, rid, failed.model_dump(mode="json", exclude_unset=True))
         raise UserFacingCliError(
             f"failed to dispatch stage '{stage.id}' to {runner_label}: {exc}",
             error_type="dispatch_failed",
@@ -120,8 +119,8 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
 
     # Finalize: record the verified handle. The critical verified linkage is the step-above one;
     # a finalize-write mismatch is loud-but-non-fatal.
-    final = replace(record, status="dispatched", run_handle=handle.to_data())
-    cache.write_dispatch(repo_root, rid, final.to_data())
+    final = record.model_copy(update={"status": "dispatched", "run_handle": handle})
+    cache.write_dispatch(repo_root, rid, final.model_dump(mode="json", exclude_unset=True))
     confirm = cache.read_dispatch(repo_root, rid)
     if confirm is None or confirm.status != "dispatched":
         user_output(f"⚠ dispatch record for run {rid} did not confirm 'dispatched' after finalize.")
@@ -136,7 +135,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
                 "stage": stage.id,
                 "run_id": rid,
                 "runner": runner_ref,
-                "run_handle": handle.to_data(),
+                "run_handle": handle.model_dump(mode="json"),
             }
         )
     )
