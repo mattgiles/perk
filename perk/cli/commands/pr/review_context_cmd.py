@@ -12,7 +12,6 @@ Exit codes: 0 ok · 1 invalid input / no plan / no PR / op failure · 2 not-a-re
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import click
 
@@ -25,6 +24,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 
 
@@ -91,7 +91,7 @@ def _impl(*, repo_root: Path) -> PrReviewContextResult:
     return PrReviewContextResult(context=context, branch=branch)
 
 
-def _resolve_plan_body(repo_root: Path, plan_ref: dict[str, Any]) -> str | None:
+def _resolve_plan_body(repo_root: Path, plan_ref: PlanRefCache) -> str | None:
     """Resolve the plan body backend-neutrally (mirrors ``materialize_plan_body``): the worktree
     cache mirror first, else fetch via the resolved issue backend (GitHub numeric ids, Linear
     ``ENG-123`` — the resolver owns the id shape). ``None`` when neither is available."""
@@ -103,7 +103,7 @@ def _resolve_plan_body(repo_root: Path, plan_ref: dict[str, Any]) -> str | None:
             text = ""
         if text:
             return text
-    pr_id = str(plan_ref.get("pr_id", "")).strip()  # fallback: fetch via the resolver (BOTH)
+    pr_id = plan_ref.pr_id.strip()  # fallback: fetch via the resolver (BOTH)
     if not pr_id:
         return None
     try:

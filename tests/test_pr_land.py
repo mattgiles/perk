@@ -20,6 +20,7 @@ from perk.cli.commands.pr.land_cmd import (
     _result_to_dict,
 )
 from perk.state import cache
+from perk.state.cache import AgentSessionCache, PlanRefCache
 
 _REF = {
     "provider": "github",
@@ -28,6 +29,11 @@ _REF = {
     "labels": ["perk:plan"],
     "objective_id": None,
 }
+
+
+def _ref(**over: object) -> PlanRefCache:
+    """Build a PlanRefCache from the canonical _REF defaults plus overrides."""
+    return PlanRefCache.model_validate({**_REF, **over})
 
 
 def _git_init(path: str) -> None:
@@ -290,7 +296,11 @@ def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
     assert baseline.exit_code == 0
 
     monkeypatch.setattr(linear_agent, "emission_enabled", lambda *_a, **_k: True)
-    monkeypatch.setattr(cache, "read_agent_session", lambda _r: {"session_id": "sess-1"})
+    monkeypatch.setattr(
+        cache,
+        "read_agent_session",
+        lambda _r: AgentSessionCache(session_id="sess-1", issue="7"),
+    )
 
     def boom(_environ):
         raise RuntimeError("agent substrate down")
@@ -316,24 +326,20 @@ def test_landed_summary_lines():
 
 def test_reconcile_on_land_no_objective_link():
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": None, "pr_id": "7"}, repo_root=Path()
+        plan_ref=_ref(objective_id=None, pr_id="7"), repo_root=Path()
     )
     assert out == ObjectiveLandUpdate(None, (), "no_objective_link")
 
 
 def test_reconcile_on_land_bad_objective_id():
     # Ids are opaque strings now — only an empty (post-`#`-strip) id is "bad".
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "#", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="#", pr_id="7"), repo_root=Path())
     assert out == ObjectiveLandUpdate(None, (), "bad_objective_id")
 
 
 def test_reconcile_on_land_objective_not_found(monkeypatch):
     monkeypatch.setattr(objectives, "get_objective", lambda **k: None)
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out == ObjectiveLandUpdate("5", (), "objective_not_found")
 
 
@@ -341,9 +347,7 @@ def test_reconcile_on_land_no_linked_node(monkeypatch):
     monkeypatch.setattr(
         objectives, "get_objective", lambda **k: _objective_state([_node("1.1", pr="#99")])
     )
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out == ObjectiveLandUpdate("5", (), "no_linked_node")
 
 
@@ -366,7 +370,7 @@ def test_reconcile_on_land_marks_backlinked_node_done(monkeypatch):
     closed: list[int] = []
     monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "#5", "pr_id": "7"}, repo_root=Path()
+        plan_ref=_ref(objective_id="#5", pr_id="7"), repo_root=Path()
     )
     # node 1.2 stays non-terminal → roadmap incomplete → no close.
     assert out == ObjectiveLandUpdate("5", ("1.1",), None)
@@ -385,9 +389,7 @@ def test_reconcile_on_land_skips_already_terminal_node(monkeypatch):
     )
     closed: list[int] = []
     monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out == ObjectiveLandUpdate("5", (), None, closed=True)
     assert closed == [5]
 
@@ -414,9 +416,7 @@ def test_reconcile_on_land_closes_objective_when_final_node_completes(monkeypatc
     )
     closed: list[int] = []
     monkeypatch.setattr(plans, "close_issue", lambda **k: closed.append(k["number"]) or True)
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out == ObjectiveLandUpdate("5", ("1.3",), None, closed=True)
     assert closed == [5]
 
@@ -441,9 +441,7 @@ def test_reconcile_on_land_close_failure_is_isolated(monkeypatch, capsys):
         raise github.GitHubError("gh exploded")
 
     monkeypatch.setattr(plans, "close_issue", _boom)
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out.nodes_marked == ("1.1",)
     assert out.closed is False
     assert out.skipped_reason is not None and out.skipped_reason.startswith("close_failed:")
@@ -494,7 +492,7 @@ def test_reconcile_on_land_completes_via_store_close_objective(monkeypatch):
         plans, "close_issue", lambda **k: (_ for _ in ()).throw(AssertionError("issue-tier close"))
     )
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
+        plan_ref=_ref(objective_id="proj-1", pr_id="ENG-7"), repo_root=Path()
     )
     assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None, closed=True)
     assert calls["closed"] == "proj-1"
@@ -536,7 +534,7 @@ def test_reconcile_on_land_posts_update_incomplete_and_fail_open(monkeypatch, ca
 
     monkeypatch.setattr(resolve, "resolve_objective_store", lambda _root: _Store())
     out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "proj-1", "pr_id": "ENG-7"}, repo_root=Path()
+        plan_ref=_ref(objective_id="proj-1", pr_id="ENG-7"), repo_root=Path()
     )
     # 1.2 stays non-terminal → incomplete → no close; the post failure never changes the result.
     assert out == ObjectiveLandUpdate("proj-1", ("1.1",), None)
@@ -548,9 +546,7 @@ def test_reconcile_on_land_is_fail_open(monkeypatch):
         raise github.GitHubError("gh exploded")
 
     monkeypatch.setattr(objectives, "get_objective", _boom)
-    out = _reconcile_objective_on_land(
-        plan_ref={"objective_id": "5", "pr_id": "7"}, repo_root=Path()
-    )
+    out = _reconcile_objective_on_land(plan_ref=_ref(objective_id="5", pr_id="7"), repo_root=Path())
     assert out.objective == "5" and out.nodes_marked == ()
     assert out.skipped_reason is not None and out.skipped_reason.startswith("error:")
 
@@ -609,7 +605,7 @@ def test_render_human_quiet_on_benign_learn_skip(capsys):
 
 
 def test_consume_learn_on_land_no_consumed():
-    out = _consume_learn_on_land(plan_ref={"pr_id": "7"}, repo_root=Path())
+    out = _consume_learn_on_land(plan_ref=_ref(pr_id="7"), repo_root=Path())
     assert out.closed == () and out.skipped_reason == "no_consumed_learn"
 
 
@@ -621,7 +617,7 @@ def test_consume_learn_on_land_closes_listed_issues(monkeypatch):
         lambda *, issue, repo_root, **k: closed.append(issue) or True,
     )
     out = _consume_learn_on_land(
-        plan_ref={"consumed_learn": [45, 50], "pr_id": "7"}, repo_root=Path()
+        plan_ref=_ref(consumed_learn=["45", "50"], pr_id="7"), repo_root=Path()
     )
     assert out.closed == ("45", "50") and out.skipped_reason is None
     assert closed == [45, 50]
@@ -633,7 +629,7 @@ def test_consume_learn_on_land_is_fail_open(monkeypatch):
         raise github.GitHubError("gh exploded")
 
     monkeypatch.setattr(plans, "close_and_label_consolidated", _boom)
-    out = _consume_learn_on_land(plan_ref={"consumed_learn": [45], "pr_id": "7"}, repo_root=Path())
+    out = _consume_learn_on_land(plan_ref=_ref(consumed_learn=["45"], pr_id="7"), repo_root=Path())
     assert out.closed == ()
     assert out.skipped_reason == "failed: #45"
 
@@ -651,7 +647,7 @@ def test_consume_learn_on_land_isolates_one_bad_issue(monkeypatch):
 
     monkeypatch.setattr(plans, "close_and_label_consolidated", _close)
     out = _consume_learn_on_land(
-        plan_ref={"consumed_learn": [45, 50, 51], "pr_id": "7"}, repo_root=Path()
+        plan_ref=_ref(consumed_learn=["45", "50", "51"], pr_id="7"), repo_root=Path()
     )
     assert out.closed == ("45", "51")
     assert closed == [45, 51]
@@ -662,7 +658,7 @@ def test_dry_run_learn_is_inert():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), {**_REF, "consumed_learn": [45]})
+        cache.write_plan_ref(Path(d), {**_REF, "consumed_learn": ["45"]})
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)

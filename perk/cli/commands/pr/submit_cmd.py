@@ -122,7 +122,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
             error_type="no_plan_ref",
         )
     branch = launch.resolve_plan_worktree_name(plan_ref)
-    issue = str(plan_ref["pr_id"])
+    issue = plan_ref.pr_id
 
     if dry_run:
         return PrSubmitResult(
@@ -157,7 +157,7 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
     # Mirror the `isinstance(...).strip()` guard the start-point resolver uses (launch.py) so all
     # three base readers treat a malformed/non-string cached value identically (ignore it), rather
     # than stringifying it into a bogus branch name.
-    pinned = plan_ref.get("base") or state.header.get("base")
+    pinned = plan_ref.base or state.header.get("base")
     base = (
         pinned.strip()
         if isinstance(pinned, str) and pinned.strip()

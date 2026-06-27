@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from perk import github
 from perk.cli.cli import cli
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 
 _REF = {
     "provider": "github",
@@ -112,7 +113,7 @@ def test_resolve_plan_body_prefers_cache_mirror(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend", _no_backend
     )
-    body = _resolve_plan_body(tmp_path, dict(_REF))
+    body = _resolve_plan_body(tmp_path, PlanRefCache.model_validate(_REF))
     assert body is not None and body.startswith("# Mirror plan")
 
 
@@ -133,6 +134,6 @@ def test_resolve_plan_body_falls_back_to_resolver_for_linear_id(monkeypatch, tmp
         "perk.cli.commands.pr.review_context_cmd.resolve.resolve_issue_backend",
         lambda _root: _Backend(),
     )
-    ref = {**_REF, "provider": "linear", "pr_id": "ENG-123"}
+    ref = PlanRefCache.model_validate({**_REF, "provider": "linear", "pr_id": "ENG-123"})
     assert _resolve_plan_body(tmp_path, ref) == "# Linear plan body"
     assert seen["issue_id"] == "ENG-123"

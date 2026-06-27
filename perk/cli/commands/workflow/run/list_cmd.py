@@ -14,6 +14,7 @@ from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import runner
 from perk.state import cache
+from perk.state.cache import DispatchCache
 from perk.substrate.output import machine_output, user_output
 
 # Per-column display clamps for the human table (the full RUN_ID is never clamped).
@@ -45,15 +46,15 @@ def _format_age(dispatched_at: str) -> str:
 
 
 def _row_to_dict(
-    record: dict[str, Any],
+    record: DispatchCache,
     *,
     run_obs: runner.RunObservation | None,
     pr: github.PullRequest | None,
 ) -> dict[str, Any]:
     """Assemble one run's JSON dict from the record + the (possibly ``None``) overlays."""
-    plan_ref = record.get("plan_ref") or {}
+    plan_ref = record.plan_ref or {}
     pr_id = str(plan_ref.get("pr_id", "")).strip()
-    handle = record.get("run_handle") or {}
+    handle = record.run_handle or {}
     run_block: dict[str, Any] | None = None
     if run_obs is not None:
         run_block = {
@@ -66,13 +67,13 @@ def _row_to_dict(
     if pr is not None:
         pr_block = {"number": pr.number, "url": pr.url, "state": pr.state}
     return {
-        "run_id": str(record.get("run_id", "")),
-        "stage": str(record.get("stage", "")),
-        "runner": str(record.get("runner", "")),
-        "kind": str(record.get("kind", "")),
-        "dispatch_status": str(record.get("status", "")),
-        "dispatched_at": str(record.get("dispatched_at", "")),
-        "error": record.get("error"),
+        "run_id": record.run_id,
+        "stage": record.stage,
+        "runner": record.runner,
+        "kind": record.kind,
+        "dispatch_status": record.status,
+        "dispatched_at": record.dispatched_at,
+        "error": record.error,
         "plan": {"pr_id": pr_id, "url": str(plan_ref.get("url", ""))},
         "pr": pr_block,
         "run": run_block,
@@ -80,7 +81,7 @@ def _row_to_dict(
 
 
 def _overlay(
-    record: dict[str, Any],
+    record: DispatchCache,
     repo_root: Any,
     *,
     plan_cache: dict[str, issue_backend.PlanState | None],
@@ -88,20 +89,18 @@ def _overlay(
     """Best-effort live overlay for one record: (run observation, correlated PR). Each read is
     fail-soft — a failure degrades to ``None`` with a one-line stderr note, never raises."""
     run_obs: runner.RunObservation | None = None
-    handle_data = record.get("run_handle")
+    handle_data = record.run_handle
     if handle_data:
         try:
             handle = runner.RunHandle.from_data(handle_data)
-            run_obs = runner.select_runner(str(record.get("runner", ""))).observe(
-                handle, repo_root=repo_root
-            )
+            run_obs = runner.select_runner(record.runner).observe(handle, repo_root=repo_root)
         except runner.RunnerError as exc:
-            user_output(f"note: run state unavailable for {record.get('run_id', '?')}: {exc}")
+            user_output(f"note: run state unavailable for {record.run_id}: {exc}")
             run_obs = None
 
     pr: github.PullRequest | None = None
     # Plan ids are opaque strings (contracts §8.21): any non-empty id resolves via the backend.
-    pr_id = str((record.get("plan_ref") or {}).get("pr_id", "")).strip()
+    pr_id = str((record.plan_ref or {}).get("pr_id", "")).strip()
     if pr_id:
         if pr_id in plan_cache:
             plan_state = plan_cache[pr_id]

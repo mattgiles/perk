@@ -9,6 +9,7 @@ from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import runner
 from perk.state import cache
+from perk.state.cache import DispatchCache
 from perk.substrate.output import machine_output, user_output
 
 EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -51,7 +52,7 @@ def resolve_target(
     as_json: bool,
     run_id: str,
     action: str,
-) -> tuple[Any, dict[str, Any], runner.RunHandle, runner.Runner] | None:
+) -> tuple[Any, DispatchCache, runner.RunHandle, runner.Runner] | None:
     """Shared control-command prelude: require a repo + GitHub auth, resolve ``run_id`` to its
     dispatch record and a reconstructed runner handle. Routes every expected failure through
     ``fail`` and returns ``None`` (the caller returns); on success returns
@@ -76,7 +77,7 @@ def resolve_target(
             message=f"no dispatched run with run_id {run_id!r}",
         )
         return None
-    handle_data = record.get("run_handle")
+    handle_data = record.run_handle
     if not handle_data:
         fail(
             ctx,
@@ -86,5 +87,5 @@ def resolve_target(
         )
         return None
     handle = runner.RunHandle.from_data(handle_data)
-    runner_obj = runner.select_runner(str(record.get("runner", "")))
+    runner_obj = runner.select_runner(record.runner)
     return repo_root, record, handle, runner_obj

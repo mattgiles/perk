@@ -176,10 +176,10 @@ def _link_from_handoff(
         handoff = cache.read_handoff(repo_root, run_id)
     except (OSError, ValueError):
         return objective_id, node_id
-    if not handoff:
+    if handoff is None:
         return objective_id, node_id
-    ho_objective = handoff.get("objective_id")
-    ho_node = handoff.get("node_id")
+    ho_objective = handoff.objective_id
+    ho_node = handoff.node_id
     if ho_objective and ho_node:
         return str(ho_objective), str(ho_node)
     return objective_id, node_id
@@ -205,10 +205,10 @@ def _consumed_learn_from_handoff(
         handoff = cache.read_handoff(repo_root, run_id)
     except (OSError, ValueError):
         return consumed_learn
-    if not handoff:
+    if handoff is None:
         return consumed_learn
-    raw = handoff.get("consumed_learn")
-    if not raw or not isinstance(raw, list):
+    raw = handoff.consumed_learn
+    if not raw:
         return consumed_learn
     ids = {cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())}
     if not ids:
@@ -235,9 +235,9 @@ def _adopt_from_handoff(
         handoff = cache.read_handoff(repo_root, run_id)
     except (OSError, ValueError):
         return adopt_from
-    if not handoff:
+    if handoff is None:
         return adopt_from
-    ho_adopt = handoff.get("adopt_from")
+    ho_adopt = handoff.adopt_from
     if ho_adopt:
         return str(ho_adopt)
     return adopt_from

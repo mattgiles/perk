@@ -7,10 +7,9 @@ actionable stage**. The launcher then materializes the ref + launches that stage
 `launch_stage`). Keeping the decision pure is what makes the resolution matrix unit-testable.
 """
 
-from typing import Any
-
 from perk import plan
 from perk.backends import issue_backend
+from perk.state.cache import PlanRefCache
 
 
 def resolve_resume_stage(
@@ -36,20 +35,27 @@ def resolve_resume_stage(
     return None
 
 
-def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) -> dict[str, Any]:
+def reconstruct_plan_ref(plan_state: issue_backend.PlanState, *, provider: str) -> PlanRefCache:
     """Rebuild the `cache.plan-ref` payload from a plan's issue-backend state (provider-agnostic).
 
     ``provider`` is the resolved issue backend's ``backend_id`` (contracts.md §8.21) — callers
     pass it from their resolved backend so this module stays pure (no config read here).
     """
-    return {
-        "provider": provider,
-        "pr_id": plan_state.id,
-        "url": plan_state.url,
-        "labels": [plan.PLAN_LABEL],
-        "objective_id": plan_state.header.get("objective_id"),
-        "consumed_learn": plan_state.header.get("consumed_learn") or [],
+    raw_consumed = plan_state.header.get("consumed_learn")
+    consumed = tuple(str(x) for x in raw_consumed) if isinstance(raw_consumed, list) else ()
+    return PlanRefCache(
+        provider=provider,
+        pr_id=plan_state.id,
+        url=plan_state.url,
+        labels=(plan.PLAN_LABEL,),
+        objective_id=_opt_str(plan_state.header.get("objective_id")),
+        consumed_learn=consumed,
         # The pinned base: recovered from the canonical `plan-header` so implement/resume/
         # the remote run-worker base off it even when the local cache.plan-ref is absent.
-        "base": plan_state.header.get("base"),
-    }
+        base=_opt_str(plan_state.header.get("base")),
+    )
+
+
+def _opt_str(value: object) -> str | None:
+    """The header value as a ``str``, or ``None`` for an absent/non-string value."""
+    return value if isinstance(value, str) else None

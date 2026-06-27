@@ -42,8 +42,8 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     # Prefer the plan's pinned base so the runner input carries the real target; fall back
     # to the GitHub default branch. (run_worker still treats `base` as informational — this keeps
     # the §8.13 input honest.)
-    plan_base = plan_ref.get("base")
-    if isinstance(plan_base, str) and plan_base.strip():
+    plan_base = plan_ref.base
+    if plan_base and plan_base.strip():
         base = plan_base.strip()
     else:
         try:
@@ -54,7 +54,8 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
                 f"⚠ could not resolve the default branch ({exc}); basing the dispatch on "
                 f"{base!r} — pass an explicit base if that is wrong."
             )
-    pr_id = str(plan_ref.get("pr_id", ""))
+    pr_id = plan_ref.pr_id
+    plan_ref_data = plan_ref.model_dump(mode="json", exclude_unset=True)
     inputs = {
         "run_id": rid,
         "stage": stage.id,
@@ -76,7 +77,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
                     "stage": stage.id,
                     "runner": runner_ref,
                     "run_id": rid,
-                    "plan_ref": plan_ref,
+                    "plan_ref": plan_ref_data,
                     "inputs": inputs,
                 }
             )
@@ -88,7 +89,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     record = runner.DispatchRecord(
         run_id=rid,
         stage=stage.id,
-        plan_ref=plan_ref,
+        plan_ref=plan_ref_data,
         runner=runner_ref,
         kind=selected.kind,
         status="dispatching",
@@ -98,11 +99,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     )
     cache.write_dispatch(repo_root, rid, record.to_data())
     back = cache.read_dispatch(repo_root, rid)
-    if (
-        back is None
-        or back.get("run_id") != rid
-        or (back.get("plan_ref") or {}).get("pr_id") != plan_ref.get("pr_id")
-    ):
+    if back is None or back.run_id != rid or (back.plan_ref or {}).get("pr_id") != pr_id:
         raise UserFacingCliError(
             f"dispatch state for run {rid} did not verify after write — refusing to trigger.",
             error_type="dispatch_state_unverified",
@@ -111,7 +108,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     # Trigger the runner. On failure, the failed record stays for supervisor visibility.
     try:
         handle = selected.dispatch(
-            stage=stage.id, plan_ref=plan_ref, run_id=rid, base=base, repo_root=repo_root
+            stage=stage.id, plan_ref=plan_ref_data, run_id=rid, base=base, repo_root=repo_root
         )
     except (runner.RunnerError, GitHubError) as exc:
         failed = replace(record, status="failed", error=str(exc))
@@ -126,7 +123,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     final = replace(record, status="dispatched", run_handle=handle.to_data())
     cache.write_dispatch(repo_root, rid, final.to_data())
     confirm = cache.read_dispatch(repo_root, rid)
-    if confirm is None or confirm.get("status") != "dispatched":
+    if confirm is None or confirm.status != "dispatched":
         user_output(f"⚠ dispatch record for run {rid} did not confirm 'dispatched' after finalize.")
 
     user_output(

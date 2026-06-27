@@ -56,11 +56,11 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
     target = number
     runs = turns = tokens = elapsed = 0
     for record in cache.list_dispatch_records(repo_root):
-        oid = (record.get("plan_ref") or {}).get("objective_id")
+        oid = (record.plan_ref or {}).get("objective_id")
         if _canon_objective(oid) != target:
             continue
         runs += 1
-        outcome = run_report.read_outcome(repo_root, str(record.get("run_id", "")))
+        outcome = run_report.read_outcome(repo_root, record.run_id)
         if not isinstance(outcome, dict):
             continue
         budget = outcome.get("budget")
@@ -74,7 +74,7 @@ def _cumulative_budget(repo_root: Path, number: str) -> dict[str, int]:
 
 def _in_flight_record(
     repo_root: Path, number: str
-) -> tuple[dict[str, Any], runner.RunHandle, runner.Runner] | None:
+) -> tuple[cache.DispatchCache, runner.RunHandle, runner.Runner] | None:
     """The newest in-flight dispatch for this objective, or ``None``.
 
     A record is in-flight when its ``run_handle`` is present and a live ``observe`` returns
@@ -83,17 +83,17 @@ def _in_flight_record(
     """
     target = number
     for record in cache.list_dispatch_records(repo_root):  # newest-first
-        if _canon_objective((record.get("plan_ref") or {}).get("objective_id")) != target:
+        if _canon_objective((record.plan_ref or {}).get("objective_id")) != target:
             continue
-        handle_data = record.get("run_handle")
+        handle_data = record.run_handle
         if not handle_data:
             continue
         handle = runner.RunHandle.from_data(handle_data)
-        runner_obj = runner.select_runner(str(record.get("runner", "")))
+        runner_obj = runner.select_runner(record.runner)
         try:
             obs = runner_obj.observe(handle, repo_root=repo_root)
         except (runner.RunnerError, GitHubError) as exc:
-            user_output(f"note: run state unavailable for {record.get('run_id', '?')}: {exc}")
+            user_output(f"note: run state unavailable for {record.run_id}: {exc}")
             continue
         if obs.status in {"queued", "in_progress"}:
             return record, handle, runner_obj
@@ -191,7 +191,7 @@ def _dispatch_stage_remote(
     )
     if dry_run:
         return None
-    cache.write_plan_ref(repo_root, plan_ref)
+    cache.write_plan_ref(repo_root, plan_ref.model_dump(mode="json", exclude_unset=True))
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         launch.launch_stage(
@@ -304,11 +304,11 @@ def _run_impl(
         if in_flight is not None:
             record, handle, runner_obj = in_flight
             if not wait:
-                payload.update(action="awaiting_run", run_id=record.get("run_id"))
+                payload.update(action="awaiting_run", run_id=record.run_id)
                 return payload
             completed = _poll_to_completion(handle, runner_obj, repo_root)
             if completed is None:
-                payload.update(action="awaiting_run", run_id=record.get("run_id"), timed_out=True)
+                payload.update(action="awaiting_run", run_id=record.run_id, timed_out=True)
                 return payload
             # Re-evaluate against FRESH state after the run settled: the just-completed run may have
             # advanced GitHub (a new PR, updated budget), so re-fetch the objective + rebuild the

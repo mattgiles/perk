@@ -27,6 +27,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
+from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 
 # Learn-consume skip reasons that are ordinary, not failures: non-factory plans carry no
@@ -134,7 +135,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             error_type="no_plan_ref",
         )
     branch = launch.resolve_plan_worktree_name(plan_ref)
-    issue = str(plan_ref["pr_id"])
+    issue = plan_ref.pr_id
 
     if dry_run:
         return PrLandResult(
@@ -166,7 +167,7 @@ def _pr_land_impl(*, repo_root: Path, dry_run: bool) -> PrLandResult:
             repo_root=repo_root,
             commit_message=_squash_commit_message(
                 issue=issue,
-                url=str(plan_ref.get("url", "")),
+                url=plan_ref.url,
                 backend_id=backend.backend_id,
                 repo_root=repo_root,
             ),
@@ -252,7 +253,7 @@ def _close_plan_issue_on_land(
         return False
 
 
-def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> ObjectiveLandUpdate:
+def _reconcile_objective_on_land(*, plan_ref: PlanRefCache, repo_root: Path) -> ObjectiveLandUpdate:
     """Mechanical auto-on-merge node-done: mark the objective node(s) backlinked to the
     just-merged plan ``done``.
 
@@ -261,7 +262,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
     logged loud-but-non-fatal to stderr and captured as a ``skipped_reason``. The auto node-done is
     deliberately set without an audit (the audit gate protects the model-facing tool path only).
     """
-    raw = plan_ref.get("objective_id")
+    raw = plan_ref.objective_id
     if not raw:
         return ObjectiveLandUpdate(None, (), "no_objective_link")
     objective_id = str(raw).lstrip("#").strip()
@@ -272,7 +273,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
         state = store.get_objective(objective_id=objective_id)
         if state is None:
             return ObjectiveLandUpdate(objective_id, (), "objective_not_found")
-        targets = objective.nodes_for_pr(list(state.nodes), str(plan_ref["pr_id"]))
+        targets = objective.nodes_for_pr(list(state.nodes), plan_ref.pr_id)
         if not targets:
             return ObjectiveLandUpdate(objective_id, (), "no_linked_node")
         marked: list[str] = []
@@ -285,7 +286,7 @@ def _reconcile_objective_on_land(*, plan_ref: dict, repo_root: Path) -> Objectiv
                 status=objective.NodeStatus.DONE,
             )
             marked.append(node.id)
-        pr_id = plan_ref["pr_id"]
+        pr_id = plan_ref.pr_id
         # Completeness is computed LOCALLY over the post-mark node list (no re-fetch — this path
         # just wrote those statuses itself): every target is terminal after the loop (already-
         # terminal targets were skipped but are terminal either way), other nodes as fetched. The
@@ -356,7 +357,7 @@ def _post_landed_update(
         )
 
 
-def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUpdate:
+def _consume_learn_on_land(*, plan_ref: PlanRefCache, repo_root: Path) -> LearnConsumeUpdate:
     """Consume the ``perk:learn`` issues a learned-docs plan consolidated: close each +
     label it ``perk:consolidated``.
 
@@ -365,11 +366,9 @@ def _consume_learn_on_land(*, plan_ref: dict, repo_root: Path) -> LearnConsumeUp
     and NEVER changes the land result — any failure is logged loud-but-non-fatal to stderr and
     captured as a ``skipped_reason``.
     """
-    raw = plan_ref.get("consumed_learn")
+    raw = plan_ref.consumed_learn
     if not raw:
         return LearnConsumeUpdate((), "no_consumed_learn")
-    if not isinstance(raw, list):
-        return LearnConsumeUpdate((), "bad_consumed_learn")
     ids = [cleaned for n in raw if (cleaned := str(n).lstrip("#").strip())]
     if not ids:
         return LearnConsumeUpdate((), "bad_consumed_learn")
