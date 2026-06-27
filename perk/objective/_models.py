@@ -12,7 +12,9 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from perk.boundary import LenientParseModel
+from pydantic import Field
+
+from perk.boundary import LenientParseModel, StrictInputModel, StrTuple
 from perk.plan import has_metadata_block
 
 OBJECTIVE_LABEL = "perk:objective"
@@ -153,6 +155,38 @@ class ObjectiveNodeEntry(LenientParseModel):
     depends_on: tuple[str, ...] | None = None
     slug: str | None = None
     comment: str | None = None
+
+    def to_domain(self) -> "ObjectiveNode":
+        return ObjectiveNode(
+            id=self.id,
+            description=self.description,
+            status=self.status,
+            pr=self.pr,
+            depends_on=self.depends_on,
+            slug=self.slug,
+            comment=self.comment,
+        )
+
+
+class StructuredRoadmapNode(StrictInputModel):
+    """Strict machine-input shape for one ``objective create --roadmap`` / ``objective_save`` node.
+
+    Mirrors the TS ``ROADMAP_PARAM_SCHEMA`` (``additionalProperties: false``): unknown keys fail
+    loudly. ``status`` and ``depends_on`` are the only intentionally-coercing fields under the
+    otherwise-strict model (a raw enum value / a list of strings).
+    """
+
+    id: str
+    description: str
+    # value-based StrEnum lookup must stay permissive under the otherwise-strict model.
+    status: NodeStatus = Field(default=NodeStatus.PENDING, strict=False)
+    slug: str | None = None
+    pr: str | None = None
+    depends_on: StrTuple | None = None  # named list->tuple coercion allowlist
+    comment: str | None = None
+    # Declared so extra="forbid" does NOT reject it; dropped here and read separately by
+    # parse_adopt_mapping (kept off the pristine ObjectiveNode).
+    adopt_issue: str | None = None
 
     def to_domain(self) -> "ObjectiveNode":
         return ObjectiveNode(

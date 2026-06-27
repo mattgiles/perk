@@ -5,11 +5,23 @@ from pathlib import Path
 from typing import Any
 
 import click
+from pydantic import ConfigDict, RootModel
 
+from perk.boundary import ValidationError, format_validation_error
 from perk.cli.alias import alias
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache, run_id
 from perk.substrate.output import machine_output, user_output
+
+
+class HandoffArgInput(RootModel[dict[str, object]]):
+    """Minimal strict parse: the ``--handoff`` payload must be a JSON object.
+
+    The handoff is open-ended (cache ``HandoffModel`` is ``extra="allow"``), so this only
+    enforces the object shape (a list/scalar fails loudly with a field path).
+    """
+
+    model_config = ConfigDict(strict=True)
 
 
 def _read_handoff_arg(value: str) -> dict[str, Any]:
@@ -25,9 +37,11 @@ def _read_handoff_arg(value: str) -> dict[str, Any]:
         parsed = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise UserFacingCliError(f"--handoff is not valid JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise UserFacingCliError("--handoff must be a JSON object.")
-    return parsed
+    try:
+        model = HandoffArgInput.model_validate(parsed)
+    except ValidationError as exc:
+        raise UserFacingCliError(format_validation_error(exc, source="--handoff")) from exc
+    return model.root
 
 
 @alias("nr")

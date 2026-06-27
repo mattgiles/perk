@@ -235,6 +235,14 @@ class BatchResolveResult:
     results: tuple[ThreadResolveResult, ...]
 
 
+@dataclass(frozen=True)
+class ResolveThreadRequest:
+    """One review thread to reply-then-resolve (the typed batch item)."""
+
+    thread_id: str
+    comment: str | None = None
+
+
 def _graphql_proc(
     query: str,
     *,
@@ -401,17 +409,17 @@ def _resolve_single(*, thread_id: str, comment: str | None, repo_root: Path) -> 
 
 
 def resolve_review_threads(
-    *, batch: list[dict[str, object]], repo_root: Path, dry_run: bool = False
+    *, batch: list[ResolveThreadRequest], repo_root: Path, dry_run: bool = False
 ) -> BatchResolveResult:
-    """Reply-then-resolve a batch of review threads. ``batch`` items are ``{thread_id, comment?}``.
+    """Reply-then-resolve a batch of review threads. ``batch`` items are ``ResolveThreadRequest``.
     Top-level ``success`` is True only when **all** resolved. Per-item failures are captured;
     a hard infra failure (gh missing / timeout) raises ``GitHubError`` (via ``_run``)."""
     if dry_run:
         results = tuple(
             ThreadResolveResult(
-                thread_id=str(item["thread_id"]),
+                thread_id=item.thread_id,
                 success=True,
-                comment_added=bool(item.get("comment")),
+                comment_added=bool(item.comment),
                 error=None,
             )
             for item in batch
@@ -419,8 +427,8 @@ def resolve_review_threads(
         return BatchResolveResult(success=True, results=results)
     results = tuple(
         _resolve_single(
-            thread_id=str(item["thread_id"]),
-            comment=_exec._opt_str(item.get("comment")),
+            thread_id=item.thread_id,
+            comment=item.comment,
             repo_root=repo_root,
         )
         for item in batch

@@ -238,6 +238,39 @@ def test_post_bad_batch_fyi_non_string_entry(monkeypatch):
     assert json.loads(result.output)["error_type"] == "bad_batch"
 
 
+def test_post_bad_batch_unknown_key_names_field_path(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        batch = _write_batch(d, {"verdict": "clean", "summary": "ok", "bogus": 1})
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "bad_batch"
+    assert "bogus" in data["message"]
+
+
+def test_post_bad_batch_wrong_typed_line_names_field_path(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        bad = {
+            "verdict": "actionable",
+            "summary": "ok",
+            "comments": [{"path": "x.py", "line": "3", "body": "nit"}],
+        }
+        batch = _write_batch(d, bad)
+        result = runner.invoke(cli, ["pr", "review-post", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "bad_batch"
+    assert "line" in data["message"]
+
+
 def test_post_bad_batch_malformed_comment(monkeypatch):
     _authed(monkeypatch)
     runner = CliRunner()

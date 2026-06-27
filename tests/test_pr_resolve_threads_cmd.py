@@ -107,6 +107,30 @@ def test_resolve_missing_thread_id_exits_1(monkeypatch):
     assert json.loads(result.output)["error_type"] == "bad_batch"
 
 
+def test_resolve_unknown_key_names_field_path(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, [{"thread_id": "PRRT_1", "bogus": 1}])
+        result = runner.invoke(cli, ["pr", "resolve-threads", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "bad_batch" and "bogus" in data["message"]
+
+
+def test_resolve_wrong_typed_thread_id_names_field_path(monkeypatch):
+    _authed(monkeypatch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        batch = _write_batch(d, [{"thread_id": 5}])
+        result = runner.invoke(cli, ["pr", "resolve-threads", "--json", "--batch", batch])
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["error_type"] == "bad_batch" and "thread_id" in data["message"]
+
+
 def test_resolve_missing_batch_file_exits_2_or_usage():
     # a nonexistent --batch path is rejected by click (exists=True) before repo resolution
     runner = CliRunner()

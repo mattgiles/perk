@@ -20,11 +20,13 @@ Exit codes: 0 ok · 1 invalid input / unauthed / bad batch / no plan / no PR / f
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import Literal
 
 import click
+from pydantic import Field, model_validator
 
 from perk import github
+from perk.boundary import StrictInputModel, ValidationError, format_validation_error
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -119,6 +121,34 @@ def _resolve_pr(*, repo_root: Path) -> int:
     return pr.number
 
 
+class ReviewCommentInput(StrictInputModel):
+    """One inline review finding in the machine-authored batch (strict: a typo fails loudly)."""
+
+    path: str = Field(min_length=1)
+    line: int
+    body: str = Field(min_length=1)
+
+
+class ReviewBatchInput(StrictInputModel):
+    """The strict `/pr-review` batch shape (`{verdict, summary, comments?, fyi?}`).
+
+    `comments`/`fyi` stay nullable so an explicit `null` is tolerated (today's behavior),
+    normalized to `[]` in conversion. `line: int` under strict rejects `bool`/`float`/`str`
+    (preserving the old `isinstance(line, bool)` guard).
+    """
+
+    verdict: Literal["clean", "actionable"]
+    summary: str = Field(min_length=1)
+    comments: list[ReviewCommentInput] | None = None
+    fyi: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _clean_has_no_comments(self) -> "ReviewBatchInput":
+        if self.verdict == "clean" and self.comments:
+            raise ValueError("a 'clean' verdict must not carry comments")
+        return self
+
+
 def _load_batch(
     batch_file: Path,
 ) -> tuple[str, str, list[github.InlineReviewComment], list[str]]:
@@ -129,65 +159,17 @@ def _load_batch(
         raise UserFacingCliError(
             f"Could not read the batch file: {exc}", error_type="bad_batch"
         ) from exc
-    if not isinstance(data, dict):
-        raise UserFacingCliError("Batch must be a JSON object", error_type="bad_batch")
-    batch = cast("dict[str, object]", data)
-    raw_verdict = batch.get("verdict")
-    if raw_verdict not in ("clean", "actionable"):
+    try:
+        model = ReviewBatchInput.model_validate(data)
+    except ValidationError as exc:
         raise UserFacingCliError(
-            "Batch must have a 'verdict' of exactly 'clean' or 'actionable'",
-            error_type="bad_batch",
-        )
-    verdict = cast("str", raw_verdict)
-    summary = batch.get("summary")
-    if not isinstance(summary, str) or not summary.strip():
-        raise UserFacingCliError(
-            "Batch must have a non-empty string 'summary'", error_type="bad_batch"
-        )
-    raw_comments = batch.get("comments", [])
-    if raw_comments is None:
-        raw_comments = []
-    if not isinstance(raw_comments, list):
-        raise UserFacingCliError("Batch 'comments' must be an array", error_type="bad_batch")
-    comments: list[github.InlineReviewComment] = []
-    for idx, raw in enumerate(raw_comments):
-        if not isinstance(raw, dict):
-            raise UserFacingCliError(f"Comment {idx} must be an object", error_type="bad_batch")
-        item = cast("dict[str, object]", raw)
-        path = item.get("path")
-        line = item.get("line")
-        body = item.get("body")
-        if not isinstance(path, str) or not path:
-            raise UserFacingCliError(
-                f"Comment {idx} has a missing/non-string 'path'", error_type="bad_batch"
-            )
-        if not isinstance(line, int) or isinstance(line, bool):
-            raise UserFacingCliError(
-                f"Comment {idx} has a missing/non-integer 'line'", error_type="bad_batch"
-            )
-        if not isinstance(body, str) or not body.strip():
-            raise UserFacingCliError(
-                f"Comment {idx} has a missing/non-string 'body'", error_type="bad_batch"
-            )
-        comments.append(github.InlineReviewComment(path=path, line=line, body=body))
-    if verdict == "clean" and comments:
-        raise UserFacingCliError(
-            "A 'clean' verdict must not carry comments — an actionable finding contradicts it",
-            error_type="bad_batch",
-        )
-    raw_fyi = batch.get("fyi", [])
-    if raw_fyi is None:
-        raw_fyi = []
-    if not isinstance(raw_fyi, list):
-        raise UserFacingCliError("Batch 'fyi' must be an array", error_type="bad_batch")
-    fyi: list[str] = []
-    for idx, note in enumerate(cast("list[object]", raw_fyi)):
-        if not isinstance(note, str) or not note.strip():
-            raise UserFacingCliError(
-                f"FYI note {idx} must be a non-empty string", error_type="bad_batch"
-            )
-        fyi.append(note)
-    return verdict, summary, comments, fyi
+            format_validation_error(exc, source="batch"), error_type="bad_batch"
+        ) from exc
+    comments = [
+        github.InlineReviewComment(path=c.path, line=c.line, body=c.body)
+        for c in (model.comments or [])
+    ]
+    return model.verdict, model.summary, comments, list(model.fyi or [])
 
 
 def _result_to_dict(
