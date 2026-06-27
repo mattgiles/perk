@@ -11,12 +11,12 @@ package facade so ``launch._WORKTREE_SETUP_TIMEOUT_S`` resolves verbatim.
 import subprocess
 from pathlib import Path
 
+from perk import plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import user_output
 
 # Per-command wall-clock cap for `[worktree] setup` commands (10 minutes) — `uv sync` / `npm ci`
@@ -66,7 +66,7 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
             )
 
 
-def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: PlanRefCache | None) -> None:
+def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRef | None) -> None:
     """Fetch the plan body from its canonical source and cache it into the worktree.
 
     Public: ``run_worker.position_worktree`` is the second consumer (the one canonical path for

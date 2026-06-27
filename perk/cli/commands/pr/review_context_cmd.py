@@ -15,7 +15,7 @@ from pathlib import Path
 
 import click
 
-from perk import github
+from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.commands.pr.shared import fail
@@ -24,7 +24,6 @@ from perk.cli.ensure import UserFacingCliError
 from perk.github import GitHubError
 from perk.run import launch
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 
 
@@ -91,7 +90,7 @@ def _impl(*, repo_root: Path) -> PrReviewContextResult:
     return PrReviewContextResult(context=context, branch=branch)
 
 
-def _resolve_plan_body(repo_root: Path, plan_ref: PlanRefCache) -> str | None:
+def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
     """Resolve the plan body backend-neutrally (mirrors ``materialize_plan_body``): the worktree
     cache mirror first, else fetch via the resolved issue backend (GitHub numeric ids, Linear
     ``ENG-123`` — the resolver owns the id shape). ``None`` when neither is available."""

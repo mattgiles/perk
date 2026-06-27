@@ -16,13 +16,13 @@ from urllib.parse import urlsplit
 
 import click
 
+from perk import plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import load_registry
 
@@ -97,7 +97,7 @@ def resume_cmd(
         return
 
     # Real run: materialize the ref at the repo root, then launch the stage (execs pi).
-    cache.write_plan_ref(repo_root, ref.model_dump(mode="json", exclude_unset=True))
+    cache.write_plan_ref(repo_root, ref)
     stage = next(s for s in load_registry().stages if s.id == stage_id)
     launch.launch_stage(
         repo_root=repo_root,
@@ -188,7 +188,7 @@ def _render_done(plan_id: str, *, as_json: bool) -> None:
 
 
 def _render_dry_run(
-    plan_id: str, stage_id: str, worktree: str, ref: PlanRefCache, *, as_json: bool
+    plan_id: str, stage_id: str, worktree: str, ref: plan.PlanRef, *, as_json: bool
 ) -> None:
     if as_json:
         machine_output(
@@ -198,7 +198,7 @@ def _render_dry_run(
                     "plan": plan_id,
                     "resumed_stage": stage_id,
                     "worktree": worktree,
-                    "plan_ref": ref.model_dump(mode="json", exclude_unset=True),
+                    "plan_ref": plan.PlanRefOut.from_domain(ref).model_dump(mode="json"),
                     "dry_run": True,
                 }
             )

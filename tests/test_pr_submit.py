@@ -4,13 +4,12 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.backends.github import plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
 from perk.cli.commands.pr import submit_cmd
 from perk.state import cache
-from perk.state.cache import AgentSessionCache
 from perk.substrate import git
 
 _REF = {
@@ -100,7 +99,7 @@ def _run(monkeypatch, args, *, write_ref=True):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         if write_ref:
-            cache.write_plan_ref(Path(d), _REF)
+            cache.write_plan_ref(Path(d), plan.PlanRefModel.model_validate(_REF).to_domain())
         return runner.invoke(cli, args)
 
 
@@ -175,7 +174,9 @@ def test_submit_targets_pinned_base_from_plan_ref(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), {**_REF, "base": "develop"})
+        cache.write_plan_ref(
+            Path(d), plan.PlanRefModel.model_validate({**_REF, "base": "develop"}).to_domain()
+        )
         result = runner.invoke(cli, ["pr", "submit", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
@@ -313,7 +314,7 @@ def test_linear_agent_failure_leaves_submit_payload_byte_identical(monkeypatch):
     monkeypatch.setattr(
         cache,
         "read_agent_session",
-        lambda _r: AgentSessionCache(session_id="sess-1", issue="7"),
+        lambda _r: cache.AgentSession(session_id="sess-1", issue="7"),
     )
 
     def boom(_environ):

@@ -10,10 +10,10 @@ paired parity suites.
 
 from pathlib import Path
 
+from perk import plan
 from perk.prompts import render
 from perk.run.launch.worktree import ResolvedWorktree
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.binding_delivery import render_cold_bindings
 from perk.substrate.config import Config
 from perk.substrate.output import user_output
@@ -22,7 +22,7 @@ from perk.substrate.registry import Stage
 
 def _initial_prompt(
     stage: Stage,
-    plan_ref: PlanRefCache | None,
+    plan_ref: plan.PlanRef | None,
     config: Config | None = None,
     preview: bool = False,
 ) -> str | None:
@@ -63,7 +63,7 @@ def _plan_read_instruction(provider: str, pr_id: str, url: str) -> str:
     return render("common/plan-read/other.md", {"pr_id": pr_id, "url": url})
 
 
-def _implement_prompt(plan_ref: PlanRefCache) -> str:
+def _implement_prompt(plan_ref: plan.PlanRef) -> str:
     """The implement-stage primer. The wording lives in the canonical template
     ``prompts/stages/implement.md``, rendered identically by both planes via the shared render seam
     (contracts.md §8.31); branching stays in code — only the ``read_cmd`` var (the provider-selected
@@ -82,7 +82,7 @@ def _implement_prompt(plan_ref: PlanRefCache) -> str:
     )
 
 
-def _address_prompt(plan_ref: PlanRefCache, model: str | None = None, preview: bool = False) -> str:
+def _address_prompt(plan_ref: plan.PlanRef, model: str | None = None, preview: bool = False) -> str:
     """Prime the address stage: classify feedback in an isolated child, fix only actionable items,
     then resolve the threads. The perk-address skill (the judgment layer) is delivered by
     the skill-binding mechanism, not hardcoded here.
@@ -115,7 +115,7 @@ def _address_prompt(plan_ref: PlanRefCache, model: str | None = None, preview: b
     return render("stages/address/action.md", variables)
 
 
-def _learn_prompt(plan_ref: PlanRefCache) -> str:
+def _learn_prompt(plan_ref: plan.PlanRef) -> str:
     """Prime the learn stage: investigate the just-landed change and capture durable learnings.
     The perk-learn skill (the judgment layer) is delivered by the skill-binding
     mechanism, not hardcoded here.

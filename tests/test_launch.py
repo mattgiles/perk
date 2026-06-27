@@ -1,10 +1,12 @@
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
 
 import pytest
-from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
+from _launch_helpers import _PLAN_REF, _PLAN_REF_JSON, _PLAN_REF_MODEL, _config, _stage
 
+from perk import plan
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
@@ -19,7 +21,6 @@ from perk.run.launch import (
     resolve_worktree,
 )
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
 from perk.substrate.config import Config
@@ -131,14 +132,14 @@ def test_resolve_base_resumed_branch_wins_over_plan_base(monkeypatch, tmp_path):
     [("42", "plan-42"), ("PROJ-123", "plan-PROJ-123")],
 )
 def test_resolve_plan_worktree_name(pr_id, expected):
-    ref = _PLAN_REF_MODEL.model_copy(update={"pr_id": pr_id})
+    ref = dataclasses.replace(_PLAN_REF_MODEL, pr_id=pr_id)
     assert resolve_plan_worktree_name(ref) == expected
 
 
 @pytest.mark.parametrize("pr_id", ["", "a/b", ".", ".."])
 def test_resolve_plan_worktree_name_rejects_unusable(pr_id):
     with pytest.raises(UserFacingCliError, match="unusable as a worktree name"):
-        resolve_plan_worktree_name(_PLAN_REF_MODEL.model_copy(update={"pr_id": pr_id}))
+        resolve_plan_worktree_name(dataclasses.replace(_PLAN_REF_MODEL, pr_id=pr_id))
 
 
 def test_implement_no_plan_ref_errors(tmp_path):
@@ -180,7 +181,7 @@ def test_implement_dry_run_json_carries_worktree_and_plan_ref(tmp_path, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["stage"] == "implement"
     assert data["worktree"].endswith("/plan-42")
-    assert data["plan_ref"] == _PLAN_REF
+    assert data["plan_ref"] == _PLAN_REF_JSON
     # The implement launch is primed — argv carries the initial prompt.
     assert data["argv"][0] == "pi"
     assert len(data["argv"]) == 3
@@ -360,7 +361,7 @@ def test_initial_prompt_primes_learn():
     assert _initial_prompt(_stage("learn"), None) is None
 
 
-_LINEAR_PLAN_REF = PlanRefCache(
+_LINEAR_PLAN_REF = plan.PlanRef(
     provider="linear",
     pr_id="a1b2c3d4-0000-0000-0000-000000000000",
     url="https://linear.app/acme/issue/ENG-123",
@@ -565,7 +566,7 @@ def test_remote_drive_prefers_pinned_plan_base(tmp_path, capsys, monkeypatch):
     # GitHub default branch (which must not even be consulted).
     from perk.run import runner
 
-    cache.write_plan_ref(tmp_path, {**_PLAN_REF, "base": "develop"})
+    cache.write_plan_ref(tmp_path, dataclasses.replace(_PLAN_REF, base="develop"))
     handle = runner.RunHandle(
         runner="ci-large", kind="github-actions", run_ref="99", url="https://gh/run/99"
     )
@@ -808,7 +809,7 @@ def test_create_bases_off_pinned_plan_base(git_repo_with_remote, monkeypatch):
     # A plan-ref carrying `base` cuts the worktree from origin/<base>, not the trunk.
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
-    cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})
+    cache.write_plan_ref(clone, dataclasses.replace(_PLAN_REF, base="develop"))
     _no_exec(monkeypatch)
     bases: list[str | None] = []
     real_add = git_mod.worktree_add
@@ -838,7 +839,7 @@ def test_explicit_worktree_recovers_base_but_does_not_clobber_plan_ref(
     # ResolvedWorktree.plan_ref stays None on this path).
     clone, _remote, _advance = git_repo_with_remote
     _push_origin_branch(clone, "develop")
-    cache.write_plan_ref(clone, {**_PLAN_REF, "base": "develop"})
+    cache.write_plan_ref(clone, dataclasses.replace(_PLAN_REF, base="develop"))
     _no_exec(monkeypatch)
     bases: list[str | None] = []
     real_add = git_mod.worktree_add

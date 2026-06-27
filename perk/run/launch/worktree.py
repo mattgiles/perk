@@ -10,9 +10,9 @@ The pure-ish resolution layer: the
 from dataclasses import dataclass
 from pathlib import Path
 
+from perk import plan
 from perk.cli.ensure import Ensure, UserFacingCliError
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate import git
 from perk.substrate.config import Config
 from perk.substrate.git import GitError
@@ -25,7 +25,7 @@ class ResolvedWorktree:
     """The worktree a stage runs in, plus the plan-ref to materialize into it (if derived)."""
 
     path: Path
-    plan_ref: PlanRefCache | None
+    plan_ref: plan.PlanRef | None
     base: str | None = None  # the start-point the create path used (None => off local HEAD)
     # True only when this resolution **freshly created** the worktree (the `git.worktree_add`
     # branch) — not idempotent reuse, a dry run, or a `worktree: none` stage. Gates the
@@ -62,7 +62,7 @@ def resolve_target(stage: Stage, remote: str | None) -> Target:
     return Target(is_remote=True, runner=remote)
 
 
-def resolve_plan_worktree_name(plan_ref: PlanRefCache) -> str:
+def resolve_plan_worktree_name(plan_ref: plan.PlanRef) -> str:
     """Deterministic, re-derivable worktree/branch name for a plan (D1).
 
     ``pr_id`` stays a string (provider-agnostic): ``42 -> plan-42``, ``PROJ-123 ->
@@ -126,9 +126,9 @@ def resolve_worktree(
     if stage.worktree == "none":
         return ResolvedWorktree(path=repo_root, plan_ref=None)
 
-    plan_ref: PlanRefCache | None = None
+    plan_ref: plan.PlanRef | None = None
     name = worktree
-    base_ref: PlanRefCache | None = None
+    base_ref: plan.PlanRef | None = None
     if name is None:  # D2/D3: derive the name from the active plan-ref
         plan_ref = cache.read_plan_ref(repo_root)
         if plan_ref is None:

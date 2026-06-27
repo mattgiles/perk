@@ -5,13 +5,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.backends import issue_backend, resolve
 from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch, resume
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 
 
 def _pr(state: str) -> github.PullRequest:
@@ -56,7 +55,7 @@ def test_reconstruct_plan_ref():
     ref = resume.reconstruct_plan_ref(
         _neutral_state(header={"objective_id": "O1"}), provider="github"
     )
-    assert ref == PlanRefCache(
+    assert ref == plan.PlanRef(
         provider="github",
         pr_id="7",
         url="https://gh/o/r/issues/7",

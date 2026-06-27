@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from perk import github
-from perk.boundary import StrictBoundaryModel
+from perk.boundary import LenientParseModel
 
 # The workflow filename the artifact MUST be named (locked here, built there). The
 # GitHub Actions runner triggers this workflow; its `run-name` must embed `${{ inputs.run_id }}`
@@ -36,18 +36,38 @@ class RunnerError(Exception):
     """A runner could not dispatch/verify (or observe/cancel) a run."""
 
 
-class RunHandle(StrictBoundaryModel):
+@dataclass(frozen=True)
+class RunHandle:
     """The opaque, runner-side handle a successful (verified) ``dispatch`` returns.
 
     ``run_ref`` is the runner-native run id (the GitHub Actions numeric id, as a string) — the
-    handle stored *inside* the dispatch record; it is **not** the perk ``run_id``. JSON-stable via
-    ``model_dump(mode="json")`` / ``model_validate``.
+    handle stored *inside* the dispatch record; it is **not** the perk ``run_id``. The JSON
+    boundary is :class:`RunHandleModel` (the dispatch cache's nested ``run_handle``).
     """
 
     runner: str  # the runner ref the dispatch was routed to ("" => default)
     kind: str  # the runner kind discriminator ("github-actions")
     run_ref: str  # the runner-native run id
     url: str  # the human run URL
+
+
+class RunHandleModel(LenientParseModel):
+    """The JSON parse/serialize boundary for :class:`RunHandle` (the dispatch cache's nested
+    ``run_handle``). Field order matches :class:`RunHandle` for byte-stable serialization."""
+
+    runner: str
+    kind: str
+    run_ref: str
+    url: str
+
+    def to_domain(self) -> RunHandle:
+        """Convert the validated model into the frozen domain object."""
+        return RunHandle(runner=self.runner, kind=self.kind, run_ref=self.run_ref, url=self.url)
+
+    @classmethod
+    def from_domain(cls, handle: RunHandle) -> "RunHandleModel":
+        """Project the frozen :class:`RunHandle` onto the serialization boundary."""
+        return cls(runner=handle.runner, kind=handle.kind, run_ref=handle.run_ref, url=handle.url)
 
 
 @dataclass(frozen=True)

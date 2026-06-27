@@ -19,6 +19,7 @@ from pathlib import Path
 
 import click
 
+from perk import plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.alias import alias
@@ -27,7 +28,6 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
@@ -115,7 +115,7 @@ def implement(
 
     # Select #N as the active plan (mirrors `perk resume`), then launch (worktree derived + the
     # ref materialized into it by launch_stage; the session is primed by Bug 1).
-    cache.write_plan_ref(repo_root, ref.model_dump(mode="json", exclude_unset=True))
+    cache.write_plan_ref(repo_root, ref)
     launch.launch_stage(
         repo_root=repo_root,
         config=config,
@@ -129,7 +129,7 @@ def implement(
 
 
 def _render_dry_run(
-    repo_root: Path, plan_id: str, worktree: str, ref: PlanRefCache, base: str | None
+    repo_root: Path, plan_id: str, worktree: str, ref: plan.PlanRef, base: str | None
 ) -> None:
     # No worktree exists yet on a fresh plan, so resolve the base the same way the active-ref
     # dry-run create does (local refs only, no fetch) to keep the two dry-run JSONs consistent.
@@ -141,7 +141,7 @@ def _render_dry_run(
                 "stage": "implement",
                 "plan": plan_id,
                 "worktree": worktree,
-                "plan_ref": ref.model_dump(mode="json", exclude_unset=True),
+                "plan_ref": plan.PlanRefOut.from_domain(ref).model_dump(mode="json"),
                 "base": resolved_base,
                 "dry_run": True,
             }

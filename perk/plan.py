@@ -21,7 +21,7 @@ from typing import Literal
 
 import yaml
 
-from perk.boundary import OutputModel
+from perk.boundary import LenientParseModel, OutputModel, StrTuple
 
 PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
@@ -168,6 +168,49 @@ class PlanHeaderOut(OutputModel):
             consumed_learn=header.consumed_learn,
             base=header.base,
             adopted_from=header.adopted_from,
+        )
+
+
+class PlanRefModel(LenientParseModel):
+    """The ``cache.plan-ref`` read/write boundary (the INPUT/parse edge of :class:`PlanRef`).
+
+    Completes the canonical input/domain/output trio alongside :class:`PlanRef` +
+    :class:`PlanRefOut`. Field declaration order matches the on-disk ``plan-ref.json`` shape
+    (the order :class:`PlanRefOut` emits) so a round-trip is byte-stable. ``labels`` is
+    :data:`StrTuple` so the JSON list coerces to a tuple.
+    """
+
+    provider: str
+    pr_id: str
+    url: str
+    labels: StrTuple
+    objective_id: str | None = None
+    consumed_learn: StrTuple = ()
+    base: str | None = None
+
+    def to_domain(self) -> PlanRef:
+        """Convert the validated model into the frozen domain object."""
+        return PlanRef(
+            provider=self.provider,
+            pr_id=self.pr_id,
+            url=self.url,
+            labels=self.labels,
+            objective_id=self.objective_id,
+            consumed_learn=self.consumed_learn,
+            base=self.base,
+        )
+
+    @classmethod
+    def from_domain(cls, ref: PlanRef) -> "PlanRefModel":
+        """Project the frozen :class:`PlanRef` onto the read/write boundary."""
+        return cls(
+            provider=ref.provider,
+            pr_id=ref.pr_id,
+            url=ref.url,
+            labels=ref.labels,
+            objective_id=ref.objective_id,
+            consumed_learn=ref.consumed_learn,
+            base=ref.base,
         )
 
 

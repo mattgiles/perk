@@ -4,7 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github, objective
+from perk import github, objective, plan
 from perk.backends.github import objectives, plans
 from perk.backends.linear import agent as linear_agent
 from perk.cli.cli import cli
@@ -20,7 +20,6 @@ from perk.cli.commands.pr.land_cmd import (
     _result_to_dict,
 )
 from perk.state import cache
-from perk.state.cache import AgentSessionCache, PlanRefCache
 
 _REF = {
     "provider": "github",
@@ -31,9 +30,9 @@ _REF = {
 }
 
 
-def _ref(**over: object) -> PlanRefCache:
-    """Build a PlanRefCache from the canonical _REF defaults plus overrides."""
-    return PlanRefCache.model_validate({**_REF, **over})
+def _ref(**over: object) -> plan.PlanRef:
+    """Build a plan.PlanRef from the canonical _REF defaults plus overrides."""
+    return plan.PlanRefModel.model_validate({**_REF, **over}).to_domain()
 
 
 def _git_init(path: str) -> None:
@@ -84,7 +83,7 @@ def _run(args, *, write_ref=True):
     with runner.isolated_filesystem() as d:
         _git_init(d)
         if write_ref:
-            cache.write_plan_ref(Path(d), _REF)
+            cache.write_plan_ref(Path(d), _ref())
         return runner.invoke(cli, args)
 
 
@@ -92,7 +91,7 @@ def test_dry_run_is_offline_and_sets_no_marker():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -121,7 +120,7 @@ def test_real_land_draft_marks_ready_merges_and_sets_marker(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=True)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -138,7 +137,7 @@ def test_real_land_empty_title_falls_back_to_closes(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False, title="")
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -150,7 +149,7 @@ def test_real_land_ready_pr_skips_mark_ready(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -162,7 +161,7 @@ def test_real_land_already_merged_is_idempotent(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         calls = _stub_land(monkeypatch, draft=False, merged=True)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -184,7 +183,7 @@ def test_real_land_non_default_base_closes_plan_issue(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="release")
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -204,7 +203,7 @@ def test_real_land_default_base_keeps_autoclose(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="main")
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -222,7 +221,7 @@ def test_real_land_unknown_base_is_fail_open(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         _stub_land(monkeypatch, draft=False, base_ref="")
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 0
@@ -299,7 +298,7 @@ def test_linear_agent_failure_leaves_land_payload_byte_identical(monkeypatch):
     monkeypatch.setattr(
         cache,
         "read_agent_session",
-        lambda _r: AgentSessionCache(session_id="sess-1", issue="7"),
+        lambda _r: cache.AgentSession(session_id="sess-1", issue="7"),
     )
 
     def boom(_environ):
@@ -658,7 +657,7 @@ def test_dry_run_learn_is_inert():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), {**_REF, "consumed_learn": ["45"]})
+        cache.write_plan_ref(Path(d), _ref(consumed_learn=["45"]))
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -669,7 +668,7 @@ def test_dry_run_objective_is_inert():
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), {**_REF, "objective_id": "5"})
+        cache.write_plan_ref(Path(d), _ref(objective_id="5"))
         result = runner.invoke(cli, ["pr", "land", "--dry-run", "--json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
@@ -686,7 +685,7 @@ def test_real_land_no_pr_exits_1(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
-        cache.write_plan_ref(Path(d), _REF)
+        cache.write_plan_ref(Path(d), _ref())
         monkeypatch.setattr(github, "find_pr_for_branch", lambda **k: None)
         result = runner.invoke(cli, ["pr", "land", "--json"])
         assert result.exit_code == 1

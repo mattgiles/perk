@@ -50,9 +50,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
+from perk import plan
 from perk.backends.linear.client import LinearClient
 from perk.state import cache
-from perk.state.cache import PlanRefCache
 
 AGENT_TOKEN_ENV = "LINEAR_AGENT_TOKEN"
 """The env var carrying the OAuth ``actor=app`` agent token (the emission gate's second half)."""
@@ -84,7 +84,7 @@ mutation AgentSessionUpdate($id: String!, $input: AgentSessionUpdateInput!) {
 """
 
 
-def emission_enabled(plan_ref: PlanRefCache | None, environ: Mapping[str, str]) -> bool:
+def emission_enabled(plan_ref: plan.PlanRef | None, environ: Mapping[str, str]) -> bool:
     """The gate: stamped ``provider == "linear"`` AND a non-empty ``LINEAR_AGENT_TOKEN``."""
     if plan_ref is None:
         return False
@@ -103,7 +103,7 @@ def agent_client_from_env(environ: Mapping[str, str]) -> LinearClient:
 def emit_run_started(
     worktree: Path,
     *,
-    plan_ref: PlanRefCache | None,
+    plan_ref: plan.PlanRef | None,
     run_id: str,
     environ: Mapping[str, str] | None = None,
     external_urls: Sequence[tuple[str, str]] = (),
@@ -126,7 +126,8 @@ def emit_run_started(
         data = client.request(_CREATE_SESSION_MUTATION, {"input": create_input})
         session_id, session_url = _parse_created_session(data)
         cache.write_agent_session(
-            worktree, {"session_id": session_id, "issue": issue, "url": session_url}
+            worktree,
+            cache.AgentSession(session_id=session_id, issue=issue, url=session_url),
         )
         _create_activity(
             client,

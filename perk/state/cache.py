@@ -8,14 +8,18 @@ policy; the GC *policy* lives in ``perk/state/gc.py``, surfaced as ``perk state 
 branchable condition (reads return ``None``, not an exception).
 """
 
+import dataclasses
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from pydantic import ConfigDict
 
-from perk.boundary import StrictBoundaryModel, StrTuple, translate_validation_errors
-from perk.run.runner import RunHandle
+from perk import plan
+from perk.boundary import LenientParseModel, StrTuple, translate_validation_errors
+from perk.run.runner import RunHandle, RunHandleModel
 from perk.substrate.output import user_output
 
 # The canonical `.perk/workflow/` subtrees (public so `perk doctor` can verify the layout).
@@ -32,16 +36,37 @@ class CacheError(ValueError):
     """
 
 
-class HandoffCache(StrictBoundaryModel):
+@dataclass(frozen=True)
+class Handoff:
     """The pre-session CLI->extension handoff blob (``handoff/<run_id>.json``).
 
-    Open-ended (``extra="allow"``): the handoff carries arbitrary ``handoff_extra``
-    keys (and whatever ``perk state new-run --handoff`` writes), recovered downstream
-    by ``plan-save``/``objective create``. The known keys below are declared so those
-    recovery sites get typed attribute access; undeclared keys still round-trip.
+    Frozen domain object. The declared fields are the known handoff keys (recovered downstream
+    by ``plan-save``/``objective create``); ``extra`` carries the open-ended keys
+    ``perk state new-run --handoff`` may write, so the blob round-trips undeclared keys.
     """
 
-    model_config = ConfigDict(frozen=True, extra="allow", strict=True)
+    run_id: str
+    consumed: bool
+    mode: str | None = None
+    stage: str | None = None
+    pi_session_id: str | None = None
+    objective_id: str | None = None
+    node_id: str | None = None
+    adopt_from: str | None = None
+    supersedes: str | None = None
+    consumed_learn: tuple[str, ...] = ()
+    extra: Mapping[str, Any] = field(default_factory=dict)
+
+
+class HandoffModel(LenientParseModel):
+    """The JSON parse/serialize boundary for :class:`Handoff` (``handoff/<run_id>.json``).
+
+    Open-ended (``extra="allow"``): the handoff carries arbitrary ``handoff_extra`` keys (and
+    whatever ``perk state new-run --handoff`` writes); undeclared keys still round-trip. The
+    known keys below are declared so the recovery sites get typed attribute access.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow", strict=False, populate_by_name=True)
     run_id: str
     consumed: bool
     mode: str | None = None
@@ -53,30 +78,55 @@ class HandoffCache(StrictBoundaryModel):
     supersedes: str | None = None
     consumed_learn: StrTuple = ()
 
+    def to_domain(self) -> Handoff:
+        """Convert the validated model into the frozen domain object, folding the open-ended
+        ``model_extra`` keys into ``extra``."""
+        return Handoff(
+            run_id=self.run_id,
+            consumed=self.consumed,
+            mode=self.mode,
+            stage=self.stage,
+            pi_session_id=self.pi_session_id,
+            objective_id=self.objective_id,
+            node_id=self.node_id,
+            adopt_from=self.adopt_from,
+            supersedes=self.supersedes,
+            consumed_learn=self.consumed_learn,
+            extra=dict(self.model_extra or {}),
+        )
 
-class PlanRefCache(StrictBoundaryModel):
-    """The active plan->branch ref pointer (``plan-ref.json``, §8.4)."""
+    @classmethod
+    def from_domain(cls, handoff: Handoff) -> "HandoffModel":
+        """Project the frozen :class:`Handoff` onto the boundary, spreading ``extra`` back to
+        top-level alongside the declared fields."""
+        return cls.model_validate(
+            {
+                **dict(handoff.extra),
+                "run_id": handoff.run_id,
+                "consumed": handoff.consumed,
+                "mode": handoff.mode,
+                "stage": handoff.stage,
+                "pi_session_id": handoff.pi_session_id,
+                "objective_id": handoff.objective_id,
+                "node_id": handoff.node_id,
+                "adopt_from": handoff.adopt_from,
+                "supersedes": handoff.supersedes,
+                "consumed_learn": handoff.consumed_learn,
+            }
+        )
 
-    provider: str
-    pr_id: str
-    url: str
-    # StrTuple (not a strict ``tuple[str, ...]``): the on-disk shape is a JSON list.
-    labels: StrTuple
-    objective_id: str | None = None
-    consumed_learn: StrTuple = ()
-    base: str | None = None
 
-
-class DispatchCache(StrictBoundaryModel):
+@dataclass(frozen=True)
+class Dispatch:
     """The durable ``run_id -> plan`` dispatch record (``scratch/runs/*/dispatch.json``).
 
-    The nested ``plan_ref`` (a ``PlanRefCache`` snapshot) and ``run_handle`` (a ``RunHandle``) are
-    validated here — this is the on-disk read boundary that owns the dispatch record's shape.
+    Frozen domain object; the nested ``plan_ref`` is a :class:`plan.PlanRef` and ``run_handle``
+    a :class:`RunHandle`.
     """
 
     run_id: str
     stage: str
-    plan_ref: PlanRefCache
+    plan_ref: plan.PlanRef
     runner: str
     kind: str
     status: str
@@ -85,12 +135,81 @@ class DispatchCache(StrictBoundaryModel):
     error: str | None = None
 
 
-class AgentSessionCache(StrictBoundaryModel):
+class DispatchModel(LenientParseModel):
+    """The JSON parse/serialize boundary for :class:`Dispatch`. Nests :class:`plan.PlanRefModel`
+    + :class:`RunHandleModel` — this is the on-disk boundary that owns the dispatch record's
+    shape."""
+
+    run_id: str
+    stage: str
+    plan_ref: plan.PlanRefModel
+    runner: str
+    kind: str
+    status: str
+    dispatched_at: str
+    run_handle: RunHandleModel | None = None
+    error: str | None = None
+
+    def to_domain(self) -> Dispatch:
+        """Convert the validated model into the frozen domain object (recursing through the
+        nested models)."""
+        return Dispatch(
+            run_id=self.run_id,
+            stage=self.stage,
+            plan_ref=self.plan_ref.to_domain(),
+            runner=self.runner,
+            kind=self.kind,
+            status=self.status,
+            dispatched_at=self.dispatched_at,
+            run_handle=self.run_handle.to_domain() if self.run_handle is not None else None,
+            error=self.error,
+        )
+
+    @classmethod
+    def from_domain(cls, record: Dispatch) -> "DispatchModel":
+        """Project the frozen :class:`Dispatch` onto the boundary (recursing through the nested
+        domain objects)."""
+        return cls(
+            run_id=record.run_id,
+            stage=record.stage,
+            plan_ref=plan.PlanRefModel.from_domain(record.plan_ref),
+            runner=record.runner,
+            kind=record.kind,
+            status=record.status,
+            dispatched_at=record.dispatched_at,
+            run_handle=(
+                RunHandleModel.from_domain(record.run_handle)
+                if record.run_handle is not None
+                else None
+            ),
+            error=record.error,
+        )
+
+
+@dataclass(frozen=True)
+class AgentSession:
     """The Linear ``AgentSession`` pointer for this worktree (``agent-session.json``, §8.22)."""
 
     session_id: str
     issue: str
     url: str | None = None
+
+
+class AgentSessionModel(LenientParseModel):
+    """The JSON parse/serialize boundary for :class:`AgentSession` (``agent-session.json``)."""
+
+    session_id: str
+    issue: str
+    url: str | None = None
+
+    def to_domain(self) -> AgentSession:
+        """Convert the validated model into the frozen domain object."""
+        return AgentSession(session_id=self.session_id, issue=self.issue, url=self.url)
+
+    @classmethod
+    def from_domain(cls, session: AgentSession) -> "AgentSessionModel":
+        """Project the frozen :class:`AgentSession` onto the serialization boundary."""
+        return cls(session_id=session.session_id, issue=session.issue, url=session.url)
 
 
 # The land->learn semaphore: `land` sets it, `learn` clears it; while present it
@@ -234,7 +353,7 @@ def write_handoff(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {**data, "run_id": run_id, "consumed": False}
     with translate_validation_errors(CacheError, source=str(path)):
-        model = HandoffCache.model_validate(payload)
+        model = HandoffModel.model_validate(payload)
     path.write_text(
         json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
         encoding="utf-8",
@@ -242,13 +361,13 @@ def write_handoff(root: Path, run_id: str, data: dict[str, Any]) -> Path:
     return path
 
 
-def read_handoff(root: Path, run_id: str) -> HandoffCache | None:
+def read_handoff(root: Path, run_id: str) -> Handoff | None:
     """Read + validate a handoff blob, or ``None`` if it does not exist."""
     path = handoff_path(root, run_id)
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return HandoffCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return HandoffModel.model_validate(json.loads(path.read_text(encoding="utf-8"))).to_domain()
 
 
 def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None = None) -> None:
@@ -256,13 +375,15 @@ def mark_handoff_consumed(root: Path, run_id: str, *, pi_session_id: str | None 
 
     Keeps the file (audit + GC signal); never deletes it (the GC pitfall, §8.1).
     """
-    data = read_handoff(root, run_id)
-    if data is None:
+    path = handoff_path(root, run_id)
+    if not path.is_file():
         return
+    with translate_validation_errors(CacheError, source=str(path)):
+        model = HandoffModel.model_validate(json.loads(path.read_text(encoding="utf-8")))
     update: dict[str, Any] = {"consumed": True}
     if pi_session_id is not None:
         update["pi_session_id"] = pi_session_id
-    updated = data.model_copy(update=update)
+    updated = model.model_copy(update=update)
     handoff_path(root, run_id).write_text(
         json.dumps(updated.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
         encoding="utf-8",
@@ -277,35 +398,35 @@ def dispatch_path(root: Path, run_id: str) -> Path:
     return run_scratch_dir(root, run_id) / "dispatch.json"
 
 
-def write_dispatch(root: Path, run_id: str, data: dict[str, Any]) -> Path:
+def write_dispatch(root: Path, run_id: str, record: Dispatch) -> Path:
     """Write the durable ``run_id -> plan`` dispatch record (creating the run dir); return its
-    path. ``run_id`` is authoritative (it overrides anything in ``data``), mirroring
+    path. ``run_id`` is authoritative (it overrides ``record.run_id``), mirroring
     ``write_handoff``. The supervisor enumerates ``scratch/runs/*/dispatch.json``
     to correlate ``run_id <-> plan <-> PR`` (§8.13).
     """
     directory = run_scratch_dir(root, run_id)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "dispatch.json"
-    payload = {**data, "run_id": run_id}
-    with translate_validation_errors(CacheError, source=str(path)):
-        model = DispatchCache.model_validate(payload)
+    model = DispatchModel.from_domain(dataclasses.replace(record, run_id=run_id))
     path.write_text(
-        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
         encoding="utf-8",
     )
     return path
 
 
-def read_dispatch(root: Path, run_id: str) -> DispatchCache | None:
+def read_dispatch(root: Path, run_id: str) -> Dispatch | None:
     """Read + validate a dispatch record, or ``None`` if it does not exist."""
     path = dispatch_path(root, run_id)
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return DispatchCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return DispatchModel.model_validate(
+            json.loads(path.read_text(encoding="utf-8"))
+        ).to_domain()
 
 
-def list_dispatch_records(root: Path) -> list[DispatchCache]:
+def list_dispatch_records(root: Path) -> list[Dispatch]:
     """All dispatch records under ``scratch/runs/*/dispatch.json``, newest-first.
 
     Reads every run's ``dispatch.json``; skips a missing/unparseable file (loud-but-non-fatal
@@ -313,7 +434,7 @@ def list_dispatch_records(root: Path) -> list[DispatchCache]:
     ``dispatched_at`` descending (empty/missing timestamps sort last). An absent ``scratch/runs/``
     dir is the normal pre-dispatch state and yields ``[]``.
     """
-    records: list[DispatchCache] = []
+    records: list[Dispatch] = []
     for run_id in list_run_ids(root):
         path = run_scratch_dir(root, run_id) / "dispatch.json"
         if not path.is_file():
@@ -321,7 +442,9 @@ def list_dispatch_records(root: Path) -> list[DispatchCache]:
         try:
             with translate_validation_errors(CacheError, source=str(path)):
                 records.append(
-                    DispatchCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+                    DispatchModel.model_validate(
+                        json.loads(path.read_text(encoding="utf-8"))
+                    ).to_domain()
                 )
         except (OSError, json.JSONDecodeError, CacheError) as exc:
             user_output(f"warning: skipping unreadable dispatch record {path}: {exc}")
@@ -338,30 +461,31 @@ def plan_ref_path(root: Path) -> Path:
     return workflow_dir(root) / "plan-ref.json"
 
 
-def write_plan_ref(root: Path, data: dict[str, Any]) -> Path:
+def write_plan_ref(root: Path, ref: plan.PlanRef) -> Path:
     """Write the provider-agnostic plan ref (§8.4) to ``plan-ref.json``; return its path.
 
-    ``exclude_unset`` preserves the input key set verbatim (the full real 7-key shape and the
-    synthetic partial shape alike) — the on-disk shape is unchanged.
+    The full 7-key shape is serialized from the typed dataclass — byte-identical to the prior
+    production path (the real plan-ref is always full).
     """
     path = plan_ref_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with translate_validation_errors(CacheError, source=str(path)):
-        model = PlanRefCache.model_validate(data)
+    model = plan.PlanRefModel.from_domain(ref)
     path.write_text(
-        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
         encoding="utf-8",
     )
     return path
 
 
-def read_plan_ref(root: Path) -> PlanRefCache | None:
+def read_plan_ref(root: Path) -> plan.PlanRef | None:
     """Read + validate the plan ref, or ``None`` if it does not exist."""
     path = plan_ref_path(root)
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return PlanRefCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return plan.PlanRefModel.model_validate(
+            json.loads(path.read_text(encoding="utf-8"))
+        ).to_domain()
 
 
 def plan_body_path(root: Path) -> Path:
@@ -386,7 +510,7 @@ def agent_session_path(root: Path) -> Path:
     return workflow_dir(root) / "agent-session.json"
 
 
-def write_agent_session(root: Path, data: dict[str, Any]) -> Path:
+def write_agent_session(root: Path, session: AgentSession) -> Path:
     """Write the Linear agent-session pointer (§8.22) to ``agent-session.json``; return its path.
 
     Shape: ``{"session_id": str, "issue": str, "url": str | None}`` — mirrors the
@@ -394,22 +518,23 @@ def write_agent_session(root: Path, data: dict[str, Any]) -> Path:
     """
     path = agent_session_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with translate_validation_errors(CacheError, source=str(path)):
-        model = AgentSessionCache.model_validate(data)
+    model = AgentSessionModel.from_domain(session)
     path.write_text(
-        json.dumps(model.model_dump(mode="json", exclude_unset=True), indent=2) + "\n",
+        json.dumps(model.model_dump(mode="json"), indent=2) + "\n",
         encoding="utf-8",
     )
     return path
 
 
-def read_agent_session(root: Path) -> AgentSessionCache | None:
+def read_agent_session(root: Path) -> AgentSession | None:
     """Read + validate the agent-session pointer, or ``None`` if it does not exist."""
     path = agent_session_path(root)
     if not path.is_file():
         return None
     with translate_validation_errors(CacheError, source=str(path)):
-        return AgentSessionCache.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        return AgentSessionModel.model_validate(
+            json.loads(path.read_text(encoding="utf-8"))
+        ).to_domain()
 
 
 # --- markers: existence-based friction semaphores (markers/<name>) ----------------------

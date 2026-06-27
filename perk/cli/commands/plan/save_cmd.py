@@ -459,9 +459,7 @@ def _plan_save_impl(
     # Persist the ref as the cache.plan-ref pointer: the next session's
     # reconciliation links it, and `implement` reads it. A dry run writes nothing.
     if not dry_run:
-        cache.write_plan_ref(
-            repo_root, plan.PlanRefOut.from_domain(plan_ref).model_dump(mode="json")
-        )
+        cache.write_plan_ref(repo_root, plan_ref)
 
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save

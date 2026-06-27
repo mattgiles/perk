@@ -17,7 +17,7 @@ def _git_init(path: str) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
 
 
-def _record(run_id: str, *, dispatched_at: str, **over) -> dict:
+def _record(run_id: str, *, dispatched_at: str, **over) -> cache.Dispatch:
     base = {
         "stage": "implement",
         "plan_ref": {
@@ -39,7 +39,7 @@ def _record(run_id: str, *, dispatched_at: str, **over) -> dict:
         "error": None,
     }
     base.update(over)
-    return {**base, "run_id": run_id}
+    return cache.DispatchModel.model_validate({**base, "run_id": run_id}).to_domain()
 
 
 # --- enumeration unit -----------------------------------------------------------------
@@ -80,7 +80,7 @@ def _invoke_in_repo(args, *, records=None, git=True):
         if git:
             _git_init(d)
         for r in records or []:
-            cache.write_dispatch(Path(d), r["run_id"], r)
+            cache.write_dispatch(Path(d), r.run_id, r)
         return runner.invoke(cli, args)
 
 

@@ -4,18 +4,18 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.state import cache
 
-_REF = {
-    "provider": "github",
-    "pr_id": "7",
-    "url": "https://gh/o/r/issues/7",
-    "labels": ["perk:plan"],
-    "objective_id": None,
-}
+_REF = plan.PlanRef(
+    provider="github",
+    pr_id="7",
+    url="https://gh/o/r/issues/7",
+    labels=("perk:plan",),
+    objective_id=None,
+)
 
 
 def _git_init(path: str) -> None:

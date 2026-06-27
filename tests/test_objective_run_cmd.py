@@ -17,7 +17,6 @@ from perk.cli.cli import cli
 from perk.cli.commands.objective import run_cmd
 from perk.run import launch, run_report, runner
 from perk.state import cache
-from perk.state.cache import DispatchCache
 
 N = objective.NodeStatus
 
@@ -289,7 +288,7 @@ class _FakeRunner:
 
 
 def _record(*, objective_id="137", run_id="01RUN", with_handle=True):
-    return DispatchCache.model_validate(
+    return cache.DispatchModel.model_validate(
         {
             "run_id": run_id,
             "stage": "implement",
@@ -309,7 +308,7 @@ def _record(*, objective_id="137", run_id="01RUN", with_handle=True):
             else None,
             "error": None,
         }
-    )
+    ).to_domain()
 
 
 def test_active_run_without_wait_is_awaiting_run(monkeypatch):

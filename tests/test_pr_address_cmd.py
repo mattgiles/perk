@@ -10,6 +10,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from perk import plan
 from perk.cli.cli import cli
 from perk.cli.commands.pr import pr_address_command
 from perk.cli.context import PerkContext
@@ -27,13 +28,13 @@ def _seed(repo: Path) -> Path:
     """Seed the active plan-ref and create the derived ``plan-42`` worktree (address reuses it)."""
     cache.write_plan_ref(
         repo,
-        {
-            "provider": "github",
-            "pr_id": "42",
-            "url": "u/42",
-            "labels": ["perk:plan"],
-            "objective_id": None,
-        },
+        plan.PlanRef(
+            provider="github",
+            pr_id="42",
+            url="u/42",
+            labels=("perk:plan",),
+            objective_id=None,
+        ),
     )
     wt = repo / ".worktrees" / "plan-42"
     wt.mkdir(parents=True)

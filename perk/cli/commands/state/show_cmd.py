@@ -33,7 +33,9 @@ def show_state(*, rid: str | None) -> None:
     if data is None:
         raise UserFacingCliError(f"no handoff for run {rid}")
     user_output(f"run {rid}:")
-    user_output(f"  handoff: {json.dumps(data.model_dump(mode='json'))}")
+    user_output(
+        f"  handoff: {json.dumps(cache.HandoffModel.from_domain(data).model_dump(mode='json'))}"
+    )
     scratch = cache.run_scratch_dir(root, rid)
     files = sorted(p.name for p in scratch.glob("*")) if scratch.is_dir() else []
     user_output(f"  scratch: {', '.join(files) or '—'}")

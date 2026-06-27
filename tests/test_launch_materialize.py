@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import subprocess
 from pathlib import Path
@@ -661,7 +662,7 @@ def test_non_implement_stage_skips_linear_agent_emission(git_repo, monkeypatch):
 
 def test_implement_linear_emission_failure_never_blocks_exec(git_repo, monkeypatch, capsys):
     """Fail-soft end-to-end: an open gate + a broken emitter substrate still reaches exec."""
-    linear_ref = {**_PLAN_REF, "provider": "linear", "pr_id": "ENG-9"}
+    linear_ref = dataclasses.replace(_PLAN_REF, provider="linear", pr_id="ENG-9")
     cache.write_plan_ref(git_repo, linear_ref)
     monkeypatch.setenv("LINEAR_AGENT_TOKEN", "lin_oauth_x")
     config = Config(worktree_root=git_repo / ".worktrees")

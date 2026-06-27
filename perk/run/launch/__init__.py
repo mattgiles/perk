@@ -41,7 +41,7 @@ import os
 import subprocess as subprocess
 from pathlib import Path
 
-from perk import __version__
+from perk import __version__, plan
 from perk import github as github
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import Ensure
@@ -222,7 +222,7 @@ def launch_stage(
     cache.ensure_layout(wt)
     cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
     if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
-        cache.write_plan_ref(wt, resolved.plan_ref.model_dump(mode="json", exclude_unset=True))
+        cache.write_plan_ref(wt, resolved.plan_ref)
     # Materialize the plan body into the worktree so in-session checkpoints can seed from
     # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
@@ -304,7 +304,7 @@ def _emit_dry_run_preview(
         "base": resolved.base,
     }
     if resolved.plan_ref is not None:
-        payload["plan_ref"] = resolved.plan_ref.model_dump(mode="json", exclude_unset=True)
+        payload["plan_ref"] = plan.PlanRefOut.from_domain(resolved.plan_ref).model_dump(mode="json")
     # On a dry run the worktree is never created, so `resolved.created` is always False; preview
     # the setup commands when the stage WOULD freshly create the worktree (a `create` stage whose
     # path does not yet exist — the same condition that gates `run_worktree_setup` on a real run).

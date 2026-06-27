@@ -1,13 +1,16 @@
+import dataclasses
 import json
 
 import pytest
 
+from perk import plan
 from perk.boundary import ValidationError
+from perk.run.runner import RunHandle
+from perk.state import cache
 from perk.state.cache import (
-    AgentSessionCache,
+    AgentSession,
     CacheError,
-    DispatchCache,
-    PlanRefCache,
+    Dispatch,
     clear_marker,
     dispatch_path,
     ensure_layout,
@@ -36,16 +39,21 @@ from perk.state.cache import (
 )
 
 
-def _dispatch(run_id: str = "01RID", **over: object) -> dict:
-    base = {
-        "stage": "implement",
-        "plan_ref": {"provider": "github", "pr_id": "7", "url": "u/7", "labels": ["perk:plan"]},
-        "runner": "",
-        "kind": "github-actions",
-        "status": "dispatched",
-        "dispatched_at": "2024-01-01T00:00:00Z",
-    }
-    return {**base, "run_id": run_id, **over}
+def _dispatch(
+    run_id: str = "01RID", *, run_handle: RunHandle | None = None, **over: object
+) -> Dispatch:
+    ref = plan.PlanRef(provider="github", pr_id="7", url="u/7", labels=("perk:plan",))
+    base = Dispatch(
+        run_id=run_id,
+        stage="implement",
+        plan_ref=ref,
+        runner="",
+        kind="github-actions",
+        status="dispatched",
+        dispatched_at="2024-01-01T00:00:00Z",
+        run_handle=run_handle,
+    )
+    return dataclasses.replace(base, **over) if over else base
 
 
 def test_ensure_layout_idempotent(tmp_path):
@@ -125,6 +133,18 @@ def test_handoff_round_trip_and_consume(tmp_path):
     assert again is not None and again.consumed is True
 
 
+def test_handoff_on_disk_shape_is_minimal(tmp_path):
+    # The on-disk blob stays minimal — only the caller's keys + the authoritative run_id/consumed
+    # (byte-identical to the pre-Pydantic passthrough; no synthesized null fields).
+    path = write_handoff(tmp_path, "RID", {"stage": "plan", "mode": "read-only"})
+    assert set(json.loads(path.read_text(encoding="utf-8"))) == {
+        "stage",
+        "mode",
+        "run_id",
+        "consumed",
+    }
+
+
 def test_write_handoff_run_id_is_authoritative(tmp_path):
     # A run_id in the data dict cannot override the keyed run_id.
     write_handoff(tmp_path, "RID", {"run_id": "BOGUS", "mode": "implement"})
@@ -132,14 +152,14 @@ def test_write_handoff_run_id_is_authoritative(tmp_path):
     assert data is not None and data.run_id == "RID"
 
 
-def test_handoff_rejects_wrong_typed_consumed(tmp_path):
-    # `consumed` is strict bool — a bool-as-int (1) is rejected (strict mode).
+def test_handoff_coerces_int_consumed(tmp_path):
+    # The read boundary is now a LenientParseModel: a bool-as-int (1) coerces to True instead of
+    # raising (the pre-Pydantic v1.0.1 behavior never validated `consumed` — truthy int). The
+    # intended lenient-edge behavior for the durable cache.
     path = write_handoff(tmp_path, "RID", {})
     path.write_text('{"run_id": "RID", "consumed": 1}\n', encoding="utf-8")
-    with pytest.raises(CacheError) as exc:
-        read_handoff(tmp_path, "RID")
-    # Subclasses ValueError so fail-soft `except (OSError, ValueError)` cache guards keep working.
-    assert isinstance(exc.value, ValueError)
+    data = read_handoff(tmp_path, "RID")
+    assert data is not None and data.consumed is True
 
 
 def test_handoff_rejects_missing_run_id(tmp_path):
@@ -150,11 +170,12 @@ def test_handoff_rejects_missing_run_id(tmp_path):
 
 
 def test_handoff_arbitrary_extra_survives_round_trip(tmp_path):
-    # `state new-run` may write an arbitrary object; extra keys round-trip (extra="allow").
+    # `state new-run` may write an arbitrary object; extra keys round-trip (extra="allow")
+    # and land in the domain object's `extra` mapping.
     write_handoff(tmp_path, "RID", {"mode": "read-only", "custom_key": "custom_value"})
     data = read_handoff(tmp_path, "RID")
     assert data is not None
-    assert data.model_dump(mode="json", exclude_unset=True)["custom_key"] == "custom_value"
+    assert data.extra["custom_key"] == "custom_value"
 
 
 def test_handoff_declared_extras_read_back_typed(tmp_path):
@@ -176,39 +197,46 @@ def test_read_and_consume_missing_handoff(tmp_path):
 
 def test_plan_ref_round_trip(tmp_path):
     assert read_plan_ref(tmp_path) is None  # absent -> None (branchable)
-    # The former 5-key partial write: `exclude_unset` preserves the shape (no consumed_learn/base).
-    ref = {
-        "provider": "github",
-        "pr_id": "42",
-        "url": "https://github.com/o/r/issues/42",
-        "labels": ["perk:plan"],
-        "objective_id": None,
-    }
-    path = write_plan_ref(tmp_path, ref)
-    assert path == plan_ref_path(tmp_path) == workflow_dir(tmp_path) / "plan-ref.json"
-    got = read_plan_ref(tmp_path)
-    assert got == PlanRefCache(
+    # `write_plan_ref` now takes a typed `plan.PlanRef` (always full), so the on-disk shape is
+    # the full 7-key shape (= byte-identical to the production write path).
+    ref = plan.PlanRef(
         provider="github",
         pr_id="42",
         url="https://github.com/o/r/issues/42",
         labels=("perk:plan",),
-        objective_id=None,
     )
-    # `objective_id: null` is preserved (explicitly set), and the shape stays 5 keys on disk.
+    path = write_plan_ref(tmp_path, ref)
+    assert path == plan_ref_path(tmp_path) == workflow_dir(tmp_path) / "plan-ref.json"
+    got = read_plan_ref(tmp_path)
+    assert got == ref
     assert set(json.loads(path.read_text(encoding="utf-8"))) == {
         "provider",
         "pr_id",
         "url",
         "labels",
         "objective_id",
+        "consumed_learn",
+        "base",
     }
 
 
-def test_plan_ref_rejects_bad_types(tmp_path):
-    with pytest.raises(CacheError):  # non-list labels
-        write_plan_ref(tmp_path, {"provider": "g", "pr_id": "1", "url": "u", "labels": "x"})
-    with pytest.raises(CacheError):  # non-str pr_id
-        write_plan_ref(tmp_path, {"provider": "g", "pr_id": 1, "url": "u", "labels": ["x"]})
+def test_plan_ref_rejects_bad_types_on_read(tmp_path):
+    # `write_plan_ref` takes a typed dataclass, so bad-type rejection lives at the read boundary:
+    # a malformed `plan-ref.json` raises CacheError when read.
+    path = plan_ref_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"provider": "g", "pr_id": "1", "url": "u", "labels": "x"}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CacheError):  # non-list labels (a bare str is not spread)
+        read_plan_ref(tmp_path)
+    path.write_text(
+        json.dumps({"provider": "g", "url": "u", "labels": ["x"]}) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CacheError):  # missing required pr_id
+        read_plan_ref(tmp_path)
 
 
 def test_dispatch_round_trip_and_required_fields(tmp_path):
@@ -224,19 +252,19 @@ def test_dispatch_round_trip_and_required_fields(tmp_path):
 
 
 def test_dispatch_nested_round_trip_is_typed(tmp_path):
-    """The nested plan_ref/run_handle are validated + read back as typed models."""
+    """The nested plan_ref/run_handle are validated + read back as typed domain objects."""
     write_dispatch(
         tmp_path,
         "01RID",
         _dispatch(
             run_id="01RID",
-            run_handle={"runner": "ci", "kind": "github-actions", "run_ref": "7", "url": "u"},
+            run_handle=RunHandle(runner="ci", kind="github-actions", run_ref="7", url="u"),
         ),
     )
     back = read_dispatch(tmp_path, "01RID")
     assert back is not None
-    assert isinstance(back.plan_ref, PlanRefCache) and back.plan_ref.pr_id == "7"
-    assert back.run_handle is not None and back.run_handle.run_ref == "7"
+    assert isinstance(back.plan_ref, plan.PlanRef) and back.plan_ref.pr_id == "7"
+    assert isinstance(back.run_handle, RunHandle) and back.run_handle.run_ref == "7"
 
 
 def test_dispatch_rejects_malformed_nested_plan_ref(tmp_path):
@@ -245,7 +273,7 @@ def test_dispatch_rejects_malformed_nested_plan_ref(tmp_path):
     bad.parent.mkdir(parents=True, exist_ok=True)
     # model_validate (the boundary) raises a raw ValidationError; the cache reader translates it.
     with pytest.raises(ValidationError):
-        DispatchCache.model_validate(
+        cache.DispatchModel.model_validate(
             {
                 "run_id": "01bad",
                 "stage": "implement",
@@ -311,14 +339,15 @@ def test_list_dispatch_records_skips_invalid_loudly(tmp_path, capsys):
     assert "skipping unreadable dispatch record" in capsys.readouterr().err
 
 
-def test_agent_session_round_trip_and_strictness(tmp_path):
+def test_agent_session_round_trip(tmp_path):
     assert read_agent_session(tmp_path) is None  # absent -> None
-    write_agent_session(tmp_path, {"session_id": "s", "issue": "ENG-1", "url": None})
+    write_agent_session(tmp_path, AgentSession(session_id="s", issue="ENG-1", url=None))
     got = read_agent_session(tmp_path)
-    assert got == AgentSessionCache(session_id="s", issue="ENG-1", url=None)
-    # extra="forbid": an unknown key is rejected.
+    assert got == AgentSession(session_id="s", issue="ENG-1", url=None)
+    # A malformed file missing a required field raises CacheError on read.
+    cache.agent_session_path(tmp_path).write_text('{"session_id": "s"}\n', encoding="utf-8")
     with pytest.raises(CacheError):
-        write_agent_session(tmp_path, {"session_id": "s", "issue": "x", "unknown": 1})
+        read_agent_session(tmp_path)
 
 
 def test_markers(tmp_path):
