@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "ReadyPrOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`github.PullRequest` subset\n(field order load-bearing).",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "url"
+      ],
+      "title": "ReadyPrOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "pr": {
+      "$ref": "#/$defs/ReadyPrOut"
+    },
+    "was_draft": {
+      "title": "Was Draft",
+      "type": "boolean"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "pr",
+    "was_draft",
+    "dry_run"
+  ],
+  "title": "PrReadyOut",
+  "type": "object"
+}

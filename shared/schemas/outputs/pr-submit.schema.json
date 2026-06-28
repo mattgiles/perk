@@ -1,0 +1,147 @@
+{
+  "$defs": {
+    "PlanHeaderUpdateOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`issue_backend.PlanHeaderUpdate` subset\n(field order load-bearing).",
+      "properties": {
+        "fields_updated": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields Updated",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fields_updated"
+      ],
+      "title": "PlanHeaderUpdateOut",
+      "type": "object"
+    },
+    "SubmitPrOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`github.PullRequest` subset\n(field order load-bearing).",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "is_draft": {
+          "title": "Is Draft",
+          "type": "boolean"
+        },
+        "existed": {
+          "title": "Existed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "number",
+        "url",
+        "is_draft",
+        "existed"
+      ],
+      "title": "SubmitPrOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrSubmitResult` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "pr": {
+      "$ref": "#/$defs/SubmitPrOut"
+    },
+    "branch": {
+      "title": "Branch",
+      "type": "string"
+    },
+    "issue": {
+      "title": "Issue",
+      "type": "string"
+    },
+    "plan_header": {
+      "$ref": "#/$defs/PlanHeaderUpdateOut"
+    },
+    "plan_embedded": {
+      "title": "Plan Embedded",
+      "type": "boolean"
+    },
+    "pr_checked": {
+      "title": "Pr Checked",
+      "type": "boolean"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "base": {
+      "title": "Base",
+      "type": "string"
+    },
+    "mergeable": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Mergeable"
+    },
+    "conflicts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Conflicts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "pr",
+    "branch",
+    "issue",
+    "plan_header",
+    "plan_embedded",
+    "pr_checked",
+    "dry_run",
+    "base",
+    "mergeable",
+    "conflicts"
+  ],
+  "title": "PrSubmitOut",
+  "type": "object"
+}

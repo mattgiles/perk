@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ReviewCommentInput": {
+      "additionalProperties": false,
+      "description": "One inline review finding in the machine-authored batch (strict: a typo fails loudly).",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "body"
+      ],
+      "title": "ReviewCommentInput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The strict `/pr-review` batch shape (`{verdict, summary, comments?, fyi?}`).\n\n`comments`/`fyi` stay nullable so an explicit `null` is tolerated (today's behavior),\nnormalized to `[]` in conversion. `line: int` under strict rejects `bool`/`float`/`str`\n(preserving the old `isinstance(line, bool)` guard).",
+  "properties": {
+    "verdict": {
+      "enum": [
+        "clean",
+        "actionable"
+      ],
+      "title": "Verdict",
+      "type": "string"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "comments": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ReviewCommentInput"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Comments"
+    },
+    "fyi": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fyi"
+    }
+  },
+  "required": [
+    "verdict",
+    "summary"
+  ],
+  "title": "ReviewBatchInput",
+  "type": "object"
+}

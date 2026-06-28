@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "StageEntry": {
+      "description": "The lenient per-stage parse model at the file boundary.\n\nSame fields/defaults as the ``Stage`` domain dataclass; tolerant parsing\n(drop unknown keys, coerce ordinary scalars) per the lenient base.",
+      "properties": {
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "mode": {
+          "default": "",
+          "title": "Mode",
+          "type": "string"
+        },
+        "worktree": {
+          "default": "",
+          "title": "Worktree",
+          "type": "string"
+        },
+        "doors": {
+          "additionalProperties": true,
+          "title": "Doors",
+          "type": "object"
+        },
+        "run_id": {
+          "additionalProperties": true,
+          "title": "Run Id",
+          "type": "object"
+        },
+        "command": {
+          "default": "",
+          "title": "Command",
+          "type": "string"
+        },
+        "requires": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Requires",
+          "type": "array"
+        },
+        "reads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reads",
+          "type": "array"
+        },
+        "writes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Writes",
+          "type": "array"
+        },
+        "predecessors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Predecessors",
+          "type": "array"
+        },
+        "successors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Successors",
+          "type": "array"
+        }
+      },
+      "title": "StageEntry",
+      "type": "object"
+    }
+  },
+  "description": "The lenient whole-file parse model.\n\n``schema_version`` is deliberately NOT a field: it stays a structural\npre-check in ``load_registry`` (it must run before generic validation and\nraise its own message). ``extra=\"ignore\"`` drops it (and any other top-level\nkey) from this model.",
+  "properties": {
+    "state_keys": {
+      "additionalProperties": true,
+      "title": "State Keys",
+      "type": "object"
+    },
+    "stages": {
+      "items": {
+        "$ref": "#/$defs/StageEntry"
+      },
+      "title": "Stages",
+      "type": "array"
+    }
+  },
+  "title": "RegistryFile",
+  "type": "object"
+}

@@ -1,0 +1,209 @@
+{
+  "$defs": {
+    "IssueOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`issue_backend.IssueRef` subset\n(field order load-bearing).",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "existed": {
+          "title": "Existed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "existed"
+      ],
+      "title": "IssueOut",
+      "type": "object"
+    },
+    "ObjectiveNodeLinkOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of :class:`ObjectiveNodeLink` (field order load-bearing).",
+      "properties": {
+        "linked": {
+          "title": "Linked",
+          "type": "boolean"
+        },
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "linked",
+        "node",
+        "status",
+        "error"
+      ],
+      "title": "ObjectiveNodeLinkOut",
+      "type": "object"
+    },
+    "PlanRefOut": {
+      "additionalProperties": false,
+      "description": "The ``cache.plan-ref`` / ``--json`` serialization boundary (the OUTPUT edge of\n:class:`PlanRef`).\n\nField declaration order is load-bearing \u2014 see :class:`PlanHeaderOut`.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "pr_id": {
+          "title": "Pr Id",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "objective_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Objective Id"
+        },
+        "consumed_learn": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Consumed Learn",
+          "type": "array"
+        },
+        "base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base"
+        }
+      },
+      "required": [
+        "provider",
+        "pr_id",
+        "url",
+        "labels"
+      ],
+      "title": "PlanRefOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PlanSaveResult` (order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "issue": {
+      "$ref": "#/$defs/IssueOut"
+    },
+    "plan_ref": {
+      "$ref": "#/$defs/PlanRefOut"
+    },
+    "cached": {
+      "title": "Cached",
+      "type": "boolean"
+    },
+    "updated": {
+      "title": "Updated",
+      "type": "boolean"
+    },
+    "objective_node": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObjectiveNodeLinkOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "issue",
+    "plan_ref",
+    "cached",
+    "updated",
+    "objective_node",
+    "dry_run"
+  ],
+  "title": "PlanSaveOut",
+  "type": "object"
+}

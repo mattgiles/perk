@@ -1,0 +1,334 @@
+{
+  "$defs": {
+    "DiscussionCommentOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`github.DiscussionComment`\n(field order load-bearing).",
+      "properties": {
+        "comment_id": {
+          "title": "Comment Id",
+          "type": "integer"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created At"
+        }
+      },
+      "required": [
+        "comment_id",
+        "body",
+        "author",
+        "created_at"
+      ],
+      "title": "DiscussionCommentOut",
+      "type": "object"
+    },
+    "FeedbackCommentOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`github.ReviewComment` (order load-bearing).",
+      "properties": {
+        "comment_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Comment Id"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Path"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Created At"
+        }
+      },
+      "required": [
+        "comment_id",
+        "body",
+        "author",
+        "path",
+        "line",
+        "created_at"
+      ],
+      "title": "FeedbackCommentOut",
+      "type": "object"
+    },
+    "FeedbackCountsOut": {
+      "additionalProperties": false,
+      "description": "The computed feedback tally (field order load-bearing).",
+      "properties": {
+        "review_threads": {
+          "title": "Review Threads",
+          "type": "integer"
+        },
+        "unresolved_threads": {
+          "title": "Unresolved Threads",
+          "type": "integer"
+        },
+        "discussion_comments": {
+          "title": "Discussion Comments",
+          "type": "integer"
+        },
+        "reviews": {
+          "title": "Reviews",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "review_threads",
+        "unresolved_threads",
+        "discussion_comments",
+        "reviews"
+      ],
+      "title": "FeedbackCountsOut",
+      "type": "object"
+    },
+    "FeedbackReviewOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`github.Review` (field order load-bearing).",
+      "properties": {
+        "review_id": {
+          "title": "Review Id",
+          "type": "string"
+        },
+        "author": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Author"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        },
+        "submitted_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Submitted At"
+        }
+      },
+      "required": [
+        "review_id",
+        "author",
+        "body",
+        "state",
+        "submitted_at"
+      ],
+      "title": "FeedbackReviewOut",
+      "type": "object"
+    },
+    "FeedbackThreadOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`github.ReviewThread` (field order load-bearing).",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "is_resolved": {
+          "title": "Is Resolved",
+          "type": "boolean"
+        },
+        "is_outdated": {
+          "title": "Is Outdated",
+          "type": "boolean"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Path"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Line"
+        },
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/FeedbackCommentOut"
+          },
+          "title": "Comments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_id",
+        "is_resolved",
+        "is_outdated",
+        "path",
+        "line",
+        "comments"
+      ],
+      "title": "FeedbackThreadOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrFeedbackResult` (order\nload-bearing). ``pr`` maps from the domain ``pr_number``.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "branch": {
+      "title": "Branch",
+      "type": "string"
+    },
+    "pr": {
+      "title": "Pr",
+      "type": "integer"
+    },
+    "review_threads": {
+      "items": {
+        "$ref": "#/$defs/FeedbackThreadOut"
+      },
+      "title": "Review Threads",
+      "type": "array"
+    },
+    "discussion_comments": {
+      "items": {
+        "$ref": "#/$defs/DiscussionCommentOut"
+      },
+      "title": "Discussion Comments",
+      "type": "array"
+    },
+    "reviews": {
+      "items": {
+        "$ref": "#/$defs/FeedbackReviewOut"
+      },
+      "title": "Reviews",
+      "type": "array"
+    },
+    "counts": {
+      "$ref": "#/$defs/FeedbackCountsOut"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "branch",
+    "pr",
+    "review_threads",
+    "discussion_comments",
+    "reviews",
+    "counts"
+  ],
+  "title": "PrFeedbackOut",
+  "type": "object"
+}

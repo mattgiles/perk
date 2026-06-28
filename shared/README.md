@@ -24,6 +24,12 @@ Contents (authored in **T2**):
 - **`contracts-history.md`** — the relocated chronological `Status (…)` changelog
   sibling of the prose spec, grouped by `§N.M` anchor (keeps `contracts.md` a compact
   current-spec document).
+- **`schemas/`** — published JSON Schemas for perk's boundary models (the shared-YAML
+  parse contracts, the machine batch inputs, and the `--json` output envelopes),
+  generated from the Pydantic models in `perk/boundary.py` and grouped by role under
+  `contracts/` / `inputs/` / `outputs/`. Reference artifacts bundled into both planes
+  but read at runtime by neither; guarded against drift by
+  `tests/test_contract_schemas.py`. See `contracts.md` §8.34.
 
 Resolution is proven by T1's per-plane resolvers (`perk/_resources.py`,
 `extension/substrate/resources.ts`): installed bundle → editable repo-sibling fallback.

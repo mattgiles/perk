@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "LandPrOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`github.PullRequest` subset\n(field order load-bearing).",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "integer"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "state"
+      ],
+      "title": "LandPrOut",
+      "type": "object"
+    },
+    "LearnConsumeOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of :class:`LearnConsumeUpdate` (field order load-bearing).",
+      "properties": {
+        "closed": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Closed",
+          "type": "array"
+        },
+        "skipped_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Skipped Reason"
+        }
+      },
+      "required": [
+        "closed",
+        "skipped_reason"
+      ],
+      "title": "LearnConsumeOut",
+      "type": "object"
+    },
+    "ObjectiveLandOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of :class:`ObjectiveLandUpdate` (field order load-bearing).\n\n``id`` maps from the domain ``objective`` field (the linked objective id).",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Id"
+        },
+        "nodes_marked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes Marked",
+          "type": "array"
+        },
+        "skipped_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Skipped Reason"
+        },
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "nodes_marked",
+        "skipped_reason",
+        "closed"
+      ],
+      "title": "ObjectiveLandOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrLandResult` (field order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "pr": {
+      "$ref": "#/$defs/LandPrOut"
+    },
+    "branch": {
+      "title": "Branch",
+      "type": "string"
+    },
+    "issue": {
+      "title": "Issue",
+      "type": "string"
+    },
+    "pending_learn": {
+      "title": "Pending Learn",
+      "type": "boolean"
+    },
+    "plan_issue_closed": {
+      "title": "Plan Issue Closed",
+      "type": "boolean"
+    },
+    "dry_run": {
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "objective": {
+      "$ref": "#/$defs/ObjectiveLandOut"
+    },
+    "learn": {
+      "$ref": "#/$defs/LearnConsumeOut"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "pr",
+    "branch",
+    "issue",
+    "pending_learn",
+    "plan_issue_closed",
+    "dry_run",
+    "objective",
+    "learn"
+  ],
+  "title": "PrLandOut",
+  "type": "object"
+}
