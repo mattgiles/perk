@@ -198,6 +198,33 @@ pr-reviewer = "anthropic/claude-sonnet-4-5"
 review-classifier = "anthropic/claude-haiku-4-5"
 ```
 
+### `[stages.<id>]`
+
+Per-stage **model** + **thinking-level** defaults, injected as pi `--model` / `--thinking` flags
+when `perk <stage>` cold-launches that stage's pi session. Each stage is its own sub-table.
+
+| Key | Type | Default |
+| --- | --- | --- |
+| `model` | string (model id, free-form; perk does not validate it) | _(pi default)_ |
+| `thinking` | string (`off`/`minimal`/`low`/`medium`/`high`/`xhigh`) | _(pi default)_ |
+
+Either key may be set alone; when a stage sets **neither**, nothing is injected (pi's own default is
+left untouched — no enforced perk default). An explicit `perk <stage> --model X` / `--thinking Y`
+wins (the config flag is injected first; pi parses last-wins). Valid stage ids are the registry
+stages (`plan`, `implement`, `address`, `learn`, `objective-author`, `objective-plan`, …). It is a
+**launch-seam** setting: warm in-session transitions inherit the launched session's model, and the
+remote CI runner is unaffected. **Overlay-aware** (a `.perk/local.toml` `[stages.<id>]` leaf-merges).
+`perk doctor` validates the stage ids + thinking levels (loud-but-non-fatal `warn`).
+
+```toml
+[stages.implement]
+model = "anthropic/claude-opus-4-1"
+thinking = "high"
+
+[stages.plan]
+thinking = "xhigh"
+```
+
 ### `[trust]`
 
 | Key | Type | Default | Notes |

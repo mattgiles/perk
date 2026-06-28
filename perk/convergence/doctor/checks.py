@@ -12,6 +12,7 @@ from perk.convergence.doctor.data import _MANAGED_GROUP, Check, Status
 from perk.state import cache, gc
 from perk.substrate import bindings, git, paths, providers, registry
 from perk.substrate.config import (
+    PI_THINKING_LEVELS,
     load_committed_issues_backend,
     load_committed_issues_team,
     load_config,
@@ -276,6 +277,64 @@ def _providers_check(root: Path) -> Check:
         f"providers: {len(problems)} problem(s)",
         shown,
         "Fix .perk/config.toml [providers], or re-run 'perk init' / 'perk doctor --fix' to sync.",
+    )
+
+
+def _stage_models_check(root: Path) -> Check | None:
+    """Validate the per-stage `[stages.<id>]` launch overrides (loud-but-non-fatal).
+
+    Returns ``None`` when no per-stage models are configured (keeps a clean repo's `perk doctor`
+    output quiet — the common case). A malformed committed TOML → ``warn`` deferring to the config
+    check (mirrors ``_providers_check``/``_issues_check``). Otherwise each configured stage id is
+    resolved against the registry stage ids and each non-None ``thinking`` against
+    ``PI_THINKING_LEVELS``; any unknown stage id or invalid thinking is a single ``warn`` (exit
+    stays 0). A broken registry skips the stage-id check (that's the registry check's finding —
+    don't double-fail). No ``--fix`` arm: the selection is user-owned config; nothing is
+    convergeable. Model strings are free-form and not validated here (pi validates them).
+    """
+    try:
+        stage_models = load_config(root).stage_models
+    except tomllib.TOMLDecodeError:
+        return Check(
+            "stage-models",
+            "repository",
+            "warn",
+            "stage models not evaluated — config invalid; see the config check",
+        )
+    if not stage_models:
+        return None
+
+    try:
+        stage_ids: set[str] | None = registry.load_registry().stage_ids()
+    except (registry.RegistryError, FileNotFoundError):
+        stage_ids = None  # the registry check owns this finding — don't double-fail
+
+    problems: list[str] = []
+    for stage_id, sm in stage_models.items():
+        if stage_ids is not None and stage_id not in stage_ids:
+            problems.append(f"[stages.{stage_id}]: `{stage_id}` is not a registry stage")
+        if sm.thinking is not None and sm.thinking not in PI_THINKING_LEVELS:
+            problems.append(
+                f"[stages.{stage_id}]: thinking `{sm.thinking}` is not a valid pi level"
+            )
+
+    if not problems:
+        return Check(
+            "stage-models",
+            "repository",
+            "ok",
+            f"stage models: {sorted(stage_models)}",
+        )
+    shown = "; ".join(problems[:3])
+    if len(problems) > 3:
+        shown += f" (+{len(problems) - 3} more)"
+    return Check(
+        "stage-models",
+        "repository",
+        "warn",
+        f"stage models: {len(problems)} problem(s)",
+        shown,
+        "Fix .perk/config.toml [stages.<id>] (model/thinking).",
     )
 
 

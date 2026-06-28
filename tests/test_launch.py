@@ -13,6 +13,7 @@ from perk.run.launch import (
     _address_prompt,
     _initial_prompt,
     _pi_agent_dir,
+    _stage_model_argv,
     _sweep_stale_pi_agent_locks,
     launch_stage,
     resolve_base,
@@ -23,7 +24,7 @@ from perk.run.launch import (
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.bindings import Binding
-from perk.substrate.config import Config
+from perk.substrate.config import Config, StageModel
 from perk.substrate.git import GitError
 
 
@@ -223,6 +224,106 @@ def test_worktree_stage_auto_approves_and_respects_user_no_approve(tmp_path, cap
     )
     data = json.loads(capsys.readouterr().out)
     assert "--approve" not in data["argv"]
+
+
+# --- [stages.<id>] per-stage model/thinking injection ---------------------------------
+
+
+def test_stage_model_argv_unconfigured_is_empty(tmp_path):
+    assert _stage_model_argv(_config(tmp_path), "implement") == []
+
+
+def test_stage_model_argv_both_knobs(tmp_path):
+    config = dataclasses.replace(
+        _config(tmp_path),
+        stage_models={"implement": StageModel(model="a/opus", thinking="high")},
+    )
+    assert _stage_model_argv(config, "implement") == ["--model", "a/opus", "--thinking", "high"]
+
+
+def test_stage_model_argv_thinking_only(tmp_path):
+    config = dataclasses.replace(
+        _config(tmp_path), stage_models={"implement": StageModel(thinking="high")}
+    )
+    assert _stage_model_argv(config, "implement") == ["--thinking", "high"]
+
+
+def test_stage_model_injected_after_trust_before_pi_args(tmp_path, capsys):
+    config = dataclasses.replace(
+        _config(tmp_path),
+        stage_models={"implement": StageModel(model="a/opus", thinking="high")},
+    )
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    assert "--model" in argv and argv[argv.index("--model") + 1] == "a/opus"
+    assert "--thinking" in argv and argv[argv.index("--thinking") + 1] == "high"
+    # injected after `--approve` (trust), before the seeded prompt (the only pi_arg-tail entry)
+    assert argv.index("--approve") < argv.index("--model")
+    assert argv.index("--thinking") < len(argv) - 1
+
+
+def test_stage_model_thinking_only_injects_no_model(tmp_path, capsys):
+    config = dataclasses.replace(
+        _config(tmp_path), stage_models={"implement": StageModel(thinking="high")}
+    )
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    assert "--thinking" in argv
+    assert "--model" not in argv
+
+
+def test_stage_model_unconfigured_leaves_argv_untouched(tmp_path, capsys):
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),  # no stage_models
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    # unchanged length: ["pi", "--approve", <prompt>] (pi's own resolution untouched)
+    assert len(argv) == 3
+    assert "--model" not in argv and "--thinking" not in argv
+
+
+def test_stage_model_explicit_flag_wins_last(tmp_path, capsys):
+    config = dataclasses.replace(
+        _config(tmp_path), stage_models={"implement": StageModel(model="a/config")}
+    )
+    cache.write_plan_ref(tmp_path, _PLAN_REF)
+    launch_stage(
+        repo_root=tmp_path,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=["--model", "a/explicit"],
+    )
+    argv = json.loads(capsys.readouterr().out)["argv"]
+    # both appear; the config one precedes the explicit one (pi parses last-wins)
+    assert argv.index("a/config") < argv.index("a/explicit")
 
 
 def test_user_binding_appended_to_initial_prompt(tmp_path, capsys):

@@ -206,6 +206,59 @@ def test_issues_check_warns_on_malformed_committed_toml(git_repo):
     assert "see the config check" in check.message
 
 
+def test_stage_models_check_absent_when_unconfigured(git_repo):
+    # No [stages] config → the check contributes nothing (keeps a clean repo quiet).
+    _scaffold(git_repo)
+    report = run_doctor(git_repo, verify=False)
+    assert next((c for c in report.checks if c.name == "stage-models"), None) is None
+
+
+def test_stage_models_check_ok_on_valid_config(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[stages.implement]\nmodel = "a/opus"\nthinking = "high"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "stage-models")
+    assert check.status == "ok" and check.group == "repository"
+    assert "implement" in check.message
+    assert report.exit_code == 0
+
+
+def test_stage_models_check_warns_on_unknown_stage(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[stages.implment]\nmodel = "a/opus"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "stage-models")
+    assert check.status == "warn"
+    assert "implment" in check.detail
+    assert report.exit_code == 0  # loud-but-non-fatal
+
+
+def test_stage_models_check_warns_on_invalid_thinking(git_repo):
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text(
+        '[stages.implement]\nthinking = "ultra"\n', encoding="utf-8"
+    )
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "stage-models")
+    assert check.status == "warn"
+    assert "ultra" in check.detail
+    assert report.exit_code == 0
+
+
+def test_stage_models_check_warns_on_malformed_committed_toml(git_repo):
+    # Malformed TOML defers to the config check (mirrors providers/issues).
+    _scaffold(git_repo)
+    (git_repo / ".perk" / "config.toml").write_text("[stages.implement\nmodel =", encoding="utf-8")
+    report = run_doctor(git_repo, verify=False)
+    check = next(c for c in report.checks if c.name == "stage-models")
+    assert check.status == "warn"
+    assert "see the config check" in check.message
+
+
 def test_issues_group_renders():
     # The _GROUP_ORDER trap: a group missing from GROUP_ORDER silently doesn't render.
     from perk.cli.commands.doctor.render import GROUP_ORDER

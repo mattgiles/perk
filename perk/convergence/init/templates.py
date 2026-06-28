@@ -62,6 +62,23 @@ root = ".worktrees"
 # objective-explorer = "anthropic/claude-haiku-4-5"
 # conflict-resolver = "anthropic/claude-sonnet-4-5"
 
+# Per-stage model + thinking defaults (optional) — injected as pi `--model` /
+# `--thinking` flags when `perk <stage>` cold-launches that stage's pi session.
+# Either key may be set alone; an unset key leaves pi's own default untouched (no
+# enforced perk default). A user-passed `perk <stage> --model X` wins (the config
+# flag is injected first; pi parses last-wins). Overlay-aware (a local.toml
+# [stages.<id>] leaf-merges over these). Valid stage ids: the registry stages
+# (plan, implement, address, learn, objective-author, objective-plan, … — see
+# `perk registry`). Thinking ∈ off/minimal/low/medium/high/xhigh. `perk doctor`
+# validates the configured stage ids + thinking levels (loud-but-non-fatal).
+#
+# [stages.implement]
+# model = "anthropic/claude-opus-4-1"
+# thinking = "high"
+#
+# [stages.plan]
+# thinking = "xhigh"
+
 # CI checks (optional) — named checks the `run_ci` tool / `/ci` command run and
 # REPORT pass/fail (they never edit or fix). Each [[ci]] row is name/command plus
 # an optional `glob` (a comma-separated pattern string); a check with a `glob` is

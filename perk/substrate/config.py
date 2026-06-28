@@ -19,6 +19,19 @@ from perk.substrate.bindings import Binding, parse_user_bindings
 
 DEFAULT_WORKTREE_DIRNAME = ".worktrees"
 
+# pi's `--thinking` level vocabulary (the contract surface the doctor check validates configured
+# `[stages.<id>] thinking` values against). Model strings are NOT validated by perk — pi resolves
+# those at session start.
+PI_THINKING_LEVELS: frozenset[str] = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
+
+
+@dataclass(frozen=True)
+class StageModel:
+    """Per-stage pi launch overrides from `[stages.<id>]` (both optional; None ⇒ pi default)."""
+
+    model: str | None = None
+    thinking: str | None = None
+
 
 class ConfigModel(LenientParseModel):
     """Lenient parse / structural backstop over the *assembled* config.
@@ -48,6 +61,11 @@ class ConfigModel(LenientParseModel):
     # to the GitHub default branch (byte-identical to prior behavior). The sibling
     # `[workflow] plan_authoring` key is TS-read and untouched.
     workflow_base: str | None = None
+    # The per-stage `[stages.<id>]` launch overrides — a `{stage_id: StageModel}` map injected as
+    # pi `--model`/`--thinking` flags at the cold-launch seam (`launch_stage`). Unknown stage ids
+    # are kept here (registry validation is the doctor check's job, not the parser's — keeps this
+    # module free of a registry import); held by identity exactly like `user_bindings`.
+    stage_models: dict[str, StageModel] = Field(default_factory=dict)
 
     def to_domain(self) -> "Config":
         """Convert the validated model into the frozen ``Config`` domain object.
@@ -63,6 +81,7 @@ class ConfigModel(LenientParseModel):
             subagents=self.subagents,
             providers=self.providers,
             workflow_base=self.workflow_base,
+            stage_models=self.stage_models,
         )
 
 
@@ -81,6 +100,7 @@ class Config:
     subagents: dict[str, str] = field(default_factory=dict)
     providers: dict[str, str | None] = field(default_factory=dict)
     workflow_base: str | None = None
+    stage_models: dict[str, StageModel] = field(default_factory=dict)
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -118,6 +138,7 @@ def load_config(repo_root: Path) -> Config:
         providers=_parse_providers_selection(merged.get("providers")),
         subagents=_parse_subagents_selection(merged.get("subagents")),
         workflow_base=_parse_workflow_base(merged.get("workflow")),
+        stage_models=_parse_stage_models(merged.get("stages")),
     )
     return model.to_domain()
 
@@ -134,6 +155,33 @@ def _parse_worktree_setup(raw: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _parse_stage_models(raw: Any) -> dict[str, StageModel]:
+    """Read the `[stages.<id>]` sub-tables into a `{stage_id: StageModel}` map.
+
+    LBYL silent-omit (mirrors ``_parse_subagents_selection``): a non-dict `[stages]` table yields
+    ``{}``; each `[stages.<id>]` sub-table contributes a ``StageModel`` built from its **string**
+    ``model``/``thinking`` values (each ``.strip()``-ed; blank/ill-typed dropped). A sub-table that
+    yields neither a model nor a thinking is omitted (an empty `[stages.foo]` stays inert). Unknown
+    stage ids are kept — registry validation is the doctor check's job, not the parser's.
+    """
+    table = raw if isinstance(raw, dict) else {}
+    result: dict[str, StageModel] = {}
+    for stage_id, sub in table.items():
+        if not isinstance(sub, dict):
+            continue
+        model = _stripped_str(sub.get("model"))
+        thinking = _stripped_str(sub.get("thinking"))
+        if model is None and thinking is None:
+            continue
+        result[stage_id] = StageModel(model=model, thinking=thinking)
+    return result
+
+
+def _stripped_str(value: Any) -> str | None:
+    """Return ``value.strip()`` when it is a non-blank ``str``, else ``None`` (ill-typed/blank)."""
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _parse_workflow_base(raw: Any) -> str | None:
