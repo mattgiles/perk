@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import ConfigDict
 
 from perk import plan
-from perk.boundary import LenientParseModel, StrTuple, translate_validation_errors
+from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.run.runner import RunHandle, RunHandleModel
 from perk.substrate.output import user_output
 
@@ -76,7 +76,7 @@ class HandoffModel(LenientParseModel):
     node_id: str | None = None
     adopt_from: str | None = None
     supersedes: str | None = None
-    consumed_learn: StrTuple = ()
+    consumed_learn: tuple[str, ...] = ()
 
     def to_domain(self) -> Handoff:
         """Convert the validated model into the frozen domain object, folding the open-ended

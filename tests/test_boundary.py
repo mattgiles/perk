@@ -15,7 +15,6 @@ from pydantic import Field
 from perk.boundary import (
     LenientParseModel,
     OutputModel,
-    StrictBoundaryModel,
     StrictInputModel,
     StrTuple,
     ValidationError,
@@ -179,23 +178,6 @@ def test_output_forbids_extra() -> None:
 def test_output_dump_json_round_trips() -> None:
     model = _Output.model_validate({"name": "x", "count": 1})
     assert model.model_dump(mode="json") == {"name": "x", "count": 1}
-
-
-# --- Legacy StrictBoundaryModel still behaves strictly (config unchanged) ---
-
-
-class _LegacyStrict(StrictBoundaryModel):
-    n: int
-
-
-def test_legacy_strict_rejects_string_scalar() -> None:
-    with pytest.raises(ValidationError):
-        _LegacyStrict.model_validate({"n": "5"})
-
-
-def test_legacy_strict_forbids_extra() -> None:
-    with pytest.raises(ValidationError):
-        _LegacyStrict.model_validate({"n": 5, "unknown": "x"})
 
 
 # --- Canonical pattern reference: lenient parse → frozen dataclass → validate ---

@@ -49,6 +49,22 @@ class ConfigModel(LenientParseModel):
     # `[workflow] plan_authoring` key is TS-read and untouched.
     workflow_base: str | None = None
 
+    def to_domain(self) -> "Config":
+        """Convert the validated model into the frozen ``Config`` domain object.
+
+        Explicit field-by-field copy (never ``Config(**model.model_dump())``: model_dump would
+        recursively turn nested ``Binding`` models into plain dicts and corrupt ``user_bindings``).
+        Attribute access preserves the original ``Binding`` instances by identity.
+        """
+        return Config(
+            worktree_root=self.worktree_root,
+            worktree_setup=self.worktree_setup,
+            user_bindings=self.user_bindings,
+            subagents=self.subagents,
+            providers=self.providers,
+            workflow_base=self.workflow_base,
+        )
+
 
 @dataclass(frozen=True)
 class Config:
@@ -103,17 +119,7 @@ def load_config(repo_root: Path) -> Config:
         subagents=_parse_subagents_selection(merged.get("subagents")),
         workflow_base=_parse_workflow_base(merged.get("workflow")),
     )
-    # Explicit field-by-field conversion (never ``Config(**model.model_dump())``: model_dump
-    # would recursively turn nested ``Binding`` models into plain dicts and corrupt
-    # ``user_bindings``). Attribute access preserves the original ``Binding`` instances by identity.
-    return Config(
-        worktree_root=model.worktree_root,
-        worktree_setup=model.worktree_setup,
-        user_bindings=model.user_bindings,
-        subagents=model.subagents,
-        providers=model.providers,
-        workflow_base=model.workflow_base,
-    )
+    return model.to_domain()
 
 
 def _parse_worktree_setup(raw: Any) -> list[str]:

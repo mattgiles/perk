@@ -2465,9 +2465,10 @@ class Runner(Protocol):
   re-runs only the failed jobs. `GitHubActionsRunner.retry` shells `github.rerun_workflow_run`
   (`gh run rerun [--failed]`), wrapping `github.GitHubError` as `RunnerError` exactly as `cancel`.
 
-The value types: `RunHandle` is a frozen Pydantic model (`StrictBoundaryModel`), JSON-stable via
-`model_dump(mode="json")`/`model_validate`; `RunObservation` stays a frozen dataclass; the dispatch
-record is modeled by `cache.DispatchCache` (the on-disk read boundary, below):
+The value types: `RunHandle` is a frozen `@dataclass` whose JSON boundary is `RunHandleModel`
+(`LenientParseModel`), JSON-stable via `model_dump(mode="json")`/`model_validate` on that boundary
+model; `RunObservation` stays a frozen dataclass; the dispatch record's domain object is `Dispatch`
+with `DispatchModel` (`LenientParseModel`) as the on-disk read boundary (below):
 
 - **`RunHandle`** — `runner` (the routed ref, `""` ⇒ default), `kind` (`"github-actions"`),
   `run_ref` (the runner-native run id — GitHub Actions' numeric id as a string), `url`. Stored
@@ -2475,12 +2476,13 @@ record is modeled by `cache.DispatchCache` (the on-disk read boundary, below):
   `run_id` is the canonical, runner-agnostic correlation key; `run_ref` is the runner-side handle.
 - **`RunObservation`** — `status` (`"queued"|"in_progress"|"completed"|"unknown"`), `conclusion`
   (`"success"|"failure"|"cancelled"|…|None`), `url`.
-- **`cache.DispatchCache`** — the durable linkage (below); its nested `plan_ref` (a `PlanRefCache`)
-  and `run_handle` (a `RunHandle`) are validated at the on-disk read boundary.
+- **`Dispatch`** — the durable linkage (below); its nested `plan_ref` (the unified `plan.PlanRef`,
+  boundary `PlanRefModel`) and `run_handle` (a `RunHandle`, boundary `RunHandleModel`) are validated
+  at the on-disk read boundary via `DispatchModel`.
 
 ### The dispatch record (the supervisor's correlation source)
 
-`cache.DispatchCache` is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
+The `Dispatch` record is persisted at **`.perk/workflow/scratch/runs/<run_id>/dispatch.json`** (the run's
 scratch dir — `perk init` already creates `scratch/runs/` and `.gitignore` already excludes
 `/.perk/workflow/scratch/`, so no layout/gitignore change). Shape:
 
