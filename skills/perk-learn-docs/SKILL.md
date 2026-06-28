@@ -74,6 +74,7 @@ it. Document **reality**, not aspiration (workarounds, quirks, tech debt all bel
 ## Out of scope (deferred)
 
 Do **not** build erk's heavier machinery: no per-category auto-generated `index.md`, no
-`tripwires.md`/`tripwires-index.md` generation, no `docs sync` codegen, no multi-agent session
-preprocessing. perk's already-synthesized `perk:learn` records replace erk's session-analysis
-pipeline — you consolidate records, you do not re-derive them.
+`tripwires.md`/`tripwires-index.md` generation, no `docs sync` codegen. `/learn` now produces
+session-grounded, already-classified `perk:learn` records (each carrying its captured-classification
+metadata — a `decision`, and an optional routable `target`); `/learn-docs` **consolidates** those
+records and their classification — it still does **not** re-derive sessions itself.
