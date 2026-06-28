@@ -237,7 +237,9 @@ URL filled in **automatically** (no copy-paste) — the same result as plannotat
 `pi.events` action, which opens the identical browser UI. Requires the
 `@plannotator/pi-extension` package installed (detected by its `/plannotator-review` command,
 independent of which plan provider is selected) and an interactive session. The review runs in the
-background; when you finish, any feedback and annotations route back into the session as a
+background; plannotator's setup progress (fetching the PR, creating the local checkout) is
+surfaced as perk notifications rather than raw terminal output that would paint over the input box.
+When you finish, any feedback and annotations route back into the session as a
 follow-up turn (a short triage note is appended when there are annotations), and approving with no
 changes shows a notification only. This is a plain warm command — no stage, no model tool.
 

@@ -29,6 +29,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { failFor } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -201,13 +202,26 @@ export function registerPrReviewLocal(pi: ExtensionAPI): void {
 
       // Kick the long-running review in the BACKGROUND — do not block the session for the whole
       // review (plannotator responds once on completion). Mirrors plannotator's own `.then` route.
+      // While setup runs, re-route plannotator's in-process `console.error` chatter through the
+      // TUI-safe report() seam so it never clobbers the input box; the debounce restores once setup
+      // goes quiet, with the `finally` as a backstop.
       void (async () => {
-        const out = await requestPlannotatorCodeReview(pi.events, {
-          prUrl: r.data.url,
-          cwd: ctx.cwd,
-          signal: ctx.signal,
-        });
-        routePrReviewOutcome(pi, ctx, out);
+        const interceptor = interceptConsoleError(
+          (line) => report(ctx, "pr-review-local", "info", line),
+          // plannotator can pause up to ~4s between setup lines — keep the quiet window comfortably
+          // above that so the debounce doesn't restore mid-setup and let the next line clobber.
+          { quietMs: 6000 },
+        );
+        try {
+          const out = await requestPlannotatorCodeReview(pi.events, {
+            prUrl: r.data.url,
+            cwd: ctx.cwd,
+            signal: ctx.signal,
+          });
+          routePrReviewOutcome(pi, ctx, out);
+        } finally {
+          interceptor.restore();
+        }
       })();
     },
   });
