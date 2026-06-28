@@ -87,3 +87,30 @@ def test_golden_init_report_minimal() -> None:
     from perk.convergence.init.report import report_to_dict
 
     assert_golden("init_report_minimal", report_to_dict(_init_report_minimal()))
+
+
+# --- doctor report ------------------------------------------------------------------------
+
+
+def _doctor_report_full():
+    from perk.convergence.doctor.data import Check, DoctorReport
+
+    return DoctorReport(
+        checks=[
+            Check("settings-wiring", "package", "ok", "wired"),
+            Check("github", "github", "warn", "unauthed", detail="gh not logged in"),
+            Check("node", "env", "info", "optional", remediation="install node"),
+            Check("registry", "repository", "fail", "drift", detail="d", remediation="r"),
+        ],
+        fixed=["re-converged settings-wiring"],
+        self_repo=True,
+        error_type=None,
+        message=None,
+        fix_errors=["skills sync failed"],
+    )
+
+
+def test_golden_doctor_report() -> None:
+    from perk.convergence.doctor import report_to_dict
+
+    assert_golden("doctor_report", report_to_dict(_doctor_report_full()))
