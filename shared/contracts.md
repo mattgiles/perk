@@ -646,9 +646,10 @@ which case perk **vacates `installPerkFooter`** (install-site runtime vacating k
 fail-safe to install; see §8.10's footer interface-seam note) and the foreign footer is the sole
 footer surface. perk's default-owned footer composes one line, in charter order, perk identity
 (`perk v<version>`), the 🎯 objective segment, the 📋 checkpoints segment (left group), then git
-branch, model, context usage (`<pct>%/<window>`, warning >70 / error >90), and guest extension
-statuses (right-aligned), with the extended D9 drop order on overflow (guests → model → branch →
-context → checkpoints; identity + objective never drop). The composed `perk` status slot
+branch, model, thinking level (bare level text, dim; read live via `pi.getThinkingLevel()`, shown
+whenever a model is present including `off`), context usage (`<pct>%/<window>`, warning >70 / error
+>90), and guest extension statuses (right-aligned), with the extended D9 drop order on overflow
+(guests → thinking → model → branch → context → checkpoints; identity + objective never drop). The composed `perk` status slot
 **remains published** (the `createPerkStatus` dual-publish is deliberate) and is the RPC-visible
 surface — `setFooter` is an RPC no-op. The `v<version> loaded` startup notify is **retired**
 (charter D7: identity is standing footer state, not a transition) — `session_start` no longer

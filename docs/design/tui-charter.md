@@ -232,15 +232,21 @@ composing, in fixed order:
   model · context · guests, two-space-joined, ≥2 spaces of padding between the groups, dim):
 
   ```
-  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2      main  gpt-5  42.3%/200k  ◆ g
-  └─────────┘  └──────────────────────┘ └──────────┘     └──┘  └───┘  └────────┘  └──┘
-   identity      objective segment      checkpoints    branch  model   context  guest
+  perk v0.0.1  🎯 251 · 12.3k tok · 5m  📋 1/3 · ▸2      main  gpt-5  high  42.3%/200k  ◆ g
+  └─────────┘  └──────────────────────┘ └──────────┘     └──┘  └───┘  └──┘  └────────┘  └──┘
+   identity      objective segment      checkpoints    branch  model  think   context  guest
   ◀════════ left group (charter order 1–3) ══▶  ◀══ right group (4, 5, +context, 6) ══▶
   ```
 
+- **Thinking-level segment.** The footer gains a thinking segment immediately after model: the
+  session thinking level rendered as bare level text (dim; `off`/`minimal`/…/`xhigh`), with no
+  glyph or label. Always shown when a model is present (including `off`); omitted when there is no
+  model. Read **live** in `render()` via `pi.getThinkingLevel()` (D10 stateless render, render-driven
+  reactivity — no event subscription); pi's clamp to model capabilities means non-reasoning models
+  render `off`.
 - **Extended D9 drop order.** With the new segments, overflow drops whole segments in order:
-  guests (rightmost-first) → model → branch → context → checkpoints; identity + objective are
-  truncate-only, never dropped (see §4).
+  guests (rightmost-first) → thinking → model → branch → context → checkpoints; identity + objective
+  are truncate-only, never dropped (see §4).
 
 **Themed widget factories (D3/D10).** Widgets adopt the `(tui, theme) => ({ render, invalidate })`
 factory form so glyphs are theme-colored without pre-baking (§5).

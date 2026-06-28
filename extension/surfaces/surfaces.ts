@@ -192,7 +192,7 @@ export function createPerkStatus(): PerkStatusHandle {
 /**
  * The raw material for one composed footer line. Left group (charter order 1–3): `identity`,
  * `objective`, `checkpoints` — the segments render verbatim (they carry their own 🎯/📋 marks).
- * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `context`, `guests` —
+ * Right group (charter order 4, 5, +context, 6): `branch`, `model`, `thinking`, `context`, `guests` —
  * right-aligned, non-segment system text dim-themed.
  */
 export interface FooterParts {
@@ -206,6 +206,8 @@ export interface FooterParts {
   branch?: string;
   /** Model id (dim); omitted when no model. */
   model?: string;
+  /** The session thinking level (dim; e.g. `high`/`off`); omitted when there is no model. */
+  thinking?: string;
   /** Context usage — rendered `<pct>%/<window>` (dim; warning >70, error >90; `?` when null). */
   context?: { percent: number | null; contextWindow: number };
   /** Guest extension statuses (dim), pre-sorted by slot key; sanitized here. */
@@ -236,14 +238,15 @@ function formatContextSegment(
  * Compose THE one footer line (FOOTER_MAX_LINES = 1): left group = identity + objective +
  * checkpoints (two-space-joined, charter order); right group = branch + model + context + guests
  * (two-space-joined), right-aligned with ≥2 spaces of padding. When the line exceeds `width`,
- * whole segments drop in the extended D9 order — guests (rightmost-first) → model → branch →
- * context → checkpoints; `identity` and `objective` are NEVER dropped — then `truncateToWidth`
+ * whole segments drop in the extended D9 order — guests (rightmost-first) → thinking → model →
+ * branch → context → checkpoints; `identity` and `objective` are NEVER dropped — then `truncateToWidth`
  * as the last resort (ANSI- and 2-cell-emoji-aware).
  */
 export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: number): string {
   const keep = {
     guests: parts.guests.map((g) => sanitizeGuestStatus(g)),
     model: true,
+    thinking: true,
     branch: true,
     context: true,
     checkpoints: true,
@@ -255,6 +258,7 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
     const right: string[] = [];
     if (keep.branch && parts.branch !== undefined) right.push(theme.fg("dim", parts.branch));
     if (keep.model && parts.model !== undefined) right.push(theme.fg("dim", parts.model));
+    if (keep.thinking && parts.thinking !== undefined) right.push(theme.fg("dim", parts.thinking));
     if (keep.context && parts.context !== undefined) {
       right.push(formatContextSegment(parts.context, theme));
     }
@@ -268,6 +272,7 @@ export function composeFooterLine(parts: FooterParts, theme: ThemeLike, width: n
   let line = compose();
   while (visibleWidth(line) > width) {
     if (keep.guests.length > 0) keep.guests.pop();
+    else if (keep.thinking) keep.thinking = false;
     else if (keep.model) keep.model = false;
     else if (keep.branch) keep.branch = false;
     else if (keep.context) keep.context = false;
@@ -293,6 +298,7 @@ export interface PerkFooterDeps {
   identity: string;
   status: PerkStatusHandle;
   getModelId(): string | null;
+  getThinkingLevel(): string | null;
   getContext(): { percent: number | null; contextWindow: number } | null;
 }
 
@@ -331,6 +337,7 @@ export function perkFooter(deps: PerkFooterDeps): PerkFooterFactory {
           checkpoints: deps.status.get("checkpoints"),
           branch: footerData.getGitBranch() ?? undefined,
           model: deps.getModelId() ?? undefined,
+          thinking: deps.getThinkingLevel() ?? undefined,
           context: deps.getContext() ?? undefined,
           guests,
         };

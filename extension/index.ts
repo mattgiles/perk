@@ -329,6 +329,7 @@ export default function (pi: ExtensionAPI) {
         identity: `perk v${version}`,
         status: perkStatus,
         getModelId: () => ctx.model?.id ?? null,
+        getThinkingLevel: () => (ctx.model ? pi.getThinkingLevel() : null),
         getContext: () => {
           const usage = ctx.getContextUsage();
           return usage ? { percent: usage.percent, contextWindow: usage.contextWindow } : null;
