@@ -57,6 +57,17 @@ def test_read_absent_is_none(tmp_path: Path):
     assert read_session_pointers(tmp_path, "01NOPE") is None
 
 
+def test_read_corrupt_record_degrades_to_none(tmp_path: Path):
+    # A corrupt/unreadable record never raises (the resolver contract) — it degrades to None.
+    path = session_pointers.session_pointers_path(tmp_path, "01BAD")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json at all", encoding="utf-8")
+    assert read_session_pointers(tmp_path, "01BAD") is None
+    # A schema-mismatched (valid JSON, missing run_id) record also degrades to None.
+    path.write_text('{"planning": {}}', encoding="utf-8")
+    assert read_session_pointers(tmp_path, "01BAD") is None
+
+
 def test_write_run_id_is_authoritative(tmp_path: Path):
     # `write_session_pointers` keys by the explicit run_id (the record's own is overridden).
     record = SessionPointers(run_id="stale")
@@ -179,6 +190,15 @@ def test_resolver_degrades_to_missing(monkeypatch, tmp_path: Path):
     assert len(r.implementation) == 1
     assert r.implementation[0].main.status == "missing"
     assert r.implementation[0].worker.status == "missing"
+
+    # A corrupt record file degrades to missing too (the resolver never crashes).
+    corrupt = session_pointers.session_pointers_path(tmp_path, "01CORRUPT")
+    corrupt.parent.mkdir(parents=True, exist_ok=True)
+    corrupt.write_text("{not json", encoding="utf-8")
+    _stub_backend(monkeypatch, {"run_id": "01CORRUPT", "impl_run_ids": []})
+    r = resolve_plan_sessions(tmp_path, "7")
+    assert r.planning_run_id == "01CORRUPT"
+    assert r.planning_main.status == "missing"
 
 
 def test_resolver_null_slot_is_missing(monkeypatch, tmp_path: Path):

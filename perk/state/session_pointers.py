@@ -19,6 +19,7 @@ from pathlib import Path
 
 from perk.boundary import LenientParseModel, translate_validation_errors
 from perk.state.cache import CacheError, run_scratch_dir
+from perk.substrate.output import user_output
 
 SESSION_POINTERS_FILE = "session-pointers.json"
 
@@ -111,14 +112,24 @@ def session_pointers_path(root: Path, run_id: str) -> Path:
 
 
 def read_session_pointers(root: Path, run_id: str) -> SessionPointers | None:
-    """Read + validate a run's session-pointers record, or ``None`` when it does not exist."""
+    """Read + validate a run's session-pointers record, or ``None`` when it is absent/unusable.
+
+    **Never raises** (the cross-run resolver depends on it): absence is the normal ``None``, and a
+    corrupt/unreadable record (bad JSON, schema mismatch, OS error) is loud-but-non-fatal — it
+    warns to stderr and degrades to ``None`` (→ a ``missing`` resolution, never a guess), mirroring
+    ``list_dispatch_records`` and the lenient TS twin ``readSessionPointers``.
+    """
     path = session_pointers_path(root, run_id)
     if not path.is_file():
         return None
-    with translate_validation_errors(CacheError, source=str(path)):
-        return SessionPointersModel.model_validate(
-            json.loads(path.read_text(encoding="utf-8"))
-        ).to_domain()
+    try:
+        with translate_validation_errors(CacheError, source=str(path)):
+            return SessionPointersModel.model_validate(
+                json.loads(path.read_text(encoding="utf-8"))
+            ).to_domain()
+    except (OSError, json.JSONDecodeError, CacheError) as exc:
+        user_output(f"warning: skipping unreadable session-pointers record {path}: {exc}")
+        return None
 
 
 def write_session_pointers(root: Path, run_id: str, record: SessionPointers) -> Path:
