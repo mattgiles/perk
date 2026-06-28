@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "learn_issue": {
+    "id": "77",
+    "url": "https://github.com/o/r/issues/77",
+    "existed": false
+  },
+  "plan_issue": "42",
+  "commented": true,
+  "pending_cleared": true,
+  "dry_run": false
+}

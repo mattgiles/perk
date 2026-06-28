@@ -320,3 +320,33 @@ def test_golden_pr_review_context() -> None:
     from perk.cli.commands.pr.review_context_cmd import _result_to_dict
 
     assert_golden("pr_review_context", _result_to_dict(_pr_review_context_result()))
+
+
+# --- learn capture ------------------------------------------------------------------------
+
+
+def _learn_capture_result(*, dry_run: bool):
+    from perk.backends import issue_backend
+    from perk.cli.commands.learn.capture_cmd import LearnCaptureResult
+
+    return LearnCaptureResult(
+        learn_issue=issue_backend.IssueRef(
+            id="77", url="https://github.com/o/r/issues/77", existed=False
+        ),
+        plan_issue="42",
+        commented=not dry_run,
+        pending_cleared=not dry_run,
+        dry_run=dry_run,
+    )
+
+
+def test_golden_learn_capture() -> None:
+    from perk.cli.commands.learn.capture_cmd import _result_to_dict
+
+    assert_golden("learn_capture", _result_to_dict(_learn_capture_result(dry_run=False)))
+
+
+def test_golden_learn_capture_dry_run() -> None:
+    from perk.cli.commands.learn.capture_cmd import _result_to_dict
+
+    assert_golden("learn_capture_dry_run", _result_to_dict(_learn_capture_result(dry_run=True)))
