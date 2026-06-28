@@ -1,6 +1,6 @@
 ---
 title: The plan review → approval → save pipeline
-read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, changing factory/authoring guidance prose (the three-tier prose mirror), or the `PLAN_AUTHORING_CONTEXT` consult-learnings nudge seam + its three-surface lockstep.
+read_when: Working on plan_review / a review backend (plannotator, first-party, tombell), the approvalSave seam, plan-source resolution for review vs save, wiring a new review surface's APPROVED/DENIED arms (the approved-first routing split), flavoring the shared first-party review core for a second subject, changing factory/authoring guidance prose (the three-tier prose mirror), the `PLAN_AUTHORING_CONTEXT` consult-learnings nudge seam + its three-surface lockstep, or bridging to another loaded extension over the `pi.events` bus (the second `code-review` plannotator bridge behind `/pr-review-local` — single-response/no-handshake, presence-gated, background-awaited).
 ---
 
 # The plan review → approval → save pipeline
@@ -169,6 +169,38 @@ guidance between the gather list and the executor paragraph.**
   post-state via `rebuildWorkflowState(branch)` — no harness/session needed even for
   claim-clear read-back, because the fake `appendEntry` lands on the branch the ctx reads.
 
+## The second event-bus bridge: `/pr-review-local` (`code-review`)
+
+`/pr-review-local` opens plannotator's browser **code-review** UI on the active PR — the **second**
+plannotator event-bus bridge (after `plan_review`'s `createPlannotatorBridge`) and the reusable
+cross-extension pattern:
+
+- **Cross-extension invocation has no API — speak the published event bus.** pi exposes no way for
+  one extension to invoke another's slash command (`sendUserMessage` sends model text;
+  `steer`/`followUp` *error* on slash commands). To reuse plannotator's review UI, perk emits a
+  `plannotator:request` on the in-process `pi.events` bus — the same mechanism the plan-review bridge
+  uses. This is now the reusable pattern for "trigger another loaded extension's behavior."
+- **The `code-review` envelope differs from `plan-review` — single-response, no handshake** (pinned
+  against a specific `@plannotator/pi-extension` version in the bridge's comment). For
+  `action: "code-review"` plannotator resolves **once** with the final
+  `{ approved, feedback?, annotations? }`: no fast handshake, no `reviewId` channel, no timeout.
+  Consequences — the bridge is simpler (emit once, resolve on the single response; no pending
+  registry); because there is no handshake, perk **gates on presence up front**
+  (`pi.getCommands().some(c => c.name === "plannotator-review")` — the bare command name; detection is
+  independent of the selected plan provider) and awaits the (possibly long) review in the
+  **background** (`void (async () => {...})()`) so the session isn't blocked for the whole review.
+- **Feedback routing** reuses submit.ts's idle-vs-streaming pattern (`ctx.isIdle()` →
+  `sendUserMessage` vs `deliverAs: "followUp"`), and a short perk-authored triage suffix is appended
+  **only when `annotations.length > 0`** (a platform PR approve/comment action returns an empty
+  annotation set — don't tell the agent to "address" a platform action).
+- **Mechanics that held:** a new read-only cold-door worker `perk pr url` (`{pr:{number,url}}`, exit
+  0/1/2) mirrors `pr review-context`'s resolution path; registering a new `pr` worker is the
+  established 3-edit recipe (import + `mark_kind(..., "worker")` + `pr_group.add_command(...)`) plus
+  the alphabetically-sorted `EXPECTED_SURFACE` entry. `/pr-review-local` is a plain warm command (no
+  registry stage, no model tool) → no `shared/registry.yaml` / `READ_ONLY_TOOLS` / `[[bindings]]`
+  change; all UI via `report()` so `surfacesGuard` stays green. (The tsc combined-literal-discriminant
+  `||`-narrowing gotcha hit here is recorded in `toolchain/biome.md`.)
+
 ## Residual risks
 
 - The editor-dialog UX (long-plan scrolling, the Ctrl+G `$EDITOR` round-trip) is
@@ -193,3 +225,4 @@ guidance between the gather list and the executor paragraph.**
 - `docs/learned/pi/extension-api.md` — `ctx.ui.editor` facts + the `headfulUIContext` gap
 - `docs/learned/pi/tool-param-decode.md` — the tri-state param decode the door's `plan` param uses
 - `docs/learned/pi/extension-seams.md` — minimal structural slices + the type-only-import cycle break
+- `docs/learned/pi/pi-events.md` — the event-bus bridge-testing mechanics (the `code-review` bridge)

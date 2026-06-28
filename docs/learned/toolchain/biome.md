@@ -1,6 +1,6 @@
 ---
 title: Biome / tsc gotchas in perk's pinned TS toolchain
-read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
+read_when: You hit a Biome lint or tsc error in the extension (useIterableCallbackReturn — incl. forEach expression-body assertions, noAssignInExpressions, noUncheckedIndexedAccess, noUselessUndefinedInitialization, noControlCharactersInRegex), a TS parameter-property failing under `node --test`, an `Omit<Union, K>` collapsing a discriminated union, a discriminated-union member with a combined-literal discriminant (`"a" | "b"`) that won't narrow out via `||`-exclusion (positive-guard the wanted variant instead), the `organizeImports` assist not running under `biome format`, editing prose inside a template literal before a `--write` run (the backtick-mangling trap), auditing a `--write` pass after an import-path sweep, or a CI lint iteration on formatting (incl. new-file collapse — run `biome check --write` first).
 ---
 
 # Biome / tsc gotchas
@@ -77,6 +77,28 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 
 Distribution fires only when the checked type is the naked param `T`; **inlining the union in the
 conditional does NOT distribute.** Reusable any time you stamp common fields onto a union member.
+
+## A combined-literal discriminant member doesn't narrow out via `||`
+
+A discriminated union with a member whose discriminant is a **combined literal** —
+`{ status: "unavailable" | "error"; warning }` — is **not** narrowed away by negatively excluding the
+literals one at a time:
+
+```ts
+if (out.status === "unavailable" || out.status === "error") return; // does NOT remove that member
+// out.handled  ← still a type error: the combined-literal member survives in the residual
+```
+
+tsc keeps that member in the residual, so a later access to a field that exists only on the wanted
+variant fails. **Fix: guard positively on the wanted variant** rather than negatively excluding the
+others:
+
+```ts
+if (out.status !== "handled") return; // narrows to the handled variant cleanly
+```
+
+Reusable rule: **positive-guard a discriminated union when a member carries a combined-literal
+discriminant** — don't try to exclude the unwanted members one literal at a time.
 
 ## Unescaped backticks in template-literal prose + `--write` = silent mangling
 

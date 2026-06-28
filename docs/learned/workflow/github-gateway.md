@@ -172,9 +172,26 @@ op or guard/early-return before any mutation (offline previews for the PR verbs;
 path is reached only from the remote worker, which has no dry-run mode). No forgotten
 plumb-through — the `= False` defaults are audited and stay.
 
+## Response converters validate through lenient parse models
+
+The gateway's response converters (`_pull_request` / `_parse_review_threads` / `_parse_reviews` /
+the issue + workflow-run reads) now validate the raw `gh` JSON through **lenient parse models**
+(`PullRequestModel`, `WorkflowRunModel`, `ReviewThreadModel` / `ReviewModel` / `ReviewCommentModel` +
+`_Actor`, `IssueReadModel`) before converting into the frozen domain objects. The converters keep
+their names + signatures; only their bodies become `Model.model_validate(raw).to_domain()`, wrapped
+at each **call site** with `translate_validation_errors(GitHubError, source=<operation label>)`. The
+edge posture is identity-required / rest-tolerant (byte-identical happy path; only a
+present-but-malformed payload changes — now a labelled `GitHubError` instead of a raw
+`KeyError`/`ValueError`), and lookup-miss guards (`none_on_not_found` / `"databaseId" not in data`)
+run **before** validation so a legitimate miss never becomes a raise. The full recipe (call-site
+validation, `AliasChoices` for two wire shapes, the `object`-param widening, nested-children
+composition) lives in `pydantic-boundary-models.md` — not duplicated here.
+
 ## Cross-references
 
 - `perk/github/` — the gateway and the helper family
+- `docs/learned/workflow/pydantic-boundary-models.md` — the boundary↔domain conversion recipe (the
+  gateway response converters apply its lenient-parse-model → frozen-dataclass pattern)
 - `docs/learned/workflow/init-external-cli.md` — the repo-authored-skills convergence, sole consumer
   of the `repo_identity` read (network-skip ordering, sibling-fragment self-exclusion)
 - `docs/learned/pi/extension-seams.md` — the TS sibling of idiom consolidation (minimal structural
