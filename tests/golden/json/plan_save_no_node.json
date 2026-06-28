@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "issue": {
+    "id": "123",
+    "url": "https://github.com/o/r/issues/123",
+    "existed": false
+  },
+  "plan_ref": {
+    "provider": "github",
+    "pr_id": "123",
+    "url": "https://github.com/o/r/issues/123",
+    "labels": [
+      "perk:plan"
+    ],
+    "objective_id": "63",
+    "consumed_learn": [
+      "45"
+    ],
+    "base": "main"
+  },
+  "cached": true,
+  "updated": false,
+  "objective_node": null,
+  "dry_run": false
+}

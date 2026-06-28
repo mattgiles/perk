@@ -18,6 +18,7 @@ import click
 from perk import objective, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
+from perk.boundary import OutputModel
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
@@ -29,6 +30,19 @@ _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
 
 @dataclass(frozen=True)
+class ObjectiveNodeLink:
+    """The objective-node commit outcome: `linked` true iff the node→plan backlink +
+    in_progress advance succeeded; `node`/`status` describe it; `error` carries a non-fatal
+    link failure. A precise frozen record (not a `dict`) so its serialization boundary is
+    nameable (`ObjectiveNodeLinkOut`)."""
+
+    linked: bool
+    node: str
+    status: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
 class PlanSaveResult:
     issue: issue_backend.IssueRef
     plan_ref: plan.PlanRef
@@ -37,10 +51,8 @@ class PlanSaveResult:
     dry_run: bool
     cached: bool  # the plan-ref was written to .perk/workflow/plan-ref.json (real save only)
     updated: bool  # an existing issue was updated in place (idempotent re-save upsert)
-    # The objective-node commit: `linked` true iff the node→plan backlink + in_progress
-    # advance succeeded; `node`/`status` describe it; `error` carries a non-fatal link failure.
-    # `None` when no objective node link was requested (no --node-id).
-    objective_node: dict[str, object] | None = None
+    # The objective-node commit; `None` when no objective node link was requested (no --node-id).
+    objective_node: ObjectiveNodeLink | None = None
 
 
 @click.command("save")
@@ -464,7 +476,7 @@ def _plan_save_impl(
     # Commit the objective-node claim atomically: set the node→plan backlink AND advance
     # `planning → in_progress` in a single write. Fail-loud, non-fatal, idempotent on re-save
     # (the plan already exists — never raise here; mirror pr_land._reconcile_objective_on_land).
-    objective_node_result: dict[str, object] | None = None
+    objective_node_result: ObjectiveNodeLink | None = None
     if not dry_run and objective_id and node_id:
         try:
             store.update_objective_node(
@@ -473,23 +485,17 @@ def _plan_save_impl(
                 status=objective.NodeStatus.IN_PROGRESS,
                 pr=f"#{issue.id}",
             )
-            objective_node_result = {
-                "linked": True,
-                "node": node_id,
-                "status": "in_progress",
-                "error": None,
-            }
+            objective_node_result = ObjectiveNodeLink(
+                linked=True, node=node_id, status="in_progress", error=None
+            )
         except Exception as exc:  # fail-loud, non-fatal: the plan already exists.
             print(
                 f"perk plan save: objective node link skipped (non-fatal): {exc}",
                 file=sys.stderr,
             )
-            objective_node_result = {
-                "linked": False,
-                "node": node_id,
-                "status": None,
-                "error": str(exc),
-            }
+            objective_node_result = ObjectiveNodeLink(
+                linked=False, node=node_id, status=None, error=str(exc)
+            )
 
     return PlanSaveResult(
         issue=issue,
@@ -503,23 +509,64 @@ def _plan_save_impl(
     )
 
 
+class IssueOut(OutputModel):
+    """The serialization boundary of the picked :class:`issue_backend.IssueRef` subset
+    (field order load-bearing)."""
+
+    id: str  # opaque string id at every machine boundary (contracts §8.21)
+    url: str
+    existed: bool  # warm /plan-save surfaces this in details
+
+    @classmethod
+    def from_domain(cls, issue: issue_backend.IssueRef) -> "IssueOut":
+        return cls(id=issue.id, url=issue.url, existed=issue.existed)
+
+
+class ObjectiveNodeLinkOut(OutputModel):
+    """The serialization boundary of :class:`ObjectiveNodeLink` (field order load-bearing)."""
+
+    linked: bool
+    node: str
+    status: str | None
+    error: str | None
+
+    @classmethod
+    def from_domain(cls, link: ObjectiveNodeLink) -> "ObjectiveNodeLinkOut":
+        return cls(linked=link.linked, node=link.node, status=link.status, error=link.error)
+
+
+class PlanSaveOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`PlanSaveResult` (order load-bearing)."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    issue: IssueOut
+    plan_ref: plan.PlanRefOut
+    cached: bool
+    updated: bool
+    objective_node: ObjectiveNodeLinkOut | None
+    dry_run: bool
+
+    @classmethod
+    def from_domain(cls, result: PlanSaveResult) -> "PlanSaveOut":
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            issue=IssueOut.from_domain(result.issue),
+            plan_ref=plan.PlanRefOut.from_domain(result.plan_ref),
+            cached=result.cached,
+            updated=result.updated,
+            objective_node=None
+            if result.objective_node is None
+            else ObjectiveNodeLinkOut.from_domain(result.objective_node),
+            dry_run=result.dry_run,
+        )
+
+
 def _result_to_dict(result: PlanSaveResult) -> dict[str, object]:
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "issue": {
-            # Opaque string id at every machine boundary (contracts §8.21).
-            "id": result.issue.id,
-            "url": result.issue.url,
-            "existed": result.issue.existed,  # warm /plan-save surfaces this in details
-        },
-        "plan_ref": plan.PlanRefOut.from_domain(result.plan_ref).model_dump(mode="json"),
-        "cached": result.cached,
-        "updated": result.updated,
-        "objective_node": result.objective_node,
-        "dry_run": result.dry_run,
-    }
+    return PlanSaveOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: PlanSaveResult) -> None:
@@ -538,11 +585,11 @@ def _render_human(result: PlanSaveResult) -> None:
         + f" → {result.issue.url}"
     )
     node_link = result.objective_node
-    if node_link and node_link.get("linked"):
+    if node_link and node_link.linked:
         user_output(
             click.style(
                 f"  ↳ linked objective #{result.plan_ref.objective_id} node "
-                f"{node_link.get('node')} (in_progress)",
+                f"{node_link.node} (in_progress)",
                 dim=True,
             )
         )

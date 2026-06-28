@@ -114,3 +114,54 @@ def test_golden_doctor_report() -> None:
     from perk.convergence.doctor import report_to_dict
 
     assert_golden("doctor_report", report_to_dict(_doctor_report_full()))
+
+
+# --- plan save ----------------------------------------------------------------------------
+
+
+def _plan_ref():
+    from perk import plan
+
+    return plan.PlanRef(
+        provider="github",
+        pr_id="123",
+        url="https://github.com/o/r/issues/123",
+        labels=("perk:plan",),
+        objective_id="63",
+        consumed_learn=("45",),
+        base="main",
+    )
+
+
+def _plan_save_result(*, with_node: bool):
+    from perk.backends import issue_backend
+    from perk.cli.commands.plan.save_cmd import ObjectiveNodeLink, PlanSaveResult
+
+    return PlanSaveResult(
+        issue=issue_backend.IssueRef(
+            id="123", url="https://github.com/o/r/issues/123", existed=False
+        ),
+        plan_ref=_plan_ref(),
+        issue_body="<header>",
+        body_comment="<body>",
+        dry_run=False,
+        cached=True,
+        updated=False,
+        objective_node=(
+            ObjectiveNodeLink(linked=True, node="1.1", status="in_progress", error=None)
+            if with_node
+            else None
+        ),
+    )
+
+
+def test_golden_plan_save_with_node() -> None:
+    from perk.cli.commands.plan.save_cmd import _result_to_dict
+
+    assert_golden("plan_save", _result_to_dict(_plan_save_result(with_node=True)))
+
+
+def test_golden_plan_save_no_node() -> None:
+    from perk.cli.commands.plan.save_cmd import _result_to_dict
+
+    assert_golden("plan_save_no_node", _result_to_dict(_plan_save_result(with_node=False)))
