@@ -47,6 +47,7 @@ from perk.convergence.doctor.checks import (
     _registry_check,
     _repo_skills_check,
     _skills_delivery_check,
+    _stage_models_check,
     _subagent_engine_check,
 )
 from perk.convergence.doctor.data import _MANAGED_GROUP, Check, DoctorReport, Status
@@ -114,6 +115,7 @@ __all__ = [
     "_runner_permissions_check",
     "_runner_workflow_managed_check",
     "_skills_delivery_check",
+    "_stage_models_check",
     "_strip_ungrouped_ignore_line",
     "_subagent_engine_check",
     "_untrack_materialized_plan_cache",
@@ -176,6 +178,10 @@ def _build_checks(root: Path, self_repo: bool, *, verify: bool) -> list[Check]:
     checks.append(_bindings_check(root, self_repo))
     checks.append(_providers_check(root))
     checks.append(_issues_check(root))
+    # Offline (reads config + the bundled registry), so NOT gated behind `if verify:`. Returns
+    # None — and contributes nothing — when no per-stage models are configured (the common case).
+    if (sm_check := _stage_models_check(root)) is not None:
+        checks.append(sm_check)
     checks.append(_subagent_engine_check(root))
     checks.append(_cache_check(root))
     checks.append(_gc_check(root))

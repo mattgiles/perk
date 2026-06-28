@@ -244,6 +244,41 @@ pr-reviewer = "anthropic/claude-sonnet-4-5"
 review-classifier = "anthropic/claude-haiku-4-5"
 ```
 
+### `[stages.<id>]`
+
+Per-stage **model** and **thinking-level** defaults, injected as pi `--model` / `--thinking` flags
+when `perk <stage>` cold-launches that stage's pi session. Each stage is its own sub-table
+(`[stages.implement]`, `[stages.plan]`, …).
+
+| Key | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `model` | string (model id) | _(pi default)_ | The pi model string (e.g. `anthropic/claude-opus-4-1`). Free-form — perk does not validate it; pi resolves it at session start. |
+| `thinking` | string | _(pi default)_ | One of `off` / `minimal` / `low` / `medium` / `high` / `xhigh`. |
+
+Either key may be set alone. When a stage configures **neither** knob, **nothing is injected** —
+pi's own model/thinking resolution is left completely untouched (there is no silently-enforced perk
+default). An explicit flag on the command line wins: `perk implement --model X` overrides a
+configured `[stages.implement] model` (perk injects the config flag first; pi parses last-wins).
+
+Valid stage ids are the registry stages (`plan`, `implement`, `address`, `learn`,
+`objective-author`, `objective-plan`, … — see `perk registry`). This is a **launch-seam** setting:
+it takes effect only where a stage cold-launches an interactive pi session. Warm in-session
+transitions inherit the launched session's model, and the remote CI runner is unaffected.
+
+The table is **overlay-aware** — a `.perk/local.toml` `[stages.<id>]` leaf-merges over the
+committed values (session-transient preference, like `[worktree] root`). `perk doctor` validates
+the configured stage ids against the registry and the thinking levels against pi's set
+(loud-but-non-fatal — an unknown stage id or invalid thinking level is a `warn`, never a failure).
+
+```toml
+[stages.implement]
+model = "anthropic/claude-opus-4-1"
+thinking = "high"
+
+[stages.plan]
+thinking = "xhigh"
+```
+
 ### `[trust]`
 
 Per-repo trust declarations.

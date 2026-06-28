@@ -11,6 +11,7 @@ from perk.substrate.bindings import Binding
 from perk.substrate.config import (
     Config,
     ConfigModel,
+    StageModel,
     load_committed_compaction,
     load_committed_issues_backend,
     load_committed_issues_team,
@@ -251,6 +252,54 @@ def test_subagents_selection_ignores_non_string_values(tmp_path):
 def test_subagents_selection_ignores_unknown_agent_key(tmp_path):
     _write(tmp_path, "perk.toml", '[subagents]\nbogus = "a/x"\n')
     assert load_config(tmp_path).subagents == {}
+
+
+# --- [stages.<id>] per-stage model/thinking -------------------------------------------
+
+
+def test_stage_models_absent_is_empty(tmp_path):
+    assert load_config(tmp_path).stage_models == {}
+
+
+def test_stage_models_parsed(tmp_path):
+    _write(
+        tmp_path,
+        "perk.toml",
+        '[stages.implement]\nmodel = "a/opus"\nthinking = "high"\n'
+        '[stages.plan]\nthinking = "xhigh"\n',
+    )
+    assert load_config(tmp_path).stage_models == {
+        "implement": StageModel(model="a/opus", thinking="high"),
+        "plan": StageModel(model=None, thinking="xhigh"),
+    }
+
+
+def test_stage_models_model_only(tmp_path):
+    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "a/opus"\n')
+    assert load_config(tmp_path).stage_models == {"implement": StageModel(model="a/opus")}
+
+
+def test_stage_models_ignores_non_string_values(tmp_path):
+    _write(tmp_path, "perk.toml", "[stages.implement]\nmodel = 3\nthinking = true\n")
+    assert load_config(tmp_path).stage_models == {}
+
+
+def test_stage_models_empty_subtable_omitted(tmp_path):
+    _write(tmp_path, "perk.toml", '[stages.foo]\n[stages.plan]\nthinking = "low"\n')
+    assert load_config(tmp_path).stage_models == {"plan": StageModel(thinking="low")}
+
+
+def test_stage_models_local_overlay_leaf_merges(tmp_path):
+    _write(tmp_path, "perk.toml", '[stages.implement]\nmodel = "a/opus"\n')
+    _write(tmp_path, "perk.local.toml", '[stages.implement]\nthinking = "high"\n')
+    assert load_config(tmp_path).stage_models == {
+        "implement": StageModel(model="a/opus", thinking="high")
+    }
+
+
+def test_stage_models_seeded_template_is_inert(tmp_path):
+    _write(tmp_path, "perk.toml", PERK_TOML_TEMPLATE)
+    assert load_config(tmp_path).stage_models == {}
 
 
 # --- [compaction] committed-only read ------------------------------------------------

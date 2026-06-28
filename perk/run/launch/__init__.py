@@ -76,7 +76,7 @@ from perk.run.launch.worktree import (
 )
 from perk.state import cache, run_id
 from perk.substrate import git as git
-from perk.substrate.config import Config, load_local_linear_api_key
+from perk.substrate.config import Config, StageModel, load_local_linear_api_key
 from perk.substrate.output import machine_output, user_output
 from perk.substrate.registry import Stage
 
@@ -216,7 +216,8 @@ def launch_stage(
     # Inserted BEFORE pi_args so a user-passed `--no-approve` overrides it (pi parses last-wins).
     # `worktree: none` stages run in the repo root the user trusts manually, so they are left alone.
     trust_args = ["--approve"] if stage.worktree != "none" else []
-    argv = ["pi", *trust_args, *pi_args, *([prompt] if prompt is not None else [])]
+    model_args = _stage_model_argv(config, stage.id)
+    argv = ["pi", *trust_args, *model_args, *pi_args, *([prompt] if prompt is not None else [])]
 
     if dry_run:  # side-effect-free: no worktree created, no handoff/plan-ref written
         _emit_dry_run_preview(
@@ -291,6 +292,21 @@ def launch_stage(
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 
 
+def _stage_model_argv(config: Config, stage_id: str) -> list[str]:
+    """Per-stage ``--model``/``--thinking`` launch flags from `[stages.<id>]` (empty when unset —
+    pi's own model/thinking defaults are left untouched). Inserted before ``pi_args`` so an
+    explicit ``perk <stage> --model X``/``--thinking Y`` overrides it (pi parses last-wins)."""
+    sm: StageModel | None = config.stage_models.get(stage_id)
+    if sm is None:
+        return []
+    args: list[str] = []
+    if sm.model:
+        args += ["--model", sm.model]
+    if sm.thinking:
+        args += ["--thinking", sm.thinking]
+    return args
+
+
 def _emit_dry_run_preview(
     *,
     stage: Stage,
@@ -344,6 +360,7 @@ __all__ = [
     "_pi_agent_dir",
     "_plan_read_instruction",
     "_resolve_prompt",
+    "_stage_model_argv",
     "_sweep_stale_pi_agent_locks",
     "launch_stage",
     "materialize_extensions",
