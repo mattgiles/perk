@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "ProviderEntry": {
+      "description": "The lenient per-entry parse model at the file boundary.\n\n``id``/``seam`` are typed ``str | None`` (not ``str = \"\"``) so an explicit YAML ``null`` parses\ncleanly; the converter normalizes ``None -> \"\"`` and ``validate()`` then surfaces the\nmissing-``id`` / bad-``seam`` content findings. Other fields coerce leniently (drop unknown\nkeys, coerce ordinary scalars) per the lenient base \u2014 content findings are the *validator*'s\njob, never construction's.",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "seam": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seam"
+        },
+        "package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package"
+        },
+        "adapter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adapter"
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "title": "Default"
+        },
+        "package_filter": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package Filter"
+        }
+      },
+      "title": "ProviderEntry",
+      "type": "object"
+    }
+  },
+  "description": "The lenient whole-file parse model.\n\n``schema_version`` is deliberately NOT a field: it stays a structural pre-check in\n``load_providers`` (it must run before generic validation and raise its own message).\n``extra=\"ignore\"`` drops it (and any other top-level key) from this model.",
+  "properties": {
+    "providers": {
+      "items": {
+        "$ref": "#/$defs/ProviderEntry"
+      },
+      "title": "Providers",
+      "type": "array"
+    }
+  },
+  "title": "ProvidersFile",
+  "type": "object"
+}

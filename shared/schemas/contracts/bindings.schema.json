@@ -1,0 +1,38 @@
+{
+  "$defs": {
+    "BindingEntry": {
+      "description": "Tolerant parse shape for one stored ``bindings.yaml`` entry.\n\nLenient base: unknown keys dropped (``extra=\"ignore\"``); absent keys default to ``\"\"`` so\n``validate()`` reports them as content findings. A present non-string scalar is a genuine\ntype error and raises (translated to ``BindingsError`` at the load boundary).",
+      "properties": {
+        "trigger": {
+          "default": "",
+          "title": "Trigger",
+          "type": "string"
+        },
+        "skill": {
+          "default": "",
+          "title": "Skill",
+          "type": "string"
+        },
+        "mode": {
+          "default": "",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "title": "BindingEntry",
+      "type": "object"
+    }
+  },
+  "description": "Whole-file parse shape.\n\n``schema_version`` stays OUT of the model (a structural pre-check in ``load_bindings`` owns\nits byte-identical message; ``extra=\"ignore\"`` drops the key here). A non-list ``bindings:``\nraises.",
+  "properties": {
+    "bindings": {
+      "items": {
+        "$ref": "#/$defs/BindingEntry"
+      },
+      "title": "Bindings",
+      "type": "array"
+    }
+  },
+  "title": "BindingsFile",
+  "type": "object"
+}

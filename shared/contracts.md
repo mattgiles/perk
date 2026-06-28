@@ -4293,3 +4293,43 @@ Both modes always produce a **fresh** skill (no in-place adoption / `adopt_from`
 skill is not a backend object). `--dry-run` JSON adds `"from": <source>` and — file mode only —
 `"scratch_path"`. This is a Python-only change (no TS plane); the authoring judgment lives in the
 `perk-skill-author` skill.
+
+## §8.34 · Published JSON Schemas for the boundary models (Objective #943, Node 4.1)
+
+perk's cross-plane machine surfaces are Pydantic boundary models (`perk/boundary.py`'s three roles).
+Their `model_json_schema()` is published as committed reference artifacts under `shared/schemas/`,
+so a consumer of perk's machine surfaces has a precise, reviewable contract.
+
+**What is published (16 top-level models, three categories).**
+
+- **Shared-YAML parse contracts** (`LenientParseModel`) → `shared/schemas/contracts/`:
+  `registry.schema.json` (`RegistryFile`), `bindings.schema.json` (`BindingsFile`),
+  `providers.schema.json` (`ProvidersFile`).
+- **Machine batch inputs** (`StrictInputModel` / `RootModel`) → `shared/schemas/inputs/`:
+  `review-post-batch.schema.json` (`ReviewBatchInput`),
+  `resolve-threads-batch.schema.json` (`ResolveThreadsBatch`),
+  `handoff-arg.schema.json` (`HandoffArgInput`),
+  `structured-roadmap-node.schema.json` (`StructuredRoadmapNode`).
+- **`--json` output envelopes** (`OutputModel`) → `shared/schemas/outputs/`: `plan-save`,
+  `pr-submit`, `pr-ready`, `pr-land`, `pr-feedback`, `pr-review-context`, `learn-capture`,
+  `init-report`, `doctor-report` (`.schema.json` each, for `PlanSaveOut` … `DoctorReportOut`).
+
+**How they are generated.** `model_json_schema()` from the live boundary models. The mode is
+**per category** — parse/input contracts describe what perk **accepts**, so they use **validation
+mode** (the default); output envelopes describe what `--json` consumers **receive**, so they use
+**serialization mode**. Nested `*Out` / `*Entry` sub-models ride along in `$defs`.
+
+**Cross-plane status.** The schemas are **published reference artifacts bundled into both planes**
+(`perk/_shared/schemas/` in the wheel, `shared/schemas/` in npm) — they are **not consumed at
+runtime** by either plane (TS still reads the YAML directly; Python validates via the live models).
+
+**Drift discipline.** The committed files are regenerated only via
+`PERK_UPDATE_SCHEMAS=1 uv run pytest tests/test_contract_schemas.py`, and
+`tests/test_contract_schemas.py` fails CI on any un-regenerated drift (per-model drift assertions, a
+no-orphans/no-gaps coverage test, and a per-category mode-correctness smoke) — so a schema change is
+always reviewed intentionally. The harness mirrors the value-golden harness (`tests/_golden.py`):
+it always re-reads + asserts after a regen, so a non-roundtrippable schema still fails loudly.
+
+**Non-goals.** `ConfigModel` (TOML, not a shared YAML contract) is not published; the stored-block
+serializers `PlanHeaderOut` / `PlanRefOut` are not published as standalone schemas (`PlanRefOut`
+rides transitively in `PlanSaveOut`'s `$defs`).

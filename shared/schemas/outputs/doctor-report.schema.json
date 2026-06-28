@@ -1,0 +1,150 @@
+{
+  "$defs": {
+    "CheckOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`Check` (field order load-bearing).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warn",
+            "info",
+            "fail"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "remediation": {
+          "title": "Remediation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "group",
+        "status",
+        "message",
+        "detail",
+        "remediation"
+      ],
+      "title": "CheckOut",
+      "type": "object"
+    },
+    "SummaryOut": {
+      "additionalProperties": false,
+      "description": "The computed status tally (field order load-bearing).",
+      "properties": {
+        "passed": {
+          "title": "Passed",
+          "type": "integer"
+        },
+        "warnings": {
+          "title": "Warnings",
+          "type": "integer"
+        },
+        "failed": {
+          "title": "Failed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "passed",
+        "warnings",
+        "failed"
+      ],
+      "title": "SummaryOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`DoctorReport` (field order load-bearing).",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "healthy": {
+      "title": "Healthy",
+      "type": "boolean"
+    },
+    "self_repo": {
+      "title": "Self Repo",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/CheckOut"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/SummaryOut"
+    },
+    "fixed": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Fixed",
+      "type": "array"
+    },
+    "fix_errors": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Fix Errors",
+      "type": "array"
+    }
+  },
+  "required": [
+    "success",
+    "healthy",
+    "self_repo",
+    "error_type",
+    "message",
+    "checks",
+    "summary",
+    "fixed",
+    "fix_errors"
+  ],
+  "title": "DoctorReportOut",
+  "type": "object"
+}

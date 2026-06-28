@@ -64,6 +64,14 @@ local machine, or a **remote CI runner** (headless = the cold door pointed at a 
 Only *agentic but bounded* stages (`implement`, `address`) are remotely runnable; the remote surface
 is the newest, least-proven part of perk.
 
+## Published schemas
+
+perk's cross-plane contracts — the shared YAML contracts (registry/bindings/providers), the machine
+batch inputs, and the `--json` output envelopes — have **published JSON Schemas** under
+`shared/schemas/`, generated from the Pydantic boundary models (`perk/boundary.py`). They are
+reference artifacts (bundled into both planes, read at runtime by neither). The canonical reference
+is `docs/user-docs/reference/json-schemas.md`.
+
 ## Discover the live surface
 
 The reference shape is here; for the exact current commands/flags run `perk --help` /

@@ -1,0 +1,6 @@
+{
+  "additionalProperties": true,
+  "description": "Minimal strict parse: the ``--handoff`` payload must be a JSON object.\n\nThe handoff is open-ended (cache ``HandoffModel`` is ``extra=\"allow\"``), so this only\nenforces the object shape (a list/scalar fails loudly with a field path).",
+  "title": "HandoffArgInput",
+  "type": "object"
+}

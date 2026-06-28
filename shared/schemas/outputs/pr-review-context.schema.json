@@ -1,0 +1,86 @@
+{
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`PrReviewContextResult`\n(flat; field order load-bearing). ``pr`` maps from the domain ``pr_number``.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "branch": {
+      "title": "Branch",
+      "type": "string"
+    },
+    "pr": {
+      "title": "Pr",
+      "type": "integer"
+    },
+    "base_ref": {
+      "title": "Base Ref",
+      "type": "string"
+    },
+    "head_ref": {
+      "title": "Head Ref",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "body": {
+      "title": "Body",
+      "type": "string"
+    },
+    "diff": {
+      "title": "Diff",
+      "type": "string"
+    },
+    "plan_body": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Plan Body"
+    }
+  },
+  "required": [
+    "success",
+    "error_type",
+    "message",
+    "branch",
+    "pr",
+    "base_ref",
+    "head_ref",
+    "title",
+    "body",
+    "diff",
+    "plan_body"
+  ],
+  "title": "PrReviewContextOut",
+  "type": "object"
+}

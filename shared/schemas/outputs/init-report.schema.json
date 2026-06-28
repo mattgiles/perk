@@ -1,0 +1,419 @@
+{
+  "$defs": {
+    "AuthOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`AuthStatus` subset (order load-bearing).",
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User"
+        },
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "ok",
+        "user",
+        "scopes",
+        "error"
+      ],
+      "title": "AuthOut",
+      "type": "object"
+    },
+    "EnvCheckOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of one :class:`EnvCheck`. Field order is load-bearing.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "remediation": {
+          "title": "Remediation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "ok",
+        "detail",
+        "remediation"
+      ],
+      "title": "EnvCheckOut",
+      "type": "object"
+    },
+    "GitHubReportOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of :class:`GitHubReport`. Field order is load-bearing.",
+      "properties": {
+        "auth": {
+          "$ref": "#/$defs/AuthOut"
+        },
+        "repo": {
+          "$ref": "#/$defs/RepoOut"
+        }
+      },
+      "required": [
+        "auth",
+        "repo"
+      ],
+      "title": "GitHubReportOut",
+      "type": "object"
+    },
+    "LinearProjectOut": {
+      "additionalProperties": false,
+      "description": "Serialization boundary of :class:`linear.LinearProjectReadiness` (order load-bearing).",
+      "properties": {
+        "projects_ok": {
+          "title": "Projects Ok",
+          "type": "boolean"
+        },
+        "projects_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Projects Error"
+        },
+        "missing_state_types": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing State Types",
+          "type": "array"
+        },
+        "states_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "States Error"
+        }
+      },
+      "required": [
+        "projects_ok",
+        "projects_error",
+        "missing_state_types",
+        "states_error"
+      ],
+      "title": "LinearProjectOut",
+      "type": "object"
+    },
+    "LinearReadinessOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of :class:`linear.LinearReadiness`. Order is load-bearing.",
+      "properties": {
+        "auth_ok": {
+          "title": "Auth Ok",
+          "type": "boolean"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "User"
+        },
+        "team_ok": {
+          "title": "Team Ok",
+          "type": "boolean"
+        },
+        "missing_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing Labels",
+          "type": "array"
+        },
+        "created_labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Created Labels",
+          "type": "array"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "auth_ok",
+        "user",
+        "team_ok",
+        "missing_labels",
+        "created_labels",
+        "error"
+      ],
+      "title": "LinearReadinessOut",
+      "type": "object"
+    },
+    "LinearReportOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the nullable :class:`LinearReport`. Order is load-bearing.",
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "team": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Team"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        },
+        "readiness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinearReadinessOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LinearProjectOut"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "ok",
+        "team",
+        "error",
+        "readiness",
+        "project"
+      ],
+      "title": "LinearReportOut",
+      "type": "object"
+    },
+    "RepoOut": {
+      "additionalProperties": false,
+      "description": "The serialization boundary of the picked :class:`RepoAccess` subset (order load-bearing).",
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "repo": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Repo"
+        },
+        "can_push": {
+          "title": "Can Push",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Error"
+        }
+      },
+      "required": [
+        "ok",
+        "repo",
+        "can_push",
+        "error"
+      ],
+      "title": "RepoOut",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The ``--json`` serialization boundary of :class:`InitReport`. Field order is load-bearing.",
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "mode": {
+      "title": "Mode",
+      "type": "string"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error Type"
+    },
+    "message": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Message"
+    },
+    "env": {
+      "items": {
+        "$ref": "#/$defs/EnvCheckOut"
+      },
+      "title": "Env",
+      "type": "array"
+    },
+    "github": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GitHubReportOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "linear": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LinearReportOut"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilities": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "changes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Changes",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "handoff": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Handoff"
+    }
+  },
+  "required": [
+    "success",
+    "mode",
+    "error_type",
+    "message",
+    "env",
+    "github",
+    "linear",
+    "capabilities",
+    "changes",
+    "warnings",
+    "handoff"
+  ],
+  "title": "InitReportOut",
+  "type": "object"
+}

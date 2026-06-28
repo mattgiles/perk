@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "NodeStatus": {
+      "description": "A roadmap node's explicit status (open #3: never inferred from a PR column).",
+      "enum": [
+        "pending",
+        "planning",
+        "in_progress",
+        "done",
+        "blocked",
+        "skipped"
+      ],
+      "title": "NodeStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Strict machine-input shape for one ``objective create --roadmap`` / ``objective_save`` node.\n\nMirrors the TS ``ROADMAP_PARAM_SCHEMA`` (``additionalProperties: false``): unknown keys fail\nloudly. ``status`` and ``depends_on`` are the only intentionally-coercing fields under the\notherwise-strict model (a raw enum value / a list of strings).",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/NodeStatus",
+      "default": "pending"
+    },
+    "slug": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Slug"
+    },
+    "pr": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pr"
+    },
+    "depends_on": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Depends On"
+    },
+    "comment": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Comment"
+    },
+    "adopt_issue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Adopt Issue"
+    }
+  },
+  "required": [
+    "id",
+    "description"
+  ],
+  "title": "StructuredRoadmapNode",
+  "type": "object"
+}

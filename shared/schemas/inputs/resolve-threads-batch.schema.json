@@ -1,0 +1,37 @@
+{
+  "$defs": {
+    "ResolveThreadInput": {
+      "additionalProperties": false,
+      "description": "One strict batch item (`{thread_id, comment?}`); a typo/wrong type fails loudly.",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "comment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Comment"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "ResolveThreadInput",
+      "type": "object"
+    }
+  },
+  "description": "The strict batch root: a JSON array of thread items (a non-array fails loudly).",
+  "items": {
+    "$ref": "#/$defs/ResolveThreadInput"
+  },
+  "title": "ResolveThreadsBatch",
+  "type": "array"
+}
