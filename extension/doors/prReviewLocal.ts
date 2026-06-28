@@ -208,7 +208,9 @@ export function registerPrReviewLocal(pi: ExtensionAPI): void {
       void (async () => {
         const interceptor = interceptConsoleError(
           (line) => report(ctx, "pr-review-local", "info", line),
-          { quietMs: 1500 },
+          // plannotator can pause up to ~4s between setup lines — keep the quiet window comfortably
+          // above that so the debounce doesn't restore mid-setup and let the next line clobber.
+          { quietMs: 6000 },
         );
         try {
           const out = await requestPlannotatorCodeReview(pi.events, {
