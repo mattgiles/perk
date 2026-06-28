@@ -4407,6 +4407,34 @@ status is from this section's fixed set: `found` (the slot's pointer is present)
 reserved for node 3.1's source-level manifest and is unused here. No user-facing command lands in
 this node — node 3.1 (`perk learn evidence`) is the first consumer.
 
+**The session-export seam (node 2.2, `perk/learn/export.py::export_session_jsonl`).** Given a
+resolved pointer, materialize a current-branch JSONL artifact as a faithful **byte copy** of the
+pointer's `session_file`. Decision: **Option A — Python reads the on-disk session JSONL directly,
+on demand** (no Pi export primitive, no TS capture-time export). Rationale: the session file IS the
+JSONL (Pi persists each session as an append-only JSONL log — a header line + entry lines); the
+slot captures are all **mid-session** (the session keeps appending afterward, so a capture-time
+export would be a partial prefix); `/learn` runs **later** in a separate session, by when the
+planning + implementation sessions have finished writing, so the on-disk file is the COMPLETE
+transcript; and the files live under the home agent dir, so they **survive worktree deletion** (the
+captured absolute `session_file` stays valid — only Pi-side GC removes it → `missing`).
+
+- Signature: `export_session_jsonl(pointer: SessionPointer | None, dest: Path) -> SessionExport`,
+  with `SessionExport = { status: "found" | "missing", source: str | None, artifact: Path | None }`
+  (a frozen `@dataclass`; `source`/`artifact` set only when `found`).
+- The copy is **faithful** (`shutil.copyfile`, not parse-and-reserialize) so the artifact preserves
+  the raw JSONL exactly — the session header line, compaction/branch-summary entries, abandoned
+  branches, unknown custom entries. Parsing/normalization is **node 3.2's** concern.
+- The stored absolute `session_file` is **authoritative**; the seam never re-derives the path from
+  the capture cwd (a possibly-deleted worktree; the session dir is cwd-encoded).
+- It **never raises** (mirroring `read_session_pointers`): a `None` pointer, an empty
+  `session_file`, a non-existent source, or any `OSError` (warned to stderr) → `missing`.
+- The export status **composes with** resolution: a `found` resolution **downgrades to `missing`**
+  at export time if the source file is gone.
+- `dest` is **caller-composed** (dest-agnostic, the full target file path): the node-3.1 consumer
+  composes the destination under the bundle scratch dir via the `run_scratch_dir`/`scratch_dir`
+  seam; node 2.2 picks no naming convention. There is **no `--json` surface in this node** (so no
+  `OutputModel` — the serialize-edge lands with node 3.1's manifest).
+
 **The classification vocabulary (two distinct, related sets).**
 
 - **The reconciled DECISION set** — the transient, in-session reconciliation output of `/learn`'s
