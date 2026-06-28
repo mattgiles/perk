@@ -110,6 +110,43 @@ test("restore() is idempotent", () => {
   assert.equal(console.error, realError);
 });
 
+test("a stale replacement reference delegates to original after restore (no sink re-route)", () => {
+  const clock = fakeClock();
+  const lines: string[] = [];
+  const interceptor = interceptConsoleError((line) => lines.push(line), {
+    quietMs: 1500,
+    schedule: clock.schedule,
+    clearScheduled: clock.clearScheduled,
+  });
+  const stale = console.error; // hold the installed replacement
+  interceptor.restore();
+  stale("late"); // calling the stale replacement after restore must not reach the sink
+  assert.deepEqual(lines, [], "no forwarding through a stale replacement after restore");
+});
+
+test("re-entrant console.error from inside the sink delegates to original (no recursion)", () => {
+  const clock = fakeClock();
+  // Install a spy as the original FIRST, so the helper captures it and re-entrant calls land here
+  // (delegated) rather than recursing into the sink. afterEach restores realError.
+  const delegated: string[] = [];
+  console.error = ((...args: unknown[]) => {
+    delegated.push(args.map(String).join(" "));
+  }) as typeof console.error;
+
+  const lines: string[] = [];
+  interceptConsoleError(
+    (line) => {
+      lines.push(line);
+      if (line === "outer") console.error("inner"); // re-enters the installed replacement
+    },
+    { quietMs: 1500, schedule: clock.schedule, clearScheduled: clock.clearScheduled },
+  );
+
+  console.error("outer"); // completes without RangeError (recursion guard)
+  assert.deepEqual(lines, ["outer"], "the re-entrant call did NOT re-route through the sink");
+  assert.deepEqual(delegated, ["inner"], "the re-entrant call delegated to the original");
+});
+
 test("restore() does not clobber a newer patcher installed after ours", () => {
   const clock = fakeClock();
   const interceptor = interceptConsoleError(() => {}, {

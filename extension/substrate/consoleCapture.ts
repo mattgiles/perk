@@ -9,7 +9,9 @@
 // so we restore after `quietMs` with no new line (self-adjusts to the variable several-second
 // setup, no fixed-duration guess). A `finally` backstop in the caller restores too; `restore()` is
 // idempotent and only reassigns `console.error` when our replacement is still installed, so an
-// accidental overlap with a newer patcher is safe rather than clobbering.
+// accidental overlap with a newer patcher is safe rather than clobbering. The replacement is inert
+// once restored (a stale reference delegates to the original) and re-entrancy-safe (a console.error
+// from inside the sink delegates to the original instead of recursing).
 
 export type ConsoleErrorSink = (line: string) => void;
 
@@ -41,6 +43,7 @@ export function interceptConsoleError(
 
   const original = console.error;
   let restored = false;
+  let active = false;
   let handle: unknown;
 
   const restore = (): void => {
@@ -62,7 +65,20 @@ export function interceptConsoleError(
   };
 
   const replacement = (...args: unknown[]): void => {
-    sink(args.map(String).join(" "));
+    // Once restored, behave as the original — a stale reference still holding `replacement`
+    // (a module that cached console.error, or a wrapping patcher) never re-routes to the sink.
+    // And if the sink (or a downstream report()/ui.notify) ever writes to console.error while we
+    // are installed, delegate to the original instead of recursing into ourselves.
+    if (restored || active) {
+      original(...args);
+      return;
+    }
+    active = true;
+    try {
+      sink(args.map(String).join(" "));
+    } finally {
+      active = false;
+    }
     resetQuietTimer();
   };
 
