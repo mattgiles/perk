@@ -529,9 +529,16 @@ refine → delete), see [How to author a repo-specific skill](../how-to/author-a
   session seeded to author the skill (following the `perk-skill-author` skill). Refuses if
   `.perk/skills/NAME/` already exists, pointing at `perk skills refine NAME`. The authoring scope
   (`.perk/skills/NAME/**` plus any directly-required docs/bindings) is a **soft scope** in the seed
-  prompt, not a structural sandbox; committing is left to you. `--dry-run` prints the seed + intended
-  path and scaffolds/launches nothing (the existence-refusal still runs). `--json` emits a stable
-  report. Trailing args after `NAME` pass through to `pi`.
+  prompt, not a structural sandbox; committing is left to you. With **`--from <file|url>`** the
+  authoring session is seeded from a source document (mirroring `objective author --from`): a **local
+  file** (relative/absolute) is read as untrusted seed DATA and materialized into a gitignored
+  scratch the session reads; an **http(s) URL** to a `SKILL.md` is handed to the session, which
+  **fetches it (and any sibling `references/`/`scripts/` or linked files) in-session**, treats
+  everything as DATA, and ports selectively. Either way it always creates a **fresh** skill (no
+  in-place adoption) and the door stays **offline** (no network in the command — the agent does any
+  fetching in-session). A non-URL, non-file `--from` fails `seed_file_error`. `--dry-run` prints the
+  seed + intended path and scaffolds/launches nothing (the existence-refusal still runs). `--json`
+  emits a stable report. Trailing args after `NAME` pass through to `pi`.
 - **`perk skills refine NAME`** — a write-capable cold door that re-opens an **existing**
   repo-authored skill: it reads `.perk/skills/NAME/SKILL.md` in the **main checkout** and launches a
   session seeded to improve it in place (following the `perk-skill-author` skill). Refuses if the

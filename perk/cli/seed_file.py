@@ -1,18 +1,24 @@
-"""Local-file seeding for the adoption cold doors (``plan from`` / ``objective author --from``).
+"""Local-file (and URL) seeding for the seed-from-source cold doors.
 
-A small, backend-free leaf shared by both cold doors. When the door's argument resolves to an
-existing readable file, perk reads the file as **untrusted seed DATA**, primes a read-only
-authoring session with it, and on save mints a **fresh** perk issue (no in-place adoption — a file
-has no backend identity to stamp). The file on disk is never modified.
+A small, backend-free leaf shared by three cold doors: ``plan from``, ``objective author --from``,
+and ``skills create --from``. When the door's argument resolves to an existing readable file, perk
+reads the file as **untrusted seed DATA**, primes an authoring session with it, and on save mints a
+**fresh** perk artifact (no in-place adoption — a file has no backend identity to stamp). The file
+on disk is never modified.
 
-The three functions here are the seam: detect (the sole disambiguator), read (with stable
-``seed_file_error`` boundaries), and materialize (a neutral untrusted-DATA scratch wrapper). The
-plan/objective-specific authoring verbs live in each door's seed prompt, not here.
+``skills create --from`` adds a URL sub-mode: an http(s) ``SKILL.md`` URL is **not** materialized to
+a scratch — :func:`detect_seed_url` only scheme-detects it and the in-session agent owns the fetch
+(of the SKILL.md and any sibling ``references/``/``scripts/`` files), keeping the door offline.
+
+The functions here are the seam: detect-file (the file disambiguator), detect-url (the scheme gate),
+read (with stable ``seed_file_error`` boundaries), and materialize (a neutral untrusted-DATA scratch
+wrapper). The plan/objective/skill-specific authoring verbs live in each door's seed prompt.
 """
 
 import hashlib
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from perk.cli.ensure import UserFacingCliError
 from perk.state import cache
@@ -29,6 +35,18 @@ def detect_seed_file(arg: str) -> Path | None:
     candidate = Path(arg).expanduser()
     if candidate.is_file():
         return candidate.resolve()
+    return None
+
+
+def detect_seed_url(arg: str) -> str | None:
+    """Return the stripped URL when ``arg`` is an http(s) URL, else ``None``.
+
+    The scheme-gate disambiguator for the URL seed sub-mode (the same idiom ``plan resume``'s
+    ``_id_from_url`` uses). Stdlib-only and backend-free — it does **not** fetch or validate
+    reachability; the in-session agent owns the fetch."""
+    stripped = arg.strip()
+    if urlsplit(stripped).scheme.lower() in {"http", "https"}:
+        return stripped
     return None
 
 

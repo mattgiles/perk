@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from perk.cli.ensure import UserFacingCliError
-from perk.cli.seed_file import detect_seed_file, read_seed_file, render_seed_file_scratch
+from perk.cli.seed_file import (
+    detect_seed_file,
+    detect_seed_url,
+    read_seed_file,
+    render_seed_file_scratch,
+)
 
 
 def test_detect_existing_file_returns_resolved_path(tmp_path: Path):
@@ -30,6 +35,21 @@ def test_detect_missing_returns_none(tmp_path: Path):
 
 def test_detect_directory_returns_none(tmp_path: Path):
     assert detect_seed_file(str(tmp_path)) is None
+
+
+def test_detect_seed_url_accepts_http_and_https():
+    assert detect_seed_url("http://example.com/SKILL.md") == "http://example.com/SKILL.md"
+    assert detect_seed_url("https://example.com/SKILL.md") == "https://example.com/SKILL.md"
+    assert detect_seed_url("  https://example.com/x  ") == "https://example.com/x"
+
+
+def test_detect_seed_url_rejects_non_http():
+    assert detect_seed_url("./notes.md") is None
+    assert detect_seed_url("notes.md") is None
+    assert detect_seed_url("/abs/path.md") is None
+    assert detect_seed_url("file:///etc/passwd") is None
+    assert detect_seed_url("ftp://example.com/x") is None
+    assert detect_seed_url("") is None
 
 
 def test_read_seed_file_ok(tmp_path: Path):

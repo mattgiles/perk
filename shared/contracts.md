@@ -4239,7 +4239,9 @@ draft→review→save mechanics. The warm plane is unchanged — `objective_draf
 structured roadmap path already carries `adopt_issue` per node, and `supersedes` rides the handoff
 exactly as `adopt_from` does, so no TS schema edit is needed.
 
-## §8.33 · Local-file seeding for the adoption cold doors (`plan from` / `objective author --from`)
+## §8.33 · Local-file (and URL) seeding for the seed-from-source cold doors
+
+*(`plan from` / `objective author --from` / `skills create --from`)*
 
 Both adoption cold doors **also** accept a relative or absolute path to a local file. This is a
 distinct **seed-from-file** mode, NOT in-place adoption: a file has no canonical backend identity,
@@ -4269,3 +4271,25 @@ unchanged (`0` ok · `1` op-failure/refusal · `2` not-a-repo).
 **Out of scope.** No in-place adoption of files (no backend identity), no change to `parse_plan_id`
 / the `adopt_from` handoff / `adopted_from` provenance / any §8.29/§8.30 machinery, no
 directory/glob support (a single file only), no write-back to the seed file.
+
+**`skills create --from` (third consumer + URL sub-mode).** `perk skills create NAME --from <SOURCE>`
+reuses the same leaf. `SOURCE` is detected **URL-first, then file** (the disambiguation order
+diverges from the doors above, which detect file-first then fall through to an id): an http(s) URL
+(`seed_file.detect_seed_url` — `urlsplit(arg).scheme` in `{http, https}`) takes the **URL sub-mode**;
+else an existing file (`detect_seed_file`) takes file mode; else a hard `seed_file_error` (no
+id/adoption fall-through — a skill has no backend identity).
+
+- **File mode** is identical to the doors above: materialized to an `<untrusted_seed_file>` scratch
+  (written even on `--dry-run`, gitignored), the authoring session reads it as DATA, authoring a
+  **fresh** skill.
+- **URL sub-mode** diverges: the URL is **not** materialized to a scratch and there is **no network
+  in the Python command** (no `require_github`). The command only scheme-detects and hands the URL
+  to the write-capable authoring session, which fetches the `SKILL.md` **and any sibling
+  `references/`/`scripts/`/linked files in-session** (it has fetch/web tools — read-write sessions
+  are not tool-restricted), treats everything as DATA, and ports selectively. This keeps the door
+  offline/fast and avoids GitHub-blob-HTML/raw-URL transforms in Python.
+
+Both modes always produce a **fresh** skill (no in-place adoption / `adopt_from` / provenance — a
+skill is not a backend object). `--dry-run` JSON adds `"from": <source>` and — file mode only —
+`"scratch_path"`. This is a Python-only change (no TS plane); the authoring judgment lives in the
+`perk-skill-author` skill.

@@ -29,6 +29,12 @@ from perk.cli.commands.skills.shared import (
 )
 from perk.cli.context import require_config
 from perk.cli.ensure import UserFacingCliError
+from perk.cli.seed_file import (
+    detect_seed_file,
+    detect_seed_url,
+    read_seed_file,
+    render_seed_file_scratch,
+)
 from perk.prompts import render
 from perk.run import launch
 from perk.substrate.output import machine_output, user_output
@@ -52,8 +58,34 @@ def _seed_prompt(skill_path: str, skill_name: str) -> str:
     )
 
 
+def _seed_from_prompt(
+    skill_path: str, skill_name: str, *, seed_path: str = "", seed_url: str = ""
+) -> str:
+    """The seed-from-source prompt (file arm or URL arm). Exactly one of ``seed_path`` /
+    ``seed_url`` is non-empty; both are always passed so the conditional template stays
+    byte-stable."""
+    return render(
+        "stages/skills/create-from.md",
+        {
+            "repo_skills_rel": REPO_SKILLS_REL,
+            "skill_name": skill_name,
+            "skill_path": skill_path,
+            "seed_path": seed_path,
+            "seed_url": seed_url,
+        },
+    )
+
+
 @click.command("create", context_settings={"ignore_unknown_options": True})
 @click.argument("name")
+@click.option(
+    "--from",
+    "from_source",
+    default=None,
+    help="Seed authoring from a local file (read as DATA) or an http(s) URL to a SKILL.md "
+    "(fetched in-session, with any sibling files); always creates a fresh skill — no in-place "
+    "adoption.",
+)
 @click.option(
     "--dry-run", is_flag=True, help="Print the seed + intended path; scaffold + launch nothing."
 )
@@ -64,6 +96,7 @@ def create_skill(
     ctx: click.Context,
     *,
     name: str,
+    from_source: str | None,
     dry_run: bool,
     as_json: bool,
     pi_args: tuple[str, ...],
@@ -72,8 +105,10 @@ def create_skill(
 
     \b
     Examples:
-      perk skills create my-skill            # scaffold + launch an authoring session
-      perk skills create my-skill --dry-run  # print the seed + intended path, launch nothing
+      perk skills create my-skill                  # scaffold + launch an authoring session
+      perk skills create my-skill --dry-run         # print the seed + intended path, launch nothing
+      perk skills create my-skill --from ./SKILL.md # seed authoring from a local file (DATA)
+      perk skills create my-skill --from https://.../SKILL.md  # fetch + seed from a URL in-session
     """
     try:
         root = repo_skills_root(ctx)
@@ -102,24 +137,69 @@ def create_skill(
         return
 
     skill_path = str(target / "SKILL.md")
-    seed = _seed_prompt(skill_path, skill_name)
+
+    # Resolve the seed source (file materialized to a scratch / URL handed to the session). The
+    # scratch is written even on --dry-run (gitignored, no tracked-file mutation), mirroring
+    # `plan from` file mode. No `--from` keeps the create.md path byte-identical.
+    seed_path = ""
+    seed_url = ""
+    if from_source is not None:
+        try:
+            url = detect_seed_url(from_source)
+            if url is not None:
+                seed_url = url
+            else:
+                seed_file = detect_seed_file(from_source)
+                if seed_file is None:
+                    skills_fail(
+                        ctx,
+                        as_json=as_json,
+                        error_type="seed_file_error",
+                        message=(
+                            f"--from: {from_source} is neither a readable file nor an http(s) URL."
+                        ),
+                    )
+                    return
+                content = read_seed_file(seed_file)
+                seed_path = str(render_seed_file_scratch(root, seed_file, content))
+        except UserFacingCliError as exc:
+            skills_fail(
+                ctx,
+                as_json=as_json,
+                error_type=exc.error_type or "seed_file_error",
+                message=exc.format_message(),
+            )
+            return
+
+    if from_source is None:
+        seed = _seed_prompt(skill_path, skill_name)
+    else:
+        seed = _seed_from_prompt(skill_path, skill_name, seed_path=seed_path, seed_url=seed_url)
 
     if dry_run:
         if as_json:
-            machine_output(
-                json.dumps(
-                    {
-                        "success": True,
-                        "error_type": None,
-                        "name": skill_name,
-                        "path": f"{REPO_SKILLS_REL}/{skill_name}",
-                        "dry_run": True,
-                    }
-                )
-            )
+            payload: dict[str, object] = {
+                "success": True,
+                "error_type": None,
+                "name": skill_name,
+                "path": f"{REPO_SKILLS_REL}/{skill_name}",
+                "dry_run": True,
+            }
+            if from_source is not None:
+                payload["from"] = from_source
+                if seed_path:
+                    payload["scratch_path"] = seed_path
+            machine_output(json.dumps(payload))
         else:
             user_output(click.style("skills create --dry-run (no scaffold; no launch)", dim=True))
             user_output(f"  name={skill_name}  path={REPO_SKILLS_REL}/{skill_name}")
+            if from_source is not None:
+                detail = f"  from={from_source}"
+                if seed_path:
+                    detail += f"  scratch={seed_path}"
+                if seed_url:
+                    detail += f"  url={seed_url}"
+                user_output(detail)
             user_output(click.style("── seed prompt ──", fg="bright_black"))
             user_output(seed)
         return
