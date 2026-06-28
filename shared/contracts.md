@@ -4335,3 +4335,84 @@ it always re-reads + asserts after a regen, so a non-roundtrippable schema still
 **Non-goals.** `ConfigModel` (TOML, not a shared YAML contract) is not published; the stored-block
 serializers `PlanHeaderOut` / `PlanRefOut` are not published as standalone schemas (`PlanRefOut`
 rides transitively in `PlanSaveOut`'s `$defs`).
+
+## §8.35 · The learn evidence-bundle contract (Objective #896, Node 1.1)
+
+`/learn` examines a **bundle of session-grounded evidence** for a landed plan — not only plan + diff.
+This section pins the bundle's shapes and vocabulary; the runtime handlers (nodes 2.x–7.1) build
+against it.
+
+**The evidence bundle (definition + invariants).** The bundle is the full set of session-grounded
+artifacts `/learn` reasons over for a landed plan. Invariants:
+
+- Every quoted artifact in the bundle is **untrusted DATA**, fenced as such — never instructions.
+- A missing source is **surfaced, never guessed**: the bundle reports a per-source status, and one
+  missing/ambiguous source never fails the whole command.
+- The bundle is **resolved cross-run** from a landed plan's identity, not from the current session's
+  identity — so a later or worktree session can rebuild it.
+
+**Minimum manifest categories.** The bundle manifest lists at least these five categories: `plan`,
+`pr`, `planning-session`, `implementation-session`, `existing-docs`. Each category carries a
+per-source status drawn from the fixed set **`found` / `missing` / `ambiguous`**.
+
+**Session classes.** Two session classes: **`planning`** (the session that authored/reviewed/saved
+the plan) and **`implementation`** (the session(s) that implemented it). Each class may resolve
+**both** a main session and a worker run, labelled distinctly when both are available.
+
+**The canonical run-cache pointer carrier.** Session pointers are recorded **against the run in the
+run cache, keyed by `run_id`** (under the run scratch dir, `perk/state/cache.py::run_scratch_dir` /
+`extension/substrate/cache.ts::runScratchDir`) — this is the canonical cross-run carrier. The plan
+branch's workflow-state **may mirror** the pointers for provenance but is **not primary**. The
+cross-run resolution path is **`plan id → plan-header run_id → run-cache pointers`**, without relying
+on the identity-gated `session_artifacts` map (current-run-only). Missing or GC'd pointers degrade to
+a `missing` status, never a guess. (The concrete carrier filename + record schema land with the
+node-2.1 handler; this section pins only the carrier *identity*.)
+
+**The classification vocabulary (two distinct, related sets).**
+
+- **The reconciled DECISION set** — the transient, in-session reconciliation output of `/learn`'s
+  angle analysis. One of `CAPTURE_LEARN`, `SHOULD_BE_CODE`, `UPDATE_EXISTING_DOC`, `NEW_DOC`,
+  `STALE_DOC`, `SKIP`, with one locked meaning each:
+  - `CAPTURE_LEARN` — a durable cross-cutting learning → create a `perk:learn` issue.
+  - `SHOULD_BE_CODE` — belongs in code/comment/docstring/schema/user-docs, not a learned doc
+    (corresponds to the perk-learn-docs knowledge-placement hierarchy).
+  - `UPDATE_EXISTING_DOC` — update an identified existing learned/user doc.
+  - `NEW_DOC` — a new learned doc is warranted.
+  - `STALE_DOC` — an existing doc is stale/duplicate and should be cleaned up.
+  - `SKIP` — nothing durable; create no issue, clear the marker only.
+- **The durable CAPTURED metadata shape** — persisted on the `perk:learn` issue header (both
+  backends). It is the DECISION set **minus `SKIP`** (a skip creates no issue) **plus an optional
+  `target`**: `{ decision ∈ {CAPTURE_LEARN, SHOULD_BE_CODE, UPDATE_EXISTING_DOC, NEW_DOC,
+  STALE_DOC}, target? }`. `target` is an optional routable pointer (e.g. an existing doc path) when
+  the decision identifies one. The fields extend the existing `learn-header` metadata block (which
+  already carries `{ run_id, created, plan }`) → `{ run_id, created, plan, decision, target? }`,
+  rendered in both block styles (HTML on GitHub, `inline-code` on Linear) so it round-trips on both
+  backends. Markdown stays the human payload. (The persist itself lands with node 4.2; this section
+  pins only the shape + key names.)
+
+**Boundary-model discipline (forward-looking).** The new learn shapes are **boundary data** and,
+when their handlers land, follow perk's existing boundary-model convention (§8.34 / `perk/boundary.py`,
+the dignified-pydantic house style) — the contract pins *which role each shape serves*, leaving field
+lists to the handlers:
+
+- The **bundle manifest** and the **session-normalization report** (`perk learn evidence --json`,
+  nodes 3.1/3.2) are an **`OutputModel` serialize-edge** — the `--json` envelope is the contract a
+  machine consumer receives.
+- Parsing **session JSONL** and reading the **`learn-header` captured metadata back off an issue**
+  are **untrusted external data** → a **`LenientParseModel` read-edge** (`extra="ignore"`), converted
+  to a **frozen `@dataclass`** domain object — never read raw dicts into domain logic.
+- The `decision` token is a **closed set** → modelled as a `StrEnum` (the five captured tokens; the
+  transient reconciliation may also yield `SKIP`), never a free string; `target` is **omittable**
+  (`str | None = None`), distinguishing "no target" from a present value.
+- `model_validate` for the untrusted edges; the constructor for trusted Python-shaped values (the
+  `ty`-friendly habit, dignified-pydantic §38).
+
+**The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
+**non-empty** *is* a learn-docs consolidation plan. `/learn` (and the future `perk learn evidence`
+command) detect this **up-front** and return a stable **no-op**: clear `pending-learn`, create no
+`perk:learn` issue, gather no bundle, spawn no children — reporting *"learn-docs plan; learn capture
+skipped"*.
+
+**Explicit deferrals.** Exact normalization counters and render-field details (entries
+read/kept/pruned, duplicate groups, truncations, chunk paths) are **not** specified here — they land
+with the node-3.2 render handler. No fiction for unbuilt fields.

@@ -138,8 +138,10 @@ auto-drives `/objective-reconcile`. Paired tool:
 ### `/learn`
 
 Investigate the landed change and capture learnings into a perk:learn issue, then clear the
-pending-learn semaphore and release the worktree. `/learn skip` clears the marker only;
-`/learn <text>` captures the text verbatim. Paired tool:
+pending-learn semaphore and release the worktree. `/learn` examines a **session-grounded evidence
+bundle** — the planning + implementation sessions, the saved plan, the merged PR, and an
+existing-docs inventory; **missing evidence is surfaced, not guessed**. `/learn skip` clears the
+marker only; `/learn <text>` captures the text verbatim. Paired tool:
 
 - **`learn`** — capture learnings (or clear the marker only). *Terminating.*
 
@@ -246,7 +248,8 @@ changes shows a notification only. This is a plain warm command — no stage, no
 ### `/learn-docs`
 
 Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author a
-`docs/learned` consolidation plan. No paired tool.
+`docs/learned` consolidation plan. The consumed perk:learn records are session-grounded and
+already-classified. No paired tool.
 
 ## Universal model-facing tools
 

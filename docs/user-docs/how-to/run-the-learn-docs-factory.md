@@ -9,7 +9,8 @@ learned-docs plan factory.
    [`/learn-docs`](../reference/in-session.md#learn-docs), or from the shell run
    [`perk learn docs --gather`](../reference/cli.md#perk-learn-docs). It gathers the open
    `perk:learn` issues into an inbox and authors a **read-only** `docs/learned` consolidation
-   **plan** — it does **not** write docs directly.
+   **plan** — it does **not** write docs directly. The gathered `perk:learn` records are
+   session-grounded and carry a routable classification (a `decision`, optional `target`).
 2. **Review and approve the plan.** Read the consolidation plan and approve it like any other plan;
    approval saves it to GitHub.
 3. **Drive it through the spine.** Take the saved plan through the ordinary
