@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "pr": {
+    "number": 42,
+    "url": "https://github.com/o/r/pull/42"
+  },
+  "was_draft": true,
+  "dry_run": false
+}

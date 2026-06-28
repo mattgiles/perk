@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "pr": {
+    "number": 42,
+    "state": "OPEN"
+  },
+  "branch": "plan-42",
+  "issue": "42",
+  "pending_learn": true,
+  "plan_issue_closed": true,
+  "dry_run": false,
+  "objective": {
+    "id": "63",
+    "nodes_marked": [
+      "1.1",
+      "1.2"
+    ],
+    "skipped_reason": null,
+    "closed": true
+  },
+  "learn": {
+    "closed": [
+      "45"
+    ],
+    "skipped_reason": null
+  }
+}

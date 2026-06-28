@@ -14,6 +14,7 @@ from pathlib import Path
 import click
 
 from perk import github
+from perk.boundary import OutputModel
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -99,15 +100,42 @@ def _pr_ready_impl(*, repo_root: Path, dry_run: bool) -> PrReadyResult:
     return PrReadyResult(pr=pr, was_draft=was_draft, dry_run=False)
 
 
+class ReadyPrOut(OutputModel):
+    """The serialization boundary of the picked :class:`github.PullRequest` subset
+    (field order load-bearing)."""
+
+    number: int
+    url: str
+
+    @classmethod
+    def from_domain(cls, pr: github.PullRequest) -> "ReadyPrOut":
+        return cls(number=pr.number, url=pr.url)
+
+
+class PrReadyOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`PrReadyResult` (order load-bearing)."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    pr: ReadyPrOut
+    was_draft: bool
+    dry_run: bool
+
+    @classmethod
+    def from_domain(cls, result: PrReadyResult) -> "PrReadyOut":
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            pr=ReadyPrOut.from_domain(result.pr),
+            was_draft=result.was_draft,
+            dry_run=result.dry_run,
+        )
+
+
 def _result_to_dict(result: PrReadyResult) -> dict[str, object]:
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "pr": {"number": result.pr.number, "url": result.pr.url},
-        "was_draft": result.was_draft,
-        "dry_run": result.dry_run,
-    }
+    return PrReadyOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: PrReadyResult) -> None:

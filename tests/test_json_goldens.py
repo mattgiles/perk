@@ -165,3 +165,158 @@ def test_golden_plan_save_no_node() -> None:
     from perk.cli.commands.plan.save_cmd import _result_to_dict
 
     assert_golden("plan_save_no_node", _result_to_dict(_plan_save_result(with_node=False)))
+
+
+# --- pr submit / ready / land / feedback / review-context ---------------------------------
+
+
+def _pull_request():
+    from perk import github
+
+    return github.PullRequest(
+        number=42,
+        url="https://github.com/o/r/pull/42",
+        is_draft=True,
+        state="OPEN",
+        existed=False,
+        base_ref="main",
+    )
+
+
+def _pr_submit_result():
+    from perk.backends import issue_backend
+    from perk.cli.commands.pr.submit_cmd import PrSubmitResult
+
+    return PrSubmitResult(
+        pr=_pull_request(),
+        branch="plan-42",
+        issue="42",
+        header_update=issue_backend.PlanHeaderUpdate(
+            fields_updated=("branch", "pr", "lifecycle_stage"), dry_run=False
+        ),
+        plan_embedded=True,
+        pr_checked=True,
+        dry_run=False,
+        base="main",
+        mergeable=False,
+        conflicts=("perk/foo.py", "perk/bar.py"),
+    )
+
+
+def _pr_ready_result():
+    from perk.cli.commands.pr.ready_cmd import PrReadyResult
+
+    return PrReadyResult(pr=_pull_request(), was_draft=True, dry_run=False)
+
+
+def _pr_land_result():
+    from perk.cli.commands.pr.land_cmd import (
+        LearnConsumeUpdate,
+        ObjectiveLandUpdate,
+        PrLandResult,
+    )
+
+    return PrLandResult(
+        pr=_pull_request(),
+        branch="plan-42",
+        issue="42",
+        pending_learn=True,
+        dry_run=False,
+        objective=ObjectiveLandUpdate(
+            objective="63", nodes_marked=("1.1", "1.2"), skipped_reason=None, closed=True
+        ),
+        learn=LearnConsumeUpdate(closed=("45",), skipped_reason=None),
+        plan_issue_closed=True,
+    )
+
+
+def _pr_feedback_result():
+    from perk import github
+    from perk.cli.commands.pr.feedback_cmd import PrFeedbackResult
+
+    feedback = github.PrFeedback(
+        pr_number=42,
+        review_threads=(
+            github.ReviewThread(
+                thread_id="PRRT_1",
+                is_resolved=False,
+                is_outdated=False,
+                path="perk/foo.py",
+                line=10,
+                comments=(
+                    github.ReviewComment(
+                        comment_id=100,
+                        body="nit",
+                        author="reviewer",
+                        path="perk/foo.py",
+                        line=10,
+                        created_at="2026-01-01T00:00:00Z",
+                    ),
+                ),
+            ),
+        ),
+        discussion_comments=(
+            github.DiscussionComment(
+                comment_id=200,
+                body="overall looks good",
+                author="reviewer",
+                created_at="2026-01-01T00:00:00Z",
+            ),
+        ),
+        reviews=(
+            github.Review(
+                review_id="PRR_1",
+                author="reviewer",
+                body="changes please",
+                state="CHANGES_REQUESTED",
+                submitted_at="2026-01-01T00:00:00Z",
+            ),
+        ),
+    )
+    return PrFeedbackResult(feedback=feedback, branch="plan-42")
+
+
+def _pr_review_context_result():
+    from perk import github
+    from perk.cli.commands.pr.review_context_cmd import PrReviewContextResult
+
+    context = github.PrReviewContext(
+        pr_number=42,
+        base_ref="main",
+        head_ref="plan-42",
+        title="My PR",
+        body="PR body",
+        diff="diff --git a/x b/x\n",
+        plan_body="# Plan\n",
+    )
+    return PrReviewContextResult(context=context, branch="plan-42")
+
+
+def test_golden_pr_submit() -> None:
+    from perk.cli.commands.pr.submit_cmd import _result_to_dict
+
+    assert_golden("pr_submit", _result_to_dict(_pr_submit_result()))
+
+
+def test_golden_pr_ready() -> None:
+    from perk.cli.commands.pr.ready_cmd import _result_to_dict
+
+    assert_golden("pr_ready", _result_to_dict(_pr_ready_result()))
+
+
+def test_golden_pr_land() -> None:
+    from perk.cli.commands.pr.land_cmd import _result_to_dict
+
+    assert_golden("pr_land", _result_to_dict(_pr_land_result()))
+
+
+def test_golden_pr_feedback() -> None:
+    from perk.cli.commands.pr.feedback_cmd import _result_to_dict
+
+    assert_golden("pr_feedback", _result_to_dict(_pr_feedback_result()))
+
+
+def test_golden_pr_review_context() -> None:
+    from perk.cli.commands.pr.review_context_cmd import _result_to_dict
+
+    assert_golden("pr_review_context", _result_to_dict(_pr_review_context_result()))

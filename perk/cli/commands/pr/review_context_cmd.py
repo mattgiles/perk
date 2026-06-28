@@ -18,6 +18,7 @@ import click
 from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
+from perk.boundary import OutputModel
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -111,21 +112,42 @@ def _resolve_plan_body(repo_root: Path, plan_ref: plan.PlanRef) -> str | None:
         return None
 
 
+class PrReviewContextOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`PrReviewContextResult`
+    (flat; field order load-bearing). ``pr`` maps from the domain ``pr_number``."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    branch: str
+    pr: int
+    base_ref: str
+    head_ref: str
+    title: str
+    body: str
+    diff: str
+    plan_body: str | None
+
+    @classmethod
+    def from_domain(cls, result: PrReviewContextResult) -> "PrReviewContextOut":
+        c = result.context
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            branch=result.branch,
+            pr=c.pr_number,
+            base_ref=c.base_ref,
+            head_ref=c.head_ref,
+            title=c.title,
+            body=c.body,
+            diff=c.diff,
+            plan_body=c.plan_body,
+        )
+
+
 def _result_to_dict(result: PrReviewContextResult) -> dict[str, object]:
-    c = result.context
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "branch": result.branch,
-        "pr": c.pr_number,
-        "base_ref": c.base_ref,
-        "head_ref": c.head_ref,
-        "title": c.title,
-        "body": c.body,
-        "diff": c.diff,
-        "plan_body": c.plan_body,
-    }
+    return PrReviewContextOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: PrReviewContextResult) -> None:
