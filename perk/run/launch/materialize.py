@@ -2,19 +2,28 @@
 
 The canonical materialization paths:
 the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body cache
-(:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), and the
-per-skill symlink mirror (:func:`materialize_skills`). ``_WORKTREE_SETUP_TIMEOUT_S`` (the
-per-command wall-clock cap) travels with :func:`run_worktree_setup` and is re-exported by the
-package facade so ``launch._WORKTREE_SETUP_TIMEOUT_S`` resolves verbatim.
+(:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), the
+per-skill symlink mirror (:func:`materialize_skills`), and the extension-install clone-copy
+(:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) heads a real
+launch's output. ``_WORKTREE_SETUP_TIMEOUT_S`` (the per-command wall-clock cap) travels with
+:func:`run_worktree_setup` and is re-exported by the package facade so
+``launch._WORKTREE_SETUP_TIMEOUT_S`` resolves verbatim.
 """
 
+import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
-from perk import plan
+import click
+
+from perk import __version__, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.cli.ensure import UserFacingCliError
+from perk.convergence.init.extension_install import consumer_npm_install_root
 from perk.github import GitHubError
 from perk.state import cache
 from perk.substrate.output import user_output
@@ -128,5 +137,114 @@ def materialize_skills(repo_root: Path, worktree: Path) -> None:
             continue  # a real dir/file already there — never clobber
         link.symlink_to(target, target_is_directory=True)
         linked += 1
-    if linked:
-        user_output(f"  (skills: mirrored {linked} skill(s) into the worktree)")
+    # The success count is folded into the launch banner (computed up front from repo_root);
+    # only the missing/empty-source warnings above are emitted here.
+
+
+def _count_skill_sources(repo_root: Path) -> int:
+    """Count the skill dirs in ``repo_root/.agents/skills/`` — the exact set
+    :func:`materialize_skills` mirrors. Best-effort: ``0`` when the dir is absent, never raises."""
+    src = repo_root / ".agents" / "skills"
+    try:
+        return len([entry for entry in src.iterdir() if entry.is_dir()])
+    except OSError:
+        return 0
+
+
+def _count_extension_packages(repo_root: Path) -> int:
+    """Count the ``packages`` entries in ``repo_root/.pi/settings.json`` — the extensions pi loads.
+    Best-effort: ``0`` on any read/JSON error."""
+    settings = repo_root / ".pi" / "settings.json"
+    try:
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        packages = data.get("packages")
+        return len(packages) if isinstance(packages, list) else 0
+    except (OSError, ValueError, AttributeError):
+        return 0
+
+
+def render_launch_banner(*, skills: int, extensions: int) -> str:
+    """The 4-line perk launch banner: the compact box-drawing wordmark, the version, and a summary
+    line that absorbs the old ``(skills: mirrored …)`` line plus the extension count."""
+    return (
+        " \u250c\u2500\u2510\u250c\u2500\u2510\u252c\u2500\u2510\u250c\u2500\u2510\n"
+        " \u251c\u2500\u2518\u251c\u2524 \u251c\u252c\u2518\u251c\u2534\u2510\n"
+        f" \u2534  \u2514\u2500\u2518\u2534\u2514\u2500\u2534 \u2534   perk v{__version__}\n"
+        f" {skills} skills \u00b7 {extensions} extensions ready"
+    )
+
+
+def print_launch_banner(repo_root: Path) -> None:
+    """Render the launch banner from ``repo_root``'s up-front counts and emit it via
+    ``user_output``. Both counts are knowable before any worktree work, so the first render is
+    already accurate — no re-render.
+
+    TTY-gated styling: the summary line is dimmed only on an interactive stderr with ``NO_COLOR``
+    unset; ``--json``/piped/CI output stays plain and escape-code-free.
+    """
+    skills = _count_skill_sources(repo_root)
+    extensions = _count_extension_packages(repo_root)
+    wordmark, _, summary = render_launch_banner(skills=skills, extensions=extensions).rpartition(
+        "\n"
+    )
+    if sys.stderr.isatty() and not os.environ.get("NO_COLOR"):
+        summary = click.style(summary, dim=True)
+    user_output(f"{wordmark}\n{summary}")
+
+
+def _clone_npm_tree(src: Path, dst: Path) -> None:
+    """Clone the converged npm install tree ``src`` into ``dst``, preferring cheap isolation.
+
+    First attempt per-file **hardlinks** (``copy_function=os.link``) — near-instant and disk-free;
+    npm only ever add/replaces a package via rename, which breaks the link, so the main checkout's
+    inodes are never mutated in place. On ``OSError`` (cross-device ``EXDEV``, or no hardlink
+    support) fall back to a deep copy (``copy2`` is reflink/clonefile-accelerated on APFS/Btrfs,
+    a full copy elsewhere — still fully isolated).
+    """
+    try:
+        shutil.copytree(src, dst, copy_function=os.link, dirs_exist_ok=True)
+    except OSError:
+        shutil.rmtree(dst, ignore_errors=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
+def materialize_extensions(repo_root: Path, worktree: Path) -> None:
+    """Stage the converged repo-root ``.pi/npm/`` into the worktree so pi installs nothing at
+    startup (a silent + faster launch beneath the banner).
+
+    A fresh worktree starts with an empty gitignored ``.pi/npm/``; at startup pi would ``npm
+    install`` every configured extension with inherited stdio (the ``added N packages`` noise). A
+    faithful copy of the converged repo-root install satisfies pi's ``needsInstall`` short-circuit
+    for every package. Copying (not symlinking) preserves per-worktree isolation: an in-dev
+    extension a worktree adopts stays in the worktree and never leaks to the main checkout.
+
+    Loud-but-non-fatal + idempotent (D4 resume), mirroring :func:`materialize_skills`: a staging
+    failure warns and degrades to pi installing in-session (the noise reappears below the banner)
+    but never blocks the launch.
+    """
+    src = consumer_npm_install_root(repo_root)
+    src_modules = src / "node_modules"
+    try:
+        src_empty = not src_modules.is_dir() or not any(src_modules.iterdir())
+    except OSError:
+        src_empty = True
+    if src_empty:
+        user_output("  (extensions: repo .pi/npm not staged — pi will install them in-session)")
+        return
+    dst = worktree / ".pi" / "npm"
+    dst_modules = dst / "node_modules"
+    try:
+        if dst_modules.is_dir() and any(dst_modules.iterdir()):
+            return  # idempotent resume: a populated install is already present — never clobber
+    except OSError:
+        pass  # treat an unreadable dst as absent and re-stage
+    try:
+        _clone_npm_tree(src, dst)
+    except OSError as exc:
+        # A clone that fails mid-copy leaves a partial tree behind. Remove it so the presence-only
+        # resume guard above doesn't permanently cache a half-copied (corrupt) install — a failed
+        # stage must degrade to pi installing fresh in-session, never to a broken tree.
+        shutil.rmtree(dst, ignore_errors=True)
+        user_output(
+            f"  (extensions: could not stage .pi/npm — {exc}; pi will install them in-session)"
+        )
