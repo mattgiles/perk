@@ -167,7 +167,7 @@ def render_launch_banner(*, skills: int, extensions: int) -> str:
     """The 4-line perk launch banner: the compact box-drawing wordmark, the version, and a summary
     line that absorbs the old ``(skills: mirrored …)`` line plus the extension count."""
     return (
-        " \u250c\u2500\u2510\u250c\u2500\u2510\u252c\u2500\u2510\u250c\u2500\u2510\n"
+        " \u250c\u2500\u2510\u250c\u2500\u2510\u252c\u2500\u2510\u252c\u250c\u2500\n"
         " \u251c\u2500\u2518\u251c\u2524 \u251c\u252c\u2518\u251c\u2534\u2510\n"
         f" \u2534  \u2514\u2500\u2518\u2534\u2514\u2500\u2534 \u2534   perk v{__version__}\n"
         f" {skills} skills \u00b7 {extensions} extensions ready"
