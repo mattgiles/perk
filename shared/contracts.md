@@ -4480,6 +4480,63 @@ command) detect this **up-front** and return a stable **no-op**: clear `pending-
 `perk:learn` issue, gather no bundle, spawn no children — reporting *"learn-docs plan; learn capture
 skipped"*.
 
+**The bundle-manifest CLI (node 3.1, `perk learn evidence --json`).** The first consumer of the
+node-2.1 resolver + node-2.2 export seam. Reads the local `cache.plan-ref` (no positional arg,
+mirroring `perk learn capture`); gathers the bundle, materializes the artifacts under
+`cache.scratch_dir(repo_root) / "learn-evidence"`, and emits the manifest. Exit codes: `0` ok (skip
+OR gathered manifest) · `1` no plan-ref / invalid · `2` not-a-repo. `require_github` is **not**
+called — GitHub reads degrade per-source, so the manifest still gathers sessions + docs offline.
+
+The `--json` envelope (`OutputModel` serialize edge, the contract a machine consumer receives):
+
+```
+EvidenceBundle = {
+  success, error_type, message,            # the standard envelope head
+  skipped: bool, skip_reason: str|null,
+  plan_id: str|null, bundle_dir: str|null, # bundle_dir relative to repo_root
+  sources: EvidenceSource[],
+  existing_docs: DocEntry[],
+}
+EvidenceSource = { category, label, status, artifact: str|null, detail: str|null }
+DocEntry       = { kind, path, title: str|null, snippet: str|null }
+```
+
+`status ∈ {found, missing, ambiguous}`. `artifact` paths are **relative to repo_root** (portable).
+The full shape is always serialized (no `exclude_unset`) so absent values render `null`.
+
+**Category → source mapping.** `plan` (1; materializes `plan-body.md`), `pr` (1; materializes
+`pr.diff` when `found`), `planning-session` (2: `main`/`worker`), `implementation-session` (per
+`impl_run_ids` entry × `main`/`worker`, files `implementation-<i>-{main,worker}.jsonl`; **one
+`missing` entry labelled `(none)`** when there are no impl runs), `existing-docs` (1 roll-up:
+`found` when the inventory is non-empty, else `missing`; the detail rides the separate
+`existing_docs[]`).
+
+**Skip detection — the plan-header, up front.** The plan is fetched once via the resolved issue
+backend; if `header["consumed_learn"]` is a **non-empty list** (LBYL: `isinstance(..., list)` +
+truthy) the command returns the stable skip (`skipped=true`, empty `sources`/`existing_docs`,
+`bundle_dir=null`) **before** any PR/session/docs gathering. A plan-**fetch** failure is **never** a
+skip signal — the command proceeds to gather with the `plan` source `missing`.
+
+**Per-source degrade with a warning.** Each source gathers in its own try/except: *expected absence*
+(a `None` lookup / null slot / no impl runs) → `missing` **silently**; a *genuine error*
+(`IssueBackendError` / `GitHubError` / `OSError`) → `missing` + a `user_output("warning: …")` to
+stderr (loud-but-non-fatal). One missing/ambiguous source never fails the command (exit `0`).
+
+**The first `ambiguous` producer — the multi-candidate PR rule.** `perk/github/prs.py` gains
+`list_prs_for_branch(*, branch, repo_root) -> tuple[PullRequest, ...]` (its own
+`head=<owner>:<branch>&state=all` list, all states; `find_pr_for_branch` is left unchanged). The PR
+source: `0` matches → `missing`; exactly one MERGED PR (even alongside closed/superseded PRs) →
+`found`; exactly one match (any state) → `found`; otherwise (`>1`, not exactly one merged) →
+**`ambiguous`** (no diff materialized).
+
+**The existing-docs roots (node 3.1's basic inventory).** `scan_existing_docs(repo_root)` scans
+three conventional roots: `docs/learned/**/*.md` (frontmatter `title`/`read_when`),
+`docs/user-docs/**/*.md` (first `# ` heading + first paragraph), and `.perk/skills/*/SKILL.md`
+(frontmatter `name`/`description`). **Top-level `skills/` is deliberately excluded** — it is perk's
+own codebase, not the workflow-managed skill surface. Per entry: `DocEntry{kind, path, title,
+snippet}`, snippets bounded (`≈240` chars), sorted by path (deterministic); non-existent roots yield
+nothing. The rich stale/duplicate checker is **node 5.1**.
+
 **Explicit deferrals.** Exact normalization counters and render-field details (entries
 read/kept/pruned, duplicate groups, truncations, chunk paths) are **not** specified here — they land
 with the node-3.2 render handler. No fiction for unbuilt fields.

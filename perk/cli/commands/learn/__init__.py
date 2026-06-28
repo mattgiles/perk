@@ -19,6 +19,7 @@ import click
 from perk.cli.alias import AliasGroup
 from perk.cli.commands.learn.capture_cmd import capture_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
+from perk.cli.commands.learn.evidence_cmd import evidence_learn
 from perk.cli.stages import make_stage_launcher
 from perk.substrate.registry import RegistryError, load_registry
 
@@ -55,7 +56,8 @@ learn_group = LearnGroup(
     "learn",
     help=(
         "Capture + consolidate learnings. Bare `perk learn` launches the learn stage (a primed "
-        "pi session); `capture` and `docs` are the cold workers the warm doors delegate to."
+        "pi session); `capture`, `docs`, and `evidence` are the cold workers the warm doors "
+        "delegate to."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
@@ -64,6 +66,7 @@ learn_group = LearnGroup(
 
 learn_group.add_command(capture_learn)
 learn_group.add_command(docs_learn)
+learn_group.add_command(evidence_learn)
 
 # The hidden bare-invocation launcher: the generic registry launcher for the `learn` stage.
 # Defensive: a broken registry must not brick the CLI (mirrors register_stage_commands) — the

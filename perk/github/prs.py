@@ -123,6 +123,31 @@ def find_pr_for_branch(*, branch: str, repo_root: Path) -> PullRequest | None:
         return _pull_request(chosen, existed=True)
 
 
+def list_prs_for_branch(*, branch: str, repo_root: Path) -> tuple[PullRequest, ...]:
+    """List **all** PRs whose head is ``branch`` (its own ``head=<owner>:<branch>&state=all``
+    query, all states), parsed via the shared converter.
+
+    Distinct from :func:`find_pr_for_branch` (which collapses to one) so a consumer can detect
+    multi-candidate ambiguity (``perk learn evidence``). ``find_pr_for_branch`` is left unchanged
+    (its many call sites want exactly one). Raises ``GitHubError`` on an infra failure.
+    """
+    items = _exec._run_json(
+        _exec._rest_args(
+            "repos/{owner}/{repo}/pulls",
+            method="GET",
+            fields={"head": f"{_owner(repo_root)}:{branch}", "state": "all"},
+        ),
+        what=f"failed to list PRs for {branch!r}",
+        source="`gh api pulls`",
+        cwd=repo_root,
+        default="[]",
+    )
+    if not isinstance(items, list) or not items:
+        return ()
+    with translate_validation_errors(_exec.GitHubError, source=f"list PRs for {branch!r}"):
+        return tuple(_pull_request(item, existed=True) for item in items)
+
+
 def create_pr(
     *,
     head: str,

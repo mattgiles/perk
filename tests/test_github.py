@@ -255,6 +255,66 @@ def test_find_pr_for_branch_none(monkeypatch):
     assert github.find_pr_for_branch(branch="plan-7", repo_root=ROOT) is None
 
 
+def test_list_prs_for_branch_none(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, "[]")),
+            ]
+        ),
+    )
+    assert github.list_prs_for_branch(branch="plan-7", repo_root=ROOT) == ()
+
+
+def test_list_prs_for_branch_one_carries_base_ref(monkeypatch):
+    pulls = [
+        {
+            "number": 2,
+            "html_url": "u/2",
+            "state": "closed",
+            "draft": False,
+            "merged_at": "2026-01-01T00:00:00Z",
+            "base": {"ref": "release"},
+        },
+    ]
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, json.dumps(pulls))),
+            ]
+        ),
+    )
+    prs = github.list_prs_for_branch(branch="plan-7", repo_root=ROOT)
+    assert len(prs) == 1
+    assert prs[0].number == 2 and prs[0].state == "MERGED" and prs[0].base_ref == "release"
+
+
+def test_list_prs_for_branch_multiple_preserves_order(monkeypatch):
+    pulls = [
+        {"number": 1, "html_url": "u/1", "state": "closed", "draft": False},
+        {"number": 2, "html_url": "u/2", "state": "open", "draft": True},
+    ]
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _GhDispatch(
+            [
+                (_has("repo", "view", "owner"), _Proc(0, "me\n")),
+                (_has("pulls", "GET"), _Proc(0, json.dumps(pulls))),
+            ]
+        ),
+    )
+    prs = github.list_prs_for_branch(branch="plan-7", repo_root=ROOT)
+    assert [p.number for p in prs] == [1, 2]
+    assert prs[0].state == "CLOSED" and prs[1].state == "OPEN"
+
+
 def test_create_pr_idempotent_returns_existing_no_post(monkeypatch):
     existing = [{"number": 9, "html_url": "u/9", "state": "open", "draft": True}]
     rec = _GhDispatch(

@@ -414,7 +414,8 @@ findings and posts once) — the reviewer children no longer call it directly.
 ### `perk learn`
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
-session); its `capture` and `docs` verbs are the cold workers the warm doors delegate to.
+session); its `capture`, `docs`, and `evidence` verbs are the cold workers the warm doors delegate
+to.
 
 ### `perk learn capture`
 
@@ -427,6 +428,17 @@ clearing.
 Consolidate open perk:learn issues into a `docs/learned` plan (a read-only factory). `--gather`
 materializes the inbox and emits `{inbox_path, learn_numbers}` without launching (the warm path);
 `--worktree`, `--dry-run`, `--remote` (local-only), and `--json` are also accepted.
+
+### `perk learn evidence`
+
+Gather a landed plan's session-grounded evidence bundle and emit a stable manifest. Reads the local
+plan-ref (no positional arg); resolves the saved plan, the merged PR's metadata/diff, the planning
+and implementation session JSONLs (main + worker, labelled distinctly), and a basic existing-docs
+inventory, materializing the artifacts under `.perk/workflow/scratch/learn-evidence/`. Each source
+carries a `found` / `missing` / `ambiguous` status — a missing or ambiguous source is **surfaced,
+never guessed**, and never fails the command. A learn-docs consolidation plan (non-empty
+`consumed_learn`) returns a stable skip up front. `--json` emits the machine-readable bundle (the
+default is a compact human summary to stderr).
 
 ### `perk worktree` (alias `wt`)
 
