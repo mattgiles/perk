@@ -30,6 +30,7 @@ imported modules and are seen regardless of which submodule the builder lives in
 from pathlib import Path
 
 from perk.backends import linear
+from perk.boundary import OutputModel
 from perk.convergence import env, init
 from perk.convergence.doctor.checks import (
     _bad_handoffs,
@@ -80,9 +81,12 @@ __all__ = [
     "_MIGRATIONS",
     "_MODEL_SECRETS",
     "Check",
+    "CheckOut",
     "DoctorReport",
+    "DoctorReportOut",
     "GitHubError",
     "Status",
+    "SummaryOut",
     "_apply_fixes",
     "_bad_handoffs",
     "_bindings_check",
@@ -230,29 +234,75 @@ def run_doctor(root: Path, *, fix: bool = False, verify: bool = True) -> DoctorR
     return DoctorReport(checks=checks, fixed=fixed, self_repo=self_repo, fix_errors=fix_errors)
 
 
+# --- the ``--json`` serialization boundary (OutputModel edge of DoctorReport) --------------
+#
+# Field declaration order is load-bearing on every model below: ``model_dump(mode="json")``
+# emits in declaration order, so the order must stay byte-stable to avoid churning the
+# ``--json`` supervisor surface (contracts §8.6).
+
+
+class CheckOut(OutputModel):
+    """The serialization boundary of one :class:`Check` (field order load-bearing)."""
+
+    name: str
+    group: str
+    status: Status
+    message: str
+    detail: str
+    remediation: str
+
+    @classmethod
+    def from_domain(cls, c: Check) -> "CheckOut":
+        return cls(
+            name=c.name,
+            group=c.group,
+            status=c.status,
+            message=c.message,
+            detail=c.detail,
+            remediation=c.remediation,
+        )
+
+
+class SummaryOut(OutputModel):
+    """The computed status tally (field order load-bearing)."""
+
+    passed: int
+    warnings: int
+    failed: int
+
+
+class DoctorReportOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`DoctorReport` (field order load-bearing)."""
+
+    success: bool
+    healthy: bool
+    self_repo: bool
+    error_type: str | None
+    message: str | None
+    checks: tuple[CheckOut, ...]
+    summary: SummaryOut
+    fixed: tuple[str, ...]
+    fix_errors: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, report: DoctorReport) -> "DoctorReportOut":
+        return cls(
+            success=report.error_type is None,
+            healthy=report.healthy,
+            self_repo=report.self_repo,
+            error_type=report.error_type,
+            message=report.message,
+            checks=tuple(CheckOut.from_domain(c) for c in report.checks),
+            summary=SummaryOut(
+                passed=sum(1 for c in report.checks if c.status == "ok"),
+                warnings=sum(1 for c in report.checks if c.status in ("warn", "info")),
+                failed=sum(1 for c in report.checks if c.status == "fail"),
+            ),
+            fixed=tuple(report.fixed),
+            fix_errors=tuple(report.fix_errors),
+        )
+
+
 def report_to_dict(report: DoctorReport) -> dict[str, object]:
     """Serialize for the ``--json`` supervisor surface (contracts §8.6)."""
-    passed = sum(1 for c in report.checks if c.status == "ok")
-    warnings = sum(1 for c in report.checks if c.status in ("warn", "info"))
-    failed = sum(1 for c in report.checks if c.status == "fail")
-    return {
-        "success": report.error_type is None,
-        "healthy": report.healthy,
-        "self_repo": report.self_repo,
-        "error_type": report.error_type,
-        "message": report.message,
-        "checks": [
-            {
-                "name": c.name,
-                "group": c.group,
-                "status": c.status,
-                "message": c.message,
-                "detail": c.detail,
-                "remediation": c.remediation,
-            }
-            for c in report.checks
-        ],
-        "summary": {"passed": passed, "warnings": warnings, "failed": failed},
-        "fixed": report.fixed,
-        "fix_errors": report.fix_errors,
-    }
+    return DoctorReportOut.from_domain(report).model_dump(mode="json")

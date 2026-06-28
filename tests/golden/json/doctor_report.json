@@ -1,0 +1,52 @@
+{
+  "success": true,
+  "healthy": false,
+  "self_repo": true,
+  "error_type": null,
+  "message": null,
+  "checks": [
+    {
+      "name": "settings-wiring",
+      "group": "package",
+      "status": "ok",
+      "message": "wired",
+      "detail": "",
+      "remediation": ""
+    },
+    {
+      "name": "github",
+      "group": "github",
+      "status": "warn",
+      "message": "unauthed",
+      "detail": "gh not logged in",
+      "remediation": ""
+    },
+    {
+      "name": "node",
+      "group": "env",
+      "status": "info",
+      "message": "optional",
+      "detail": "",
+      "remediation": "install node"
+    },
+    {
+      "name": "registry",
+      "group": "repository",
+      "status": "fail",
+      "message": "drift",
+      "detail": "d",
+      "remediation": "r"
+    }
+  ],
+  "summary": {
+    "passed": 1,
+    "warnings": 2,
+    "failed": 1
+  },
+  "fixed": [
+    "re-converged settings-wiring"
+  ],
+  "fix_errors": [
+    "skills sync failed"
+  ]
+}

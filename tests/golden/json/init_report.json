@@ -1,0 +1,74 @@
+{
+  "success": true,
+  "mode": "github",
+  "error_type": null,
+  "message": null,
+  "env": [
+    {
+      "name": "node",
+      "ok": true,
+      "detail": "v22.19.0",
+      "remediation": ""
+    },
+    {
+      "name": "gh",
+      "ok": false,
+      "detail": "missing",
+      "remediation": "brew install gh"
+    }
+  ],
+  "github": {
+    "auth": {
+      "ok": true,
+      "user": "mat",
+      "scopes": [
+        "repo",
+        "read:org"
+      ],
+      "error": null
+    },
+    "repo": {
+      "ok": true,
+      "repo": "owner/repo",
+      "can_push": true,
+      "error": null
+    }
+  },
+  "linear": {
+    "ok": true,
+    "team": "ENG",
+    "error": null,
+    "readiness": {
+      "auth_ok": true,
+      "user": "Mat",
+      "team_ok": true,
+      "missing_labels": [
+        "perk:learn"
+      ],
+      "created_labels": [
+        "perk:plan"
+      ],
+      "error": null
+    },
+    "project": {
+      "projects_ok": true,
+      "projects_error": null,
+      "missing_state_types": [
+        "canceled"
+      ],
+      "states_error": null
+    }
+  },
+  "capabilities": [
+    "settings-wiring",
+    "workflow-dir"
+  ],
+  "changes": [
+    "wrote .perk/config.toml",
+    "wrote .gitignore"
+  ],
+  "warnings": [
+    "untracked: docs/foo.md"
+  ],
+  "handoff": ".perk/workflow/post-init.md"
+}

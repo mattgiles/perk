@@ -19,6 +19,7 @@ from perk import github, plan
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
+from perk.boundary import OutputModel
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -270,29 +271,70 @@ def _compose_pr_body(
     return "\n\n".join(parts) + "\n"
 
 
+class SubmitPrOut(OutputModel):
+    """The serialization boundary of the picked :class:`github.PullRequest` subset
+    (field order load-bearing)."""
+
+    number: int
+    url: str
+    is_draft: bool
+    existed: bool
+
+    @classmethod
+    def from_domain(cls, pr: github.PullRequest) -> "SubmitPrOut":
+        return cls(number=pr.number, url=pr.url, is_draft=pr.is_draft, existed=pr.existed)
+
+
+class PlanHeaderUpdateOut(OutputModel):
+    """The serialization boundary of the picked :class:`issue_backend.PlanHeaderUpdate` subset
+    (field order load-bearing)."""
+
+    fields_updated: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, update: issue_backend.PlanHeaderUpdate) -> "PlanHeaderUpdateOut":
+        return cls(fields_updated=update.fields_updated)
+
+
+class PrSubmitOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`PrSubmitResult` (order load-bearing)."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    pr: SubmitPrOut
+    branch: str
+    issue: str  # opaque string id at every machine boundary (contracts §8.21)
+    plan_header: PlanHeaderUpdateOut
+    plan_embedded: bool
+    pr_checked: bool
+    dry_run: bool
+    base: str
+    # Tri-state: bool when the probe is definitive, null when undetermined.
+    mergeable: bool | None
+    conflicts: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, result: PrSubmitResult) -> "PrSubmitOut":
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            pr=SubmitPrOut.from_domain(result.pr),
+            branch=result.branch,
+            issue=result.issue,
+            plan_header=PlanHeaderUpdateOut.from_domain(result.header_update),
+            plan_embedded=result.plan_embedded,
+            pr_checked=result.pr_checked,
+            dry_run=result.dry_run,
+            base=result.base,
+            mergeable=result.mergeable,
+            conflicts=result.conflicts,
+        )
+
+
 def _result_to_dict(result: PrSubmitResult) -> dict[str, object]:
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "pr": {
-            "number": result.pr.number,
-            "url": result.pr.url,
-            "is_draft": result.pr.is_draft,
-            "existed": result.pr.existed,
-        },
-        "branch": result.branch,
-        # Opaque string id at every machine boundary (contracts §8.21).
-        "issue": result.issue,
-        "plan_header": {"fields_updated": list(result.header_update.fields_updated)},
-        "plan_embedded": result.plan_embedded,
-        "pr_checked": result.pr_checked,
-        "dry_run": result.dry_run,
-        "base": result.base,
-        # Tri-state: bool when the probe is definitive, null when undetermined.
-        "mergeable": result.mergeable,
-        "conflicts": list(result.conflicts),
-    }
+    return PrSubmitOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: PrSubmitResult) -> None:

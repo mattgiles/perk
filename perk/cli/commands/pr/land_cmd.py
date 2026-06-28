@@ -21,6 +21,7 @@ from perk import github, objective, plan
 from perk.backends import issue_backend, objective_store, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.backends.linear import agent as linear_agent
+from perk.boundary import OutputModel
 from perk.cli.commands.pr.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -413,29 +414,83 @@ def _squash_commit_message(*, issue: str, url: str, backend_id: str, repo_root: 
     return f"{title}\n\n{footer}" if title else footer
 
 
+class LandPrOut(OutputModel):
+    """The serialization boundary of the picked :class:`github.PullRequest` subset
+    (field order load-bearing)."""
+
+    number: int
+    state: str
+
+    @classmethod
+    def from_domain(cls, pr: github.PullRequest) -> "LandPrOut":
+        return cls(number=pr.number, state=pr.state)
+
+
+class ObjectiveLandOut(OutputModel):
+    """The serialization boundary of :class:`ObjectiveLandUpdate` (field order load-bearing).
+
+    ``id`` maps from the domain ``objective`` field (the linked objective id)."""
+
+    id: str | None
+    nodes_marked: tuple[str, ...]
+    skipped_reason: str | None
+    closed: bool
+
+    @classmethod
+    def from_domain(cls, update: ObjectiveLandUpdate) -> "ObjectiveLandOut":
+        return cls(
+            id=update.objective,
+            nodes_marked=update.nodes_marked,
+            skipped_reason=update.skipped_reason,
+            closed=update.closed,
+        )
+
+
+class LearnConsumeOut(OutputModel):
+    """The serialization boundary of :class:`LearnConsumeUpdate` (field order load-bearing)."""
+
+    closed: tuple[str, ...]
+    skipped_reason: str | None
+
+    @classmethod
+    def from_domain(cls, update: LearnConsumeUpdate) -> "LearnConsumeOut":
+        return cls(closed=update.closed, skipped_reason=update.skipped_reason)
+
+
+class PrLandOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`PrLandResult` (field order load-bearing)."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    pr: LandPrOut
+    branch: str
+    issue: str  # opaque string id at every machine boundary (contracts §8.21)
+    pending_learn: bool
+    plan_issue_closed: bool
+    dry_run: bool
+    objective: ObjectiveLandOut
+    learn: LearnConsumeOut
+
+    @classmethod
+    def from_domain(cls, result: PrLandResult) -> "PrLandOut":
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            pr=LandPrOut.from_domain(result.pr),
+            branch=result.branch,
+            issue=result.issue,
+            pending_learn=result.pending_learn,
+            plan_issue_closed=result.plan_issue_closed,
+            dry_run=result.dry_run,
+            objective=ObjectiveLandOut.from_domain(result.objective),
+            learn=LearnConsumeOut.from_domain(result.learn),
+        )
+
+
 def _result_to_dict(result: PrLandResult) -> dict[str, object]:
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "pr": {"number": result.pr.number, "state": result.pr.state},
-        "branch": result.branch,
-        # Opaque string id at every machine boundary (contracts §8.21).
-        "issue": result.issue,
-        "pending_learn": result.pending_learn,
-        "plan_issue_closed": result.plan_issue_closed,
-        "dry_run": result.dry_run,
-        "objective": {
-            "id": result.objective.objective,
-            "nodes_marked": list(result.objective.nodes_marked),
-            "skipped_reason": result.objective.skipped_reason,
-            "closed": result.objective.closed,
-        },
-        "learn": {
-            "closed": list(result.learn.closed),
-            "skipped_reason": result.learn.skipped_reason,
-        },
-    }
+    return PrLandOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: PrLandResult) -> None:

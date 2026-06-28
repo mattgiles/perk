@@ -1,0 +1,29 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "pr": {
+    "number": 42,
+    "url": "https://github.com/o/r/pull/42",
+    "is_draft": true,
+    "existed": false
+  },
+  "branch": "plan-42",
+  "issue": "42",
+  "plan_header": {
+    "fields_updated": [
+      "branch",
+      "pr",
+      "lifecycle_stage"
+    ]
+  },
+  "plan_embedded": true,
+  "pr_checked": true,
+  "dry_run": false,
+  "base": "main",
+  "mergeable": false,
+  "conflicts": [
+    "perk/foo.py",
+    "perk/bar.py"
+  ]
+}

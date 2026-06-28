@@ -16,6 +16,7 @@ import click
 
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
+from perk.boundary import OutputModel
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
@@ -138,22 +139,47 @@ def _backlink(
     return True
 
 
+class LearnIssueOut(OutputModel):
+    """The serialization boundary of the picked :class:`issue_backend.IssueRef` subset
+    (field order load-bearing)."""
+
+    id: str  # opaque string id at every machine boundary (contracts §8.21)
+    url: str
+    existed: bool
+
+    @classmethod
+    def from_domain(cls, issue: issue_backend.IssueRef) -> "LearnIssueOut":
+        return cls(id=issue.id, url=issue.url, existed=issue.existed)
+
+
+class LearnCaptureOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`LearnCaptureResult` (order load-bearing)."""
+
+    success: bool
+    error_type: str | None
+    message: str | None
+    learn_issue: LearnIssueOut
+    plan_issue: str
+    commented: bool
+    pending_cleared: bool
+    dry_run: bool
+
+    @classmethod
+    def from_domain(cls, result: LearnCaptureResult) -> "LearnCaptureOut":
+        return cls(
+            success=True,
+            error_type=None,
+            message=None,
+            learn_issue=LearnIssueOut.from_domain(result.learn_issue),
+            plan_issue=result.plan_issue,
+            commented=result.commented,
+            pending_cleared=result.pending_cleared,
+            dry_run=result.dry_run,
+        )
+
+
 def _result_to_dict(result: LearnCaptureResult) -> dict[str, object]:
-    return {
-        "success": True,
-        "error_type": None,
-        "message": None,
-        "learn_issue": {
-            # Opaque string id at every machine boundary (contracts §8.21).
-            "id": result.learn_issue.id,
-            "url": result.learn_issue.url,
-            "existed": result.learn_issue.existed,
-        },
-        "plan_issue": result.plan_issue,
-        "commented": result.commented,
-        "pending_cleared": result.pending_cleared,
-        "dry_run": result.dry_run,
-    }
+    return LearnCaptureOut.from_domain(result).model_dump(mode="json")
 
 
 def _render_human(result: LearnCaptureResult) -> None:

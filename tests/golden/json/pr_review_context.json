@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "error_type": null,
+  "message": null,
+  "branch": "plan-42",
+  "pr": 42,
+  "base_ref": "main",
+  "head_ref": "plan-42",
+  "title": "My PR",
+  "body": "PR body",
+  "diff": "diff --git a/x b/x\n",
+  "plan_body": "# Plan\n"
+}
