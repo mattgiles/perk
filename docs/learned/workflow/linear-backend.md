@@ -739,6 +739,23 @@ The durable placement decisions:
 - The generic `_opt_*`/`_require_*` detail and the disposition-matching rule live in `toolchain/ty.md`
   (the lenient-twin section) — don't duplicate it here.
 
+## Issue-tier boundary model (the `TypedDict` pilot retired)
+
+The Node-3.1 `LinearIssueNode` `TypedDict` pilot above was **retired** for a lenient response model
+(`LinearIssueNodeModel` + nested `_IssueStateNode` in `perk/backends/linear/_helpers.py`), mirroring
+the GitHub node-2.1 boundary→domain pattern. Because the one recurring selection
+(`id identifier url title description state{type}`) feeds **two** domain objects — `PlanState` via
+`get_plan` AND `AdoptableIssue` via `read_issue` — there is **no single `to_domain()`**: the model
+exposes validated field accessors + a `normalized_state()` helper and each call site assembles its
+own domain object (the model-crosses-the-boundary / call-site-assembles split). `identifier` is the
+only required field (it IS the boundary id `PlanState.id` / `AdoptableIssue.id`); the rest are
+tolerant-default, so only the present-but-malformed error TYPE changes (→ a labelled
+`IssueBackendError` with a `"read plan issue …"` source). The `translate_validation_errors` wraps
+ONLY `model_validate`, never the downstream `_get_pr` (which already raises `IssueBackendError`). The
+engagement-mapper helpers (`_require_str` / `_opt_str` / `_opt_dict`) STAY — they back the still-inline
+out-of-scope engagement reads. Full recipe in `pydantic-boundary-models.md` (the
+gateway-application section).
+
 ## `_FakeLinear` insertion-order substring footgun (RECONFIRMED, #711)
 
 Every `project(id` sub-query contains the `project(id` substring; in the scripted-response dict
@@ -770,6 +787,8 @@ unobserved:
 
 ## Cross-references
 
+- `docs/learned/workflow/pydantic-boundary-models.md` — the boundary↔domain conversion recipe (the
+  issue-tier `LinearIssueNodeModel` applies its 1-shape→N-domains accessors + normalizer split)
 - `docs/learned/workflow/issue-backend.md` — the backend-agnostic protocol seam
 - `docs/learned/workflow/objective-store.md` — the objective-storage tier contract the
   project-backed store implements (the facade refactor, resolver, translate-CM, node↔plan unification)

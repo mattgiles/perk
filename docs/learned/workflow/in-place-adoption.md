@@ -1,6 +1,6 @@
 ---
 title: In-place adoption of a pre-existing issue / Linear project
-read_when: You are adopting a pre-existing human-authored issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), or adding any additive in-place writer that must byte-preserve a foreign field.
+read_when: You are adopting a pre-existing human-authored issue or Linear project as a perk plan/objective in place (`plan from`, `objective author --from`), seeding a fresh authoring session from a local file or URL (`plan from <file>`, `objective author --from <file>`, `skills create --from <file|url>` — the seed-from-source leaf + the offline-at-the-door URL sub-mode), or adding any additive in-place writer that must byte-preserve a foreign field.
 ---
 
 # In-place adoption of a pre-existing issue / Linear project
@@ -53,6 +53,42 @@ is the whole design axis:
   test reports as both passed AND errored — easy to misread the count). For cwd-relative file
   detection, rely on the runner's own chdir — write the file as `Path(d, "notes.md")` and invoke
   with the bare relative name; do **not** add `monkeypatch.chdir`.
+
+### Third consumer + a URL sub-mode (#988)
+
+`skills create --from <file|url>` is the **THIRD** seed-from-source consumer (after `plan from` /
+`objective author --from`), keeping `perk/cli/seed_file.py` a backend-free / stdlib-only leaf. It adds
+a **URL sub-mode** and confirms the per-artifact adoption asymmetry once more:
+
+- **A new pure scheme-gate `detect_seed_url(arg) -> str | None` (http/https only)** — the same idiom
+  as the `_id_from_url` URL detector (`urlsplit(arg.strip()).scheme.lower() in {"http", "https"}`). It
+  does NOT fetch or validate reachability; the in-session **read-write, non-tool-restricted** agent
+  owns the fetch of the `SKILL.md` + sibling `references/` / `scripts/` / linked files. URL sub-mode
+  is **offline-at-the-door** (zero Python network; no `require_github`; no scratch materialized —
+  contrast file mode, which materializes a gitignored `<untrusted_seed_file>` scratch even on
+  `--dry-run`). `detect_seed_file` / `read_seed_file` / `render_seed_file_scratch` are reused
+  UNCHANGED for file mode.
+- **Detection ORDER diverges by door** (record per-door, matching `contracts.md §8.33`): `plan from` /
+  `objective author --from` detect **file-first then fall through to an id**; `skills create --from`
+  is **URL-first, then file, else a hard seed-file error** — no id/adoption fall-through because a
+  skill has no backend identity.
+- **No in-place adoption for skills** — both modes always mint a FRESH skill (no `adopt_from`
+  handoff, no `adopted_from` provenance, no metadata stamping; a skill is not a backend object). This
+  is the **4th** surface confirming the "adoption surface shape decided per-artifact" rule: skills got
+  the seed-from-source half but NOT the in-place-adoption half.
+- **Byte-identity discipline:** the no-`--from` dry-run JSON payload is asserted with exact `==`;
+  keep it byte-identical by **branching** (a `--from` path ADDS `"from"` (+ file-mode `"scratch_path"`)
+  keys; the no-`--from` path is untouched) and by isolating all seed complexity in a **NEW conditional
+  prompt template** (`create-from.md`) so the existing `create.md` renders byte-for-byte unchanged.
+  The conditional template uses the frozen mini-jinja `{% if seed_url %}` over a bare ident with both
+  vars always passed (one empty); `live.yaml` needs BOTH arms (file + URL) for the coverage guard; a
+  `prompts/`-only diff skips `node:test` under `[[ci]]` → run the prompt-grammar / prompts node:tests
+  manually.
+- **Test/CI mechanics:** `--json --dry-run` prints ONLY the JSON payload (machine_output); the
+  human-readable seed prompt prints only in non-JSON mode (user_output→stderr) — so a test asserting
+  the seed text references the URL + fetch instruction must invoke TWICE (once `--json` for payload
+  shape, once non-`--json` for the printed seed). `CliRunner().isolated_filesystem()` already chdirs,
+  so relative `--from` paths resolve there (see the chdir gotcha above).
 
 ## Surface shape is decided per-node, asymmetrically (#711)
 

@@ -1,6 +1,6 @@
 ---
 title: Pydantic boundary↔domain conversion (Pydantic at the edges, frozen `@dataclass` domain)
-read_when: Converting a registry/bindings/providers/config/plan-metadata/objective/cache boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, deciding read-into-the-type vs serialize-only direction, preserving byte-stable stored YAML/JSON, or writing ty-clean negative tests against a frozen dataclass + its Pydantic boundary model.
+read_when: Converting a registry/bindings/providers/config/plan-metadata/objective/cache boundary onto the lenient-parse-model → frozen-`@dataclass` → `validate()` pattern, deciding read-into-the-type vs serialize-only direction, preserving byte-stable stored YAML/JSON, writing ty-clean negative tests against a frozen dataclass + its Pydantic boundary model, applying the lenient-parse pattern to an external API gateway response shape (GitHub/Linear, call-site `translate_validation_errors` labels, `AliasChoices`, 1-shape→N-domains accessors), converting a machine-authored CLI batch parser onto `StrictInputModel`/`RootModel`, or pinning a hand-rolled `--json` OUTPUT envelope onto an `OutputModel` with the golden-snapshot harness.
 ---
 
 # Pydantic boundary↔domain conversion
@@ -66,6 +66,63 @@ parse model at the boundary" that the code disproved: the stored block was read 
 `OutputModel` with an explicit `from_domain`, and do NOT author a read-parser with no consumer**
 ("don't author fiction for unbuilt components"). The planner's "Correction to the node framing
 (verified against the code)" section is doing real work — **trust the code over the roadmap prose.**
+
+## Applying the lenient-parse pattern to API gateway response shapes
+
+The boundary-inversion recipe applies unchanged to **external API response shapes** (GitHub `gh`
+JSON, Linear GraphQL nodes) — not just perk's own stored files. Point at `perk/github/` and
+`perk/backends/linear/_helpers.py` for the concrete models. The gateway-specific mechanics:
+
+- **Validate at the CALL SITE, not inside the converter.** The hand-rolled converters
+  (`_pull_request` / `_parse_review_threads` / `_parse_reviews` / the issue + workflow-run reads)
+  keep their names + signatures so call sites are untouched; only their **bodies** become
+  `Model.model_validate(raw).to_domain()`. Wrap `translate_validation_errors(<ErrorType>,
+  source=<operation label>)` at each **call site** so the resulting error carries *that site's*
+  operation label (`"create PR"`, `"read PR #42"`, `"read plan issue …"`). This is the clean way to
+  give one shared converter a per-call-site error label without threading the label into the
+  converter. **Wrap ONLY `model_validate`, never the downstream domain work** — the subsequent
+  PR-resolve / domain step already raises the gateway error type and must stay *outside* the block so
+  it isn't relabelled with the parse source.
+- **Prefer `Field(validation_alias=AliasChoices(...))` over `Field(alias=...)` for response models.**
+  `AliasChoices` lets **one model serve two wire shapes** — e.g. `WorkflowRunModel.id` reads
+  `AliasChoices("databaseId", "id")` and `url` reads `AliasChoices("url", "html_url")`, unifying the
+  camelCase `gh run view` producer AND the snake_case REST trigger-discovery producer into one
+  model. The lenient base already sets `populate_by_name=True`.
+- **Widen a converter param to `object` when you delete its `isinstance(data, dict)` narrowing
+  guard.** Replacing the guard with `model_validate` removes the narrowing, and the subprocess JSON
+  helpers (`_run_json` / `_graphql`) return `Any | None`; `model_validate` accepts `Any`/`object`, so
+  retype the converter param `object`. (This incidentally lets `from typing import Any` be dropped
+  where it was only there for the old `dict[str, Any]` param.)
+- **Edge-sharpening posture (byte-identical happy path, cleaner error TYPE only).** The identity
+  field is required (`number` / `id` / `identifier` / thread id); every non-identity field keeps a
+  default, so happy-path output is unchanged. The only observable change is a *present-but-malformed*
+  payload now raising a labelled error instead of a raw `KeyError`/`ValueError`. **Lookup-miss guards
+  run BEFORE validation** (a soft `"databaseId" not in data → None` / `none_on_not_found → None` stays
+  ahead of `model_validate`) so sharpening converts only a malformed payload into a raise, never a
+  legitimate lookup miss. Deliberately-tolerant non-identity fields stay defaulted (e.g.
+  `ReviewCommentModel.comment_id: int | None` — `databaseId` is documented absent on some nodes and
+  is not the thread's identity).
+- **Nested-children composition.** Validate child nodes separately and inject them via a
+  keyword-only `to_domain(*, comments=...)` rather than the parent model owning the nested list
+  (review threads build `comments = tuple(ReviewCommentModel.model_validate(c).to_domain() …)` then
+  `ReviewThreadModel.model_validate(node).to_domain(comments=comments)`).
+- **One boundary shape fanning out to differently-shaped domain objects ⇒ NO single `to_domain()`.**
+  GitHub's `IssueReadModel` is 1-shape→1-domain → a single `to_domain()`. But Linear's recurring
+  selection `id identifier url title description state{type}` feeds **two** domain objects
+  (`PlanState` via `get_plan` AND `AdoptableIssue` via `read_issue`), so the model exposes
+  **validated field accessors + a small normalizer** (`normalized_state()`) and each call site
+  assembles its own domain object — the same posture as GitHub's `to_domain(*, comments=...)` /
+  `_normalized_state()` split. **Decision rule:** 1-shape→1-domain gets a single `to_domain()`;
+  1-shape→N-domains gets accessors + normalizers.
+- **Fold a shared helper into a model only after grep-confirming single-package use** (`_pr_state` →
+  `PullRequestModel._normalized_state()`, `_login` → a nested `_Actor(LenientParseModel)`); retain
+  generic connection-walk plumbing (`_pr_node` / `_nodes` GraphQL `{nodes:[…]}` unwrapping — it has
+  no nameable boundary). **Substrate-home rule:** the domain payload-shape model lives in the package
+  leaf (`perk/backends/linear/_helpers.py`), not the generic client module that keeps the low-level
+  `_opt_*`/`_require_*` helpers.
+
+This is a Python-internal tightening with a byte-identical happy path, so per this doc's cross-plane
+posture it touches **neither `shared/contracts.md` nor `docs/user-docs/`**.
 
 ## Explicit field copy over `**model_dump()` (the settled "1:1 no-op" objection)
 
@@ -170,6 +227,104 @@ dataclass** (`ConfigModel(LenientParseModel)` built then converted to a frozen `
   and corrupts `user_bindings`. Use **explicit attribute access**; with pydantic's default
   `revalidate_instances="never"`, `model.user_bindings` holds the original `Binding` instances by
   identity (tests assert `config.user_bindings[0] is binding`).
+
+## Strict-input CLI-batch parsers (`StrictInputModel` / `RootModel`)
+
+The lenient base reads untrusted edges; **machine-authored CLI batch inputs** (the `--batch` /
+`--roadmap` JSON a sibling tool writes) go the other way — a typo must fail **loudly**. Converting
+hand-rolled `isinstance` ladders onto `StrictInputModel` / `RootModel`:
+
+- **`translate_validation_errors` CANNOT carry `error_type`** — it constructs `error_cls(message)`
+  with a single arg. For a CLI error that needs `error_type="bad_batch"`, do NOT use the context
+  manager: catch `ValidationError` directly and raise the
+  `UserFacingCliError(format_validation_error(exc, source="batch"), error_type="bad_batch") from exc`
+  yourself, reusing the exported `format_validation_error` field-path renderer. The pre-existing
+  JSON-decode `try/except` stays a SEPARATE raise (a `JSONDecodeError` is not a `ValidationError`).
+- **`RootModel` strictness must be restated.** Bare-list / bare-dict batch roots
+  (`class X(RootModel[list[Item]])` / `RootModel[dict[str, object]]`) read `model.root`, but the
+  `StrictInputModel` base config does NOT apply — `RootModel` subclasses `BaseModel` directly — so
+  restate `model_config = ConfigDict(strict=True)` on the RootModel subclass so a non-array/non-object
+  fails loudly.
+- **Opt-in coercion fields under an otherwise-strict model.** A `StrEnum` field needs
+  `Field(default=..., strict=False)` to keep value-based lookup (`"done" → NodeStatus.DONE`); a
+  JSON-array→tuple field reuses the `StrTuple` `BeforeValidator`. These are the ONLY
+  intentionally-coercing fields — everything else stays strict.
+- **Per-parser error contracts diverge** (the inbox correction to the node's "same `bad_batch` for
+  every parser" framing): **verify each command's existing error contract before assuming one shared
+  class.** Only the two `pr` parsers raise `bad_batch`; the objective structured-roadmap path keeps
+  its `(nodes, errors)` contract → `invalid_roadmap`; `state new-run` has no `--json`/machine surface
+  → keeps a bare `UserFacingCliError` with no `error_type`.
+- **Forking a shared lenient validator when ONE caller must go strict.** The structured `--roadmap`
+  path must go strict while the shared `validate_roadmap` (also used by the stored-YAML read + manifest
+  read) MUST stay lenient. **Inline the envelope handling** (schema-version / nodes-is-list /
+  per-item-is-mapping + the absent/blank-`status`→pending pre-default) into the strict path and
+  validate each node via a strict node model, leaving the shared lenient validator byte-unchanged.
+  Don't parameterize the shared validator with a strict flag — copy the envelope logic. A side-map key
+  (`adopt_issue`, consumed by `parse_adopt_mapping`) declared on the strict node model with a default
+  keeps `extra="forbid"` from rejecting it, and is dropped in `to_domain` to keep the domain object
+  pristine.
+- **Intended behavior change (NOT byte-identical).** An unknown/ill-typed key on a strictened path
+  now fails loudly with a field path (previously silently dropped) — aligning Python with the TS
+  `ROADMAP_PARAM_SCHEMA` (`additionalProperties: false`) the agent path already enforced. This is the
+  exception to the "byte-identical, no contract/doc touch" rule, *and* it still needs no contract
+  change because it enforces an already-documented TS contract.
+- **Gotchas.** Switching a hand-rolled `isinstance` check to a pydantic model **changes the
+  user-facing error STRING** even when exit code/behavior is identical (`new-run`'s
+  `"--handoff must be a JSON object."` → pydantic's `"--handoff: <root>: Input should be a valid
+  dictionary"`) — after any such conversion, grep existing tests for the old message substring (a
+  `new-run` test pinned the old text). A `Field(min_length=1)` is a deliberate relaxation vs an old
+  `.strip()` check (whitespace-only now passes; empty/missing/wrong-type still fails). A cross-field
+  rule (clean-verdict-has-no-comments) is a `@model_validator(mode="after")` raising `ValueError`
+  (surfaces as `ValidationError`). Negative tests drive through `Model.model_validate({...})`, never
+  typed kwargs.
+- **A domain dataclass + gateway signature flip** (introduce a frozen request dataclass, e.g.
+  `github.ResolveThreadRequest`, to replace a `list[dict]` batch item, then flip the gateway signature
+  and drop the now-redundant `str(item["thread_id"])` coercions) is completeness-proven by **whole-tree
+  `ty check tests perk`** — it catches every stale dict-literal call site grep would miss.
+
+## OUTPUT-envelope golden-pinning (`OutputModel.from_domain(...).model_dump(mode="json")`)
+
+Converting hand-rolled `--json` dict builders (init/doctor reports, plan save, the pr verbs, learn
+capture) to `OutputModel.from_domain(...).model_dump(mode="json")` byte-identically:
+
+- **The golden-snapshot harness as the byte-identity oracle (the durable win).** Establish a minimal
+  snapshot harness (`tests/_golden.py` with a `GOLDEN_DIR` + an `assert_golden(name, actual)` that,
+  under a `PERK_UPDATE_GOLDEN` env flag, **regens THEN still re-reads + asserts** so a
+  non-roundtrippable regen still fails loudly); snapshots committed under `tests/golden/json/`.
+- **"Pin FIRST" realized via an in-process oracle, not branch-vs-main file diffing.** Generate each
+  envelope's golden from the **pre-swap committed builder** loaded with `git show HEAD:<path>` →
+  `exec(compile(...), module.__dict__)`, call the OLD builder with a fixture **built from the CURRENT
+  domain classes** (duck-typed — the old builder only does attribute access, so class identity is
+  irrelevant), commit that golden, swap the builder, then re-run WITHOUT the flag — green IS the proof.
+  A final `PERK_UPDATE_GOLDEN=1` regen producing **zero git diff** is the strongest confirmation.
+  **Commit cadence matters:** commit each envelope's swap right after generating its golden so each
+  golden's `HEAD:` oracle is genuinely the pre-swap version of THAT file.
+- **Fixtures must populate optional fields + the nullable arms** that exercise the `None`-guard
+  branches (the riskiest) — full + minimal variants, with/without the optional nested object
+  (init full + `github`/`linear` None; plan_save with/without `objective_node`; learn real/dry-run).
+- **Dict-field promotion as a dignified precondition for a precise published schema.** The
+  no-`dict[str, object]`-holes rule forces promoting an in-scope `dict`-typed domain field to a frozen
+  `@dataclass` (with its own nested `*Out`) BEFORE the swap (plan-save's
+  `objective_node: dict[str, object] | None` → a frozen `ObjectiveNodeLink`); emitted JSON stays
+  byte-identical (existing assertions + the golden confirm). Generalize: an OUTPUT envelope nesting a
+  `dict` field → promote the dict to a domain dataclass + its own nested `*Out` first.
+- **Nested-OutputModel discipline.** Each nested object gets its own named `*Out` whose `from_domain`
+  picks the **EXACT legacy subset** (never a wholesale domain dump — the golden catches an
+  extra/missing key); **reuse a sibling node's existing `*Out`** rather than re-wrapping
+  (`model_dump(mode="json")` recurses through nested `OutputModel`s); field declaration order = legacy
+  key order on every `*Out` (carry the existing `(order load-bearing)` docstring convention).
+  **Map-not-copy** fields are handled in `from_domain` (not a domain rename, e.g.
+  `ObjectiveLandOut.id` from domain `update.objective`); **computed-derived keys** (doctor `summary`,
+  feedback `counts`) compute pure counts in `from_domain` (no domain field, no I/O).
+- **Mechanics.** Whole-tree `ty check tests perk` is the completeness oracle (no `.model_dump()`
+  blast-radius miss AND no `from_domain` relying on coercion); **removing a re-export-only helper is a
+  3-site edit** (grep callers first, then drop from BOTH the import and `__all__`; adding the new
+  `*Out` needs the reciprocal import + RUF022 isort-alphabetical `__all__` insert); E501 churn from
+  the longer `Model.from_domain(...).model_dump(...)` one-liners (shorten docstrings, `ruff format`
+  reflows — CI-green ≠ committed-format-green); consolidating all goldens + fixtures in one test
+  module is a defensible structural simplification (placement doesn't affect the byte-identity proof).
+  Pure Python-internal byte-identical output → touches neither contracts nor user-docs (a later
+  schema-publish node owns the `model_json_schema()` + contract/doc amendments).
 
 ## Byte-identity discipline
 
