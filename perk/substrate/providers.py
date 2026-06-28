@@ -64,6 +64,21 @@ class ProviderEntry(LenientParseModel):
     default: bool = False
     package_filter: dict[str, Any] | None = None
 
+    def to_domain(self) -> "Provider":
+        """Explicit field-for-field conversion into the frozen domain object.
+
+        Normalizes an absent/``null`` ``id``/``seam`` to ``""`` so ``validate()`` surfaces the
+        missing-``id`` / bad-``seam`` content findings (rather than the parse model raising).
+        """
+        return Provider(
+            id=self.id or "",
+            seam=self.seam or "",
+            package=self.package,
+            adapter=self.adapter,
+            default=self.default,
+            package_filter=self.package_filter,
+        )
+
 
 class ProvidersFile(LenientParseModel):
     """The lenient whole-file parse model.
@@ -74,6 +89,13 @@ class ProvidersFile(LenientParseModel):
     """
 
     providers: list[ProviderEntry] = Field(default_factory=list)
+
+    def to_domain(self, schema_version: int) -> "ProviderSet":
+        """Convert the whole validated file into the frozen ``ProviderSet`` domain object."""
+        return ProviderSet(
+            schema_version=schema_version,
+            providers=tuple(e.to_domain() for e in self.providers),
+        )
 
 
 @dataclass(frozen=True)
@@ -159,28 +181,8 @@ def load_providers(path: Path | None = None) -> ProviderSet:
         )
 
     with translate_validation_errors(ProvidersError, source=str(providers_path)):
-        parsed = ProvidersFile.model_validate(data)
-        return ProviderSet(
-            # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
-            schema_version=SUPPORTED_SCHEMA_VERSION,
-            providers=tuple(_to_provider(e) for e in parsed.providers),
-        )
-
-
-def _to_provider(entry: ProviderEntry) -> Provider:
-    """Explicit field-for-field conversion of a parsed entry into the frozen domain object.
-
-    Normalizes an absent/``null`` ``id``/``seam`` to ``""`` so ``validate()`` surfaces the
-    missing-``id`` / bad-``seam`` content findings (rather than the parse model raising).
-    """
-    return Provider(
-        id=entry.id or "",
-        seam=entry.seam or "",
-        package=entry.package,
-        adapter=entry.adapter,
-        default=entry.default,
-        package_filter=entry.package_filter,
-    )
+        # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
+        return ProvidersFile.model_validate(data).to_domain(SUPPORTED_SCHEMA_VERSION)
 
 
 # ----------------------------------------------------------------------- validate

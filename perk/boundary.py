@@ -39,7 +39,6 @@ __all__ = [
     "LenientParseModel",
     "OutputModel",
     "StrTuple",
-    "StrictBoundaryModel",
     "StrictInputModel",
     "ValidationError",
     "format_validation_error",
@@ -87,20 +86,6 @@ class OutputModel(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class StrictBoundaryModel(BaseModel):
-    """Legacy/transitional base — use the role-named bases instead.
-
-    Config-identical to ``StrictInputModel`` (``frozen``, ``extra="forbid"``,
-    ``strict``). Still backs the per-model domain shapes (registry / bindings /
-    providers / plan / objective / cache / runner) during the in-progress
-    migration onto the role-named bases (``LenientParseModel`` /
-    ``StrictInputModel`` / ``OutputModel``); to be removed once every consumer has
-    moved off it.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
 
 
 def _coerce_sequence_to_tuple(value: object) -> object:

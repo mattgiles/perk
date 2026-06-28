@@ -18,7 +18,6 @@ from perk.substrate.providers import (
     ProviderEntry,
     ProvidersError,
     ProviderSet,
-    _to_provider,
     load_providers,
     resolve_providers,
     validate,
@@ -371,12 +370,12 @@ def test_models_are_frozen():
 
 
 def test_lenient_field_coercion_is_preserved():
-    empty = _to_provider(ProviderEntry.model_validate({}))
+    empty = ProviderEntry.model_validate({}).to_domain()
     assert empty.id == "" and empty.seam == ""
     assert empty.package is None and empty.adapter is None
     assert empty.default is False and empty.package_filter is None
     # An explicit null id normalizes to "" through the converter (a content Issue, not a raise).
-    assert _to_provider(ProviderEntry.model_validate({"id": None})).id == ""
+    assert ProviderEntry.model_validate({"id": None}).to_domain().id == ""
     # The lenient base now lax-coerces the flag: "true"/1 -> True (was: only literal True).
     assert ProviderEntry.model_validate({"default": "true"}).default is True
     # A genuinely ill-typed scalar now raises (was: silently collapsed to the lenient empty).

@@ -69,6 +69,23 @@ class StageEntry(LenientParseModel):
     predecessors: list[str] = Field(default_factory=list)
     successors: list[str] = Field(default_factory=list)
 
+    def to_domain(self) -> "Stage":
+        """Explicit field-for-field conversion into the frozen domain object."""
+        return Stage(
+            id=self.id,
+            summary=self.summary,
+            mode=self.mode,
+            worktree=self.worktree,
+            doors=self.doors,
+            run_id=self.run_id,
+            command=self.command,
+            requires=self.requires,
+            reads=self.reads,
+            writes=self.writes,
+            predecessors=self.predecessors,
+            successors=self.successors,
+        )
+
 
 class RegistryFile(LenientParseModel):
     """The lenient whole-file parse model.
@@ -81,6 +98,14 @@ class RegistryFile(LenientParseModel):
 
     state_keys: dict[str, Any] = Field(default_factory=dict)
     stages: list[StageEntry] = Field(default_factory=list)
+
+    def to_domain(self, schema_version: int) -> "Registry":
+        """Convert the whole validated file into the frozen ``Registry`` domain object."""
+        return Registry(
+            schema_version=schema_version,
+            state_keys=frozenset(_flatten_state_keys(self.state_keys)),
+            stages=tuple(s.to_domain() for s in self.stages),
+        )
 
 
 @dataclass(frozen=True)
@@ -146,31 +171,8 @@ def load_registry(path: Path | None = None) -> Registry:
         )
 
     with translate_validation_errors(RegistryError, source=str(registry_path)):
-        parsed = RegistryFile.model_validate(data)
-        return Registry(
-            # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
-            schema_version=SUPPORTED_SCHEMA_VERSION,
-            state_keys=frozenset(_flatten_state_keys(parsed.state_keys)),
-            stages=tuple(_to_stage(s) for s in parsed.stages),
-        )
-
-
-def _to_stage(entry: StageEntry) -> Stage:
-    """Explicit field-for-field conversion of a parsed entry into the frozen domain object."""
-    return Stage(
-        id=entry.id,
-        summary=entry.summary,
-        mode=entry.mode,
-        worktree=entry.worktree,
-        doors=entry.doors,
-        run_id=entry.run_id,
-        command=entry.command,
-        requires=entry.requires,
-        reads=entry.reads,
-        writes=entry.writes,
-        predecessors=entry.predecessors,
-        successors=entry.successors,
-    )
+        # proven == SUPPORTED_SCHEMA_VERSION above; the literal satisfies strict int + ty.
+        return RegistryFile.model_validate(data).to_domain(SUPPORTED_SCHEMA_VERSION)
 
 
 def _flatten_state_keys(raw: object) -> set[str]:

@@ -21,7 +21,7 @@ from typing import Literal
 
 import yaml
 
-from perk.boundary import LenientParseModel, OutputModel, StrTuple
+from perk.boundary import LenientParseModel, OutputModel
 
 PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
@@ -176,16 +176,17 @@ class PlanRefModel(LenientParseModel):
 
     Completes the canonical input/domain/output trio alongside :class:`PlanRef` +
     :class:`PlanRefOut`. Field declaration order matches the on-disk ``plan-ref.json`` shape
-    (the order :class:`PlanRefOut` emits) so a round-trip is byte-stable. ``labels`` is
-    :data:`StrTuple` so the JSON list coerces to a tuple.
+    (the order :class:`PlanRefOut` emits) so a round-trip is byte-stable. The lenient base
+    coerces a JSON list into a ``tuple`` natively, so ``labels``/``consumed_learn`` need no
+    explicit ``StrTuple`` coercion shim.
     """
 
     provider: str
     pr_id: str
     url: str
-    labels: StrTuple
+    labels: tuple[str, ...]
     objective_id: str | None = None
-    consumed_learn: StrTuple = ()
+    consumed_learn: tuple[str, ...] = ()
     base: str | None = None
 
     def to_domain(self) -> PlanRef:

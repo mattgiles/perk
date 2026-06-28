@@ -78,6 +78,10 @@ class BindingEntry(LenientParseModel):
     skill: str = ""
     mode: str = ""
 
+    def to_domain(self) -> "Binding":
+        """Explicit field-for-field conversion into the frozen domain object."""
+        return Binding(trigger=self.trigger, skill=self.skill, mode=self.mode)
+
 
 class BindingsFile(LenientParseModel):
     """Whole-file parse shape.
@@ -88,6 +92,16 @@ class BindingsFile(LenientParseModel):
     """
 
     bindings: list[BindingEntry] = Field(default_factory=list)
+
+    def to_domain(self, schema_version: int) -> "BindingSet":
+        """Convert the whole validated file into the frozen ``BindingSet`` domain object.
+
+        ``bindings`` stays a ``list`` (not a tuple) to match ``BindingSet.bindings``.
+        """
+        return BindingSet(
+            schema_version=schema_version,
+            bindings=[e.to_domain() for e in self.bindings],
+        )
 
 
 @dataclass(frozen=True)
@@ -152,15 +166,7 @@ def load_bindings(path: Path | None = None) -> BindingSet:
 
     with translate_validation_errors(BindingsError, source=str(bindings_path)):
         parsed = BindingsFile.model_validate(data)
-    return BindingSet(
-        schema_version=schema_version,
-        bindings=[_to_binding(entry) for entry in parsed.bindings],
-    )
-
-
-def _to_binding(entry: BindingEntry) -> Binding:
-    """Explicit field-for-field conversion of a parsed entry into the frozen domain object."""
-    return Binding(trigger=entry.trigger, skill=entry.skill, mode=entry.mode)
+    return parsed.to_domain(schema_version)
 
 
 def _as_list(value: Any) -> list[Any]:
