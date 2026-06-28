@@ -247,6 +247,28 @@ def test_impl_runs_resolved(tmp_path: Path, monkeypatch):
     assert next(s for s in impl if s.label == "01RUN_I/worker").status == "missing"
 
 
+def test_pr_diff_read_failure_stays_found_no_artifact(tmp_path: Path, monkeypatch, capsys):
+    # A diff-read failure leaves the PR `found` (with a null artifact) + a warning — never raises.
+    _git_init(tmp_path)
+    backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
+    _patch_backend(monkeypatch, backend)
+    merged = github.PullRequest(
+        number=42, url="u/42", is_draft=False, state="MERGED", existed=True, base_ref="main"
+    )
+    monkeypatch.setattr(github, "list_prs_for_branch", lambda **k: (merged,))
+
+    def _boom(**_k):
+        raise github.GitHubError("diff unavailable")
+
+    monkeypatch.setattr(github, "get_pr_review_context", _boom)
+
+    bundle = gather_evidence(tmp_path, _ref())
+    pr = next(s for s in bundle.sources if s.category == "pr")
+    assert pr.status == "found" and pr.artifact is None
+    assert pr.detail == "#42 MERGED base=main"
+    assert "warning" in capsys.readouterr().err
+
+
 def test_missing_pr_source_still_returns(tmp_path: Path, monkeypatch):
     _git_init(tmp_path)
     backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})

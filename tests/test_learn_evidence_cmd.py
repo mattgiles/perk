@@ -38,7 +38,7 @@ class _FakeBackend:
         return "PLAN BODY"
 
 
-def _run(monkeypatch, *, header: dict[str, object], write_ref: bool = True):
+def _run(monkeypatch, *, header: dict[str, object], write_ref: bool = True, as_json: bool = True):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -46,7 +46,10 @@ def _run(monkeypatch, *, header: dict[str, object], write_ref: bool = True):
             cache.write_plan_ref(Path(d), _REF)
         monkeypatch.setattr(resolve, "resolve_issue_backend", lambda root: _FakeBackend(header))
         monkeypatch.setattr(github, "list_prs_for_branch", lambda **k: ())
-        result = runner.invoke(cli, ["learn", "evidence", "--json"])
+        args = ["learn", "evidence"]
+        if as_json:
+            args.append("--json")
+        result = runner.invoke(cli, args)
     return result
 
 
@@ -77,6 +80,22 @@ def test_evidence_json_envelope(monkeypatch):
     } <= categories
     source = data["sources"][0]
     assert set(source) == {"category", "label", "status", "artifact", "detail"}
+
+
+def test_evidence_human_render_default_path(monkeypatch):
+    # The default (non-`--json`) path renders a compact human summary to stderr without crashing —
+    # exercises `_render_human` label splitting (`s.label.split("/")[0]`) + status lookups.
+    result = _run(
+        monkeypatch, header={"run_id": "01RUN_P", "impl_run_ids": ["01RUN_I"]}, as_json=False
+    )
+    assert result.exit_code == 0
+    assert "plan " in result.output and "impl run(s)" in result.output
+
+
+def test_evidence_human_render_skip(monkeypatch):
+    result = _run(monkeypatch, header={"consumed_learn": ["12"]}, as_json=False)
+    assert result.exit_code == 0
+    assert "skipped" in result.output
 
 
 def test_evidence_skip_arm(monkeypatch):
