@@ -6,12 +6,13 @@
 // + binds the project `@mgiles/perk` extension, with the `session_start` claim engaging). See worker.ts.
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { PlanRef } from "../substrate/cache.ts";
 import { runEventsPath } from "../substrate/cache.ts";
+import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import { loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
 import {
   applyEvent,
@@ -289,6 +290,7 @@ class FakeSession implements DriveSessionLike {
   abortCalls = 0;
   disposed = false;
   branch: unknown[] = [];
+  sessionFile: string | null = null;
   private listeners: ((e: DriveEvent) => void)[] = [];
   private readonly script: (emit: (e: DriveEvent) => void) => Promise<void> | void;
   constructor(script: (emit: (e: DriveEvent) => void) => Promise<void> | void) {
@@ -315,7 +317,10 @@ class FakeSession implements DriveSessionLike {
   dispose(): void {
     this.disposed = true;
   }
-  sessionManager = { getBranch: (): unknown[] => this.branch };
+  sessionManager = {
+    getBranch: (): unknown[] => this.branch,
+    getSessionFile: (): string | null => this.sessionFile,
+  };
 }
 
 interface FakeRuntime extends DriveRuntimeLike {
@@ -365,6 +370,67 @@ test("driveStage: implement happy path → completed with pr, disposes, never th
   assert.equal(outcome.budget.tokens, 15);
   assert.equal(session.bindCalls, 1);
   assert.equal(runtime.disposed, true);
+});
+
+test("driveStage: implement records the implementation/worker session pointer", async () => {
+  const wt = mkdtempSync(join(tmpdir(), "perk-worker-cap-"));
+  const session = new FakeSession((emit) => {
+    emit({
+      type: "tool_execution_end",
+      toolName: "submit",
+      result: { details: { ok: true, pr: { number: 7, url: "https://x/pr/7" } } },
+    });
+  });
+  session.sessionFile = "/sessions/worker-xyz.jsonl";
+  const saved = process.env.PERK_RUN_ID;
+  process.env.PERK_RUN_ID = "01RID_I";
+  try {
+    await driveStage(
+      {
+        worktree: wt,
+        stage: "implement",
+        initialPrompt: "go",
+        budget: baseBudget,
+        model: {} as never,
+      },
+      { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+    );
+    const record = readSessionPointers(wt, "01RID_I");
+    assert.ok(record !== null, "the worker recorded a session-pointers record");
+    assert.equal(record.implementation.worker?.pi_session_id, "worker-xyz.jsonl");
+    assert.equal(record.implementation.worker?.session_file, "/sessions/worker-xyz.jsonl");
+    // The worker writes only the .worker slot; the inner session_start owns .main.
+    assert.equal(record.implementation.main, null);
+  } finally {
+    if (saved === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = saved;
+    rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test("driveStage: a non-implement stage records no worker pointer", async () => {
+  const wt = mkdtempSync(join(tmpdir(), "perk-worker-cap-"));
+  const session = new FakeSession(() => {});
+  session.sessionFile = "/sessions/addr.jsonl";
+  const saved = process.env.PERK_RUN_ID;
+  process.env.PERK_RUN_ID = "01RID_A";
+  try {
+    await driveStage(
+      {
+        worktree: wt,
+        stage: "address",
+        initialPrompt: "go",
+        budget: baseBudget,
+        model: {} as never,
+      },
+      { createRuntime: async () => fakeRuntime(session), now: () => 1000 },
+    );
+    assert.equal(readSessionPointers(wt, "01RID_A"), null);
+  } finally {
+    if (saved === undefined) delete process.env.PERK_RUN_ID;
+    else process.env.PERK_RUN_ID = saved;
+    rmSync(wt, { recursive: true, force: true });
+  }
 });
 
 test("driveStage: maxTurns budget trips → budget_exhausted/budget + abort called", async () => {

@@ -37,6 +37,7 @@ import { planReadInstruction } from "../doors/lifecycleGates.ts";
 import { ensureRunScratch, type PlanRef, readPlanRef, runEventsPath } from "../substrate/cache.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
+import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import { rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { capForModel } from "./readOnlySession.ts";
 
@@ -162,7 +163,7 @@ export interface DriveSessionLike {
   prompt(text: string): Promise<void>;
   abort(): Promise<void>;
   dispose(): void;
-  sessionManager: { getBranch(): unknown[] };
+  sessionManager: { getBranch(): unknown[]; getSessionFile?(): string | null };
 }
 
 /** The runtime surface (structurally satisfied by pi's `AgentSessionRuntime`). */
@@ -682,6 +683,20 @@ export async function driveStage(
     let boundSession = runtime.session;
     await bindManager.bind(boundSession);
     emitter.emit({ kind: "run_started", run_id: runId, stage: opts.stage });
+
+    // Implementation/worker session pointer (contracts.md §8.35): the headless drive records the
+    // inner driven session's file under THIS run id into the shared main checkout (the worktree's
+    // `mainCheckoutRoot`), labelled `.worker` by capture site. The inner session's own
+    // `session_start` records the matching `.main`. Best-effort + non-fatal (carrier warns).
+    if (opts.stage === "implement") {
+      captureSessionPointer({
+        cwd: opts.worktree,
+        runId,
+        klass: "implementation",
+        site: "worker",
+        sessionFile: boundSession.sessionManager.getSessionFile?.() ?? null,
+      });
+    }
 
     // Budget/abort wiring (Gap 2): wall-clock timer + external signal both trip → session.abort().
     const timer = setTimeout(() => trip("budget"), opts.budget.wallClockMs);

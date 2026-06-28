@@ -58,6 +58,7 @@ PLAN_HEADER_FIELDS = frozenset(
         "consumed_learn",
         "base",
         "adopted_from",
+        "impl_run_ids",
     }
 )
 
@@ -112,6 +113,10 @@ class PlanHeader:
     # INTO the human issue); its **presence** is the canonical "this plan was adopted; its issue
     # body/title are verbatim human content" signal. `None` for a normally-authored plan.
     adopted_from: str | None = None
+    # The implementation run id(s) this plan was implemented under (contracts.md §8.35) — the
+    # GC-proof cross-run linkage to each implement session's run-cache session-pointers record.
+    # **Submit-staged** (empty at save, exactly like `branch`/`pr`); union-merged at `/submit`.
+    impl_run_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -154,6 +159,9 @@ class PlanHeaderOut(OutputModel):
     consumed_learn: tuple[str, ...] = ()
     base: str | None = None
     adopted_from: str | None = None
+    # Declared LAST so the existing field byte-order is preserved on re-save; renders
+    # `impl_run_ids: []` like `consumed_learn: []` (contracts.md §8.35).
+    impl_run_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_domain(cls, header: PlanHeader) -> "PlanHeaderOut":
@@ -168,6 +176,7 @@ class PlanHeaderOut(OutputModel):
             consumed_learn=header.consumed_learn,
             base=header.base,
             adopted_from=header.adopted_from,
+            impl_run_ids=header.impl_run_ids,
         )
 
 

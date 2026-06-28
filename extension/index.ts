@@ -44,6 +44,7 @@ import {
 import { loadRegistry, type Registry, stageConsumesPlanRef } from "./substrate/registry.ts";
 import { perkVersion, sharedDir } from "./substrate/resources.ts";
 import { mintRunId } from "./substrate/runId.ts";
+import { captureSessionPointer } from "./substrate/sessionPointers.ts";
 import { registerToolGating } from "./substrate/toolGating.ts";
 import {
   appendWorkflowState,
@@ -290,6 +291,24 @@ export default function (pi: ExtensionAPI) {
       // Non-consuming stage (or no launched stage): preserve any already-linked ref via LWW,
       // but NEVER read the cache file — the root selector must not leak in.
       resolved = { ...resolved, active_plan_ref: linked };
+    }
+
+    // Implementation session pointer (contracts.md §8.35): an implement session self-keys its own
+    // session file into the shared main checkout so a later/other session resolves it cross-run.
+    // The headless worker's inner session lands here too (.main); driveStage records the matching
+    // .worker. A forked implement session inherits the parent's launched stage + threads the
+    // inherited parent session id as fork provenance. Best-effort + non-fatal (carrier warns).
+    const implStage =
+      runStage ?? (decision.action === "fork" ? (decision.state.stage ?? null) : null);
+    if (resolved.run_id && implStage === "implement") {
+      captureSessionPointer({
+        cwd: ctx.cwd,
+        runId: resolved.run_id,
+        klass: "implementation",
+        site: "main",
+        sessionFile,
+        parentSessionId: decision.action === "fork" ? (decision.state.pi_session_id ?? null) : null,
+      });
     }
 
     // Reapply the read-only allowlist from the resolved mode. Fail-closed: if the sync throws,

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { runScratchDir, workflowDir } from "./substrate/cache.ts";
+import { readSessionPointers } from "./substrate/sessionPointers.ts";
 import { loadPerkSession, plantSession, scaffoldRepo } from "./testing/harness.ts";
 
 test("claim: fresh session with PERK_RUN_ID + handoff claims the run", async () => {
@@ -92,6 +93,63 @@ test("fork: an inherited pi_session_id derives a child run_id", async () => {
     assert.equal(s?.predecessor, "01RID");
     // the child's scratch dir was isolated
     assert.ok(existsSync(runScratchDir(cwd, "01RID.1")));
+  } finally {
+    h.dispose();
+  }
+});
+
+test("implement session_start records the implementation/main session pointer", async () => {
+  // A cold-claimed implement run self-keys its current session file into implementation.main.
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write", stage: "implement" } });
+  const file = plantSession(cwd, []); // file-backed so getSessionFile() yields a real path
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    const record = readSessionPointers(cwd, "01RID");
+    assert.ok(record !== null, "a session-pointers record was written");
+    assert.equal(record.implementation.main?.pi_session_id, "planted-parent.jsonl");
+    assert.ok((record.implementation.main?.session_file ?? "").length > 0);
+    assert.equal(record.implementation.main?.parent_pi_session_id, null);
+    // Self-keyed: an implement run fills only the implementation slots.
+    assert.equal(record.planning.main, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("a non-implement stage does NOT record an implementation pointer", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-only", stage: "plan" } });
+  const file = plantSession(cwd, []);
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_RUN_ID: "01RID" },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    // The implementation/main capture is gated on stage === "implement"; a plan run writes none
+    // here (planning.main is savePlan's job, not session_start's).
+    assert.equal(readSessionPointers(cwd, "01RID"), null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("fork: a forked implement session threads the parent session as fork provenance", async () => {
+  const cwd = scaffoldRepo();
+  // Planted state: an implement run forked (pi_session_id won't match this file's basename).
+  const file = plantSession(cwd, [
+    { run_id: "01RID", pi_session_id: "OTHER-SESSION", mode: "read-write", stage: "implement" },
+  ]);
+  const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
+  try {
+    // The child run id is 01RID.1; the capture inherits the parent's launched stage + threads the
+    // inherited parent session id as parent_pi_session_id.
+    const record = readSessionPointers(cwd, "01RID.1");
+    assert.ok(record !== null);
+    assert.equal(record.implementation.main?.parent_pi_session_id, "OTHER-SESSION");
   } finally {
     h.dispose();
   }

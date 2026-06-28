@@ -105,7 +105,14 @@ function isUnmergeable(details: SubmitDetails): details is OkDetails<SubmitOk> {
 export async function submitPr(pi: ExtensionAPI, ctx: ExtensionContext): Promise<SubmitResult> {
   const fail = failFor(ctx, "submit");
 
-  const r = await runColdDoor<SubmitOk>(pi, ctx, ["pr", "submit", "--json"], {
+  // Stamp this implement run id into the plan-header `impl_run_ids` linkage (contracts.md
+  // §8.35) so a later/other session can resolve the implement session pointers cross-run.
+  // Mirrors planSave's `--run-id` thread; covers the interactive /submit AND the headless worker
+  // drive (both flow through this warm door). Absent run_id ⇒ omit (bare-stamp untouched).
+  const runId = rebuildWorkflowState(branchOf(ctx)).run_id ?? "";
+  const args = ["pr", "submit", "--json"];
+  if (runId) args.push("--run-id", runId);
+  const r = await runColdDoor<SubmitOk>(pi, ctx, args, {
     label: "perk pr submit",
     decode: decodeSubmit,
   });
