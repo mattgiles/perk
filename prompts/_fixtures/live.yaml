@@ -118,6 +118,20 @@
     repo_skills_rel: ".pi/skills"
     skill_name: "foo"
     skill_path: ".pi/skills/foo/SKILL.md"
+- template: "stages/skills/create-from.md"
+  vars:
+    repo_skills_rel: ".pi/skills"
+    skill_name: "foo"
+    skill_path: ".pi/skills/foo/SKILL.md"
+    seed_path: "/tmp/seed-file-foo-deadbeef.md"
+    seed_url: ""
+- template: "stages/skills/create-from.md"
+  vars:
+    repo_skills_rel: ".pi/skills"
+    skill_name: "foo"
+    skill_path: ".pi/skills/foo/SKILL.md"
+    seed_path: ""
+    seed_url: "https://github.com/x/skills/blob/main/skills/foo/SKILL.md"
 - template: "stages/skills/refine.md"
   vars:
     repo_skills_rel: ".pi/skills"

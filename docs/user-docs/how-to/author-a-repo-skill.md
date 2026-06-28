@@ -17,6 +17,11 @@ this how-to is the lifecycle, not the authoring craft.
    - `perk skills create NAME` — scaffolds **and** launches a write-capable authoring session
      following the `perk-skill-author` skill.
 
+   `create` also accepts **`--from <file|url>`** to seed authoring from a source document: a local
+   file is read as seed DATA; an http(s) URL to a `SKILL.md` is fetched **in-session** (along with
+   any sibling `references/`/`scripts/` files), treated as DATA, and ported selectively into the new
+   skill. It always creates a fresh skill (no adoption) and the door stays offline.
+
    Both are **create-only**: they refuse if `.perk/skills/NAME/` already exists and point you at
    `perk skills refine NAME` to re-open it.
 
@@ -33,7 +38,8 @@ this how-to is the lifecycle, not the authoring craft.
    inited repo may legitimately lack the link until this first sync.
 
 5. **Refine later** with `perk skills refine NAME` — re-opens the existing skill in a write-capable
-   session and **skips sync** (the file already exists; there is no `--from` input in v1).
+   session and **skips sync** (the file already exists). `refine` takes no `--from` — seeding from a
+   source document is a `create`-only input.
 
 6. **Delete** with `perk skills delete NAME --yes` when the skill is no longer wanted; it removes
    `.perk/skills/NAME/` and reconverges the fragment.

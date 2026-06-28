@@ -688,6 +688,113 @@ def test_create_refuses_existing_dry_run(monkeypatch, tmp_path):
     assert calls == []
 
 
+# --- create --from (seed-from-source) ---------------------------------------
+
+
+def _scratch_dir(tmp_path: Path) -> Path:
+    return tmp_path / ".perk" / "workflow" / "scratch"
+
+
+def test_create_from_file_real_run_scaffolds_and_seeds_scratch(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    seed = tmp_path / "source.md"
+    seed.write_text("author a skill that does X", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli, ["skills", "create", "foo", "--from", str(seed)], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / ".perk" / "skills" / "foo" / "SKILL.md").is_file()
+    assert len(calls) == 1
+    prompt = calls[0]["prompt_override"]
+    scratch_files = list(_scratch_dir(tmp_path).glob("seed-file-source-*.md"))
+    assert len(scratch_files) == 1
+    assert str(scratch_files[0]) in prompt
+    assert "<untrusted_seed_file>" in scratch_files[0].read_text(encoding="utf-8")
+
+
+def test_create_from_file_dry_run_json(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    seed = tmp_path / "source.md"
+    seed.write_text("seed data", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["skills", "create", "foo", "--from", str(seed), "--dry-run", "--json"],
+        obj=_ctx(tmp_path),
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["from"] == str(seed)
+    assert payload["scratch_path"].endswith(".md")
+    assert Path(payload["scratch_path"]).is_file()
+    # No scaffold, no launch on --dry-run.
+    assert not (tmp_path / ".perk" / "skills" / "foo").exists()
+    assert calls == []
+
+
+def test_create_from_url_dry_run(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    url = "https://github.com/x/skills/blob/main/skills/foo/SKILL.md"
+
+    # JSON payload: `from` present, no scratch_path (URL mode materializes no scratch).
+    result = CliRunner().invoke(
+        cli,
+        ["skills", "create", "foo", "--from", url, "--dry-run", "--json"],
+        obj=_ctx(tmp_path),
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["from"] == url
+    assert "scratch_path" not in payload
+    assert not (tmp_path / ".perk" / "skills" / "foo").exists()
+    assert calls == []
+
+    # Human (non-JSON) dry run prints the URL-arm seed with the fetch + sibling instruction.
+    result = CliRunner().invoke(
+        cli, ["skills", "create", "foo", "--from", url, "--dry-run"], obj=_ctx(tmp_path)
+    )
+    assert result.exit_code == 0, result.output
+    assert url in result.output
+    assert "FETCH" in result.output and "sibling" in result.output
+    assert calls == []
+
+
+def test_create_from_nonexistent_non_url_fails(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    result = CliRunner().invoke(
+        cli,
+        ["skills", "create", "foo", "--from", "./does-not-exist", "--json"],
+        obj=_ctx(tmp_path),
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "seed_file_error"
+    assert not (tmp_path / ".perk" / "skills" / "foo").exists()
+    assert calls == []
+
+
+def test_create_from_empty_file_fails(monkeypatch, tmp_path):
+    _patch_repo_skills(monkeypatch)
+    calls = _stub_launch(monkeypatch)
+    empty = tmp_path / "empty.md"
+    empty.write_text("   \n", encoding="utf-8")
+    result = CliRunner().invoke(
+        cli,
+        ["skills", "create", "foo", "--from", str(empty), "--json"],
+        obj=_ctx(tmp_path),
+    )
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["error_type"] == "seed_file_error"
+    assert not (tmp_path / ".perk" / "skills" / "foo").exists()
+    assert calls == []
+
+
 # --- refine (refine cold door) ----------------------------------------------
 
 
