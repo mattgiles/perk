@@ -241,6 +241,10 @@ def materialize_extensions(repo_root: Path, worktree: Path) -> None:
     try:
         _clone_npm_tree(src, dst)
     except OSError as exc:
+        # A clone that fails mid-copy leaves a partial tree behind. Remove it so the presence-only
+        # resume guard above doesn't permanently cache a half-copied (corrupt) install — a failed
+        # stage must degrade to pi installing fresh in-session, never to a broken tree.
+        shutil.rmtree(dst, ignore_errors=True)
         user_output(
             f"  (extensions: could not stage .pi/npm — {exc}; pi will install them in-session)"
         )

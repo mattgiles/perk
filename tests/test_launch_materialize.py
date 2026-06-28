@@ -878,6 +878,27 @@ def test_materialize_extensions_clone_failure_is_non_fatal(tmp_path, capsys, mon
     assert "extensions: could not stage .pi/npm" in capsys.readouterr().err
 
 
+def test_materialize_extensions_clone_failure_cleans_up_partial_tree(tmp_path, capsys, monkeypatch):
+    """A clone that fails mid-copy leaves a partial tree; the outer handler removes it so the
+    presence-only resume guard never permanently caches a half-copied (corrupt) install."""
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    dst = worktree / ".pi" / "npm"
+
+    def _partial_then_boom(src, dest, **_k):
+        # simulate a copy that wrote some files before failing partway through
+        (Path(dest) / "node_modules" / "half").mkdir(parents=True, exist_ok=True)
+        raise OSError("disk full")
+
+    monkeypatch.setattr("perk.run.launch.materialize.shutil.copytree", _partial_then_boom)
+
+    materialize_extensions(repo_root, worktree)
+
+    assert "extensions: could not stage .pi/npm" in capsys.readouterr().err
+    assert not dst.exists()  # partial tree removed → next launch re-stages / pi installs fresh
+
+
 def test_materialize_extensions_hardlink_fallback_deep_copies(tmp_path, monkeypatch):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
