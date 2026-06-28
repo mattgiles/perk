@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from perk.backends import linear
+from perk.boundary import OutputModel
 from perk.convergence.env import EnvCheck
 from perk.github import AuthStatus, RepoAccess
 
@@ -84,74 +85,159 @@ class InitReport:
         )
 
 
-def _env_to_dict(check: EnvCheck) -> dict[str, object]:
-    return {
-        "name": check.name,
-        "ok": check.ok,
-        "detail": check.detail,
-        "remediation": check.remediation,
-    }
+# --- the ``--json`` serialization boundary (OutputModel edge of InitReport) ----------------
+#
+# Field declaration order is load-bearing on every model below: ``model_dump(mode="json")``
+# emits in declaration order, so the order must stay byte-stable to avoid churning the
+# ``--json`` supervisor surface (§3.2 / §8.5).
+
+
+class EnvCheckOut(OutputModel):
+    """The serialization boundary of one :class:`EnvCheck`. Field order is load-bearing."""
+
+    name: str
+    ok: bool
+    detail: str
+    remediation: str
+
+    @classmethod
+    def from_domain(cls, check: EnvCheck) -> "EnvCheckOut":
+        return cls(name=check.name, ok=check.ok, detail=check.detail, remediation=check.remediation)
+
+
+class AuthOut(OutputModel):
+    """The serialization boundary of the picked :class:`AuthStatus` subset (order load-bearing)."""
+
+    ok: bool
+    user: str | None
+    scopes: tuple[str, ...]
+    error: str | None
+
+    @classmethod
+    def from_domain(cls, auth: AuthStatus) -> "AuthOut":
+        return cls(ok=auth.ok, user=auth.user, scopes=auth.scopes, error=auth.error)
+
+
+class RepoOut(OutputModel):
+    """The serialization boundary of the picked :class:`RepoAccess` subset (order load-bearing)."""
+
+    ok: bool
+    repo: str | None
+    can_push: bool
+    error: str | None
+
+    @classmethod
+    def from_domain(cls, repo: RepoAccess) -> "RepoOut":
+        return cls(ok=repo.ok, repo=repo.repo, can_push=repo.can_push, error=repo.error)
+
+
+class GitHubReportOut(OutputModel):
+    """The serialization boundary of :class:`GitHubReport`. Field order is load-bearing."""
+
+    auth: AuthOut
+    repo: RepoOut
+
+    @classmethod
+    def from_domain(cls, report: GitHubReport) -> "GitHubReportOut":
+        return cls(auth=AuthOut.from_domain(report.auth), repo=RepoOut.from_domain(report.repo))
+
+
+class LinearReadinessOut(OutputModel):
+    """The serialization boundary of :class:`linear.LinearReadiness`. Order is load-bearing."""
+
+    auth_ok: bool
+    user: str | None
+    team_ok: bool
+    missing_labels: tuple[str, ...]
+    created_labels: tuple[str, ...]
+    error: str | None
+
+    @classmethod
+    def from_domain(cls, r: linear.LinearReadiness) -> "LinearReadinessOut":
+        return cls(
+            auth_ok=r.auth_ok,
+            user=r.user,
+            team_ok=r.team_ok,
+            missing_labels=r.missing_labels,
+            created_labels=r.created_labels,
+            error=r.error,
+        )
+
+
+class LinearProjectOut(OutputModel):
+    """Serialization boundary of :class:`linear.LinearProjectReadiness` (order load-bearing)."""
+
+    projects_ok: bool
+    projects_error: str | None
+    missing_state_types: tuple[str, ...]
+    states_error: str | None
+
+    @classmethod
+    def from_domain(cls, p: linear.LinearProjectReadiness) -> "LinearProjectOut":
+        return cls(
+            projects_ok=p.projects_ok,
+            projects_error=p.projects_error,
+            missing_state_types=p.missing_state_types,
+            states_error=p.states_error,
+        )
+
+
+class LinearReportOut(OutputModel):
+    """The serialization boundary of the nullable :class:`LinearReport`. Order is load-bearing."""
+
+    ok: bool
+    team: str | None
+    error: str | None
+    readiness: LinearReadinessOut | None
+    project: LinearProjectOut | None
+
+    @classmethod
+    def from_domain(cls, report: LinearReport) -> "LinearReportOut":
+        return cls(
+            ok=report.ok,
+            team=report.team,
+            error=report.error,
+            readiness=None
+            if report.readiness is None
+            else LinearReadinessOut.from_domain(report.readiness),
+            project=None
+            if report.project is None
+            else LinearProjectOut.from_domain(report.project),
+        )
+
+
+class InitReportOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`InitReport`. Field order is load-bearing."""
+
+    success: bool
+    mode: str
+    error_type: str | None
+    message: str | None
+    env: tuple[EnvCheckOut, ...]
+    github: GitHubReportOut | None
+    linear: LinearReportOut | None
+    capabilities: tuple[str, ...]
+    changes: tuple[str, ...]
+    warnings: tuple[str, ...]
+    handoff: str | None
+
+    @classmethod
+    def from_domain(cls, report: InitReport) -> "InitReportOut":
+        return cls(
+            success=report.ok,
+            mode=report.mode,
+            error_type=report.error_type,
+            message=report.message,
+            env=tuple(EnvCheckOut.from_domain(c) for c in report.env),
+            github=None if report.github is None else GitHubReportOut.from_domain(report.github),
+            linear=None if report.linear is None else LinearReportOut.from_domain(report.linear),
+            capabilities=report.capabilities,
+            changes=tuple(report.changes),
+            warnings=tuple(report.warnings),
+            handoff=report.handoff,
+        )
 
 
 def report_to_dict(report: InitReport) -> dict[str, object]:
     """Serialize an ``InitReport`` for the ``--json`` supervisor surface (cli-vs-pi §3.2)."""
-    gh = report.github
-    return {
-        "success": report.ok,
-        "mode": report.mode,
-        "error_type": report.error_type,
-        "message": report.message,
-        "env": [_env_to_dict(c) for c in report.env],
-        "github": None
-        if gh is None
-        else {
-            "auth": {
-                "ok": gh.auth.ok,
-                "user": gh.auth.user,
-                "scopes": list(gh.auth.scopes),
-                "error": gh.auth.error,
-            },
-            "repo": {
-                "ok": gh.repo.ok,
-                "repo": gh.repo.repo,
-                "can_push": gh.repo.can_push,
-                "error": gh.repo.error,
-            },
-        },
-        "linear": _linear_to_dict(report.linear),
-        "capabilities": list(report.capabilities),
-        "changes": report.changes,
-        "warnings": report.warnings,
-        "handoff": report.handoff,
-    }
-
-
-def _linear_to_dict(report: LinearReport | None) -> dict[str, object] | None:
-    """Serialize the nullable ``LinearReport`` (§8.5: a `linear` key parallel to `github`)."""
-    if report is None:
-        return None
-    r = report.readiness
-    p = report.project
-    return {
-        "ok": report.ok,
-        "team": report.team,
-        "error": report.error,
-        "readiness": None
-        if r is None
-        else {
-            "auth_ok": r.auth_ok,
-            "user": r.user,
-            "team_ok": r.team_ok,
-            "missing_labels": list(r.missing_labels),
-            "created_labels": list(r.created_labels),
-            "error": r.error,
-        },
-        "project": None
-        if p is None
-        else {
-            "projects_ok": p.projects_ok,
-            "projects_error": p.projects_error,
-            "missing_state_types": list(p.missing_state_types),
-            "states_error": p.states_error,
-        },
-    }
+    return InitReportOut.from_domain(report).model_dump(mode="json")

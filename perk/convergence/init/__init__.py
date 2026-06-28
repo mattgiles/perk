@@ -56,9 +56,8 @@ from perk.convergence.init.repo_skills import (
 from perk.convergence.init.report import (
     GitHubReport,
     InitReport,
+    InitReportOut,
     LinearReport,
-    _env_to_dict,
-    _linear_to_dict,
     report_to_dict,
 )
 from perk.convergence.init.settings import (
@@ -137,6 +136,7 @@ __all__ = [
     "ExtensionInstallStatus",
     "GitHubReport",
     "InitReport",
+    "InitReportOut",
     "LinearReport",
     "ManagedConvergence",
     "RepoSkillsConvergence",
@@ -154,12 +154,10 @@ __all__ = [
     "_converge_workflow_dir",
     "_desired_packages",
     "_desired_skills_manifest",
-    "_env_to_dict",
     "_extension_install_lock",
     "_git_identity",
     "_install_perk_extension",
     "_linear_readiness",
-    "_linear_to_dict",
     "_managed_identities",
     "_merge_static_packages",
     "_npm_name",

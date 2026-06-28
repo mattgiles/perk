@@ -1,0 +1,20 @@
+{
+  "success": false,
+  "mode": "unknown",
+  "error_type": "not_a_repo",
+  "message": "Not a git repository",
+  "env": [
+    {
+      "name": "git",
+      "ok": false,
+      "detail": "not a repo",
+      "remediation": "git init"
+    }
+  ],
+  "github": null,
+  "linear": null,
+  "capabilities": [],
+  "changes": [],
+  "warnings": [],
+  "handoff": null
+}
