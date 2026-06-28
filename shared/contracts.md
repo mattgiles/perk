@@ -4365,8 +4365,46 @@ run cache, keyed by `run_id`** (under the run scratch dir, `perk/state/cache.py:
 branch's workflow-state **may mirror** the pointers for provenance but is **not primary**. The
 cross-run resolution path is **`plan id → plan-header run_id → run-cache pointers`**, without relying
 on the identity-gated `session_artifacts` map (current-run-only). Missing or GC'd pointers degrade to
-a `missing` status, never a guess. (The concrete carrier filename + record schema land with the
-node-2.1 handler; this section pins only the carrier *identity*.)
+a `missing` status, never a guess.
+
+**The concrete carrier (node 2.1).** The record is `session-pointers.json`, written under the run's
+scratch dir at `<main-checkout>/.perk/workflow/scratch/runs/<run_id>/` — where `<main-checkout> =
+main_worktree_root(cwd) or cwd` (`perk/substrate/git.py::main_worktree_root` /
+`extension/substrate/git.ts::mainCheckoutRoot`) so a linked-worktree run and a later resolver agree
+on ONE shared location. The path is built only through the `run_scratch_dir`/`runScratchDir` seam.
+Schema (byte-identical across planes):
+
+```json
+{
+  "run_id": "<this run's id>",
+  "planning":       { "main": <Pointer|null>, "worker": <Pointer|null> },
+  "implementation": { "main": <Pointer|null>, "worker": <Pointer|null> }
+}
+```
+
+`Pointer = { "pi_session_id": str, "session_file": str, "parent_pi_session_id": str|null, "at":
+ISO-8601 }`. Each run is **self-keyed**: it writes its records ONLY under its OWN `run_id`, and
+fills only the slots it owns (planning runs → `planning.*`; implement runs → `implementation.*`).
+The four class/site slots are always present (null when unset) so a TS read-modify-write merges
+trivially. `pi_session_id` = the session-file basename (matches the `perk:workflow-state` stamp);
+`session_file` = the absolute path known at capture (informational); `parent_pi_session_id`
+preserves fork/replacement provenance (the inherited parent session, else null). `main` vs `worker`
+is distinguished by **capture site** (deterministic), not by inspection: the interior
+`session_start` writes `.main`, the headless `worker.driveStage` writes `.worker`.
+
+**The plan-header linkage.** The planning `run_id` is already on the `plan-header`. The
+implementation run id(s) are stamped onto the header as `impl_run_ids: tuple[str, ...]`, a
+**submit-staged** field (null/empty at save, exactly like `branch`/`pr`) union-merged at `/submit`
+(`perk pr submit --run-id <run_id>` appends the current run id iff absent — dedup, order-preserving).
+The header is the canonical, GC-proof cross-run LINKAGE; the run cache is the primary POINTER store.
+
+**Cross-run resolution (node 2.1, `perk/learn/sessions.py::resolve_plan_sessions`).** `plan_id →
+resolve_issue_backend(repo_root).get_plan(...).header → {run_id (planning), impl_run_ids
+(implementation)} → read each run's session-pointers record under the main checkout`. Per-role
+status is from this section's fixed set: `found` (the slot's pointer is present) / `missing`
+(plan/header/run_id absent, the record file GC'd/absent, or the slot is null). `ambiguous` is
+reserved for node 3.1's source-level manifest and is unused here. No user-facing command lands in
+this node — node 3.1 (`perk learn evidence`) is the first consumer.
 
 **The classification vocabulary (two distinct, related sets).**
 

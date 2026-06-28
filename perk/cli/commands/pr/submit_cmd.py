@@ -49,8 +49,14 @@ class PrSubmitResult:
 @click.command("submit")
 @click.option("--dry-run", is_flag=True, help="Compose the plan without pushing or hitting GitHub.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--run-id",
+    "run_id",
+    default=None,
+    help="This implement run's id; union-merged into the plan-header impl_run_ids (§8.35).",
+)
 @click.pass_context
-def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
+def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool, run_id: str | None) -> None:
     """Open a draft PR for the active plan's branch (the implement → submit boundary).
 
     \b
@@ -60,7 +66,7 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
         repo_root = require_repo(ctx)
         if not dry_run:
             require_github(ctx)
-        result = _pr_submit_impl(repo_root=repo_root, dry_run=dry_run)
+        result = _pr_submit_impl(repo_root=repo_root, dry_run=dry_run, run_id=run_id)
     except (GitHubError, IssueBackendError) as exc:
         fail(
             ctx,
@@ -110,7 +116,19 @@ def submit_pr(ctx: click.Context, *, dry_run: bool, as_json: bool) -> None:
 _HEADER_FIELDS = ("branch", "pr", "lifecycle_stage")
 
 
-def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
+def _merge_impl_run_ids(existing: object, run_id: str) -> tuple[str, ...]:
+    """Union-merge ``run_id`` into the header's existing ``impl_run_ids`` (dedup, order-preserving).
+
+    The stored value is untrusted (read back off the issue header): only string entries are kept,
+    and ``run_id`` is appended iff absent. Anything non-list degrades to an empty base.
+    """
+    base: list[str] = []
+    if isinstance(existing, list):
+        base = [item for item in existing if isinstance(item, str)]
+    return tuple(base) if run_id in base else (*base, run_id)
+
+
+def _pr_submit_impl(*, repo_root: Path, dry_run: bool, run_id: str | None = None) -> PrSubmitResult:
     """Resolves the plan, pushes, opens the PR, updates the header.
 
     A dry run is fully **offline** (no push, no `gh` read or write): it composes the launch
@@ -188,14 +206,19 @@ def _pr_submit_impl(*, repo_root: Path, dry_run: bool) -> PrSubmitResult:
         raise UserFacingCliError(
             "PR body check failed:\n  " + "\n  ".join(errors), error_type="pr_check_failed"
         )
-    header_update = backend.update_plan_header(
-        issue_id=issue,
-        fields={
-            "branch": branch,
-            "pr": str(pr.number),
-            "lifecycle_stage": plan.LifecycleStage.IMPL.value,
-        },
-    )
+    fields: dict[str, object] = {
+        "branch": branch,
+        "pr": str(pr.number),
+        "lifecycle_stage": plan.LifecycleStage.IMPL.value,
+    }
+    # Stamp the implement run id into the staged `impl_run_ids` linkage (contracts.md §8.35):
+    # union-merge against the header already in hand (dedup, order-preserving). Bare CLI
+    # invocations (no `--run-id`) leave the field untouched. `update_plan_header` MERGES, so a
+    # later resave/restamp accumulates new run ids rather than clobbering.
+    if run_id:
+        merged = _merge_impl_run_ids(state.header.get("impl_run_ids"), run_id)
+        fields["impl_run_ids"] = list(merged)
+    header_update = backend.update_plan_header(issue_id=issue, fields=fields)
     # Mirror the opened PR into the Linear agent session. Gated inside the
     # emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft — it
     # never changes the submit result or exit code. Never reached on --dry-run (early return).

@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { readSessionPointers } from "../substrate/sessionPointers.ts";
 import { WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import { fakePerk, loadPerkSession, plantSession, scaffoldRepo } from "../testing/harness.ts";
 
@@ -91,6 +92,33 @@ test("tool: plan_save re-save surfaces Updated + details.updated", async () => {
     assert.equal(details.updated, true);
     assert.equal(details.existed, true);
     assert.match(result.content[0]?.text ?? "", /Updated plan #42/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: plan_save records the planning/main session pointer (file-backed session)", async () => {
+  // A file-backed keep session has a real session file → savePlan captures planning.main under
+  // the run id, into the shared main checkout (cwd here, since scaffoldRepo is not a git repo).
+  const cwd = scaffoldRepo();
+  const file = plantSession(cwd, [
+    { run_id: "01RID", pi_session_id: "planted-parent.jsonl", mode: "read-write" },
+  ]);
+  const bin = fakePerk(cwd, { stdout: PLAN_JSON });
+  const h = await loadPerkSession({
+    cwd,
+    env: { PERK_BIN: bin },
+    sessionManager: SessionManager.open(file),
+  });
+  try {
+    await h.invokeTool("plan_save", { plan: PLAN_MD });
+    const record = readSessionPointers(cwd, "01RID");
+    assert.ok(record !== null, "a session-pointers record was written");
+    assert.ok((record.planning.main?.session_file ?? "").length > 0);
+    assert.equal(record.planning.main?.pi_session_id, "planted-parent.jsonl");
+    // Self-keyed: a planning run fills only the planning slots.
+    assert.equal(record.implementation.main, null);
+    assert.equal(record.implementation.worker, null);
   } finally {
     h.dispose();
   }

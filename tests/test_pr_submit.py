@@ -357,3 +357,81 @@ def test_push_rejected_maps_to_stable_error(monkeypatch):
     result = _run(monkeypatch, ["pr", "submit", "--json"])
     assert result.exit_code == 1
     assert json.loads(result.output)["error_type"] == "push_rejected"
+
+
+def _stub_get_plan_header(monkeypatch, header: dict[str, object]) -> None:
+    """Re-stub the gateway `get_plan` so the in-hand plan-header carries `header` (for the
+    `impl_run_ids` union-merge path)."""
+    monkeypatch.setattr(
+        plans,
+        "get_plan",
+        lambda **k: plans.PlanState(
+            number=7, url="u/7", title="My Feature", header=header, pr=None
+        ),
+    )
+
+
+def test_run_id_stamps_impl_run_ids(monkeypatch):
+    # `--run-id` on a fresh plan (empty header) stamps a single-element impl_run_ids linkage.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    result = _run(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_I"])
+    assert result.exit_code == 0
+    assert calls["header"] == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+        "impl_run_ids": ["01RUN_I"],
+    }
+    assert json.loads(result.output)["plan_header"]["fields_updated"] == [
+        "branch",
+        "pr",
+        "lifecycle_stage",
+        "impl_run_ids",
+    ]
+
+
+def test_run_id_union_merges_existing_impl_run_ids(monkeypatch):
+    # An existing impl_run_ids list is preserved + de-duplicated, the new id appended at the tail.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"impl_run_ids": ["01RUN_A", "01RUN_B"]})
+    result = _run(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_C"])
+    assert result.exit_code == 0
+    assert calls["header"] == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+        "impl_run_ids": ["01RUN_A", "01RUN_B", "01RUN_C"],
+    }
+
+
+def test_run_id_dedups_when_already_present(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    _stub_get_plan_header(monkeypatch, {"impl_run_ids": ["01RUN_A"]})
+    result = _run(monkeypatch, ["pr", "submit", "--json", "--run-id", "01RUN_A"])
+    assert result.exit_code == 0
+    assert calls["header"] == {
+        "branch": "plan-7",
+        "pr": "42",
+        "lifecycle_stage": "impl",
+        "impl_run_ids": ["01RUN_A"],
+    }
+
+
+def test_no_run_id_leaves_impl_run_ids_untouched(monkeypatch):
+    # A bare CLI submit (no --run-id) never writes the impl_run_ids field.
+    _authed(monkeypatch)
+    calls = _stub_gh(monkeypatch)
+    result = _run(monkeypatch, ["pr", "submit", "--json"])
+    assert result.exit_code == 0
+    assert calls["header"] == {"branch": "plan-7", "pr": "42", "lifecycle_stage": "impl"}
+
+
+def test_merge_impl_run_ids_ignores_non_string_and_non_list():
+    # The stored value is untrusted (read off the issue header): keep only string entries, and
+    # degrade a non-list base to empty.
+    assert submit_cmd._merge_impl_run_ids(["a", 3, "b"], "c") == ("a", "b", "c")
+    assert submit_cmd._merge_impl_run_ids(None, "c") == ("c",)
+    assert submit_cmd._merge_impl_run_ids("not-a-list", "c") == ("c",)

@@ -36,6 +36,7 @@ import {
 } from "../substrate/coldDoor.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { readSessionArtifact, type SessionDataCtx } from "../substrate/sessionData.ts";
+import { captureSessionPointer } from "../substrate/sessionPointers.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
 import { idArrayParam, paramsOf, stringParam } from "../substrate/toolParams.ts";
 import {
@@ -311,6 +312,19 @@ export async function savePlan(
     stdin: { flag: "--plan-file", content: plan, filename: "plan.md" },
   });
   if (!r.ok) return fail(r.message, r.errorType);
+
+  // Capture the planning session pointer (contracts.md §8.35): this planning run self-keys by its
+  // own run_id into the shared main checkout, so a later/other session can resolve it cross-run.
+  // Best-effort + non-fatal (the carrier warns + returns false; a successful save must stand).
+  // Covers /plan-save, the plan_save tool, and approvalSave (all flow through savePlan).
+  captureSessionPointer({
+    cwd: ctx.cwd,
+    runId,
+    klass: "planning",
+    site: "main",
+    // Optional-chained: best-effort, and some side-session fakes have no getSessionFile.
+    sessionFile: ctx.sessionManager.getSessionFile?.(),
+  });
 
   // Link the live session (turn-3 D4): append iff the rebuilt ref differs, with a strict read-back.
   const ref = r.data.plan_ref;
