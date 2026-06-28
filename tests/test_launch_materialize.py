@@ -6,13 +6,17 @@ from pathlib import Path
 import pytest
 from _launch_helpers import _PLAN_REF, _PLAN_REF_MODEL, _config, _stage
 
+from perk import __version__
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch
 from perk.run.launch import (
     launch_stage,
+    materialize_extensions,
     materialize_skills,
+    print_launch_banner,
     resolve_worktree,
 )
+from perk.run.launch.materialize import render_launch_banner
 from perk.state import cache
 from perk.substrate import git as git_mod
 from perk.substrate.config import Config
@@ -719,3 +723,172 @@ def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
     assert data["stage"] == "objective-plan"
     assert data["objective_id"] == "63"
     assert data["node_id"] == "1.1"
+
+
+def test_skills_mirror_no_longer_prints_success_line(tmp_path, capsys):
+    """The mirrored-count line is folded into the launch banner; a direct call that links a fresh
+    skill prints no `(skills: mirrored ...)` success line (the missing/empty warnings stay)."""
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "perk-implement", "ruff")
+    worktree = tmp_path / "wt"
+
+    materialize_skills(repo_root, worktree)
+
+    # both skills were mirrored as symlinks
+    assert (worktree / ".agents" / "skills" / "perk-implement").is_symlink()
+    assert "skills: mirrored" not in capsys.readouterr().err
+
+
+# --- launch banner -------------------------------------------------------------------------
+
+
+def test_render_launch_banner_contains_wordmark_version_and_summary():
+    banner = render_launch_banner(skills=25, extensions=7)
+    lines = banner.splitlines()
+    # three wordmark lines (box-drawing), the version on the third, the summary on the fourth
+    assert lines[0].strip().startswith("\u250c")  # ┌
+    assert f"perk v{__version__}" in lines[2]
+    assert lines[3] == " 25 skills \u00b7 7 extensions ready"
+
+
+def _seed_settings(repo_root: Path, package_count: int) -> None:
+    settings = repo_root / ".pi" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps({"packages": [f"pkg{i}" for i in range(package_count)]}), encoding="utf-8"
+    )
+
+
+def test_print_launch_banner_counts_skills_and_extensions(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "a", "b", "c")
+    _seed_settings(repo_root, 5)
+
+    print_launch_banner(repo_root)
+
+    err = capsys.readouterr().err
+    assert "3 skills \u00b7 5 extensions ready" in err
+    assert f"perk v{__version__}" in err
+
+
+def test_print_launch_banner_no_ansi_when_not_a_tty(tmp_path, capsys):
+    """Under capsys stderr is not a tty, so the summary carries no ANSI escape codes."""
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "a")
+    _seed_settings(repo_root, 1)
+
+    print_launch_banner(repo_root)
+
+    assert "\x1b[" not in capsys.readouterr().err
+
+
+def test_print_launch_banner_missing_sources_count_zero(tmp_path, capsys):
+    """No .agents/skills/ and no .pi/settings.json → both counts fall back to 0, never raises."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    print_launch_banner(repo_root)
+
+    assert "0 skills \u00b7 0 extensions ready" in capsys.readouterr().err
+
+
+def test_launch_banner_heads_output_before_staging_warnings(git_repo, monkeypatch, capsys):
+    """An end-to-end implement launch prints the banner lines before any skills/extensions
+    warning, and the old `(skills: mirrored` success line never appears."""
+    _seed_skills(git_repo, "perk-implement")
+    # Keep repo-root .pi/npm empty so materialize_extensions takes the deterministic
+    # "not staged" warning path (no network install) for the ordering assertion.
+    monkeypatch.setattr(launch.init, "ensure_extension_install_present", lambda *_a, **_k: None)
+    _wt, execs = _drive_implement(git_repo, monkeypatch)
+    assert execs == ["pi"]
+    err = capsys.readouterr().err
+    assert "skills: mirrored" not in err
+    # the summary line heads the output, before the extensions staging warning
+    banner_idx = err.index("skills \u00b7")
+    staged_idx = err.index("extensions: repo .pi/npm not staged")
+    assert banner_idx < staged_idx
+
+
+# --- materialize_extensions ----------------------------------------------------------------
+
+
+def _seed_npm_install(repo_root: Path, *packages: str) -> None:
+    """Seed a populated repo-root `.pi/npm/node_modules/<pkg>/package.json` install."""
+    modules = repo_root / ".pi" / "npm" / "node_modules"
+    for pkg in packages:
+        pkg_dir = modules / pkg
+        pkg_dir.mkdir(parents=True, exist_ok=True)
+        (pkg_dir / "package.json").write_text(
+            json.dumps({"name": pkg, "version": "1.0.0"}), encoding="utf-8"
+        )
+
+
+def test_materialize_extensions_stages_populated_source(tmp_path):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+
+    materialize_extensions(repo_root, worktree)
+
+    staged = worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json"
+    assert staged.is_file()
+    assert json.loads(staged.read_text(encoding="utf-8"))["name"] == "ext-a"
+
+
+def test_materialize_extensions_idempotent_resume(tmp_path):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+    # a pre-populated worktree install with a sentinel that must survive (no clobber)
+    dst_modules = worktree / ".pi" / "npm" / "node_modules"
+    dst_modules.mkdir(parents=True)
+    sentinel = dst_modules / "sentinel.txt"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+
+    materialize_extensions(repo_root, worktree)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
+    assert not (dst_modules / "ext-a").exists()  # resume left the install untouched
+
+
+def test_materialize_extensions_missing_source_is_non_fatal(tmp_path, capsys):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    worktree = tmp_path / "wt"
+
+    materialize_extensions(repo_root, worktree)
+
+    assert "extensions: repo .pi/npm not staged" in capsys.readouterr().err
+    assert not (worktree / ".pi" / "npm").exists()  # nothing staged
+
+
+def test_materialize_extensions_clone_failure_is_non_fatal(tmp_path, capsys, monkeypatch):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+
+    def _boom(*_a, **_k):
+        raise OSError("disk full")
+
+    # both arms of the clone ladder fail → the warning, launch not blocked
+    monkeypatch.setattr("perk.run.launch.materialize.shutil.copytree", _boom)
+
+    materialize_extensions(repo_root, worktree)
+
+    assert "extensions: could not stage .pi/npm" in capsys.readouterr().err
+
+
+def test_materialize_extensions_hardlink_fallback_deep_copies(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "wt"
+    _seed_npm_install(repo_root, "ext-a")
+
+    def _no_hardlink(*_a, **_k):
+        raise OSError("EXDEV")
+
+    # the hardlink arm fails (e.g. cross-device); the deep-copy fallback still stages the files
+    monkeypatch.setattr("perk.run.launch.materialize.os.link", _no_hardlink)
+
+    materialize_extensions(repo_root, worktree)
+
+    assert (worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json").is_file()

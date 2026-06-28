@@ -22,7 +22,8 @@ monkeypatches resolve against (``os`` / ``subprocess`` / ``github`` / ``git`` / 
 ``linear_agent`` / ``init`` / ``runner``) are kept here so ``perk.run.launch.<mod>.attr`` rebinds
 the shared singleton every submodule that imports the same module sees. The orchestrator references
 the moved helpers (``resolve_target`` / ``resolve_worktree`` / ``_resolve_prompt`` /
-``materialize_plan_body`` / ``materialize_skills`` / ``run_worktree_setup`` /
+``materialize_plan_body`` / ``materialize_skills`` / ``materialize_extensions`` /
+``print_launch_banner`` / ``run_worktree_setup`` /
 ``_drive_remote_target``) as **bare facade globals**, so ``setattr(launch, "run_worktree_setup",
 …)`` / ``setattr(launch, "launch_stage", …)`` keep rebinding the names the orchestrator reads
 (zero test churn). ``_WORKTREE_SETUP_TIMEOUT_S`` travels with ``run_worktree_setup`` into
@@ -49,8 +50,10 @@ from perk.convergence import init
 from perk.run import runner as runner
 from perk.run.launch.materialize import (
     _WORKTREE_SETUP_TIMEOUT_S,
+    materialize_extensions,
     materialize_plan_body,
     materialize_skills,
+    print_launch_banner,
     run_worktree_setup,
 )
 from perk.run.launch.prompts import (
@@ -180,6 +183,12 @@ def launch_stage(
         stage.doors.get("cold_local") is True,
         f"Stage '{stage.id}' has no cold-local door.",
     )
+    # Head a real launch with the perk banner, before any worktree work (git-worktree-add, skills
+    # mirror, extension staging, worktree-setup hook, any fallback npm install) streams beneath it.
+    # Both counts come from repo_root and are accurate at first render. `--dry-run` keeps its
+    # `_emit_dry_run_preview` (no banner); `--remote` returned earlier in `_drive_remote_target`.
+    if not dry_run:
+        print_launch_banner(repo_root)
 
     resolved = resolve_worktree(
         repo_root=repo_root,
@@ -223,12 +232,24 @@ def launch_stage(
     cache.write_handoff(wt, rid, {"stage": stage.id, "mode": stage.mode, **(handoff_extra or {})})
     if resolved.plan_ref is not None:  # D5: materialize the ref into the worktree
         cache.write_plan_ref(wt, resolved.plan_ref)
+    # Warm perk's @mgiles/perk npm install into the repo-root .pi/npm/ BEFORE staging it into the
+    # worktree. pi installs a missing project-scope `npm:` package lazily and unlocked, so a
+    # missing-install window + parallel launches let a second process load from a half-installed
+    # package and drop the perk extension. `ensure_extension_install_present` installs-on-absent
+    # under a cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and
+    # best-effort + non-fatal internally. It is idempotent and depends on neither `env` nor `chdir`,
+    # so it runs here — the repo-root install is fully warmed before `materialize_extensions` clones
+    # it into the worktree. `worktree: none` stages load from this repo-root install directly.
+    init.ensure_extension_install_present(repo_root, self_repo=init.is_self_repo(repo_root))
     # Materialize the plan body into the worktree so in-session checkpoints can seed from
     # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
+    # `materialize_extensions` clones the warmed repo-root .pi/npm/ into the worktree so pi installs
+    # nothing at startup (a silent launch beneath the banner).
     if stage.worktree != "none":
         materialize_plan_body(repo_root, wt, resolved.plan_ref or cache.read_plan_ref(repo_root))
         materialize_skills(repo_root, wt)
+        materialize_extensions(repo_root, wt)
     # Mirror the implement-run start into Linear's Agents UI. Gated inside
     # the emitter (stamped provider == "linear" AND LINEAR_AGENT_TOKEN) and fully fail-soft —
     # it can never block the exec below. Not reached on --dry-run or --remote (early returns).
@@ -266,14 +287,6 @@ def launch_stage(
         if local_linear_key is not None:
             env["LINEAR_API_KEY"] = local_linear_key
     _sweep_stale_pi_agent_locks(_pi_agent_dir())  # silence pi's stale-lock startup warning
-    # Warm perk's @mgiles/perk npm install before exec so the perk extension always loads from a
-    # COMPLETE install. pi installs a missing project-scope `npm:` package lazily and unlocked, so
-    # a missing-install window + parallel launches let a second process load from a half-installed
-    # package and drop the perk extension. `ensure_extension_install_present` installs-on-absent
-    # under a cross-process lock (a cheap `is_dir()` no-op once present); self-repo-exempt and
-    # best-effort + non-fatal internally. Targets the repo-root install (`worktree: none` stages
-    # load from there). Not reached on --dry-run / --remote (both early-returned above).
-    init.ensure_extension_install_present(repo_root, self_repo=init.is_self_repo(repo_root))
     os.chdir(wt)  # pi's ctx.cwd becomes the worktree; the extension claims from there
     os.execvpe("pi", argv, env)  # the CLI *becomes* pi — nothing after this runs
 
@@ -333,8 +346,10 @@ __all__ = [
     "_resolve_prompt",
     "_sweep_stale_pi_agent_locks",
     "launch_stage",
+    "materialize_extensions",
     "materialize_plan_body",
     "materialize_skills",
+    "print_launch_banner",
     "resolve_base",
     "resolve_plan_worktree_name",
     "resolve_target",
