@@ -7,6 +7,14 @@ current-branch byte copy; the bundle manifest CLI + render are future consumers 
 them.
 """
 
+from perk.learn.evidence import (
+    DocEntry,
+    EvidenceBundle,
+    EvidenceSource,
+    SourceStatus,
+    gather_evidence,
+    scan_existing_docs,
+)
 from perk.learn.export import (
     ExportStatus,
     SessionExport,
@@ -20,11 +28,17 @@ from perk.learn.sessions import (
 )
 
 __all__ = [
+    "DocEntry",
+    "EvidenceBundle",
+    "EvidenceSource",
     "ExportStatus",
     "ImplementationRun",
     "ResolvedSessions",
     "SessionExport",
     "SessionResolution",
+    "SourceStatus",
     "export_session_jsonl",
+    "gather_evidence",
     "resolve_plan_sessions",
+    "scan_existing_docs",
 ]
