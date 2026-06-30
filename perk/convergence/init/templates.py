@@ -61,6 +61,7 @@ root = ".worktrees"
 # review-classifier = "anthropic/claude-haiku-4-5"
 # objective-explorer = "anthropic/claude-haiku-4-5"
 # conflict-resolver = "anthropic/claude-sonnet-4-5"
+# learn-analyst = "anthropic/claude-sonnet-4-5"
 
 # Per-stage model + thinking defaults (optional) — injected as pi `--model` /
 # `--thinking` flags when `perk <stage>` cold-launches that stage's pi session.

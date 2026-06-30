@@ -1006,8 +1006,8 @@ routes to `/land`.
 - **Configurable models via the agent-keyed `[subagents]` table (#196).** Every perk-owned project
   agent's model is configurable through one flat `[subagents]` table in `.perk/config.toml` (overlaid by
   `.perk/local.toml`), keyed by the bare agent name — `pr-reviewer`, `review-classifier`,
-  `objective-explorer`, `conflict-resolver` (matching each def's `name:` frontmatter and the
-  `perk.<name>` invocation).
+  `objective-explorer`, `conflict-resolver`, `learn-analyst` (matching each def's `name:` frontmatter
+  and the `perk.<name>` invocation).
   Each configured value is injected as a **per-call inline `model` override** on that agent's
   `subagent` spawn (the agent's frontmatter `model` stays the default when the key is unset). This
   is wired at the authored spawn sites: the warm TS doors (`prReviewGuidance`,
@@ -4608,3 +4608,30 @@ preserves Pi `compaction`/`branch_summary` entries with their `readFiles`/`modif
   `render` field touches nothing under `shared/schemas/`. The JSONL parse is a `LenientParseModel`
   read-edge → frozen `@dataclass`; the report is an `OutputModel` serialize-edge (realizing this
   section's forward-looking discipline).
+
+**The learn-analyst angle agent (node 4.1).** A perk-owned project agent
+`agents/learn-analyst.md` (runtime `perk.learn-analyst`) — fresh-context, read-only, and
+**report-only** (it never captures learnings, never creates a `perk:learn` issue, never posts,
+never stages or writes files, never spawns subagents). Delivered like its siblings via `PERK_AGENTS`
++ the managed `.pi/agents/perk/` convergence. It is the cross-plane **output contract** node 4.2's
+warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
+
+- **Four angles** (one assigned per spawn, mirroring `pr-reviewer`): `plan-vs-implementation`
+  (plan vs what shipped), `session-deviations` (course-corrections & durable gotchas),
+  `validation-risk` (what stayed risky / under-tested), `existing-docs` (doc routing onto the
+  manifest's `existing_docs[]` inventory, enriched by node 5.1 later).
+- **Input.** The task prompt names (a) the assigned angle and (b) the absolute path to the
+  `perk learn evidence --render --json` manifest (§8.35 above) plus the bundle dir. The child reads
+  the shared bundle — manifest statuses, `existing_docs[]`, `render.sessions[].chunk_paths`,
+  `plan-body.md`, `pr.diff` — and **never re-gathers** (the parent runs the gather once so all
+  angles share one bundle). `missing`/`ambiguous` sources are surfaced in `fyi`, never guessed.
+- **Output (parsed by node 4.2).** A fenced JSON block `{angle, verdict, candidates[], fyi[]}`.
+  `verdict ∈ {clean, actionable}` is **derived** — any candidate whose `decision` is not `SKIP` ⇒
+  `actionable`, else `clean` (no default verdict — enumerate candidates first, then derive). Each
+  candidate is `{decision ∈ the §8.35 DECISION set, summary, target: str|null, evidence}`. `SKIP`
+  candidates may appear (a weighed-and-rejected item, for the parent's transparency); the durable
+  CAPTURED metadata persists only non-`SKIP` decisions.
+- **Model** configurable via `[subagents] learn-analyst` (both planes; default
+  `anthropic/claude-sonnet-4-5`, fallback `anthropic/claude-haiku-4-5`).
+- **Deferred to node 4.2:** the warm `/learn` orchestrator that spawns 2–4 of these in parallel,
+  reconciles the per-angle reports into one classified decision, and persists the CAPTURED metadata.

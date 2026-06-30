@@ -48,8 +48,9 @@ class ConfigModel(LenientParseModel):
     worktree_setup: list[str] = Field(default_factory=list)
     user_bindings: list[Binding] = Field(default_factory=list)
     # The agent-keyed `[subagents]` table — a per-agent model override for each perk-owned
-    # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`), injected as a
-    # per-call inline `model` override on that agent's spawn. Absent keys mean "use the agent's
+    # project agent (`pr-reviewer`, `review-classifier`, `objective-explorer`, `conflict-resolver`,
+    # `learn-analyst`), injected as a per-call inline `model` override on that agent's spawn. Absent
+    # keys mean "use the agent's
     # frontmatter default". Only known agent keys with string values are kept (mirrors `providers`).
     subagents: dict[str, str] = Field(default_factory=dict)
     # The raw `[providers]` per-seam selection (provider-id strings or None when absent). Exposed
@@ -199,7 +200,13 @@ def _parse_workflow_base(raw: Any) -> str | None:
 
 
 # The perk-owned project agents configurable via the `[subagents]` table.
-_SUBAGENT_KEYS = ("pr-reviewer", "review-classifier", "objective-explorer", "conflict-resolver")
+_SUBAGENT_KEYS = (
+    "pr-reviewer",
+    "review-classifier",
+    "objective-explorer",
+    "conflict-resolver",
+    "learn-analyst",
+)
 
 
 def _parse_subagents_selection(raw: Any) -> dict[str, str]:
