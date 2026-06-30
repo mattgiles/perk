@@ -101,6 +101,10 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRe
     if body:
         cache.write_plan_body(worktree, body)
         log_done(f"cached plan #{pr_id} body")
+    else:
+        # An empty/whitespace body is a successful fetch with nothing to cache (checkpoints stay
+        # inert). Resolve the step line so it never dangles as a false "stuck" signal.
+        log_warn(f"checkpoints: plan #{pr_id} body is empty")
 
 
 def materialize_skills(repo_root: Path, worktree: Path) -> None:

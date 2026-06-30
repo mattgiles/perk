@@ -90,7 +90,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["success"] is True
         assert payload["plan"] == "42"
         assert payload["run_id"] == _RUN_ID
@@ -101,7 +101,8 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert scratch.is_file()
         text = scratch.read_text(encoding="utf-8")
         assert "<untrusted_plan>" in text and "EXISTING PLAN BODY" in text
-        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up plan #42" in result.stderr
 
 
 def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
@@ -251,7 +252,7 @@ def test_accepts_hash_prefixed_plan_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "#42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["plan"] == "42"
+        assert json.loads(result.stdout)["plan"] == "42"  # stdout only (lookup line on stderr)
 
 
 def test_not_a_repo_exit_2():

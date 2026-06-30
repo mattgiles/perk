@@ -325,11 +325,12 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["success"] is True and payload["dry_run"] is True
         assert payload["node"] == "1.2" and payload["marked_status"] == "planning"
         assert payload["skipped_claims"] == []  # always present, empty when no claims exist
-        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up objective #7" in result.stderr
 
 
 def test_url_argument_peeled_to_objective_id(monkeypatch):
@@ -345,7 +346,7 @@ def test_url_argument_peeled_to_objective_id(monkeypatch):
             ["objective", "plan", "https://github.com/o/r/issues/7", "--dry-run", "--json"],
         )
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["objective"] == "7"
+        assert json.loads(result.stdout)["objective"] == "7"  # stdout only (lookup line on stderr)
 
 
 def test_objective_required_when_number_omitted(monkeypatch):
@@ -456,7 +457,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["node"] == "1.2"
         assert payload["skipped_claims"] == ["1.1"]
 

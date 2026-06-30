@@ -113,6 +113,58 @@ def test_launch_does_not_warm_on_dry_run(git_repo, monkeypatch, capsys):
     assert warmed == []  # --dry-run early-returns before the warm
 
 
+def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, capsys):
+    """When the extension is absent and the warm actually installs (returns a change line), the
+    installing step resolves to a done milestone."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch.init,
+        "ensure_extension_install_present",
+        lambda repo_root, *, self_repo: "installed @mgiles/perk pre-launch",
+    )
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    err = capsys.readouterr().err
+    assert "installing perk extension" in err
+    assert "installed perk extension" in err  # the step resolved to ✓
+
+
+def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypatch, capsys):
+    """When the extension is absent and the warm returns None with the dir still absent (a swallowed
+    failure), the installing step resolves to a warn rather than dangling."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
+    )
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    err = capsys.readouterr().err
+    assert "installing perk extension" in err
+    assert "install failed" in err  # the step resolved to ⚠, never dangles
+
+
 def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
     """Drive a local implement launch, returning the env handed to ``os.execvpe``."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
@@ -529,6 +581,30 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     assert execs == ["pi"], "launch still proceeded"
     assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
     assert "could not fetch plan #42 body" in capsys.readouterr().err
+
+
+def test_implement_empty_plan_body_resolves_the_step(git_repo, monkeypatch, capsys):
+    """An empty body is a successful fetch with nothing to cache; the fetching step must still
+    resolve (to a warn) so it never dangles as a false 'stuck' signal."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "")
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = config.worktree_root / "plan-42"
+    assert execs == ["pi"]
+    assert not cache.plan_body_path(wt).exists()  # nothing cached for an empty body
+    assert "plan #42 body is empty" in capsys.readouterr().err
 
 
 def _seed_skills(repo_root: Path, *names: str) -> None:

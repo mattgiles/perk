@@ -386,8 +386,10 @@ resolution) — narrating them would be dishonest and bury the lines that matter
 **best-effort side-telemetry the launched session never consumes** (the fire-and-forget Linear
 Agents-UI mirror) — a network call, but off the critical path. Because every narrated step is on
 the critical path, a `›` line that never becomes its `✓` genuinely pinpoints *where a launch is
-stuck*. Machine surfaces (`--json`/`--dry-run`) stay byte-unchanged: progress is stderr-only and
-launcher-command lookups are gated on the real-launch path.
+stuck*. Machine surfaces stay byte-unchanged because **progress is stderr-only** — the `--json`
+stdout payload is untouched even when a launcher-command lookup is narrated on the `--dry-run`
+path (the lookup I/O runs there too, so narrating only the real-launch path would be incoherent).
+Narrate the wait wherever the wait happens; never gate the narration on a flag the I/O ignores.
 
 ---
 

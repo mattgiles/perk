@@ -133,7 +133,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["success"] is True
         assert payload["objective"] == "42" and payload["supersedes"] == "42"
         # only the UNFINISHED nodes carry forward (done/skipped excluded)
@@ -145,7 +145,8 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert "<untrusted_objective_unfinished_nodes>" in text
         assert "node 1.2" in text and "node 2.1" in text
         assert "node 1.1" not in text  # done node excluded
-        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up objective #42" in result.stderr
 
 
 def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):

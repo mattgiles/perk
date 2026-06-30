@@ -100,12 +100,13 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "resume", "42", "--dry-run", "--json"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert data["resumed_stage"] == "implement" and data["worktree"] == "plan-7"
         assert data["plan_ref"]["pr_id"] == "7"
         # dry run writes no ref
         assert not cache.plan_ref_path(Path(d)).exists()
-        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up plan #42" in result.stderr
 
 
 def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
@@ -131,7 +132,7 @@ def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
         )
         assert result.exit_code == 0, result.output
         assert seen["issue_id"] == "SAV-9"
-        assert json.loads(result.output)["plan"] == "SAV-9"
+        assert json.loads(result.stdout)["plan"] == "SAV-9"  # stdout only (lookup line on stderr)
 
 
 def test_real_resume_writes_ref_and_launches(monkeypatch):

@@ -66,9 +66,10 @@ def resume_cmd(
         config = require_config(ctx)
         plan_id = parse_plan_id(plan)
         backend = resolve.resolve_issue_backend(repo_root)
-        # Gated on the real-launch path so the `--dry-run`/`--json` preview stays byte-unchanged.
-        if not dry_run:
-            log_step(f"looking up plan #{plan_id}")
+        # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
+        # resolves the stage via this same read), so the narration is NOT gated on `dry_run`; the
+        # line goes to stderr, leaving the `--json` stdout payload byte-unchanged.
+        log_step(f"looking up plan #{plan_id}")
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

@@ -188,10 +188,11 @@ def replan_objective(
 
         store = resolve.resolve_objective_store(repo_root)
         is_linear = store.backend_id != resolve.GITHUB_BACKEND_ID
-        # Gated on the real-launch path so the `--dry-run`/`--json` preview stays byte-unchanged;
-        # one line covers the immediately-following `read_issue` lookup too.
-        if not dry_run:
-            log_step(f"looking up objective #{objective_id}")
+        # Narrate the backend lookup wait (one line covers the immediately-following `read_issue`
+        # too). The lookup runs on the dry-run path too (dry-run materializes the real artifact via
+        # these reads), so the narration is NOT gated on `dry_run`; the line goes to stderr, leaving
+        # the `--json` stdout payload byte-unchanged.
+        log_step(f"looking up objective #{objective_id}")
         state = store.get_objective(objective_id=objective_id)
         if state is None:
             raise UserFacingCliError(
