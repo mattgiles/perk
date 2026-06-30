@@ -224,6 +224,8 @@ class TestDelegation:
             "repo_root": tmp_path,
             "run_id": "RUN1",
             "plan_number": 12,
+            "decision": None,
+            "target": None,
             "dry_run": True,
         }
         assert result == issue_backend.IssueRef(id="14", url="u14", existed=False)

@@ -421,7 +421,10 @@ to.
 
 Create the perk:learn issue from captured learnings and clear pending-learn (land → learn). Reads
 the markdown from the required `--body` file; `--dry-run` composes without creating an issue or
-clearing.
+clearing. The optional `--decision` (one of `CAPTURE_LEARN`, `SHOULD_BE_CODE`, `UPDATE_EXISTING_DOC`,
+`NEW_DOC`, `STALE_DOC`) and `--target` (a routable pointer, e.g. a doc path) persist the reconciled
+captured classification onto the perk:learn issue header (both backends); the `--json` envelope is
+unchanged (the classification lives on the issue, not the capture result).
 
 ### `perk learn docs`
 
@@ -438,7 +441,10 @@ inventory, materializing the artifacts under `.perk/workflow/scratch/learn-evide
 carries a `found` / `missing` / `ambiguous` status — a missing or ambiguous source is **surfaced,
 never guessed**, and never fails the command. A learn-docs consolidation plan (non-empty
 `consumed_learn`) returns a stable skip up front. `--json` emits the machine-readable bundle (the
-default is a compact human summary to stderr).
+default is a compact human summary to stderr). On a gathered (non-skip) bundle the command also
+writes the full manifest to `.perk/workflow/scratch/learn-evidence/manifest.json` — the same payload
+as `--json` stdout (written unconditionally, so the bundle is self-contained for the `/learn` analyst
+children that read it).
 
 `--render` additionally normalizes the **found** session JSONLs into bounded, untrusted-DATA-fenced
 Markdown chunks under `.perk/workflow/scratch/learn-evidence/chunks/` (one or more `<stem>[-N].md`

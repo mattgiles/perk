@@ -2,11 +2,12 @@
 // clears the pending-learn semaphore. Driven through a REAL bound AgentSession via the T1 harness.
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { markerPath, PENDING_LEARN, setMarker, writePlanRef } from "../substrate/cache.ts";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { learnGuidance } from "./learn.ts";
+import { learnGuidance, learnOrchestrateGuidance } from "./learn.ts";
 
 const PLAN_REF = {
   provider: "github",
@@ -84,21 +85,23 @@ test("/learn (bare, headless): stays the safe marker-clear", async () => {
   }
 });
 
-test("/learn (bare, interactive): injects guidance and keeps the marker", async () => {
+test("/learn (bare, interactive, no worker): degrades to the simple pass and keeps the marker", async () => {
+  // With no PERK_BIN/handoff the evidence cold door is unavailable, so bare /learn degrades to the
+  // simple learn pass (never a dead end). The agent clears the marker via the `learn` tool, so the
+  // command must NOT clear it here.
   const cwd = scaffoldRepo();
   setMarker(cwd, PENDING_LEARN);
   writePlanRef(cwd, PLAN_REF);
   const h = await loadPerkSession({ cwd });
   try {
     await h.runCommandHandler("learn", "");
-    // The agent clears the marker by calling the `learn` tool — the command must NOT clear it.
     assert.ok(
       existsSync(markerPath(cwd, PENDING_LEARN)),
       "bare /learn left pending-learn for the capture pass",
     );
     assert.ok(
-      h.notifies.some((n) => n.includes("investigate the landed change")),
-      "notified the capture workflow",
+      h.notifies.some((n) => n.includes("falling back to the simple learn pass")),
+      "notified the graceful fallback",
     );
   } finally {
     h.dispose();
@@ -247,6 +250,180 @@ test("tool: learn with a mistyped summary → bad_input AND the marker is NOT cl
     assert.ok(
       existsSync(markerPath(cwd, PENDING_LEARN)),
       "pending-learn NOT cleared on uncertainty",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: a valid decision/target reach learnDone (capture argv carries --decision/--target)", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const argvFile = join(cwd, "argv.txt");
+  const bin = fakePerk(cwd, { stdout: CAPTURE_JSON, argvFile });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    const result = await h.invokeTool("learn", {
+      summary: "durable learning",
+      decision: "UPDATE_EXISTING_DOC",
+      target: "docs/learned/x.md",
+    });
+    assert.equal(result.terminate, true);
+    const argv = readFileSync(argvFile, "utf8");
+    assert.match(argv, /learn\ncapture\n--json/);
+    assert.match(argv, /--decision\nUPDATE_EXISTING_DOC/);
+    assert.match(argv, /--target\ndocs\/learned\/x\.md/);
+  } finally {
+    h.dispose();
+  }
+});
+
+test("tool: an out-of-enum decision → bad_input AND the marker is NOT cleared", async () => {
+  const cwd = scaffoldRepo();
+  setMarker(cwd, PENDING_LEARN);
+  const h = await loadPerkSession({ cwd });
+  try {
+    const result = await h.invokeTool("learn", { summary: "x", decision: "NONSENSE" });
+    const details = result.details as { ok: boolean; error_type?: string };
+    assert.equal(details.ok, false);
+    assert.equal(details.error_type, "bad_input");
+    assert.ok(
+      existsSync(markerPath(cwd, PENDING_LEARN)),
+      "pending-learn NOT cleared on a bad decision",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+// --- learnOrchestrateGuidance (pure) ---------------------------------------------
+
+test("learnOrchestrateGuidance: names the angles, the spawn/reconcile steps, and renders the paths", () => {
+  const g = learnOrchestrateGuidance({
+    manifestPath: "/abs/learn-evidence/manifest.json",
+    bundleDir: "/abs/learn-evidence",
+  });
+  // Spawn step: 2–4 fresh-context analysts via the subagent tool.
+  assert.match(g, /2[\u2013-]4/);
+  assert.match(g, /perk\.learn-analyst/);
+  assert.match(g, /subagent/);
+  assert.match(g, /context: "fresh"/);
+  // session-deviations is mandatory + carries the off-track/dead-ends/wasted-effort emphasis.
+  assert.match(g, /session-deviations/);
+  assert.match(g, /off-track/);
+  assert.match(g, /dead ends/);
+  assert.match(g, /plan-vs-implementation/);
+  assert.match(g, /existing-docs/);
+  // Reconcile → capture/skip, and the missing/malformed-child instruction.
+  assert.match(g, /[Rr]econcile/);
+  assert.match(g, /missing or malformed child report/);
+  assert.match(g, /`learn`\*\* tool/);
+  assert.match(g, /no `summary`/);
+  // Renders the manifest path + bundle dir.
+  assert.match(g, /\/abs\/learn-evidence\/manifest\.json/);
+  assert.match(g, /\/abs\/learn-evidence/);
+});
+
+test("learnOrchestrateGuidance: model override appears when set, absent when empty", () => {
+  const withModel = learnOrchestrateGuidance({
+    model: "google/gemini-3.5-flash",
+    manifestPath: "/m.json",
+    bundleDir: "/d",
+  });
+  assert.match(withModel, /model: "google\/gemini-3\.5-flash"/);
+  const noModel = learnOrchestrateGuidance({ manifestPath: "/m.json", bundleDir: "/d" });
+  assert.doesNotMatch(noModel, /model:/);
+  assert.match(noModel, /no model override/);
+});
+
+// --- bare interactive /learn orchestration branches ------------------------------
+
+const SKIP_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  skipped: true,
+  skip_reason: "learn-docs plan",
+  plan_id: "7",
+  bundle_dir: null,
+  sources: [],
+  existing_docs: [],
+  render: null,
+});
+
+const GATHERED_JSON = JSON.stringify({
+  success: true,
+  error_type: null,
+  message: null,
+  skipped: false,
+  skip_reason: null,
+  plan_id: "7",
+  bundle_dir: ".perk/workflow/scratch/learn-evidence",
+  sources: [],
+  existing_docs: [],
+  render: null,
+});
+
+test("/learn (bare, learn-docs plan): clears the marker, no orchestration", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const bin = fakePerk(cwd, { stdout: SKIP_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.runCommandHandler("learn", "");
+    assert.ok(
+      !existsSync(markerPath(cwd, PENDING_LEARN)),
+      "learn-docs short-circuit clears pending-learn",
+    );
+    assert.ok(
+      h.notifies.some((n) => n.includes("learn-docs plan; learn capture skipped")),
+      "reported the learn-docs skip",
+    );
+    assert.ok(
+      !h.notifies.some((n) => n.includes("multi-angle learn")),
+      "no orchestration kickoff on a learn-docs plan",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/learn (bare, gathered bundle): keeps the marker and kicks off orchestration", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  const bin = fakePerk(cwd, { stdout: GATHERED_JSON });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.runCommandHandler("learn", "");
+    // The model captures via the `learn` tool, so the command must NOT clear the marker.
+    assert.ok(
+      existsSync(markerPath(cwd, PENDING_LEARN)),
+      "bare /learn left pending-learn for the capture pass",
+    );
+    assert.ok(
+      h.notifies.some((n) => n.includes("multi-angle learn")),
+      "reported the orchestration kickoff",
+    );
+  } finally {
+    h.dispose();
+  }
+});
+
+test("/learn (bare, gather failure): keeps the marker and falls back to the simple pass", async () => {
+  const cwd = scaffoldRepo({ handoff: { runId: "01RID", mode: "read-write" } });
+  setMarker(cwd, PENDING_LEARN);
+  writePlanRef(cwd, PLAN_REF);
+  const bin = fakePerk(cwd, { stdout: "", code: 1 });
+  const h = await loadPerkSession({ cwd, env: { PERK_RUN_ID: "01RID", PERK_BIN: bin } });
+  try {
+    await h.runCommandHandler("learn", "");
+    assert.ok(
+      existsSync(markerPath(cwd, PENDING_LEARN)),
+      "gather failure leaves the marker for the fallback capture pass",
+    );
+    assert.ok(
+      h.notifies.some((n) => n.includes("falling back to the simple learn pass")),
+      "reported the graceful fallback",
     );
   } finally {
     h.dispose();

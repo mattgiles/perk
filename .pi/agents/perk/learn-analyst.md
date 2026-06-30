@@ -50,8 +50,13 @@ subagents** — you analyze and report.
      from, exceed, or fall short of the plan? Mid-implementation decisions, scope changes, and
      surprises a future planner should know about.
    - **session-deviations** — *Course-corrections & gotchas.* Read the planning + implementation
-     session chunks for dead ends, retries, surprising discoveries, and traps the agent hit. A
-     durable cross-cutting gotcha is the signal; a one-off typo fix is not.
+     session chunks for dead ends, retries, surprising discoveries, and traps the agent hit. The
+     **highest-value** signal is **what the agent got wrong or didn't understand about the
+     codebase that sent it off-track** — mental-model gaps, a wrong assumption about how a module
+     or contract worked, a misread of where logic lived — and the **dead ends and wasted
+     time/effort** that followed. Foreground those: a future agent reading the captured learning
+     should be able to *avoid repeating the same trap*. A durable cross-cutting gotcha is the
+     signal; a one-off typo fix is not.
    - **validation-risk** — *What stayed risky.* What was validated vs left fragile? Untested edge
      cases, assumptions that held by luck, things that passed CI but could regress. Reason about the
      risk; do **not** run the test suite or build.

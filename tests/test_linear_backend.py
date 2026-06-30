@@ -362,7 +362,42 @@ class TestLearnTwins:
         assert header is not None
         assert header["run_id"] == "01LEARN"
         assert header["plan"] == "ENG-1"  # the boundary string, verbatim
+        # A decision-less call omits the captured-classification fields (back-compat).
+        assert "decision" not in header and "target" not in header
         assert description.endswith("learnings\n")
+
+    def test_create_learn_issue_persists_decision_and_target(self) -> None:
+        backend, fake = _make_backend(
+            {
+                "teams(filter": [_TEAM_RESPONSE],
+                "issues(first": [_no_issues()],
+                "issueLabels(filter": [_LABEL_FOUND],
+                "issueCreate(": [
+                    {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {"id": "iss-l", "identifier": "ENG-7", "url": "u-l"},
+                        }
+                    }
+                ],
+            }
+        )
+        backend.create_learn_issue(
+            title="t",
+            body="learnings",
+            run_id="01LEARN",
+            plan_id="ENG-1",
+            decision="NEW_DOC",
+            target=None,
+        )
+        [(_, variables)] = _queries(fake, "issueCreate(")
+        description = _input_payload(variables)["description"]
+        assert isinstance(description, str)
+        header = plan.find_metadata_block(description, plan.LEARN_HEADER_KEY)
+        assert header is not None
+        assert header["decision"] == "NEW_DOC"
+        # A None target is omitted entirely (distinguishing "no target" from a present value).
+        assert "target" not in header
 
     def test_create_learn_issue_is_idempotent_via_find(self) -> None:
         learn_description = plan.render_metadata_block(

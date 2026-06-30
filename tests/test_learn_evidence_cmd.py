@@ -219,6 +219,38 @@ def test_render_human_arm(monkeypatch):
     assert "render: planning-session/main" in result.output
 
 
+def test_evidence_writes_manifest_matching_json_stdout(monkeypatch):
+    # A materialized (non-skip) bundle also writes <bundle_dir>/manifest.json with the same payload
+    # as the --json stdout, so the analyst children can read it (contracts.md §8.35).
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        monkeypatch.setattr(
+            evidence_cmd, "gather_evidence", lambda root, ref: _bundle_with_session(Path(d))
+        )
+        result = runner.invoke(cli, ["learn", "evidence", "--render", "--json"])
+        assert result.exit_code == 0
+        manifest = Path(d) / ".perk/workflow/scratch/learn-evidence/manifest.json"
+        assert manifest.is_file()
+        assert json.loads(manifest.read_text(encoding="utf-8")) == json.loads(result.output)
+
+
+def test_evidence_skip_writes_no_manifest(monkeypatch):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        monkeypatch.setattr(
+            resolve, "resolve_issue_backend", lambda root: _FakeBackend({"consumed_learn": ["12"]})
+        )
+        monkeypatch.setattr(github, "list_prs_for_branch", lambda **k: ())
+        result = runner.invoke(cli, ["learn", "evidence", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.output)["skipped"] is True
+        assert not (Path(d) / ".perk/workflow/scratch/learn-evidence/manifest.json").exists()
+
+
 def test_render_skip_plan_yields_null(monkeypatch):
     result = _run(monkeypatch, header={"consumed_learn": ["12"]}, do_render=True)
     assert result.exit_code == 0

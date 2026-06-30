@@ -295,7 +295,15 @@ class LinearIssueBackend:
         )
 
     def create_learn_issue(
-        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        plan_id: str,
+        decision: str | None = None,
+        target: str | None = None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
         if dry_run:
             return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)
@@ -310,10 +318,14 @@ class LinearIssueBackend:
         )
         # Rendered directly in the inline-code style (no transcoding needed). The header `plan`
         # field stores the boundary `plan_id` string verbatim (headers are backend-owned opaque
-        # values — GitHub stores its int issue number; Linear stores its string id).
-        header = plan.render_metadata_block(
-            plan.LEARN_HEADER_KEY,
-            {"run_id": run_id, "created": plan.now_iso(), "plan": plan_id},
+        # values — GitHub stores its int issue number; Linear stores its string id). The optional
+        # captured `decision`/`target` classification rides the header (contracts.md §8.35).
+        header = plan.render_learn_header(
+            run_id=run_id,
+            created=plan.now_iso(),
+            plan=plan_id,
+            decision=decision,
+            target=target,
             style="inline-code",
         )
         full_body = f"{header}\n\n{to_linear_markdown(body.strip())}\n"
