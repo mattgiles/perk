@@ -216,6 +216,20 @@ def print_launch_banner(repo_root: Path) -> None:
     user_output(f"{wordmark}\n{summary}")
 
 
+def print_launch_banner_gated(repo_root: Path, *, dry_run: bool, remote: str | None) -> None:
+    """Emit the launch banner only for a real local launch — the single gate the four narrating
+    cold-door commands share to head their own pre-launch narration with the banner.
+
+    Skipped on ``--dry-run`` (the preview path owns the output) and on ``--remote`` (the remote
+    path prints no banner). ``remote is None`` is the exact "this is a local launch" test: absent
+    ``--remote`` → ``None`` (local); ``--remote``/``--remote=x`` → ``""``/``"x"`` (both remote).
+    Idempotent via :func:`print_launch_banner`, so ``launch_stage``'s later call is the no-op
+    fallback.
+    """
+    if not dry_run and remote is None:
+        print_launch_banner(repo_root)
+
+
 def _clone_npm_tree(src: Path, dst: Path) -> None:
     """Clone the converged npm install tree ``src`` into ``dst``, preferring cheap isolation.
 

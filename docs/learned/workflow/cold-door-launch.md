@@ -157,9 +157,11 @@ doubles. `launch_stage` emits it immediately after the cold-local invariant and 
 every non-narrating launch command. But four cold-door commands narrate a backend lookup
 (`log_step("looking up #X")`) *before* they call `launch_stage`, and that lookup is load-bearing
 (its result builds the seed), so it cannot move after the launch. Those four — `objective plan`,
-`objective replan`, `plan resume`, `plan replan` — therefore emit the banner **themselves**, gated
-to a real local launch (`if not dry_run and remote is None`), right before their `looking up`
-narration; `launch_stage`'s own call is then the no-op fallback. The guard is reset by an autouse
+`objective replan`, `plan resume`, `plan replan` — therefore emit the banner **themselves**, right
+before their `looking up` narration, through one shared seam — `print_launch_banner_gated(repo_root,
+*, dry_run, remote)` — so the gate (`not dry_run and remote is None`) lives in exactly one place
+instead of duplicated across the four call sites; `launch_stage`'s own call is then the no-op
+fallback. The guard is reset by an autouse
 `conftest.py` fixture so the process-global flag never leaks across tests. Both counts (skills =
 dir count in `.agents/skills/`; extensions = package count in `.pi/settings.json`) are knowable up
 front from `repo_root`, so the first render is accurate. The `remote is None` test (not

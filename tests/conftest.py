@@ -14,6 +14,8 @@ from perk.convergence.init import extension_install as _ext_install
 def _reset_launch_banner_guard():
     """Reset the process-global once-per-process banner guard before every test so the latched
     flag never leaks across tests (an emitter in one test must not no-op a later test)."""
+    # Imported inside the fixture (not at module top) so resetting the private guard stays a
+    # narrow test concern and conftest's import surface isn't widened for every collection.
     import perk.run.launch.materialize as _m
 
     _m._LAUNCH_BANNER_EMITTED = False

@@ -67,11 +67,7 @@ def resume_cmd(
         plan_id = parse_plan_id(plan)
         backend = resolve.resolve_issue_backend(repo_root)
         # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
-        # Idempotent — launch_stage's own call later is a no-op. Skipped on --dry-run (returns
-        # before launch_stage; preview owns the output) and on --remote (the remote path prints no
-        # banner).
-        if not dry_run and remote is None:
-            launch.print_launch_banner(repo_root)
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
         # resolves the stage via this same read), so the narration is NOT gated on `dry_run`; the
         # line goes to stderr, leaving the `--json` stdout payload byte-unchanged.
