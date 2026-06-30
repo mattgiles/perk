@@ -254,11 +254,15 @@ npm version "$(uv version --short)" --no-git-tag-version
 If your `uv` does not support `uv version --short`, read the version from `pyproject.toml`
 and pass it to `npm version` manually.
 
-Update `CHANGELOG.md`:
+Update `CHANGELOG.md` (the **two-phase changelog convention** — see
+[releasing.md](./releasing.md#changelog-discipline) for the full convention):
 
-1. Change `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
-2. Add a fresh empty `## [Unreleased]` section above it.
-3. Keep the existing change entries under the new release heading.
+1. Strip the parenthesized short-hash tokens from the released bullets (released sections carry no
+   tokens).
+2. Change `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
+3. Add a fresh empty `## [Unreleased]` section above it **with a new `<!-- As of <hash> -->` marker
+   at the release HEAD**.
+4. Keep the existing change entries under the new release heading.
 
 Run checks:
 

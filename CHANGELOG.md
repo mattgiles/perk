@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!-- As of fa6b115 -->
+
 ### Added
 
 ### Changed
@@ -30,7 +32,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
----
-
-`0.0.1` is the current unreleased baseline — there is no published release section yet. See
-[docs/releasing.md](docs/releasing.md) for the release policy + runbook.
+See [docs/releasing.md](docs/releasing.md) for the release policy, runbook, and the two-phase
+changelog convention.
