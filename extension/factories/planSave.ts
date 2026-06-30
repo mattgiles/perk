@@ -34,6 +34,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { readSessionArtifact, type SessionDataCtx } from "../substrate/sessionData.ts";
 import { captureSessionPointer } from "../substrate/sessionPointers.ts";
@@ -566,7 +567,7 @@ export function registerPlanSave(pi: ExtensionAPI, gating: ToolGating): void {
     },
   });
 
-  pi.registerCommand("plan-save", {
+  registerPerkCommand(pi, "plan-save", {
     description:
       "Save the latest proposed plan to GitHub — the manual failsafe for the approval→save flow " +
       "(the read-only → read-write boundary).",

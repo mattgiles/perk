@@ -43,6 +43,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
@@ -314,7 +315,7 @@ export function registerLearn(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("learn", {
+  registerPerkCommand(pi, "learn", {
     description:
       "Investigate the landed change and capture learnings (bare /learn drives the workflow); " +
       "/learn skip clears pending-learn only; /learn <text> captures the text verbatim.",

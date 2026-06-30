@@ -24,6 +24,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import type { ToolGating } from "../substrate/toolGating.ts";
@@ -239,7 +240,7 @@ export function registerObjectiveSave(pi: ExtensionAPI, gating: ToolGating): voi
     },
   });
 
-  pi.registerCommand("objective-save", {
+  registerPerkCommand(pi, "objective-save", {
     description:
       "Save the working objective draft to GitHub — the manual failsafe for the approval→save " +
       "flow (artifact-first; drives the structured save only when no draft exists).",

@@ -29,6 +29,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { readHandoff, readPlanBody } from "../substrate/cache.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import {
   loadProviders,
@@ -516,7 +517,7 @@ export function registerCheckpoints(pi: ExtensionAPI, status: PerkStatusHandle):
     }
   });
 
-  pi.registerCommand("checkpoints", {
+  registerPerkCommand(pi, "checkpoints", {
     description: "Show perk implementation checkpoints (read-only).",
     handler: async (_args, ctx) => {
       // Todo-provider deferral: announce the deferral headless-safe and step aside when a

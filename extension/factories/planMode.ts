@@ -31,6 +31,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import {
   loadProviders,
@@ -150,7 +151,7 @@ export function registerPlanMode(pi: ExtensionAPI, gating: ToolGating): void {
     }
   }
 
-  pi.registerCommand("plan", {
+  registerPerkCommand(pi, "plan", {
     description: "Toggle perk plan mode (read-only exploration + plan authoring).",
     handler: async (_args, ctx) => toggle(ctx),
   });

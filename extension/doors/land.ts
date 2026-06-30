@@ -15,6 +15,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -208,7 +209,7 @@ export function registerLand(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("land", {
+  registerPerkCommand(pi, "land", {
     description: "Merge the active plan's PR and set pending-learn (submit → land).",
     handler: async (_args, ctx) => {
       const result = await landPr(pi, ctx);

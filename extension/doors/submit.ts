@@ -21,6 +21,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, type OkDetails, ok, type Result } from "../substrate/result.ts";
@@ -236,7 +237,7 @@ export function registerSubmit(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("submit", {
+  registerPerkCommand(pi, "submit", {
     description: "Push the branch and open a draft PR for the active plan (implement → submit).",
     handler: async (_args, ctx) => {
       const result = await submitPr(pi, ctx);

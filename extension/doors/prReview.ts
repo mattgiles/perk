@@ -23,6 +23,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { type ColdJson, numberField, runColdDoor, stringField } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
@@ -296,7 +297,7 @@ export function registerPrReview(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("pr-review", {
+  registerPerkCommand(pi, "pr-review", {
     description:
       "Review the active PR via 2–3 angle-specialized fresh-context reviewers, reconcile their " +
       "findings, and post one verdict-driven outcome. The review model is configurable via " +

@@ -14,6 +14,7 @@ import type {
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { PlanRef } from "../substrate/cache.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { render } from "../substrate/prompts.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
 import { report } from "../surfaces/report.ts";
@@ -104,7 +105,7 @@ export function implementHandoffPrompt(ref: PlanRef): string {
  * either way), fail-safe-headless.
  */
 function registerImplementGuard(pi: ExtensionAPI): void {
-  pi.registerCommand("implement", {
+  registerPerkCommand(pi, "implement", {
     description:
       "Refresh implement context (in-worktree handoff); cross-worktree is `perk implement`.",
     handler: async (_args, ctx) => {

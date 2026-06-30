@@ -19,6 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { report as reportTo } from "../surfaces/report.ts";
 
 /** Project-scoped ambient routing index, relative to the repo root. */
@@ -137,7 +138,7 @@ export function registerSelfcheck(
   pi: ExtensionAPI,
   opts: { version: string; sharedOk: boolean },
 ): void {
-  pi.registerCommand("perk-selfcheck", {
+  registerPerkCommand(pi, "perk-selfcheck", {
     description:
       "Verify perk's session wiring: the ambient index + managed AGENTS block reached the prompt.",
     handler: async (_args, ctx) => {
