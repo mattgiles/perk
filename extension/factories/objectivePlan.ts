@@ -27,6 +27,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig, resolveIssueBackendId } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
@@ -745,7 +746,7 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
     },
   });
 
-  pi.registerCommand("objective-reconcile", {
+  registerPerkCommand(pi, "objective-reconcile", {
     description:
       "Reconcile an objective's roadmap prose against a merged PR (post-land). Pass an objective " +
       "number (else the active objective, else the just-landed plan's objective).",
@@ -770,7 +771,7 @@ export function registerObjectivePlan(pi: ExtensionAPI, gating: ToolGating): voi
     },
   });
 
-  pi.registerCommand("objective-plan", {
+  registerPerkCommand(pi, "objective-plan", {
     description:
       "Start the objective plan factory: select the next node and author a bounded plan. " +
       "Pass an objective number (else the active objective) and optional --node ID.",

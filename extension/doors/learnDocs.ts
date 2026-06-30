@@ -13,6 +13,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import { type ColdJson, runColdDoor, stringField } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { render } from "../substrate/prompts.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -52,7 +53,7 @@ export function learnDocsGuidance(inboxPath: string, learnNumbers: string[]): st
 
 /** Register the warm learned-docs door: the `/learn-docs` command (no model tool). */
 export function registerLearnDocs(pi: ExtensionAPI): void {
-  pi.registerCommand("learn-docs", {
+  registerPerkCommand(pi, "learn-docs", {
     description:
       "Start the learned-docs plan factory: gather open perk:learn issues into an inbox and author " +
       "a docs/learned consolidation plan.",

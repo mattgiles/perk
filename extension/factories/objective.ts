@@ -19,6 +19,7 @@
 // best-effort and never throw (logged-not-thrown, like checkpoints).
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { branchOf, rebuildWorkflowState, WORKFLOW_STATE_TYPE } from "../substrate/workflowState.ts";
 import {
@@ -231,7 +232,7 @@ export function registerObjective(pi: ExtensionAPI, status: PerkStatusHandle): v
     }
   });
 
-  pi.registerCommand("objective", {
+  registerPerkCommand(pi, "objective", {
     description: "Show, set (`<id>`), or clear (`clear`) the active perk objective + budget.",
     handler: async (args, ctx) => {
       objectiveCommand(pi, ctx, args, status);

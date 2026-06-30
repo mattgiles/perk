@@ -29,6 +29,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { interceptConsoleError } from "../substrate/consoleCapture.ts";
 import { failFor } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
@@ -159,7 +160,7 @@ function routePrReviewOutcome(
 
 /** Register the warm `/pr-review-local` command. */
 export function registerPrReviewLocal(pi: ExtensionAPI): void {
-  pi.registerCommand("pr-review-local", {
+  registerPerkCommand(pi, "pr-review-local", {
     description:
       "Open the plannotator browser code review on the active PR (URL filled in automatically).",
     handler: async (_args, ctx) => {

@@ -29,6 +29,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ensureRunScratch, scratchDir } from "../substrate/cache.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { type CiCheck, loadPerkConfig } from "../substrate/config.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
 import { branchOf, rebuildWorkflowState } from "../substrate/workflowState.ts";
@@ -565,7 +566,7 @@ export function registerCiExecutor(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("ci", {
+  registerPerkCommand(pi, "ci", {
     description: "Run the project's configured CI checks and report results (never auto-fixes).",
     handler: async (args, ctx) => {
       const check = args.trim() === "" ? undefined : args.trim();

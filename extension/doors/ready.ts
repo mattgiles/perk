@@ -13,6 +13,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { report } from "../surfaces/report.ts";
 
@@ -73,7 +74,7 @@ export function registerReady(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("ready", {
+  registerPerkCommand(pi, "ready", {
     description: "Mark the active plan's draft PR ready for review (submit → ready).",
     handler: async (_args, ctx) => {
       const result = await markReady(pi, ctx);

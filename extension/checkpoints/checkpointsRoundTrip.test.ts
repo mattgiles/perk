@@ -199,7 +199,8 @@ test("/checkpoints notifies a single line (D8): done/total · ▸n <current step
   const h = await loadPerkSession({ cwd, sessionManager: SessionManager.open(file) });
   try {
     await h.invokeCommand("checkpoints");
-    const msg = h.notifies.find((m) => m.includes("checkpoints"));
+    // Skip the uniform `perk: checkpoints — running…` entry toast; assert the status line.
+    const msg = h.notifies.find((m) => m.includes("checkpoints") && m.includes("·"));
     assert.ok(msg, `notified: ${JSON.stringify(h.notifies)}`);
     assert.ok(!msg.includes("\n"), `one line, no newlines: ${JSON.stringify(msg)}`);
     assert.ok(
@@ -487,7 +488,8 @@ test("explicit `## Steps` plans: no generation, no injection, no (generated) suf
       "explicit steps → no steps-context injection",
     );
     await h.invokeCommand("checkpoints");
-    const msg = h.notifies.find((m) => m.includes("checkpoints"));
+    // Skip the uniform `perk: checkpoints — running…` entry toast; assert the status line.
+    const msg = h.notifies.find((m) => m.includes("checkpoints") && m.includes("·"));
     assert.ok(msg && !msg.includes("(generated)"), `no (generated) suffix: ${JSON.stringify(msg)}`);
   } finally {
     reg.unregister();

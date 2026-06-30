@@ -20,6 +20,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { registerPerkCommand } from "../substrate/command.ts";
 import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
@@ -324,7 +325,7 @@ export function registerAddress(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("address", {
+  registerPerkCommand(pi, "address", {
     description:
       "Classify PR review feedback (isolated child) and resolve threads (submit → address). " +
       "Pass --preview to classify only (take no action).",
