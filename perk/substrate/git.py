@@ -208,6 +208,33 @@ def fetch(repo: Path, *, remote: str = "origin") -> None:
     _run(["fetch", remote], cwd=repo, timeout=120)
 
 
+def upstream_ref(repo: Path) -> str | None:
+    """The current branch's upstream tracking ref (e.g. ``origin/main``), or ``None``.
+
+    Reads ``git rev-parse --abbrev-ref --symbolic-full-name @{upstream}`` — local refs only (no
+    network). Returns ``None`` when there is no upstream configured or HEAD is detached
+    (``GitError`` → ``None``), so callers degrade rather than break.
+    """
+    try:
+        out = _run(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], cwd=repo)
+    except GitError:
+        return None
+    ref = out.strip()
+    return ref or None
+
+
+def merge_ff_only(repo: Path, ref: str) -> bool:
+    """Fast-forward the current branch to ``ref`` (``git merge --ff-only <ref>``); best-effort.
+
+    Returns ``True`` on a clean fast-forward (exit 0), ``False`` otherwise (a non-fast-forward /
+    diverged history exits non-zero). Never raises on a non-FF result — runs through
+    ``_run_capture`` (mirroring ``delete_branches``). A ``TimeoutExpired`` still raises
+    ``GitError`` (inherited from ``_run_capture``). Mutates the working tree on success, so callers
+    must guard on a clean tree + a real upstream first.
+    """
+    return _run_capture(["merge", "--ff-only", ref], cwd=repo).returncode == 0
+
+
 def detect_trunk_branch(repo: Path, *, remote: str = "origin") -> str:
     """The repository's trunk branch name (mirrors erk's ``detect_trunk_branch``).
 

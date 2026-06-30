@@ -52,8 +52,30 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
             stage=k["stage"].id,
             prompt=k.get("prompt_override"),
             handoff_extra=k.get("handoff_extra"),
+            sync_main=k.get("sync_main"),
         ),
     )
+
+
+def test_sync_main_default_on_and_no_sync_opts_out(monkeypatch):
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    runner = CliRunner()
+    for args, expected in ((), True), (("--no-sync",), False):
+        launched: dict = {}
+        _stub_launch(monkeypatch, launched)
+        with runner.isolated_filesystem() as d:
+            _git_init(d)
+            result = runner.invoke(cli, ["objective", "plan", "7", "--json", *args])
+            assert result.exit_code == 0, result.output
+        assert launched["sync_main"] is expected
 
 
 def test_selects_next_node_marks_planning_and_launches(monkeypatch):

@@ -116,6 +116,12 @@ def _gather(repo_root: Path) -> tuple[Path, tuple[LearnIssueSummary, ...]]:
     help="Local (default) or a remote runner; learn-docs is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def docs_learn(
@@ -126,6 +132,7 @@ def docs_learn(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Consolidate open perk:learn issues into a docs/learned plan (read-only factory).
@@ -207,4 +214,5 @@ def docs_learn(
         # saves via the `/plan-save` *command* — which forwards only {plan, title}, dropping the
         # ids. Stashing them here makes the tool-vs-command save surface irrelevant.
         handoff_extra={"consumed_learn": list(learn_ids)},
+        sync_main=not no_sync,
     )

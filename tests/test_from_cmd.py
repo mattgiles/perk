@@ -61,8 +61,23 @@ def _stub_launch(monkeypatch, sink: dict) -> None:
             handoff_extra=k.get("handoff_extra"),
             run_id_override=k.get("run_id_override"),
             binding_trigger=k.get("binding_trigger"),
+            sync_main=k.get("sync_main"),
         ),
     )
+
+
+def test_no_sync_opts_out_of_main_checkout_sync(monkeypatch):
+    _authed(monkeypatch)
+    _stub_issue(monkeypatch)
+    runner = CliRunner()
+    for args, expected in ((), True), (("--no-sync",), False):
+        launched: dict = {}
+        _stub_launch(monkeypatch, launched)
+        with runner.isolated_filesystem() as d:
+            _git_init(d)
+            result = runner.invoke(cli, ["plan", "from", "7", "--json", *args])
+            assert result.exit_code == 0, result.output
+        assert launched["sync_main"] is expected
 
 
 def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):

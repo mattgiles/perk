@@ -69,6 +69,7 @@ from perk.run.launch.worktree import (
     ResolvedWorktree,
     Target,
     _fetch_best_effort,
+    _sync_main_checkout,
     resolve_base,
     resolve_plan_worktree_name,
     resolve_target,
@@ -141,6 +142,7 @@ def launch_stage(
     binding_trigger: str | None = None,
     run_id_override: str | None = None,
     preview: bool = False,
+    sync_main: bool = True,
 ) -> None:
     """Mint a run_id, write the handoff (+ plan-ref), position the worktree, and ``exec pi``.
 
@@ -174,6 +176,12 @@ def launch_stage(
     seed prompt to classify-only (take no action). Local-launch only: the remote dispatch path
     builds no seed prompt, so ``preview`` is inert on ``--remote``. Every other caller defaults
     ``False`` and is unaffected.
+
+    ``sync_main`` (default ``True``): a guarded fast-forward of the main checkout before launch,
+    for read-only ``worktree: none`` stages only (the planning/authoring stages that run in the
+    user's main checkout and otherwise do no remote sync). The ``--no-sync`` opt-out on the
+    interactive launchers flips it. Self-guarding + loud-but-non-fatal (see
+    :func:`_sync_main_checkout`); inert on every other stage and on ``--remote``/``--dry-run``.
     """
     target = resolve_target(stage, remote)  # raises `remote_blocked` on a local-only stage
     if target.is_remote:
@@ -189,6 +197,14 @@ def launch_stage(
     # `_emit_dry_run_preview` (no banner); `--remote` returned earlier in `_drive_remote_target`.
     if not dry_run:
         print_launch_banner(repo_root)
+
+    # Guarded fast-forward of the main checkout for read-only `worktree: none` planning/authoring
+    # stages (which run in the user's main checkout and otherwise never sync at launch). Before
+    # `resolve_worktree` (a no-op fetch for `worktree: none`), so ordering is irrelevant beyond
+    # "before exec". Self-guarding + loud-but-non-fatal; never reached on `--remote` (returned
+    # earlier) or `--dry-run` (previewed below instead).
+    if not dry_run and sync_main and stage.worktree == "none" and stage.mode == "read-only":
+        _sync_main_checkout(repo_root)
 
     resolved = resolve_worktree(
         repo_root=repo_root,
@@ -226,6 +242,7 @@ def launch_stage(
             rid=rid,
             argv=argv,
             setup=config.worktree_setup,
+            sync_main=sync_main,
         )
         return
 
@@ -314,6 +331,7 @@ def _emit_dry_run_preview(
     rid: str,
     argv: list[str],
     setup: list[str] | None = None,
+    sync_main: bool = True,
 ) -> None:
     """The side-effect-free ``--dry-run`` preview of a cold-local launch (user lines + the
     machine-readable JSON payload). The remote dispatch preview in :func:`_drive_remote_target`
@@ -321,6 +339,10 @@ def _emit_dry_run_preview(
 
     ``setup`` is the project's ``[worktree] setup`` commands; when the worktree would be freshly
     created and the list is non-empty, the planned commands are previewed (but never run).
+
+    ``sync_main`` mirrors the real-run gate: when the stage WOULD fast-forward the main checkout
+    (a read-only ``worktree: none`` stage with sync on), the preview emits a line + a
+    ``payload["sync_main"]`` flag (build-once preview-parity discipline).
     """
     user_output(f"would launch stage '{stage.id}' in {resolved.path}")
     user_output(f"  run_id={rid}  PERK_RUN_ID={rid}  argv={' '.join(argv)}")
@@ -334,6 +356,10 @@ def _emit_dry_run_preview(
     }
     if resolved.plan_ref is not None:
         payload["plan_ref"] = plan.PlanRefOut.from_domain(resolved.plan_ref).model_dump(mode="json")
+    would_sync = stage.worktree == "none" and stage.mode == "read-only" and sync_main
+    if would_sync:
+        user_output("  would sync main checkout (fast-forward) before launch")
+        payload["sync_main"] = would_sync
     # On a dry run the worktree is never created, so `resolved.created` is always False; preview
     # the setup commands when the stage WOULD freshly create the worktree (a `create` stage whose
     # path does not yet exist — the same condition that gates `run_worktree_setup` on a real run).
@@ -362,6 +388,7 @@ __all__ = [
     "_resolve_prompt",
     "_stage_model_argv",
     "_sweep_stale_pi_agent_locks",
+    "_sync_main_checkout",
     "launch_stage",
     "materialize_extensions",
     "materialize_plan_body",

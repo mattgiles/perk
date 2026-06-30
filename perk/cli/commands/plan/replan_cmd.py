@@ -116,6 +116,12 @@ def _seed_prompt(
     help="Local (default) or a remote runner; replan is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def replan(
@@ -126,6 +132,7 @@ def replan(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Re-author the open plan PLAN against the current codebase (read-only, in-place).
@@ -241,4 +248,5 @@ def replan(
         run_id_override=original_run_id,
         # replan borrows `plan`, so its binding trigger is the command (not stage:plan).
         binding_trigger="command:replan",
+        sync_main=not no_sync,
     )

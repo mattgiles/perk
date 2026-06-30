@@ -330,3 +330,35 @@ def test_detect_merge_conflicts_unparseable_conflict_is_still_unmergeable(
     assert probe.determined is True
     assert probe.mergeable is False  # the bug would have made this True
     assert probe.conflicts == ()
+
+
+# --- upstream_ref / merge_ff_only -----------------------------------------------------
+
+
+def test_upstream_ref_returns_tracking_ref(git_repo_with_remote):
+    clone, _remote, _advance = git_repo_with_remote
+    assert git.upstream_ref(clone) == "origin/main"
+
+
+def test_upstream_ref_none_without_upstream(git_repo):
+    # A repo with no remote/upstream configured -> None (never raises).
+    assert git.upstream_ref(git_repo) is None
+
+
+def test_merge_ff_only_fast_forwards_clean(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    advanced = advance()  # origin/main moves ahead of the clone's local main
+    git.fetch(clone)
+    assert git.merge_ff_only(clone, "origin/main") is True
+    assert _sha(clone) == advanced  # the working tree fast-forwarded
+
+
+def test_merge_ff_only_false_on_divergence(git_repo_with_remote):
+    clone, _remote, advance = git_repo_with_remote
+    # Local main commits independently while origin/main also advances -> diverged, no FF.
+    (clone / "local.txt").write_text("local\n", encoding="utf-8")
+    _git(clone, "add", ".")
+    _git(clone, "commit", "-qm", "local-only commit")
+    advance()
+    git.fetch(clone)
+    assert git.merge_ff_only(clone, "origin/main") is False

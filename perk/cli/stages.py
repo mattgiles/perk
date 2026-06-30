@@ -62,6 +62,12 @@ def make_stage_launcher(stage: Stage) -> click.Command:
         flag_value="",
         help="Local (default) or a remote runner (dispatch the stage to CI).",
     )
+    @click.option(
+        "--no-sync",
+        "no_sync",
+        is_flag=True,
+        help="Skip the pre-launch fast-forward of the main checkout.",
+    )
     @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
     @click.pass_context
     def _cmd(
@@ -70,8 +76,11 @@ def make_stage_launcher(stage: Stage) -> click.Command:
         worktree: str | None,
         dry_run: bool,
         remote: str | None,
+        no_sync: bool,
         pi_args: tuple[str, ...],
     ) -> None:
+        # --no-sync is inert for stages that aren't read-only `worktree: none` (e.g. the hidden
+        # `learn` launcher); launch_stage's gate ignores sync_main outside those stages.
         launch_stage(
             repo_root=require_repo(ctx),
             config=require_config(ctx),
@@ -80,6 +89,7 @@ def make_stage_launcher(stage: Stage) -> click.Command:
             dry_run=dry_run,
             remote=remote,
             pi_args=list(pi_args),
+            sync_main=not no_sync,
         )
 
     return _cmd

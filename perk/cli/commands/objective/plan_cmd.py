@@ -123,6 +123,12 @@ def _seed_prompt(
     help="Local (default) or a remote runner; objective plan is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def plan_objective(
@@ -134,6 +140,7 @@ def plan_objective(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Select the next objective node and author a bounded plan (read-only).
@@ -296,4 +303,5 @@ def plan_objective(
         # regardless of which save surface the model uses (the /plan-save command forwards only
         # {plan, title}). The factory already marked node.id `planning` above.
         handoff_extra={"objective_id": number, "node_id": node.id},
+        sync_main=not no_sync,
     )

@@ -139,6 +139,12 @@ def _adopt_seed_prompt(
     help="Local (default) or a remote runner; objective author is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def author_objective(
@@ -149,6 +155,7 @@ def author_objective(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Draft a new objective + roadmap in a read-only authoring session.
@@ -170,6 +177,7 @@ def author_objective(
             remote=remote,
             as_json=as_json,
             pi_args=pi_args,
+            sync_main=not no_sync,
         )
         return
 
@@ -199,6 +207,7 @@ def author_objective(
         remote=remote,
         pi_args=list(pi_args),
         prompt_override=_seed_prompt(),
+        sync_main=not no_sync,
     )
 
 
@@ -211,6 +220,7 @@ def _author_from(
     remote: str | None,
     as_json: bool,
     pi_args: tuple[str, ...],
+    sync_main: bool,
 ) -> None:
     """``objective author --from`` — adopt a pre-existing source in place (§8.30)."""
     try:
@@ -232,6 +242,7 @@ def _author_from(
                 remote=remote,
                 as_json=as_json,
                 pi_args=pi_args,
+                sync_main=sync_main,
             )
             return
 
@@ -339,6 +350,7 @@ def _author_from(
         pi_args=list(pi_args),
         prompt_override=seed,
         handoff_extra={"adopt_from": source_id},
+        sync_main=sync_main,
     )
 
 
@@ -361,6 +373,7 @@ def _author_from_file(
     remote: str | None,
     as_json: bool,
     pi_args: tuple[str, ...],
+    sync_main: bool,
 ) -> None:
     """Seed-from-file mode: read a local file as DATA and author a FRESH objective over it (no
     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
@@ -416,4 +429,5 @@ def _author_from_file(
         remote=remote,
         pi_args=list(pi_args),
         prompt_override=seed,
+        sync_main=sync_main,
     )

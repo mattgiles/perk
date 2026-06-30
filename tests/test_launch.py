@@ -984,3 +984,210 @@ def test_dry_run_surfaces_base_without_fetching(git_repo_with_remote, monkeypatc
     data = json.loads(capsys.readouterr().out)
     assert data["base"] == "origin/main"
     assert not (clone / ".worktrees" / "plan-42").exists()
+
+
+# --- main-checkout sync gating (read-only worktree:none stages) -----------------------
+
+
+class _SyncCalls:
+    """Typed recorder for the sync-helper probes (so a skip is asserted by a probe NOT reached)."""
+
+    def __init__(self) -> None:
+        self.fetch = 0
+        self.upstream_ref = 0
+        self.merge_ff_only: list[str] = []
+
+
+def _patch_sync_git(
+    monkeypatch,
+    *,
+    has_remote=True,
+    branch="main",
+    dirty=False,
+    upstream="origin/main",
+    ff=True,
+    fetch_raises=False,
+) -> _SyncCalls:
+    """Monkeypatch the sync helpers on `perk.run.launch.worktree.git` + record calls."""
+    calls = _SyncCalls()
+
+    def _fetch(_repo, **_k):
+        calls.fetch += 1
+        if fetch_raises:
+            raise GitError("offline")
+
+    def _merge(_repo, ref):
+        calls.merge_ff_only.append(ref)
+        return ff
+
+    def _upstream(_repo):
+        calls.upstream_ref += 1
+        return upstream
+
+    monkeypatch.setattr("perk.run.launch.worktree.git.has_remote", lambda _r, *a, **k: has_remote)
+    monkeypatch.setattr("perk.run.launch.worktree.git.current_branch", lambda _r: branch)
+    monkeypatch.setattr("perk.run.launch.worktree.git.is_dirty", lambda _r: dirty)
+    monkeypatch.setattr("perk.run.launch.worktree.git.fetch", _fetch)
+    monkeypatch.setattr("perk.run.launch.worktree.git.upstream_ref", _upstream)
+    monkeypatch.setattr("perk.run.launch.worktree.git.merge_ff_only", _merge)
+    # Keep the pre-exec npm-install warming offline + the exec a no-op.
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
+    )
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda _f, _a, _e: None)
+    return calls
+
+
+def _launch_plan(tmp_path, **kwargs):
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+        **kwargs,
+    )
+
+
+def test_sync_fast_forwards_clean_read_only_none_stage(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch)
+    _launch_plan(tmp_path)
+    assert calls.merge_ff_only == ["origin/main"]
+    assert "synced main → origin/main" in capsys.readouterr().err
+
+
+def test_sync_skips_on_dirty_tree(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch, dirty=True)
+    _launch_plan(tmp_path)
+    assert calls.merge_ff_only == []  # never fast-forwards a dirty tree
+    assert calls.fetch == 0  # short-circuits before the network
+    assert "uncommitted changes" in capsys.readouterr().err
+
+
+def test_sync_skips_on_detached_head(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch, branch=None)
+    _launch_plan(tmp_path)
+    assert calls.merge_ff_only == []
+    assert "detached HEAD" in capsys.readouterr().err
+
+
+def test_sync_skips_without_upstream(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch, upstream=None)
+    _launch_plan(tmp_path)
+    assert calls.fetch == 1  # fetched, then found no upstream
+    assert calls.merge_ff_only == []
+    assert "no upstream" in capsys.readouterr().err
+
+
+def test_sync_noop_without_remote_is_fully_offline(tmp_path, monkeypatch):
+    calls = _patch_sync_git(monkeypatch, has_remote=False)
+    _launch_plan(tmp_path)
+    assert calls.fetch == 0  # no remote -> no network at all
+    assert calls.merge_ff_only == []
+
+
+def test_sync_skips_on_divergence_but_launch_proceeds(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch, ff=False)
+    _launch_plan(tmp_path)  # must NOT raise — a non-FF only warns
+    assert calls.merge_ff_only == ["origin/main"]
+    assert "diverged" in capsys.readouterr().err
+
+
+def test_sync_skips_on_fetch_failure(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch, fetch_raises=True)
+    _launch_plan(tmp_path)
+    assert calls.fetch == 1
+    assert calls.merge_ff_only == []  # never reached after a fetch failure
+    assert "STALE" in capsys.readouterr().err
+
+
+def test_sync_disabled_by_sync_main_false(tmp_path, monkeypatch):
+    calls = _patch_sync_git(monkeypatch)
+    _launch_plan(tmp_path, sync_main=False)
+    assert calls.fetch == 0
+    assert calls.merge_ff_only == []
+
+
+def test_sync_not_run_for_read_write_none_stage(tmp_path, monkeypatch):
+    calls = _patch_sync_git(monkeypatch)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("save"),  # read-write, worktree: none
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert calls.fetch == 0
+    assert calls.merge_ff_only == []
+
+
+def test_sync_not_run_for_create_stage(git_repo_with_remote, monkeypatch):
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    calls = _patch_sync_git(monkeypatch)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),  # worktree: create
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    assert calls.merge_ff_only == []  # create keeps its own fresh-base path, not the sync
+
+
+def test_dry_run_previews_sync_for_qualifying_stage(tmp_path, monkeypatch, capsys):
+    calls = _patch_sync_git(monkeypatch)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    out = capsys.readouterr()
+    assert calls.fetch == 0 and calls.merge_ff_only == []  # dry-run never syncs
+    assert "would sync main checkout" in out.err
+    assert json.loads(out.out)["sync_main"] is True
+
+
+def test_dry_run_no_sync_preview_when_disabled(tmp_path, monkeypatch, capsys):
+    _patch_sync_git(monkeypatch)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("plan"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+        sync_main=False,
+    )
+    out = capsys.readouterr()
+    assert "would sync main checkout" not in out.err
+    assert "sync_main" not in json.loads(out.out)
+
+
+def test_dry_run_no_sync_preview_for_read_write_stage(tmp_path, monkeypatch, capsys):
+    _patch_sync_git(monkeypatch)
+    launch_stage(
+        repo_root=tmp_path,
+        config=_config(tmp_path),
+        stage=_stage("save"),
+        worktree=None,
+        dry_run=True,
+        remote=None,
+        pi_args=[],
+    )
+    out = capsys.readouterr()
+    assert "would sync main checkout" not in out.err
+    assert "sync_main" not in json.loads(out.out)
