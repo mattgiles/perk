@@ -10,6 +10,16 @@ from perk.convergence import init as init_mod
 from perk.convergence.init import extension_install as _ext_install
 
 
+@pytest.fixture(autouse=True)
+def _reset_launch_banner_guard():
+    """Reset the process-global once-per-process banner guard before every test so the latched
+    flag never leaks across tests (an emitter in one test must not no-op a later test)."""
+    import perk.run.launch.materialize as _m
+
+    _m._LAUNCH_BANNER_EMITTED = False
+    yield
+
+
 @pytest.fixture
 def stub_env(monkeypatch):
     """Make `perk init`'s external verification pass without a real/authed toolchain.

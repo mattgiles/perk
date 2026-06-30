@@ -333,6 +333,40 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         assert "looking up objective #7" in result.stderr
 
 
+def test_real_launch_banner_precedes_lookup(monkeypatch):
+    """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(
+        objectives,
+        "update_objective_node",
+        lambda **k: objectives.ObjectiveNodeUpdate(
+            number=k["number"], node_id=k["node_id"], comment_updated=True, dry_run=False
+        ),
+    )
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up")
+
+
+def test_dry_run_emits_no_banner(monkeypatch):
+    """The banner is gated off on `--dry-run` (the preview path owns the output)."""
+    _authed(monkeypatch)
+    monkeypatch.setattr(objectives, "get_objective", lambda **k: _state())
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert "skills \u00b7" not in result.stderr
+
+
 def test_url_argument_peeled_to_objective_id(monkeypatch):
     # A pasted GitHub issue URL is peeled to its id before resolution; the dry-run payload
     # carries the extracted "7" (the parser is pure — the backend still authorities resolution).

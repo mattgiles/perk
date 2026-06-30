@@ -170,6 +170,33 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
     assert "objective_save" in prompt
 
 
+def test_real_launch_banner_precedes_lookup(monkeypatch):
+    """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "replan", "42"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up")
+
+
+def test_dry_run_emits_no_banner(monkeypatch):
+    """The banner is gated off on `--dry-run` (the preview path owns the output)."""
+    store = _FakeStore(state=_state(_UNFINISHED_NODES))
+    _patch(monkeypatch, store)
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["objective", "replan", "42", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert "skills \u00b7" not in result.stderr
+
+
 def test_strips_hash_prefix(monkeypatch):
     store = _FakeStore(state=_state(_UNFINISHED_NODES))
     _patch(monkeypatch, store)

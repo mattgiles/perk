@@ -150,10 +150,21 @@ human/interactive path (see `objective-lifecycle.md`).
 intervention is **pre-exec**. pi's startup npm noise (`added N packages`) is pi's own output **after**
 exec and cannot be filtered; the only lever is to make pi have nothing to install.
 
-**Banner first.** `print_launch_banner(repo_root)` is emitted immediately after the cold-local
-invariant and **before** `resolve_worktree` (before the git-worktree-add), gated `if not dry_run`.
-Both counts (skills = dir count in `.agents/skills/`; extensions = package count in
-`.pi/settings.json`) are knowable up front from `repo_root`, so the first render is accurate.
+**Banner first.** `print_launch_banner(repo_root)` is **idempotent** — it latches a module-level
+guard (`_LAUNCH_BANNER_EMITTED`) on first emit and no-ops on every later call, so the banner never
+doubles. `launch_stage` emits it immediately after the cold-local invariant and **before**
+`resolve_worktree` (before the git-worktree-add), gated `if not dry_run` — the sole emitter for
+every non-narrating launch command. But four cold-door commands narrate a backend lookup
+(`log_step("looking up #X")`) *before* they call `launch_stage`, and that lookup is load-bearing
+(its result builds the seed), so it cannot move after the launch. Those four — `objective plan`,
+`objective replan`, `plan resume`, `plan replan` — therefore emit the banner **themselves**, gated
+to a real local launch (`if not dry_run and remote is None`), right before their `looking up`
+narration; `launch_stage`'s own call is then the no-op fallback. The guard is reset by an autouse
+`conftest.py` fixture so the process-global flag never leaks across tests. Both counts (skills =
+dir count in `.agents/skills/`; extensions = package count in `.pi/settings.json`) are knowable up
+front from `repo_root`, so the first render is accurate. The `remote is None` test (not
+`resolve_target` ordering) is the exact "this is a local launch" gate — `--remote` absent → `None`
+(local), `--remote`/`--remote=x` → `""`/`"x"` (both remote, no banner).
 
 **Pre-stage `.pi/npm`.** `materialize_extensions` clone-copies the converged repo-root `.pi/npm/` into
 the worktree so pi's `needsInstall` short-circuits (silent + faster). Copy (not symlink) preserves
