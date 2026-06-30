@@ -154,6 +154,36 @@ exception's boundary IS the rule's criterion. Recorded **in lockstep across the 
 records** (`docs/design/tui-charter.md`, `shared/contracts.md`, `AGENTS.md`) per the "amend the
 contract / update user docs, don't drift" rule, with glyph conformance during the port.
 
+## Taming a foreign extension's `console.error` TUI clobber (`/pr-review-local`)
+
+**The reusable insight — in-process vs subprocess clobber.** A foreign extension's terminal noise is
+interceptable **only** when it's the extension's own `console.error` (same Node process). plannotator's
+git/gh subprocesses use captured output, so they never leak; the only clobber is its in-process
+`console.error` painting over pi's managed TUI input box. **Verify this distinction first** — if the
+noise were inherited subprocess stdio, a JS console swap would be useless.
+
+**The console-swap helper pattern** (`extension/substrate/consoleCapture.ts`, `interceptConsoleError` —
+the first production console-swap; prior swaps were all test-local):
+
+- **Injected sink, never `ui.notify`.** The helper takes a caller-supplied sink and stays a pure
+  substrate module (keeps it out of the `surfaces/` allowlist that `surfacesGuard.test.ts` enforces);
+  the door passes a sink that routes through the already-allowed `report()` seam.
+- **Debounce-driven restore, with `quietMs` exceeding the producer's worst-case silence.** Setup emits
+  a burst then quiets, so restore after `quietMs` with no new line; start the timer immediately so a
+  zero-line case still restores; a `finally` backstop also restores. The shipped value was corrected
+  `1500ms → 6000ms` in review because the producer can pause ~4s between lines — **tune a debounce to
+  the producer's worst-case silence, not the typical gap.**
+- **Idempotent + never-clobber-a-newer-patcher restore** (reassign only if the slot is still our
+  replacement), **post-restore deactivation** (a stale reference delegates to the original), and a
+  **re-entrancy guard** (a `console.error` fired from inside the sink delegates to the original) —
+  defense-in-depth.
+- **Injectable scheduler** (defaults to `setTimeout`/`clearTimeout` with `unref`) for deterministic
+  fake-clock unit tests of debounce/reset/zero-line/idempotency.
+
+**Scope.** Headful-only — the interceptor installs only after the command's `hasUI` guard (raw
+`console.error` is what clobbers a TUI). No Python, no new tool/command/stage, no
+`shared/contracts.md` change.
+
 ## Cross-references
 
 - `extension/surfaces/surfaces.ts`, `extension/surfaces/report.ts` — the surfaces module (the only sanctioned

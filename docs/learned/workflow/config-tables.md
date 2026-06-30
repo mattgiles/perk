@@ -218,6 +218,41 @@ A repo committing `[trust] ci` auto-runs its own CI and suppresses even the head
 example so new repos stay safe-by-default. No Python parser mirrors `[trust]` — it is pure-TS /
 interior-only.
 
+## Single-plane (Python-only) launch-seam config feature (`[stages.<id>]`)
+
+The cross-cutting insight: **a config knob that only shapes the local cold-launch `pi` argv needs no
+cross-plane work.** `[stages.<id>]` lets a repo pass per-stage `pi` args (e.g. a per-stage `--model`)
+at the cold launch. The end-to-end recipe is single-plane (Python only):
+
+- **Parser** (`config.py`): a frozen stdlib `@dataclass` held **by identity** in both `ConfigModel`
+  (pydantic) and the frozen `Config` — the exact `user_bindings` precedent
+  (`revalidate_instances="never"` preserves instances; `to_domain()` does explicit attribute copy).
+  LBYL silent-omit (non-dict table → `{}`; blank/ill-typed sub-keys dropped; an empty sub-table stays
+  inert). **Unknown stage ids are KEPT at the parser** — registry validation is the doctor check's
+  job, which keeps `config.py` free of a registry import.
+- **Injection** (`launch_stage`): splice the per-stage model args into the **single** argv vector,
+  mirroring the existing `--approve` trust-arg precedent. Two free wins from building argv **once
+  before** the `dry_run` branch: `--dry-run --json` previews the injected flags, and
+  inject-before-pass-through gives user-`--model`-wins for free (see `cold-door-launch.md`'s
+  build-argv-once rule). The remote path early-returns before this block, so `--remote` carries no
+  per-stage args (a documented non-goal).
+- **Doctor check**: returns **`None` to contribute nothing when unconfigured** (keeps a clean repo's
+  `perk doctor` quiet), wired with a walrus conditional-append and **NOT** gated behind `if verify:`
+  (offline: reads config + the bundled registry). Malformed-TOML → `warn` deferring to the config
+  check; a registry error skips the stage-id check (the registry check owns that finding — don't
+  double-fail). Reuses an existing check group → no `GROUP_ORDER` change. No `--fix` arm (user-owned
+  config).
+
+Specifics worth keeping: the TS plane needs **no change** (`parseTomlSubset` keys `[stages.*]` as an
+unread section); overlay-aware for free (the recursive `_overlay` leaf-merges nested `[stages.<id>]`
+tables); `contracts.md` is deliberately **not** amended (it documents only cross-plane config — a
+Python-launch-only knob is out of scope) while `docs/user-docs/` + the `perk-expert` reference mirror
+**are** updated.
+
+Residual scope: `[stages.<id>]` applies only where a stage cold-launches an interactive pi session;
+deterministic `--json` workers launch no pi (inert there); warm in-session transitions inherit the
+launched session's model; the remote runner is unaffected.
+
 ## Cross-references
 
 - `extension/substrate/config.ts` — `parseTomlSubset` (string-values-only TS parser); `parseCiChecks` (`[[ci]]` → `CiCheck[]`)

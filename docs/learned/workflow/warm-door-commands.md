@@ -84,6 +84,43 @@ assert `h.registeredCommands().includes("<cmd>")`), and (b) **pure `*Guidance` u
 rendered text names the tool + required args, renders/omits optional args like `title`, and contains
 no hardcoded skill-pointer string). The canonical tool tests remain the behavioral coverage.
 
+## The `registerPerkCommand` entry-toast wrapper + test discipline for wrappers
+
+**The shared registration chokepoint.** A single `registerPerkCommand(pi, name, options)`
+(`extension/substrate/command.ts`) now wraps every warm perk command: it emits one transient entry
+toast (`perk: <cmd> — running…`) through the `report()` seam (**not** a direct `ctx.ui.notify`, so it
+satisfies the surfaces-discipline guard) synchronously **before** the first `await`, then awaits the
+original handler with no try/catch (errors propagate unchanged). Headless-safe for free via
+`report()`'s stderr fallback. Vendored `/btw` is the sole exclusion (its `ctx.ui.custom` overlay has
+its own UX).
+
+**Test-adaptation corollary.** Any command test asserting an exact notify array/count now gains one
+`info`-severity `perk: <cmd> — running…` entry — relax to substring / severity-filter assertions (the
+established fragile-count pattern; cross-reference the startup-banner note in `pi/tui-surfaces.md`).
+
+**Three reusable wrapper/door test traps:**
+
+1. **Grep ALL sites matching a finder pattern (false-green from an incomplete sweep).** When a change
+   makes a new notify fire on *every* command, a test finder like
+   `.find((m) => m.includes("<cmd>"))` now matches the new entry toast instead of the line it meant to
+   assert, so the downstream assertion passes **vacuously**. Fixing the first such finder does not
+   prove the others are covered — grep ALL sites matching the pattern. The discriminator here: the
+   real status line carries `·`, the entry toast does not, so re-narrowing with `&& m.includes("·")`
+   re-selects the intended line.
+2. **A synchronous spy can't prove a wrapper `await`s.** A sync handler spy records immediately
+   regardless of an omitted `await`. To prove a wrapper awaits to completion: make the inner handler
+   **yield control** and set a `completed` flag after the yield, then assert `completed` after awaiting
+   the wrapped handler. Reusable for any middleware-awaits-to-completion proof.
+3. **Fallback-path tests must assert the observable effect, not the absence of an exception.** The
+   headless (`!hasUI`) path must assert the expected `running…` line actually reached stderr, not
+   merely that the handler ran. When a code path has a distinct observable side effect (stderr line,
+   log, file write), assert that effect.
+
+**Door-restructure ripple.** Changing a warm command's deterministic flow breaks existing
+report-string assertions — when you restructure a door, grep its test for `notifies.some(...)` /
+report-string assertions and re-point them at the new flow's lines (e.g. a degraded-to-fallback path
+asserts the fallback report line).
+
 ## The warm gate-enter recipe (enter is distributed, exit is centralized)
 
 A warm door that seeds a read-only turn enters the gate with the **skip-if-active** recipe, proven

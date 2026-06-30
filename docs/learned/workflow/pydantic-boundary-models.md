@@ -344,6 +344,83 @@ The on-disk blob is the only durable contract, so the conversion must keep it by
 - **Verification that works:** generate every blob from a scratch dir on the branch AND on a `main`
   checkout, then `diff` the captured outputs — proves byte-identity in one shot.
 
+## Converter-idiom unification + the discipline guard
+
+**Free `_to_X(entry)` functions → `to_domain()` methods on parse models.** The substrate
+(`registry.py` / `providers.py` / `bindings.py` / `config.py`) was the last holdout using module-level
+free converters + inline assembly inside `load_*`; unify onto the `to_domain()` / `from_domain()`
+method idiom used everywhere else. Recipe + gotchas:
+
+- A per-entry model gets `to_domain(self) -> "DomainClass"`; a whole-file model gets
+  `to_domain(self, schema_version)` with `schema_version` as a **method param, not a model field**
+  (it's a structural pre-check, never parsed).
+- The **string forward-ref return annotation is mandatory** because the parse model precedes its
+  domain dataclass in source order.
+- The **collection type must match the domain field** (build a list where the domain field is a list,
+  a tuple where it's a tuple — don't blindly tuple-ify).
+- `ConfigModel.to_domain()` keeps the **explicit attribute-copy** (never `Config(**model.model_dump())`,
+  which recursively dicts nested instances and corrupts them).
+- Adding a *method* adds no field, so the schema-drift suite is unaffected — the unification is
+  schema-invisible.
+
+**`StrTuple` is redundant on LENIENT models, load-bearing only on STRICT.** On a `LenientParseModel`
+(`strict=False`) a plain `tuple[str, ...]` field coerces a JSON list → tuple natively, so the
+`BeforeValidator(list→tuple)` shim is pure redundancy (simplify it away). On a `StrictInputModel`
+(`strict=True`) a plain tuple field **rejects** a JSON list, so the shim is load-bearing — keep it.
+Byte-identity caveat: every stored blob/fixture carries JSON arrays which both forms turn into the
+identical tuple; the only behavioral delta is on a malformed non-list input (absent from all
+blobs/fixtures — verify before claiming byte-identity).
+
+**The `StrictBoundaryModel` removal → the AST discipline guard.** The legacy strict-as-domain base had
+zero production consumers (import-proven dead). The durable artifact is the new
+`tests/test_boundary_discipline.py` — an AST source-scan guard (mirrors `test_paths_guard.py`):
+`ast.walk` every module under the package, flag any `ClassDef` whose base is an `ast.Name` in
+`{BaseModel, StrictBoundaryModel}`, allowlist `boundary.py` only (it legitimately defines the
+role-named bases). `RootModel[...]` is an `ast.Subscript` (not flagged); role-named bases are
+different names (not flagged). Pair vacuousness self-checks + a positive arm (`class X(BaseModel)` IS
+flagged) + negative arms. A backstop-not-proof (matches written base names, not re-exported aliases) —
+see `source-scan-guards.md`.
+
+**contracts.md value-type drift after a behavior-neutral retype.** A cross-plane behavior-neutral
+refactor still leaves prose drift in `shared/contracts.md` value-type blocks that name old class
+identities (e.g. "`RunHandle` is a frozen Pydantic model" after it became a frozen `@dataclass` whose
+JSON boundary is a `LenientParseModel`). **Grep the type names when a domain type is
+renamed/retyped** and reconcile the value-type blocks.
+
+## Publishing generated JSON Schemas as a committed contract
+
+**A generated-artifact drift harness mirrors `tests/_golden.py`** (`tests/_schemas.py` is the 2nd
+instance). The recipe for any "commit a generated artifact as a reviewable contract":
+
+- An **ordered module-level registry tuple** = single source of truth for *what is published* (each
+  entry: relative path + model + mode), from which both the per-item drift tests and the coverage
+  test derive (never duplicate the list).
+- `render()` = `json.dumps(..., indent=2) + "\n"` with **no `sort_keys`** (pydantic emits declaration
+  order, matching `_golden.py`).
+- `assert_*` does **regen-then-ALWAYS-reread-and-assert** gated on a **dedicated** env flag
+  (`PERK_UPDATE_SCHEMAS`, kept separate from `PERK_UPDATE_GOLDEN`) so a regen producing garbage still
+  fails loudly.
+- The helper module has **no `test_` prefix** (so pytest doesn't collect it).
+- Add a no-orphans/no-gaps coverage test (glob committed files vs registry, both directions) + a
+  mode-correctness smoke.
+
+**Per-category schema MODE is the load-bearing decision** (dignified-pydantic §32). A JSON Schema *is*
+the external contract, so direction matters: parse/input models publish what perk **accepts** →
+validation mode (the default); output envelopes publish what `--json` consumers **receive** →
+serialization mode. Nested `*Out` / `*Entry` sub-models ride along in `$defs` automatically.
+
+**`shared/` force-include bundles a new subdir into both planes for free.** `shared/` is force-included
+wholesale into the wheel as `perk/_shared` and shipped in npm via the `shared/` files entry, so a new
+`shared/schemas/` subdir bundles into **both** planes with zero packaging-config change — only a guard
+assertion is needed (add one representative path to both the wheel and npm-pack packaging tests,
+reusing the existing build-once `xdist_group`).
+
+**The doc-amendment rule's deliberate exception for schema-publish nodes.** The "Python-internal
+byte-identical refactor touches neither `contracts.md` nor `docs/user-docs/`" discipline governs the
+byte-identical refactor nodes; a node that **defers** the schema-publish + contract/doc amendments
+makes those same-turn amendments **mandatory**, not drift (five surfaces in lockstep: `contracts.md`,
+`shared/README.md`, a new user-docs reference + its index link, and the `perk-expert` mirror).
+
 ## Cross-plane / docs posture
 
 These conversions are **Python-internal validation refactors with byte-identical observable
