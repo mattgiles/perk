@@ -112,6 +112,49 @@ def _fetch_best_effort(repo_root: Path) -> None:
         )
 
 
+def _sync_main_checkout(repo_root: Path) -> None:
+    """Guarded fast-forward of the **main checkout** before a read-only ``worktree: none`` launch.
+
+    Read-only planning/authoring stages run in the user's main checkout and do no remote sync at
+    launch, so a planning session could open against a stale tree (missing sibling nodes already
+    landed on trunk). This best-effort, loud-but-non-fatal sync (mirroring ``_fetch_best_effort``)
+    fast-forwards the current branch to its upstream — **only** when the checkout is clean, on a
+    branch, has an upstream, and can fast-forward. Any other condition warns and skips: it never
+    aborts the launch, never creates a merge commit, and never touches a dirty or detached tree
+    (the user's working state is sacred).
+    """
+    if not git.has_remote(repo_root):
+        return  # nothing to sync against (also keeps remote-less repos / the test suite offline)
+    branch = git.current_branch(repo_root)
+    if branch is None:
+        user_output("⚠ detached HEAD — skipping checkout sync")
+        return
+    if git.is_dirty(repo_root):
+        user_output(
+            "⚠ uncommitted changes — skipping checkout sync (commit or stash to pick up remote)"
+        )
+        return
+    try:
+        git.fetch(repo_root)
+    except GitError as exc:
+        user_output(
+            f"⚠ could not fetch origin ({exc}); using the LAST-KNOWN checkout state — it may be "
+            "STALE. Connect and re-run to sync the main checkout."
+        )
+        return
+    upstream = git.upstream_ref(repo_root)
+    if upstream is None:
+        user_output(f"⚠ branch '{branch}' has no upstream — skipping checkout sync")
+        return
+    if not git.merge_ff_only(repo_root, upstream):
+        user_output(
+            f"⚠ '{branch}' has diverged from {upstream} — skipping fast-forward "
+            "(reconcile manually)"
+        )
+        return
+    user_output(f"synced {branch} → {upstream}")
+
+
 def resolve_worktree(
     *,
     repo_root: Path,

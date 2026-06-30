@@ -146,6 +146,18 @@ draft PR ready for review (the deliberate review gate) — a worker-only command
 
 ## Command groups
 
+> **Pre-launch fast-forward (read-only planning/authoring).** The read-only planning and authoring
+> launchers — `perk plan` (bare), `perk plan replan`, `perk plan from`, `perk objective plan`,
+> `perk objective author` (incl. `--from`), `perk objective replan`, and `perk learn docs` — run in
+> your **main checkout** (not a fresh `plan-<id>` worktree). To avoid planning against a stale tree,
+> they **fast-forward the main checkout before launch** by default: a best-effort `git fetch`, then
+> `git merge --ff-only` of your branch's upstream — but **only** when the checkout is clean, on a
+> branch, has an upstream, and can fast-forward. Any other condition (dirty tree, detached HEAD, no
+> upstream, diverged history, no remote, offline) **warns and skips** — it never aborts the launch,
+> never creates a merge commit, and never touches a dirty or detached tree. Pass `--no-sync` to any
+> of these commands to opt out. (`perk plan resume` and `perk objective run` keep the default and
+> have no `--no-sync` flag.)
+
 ### `perk plan`
 
 Author and revise plans. Bare `perk plan` launches the read-only `plan` stage (a primed `pi`

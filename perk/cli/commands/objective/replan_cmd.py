@@ -149,6 +149,12 @@ def _seed_prompt(
     help="Local (default) or a remote runner; objective replan is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def replan_objective(
@@ -159,6 +165,7 @@ def replan_objective(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Re-author the objective OBJECTIVE_ARG as a superseding net-new objective (read-only).
@@ -305,6 +312,7 @@ def replan_objective(
         prompt_override=seed,
         handoff_extra={"supersedes": str(objective_id)},
         binding_trigger="command:objective-replan",
+        sync_main=not no_sync,
     )
 
 

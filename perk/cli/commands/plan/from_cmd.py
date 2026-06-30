@@ -123,6 +123,12 @@ def _seed_prompt(
     help="Local (default) or a remote runner; adoption is local-only (cold_remote:false).",
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.option(
+    "--no-sync",
+    "no_sync",
+    is_flag=True,
+    help="Skip the pre-launch fast-forward of the main checkout.",
+)
 @click.argument("pi_args", nargs=-1, type=click.UNPROCESSED)
 @click.pass_context
 def plan_from(
@@ -133,6 +139,7 @@ def plan_from(
     dry_run: bool,
     remote: str | None,
     as_json: bool,
+    no_sync: bool,
     pi_args: tuple[str, ...],
 ) -> None:
     """Adopt the pre-existing issue ISSUE in place as a perk plan (read-only authoring pass).
@@ -163,6 +170,7 @@ def plan_from(
                 remote=remote,
                 as_json=as_json,
                 pi_args=pi_args,
+                sync_main=not no_sync,
             )
             return
 
@@ -260,6 +268,7 @@ def plan_from(
         pi_args=list(pi_args),
         prompt_override=seed,
         handoff_extra={"adopt_from": issue_id},
+        sync_main=not no_sync,
     )
 
 
@@ -282,6 +291,7 @@ def _plan_from_file(
     remote: str | None,
     as_json: bool,
     pi_args: tuple[str, ...],
+    sync_main: bool,
 ) -> None:
     """Seed-from-file mode: read a local file as DATA and author a FRESH plan over it (no
     `adopt_from` handoff, no in-place adoption). Skips `require_github` — the only read is local;
@@ -335,4 +345,5 @@ def _plan_from_file(
         remote=remote,
         pi_args=list(pi_args),
         prompt_override=seed,
+        sync_main=sync_main,
     )
