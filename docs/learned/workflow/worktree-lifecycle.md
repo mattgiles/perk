@@ -73,6 +73,47 @@ posture is preserved.
 Branch deletes (local + remote) run **after** all removals — git refuses to delete a branch checked
 out in a live worktree.
 
+## Robust removal: self-heal slow + broken worktrees, then prune
+
+`git.worktree_remove` shells `git worktree remove [--force] <path>` (the heavy `rm -rf` of the
+gitignored `node_modules`/`.venv`/`.pi/npm/node_modules` trees) with a generous
+`_WORKTREE_REMOVE_TIMEOUT = 300` (the default 30 s is far too short). On a **recoverable** `GitError`
+it falls back to a Python `shutil.rmtree` (no subprocess timeout; copes with a partial tree):
+
+- **`_is_recoverable_remove_failure(message)`** matches exactly two refusals: `timed out` (a slow
+  `rm -rf` under disk contention) and `validation failed` (a broken worktree whose `.git` gitlink is
+  gone — which `--force` does **not** bypass). These are causally linked: a timed-out removal leaves
+  the residue that becomes the next run's validation failure, so the stale population only grows
+  until self-heal breaks the loop.
+- A **dirty refusal** (`contains modified or untracked files` / `use --force`) is deliberately NOT
+  matched, so it re-raises unchanged — the `shutil.rmtree` fallback never fires on it, and
+  `perk worktree remove` keeps protecting uncommitted work. (Safety test:
+  `test_worktree_remove_dirty_refusal_not_recovered`.)
+- **The fallback leaves a stale admin entry.** When `shutil.rmtree` removes the dir, the
+  `.git/worktrees/<id>` admin record lingers (git didn't run its teardown). So the contract is:
+  every caller MUST follow up with a **serialized** `git.worktree_prune(repo)`. The fallback does
+  NOT prune itself — `git worktree prune` rewrites the whole worktree set and is unsafe under the
+  concurrent removal pool.
+
+**Prune ordering is load-bearing.** Wipe calls `worktree_prune` once on the main thread *after* the
+removal pool and *before* the branch deletes: until the stale admin entry is pruned, git still
+believes the (deleted) dir has the plan branch checked out and refuses `git branch -D <branch>` with
+"checked out at …". This one serialized prune also sweeps the pre-existing orphan admin entries
+already on disk. It runs in the **non-dry-run path only** (it sits after the dry-run early return).
+`perk worktree remove` prunes after its single successful removal (a no-op when git's own removal
+succeeded).
+
+**Pool size.** `_MAX_REMOVE_WORKERS` is **8** (was 32): 32 concurrent `rm -rf`s of
+`node_modules`/`.venv` trees thrash the disk badly enough that individual removals starve and time
+out (producing the broken residue above); a smaller pool lets each finish on the primary git path so
+the `shutil.rmtree` fallback stays the exception, not the norm.
+
+**Gather guard for a fully-missing dir.** `_gather_facts` returns neutral facts
+(`is_dirty=False, has_pending_learn=False`) when `not wt_path.exists()`, before running
+`git.is_dirty` / `cache.has_marker` — a working dir that is entirely gone would otherwise let
+`git status` run against an unexpected `.git`-walk ancestor (or crash on a nonexistent cwd). Such an
+entry flows normally to classification; the end-of-pool prune clears its admin record.
+
 ## Branch deletion is best-effort, forced, and batched
 
 - **Local** — `git.delete_branches(repo, names, *, force=False) -> list[str]` runs one
@@ -162,7 +203,7 @@ is the sole signal under test.
 ## Cross-references
 
 - `perk/cli/commands/worktree/wipe_cmd.py` — `wipe_worktrees`, `_classify_worktree`, `WipeDecision`, `_wipe_impl`, `_gather_facts`, `_MAX_REMOVE_WORKERS`
-- `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_list`
+- `perk/substrate/git.py` — `delete_branch`, `delete_branches`, `delete_remote_branches`, `has_remote`, `_run_capture`, `worktree_remove`, `worktree_prune`, `worktree_list`, `_is_recoverable_remove_failure`, `_WORKTREE_REMOVE_TIMEOUT`
 - `docs/learned/workflow/plan-ref-lifecycle.md` — the plan-ref *binding* role of a worktree (distinct from filesystem batch ops)
 - `docs/learned/workflow/session-data.md` — the CliRunner-payload instance of the `.resolve()` rule
 - `docs/learned/workflow/cold-door-launch.md` — `run_worktree_setup`, the single canonical setup-execution path

@@ -34,4 +34,7 @@ def _remove_impl(*, repo_root: Path, worktree_root: Path, name: str, force: bool
         git.worktree_remove(repo_root, path, force=force)
     except GitError as exc:
         raise UserFacingCliError(f"git worktree remove failed: {exc}") from exc
+    # A fallback-path removal leaves a stale `.git/worktrees/<id>` admin entry; prune it. When
+    # git's own removal succeeded the prune is a harmless no-op.
+    git.worktree_prune(repo_root)
     user_output(click.style("✓ ", fg="green") + f"removed worktree {name}")

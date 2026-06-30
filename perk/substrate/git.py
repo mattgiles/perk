@@ -8,6 +8,7 @@ returning ``None`` on failure (the operation is the authoritative test).
 
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -404,13 +405,64 @@ def worktree_list(repo: Path) -> list[Worktree]:
     return _parse_worktrees(_run(["worktree", "list", "--porcelain"], cwd=repo))
 
 
+# Worktree removal shells a large `rm -rf` over the gitignored `node_modules`/`.venv`/
+# `.pi/npm/node_modules` trees a perk worktree carries — far more than the default 30 s.
+_WORKTREE_REMOVE_TIMEOUT = 300
+
+
+def _is_recoverable_remove_failure(message: str) -> bool:
+    """Whether a ``git worktree remove`` ``GitError`` is one of the two self-healable refusals.
+
+    Matches a slow `rm -rf` (``timed out``) and a broken worktree whose `.git` gitlink is gone
+    (``validation failed`` — which ``--force`` does NOT bypass). A *dirty* refusal
+    (``contains modified or untracked files`` / ``use --force``) is deliberately NOT matched, so
+    it re-raises and keeps `perk worktree remove` protecting uncommitted work.
+    """
+    lowered = message.lower()
+    return "timed out" in lowered or "validation failed" in lowered
+
+
 def worktree_remove(repo: Path, path: Path, *, force: bool) -> None:
-    """Remove the worktree at ``path``."""
+    """Remove the worktree at ``path``, self-healing the two recoverable git refusals.
+
+    Primary path: ``git worktree remove [--force] <path>`` with a generous
+    ``_WORKTREE_REMOVE_TIMEOUT`` (the heavy `rm -rf` of large gitignored trees). On a recoverable
+    ``GitError`` (slow removal that ``timed out``, or a broken worktree whose missing `.git`
+    fails ``validation``) it falls back to a Python ``shutil.rmtree`` (no subprocess timeout,
+    copes with partial trees). A non-recoverable ``GitError`` (the dirty-protection refusal)
+    re-raises unchanged.
+
+    **Contract:** when the fallback path is taken the working dir is gone but the stale
+    ``.git/worktrees/<id>`` admin entry lingers, so every caller MUST follow up with a
+    (serialized) ``worktree_prune``. The fallback does NOT prune itself — pruning rewrites the
+    whole worktree set and is unsafe under a concurrent removal pool, so it is the caller's job.
+    """
     args = ["worktree", "remove"]
     if force:
         args.append("--force")
     args.append(str(path))
-    _run(args, cwd=repo)
+    try:
+        _run(args, cwd=repo, timeout=_WORKTREE_REMOVE_TIMEOUT)
+    except GitError as exc:
+        if not _is_recoverable_remove_failure(str(exc)):
+            raise
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+            except OSError as os_exc:
+                raise GitError(f"worktree remove fallback failed: {os_exc}") from os_exc
+
+
+def worktree_prune(repo: Path) -> None:
+    """Clear stale ``.git/worktrees/<id>`` admin entries (``git worktree prune``).
+
+    Removes the admin records of worktrees whose working dir / `.git` gitlink is gone — including
+    the residue a ``worktree_remove`` fallback leaves behind. Raises ``GitError`` on failure.
+
+    **Serialize this** — ``git worktree prune`` rewrites the whole worktree set, so it must NOT
+    run concurrently with the removal pool; callers run it once on the main thread.
+    """
+    _run(["worktree", "prune"], cwd=repo)
 
 
 def _parse_worktrees(porcelain: str) -> list[Worktree]:

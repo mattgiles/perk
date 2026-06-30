@@ -512,15 +512,21 @@ List the repo's worktrees.
 
 ### `perk worktree remove NAME` (alias `rm`)
 
-Remove the worktree `NAME`. `--force` removes even with uncommitted changes.
+Remove the worktree `NAME`. `--force` removes even with uncommitted changes. After removal it also
+prunes the worktree's stale admin entry, so a worktree a prior interrupted removal left half-removed
+is still cleared.
 
 ### `perk worktree wipe`
 
 Remove all merged, safe-to-delete `plan-<N>` worktrees (and their branches). Each wiped worktree's
 **remote** branch on `origin` is also deleted (best-effort — already-deleted remote branches, e.g.
 from GitHub's auto-delete-head-branch-on-merge, are tolerated; an offline run just skips the remote
-step). Worktree removal and branch cleanup are parallelized/batched for speed. `--dry-run` previews
-removals; `--force` bypasses the safety guards (removes even if dirty or pending-learn).
+step). Worktree removal and branch cleanup are parallelized/batched for speed. Removal **self-heals**
+slow/huge worktrees (a `rm -rf` over large gitignored trees that would otherwise time out) and broken
+worktrees (a prior interrupted run left the `.git` gitlink missing) by falling back to a direct
+directory removal, then prunes the stale admin entries those leave behind — so a wipe is effective
+even on worktrees a half-removed prior run left in place. `--dry-run` previews removals; `--force`
+bypasses the safety guards (removes even if dirty or pending-learn).
 
 ### `perk state` (alias `st`)
 
