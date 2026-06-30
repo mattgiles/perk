@@ -461,6 +461,30 @@ elided). With `--json`, a stable normalization report (per-role counters + chunk
 envelope's `render` field (`null` unless `--render`); with the human summary, one `render:` line per
 role. `--render` and `--json` are independent.
 
+### `perk learn docs-sync`
+
+Regenerate the `docs/learned/` navigation from each doc's `title` + `read_when` frontmatter (the
+single source of truth). Writes two artifacts: the terse, ambient routing block in
+`.pi/APPEND_SYSTEM.md` (one line per doc, loaded into every session's system prompt) and the per-doc
+catalog table in `docs/learned/index.md` (one row per doc, linking the doc with a single-line *when to
+read* cue). Both wrap their generated region in `<!-- BEGIN perk docs-sync … -->` /
+`<!-- END perk docs-sync -->` markers, leaving a hand-editable preamble outside the markers untouched.
+Generation is deterministic and idempotent — only artifacts whose content changed are written, and
+re-running on a current tree is a no-op. `--dry-run` reports what would change without writing;
+`--json` emits a `{written, unchanged, dry_run}` envelope. Purely local (no GitHub/config). Exit `0`
+ok · `2` not-a-repo.
+
+### `perk learn docs-check`
+
+Verify the generated `docs/learned/` navigation is current, and report advisory hygiene. **Freshness**
+gates the exit: each artifact's marked region must match a fresh render (absent markers or a mismatch ⇒
+stale). **Hygiene** is advisory — always printed, never changing a fresh exit — and covers missing
+`title`/`read_when` frontmatter, copied-source-looking code blocks (a source-language fence with `≥ 10`
+non-blank lines; data-format/CLI fences are ignored), duplicated `read_when` cues, stale source
+pointers, and broken doc→doc links. Read-only and purely local. Exit `0` fresh · `1` stale (run
+`perk learn docs-sync`) · `2` not-a-repo. Freshness is intentionally **not** wired into `just ci` /
+`just test` — run `docs-check` on demand.
+
 ### `perk worktree` (alias `wt`)
 
 Create, list, and remove git worktrees: `create` (`new`), `list` (`ls`), `remove` (`rm`), `wipe`.
