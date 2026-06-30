@@ -16,7 +16,7 @@ from perk.state import cache
 from perk.substrate import git
 from perk.substrate.config import Config
 from perk.substrate.git import GitError
-from perk.substrate.output import user_output
+from perk.substrate.output import log_done, log_step, log_warn
 from perk.substrate.registry import Stage
 
 
@@ -103,11 +103,12 @@ def resolve_base(
 def _fetch_best_effort(repo_root: Path) -> None:
     """Fetch ``origin`` before basing a new branch; an offline failure is **non-fatal but warns
     loudly** (silent-off-stale-local is the bug this guards against)."""
+    log_step("fetching origin")
     try:
         git.fetch(repo_root)
     except GitError as exc:
-        user_output(
-            f"⚠ could not fetch origin ({exc}); basing this branch on the LAST-KNOWN origin ref "
+        log_warn(
+            f"could not fetch origin ({exc}); basing this branch on the LAST-KNOWN origin ref "
             "— it may be STALE. Connect and re-run, or pass --base, to start from up-to-date trunk."
         )
 
@@ -127,32 +128,30 @@ def _sync_main_checkout(repo_root: Path) -> None:
         return  # nothing to sync against (also keeps remote-less repos / the test suite offline)
     branch = git.current_branch(repo_root)
     if branch is None:
-        user_output("⚠ detached HEAD — skipping checkout sync")
+        log_warn("detached HEAD — skipping checkout sync")
         return
     if git.is_dirty(repo_root):
-        user_output(
-            "⚠ uncommitted changes — skipping checkout sync (commit or stash to pick up remote)"
-        )
+        log_warn("uncommitted changes — skipping checkout sync (commit or stash to pick up remote)")
         return
+    log_step("fetching origin")
     try:
         git.fetch(repo_root)
     except GitError as exc:
-        user_output(
-            f"⚠ could not fetch origin ({exc}); using the LAST-KNOWN checkout state — it may be "
+        log_warn(
+            f"could not fetch origin ({exc}); using the LAST-KNOWN checkout state — it may be "
             "STALE. Connect and re-run to sync the main checkout."
         )
         return
     upstream = git.upstream_ref(repo_root)
     if upstream is None:
-        user_output(f"⚠ branch '{branch}' has no upstream — skipping checkout sync")
+        log_warn(f"branch '{branch}' has no upstream — skipping checkout sync")
         return
     if not git.merge_ff_only(repo_root, upstream):
-        user_output(
-            f"⚠ '{branch}' has diverged from {upstream} — skipping fast-forward "
-            "(reconcile manually)"
+        log_warn(
+            f"'{branch}' has diverged from {upstream} — skipping fast-forward (reconcile manually)"
         )
         return
-    user_output(f"synced {branch} → {upstream}")
+    log_done(f"synced {branch} → {upstream}")
 
 
 def resolve_worktree(
@@ -205,12 +204,14 @@ def resolve_worktree(
         elif materialize:
             _fetch_best_effort(repo_root)  # network sync first so a fresh origin/* is seen
             resolved_base = resolve_base(repo_root, name, base, plan_base)
+            log_step(f"creating worktree {name} from {resolved_base or 'local HEAD'}")
             try:
                 git.worktree_add(
                     repo_root, path, branch=name, create_branch=True, base=resolved_base
                 )
             except GitError as exc:
                 raise UserFacingCliError(f"git worktree add failed: {exc}") from exc
+            log_done(f"created worktree {name}")
             created = True  # fresh creation only — gates the `[worktree] setup` hook
         else:  # dry-run create: resolve the base from local refs only (no fetch, no create)
             resolved_base = resolve_base(repo_root, name, base, plan_base)

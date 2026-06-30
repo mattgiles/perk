@@ -33,7 +33,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -154,6 +154,11 @@ def replan(
         launch.resolve_target(stage, remote)
 
         backend = resolve.resolve_issue_backend(repo_root)
+        # Narrate the backend lookup wait (one line covers the immediately-following
+        # `get_plan_body` too). The lookup runs on the dry-run path too (dry-run materializes the
+        # real artifact via these reads), so the narration is NOT gated on `dry_run`; the line goes
+        # to stderr, leaving the `--json` stdout payload byte-unchanged.
+        log_step(f"looking up plan #{plan_id}")
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

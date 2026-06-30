@@ -113,6 +113,58 @@ def test_launch_does_not_warm_on_dry_run(git_repo, monkeypatch, capsys):
     assert warmed == []  # --dry-run early-returns before the warm
 
 
+def test_install_step_resolves_done_when_install_happens(git_repo, monkeypatch, capsys):
+    """When the extension is absent and the warm actually installs (returns a change line), the
+    installing step resolves to a done milestone."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch.init,
+        "ensure_extension_install_present",
+        lambda repo_root, *, self_repo: "installed @mgiles/perk pre-launch",
+    )
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    err = capsys.readouterr().err
+    assert "installing perk extension" in err
+    assert "installed perk extension" in err  # the step resolved to ✓
+
+
+def test_install_step_resolves_warn_when_install_did_not_take(git_repo, monkeypatch, capsys):
+    """When the extension is absent and the warm returns None with the dir still absent (a swallowed
+    failure), the installing step resolves to a warn rather than dangling."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: None)
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: None)
+    monkeypatch.setattr(
+        launch.init, "ensure_extension_install_present", lambda repo_root, *, self_repo: None
+    )
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    err = capsys.readouterr().err
+    assert "installing perk extension" in err
+    assert "install failed" in err  # the step resolved to ⚠, never dangles
+
+
 def _launch_capturing_env(git_repo, monkeypatch) -> dict[str, str]:
     """Drive a local implement launch, returning the env handed to ``os.execvpe``."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
@@ -188,14 +240,15 @@ class _Result:
         self.returncode = returncode
 
 
-def test_run_worktree_setup_empty_runs_nothing(tmp_path, monkeypatch):
+def test_run_worktree_setup_empty_runs_nothing(tmp_path, monkeypatch, capsys):
     calls: list = []
     monkeypatch.setattr(launch.subprocess, "run", lambda *a, **k: calls.append((a, k)))
     launch.run_worktree_setup(tmp_path, [])
     assert calls == []
+    assert "running worktree setup" not in capsys.readouterr().err  # no header when empty
 
 
-def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch):
+def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch, capsys):
     calls: list = []
 
     def _run(argv, **kwargs):
@@ -204,6 +257,7 @@ def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch):
 
     monkeypatch.setattr(launch.subprocess, "run", _run)
     launch.run_worktree_setup(tmp_path, ["uv sync", "npm ci"])
+    assert "running worktree setup" in capsys.readouterr().err  # the header precedes the echoes
     assert [c[0] for c in calls] == [
         ["bash", "-lc", "uv sync"],
         ["bash", "-lc", "npm ci"],
@@ -474,9 +528,9 @@ def test_launch_sweeps_stale_lock_before_exec(git_repo, monkeypatch, tmp_path):
     assert execs == ["pi"]  # exec was reached
 
 
-def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch):
+def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch, capsys):
     """The cold door caches the plan body into the worktree so in-session checkpoints can
-    seed from its `## Steps` list."""
+    seed from its `## Steps` list, narrating the fetch wait + its cached milestone."""
     cache.write_plan_ref(git_repo, _PLAN_REF)
     config = Config(worktree_root=git_repo / ".worktrees")
     monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
@@ -495,6 +549,9 @@ def test_implement_materializes_plan_body_for_checkpoints(git_repo, monkeypatch)
     )
     wt = config.worktree_root / "plan-42"
     assert cache.plan_body_path(wt).read_text(encoding="utf-8").strip() == markdown.strip()
+    err = capsys.readouterr().err
+    assert "fetching plan #42 body" in err
+    assert "cached plan #42 body" in err
 
 
 def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys):
@@ -524,6 +581,30 @@ def test_implement_plan_body_fetch_is_best_effort(git_repo, monkeypatch, capsys)
     assert execs == ["pi"], "launch still proceeded"
     assert not cache.plan_body_path(wt).exists(), "no body cached on fetch failure"
     assert "could not fetch plan #42 body" in capsys.readouterr().err
+
+
+def test_implement_empty_plan_body_resolves_the_step(git_repo, monkeypatch, capsys):
+    """An empty body is a successful fetch with nothing to cache; the fetching step must still
+    resolve (to a warn) so it never dangles as a false 'stuck' signal."""
+    cache.write_plan_ref(git_repo, _PLAN_REF)
+    config = Config(worktree_root=git_repo / ".worktrees")
+    execs: list[str] = []
+    monkeypatch.setattr("perk.run.launch.os.chdir", lambda _p: None)
+    monkeypatch.setattr("perk.run.launch.os.execvpe", lambda f, a, e: execs.append(f))
+    monkeypatch.setattr("perk.backends.github.plans.get_plan_body", lambda **_k: "")
+    launch_stage(
+        repo_root=git_repo,
+        config=config,
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    wt = config.worktree_root / "plan-42"
+    assert execs == ["pi"]
+    assert not cache.plan_body_path(wt).exists()  # nothing cached for an empty body
+    assert "plan #42 body is empty" in capsys.readouterr().err
 
 
 def _seed_skills(repo_root: Path, *names: str) -> None:
@@ -725,9 +806,9 @@ def test_handoff_extra_is_merged_into_handoff(git_repo, monkeypatch):
     assert data["node_id"] == "1.1"
 
 
-def test_skills_mirror_no_longer_prints_success_line(tmp_path, capsys):
-    """The mirrored-count line is folded into the launch banner; a direct call that links a fresh
-    skill prints no `(skills: mirrored ...)` success line (the missing/empty warnings stay)."""
+def test_skills_mirror_prints_total_delivered_count(tmp_path, capsys):
+    """The mirror emits a `✓ mirrored N skills` milestone reporting the TOTAL delivered (not just
+    freshly linked) count, so it reads correctly on an idempotent resume."""
     repo_root = tmp_path / "repo"
     _seed_skills(repo_root, "perk-implement", "ruff")
     worktree = tmp_path / "wt"
@@ -736,7 +817,18 @@ def test_skills_mirror_no_longer_prints_success_line(tmp_path, capsys):
 
     # both skills were mirrored as symlinks
     assert (worktree / ".agents" / "skills" / "perk-implement").is_symlink()
-    assert "skills: mirrored" not in capsys.readouterr().err
+    assert "mirrored 2 skills" in capsys.readouterr().err
+
+
+def test_skills_mirror_count_is_total_not_freshly_linked_on_resume(tmp_path, capsys):
+    """A second mirror (idempotent resume, where `linked` would be 0) still reports the total."""
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "perk-implement", "ruff")
+    worktree = tmp_path / "wt"
+    materialize_skills(repo_root, worktree)
+    capsys.readouterr()  # drop the first run's output
+    materialize_skills(repo_root, worktree)
+    assert "mirrored 2 skills" in capsys.readouterr().err
 
 
 # --- launch banner -------------------------------------------------------------------------
@@ -823,7 +915,7 @@ def _seed_npm_install(repo_root: Path, *packages: str) -> None:
         )
 
 
-def test_materialize_extensions_stages_populated_source(tmp_path):
+def test_materialize_extensions_stages_populated_source(tmp_path, capsys):
     repo_root = tmp_path / "repo"
     worktree = tmp_path / "wt"
     _seed_npm_install(repo_root, "ext-a")
@@ -833,6 +925,7 @@ def test_materialize_extensions_stages_populated_source(tmp_path):
     staged = worktree / ".pi" / "npm" / "node_modules" / "ext-a" / "package.json"
     assert staged.is_file()
     assert json.loads(staged.read_text(encoding="utf-8"))["name"] == "ext-a"
+    assert "staged extensions" in capsys.readouterr().err  # the success milestone
 
 
 def test_materialize_extensions_idempotent_resume(tmp_path):

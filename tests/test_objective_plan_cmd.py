@@ -99,6 +99,7 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
+        assert "looking up objective #7" in result.stderr  # narrates the backend lookup wait
     # The next actionable node (1.2) is selected + marked planning, then launched with the seed.
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
@@ -324,10 +325,12 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["success"] is True and payload["dry_run"] is True
         assert payload["node"] == "1.2" and payload["marked_status"] == "planning"
         assert payload["skipped_claims"] == []  # always present, empty when no claims exist
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up objective #7" in result.stderr
 
 
 def test_url_argument_peeled_to_objective_id(monkeypatch):
@@ -343,7 +346,7 @@ def test_url_argument_peeled_to_objective_id(monkeypatch):
             ["objective", "plan", "https://github.com/o/r/issues/7", "--dry-run", "--json"],
         )
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["objective"] == "7"
+        assert json.loads(result.stdout)["objective"] == "7"  # stdout only (lookup line on stderr)
 
 
 def test_objective_required_when_number_omitted(monkeypatch):
@@ -364,7 +367,8 @@ def test_objective_not_found(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "99", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_not_found"
+        # Parse stdout: the real-path `looking up #99` line is on stderr (combined .output).
+        assert json.loads(result.stdout)["error_type"] == "objective_not_found"
 
 
 def test_no_actionable_node(monkeypatch):
@@ -383,11 +387,11 @@ def test_no_actionable_node(monkeypatch):
         # next-node path
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "no_actionable_node"
+        assert json.loads(result.stdout)["error_type"] == "no_actionable_node"
         # explicit non-actionable node path
         result2 = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result2.exit_code == 1
-        assert json.loads(result2.output)["error_type"] == "no_actionable_node"
+        assert json.loads(result2.stdout)["error_type"] == "no_actionable_node"
 
 
 def _parallel_state():
@@ -453,7 +457,7 @@ def test_dry_run_reports_skipped_claims(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["node"] == "1.2"
         assert payload["skipped_claims"] == ["1.1"]
 
@@ -526,7 +530,7 @@ def test_in_flight_node_reports_objective_in_flight(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_in_flight"
+        assert json.loads(result.stdout)["error_type"] == "objective_in_flight"
 
 
 def test_complete_objective_reports_complete_message(monkeypatch):
@@ -544,7 +548,7 @@ def test_complete_objective_reports_complete_message(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "no_actionable_node"
         assert "complete" in payload["message"]
 
@@ -594,7 +598,7 @@ def test_explicit_in_flight_node_rejected(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--node", "1.1", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_in_flight"
+        assert json.loads(result.stdout)["error_type"] == "objective_in_flight"
 
 
 def test_remote_blocked(monkeypatch):
@@ -605,7 +609,7 @@ def test_remote_blocked(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--remote", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "remote_blocked"
+        assert json.loads(result.stdout)["error_type"] == "remote_blocked"
 
 
 def test_not_a_repo_exit_2():

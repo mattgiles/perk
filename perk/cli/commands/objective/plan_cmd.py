@@ -34,7 +34,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -167,6 +167,10 @@ def plan_objective(
             require_github(ctx)
 
         store = resolve.resolve_objective_store(repo_root)
+        # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
+        # resolves the node via this read), so the narration is NOT gated on `dry_run`; the line
+        # goes to stderr, leaving the `--json` stdout payload byte-unchanged.
+        log_step(f"looking up objective #{number}")
         state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(

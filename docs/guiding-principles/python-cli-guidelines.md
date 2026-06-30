@@ -361,6 +361,36 @@ if user_confirm("Proceed?", default=False):
 
 *(Source: `cli/output-styling.md`.)*
 
+### 7.5 Leveled progress logs — narrate the waits on the critical path
+
+The cold-door pi-launch (`perk/run/launch/*` plus the launcher commands' pre-launch backend
+lookups) narrates its real work through a small **leveled-log vocabulary** in
+`perk/substrate/output.py`, each routed through `user_output` (→ stderr), **glyph-only (no ANSI
+color)**, indented two spaces so the lines sit in a tidy column under the launch banner:
+
+- `log_step(message)` → `  › {message}` — an action **starting** (a wait).
+- `log_done(message)` → `  ✓ {message}` — a milestone **completed**.
+- `log_warn(message)` → `  ⚠ {message}` — a degraded / skipped note.
+
+**The convention — a step earns a progress line iff both:** (a) it performs **perceptible
+blocking I/O** — a network round-trip (git fetch, a backend lookup, an npm install) or a
+non-trivial filesystem materialization (worktree add, the `.pi/npm` clone-copy, worktree-setup
+subprocesses); **and** (b) it is **on the critical path** of producing this session (its outcome
+shapes or gates the launched session, or it is a milestone the banner already promised). Place
+`log_step` immediately **before** the operation (so the user sees *where* the wait is) and
+`log_done` **after** when completion is a milestone worth confirming.
+
+Everything failing either test stays **silent**, in two explicit categories: **instant /
+local-only operations** (run_id mint, handoff/plan-ref writes, argv assembly, pure in-memory
+resolution) — narrating them would be dishonest and bury the lines that matter; and
+**best-effort side-telemetry the launched session never consumes** (the fire-and-forget Linear
+Agents-UI mirror) — a network call, but off the critical path. Because every narrated step is on
+the critical path, a `›` line that never becomes its `✓` genuinely pinpoints *where a launch is
+stuck*. Machine surfaces stay byte-unchanged because **progress is stderr-only** — the `--json`
+stdout payload is untouched even when a launcher-command lookup is narrated on the `--dry-run`
+path (the lookup I/O runs there too, so narrating only the real-launch path would be incoherent).
+Narrate the wait wherever the wait happens; never gate the narration on a flag the I/O ignores.
+
 ---
 
 ## 8. Command groups & the machine surface

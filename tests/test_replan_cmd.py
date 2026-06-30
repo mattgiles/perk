@@ -90,7 +90,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)  # stdout only: the lookup line is on stderr
         assert payload["success"] is True
         assert payload["plan"] == "42"
         assert payload["run_id"] == _RUN_ID
@@ -101,6 +101,8 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert scratch.is_file()
         text = scratch.read_text(encoding="utf-8")
         assert "<untrusted_plan>" in text and "EXISTING PLAN BODY" in text
+        # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
+        assert "looking up plan #42" in result.stderr
 
 
 def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
@@ -113,6 +115,7 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
+        assert "looking up plan #42" in result.stderr  # narrates the backend lookup wait
     assert launched["stage"] == "plan"  # borrows the plan stage
     assert launched["run_id_override"] == _RUN_ID  # re-enters the existing plan's run
     assert launched["binding_trigger"] == "command:replan"
@@ -182,7 +185,8 @@ def test_refuses_non_open_plan(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "plan_not_open"
+        # Parse stdout: the real-path `looking up #42` line is on stderr (combined .output).
+        assert json.loads(result.stdout)["error_type"] == "plan_not_open"
 
 
 def test_refuses_missing_plan(monkeypatch):
@@ -193,7 +197,7 @@ def test_refuses_missing_plan(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "plan_not_found"
+        assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
 def test_refuses_plan_without_run_id(monkeypatch):
@@ -204,7 +208,7 @@ def test_refuses_plan_without_run_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "no_run_id"
+        assert json.loads(result.stdout)["error_type"] == "no_run_id"
 
 
 def test_refuses_empty_body(monkeypatch):
@@ -215,7 +219,7 @@ def test_refuses_empty_body(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "no_plan_body"
+        assert json.loads(result.stdout)["error_type"] == "no_plan_body"
 
 
 def test_remote_blocked(monkeypatch):
@@ -248,7 +252,7 @@ def test_accepts_hash_prefixed_plan_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "replan", "#42", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["plan"] == "42"
+        assert json.loads(result.stdout)["plan"] == "42"  # stdout only (lookup line on stderr)
 
 
 def test_not_a_repo_exit_2():
