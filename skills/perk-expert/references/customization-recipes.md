@@ -41,8 +41,8 @@ every binding you want active, not just additions.
 
 ## Override a subagent model (`[subagents]`)
 
-Fixed-key table — affects only perk's own four agents (`pr-reviewer`, `review-classifier`,
-`objective-explorer`, `conflict-resolver`). An absent key uses the agent's frontmatter default.
+Fixed-key table — affects only perk's own five agents (`pr-reviewer`, `review-classifier`,
+`objective-explorer`, `conflict-resolver`, `learn-analyst`). An absent key uses the agent's frontmatter default.
 
 ```toml
 [subagents]

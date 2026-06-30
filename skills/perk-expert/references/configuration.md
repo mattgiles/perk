@@ -191,6 +191,7 @@ default.
 | `review-classifier` | string (model id) | _(frontmatter default)_ |
 | `objective-explorer` | string (model id) | _(frontmatter default)_ |
 | `conflict-resolver` | string (model id) | _(frontmatter default)_ |
+| `learn-analyst` | string (model id) | _(frontmatter default)_ |
 
 ```toml
 [subagents]
