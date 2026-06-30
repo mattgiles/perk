@@ -60,11 +60,25 @@ subagents** — you analyze and report.
    - **validation-risk** — *What stayed risky.* What was validated vs left fragile? Untested edge
      cases, assumptions that held by luck, things that passed CI but could regress. Reason about the
      risk; do **not** run the test suite or build.
-   - **existing-docs** — *Doc routing.* Using the manifest's `existing_docs[]` inventory (learned
-     docs / user docs / skills), decide whether the bundle's learnings map onto an **existing** doc
-     (update it) or a **stale/duplicate** doc (flag it), versus a genuinely new area. **Verify a
-     source pointer before recommending it** — read the candidate doc and confirm it really is the
-     right (or stale) target; do not disambiguate on a filename alone.
+   - **existing-docs** — *Doc routing (de-dup is candidate-vs-corpus).* Decide whether **the
+     learning being captured** already lives in an **existing** doc — using the manifest's full
+     `existing_docs[]` inventory (learned docs / user docs / skills) **plus the manifest's
+     `docs_findings`** (the deterministic rich scan). Read `docs_findings`: `stale_pointers` (a
+     doc's verified ghost source pointer — file/symbol gone), `broken_doc_paths` (a doc→doc/catalog
+     link that no longer resolves), `duplicate_groups` (the rare exact title/routing-cue collision
+     guard). **The scan is corpus-wide and high-recall** — learned docs intentionally carry
+     historical pointers, so weigh findings **by relevance to the candidate doc(s) for THIS
+     capture**; surface the rest as `fyi`, never inflate. Carry forward two clauses:
+     - **The default is VERIFY, not HARMONIZE.** Never recommend a disambiguation note /
+       consolidation without first confirming (via `docs_findings` **or** your own `read`) that
+       both docs reference real, existing code — verify the source pointers before disambiguating.
+     - **One ghost + one real = delete the ghost.** When two docs overlap, compare their
+       `stale_pointers`: the doc that is phantoms is the ghost → `STALE_DOC` on it, **not** a
+       harmonizing `UPDATE_EXISTING_DOC` on both.
+     Decision routing: a topical match against an otherwise-valid doc → `UPDATE_EXISTING_DOC`
+     (`target` = its path); stale pointers / broken links on a doc you'd update → still
+     `UPDATE_EXISTING_DOC` (also fix them); a doc that is *mostly* phantoms → `STALE_DOC`. Do not
+     disambiguate on a filename alone — `read` the candidate doc to confirm the target.
 
    **Investigation license.** You **may and should** use `read`/`grep`/`find`/`ls` and read-only
    `bash` (e.g. `git log`, `git show`, `git grep`) to ground a candidate in the **actually merged

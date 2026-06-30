@@ -20,6 +20,12 @@ from perk.boundary import OutputModel
 from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
+from perk.learn.docs_scan import (
+    BrokenDocPath,
+    DocFindings,
+    DuplicateGroup,
+    StalePointer,
+)
 from perk.learn.evidence import DocEntry, EvidenceBundle, EvidenceSource, gather_evidence
 from perk.learn.normalize import (
     BoilerplateDigest,
@@ -132,6 +138,61 @@ class DocEntryOut(OutputModel):
         return cls(kind=entry.kind, path=entry.path, title=entry.title, snippet=entry.snippet)
 
 
+class StalePointerOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`StalePointer` (order load-bearing)."""
+
+    doc: str
+    pointer: str
+    reason: str
+
+    @classmethod
+    def from_domain(cls, ptr: StalePointer) -> "StalePointerOut":
+        return cls(doc=ptr.doc, pointer=ptr.pointer, reason=ptr.reason)
+
+
+class BrokenDocPathOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`BrokenDocPath` (order load-bearing)."""
+
+    doc: str
+    target: str
+
+    @classmethod
+    def from_domain(cls, broken: BrokenDocPath) -> "BrokenDocPathOut":
+        return cls(doc=broken.doc, target=broken.target)
+
+
+class DuplicateGroupOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`DuplicateGroup` (order load-bearing)."""
+
+    basis: str
+    key: str
+    docs: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, group: DuplicateGroup) -> "DuplicateGroupOut":
+        return cls(basis=group.basis, key=group.key, docs=group.docs)
+
+
+class DocFindingsOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`DocFindings` (order load-bearing)."""
+
+    stale_pointers: tuple[StalePointerOut, ...]
+    broken_doc_paths: tuple[BrokenDocPathOut, ...]
+    duplicate_groups: tuple[DuplicateGroupOut, ...]
+
+    @classmethod
+    def from_domain(cls, findings: DocFindings) -> "DocFindingsOut":
+        return cls(
+            stale_pointers=tuple(StalePointerOut.from_domain(s) for s in findings.stale_pointers),
+            broken_doc_paths=tuple(
+                BrokenDocPathOut.from_domain(b) for b in findings.broken_doc_paths
+            ),
+            duplicate_groups=tuple(
+                DuplicateGroupOut.from_domain(d) for d in findings.duplicate_groups
+            ),
+        )
+
+
 class BoilerplateDigestOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`BoilerplateDigest` (order load-bearing)."""
 
@@ -200,6 +261,7 @@ class EvidenceBundleOut(OutputModel):
     bundle_dir: str | None
     sources: tuple[EvidenceSourceOut, ...]
     existing_docs: tuple[DocEntryOut, ...]
+    docs_findings: DocFindingsOut
     render: RenderReportOut | None = None
 
     @classmethod
@@ -216,6 +278,7 @@ class EvidenceBundleOut(OutputModel):
             bundle_dir=bundle.bundle_dir,
             sources=tuple(EvidenceSourceOut.from_domain(s) for s in bundle.sources),
             existing_docs=tuple(DocEntryOut.from_domain(d) for d in bundle.existing_docs),
+            docs_findings=DocFindingsOut.from_domain(bundle.docs_findings),
             render=None if render is None else RenderReportOut.from_domain(render),
         )
 
@@ -239,9 +302,13 @@ def _render_human(bundle: EvidenceBundle, render: RenderReport | None = None) ->
         }
     )
     docs = len(bundle.existing_docs)
+    findings = bundle.docs_findings
     user_output(
         f"plan {plan_status}, pr {pr_status}, planning {planning_summary}, "
-        f"{impl_runs} impl run(s), docs: {docs}"
+        f"{impl_runs} impl run(s), docs: {docs} "
+        f"(stale-ptr: {len(findings.stale_pointers)}, "
+        f"broken-link: {len(findings.broken_doc_paths)}, "
+        f"dup-groups: {len(findings.duplicate_groups)})"
     )
     if render is not None:
         for report in render.sessions:

@@ -11,6 +11,7 @@ from perk.backends import resolve
 from perk.backends.issue_backend import PlanState
 from perk.cli.cli import cli
 from perk.cli.commands.learn import evidence_cmd
+from perk.learn.docs_scan import DocFindings
 from perk.learn.evidence import EvidenceBundle, EvidenceSource
 from perk.state import cache
 
@@ -78,7 +79,13 @@ def test_evidence_json_envelope(monkeypatch):
         "bundle_dir",
         "sources",
         "existing_docs",
+        "docs_findings",
         "render",
+    }
+    assert set(data["docs_findings"]) == {
+        "stale_pointers",
+        "broken_doc_paths",
+        "duplicate_groups",
     }
     assert data["render"] is None
     assert data["success"] is True and data["skipped"] is False
@@ -117,6 +124,47 @@ def test_evidence_skip_arm(monkeypatch):
     data = json.loads(result.output)
     assert data["skipped"] is True
     assert data["sources"] == [] and data["existing_docs"] == []
+    assert data["docs_findings"] == {
+        "stale_pointers": [],
+        "broken_doc_paths": [],
+        "duplicate_groups": [],
+    }
+
+
+def test_evidence_json_serializes_docs_findings(monkeypatch):
+    # Plant a phantom source pointer + a broken catalog link; assert both ride the envelope.
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _git_init(d)
+        cache.write_plan_ref(root, _REF)
+        (root / "perk/run/launch").mkdir(parents=True)  # module-split: launch.py is gone
+        learned = root / "docs/learned"
+        learned.mkdir(parents=True)
+        (learned / "x.md").write_text(
+            "---\ntitle: X\nread_when: x\n---\nSee `perk/run/launch.py::gone`.\n",
+            encoding="utf-8",
+        )
+        (learned / "index.md").write_text("- [Ghost](workflow/ghost.md)\n", encoding="utf-8")
+        monkeypatch.setattr(
+            resolve,
+            "resolve_issue_backend",
+            lambda r: _FakeBackend({"run_id": "01RUN_P", "impl_run_ids": []}),
+        )
+        monkeypatch.setattr(github, "list_prs_for_branch", lambda **k: ())
+        result = runner.invoke(cli, ["learn", "evidence", "--json"])
+    assert result.exit_code == 0
+    findings = json.loads(result.output)["docs_findings"]
+    assert findings["stale_pointers"] == [
+        {
+            "doc": "docs/learned/x.md",
+            "pointer": "perk/run/launch.py::gone",
+            "reason": "missing-file",
+        }
+    ]
+    assert findings["broken_doc_paths"] == [
+        {"doc": "docs/learned/index.md", "target": "workflow/ghost.md"}
+    ]
 
 
 def test_evidence_no_plan_ref_exits_1(monkeypatch):
@@ -166,6 +214,7 @@ def _bundle_with_session(repo_root: Path) -> EvidenceBundle:
             EvidenceSource(category="existing-docs", label="inventory", status="missing"),
         ),
         existing_docs=(),
+        docs_findings=DocFindings(),
     )
 
 

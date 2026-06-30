@@ -26,13 +26,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-import yaml
-
 from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackend, IssueBackendError, PlanState
-from perk.boundary import LenientParseModel
 from perk.github import GitHubError
+from perk.learn.docs_scan import (
+    DocEntry,
+    DocFindings,
+    _rel,
+    scan_docs_richly,
+    scan_existing_docs,
+)
 from perk.learn.export import export_session_jsonl
 from perk.learn.sessions import ImplementationRun, resolve_plan_sessions
 from perk.run import launch
@@ -42,14 +46,9 @@ from perk.substrate.output import user_output
 
 SourceStatus = Literal["found", "missing", "ambiguous"]
 
-_SNIPPET_LEN = 240
-
-# The three conventional existing-docs roots scanned by `scan_existing_docs`. Top-level `skills/`
-# is deliberately excluded — it is perk's own codebase, not the workflow-managed skill surface;
-# `.perk/skills/` is the repo-authored skill surface.
-_LEARNED_GLOB = ("docs/learned", "**/*.md")
-_USER_DOCS_GLOB = ("docs/user-docs", "**/*.md")
-_SKILLS_GLOB = (".perk/skills", "*/SKILL.md")
+# `DocEntry`, the doc-scan helpers, and the rich `DocFindings` family live in the dependency-light
+# leaf `perk.learn.docs_scan`; re-exported above so existing call sites import them from here
+# unchanged. `scan_docs_richly` / the findings sub-types are re-exported for the same reason.
 
 
 @dataclass(frozen=True)
@@ -65,18 +64,9 @@ class EvidenceSource:
 
 
 @dataclass(frozen=True)
-class DocEntry:
-    """One inventoried existing doc: its kind, repo-relative path, and (best-effort) metadata."""
-
-    kind: str  # "learned" | "user-doc" | "skill"
-    path: str
-    title: str | None
-    snippet: str | None
-
-
-@dataclass(frozen=True)
 class EvidenceBundle:
-    """The full gathered manifest. A skip yields ``skipped=True`` with empty source/doc tuples."""
+    """The full gathered manifest. A skip yields ``skipped=True`` with empty source/doc tuples
+    and an empty ``docs_findings``."""
 
     skipped: bool
     skip_reason: str | None
@@ -84,127 +74,7 @@ class EvidenceBundle:
     bundle_dir: str | None
     sources: tuple[EvidenceSource, ...]
     existing_docs: tuple[DocEntry, ...]
-
-
-class _DocFrontmatter(LenientParseModel):
-    """The untrusted read edge for any inventoried doc's YAML frontmatter.
-
-    Serves a learned doc (``title``/``read_when``) and a skill (``name``/``description``); the
-    lenient base (``extra="ignore"``) drops every other frontmatter key a doc may carry.
-    """
-
-    title: str | None = None
-    read_when: str | None = None
-    name: str | None = None
-    description: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Pure existing-docs inventory
-# ---------------------------------------------------------------------------
-
-
-def scan_existing_docs(repo_root: Path) -> tuple[DocEntry, ...]:
-    """Inventory the three conventional docs roots; deterministic (sorted by path), never raises.
-
-    ``docs/learned/**/*.md`` (frontmatter ``title``/``read_when``), ``docs/user-docs/**/*.md``
-    (first ``# `` heading + first paragraph), ``.perk/skills/*/SKILL.md`` (frontmatter
-    ``name``/``description``). Non-existent roots yield nothing.
-    """
-    entries: list[DocEntry] = []
-    entries.extend(_scan_root(repo_root, "learned", _LEARNED_GLOB))
-    entries.extend(_scan_root(repo_root, "user-doc", _USER_DOCS_GLOB))
-    entries.extend(_scan_root(repo_root, "skill", _SKILLS_GLOB))
-    return tuple(sorted(entries, key=lambda e: e.path))
-
-
-def _scan_root(repo_root: Path, kind: str, glob: tuple[str, str]) -> list[DocEntry]:
-    root = repo_root / glob[0]
-    if not root.is_dir():
-        return []
-    out: list[DocEntry] = []
-    for path in root.glob(glob[1]):
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        title, snippet = _doc_metadata(kind, text)
-        out.append(DocEntry(kind=kind, path=_rel(repo_root, path), title=title, snippet=snippet))
-    return out
-
-
-def _doc_metadata(kind: str, text: str) -> tuple[str | None, str | None]:
-    """Best-effort ``(title, snippet)`` for a doc; never raises (malformed → ``(None, None)``)."""
-    if kind in ("learned", "skill"):
-        front = _frontmatter_dict(text)
-        if not front:
-            return None, None
-        try:
-            meta = _DocFrontmatter.model_validate(front)
-        except ValueError:
-            return None, None
-        if kind == "skill":
-            return meta.name, _truncate(meta.description)
-        return meta.title, _truncate(meta.read_when)
-    return _user_doc_metadata(text)
-
-
-def _user_doc_metadata(text: str) -> tuple[str | None, str | None]:
-    """A user-doc has no frontmatter: title = first ``# `` heading, snippet = first paragraph."""
-    title: str | None = None
-    snippet: str | None = None
-    paragraph: list[str] = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if title is None and line.startswith("# "):
-            title = line[2:].strip()
-            continue
-        if title is not None:
-            if line:
-                paragraph.append(line)
-            elif paragraph:
-                break
-    if paragraph:
-        snippet = _truncate(" ".join(paragraph))
-    return title, snippet
-
-
-def _frontmatter_dict(text: str) -> dict[str, object]:
-    """Parse a doc's leading ``---``-delimited YAML frontmatter mapping; ``{}`` when absent or
-    malformed (mirrors the ``repo_skills.py`` splitter — never raises)."""
-    if not text.startswith("---\n"):
-        return {}
-    lines = text.split("\n")
-    end = next((i for i in range(1, len(lines)) if lines[i] == "---"), None)
-    if end is None:
-        return {}
-    try:
-        parsed = yaml.safe_load("\n".join(lines[1:end]))
-    except yaml.YAMLError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
-
-
-def _rel(repo_root: Path, path: Path) -> str:
-    """``path`` relative to ``repo_root`` (POSIX-stable), else the absolute string."""
-    try:
-        return path.relative_to(repo_root).as_posix()
-    except ValueError:
-        return str(path)
-
-
-def _truncate(value: str | None) -> str | None:
-    """A bounded single-line snippet (``≈240`` chars), or ``None`` for an empty/absent value."""
-    if not value:
-        return None
-    flat = " ".join(value.split())
-    if not flat:
-        return None
-    if len(flat) <= _SNIPPET_LEN:
-        return flat
-    return flat[: _SNIPPET_LEN - 1].rstrip() + "…"
+    docs_findings: DocFindings
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +102,7 @@ def gather_evidence(repo_root: Path, plan_ref: plan.PlanRef) -> EvidenceBundle:
             bundle_dir=None,
             sources=(),
             existing_docs=(),
+            docs_findings=DocFindings(),
         )
 
     bundle_dir = cache.scratch_dir(repo_root) / "learn-evidence"
@@ -252,6 +123,7 @@ def gather_evidence(repo_root: Path, plan_ref: plan.PlanRef) -> EvidenceBundle:
         bundle_dir=_rel(repo_root, bundle_dir),
         sources=tuple(sources),
         existing_docs=docs,
+        docs_findings=scan_docs_richly(repo_root),
     )
 
 
