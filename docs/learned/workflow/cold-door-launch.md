@@ -144,6 +144,43 @@ It ends in `os.execvpe("pi", …)` — the CLI *becomes* pi, and nothing after t
 **cannot** compose a *local* launch (it would never come back); landing therefore stays the
 human/interactive path (see `objective-lifecycle.md`).
 
+## Launch banner + worktree `.pi/npm` pre-staging (the exec-wall, applied two ways)
+
+**The exec-wall reaffirmed.** `launch_stage` ends in `os.execvpe` — perk *becomes* pi, so all
+intervention is **pre-exec**. pi's startup npm noise (`added N packages`) is pi's own output **after**
+exec and cannot be filtered; the only lever is to make pi have nothing to install.
+
+**Banner first.** `print_launch_banner(repo_root)` is emitted immediately after the cold-local
+invariant and **before** `resolve_worktree` (before the git-worktree-add), gated `if not dry_run`.
+Both counts (skills = dir count in `.agents/skills/`; extensions = package count in
+`.pi/settings.json`) are knowable up front from `repo_root`, so the first render is accurate.
+
+**Pre-stage `.pi/npm`.** `materialize_extensions` clone-copies the converged repo-root `.pi/npm/` into
+the worktree so pi's `needsInstall` short-circuits (silent + faster). Copy (not symlink) preserves
+per-worktree isolation. The two npm worlds never overlap: repo-root `node_modules` = perk's own dev
+deps; `.pi/npm/` = pi's extension install root only.
+
+**Reorder gotcha (safe-move discipline).** `ensure_extension_install_present` moved to **before** the
+worktree block — safe because it is idempotent and depends on neither `env` nor `chdir`, but the
+load-bearing *reason* it had to move: the repo-root install must be fully warmed before
+`materialize_extensions` clones it.
+
+**The partial-tree cache hazard (general lesson).** The clone uses a hardlink ladder (`copytree` with
+`os.link`, falling back to a deep copy; `shutil.Error` subclasses `OSError`). A **presence-only**
+idempotency resume guard combined with a writer that leaves a partial tree on a mid-copy failure would
+**permanently cache corruption** (a half-copied package can satisfy a presence check yet fail to
+load). Fix: `rmtree(dst, ignore_errors=True)` in the failure branch so a failed stage degrades to a
+fresh in-session install. **General rule: a presence-only resume guard requires its writer to clean up
+partial state on failure, or it caches corruption.**
+
+**Posture + test gotchas.** Loud-but-non-fatal + idempotent (mirrors `materialize_skills`); TTY-gated
+styling (dim only when stderr is a TTY and not `NO_COLOR`, since `user_output` writes to stderr) keeps
+`--json`/piped/CI output escape-code-free. The end-to-end ordering test is **non-deterministic unless
+`ensure_extension_install_present` is monkeypatched to a no-op** (unstubbed it can genuinely
+network-install into repo-root `.pi/npm`, flipping the "not staged" warning path the assertion depends
+on). The banner was pinned byte-for-byte against the approved wordmark via a `/tmp` capture before
+committing (box-drawing glyphs are easy to transcribe wrong).
+
 ## Refactoring launch/run behind byte-exact pins
 
 The node-4.3 dignified sweep of `perk/run/launch.py` / the run worker established three constraints:

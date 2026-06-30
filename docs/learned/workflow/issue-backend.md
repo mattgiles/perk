@@ -155,6 +155,22 @@ callers. The `[issues]` plan named only one `reconstruct_plan_ref` caller as nee
 `implement_cmd.py`, `run_worker.py`, `objective/run_cmd.py::_dispatch_stage_remote`). Making the
 kwarg required is what surfaced them loudly — the type checker/test suite forces completeness.
 
+## Growing a protocol signature — even DEFAULTED params ripple to two test sites
+
+Adding two **defaulted** params (`decision` / `target`) to the `create_learn_issue` **protocol** broke
+two structurally-different test sites, each caught by a **different** gate:
+
+- **ty (not pytest):** a conformant fake stopped conforming to the protocol → `invalid-assignment` at
+  the annotated binding. **Defaulted params don't make a fake conformant — the fake's signature must
+  grow too.** Surfaces ONLY under `ty check`, never at runtime or in pytest.
+- **pytest:** a kwarg-**recorder** delegation test does an exact-dict equality on captured kwargs, so
+  the two new kwargs (`decision: None, target: None`) must be added to the expected dict.
+
+**Census rule when growing an issue-backend protocol signature:** update (a) every conformant fake's
+signature AND (b) every kwarg-recorder exact-dict assertion. `grep "def create_learn_issue"` finds the
+fakes; only `ty check tests perk` + full pytest **together** catch both arms. Cross-reference
+`learn-evidence-pipeline.md` for the feature that triggered this.
+
 ## Doctor arm-mapping over a collapsed error type
 
 The resolver deliberately collapses `tomllib.TOMLDecodeError` into `IssueBackendError` (consumers
