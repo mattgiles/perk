@@ -130,7 +130,7 @@ def _classification_line(issue: LearnIssueSummary) -> str:
 def _scan_section(inventory: tuple[DocEntry, ...], findings: DocFindings) -> list[str]:
     """The docs-inbox ``## Existing docs (scan)`` section: the 3-root inventory + advisory findings.
 
-    Surfaces node-5.1's `scan_existing_docs` / `scan_docs_richly` output so the docs plan can do
+    Surfaces the `scan_existing_docs` / `scan_docs_richly` output so the docs plan can do
     cleanup-first + UPDATE-vs-NEW placement against the real corpus.
     """
     lines = ["## Existing docs (scan)", ""]

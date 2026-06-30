@@ -13,8 +13,8 @@ create/update ``docs/learned/<category>/*.md`` and regenerate the routing (``doc
 **Curator AND verifier.** The gather filter is the *default* route; the factory still applies the
 knowledge-placement hierarchy and, when a doc-destined learning actually belongs in
 code/comment/docstring/schema/user-docs, **emits a ``SHOULD_BE_CODE`` follow-up step** instead of
-forcing a learned doc (the original node requirement). The inbox is widened with each learning's
-captured classification + the node-5.1 existing-docs scan (cleanup-first + UPDATE-vs-NEW).
+forcing a learned doc. The inbox is widened with each learning's captured classification + the
+existing-docs scan (cleanup-first + UPDATE-vs-NEW).
 
 The read-only factory session reads the materialized inbox via the ``read`` tool — the read-only
 bash allowlist excludes ``gh``/``perk``, so this cold door performs every GitHub read up front.
