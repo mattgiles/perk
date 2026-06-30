@@ -426,8 +426,8 @@ findings and posts once) — the reviewer children no longer call it directly.
 ### `perk learn`
 
 Capture and consolidate learnings. Bare `perk learn` launches the `learn` stage (a primed `pi`
-session); its `capture`, `docs`, and `evidence` verbs are the cold workers the warm doors delegate
-to.
+session); its `capture`, `code`, `docs`, and `evidence` verbs are the cold workers the warm doors
+delegate to.
 
 ### `perk learn capture`
 
@@ -440,9 +440,27 @@ unchanged (the classification lives on the issue, not the capture result).
 
 ### `perk learn docs`
 
-Consolidate open perk:learn issues into a `docs/learned` plan (a read-only factory). `--gather`
-materializes the inbox and emits `{inbox_path, learn_numbers}` without launching (the warm path);
-`--worktree`, `--dry-run`, `--remote` (local-only), and `--json` are also accepted.
+Consolidate the **doc-destined** open perk:learn issues into a `docs/learned` plan (a read-only
+factory). The cold door partitions the open issues by their captured `decision`: every
+classification except a pre-stamped `SHOULD_BE_CODE` (those route to `perk learn code`; legacy /
+unclassified default to docs) lands here. The inbox carries each learning's classification line
+(`decision` + optional `target`) plus an existing-docs scan (inventory + stale pointers / broken
+links / duplicate cues) for cleanup-first placement. The factory remains a **curator and verifier**:
+it still emits a `SHOULD_BE_CODE` follow-up step when a doc-destined learning actually belongs in
+code/comment/docstring/schema/user-docs, and regenerates the routing via `perk learn docs-sync`
+(never by hand). `--gather` materializes the inbox and emits `{inbox_path, learn_numbers}` without
+launching (the warm path); `--worktree`, `--dry-run`, `--remote` (local-only), and `--json` are also
+accepted.
+
+### `perk learn code`
+
+Route the pre-stamped `SHOULD_BE_CODE` open perk:learn issues into a code plan (a read-only factory,
+the additive sibling of `perk learn docs`). Gathers only the issues `/learn` classified
+`SHOULD_BE_CODE` and materializes a **lean** inbox (classification + `target`, no docs scan); the
+factory authors a bounded plan that lands each insight in its real code home (a type/constant,
+comment, docstring, schema, or user-doc) after verifying the `target` against the codebase. Options
+are identical to `perk learn docs` (`--gather`, `--worktree`, `--dry-run`, `--remote` local-only,
+`--json`). An empty inbox exits non-zero, cross-hinting `perk learn docs`.
 
 ### `perk learn evidence`
 

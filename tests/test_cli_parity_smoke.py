@@ -115,6 +115,7 @@ EXPECTED_SURFACE: dict[str, object] = {
         "doctor": [("workflow", ())],
         "learn": [
             ("capture", ()),
+            ("code", ()),
             ("docs", ()),
             ("docs-check", ()),
             ("docs-sync", ()),

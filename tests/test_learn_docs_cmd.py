@@ -10,10 +10,19 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from perk import github
+from perk import github, plan
 from perk.backends.github import plans
 from perk.cli.cli import cli
 from perk.run import launch
+
+
+def _learn_body(text: str, *, decision: str | None = None, target: str | None = None) -> str:
+    """A learn-issue body with a stamped learn-header (the gather-time classification route)."""
+    header = plan.render_learn_header(
+        run_id="01RID", created="t", plan=1, decision=decision, target=target
+    )
+    return f"{text}\n\n{header}"
+
 
 _INBOX_REL = ".perk/workflow/scratch/learn-docs-inbox.md"
 
@@ -149,3 +158,97 @@ def test_not_a_repo_exit_2():
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 2
         assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+def test_docs_factory_filters_out_should_be_code(monkeypatch):
+    """The docs factory pre-routes (filters out) pre-stamped SHOULD_BE_CODE issues; everything
+    else (incl. legacy/unclassified) is doc-destined and consumed here."""
+    _authed(monkeypatch)
+    issues = (
+        plans.LearnIssueSummary(number=45, title="L45", url="u/45", body="legacy unclassified"),
+        plans.LearnIssueSummary(
+            number=46,
+            title="L46",
+            url="u/46",
+            body=_learn_body("doc one", decision="NEW_DOC"),
+        ),
+        plans.LearnIssueSummary(
+            number=47,
+            title="L47",
+            url="u/47",
+            body=_learn_body("code one", decision="SHOULD_BE_CODE", target="perk/foo.py"),
+        ),
+    )
+    _stub_list(monkeypatch, issues=issues)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["learn", "docs", "--json"])
+        assert result.exit_code == 0, result.output
+        # 47 (SHOULD_BE_CODE) is filtered out; 45 (legacy) + 46 (NEW_DOC) stay.
+        assert launched["handoff_extra"] == {"consumed_learn": ["45", "46"]}
+        text = (Path(d) / _INBOX_REL).read_text(encoding="utf-8")
+        assert "Learning #45" in text and "Learning #46" in text
+        assert "Learning #47" not in text
+
+
+def test_docs_inbox_carries_classification_and_scan(monkeypatch):
+    """The inbox renders the per-issue classification line + the existing-docs scan section
+    (with a finding seeded into the corpus)."""
+    _authed(monkeypatch)
+    issues = (
+        plans.LearnIssueSummary(
+            number=46,
+            title="L46",
+            url="u/46",
+            body=_learn_body("doc one", decision="NEW_DOC", target="docs/learned/x/y.md"),
+        ),
+    )
+    _stub_list(monkeypatch, issues=issues)
+
+    def boom_launch(**k):
+        raise AssertionError("--gather must not launch")
+
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        # Seed a learned doc with a stale source pointer so scan_docs_richly emits a finding.
+        doc = Path(d) / "docs" / "learned" / "cat" / "slug.md"
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text(
+            "---\ntitle: T\nread_when: when\n---\n\n"
+            "See `perk/totally_missing.py::ghost` for the detail.\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(cli, ["learn", "docs", "--gather", "--json"])
+        assert result.exit_code == 0, result.output
+        text = (Path(d) / _INBOX_REL).read_text(encoding="utf-8")
+        # The perk-derived classification line + target above the verbatim block.
+        assert "**classification:** NEW_DOC" in text
+        assert "→ target: `docs/learned/x/y.md`" in text
+        # The existing-docs scan section + the stale-pointer finding.
+        assert "## Existing docs (scan)" in text
+        assert "docs/learned/cat/slug.md" in text
+        assert "perk/totally_missing.py::ghost" in text
+
+
+def test_docs_seed_retains_verifier_and_cleanup_language(monkeypatch):
+    """The docs seed keeps the cleanup-first / docs-sync language AND the retained
+    SHOULD_BE_CODE follow-up + placement-hierarchy verifier language."""
+    _authed(monkeypatch)
+    _stub_list(monkeypatch)
+    launched: dict = {}
+    _stub_launch(monkeypatch, launched)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["learn", "docs", "--json"])
+        assert result.exit_code == 0, result.output
+    prompt = launched["prompt"] or ""
+    assert "docs-sync" in prompt
+    assert "cleanup-first" in prompt.lower()
+    assert "SHOULD_BE_CODE" in prompt
+    assert "placement hierarchy" in prompt.lower()

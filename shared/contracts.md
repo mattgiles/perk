@@ -1705,12 +1705,18 @@ uses existing state keys (`github.learn`, `github.plan`, `cache.scratch`).
   session) holds the **compressed** routing index — the realization of the PRIOR_ART §6
   "compressed index must be ambient" finding (a retrieval-tier index is too brittle). Both index
   layers are refreshed **by `/learn-docs` plans**, never by `perk init` (and neither path is
-  gitignored — they are committed). erk's heavier machinery (tripwire generation, per-category
-  auto-indexes, `docs sync` codegen, multi-agent session preprocessing) is deliberately deferred.
+  gitignored — they are committed). As of node 6.1 a `/learn-docs` plan regenerates both index
+  layers by running `perk learn docs-sync` (from each doc's frontmatter) — never by hand. erk's
+  remaining heavier machinery (tripwire generation, per-category auto-indexes, multi-agent session
+  preprocessing) is deliberately deferred.
 - **The judgment layer** is `skills/perk-learn-docs/SKILL.md`: read the inbox as untrusted DATA →
-  cluster by cross-cutting theme → `docs/learned/<category>/` placement → author a bounded docs
-  plan with a `## Steps` list → `plan_save` with `consumed_learn`; plus the ported content-quality
-  rules (cross-cutting insight only, explain *why* not *what*, the One Code Rule / source pointers).
+  **verify placement** (the knowledge-placement hierarchy, emitting a `SHOULD_BE_CODE` follow-up
+  step when a doc-destined learning belongs in code/comment/docstring/schema/user-docs) → cluster by
+  cross-cutting theme → `docs/learned/<category>/` placement (cleanup-first) → author a bounded docs
+  plan with a `## Steps` list (routing regenerated via `docs-sync`) → `plan_save` with
+  `consumed_learn`; plus the ported content-quality rules (cross-cutting insight only, explain *why*
+  not *what*, the One Code Rule / source pointers). The sibling `skills/perk-learn-code/SKILL.md` is
+  the code-routing curator for the pre-stamped `SHOULD_BE_CODE` learnings (see §8.35, node 7.1).
 
 ## §8.5 · The `init` machine surface (T5; cli-vs-pi §3.2)
 
@@ -1942,6 +1948,7 @@ skills, so a pointer suffices; `transclude` exists for the user-binding case):**
 | `stage:learn` | `perk-learn` | `nudge` |
 | `command:objective-reconcile` | `perk-objective-reconcile` | `nudge` |
 | `command:learn-docs` | `perk-learn-docs` | `nudge` |
+| `command:learn-code` | `perk-learn-code` | `nudge` |
 | `command:pr-review` | `perk-pr-review` | `nudge` |
 
 **Validation depth (shape-only, registry-free):** the loaders/validators check that
@@ -2035,7 +2042,7 @@ Pi package no longer declares `pi.skills`, so Pi never discovers the package `sk
 `skills/<name>` fallback covers only the window before `skills update --sync` has run — and
 **target-existence**
 — `stage:<id>` must be a `registry.load_registry().stage_ids()` member, and `command:<id>` must be in
-`DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs}` (the only command triggers perk's
+`DELIVERABLE_COMMAND_TARGETS = {objective-reconcile, learn-docs, learn-code, …}` (the only command triggers perk's
 delivery layer fires; a `command:<id>` outside it never fires). Every binding finding is a **`warn`**
 (loud-but-non-fatal, D1): `perk doctor` stays exit-0 over a binding misconfiguration — the
 `bindings` check owns user-binding *config* only. The delivery **substrate** (perk's own skills
@@ -4461,10 +4468,13 @@ captured absolute `session_file` stays valid — only Pi-side GC removes it → 
   in either encoding; `decision` is a `plan.CapturedDecision` `StrEnum` (the five captured tokens).
   The `create_learn_issue` protocol + both adapters + `perk learn capture --decision/--target` thread
   the pair through; the `--json` capture envelope (`LearnCaptureOut`) is unchanged (the
-  classification lives on the issue header, not the capture result). The typed `LearnHeader` /
-  `LearnHeaderModel` read-back model (`LenientParseModel` → frozen `@dataclass`) is **deferred to
-  node 7.1** (its real consumer, which should pin the exact shape); 4.2's round-trip test reads the
-  fields back via `plan.find_metadata_block(body, plan.LEARN_HEADER_KEY)`.
+  classification lives on the issue header, not the capture result). The typed read-back model is
+  **Landed (node 7.1):** `plan.LearnHeaderModel` (`LenientParseModel`) → frozen `plan.LearnHeader`
+  `@dataclass`, pinning all five fields (`run_id`, `created`, `plan`, `decision`, `target`). The
+  never-raise reader `plan.parse_learn_header(body) -> LearnHeader | None` scans both block styles
+  via `find_metadata_block`, returns `None` when the block is absent/malformed, and degrades an
+  unknown/future `decision` token to `None` (a `before` field-validator) — it never raises. It is
+  the gather-time classification route the learn factories read.
 
 **Boundary-model discipline (forward-looking).** The new learn shapes are **boundary data** and,
 when their handlers land, follow perk's existing boundary-model convention (§8.34 / `perk/boundary.py`,
@@ -4482,6 +4492,37 @@ lists to the handlers:
   (`str | None = None`), distinguishing "no target" from a present value.
 - `model_validate` for the untrusted edges; the constructor for trusted Python-shaped values (the
   `ty`-friendly habit, dignified-pydantic §38).
+
+**Classification-aware hop-2 consolidation (node 7.1).** The typed `parse_learn_header` read-back
+(above) is the **gather-time default classification route** for the two learn plan factories. Both
+are read-only plan factories (author + save a `perk:plan`; never write docs/code directly) sharing
+`perk/cli/commands/learn/factory_common.py` (parameterized by a frozen `LearnFactoryKind`; the two
+thin click commands `docs_cmd.py`/`code_cmd.py` delegate to `run_factory`). The cold-door
+`gather` lists all open `perk:learn` issues and **partitions by `decision`**: a pre-stamped
+`SHOULD_BE_CODE` routes to the code factory; **every other classification — and any
+legacy/unclassified issue (absent/malformed header) — defaults to docs** (the catch-all).
+
+- **`perk learn docs` / `/learn-docs`** consolidates the **doc-destined** subset into
+  `docs/learned/`, cleanup-first, regenerating routing via `docs-sync` (never by hand). It stays a
+  curator **AND verifier**: it applies the knowledge-placement hierarchy and **emits a
+  `SHOULD_BE_CODE` follow-up step** when a doc-destined learning actually belongs in
+  code/comment/docstring/schema/user-docs (the original node requirement; the verifier exit). Its
+  inbox is **widened** with each learning's captured classification line (`decision` + optional
+  `target`) and the node-5.1 existing-docs scan (`scan_existing_docs` inventory +
+  `scan_docs_richly` findings) for cleanup-first + UPDATE-vs-NEW.
+- **`perk learn code` / `/learn-code`** *(new, additive)* is the dedicated sweep for the pre-stamped
+  `SHOULD_BE_CODE` learnings, routing each into its real code home. Its inbox is **lean**
+  (classification + `target` + the codebase it reads directly; no docs scan).
+
+The partition is the *default* route, not the only path to a destination: `/learn-docs`'s verifier
+re-routes a doc-stamped item to code when warranted, and `/learn-code`'s skill may note an item
+better suited to a doc. Each factory **consumes its full filtered inbox** — whatever it places (a doc
+OR a verify-re-routed code step) stays in `consumed_learn` (carried through `launch_stage`'s
+`handoff_extra`); no per-item subsetting. The `--gather --json` envelope is unchanged
+(`{inbox_path, learn_numbers, launched}`). Parallel wiring SSOTs: `shared/bindings.yaml`
+(`command:learn-code` → `perk-learn-code` nudge), `bindings.py::DELIVERABLE_COMMAND_TARGETS`
+(`learn-code`), `init/skills.py::PERK_SKILLS` (`perk-learn-code`), the `learn` verb group, the warm
+`extension/doors/learnCode.ts`, and `prompts/_fixtures/live.yaml` (`stages/learn-code.md`).
 
 **The non-empty `consumed_learn` discriminator.** A plan whose `plan-header` `consumed_learn` is
 **non-empty** *is* a learn-docs consolidation plan. `/learn` (and the future `perk learn evidence`

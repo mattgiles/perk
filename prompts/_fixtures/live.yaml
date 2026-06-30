@@ -113,6 +113,10 @@
   vars:
     inbox_path: ".perk/workflow/scratch/learn-docs-inbox.md"
     num_list: "45, 50"
+- template: "stages/learn-code.md"
+  vars:
+    inbox_path: ".perk/workflow/scratch/learn-code-inbox.md"
+    num_list: "45, 50"
 - template: "stages/skills/create.md"
   vars:
     repo_skills_rel: ".pi/skills"

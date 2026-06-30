@@ -16,6 +16,7 @@ import { registerAskUser } from "./doors/askUser.ts";
 import { registerCiExecutor } from "./doors/ciExecutor.ts";
 import { registerLand } from "./doors/land.ts";
 import { registerLearn } from "./doors/learn.ts";
+import { registerLearnCode } from "./doors/learnCode.ts";
 import { registerLearnDocs } from "./doors/learnDocs.ts";
 import { registerLifecycleGates } from "./doors/lifecycleGates.ts";
 import { registerPrReview } from "./doors/prReview.ts";
@@ -473,9 +474,15 @@ export default function (pi: ExtensionAPI) {
   // factory guidance so the model authors a docs/learned consolidation plan (no model tool).
   registerLearnDocs(pi);
 
+  // The learn-code plan factory's warm surface: the `/learn-code` command gathers pre-stamped
+  // SHOULD_BE_CODE perk:learn issues into an inbox (via the `perk learn code --gather` cold door)
+  // and injects the factory guidance so the model authors a code-routing plan (no model tool).
+  registerLearnCode(pi);
+
   // Warm-door skill-binding delivery: Mechanism A's `before_agent_start` injection of
   // the launched stage's user-originated bindings (+ the stale-context strip). Mechanism B (the
-  // `command:<id>` suffix) is wired into the `/objective-reconcile` + `/learn-docs` guidance.
+  // `command:<id>` suffix) is wired into the `/objective-reconcile` + `/learn-docs` +
+  // `/learn-code` guidance.
   registerBindingDelivery(pi);
 
   // `/perk-selfcheck` — the session-wiring verifier (turned from a liveness ping into a real check

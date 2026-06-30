@@ -20,8 +20,9 @@ from enum import StrEnum
 from typing import Literal
 
 import yaml
+from pydantic import field_validator
 
-from perk.boundary import LenientParseModel, OutputModel
+from perk.boundary import LenientParseModel, OutputModel, ValidationError
 
 PLAN_LABEL = "perk:plan"
 PLAN_LABEL_COLOR = "1f883d"  # GitHub green
@@ -87,6 +88,79 @@ class CapturedDecision(StrEnum):
     UPDATE_EXISTING_DOC = "UPDATE_EXISTING_DOC"
     NEW_DOC = "NEW_DOC"
     STALE_DOC = "STALE_DOC"
+
+
+@dataclass(frozen=True)
+class LearnHeader:
+    """The typed read-back of a `perk:learn` issue's ``learn-header`` block (contracts.md §8.35).
+
+    The frozen domain object behind :func:`parse_learn_header` — the gather-time classification
+    route the learn factories read. ``decision`` is the captured-classification token (``None`` when
+    absent or an unknown/future token); ``target`` is the optional routable pointer. ``plan`` is the
+    backend-owned opaque value (GitHub stores an int issue number; Linear a string id).
+    """
+
+    run_id: str | None = None
+    created: str | None = None
+    plan: str | int | None = None
+    decision: CapturedDecision | None = None
+    target: str | None = None
+
+
+class LearnHeaderModel(LenientParseModel):
+    """The untrusted read edge for a stored ``learn-header`` block (the INPUT/parse edge of
+    :class:`LearnHeader`).
+
+    Lenient (``extra="ignore"``): an additively-grown header drops unknown keys. ``decision``
+    degrades to ``None`` for any value outside :class:`CapturedDecision` (a legacy/unclassified or
+    future token) via the ``before`` validator, so a never-seen token never raises here.
+    """
+
+    run_id: str | None = None
+    created: str | None = None
+    plan: str | int | None = None
+    decision: CapturedDecision | None = None
+    target: str | None = None
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def _coerce_decision(cls, value: object) -> object:
+        """Map a value outside :class:`CapturedDecision` to ``None`` (unknown/future token)."""
+        if value is None or isinstance(value, CapturedDecision):
+            return value
+        if isinstance(value, str):
+            try:
+                return CapturedDecision(value)
+            except ValueError:
+                return None
+        return None
+
+    def to_domain(self) -> LearnHeader:
+        """Convert the validated model into the frozen domain object."""
+        return LearnHeader(
+            run_id=self.run_id,
+            created=self.created,
+            plan=self.plan,
+            decision=self.decision,
+            target=self.target,
+        )
+
+
+def parse_learn_header(body: str) -> LearnHeader | None:
+    """Read the ``learn-header`` block back off an issue body. ``None`` when absent; never raises.
+
+    Scans both block styles via :func:`find_metadata_block`; an absent/malformed block → ``None``.
+    A present-but-invalid payload (a ``ValidationError`` after the lenient parse) also degrades to
+    ``None`` rather than raising — the gather-time default route must never brick on a stray header.
+    """
+    block = find_metadata_block(body, LEARN_HEADER_KEY)
+    if block is None:
+        return None
+    try:
+        model = LearnHeaderModel.model_validate(block)
+    except ValidationError:
+        return None
+    return model.to_domain()
 
 
 class LifecycleStage(StrEnum):
