@@ -158,6 +158,33 @@ def test_create_learn_issue_creates_with_label_and_header(monkeypatch):
     body = rec.body_files[-1]
     assert plan.extract_run_id(body, header_key=plan.LEARN_HEADER_KEY) == "01RID"
     assert "captured body" in body
+    # A decision-less call omits the captured-classification fields (back-compat).
+    header = plan.find_metadata_block(body, plan.LEARN_HEADER_KEY)
+    assert header is not None and "decision" not in header and "target" not in header
+
+
+def test_create_learn_issue_persists_decision_and_target(monkeypatch):
+    # The captured classification rides the learn-header (html style) and reads back via
+    # find_metadata_block (contracts.md §8.35).
+    rec = _GhRecorder(
+        get=_Proc(0, stdout="[]"),
+        post=_Proc(0, stdout=json.dumps({"number": 101, "url": "u/101"})),
+    )
+    monkeypatch.setattr(subprocess, "run", rec)
+    plans.create_learn_issue(
+        title="Learnings: X",
+        body="captured body",
+        repo_root=ROOT,
+        run_id="01RID",
+        plan_number=7,
+        decision="UPDATE_EXISTING_DOC",
+        target="docs/learned/workflow/foo.md",
+    )
+    header = plan.find_metadata_block(rec.body_files[-1], plan.LEARN_HEADER_KEY)
+    assert header is not None
+    assert header["decision"] == "UPDATE_EXISTING_DOC"
+    assert header["target"] == "docs/learned/workflow/foo.md"
+    assert header["plan"] == 7  # GitHub stores the int issue number, unchanged
 
 
 # --- learned-docs consumer (hop-2) ----------------------------------------------------------

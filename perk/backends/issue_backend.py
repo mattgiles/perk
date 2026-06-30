@@ -259,10 +259,19 @@ class IssueBackend(Protocol):
         ...
 
     def create_learn_issue(
-        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        plan_id: str,
+        decision: str | None = None,
+        target: str | None = None,
+        dry_run: bool = False,
     ) -> IssueRef:
         """Create the knowledge-capture (learn) issue. Idempotent via ``find_learn_issue``;
-        renders the learn-header (``run_id``/``created``/``plan``) into the body so the finder
+        renders the learn-header (``run_id``/``created``/``plan``, plus the optional captured
+        ``decision``/``target`` classification — contracts.md §8.35) into the body so the finder
         can match. Raises on failure."""
         ...
 

@@ -67,10 +67,18 @@ def evidence_learn(ctx: click.Context, *, as_json: bool, do_render: bool) -> Non
         return
 
     render = _maybe_render(repo_root, bundle) if do_render else None
+    payload = EvidenceBundleOut.from_domain(bundle, render=render).model_dump(mode="json")
+
+    # Self-contained bundle: write the full manifest (the same payload as `--json` stdout, including
+    # `render`) into the bundle dir so the analyst children can `read` it (they cannot read the
+    # door's stdout). Written unconditionally on a materialized bundle (independent of `--json`);
+    # deterministic (the envelope carries no wall-clock). No write on a skip (`bundle_dir is None`).
+    if bundle.bundle_dir is not None and not bundle.skipped:
+        manifest_path = repo_root / bundle.bundle_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
     if as_json:
-        out = EvidenceBundleOut.from_domain(bundle, render=render)
-        machine_output(json.dumps(out.model_dump(mode="json")))
+        machine_output(json.dumps(payload))
     else:
         _render_human(bundle, render)
 

@@ -1,13 +1,32 @@
-// The deepened warm `/learn` door. Graduates the thin marker-clear into a real knowledge-capture
-// pass: when a `summary` is given, DELEGATE to `perk learn capture --json` via the shared cold-door
-// client (`runColdDoor` — the body rides the run-scratch stdin channel; GitHub writes canonical in
-// Python), which creates a `perk:learn` issue + clears
-// `pending-learn`; then mirror the marker-clear in-session (idempotent). With no `summary`, stay
-// the thin TS-only marker-clear (graceful — no empty issue). Never throws (soft `details.ok`);
-// the capture decode is fully LENIENT — a `success: true` envelope always yields the captured-ok
-// terminating result even when `learn_issue` is undecodable (render-only field; see
-// `decodeLearnCapture`).
+// The warm `/learn` door — a multi-angle knowledge-capture orchestrator (mirrors `/pr-review`).
+//
+// Bare interactive `/learn` gathers a reproducible evidence bundle ONCE via the cold door
+// (`perk learn evidence --render --json`; the parent owns the gather per §8.35), then branches:
+// a learn-docs plan short-circuits to a deterministic marker-clear no-op; a gather failure (or a
+// bundle-less success) degrades to the simple `learnGuidance` injection (/learn is never a dead
+// end); otherwise it injects the orchestration seed (`learnOrchestrateGuidance`) so the model spawns
+// 2–4 fresh-context `perk.learn-analyst` children, reconciles their reports into ONE classified
+// decision, and captures (via the `learn` tool, with the routable `decision`/`target` persisted on
+// the issue header — both backends) or skips.
+//
+// The `learn` tool is the capture half: with a `summary`, DELEGATE to `perk learn capture --json`
+// via the shared cold-door client (`runColdDoor` — the body rides the run-scratch stdin channel,
+// the `decision`/`target` classification rides flags; canonical write in Python), creating a
+// `perk:learn` issue + clearing `pending-learn`, then mirror the marker-clear in-session
+// (idempotent). With no `summary`, stay the thin TS-only marker-clear (graceful — no empty issue).
+// Never throws (soft `details.ok`); the capture decode is fully LENIENT — a `success: true`
+// envelope always yields the captured-ok terminating result even when `learn_issue` is undecodable
+// (render-only field; see `decodeLearnCapture`).
+//
+// Headless bare `/learn` stays the safe marker-clear (cannot drive a turn / spawn children).
+// `/learn <text>` / `/learn skip` stay the existing verbatim-capture / marker-clear paths
+// (decision-less escape hatches). Cold `perk learn` launch stays the simple investigate+capture.
+//
+// The analyst model is configurable via `[subagents] learn-analyst` in `.perk/config.toml`; because
+// `subagents.agentOverrides` does NOT reach project agents, the orchestration seed injects that
+// model as a per-call inline `model` override on every analyst spawn.
 
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { bindingSuffix } from "../substrate/bindingDelivery.ts";
 import {
@@ -24,6 +43,7 @@ import {
   runColdDoor,
   stringField,
 } from "../substrate/coldDoor.ts";
+import { loadPerkConfig } from "../substrate/config.ts";
 import { render } from "../substrate/prompts.ts";
 import { failFor, ok, type Result } from "../substrate/result.ts";
 import { paramsOf, stringParam } from "../substrate/toolParams.ts";
@@ -44,6 +64,41 @@ export type LearnResult = Result<LearnOk>;
 /** The decoded `perk learn capture --json` payload slice the warm door consumes. */
 interface LearnCapturePayload {
   learn_issue?: { id: string; url: string; existed: boolean };
+}
+
+/**
+ * The closed CAPTURED-classification set persisted on a `perk:learn` header (contracts.md §8.35) —
+ * the reconciliation DECISION set minus `SKIP` (a skip creates no issue). Mirrors
+ * `plan.CapturedDecision` (the Python SSOT) and the `learn` tool's JSON-schema enum.
+ */
+const CAPTURED_DECISIONS = [
+  "CAPTURE_LEARN",
+  "SHOULD_BE_CODE",
+  "UPDATE_EXISTING_DOC",
+  "NEW_DOC",
+  "STALE_DOC",
+] as const;
+
+/** The decoded `perk learn evidence --json` slice the orchestrator branches on. */
+interface EvidenceDecode {
+  skipped: boolean;
+  skip_reason: string | null;
+  bundle_dir: string | null;
+}
+
+/**
+ * Decode the `perk learn evidence --render --json` success payload — fully LENIENT (mirrors
+ * `decodeLearnCapture`): it **never returns null**, so any success envelope yields a usable object
+ * and the `runColdDoor` `bad_output` arm is deliberately unreachable for this door. A missing/
+ * mistyped `skipped` defaults false; `bundle_dir`/`skip_reason` default null. `!r.ok` (exec /
+ * transport / `success:false`) routes to the gather-failure fallback, not here.
+ */
+function decodeEvidence(payload: ColdJson): EvidenceDecode {
+  return {
+    skipped: booleanField(payload, "skipped") ?? false,
+    skip_reason: stringField(payload, "skip_reason") ?? null,
+    bundle_dir: stringField(payload, "bundle_dir") ?? null,
+  };
 }
 
 /**
@@ -86,10 +141,13 @@ export async function learnDone(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   summary?: string,
+  decision?: string,
+  target?: string,
 ): Promise<LearnResult> {
   const trimmed = (summary ?? "").trim();
 
-  // No summary: the thin, graceful path — just clear the marker (no empty issue).
+  // No summary: the thin, graceful path — just clear the marker (no empty issue). A skip carries
+  // no classification, so `decision`/`target` are intentionally ignored on this arm.
   if (trimmed.length === 0) {
     const { wasPending } = clearPending(ctx);
     const text = wasPending
@@ -100,7 +158,13 @@ export async function learnDone(
 
   const fail = failFor(ctx, "learn");
 
-  const r = await runColdDoor<LearnCapturePayload>(pi, ctx, ["learn", "capture", "--json"], {
+  // The captured classification (contracts.md §8.35) rides flags on the capture argv; Click parses
+  // them regardless of order, and the `--body` stdin channel is unchanged.
+  const argv = ["learn", "capture", "--json"];
+  if (decision !== undefined) argv.push("--decision", decision);
+  if (target !== undefined) argv.push("--target", target);
+
+  const r = await runColdDoor<LearnCapturePayload>(pi, ctx, argv, {
     label: "perk learn capture",
     decode: decodeLearnCapture,
     stdin: { flag: "--body", content: `${trimmed}\n`, filename: `learn-${Date.now()}.md` },
@@ -167,6 +231,26 @@ export function learnGuidance(planRef: PlanRef | null): string {
   });
 }
 
+/**
+ * The orchestration seed the warm bare `/learn` injects to spawn the angle-specialized analysts and
+ * reconcile their reports into one classified capture/skip (the perk-learn skill pointer rides the
+ * skill-binding suffix — stage:learn — not hardcoded here). Pure + exported for offline tests
+ * (mirrors `prReviewGuidance`). When `model` is set, EVERY analyst spawn carries an inline `model`
+ * override; otherwise the agent's default is used. `manifestPath` is absolute; `bundleDir` is the
+ * absolute bundle directory.
+ */
+export function learnOrchestrateGuidance(opts: {
+  model?: string;
+  manifestPath: string;
+  bundleDir: string;
+}): string {
+  return render("stages/learn-orchestrate.md", {
+    model: opts.model ?? "",
+    manifest_path: opts.manifestPath,
+    bundle_dir: opts.bundleDir,
+  });
+}
+
 /** Register the warm door: the `learn` terminating tool + the `/learn` command twin. */
 export function registerLearn(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -188,17 +272,45 @@ export function registerLearn(pi: ExtensionAPI): void {
           type: "string",
           description: "Markdown learnings to capture in a perk:learn issue. Omit to only clear.",
         },
+        decision: {
+          type: "string",
+          enum: [...CAPTURED_DECISIONS],
+          description:
+            "The reconciled captured-classification token, persisted on the perk:learn header. " +
+            "Omit on a verbatim /learn <text> capture (the decision-less escape hatch).",
+        },
+        target: {
+          type: "string",
+          description:
+            "An optional routable pointer (e.g. an existing doc path) for the classification.",
+        },
       },
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      // Tool-boundary decode: absent → undefined (the marker-clear path); mistyped →
+      // Tool-boundary decode (mirrors the `summary` strictness): absent → undefined (the
+      // marker-clear / decision-less path); a present-but-mistyped/out-of-enum value →
       // strict-fail — never silently clear the pending-learn marker on uncertainty.
       const p = paramsOf(params);
+      const fail = failFor(ctx, "learn");
       const summary = p === null ? undefined : stringParam(p, "summary");
       if (summary === null) {
-        return failFor(ctx, "learn")("learn `summary` must be a string", "bad_input");
+        return fail("learn `summary` must be a string", "bad_input");
       }
-      return learnDone(pi, ctx, summary);
+      const decision = p === null ? undefined : stringParam(p, "decision");
+      if (decision === null) {
+        return fail("learn `decision` must be a string", "bad_input");
+      }
+      if (decision !== undefined && !(CAPTURED_DECISIONS as readonly string[]).includes(decision)) {
+        return fail(
+          `learn \`decision\` must be one of ${CAPTURED_DECISIONS.join(", ")}`,
+          "bad_input",
+        );
+      }
+      const target = p === null ? undefined : stringParam(p, "target");
+      if (target === null) {
+        return fail("learn `target` must be a string", "bad_input");
+      }
+      return learnDone(pi, ctx, summary, decision, target);
     },
   });
 
@@ -220,16 +332,73 @@ export function registerLearn(pi: ExtensionAPI): void {
         return;
       }
 
-      // Bare `/learn`: headless can't drive a turn — stay the safe marker-clear (fail-safe). An
-      // interactive session injects the perk-learn guidance so the agent does the capture pass
-      // (it clears the marker itself by calling the `learn` tool — do NOT clear it here).
+      // Bare `/learn`: headless can't drive a turn or spawn children — stay the safe marker-clear
+      // (fail-safe).
       if (!ctx.hasUI) {
         const result = await learnDone(pi, ctx, "");
         console.error(`perk: /learn invoked (headless) — ${result.content[0]?.text ?? "cleared"}`);
         return;
       }
-      report(ctx, "learn", "info", "investigate the landed change and capture learnings");
-      pi.sendUserMessage(learnGuidance(activePlanRef(ctx)) + bindingSuffix(ctx.cwd, "stage:learn"));
+
+      // Interactive bare `/learn`: the multi-angle orchestrator (mirrors /pr-review). Gather the
+      // evidence bundle ONCE (the parent owns the gather — §8.35), then branch.
+      const fallback = () => {
+        // Graceful degrade — /learn is never a dead end. Fall back to the simple learn pass (the
+        // prior behavior); the agent clears the marker itself via the `learn` tool.
+        pi.sendUserMessage(
+          learnGuidance(activePlanRef(ctx)) + bindingSuffix(ctx.cwd, "stage:learn"),
+        );
+      };
+
+      const r = await runColdDoor<EvidenceDecode>(
+        pi,
+        ctx,
+        ["learn", "evidence", "--render", "--json"],
+        { label: "perk learn evidence", decode: decodeEvidence },
+      );
+
+      // Gather failure (exec / transport / success:false): degrade to the simple learn pass.
+      if (!r.ok) {
+        report(
+          ctx,
+          "learn",
+          "info",
+          "evidence gather unavailable — falling back to the simple learn pass",
+        );
+        fallback();
+        return;
+      }
+
+      // Short-circuit: a learn-docs consolidation plan — clear the marker, inject nothing.
+      if (r.data.skipped) {
+        clearPending(ctx);
+        report(ctx, "learn", "info", "learn-docs plan; learn capture skipped");
+        return;
+      }
+
+      // Defensive: a success envelope with no bundle dir — same graceful fallback.
+      if (r.data.bundle_dir === null) {
+        report(
+          ctx,
+          "learn",
+          "info",
+          "evidence bundle unavailable — falling back to the simple learn pass",
+        );
+        fallback();
+        return;
+      }
+
+      // Orchestrate: spawn analysts over the shared bundle, reconcile, capture-or-skip. `bundle_dir`
+      // is repo_root-relative; the door's cwd is the worktree root the command resolved against.
+      const bundleDir = join(ctx.cwd, r.data.bundle_dir);
+      const manifestPath = join(bundleDir, "manifest.json");
+      const model = loadPerkConfig(ctx.cwd).subagents["learn-analyst"];
+      report(ctx, "learn", "info", "multi-angle learn: spawn analysts → reconcile → capture");
+      // The agent captures via the `learn` tool (clearing the marker itself) — do NOT clear here.
+      pi.sendUserMessage(
+        learnOrchestrateGuidance({ model, manifestPath, bundleDir }) +
+          bindingSuffix(ctx.cwd, "stage:learn"),
+      );
     },
   });
 }

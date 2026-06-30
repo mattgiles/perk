@@ -256,12 +256,15 @@ def create_learn_issue(
     repo_root: Path,
     run_id: str | None,
     plan_number: int,
+    decision: str | None = None,
+    target: str | None = None,
     dry_run: bool = False,
 ) -> PlanIssue:
     """Create the ``perk:learn`` knowledge-capture issue. Mirrors
     ``create_plan_issue`` but: lazily creates the ``perk:learn`` label, is **idempotent via
     ``find_learn_issue``** (not ``find_plan_issue``), and renders a ``learn-header`` block into the
-    body so the finder can match. Raises ``GitHubError`` on failure."""
+    body so the finder can match. The optional ``decision``/``target`` captured classification
+    rides the header (contracts.md §8.35). Raises ``GitHubError`` on failure."""
     if dry_run:
         return PlanIssue(number=0, url="(dry-run)", existed=False)
     if run_id:
@@ -274,9 +277,13 @@ def create_learn_issue(
         description=plan.LEARN_LABEL_DESCRIPTION,
         repo_root=repo_root,
     )
-    header = plan.render_metadata_block(
-        plan.LEARN_HEADER_KEY,
-        {"run_id": run_id, "created": plan.now_iso(), "plan": plan_number},
+    header = plan.render_learn_header(
+        run_id=run_id,
+        created=plan.now_iso(),
+        plan=plan_number,
+        decision=decision,
+        target=target,
+        style="html",
     )
     full_body = f"{header}\n\n{body.strip()}\n"
     return create_plan_issue(

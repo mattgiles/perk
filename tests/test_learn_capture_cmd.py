@@ -40,6 +40,8 @@ def _stub(monkeypatch, *, run_id: str = "01RID") -> dict[str, object]:
 
     def _create(**k):
         calls["created"] = {"run_id": k["run_id"], "plan_number": k["plan_number"]}
+        calls["decision"] = k.get("decision")
+        calls["target"] = k.get("target")
         return plans.PlanIssue(number=99, url="u/99", existed=False)
 
     def _comment(**k):
@@ -76,6 +78,29 @@ def test_capture_creates_issue_and_clears_marker(monkeypatch):
     assert calls["created"] == {"run_id": "01RID", "plan_number": 7}
     assert calls["commented"] is True
     assert marker is False  # pending-learn cleared
+
+
+def test_capture_threads_decision_and_target(monkeypatch):
+    _authed(monkeypatch)
+    calls = _stub(monkeypatch)
+    result, _ = _run(
+        monkeypatch,
+        ["--json", "--decision", "UPDATE_EXISTING_DOC", "--target", "docs/learned/x.md"],
+    )
+    assert result.exit_code == 0
+    assert calls["decision"] == "UPDATE_EXISTING_DOC"
+    assert calls["target"] == "docs/learned/x.md"
+    # The --json envelope is unchanged (the classification lives on the issue header, not here).
+    data = json.loads(result.output)
+    assert "decision" not in data and "target" not in data
+
+
+def test_capture_rejects_out_of_set_decision(monkeypatch):
+    _authed(monkeypatch)
+    _stub(monkeypatch)
+    result, marker = _run(monkeypatch, ["--json", "--decision", "NONSENSE"])
+    assert result.exit_code != 0  # click.Choice rejects it before any work
+    assert marker is True  # nothing cleared
 
 
 def test_capture_dry_run_writes_nothing(monkeypatch):

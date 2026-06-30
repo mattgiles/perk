@@ -4454,8 +4454,17 @@ captured absolute `session_file` stays valid — only Pi-side GC removes it → 
   the decision identifies one. The fields extend the existing `learn-header` metadata block (which
   already carries `{ run_id, created, plan }`) → `{ run_id, created, plan, decision, target? }`,
   rendered in both block styles (HTML on GitHub, `inline-code` on Linear) so it round-trips on both
-  backends. Markdown stays the human payload. (The persist itself lands with node 4.2; this section
-  pins only the shape + key names.)
+  backends. Markdown stays the human payload. **Landed (node 4.2):** both backends render the
+  header via the shared `perk/plan.py::render_learn_header(*, run_id, created, plan, decision,
+  target, style)` helper (declaration order `run_id`, `created`, `plan`, then `decision`/`target`
+  **only when present**) so the header is byte-identical in shape and the optional fields round-trip
+  in either encoding; `decision` is a `plan.CapturedDecision` `StrEnum` (the five captured tokens).
+  The `create_learn_issue` protocol + both adapters + `perk learn capture --decision/--target` thread
+  the pair through; the `--json` capture envelope (`LearnCaptureOut`) is unchanged (the
+  classification lives on the issue header, not the capture result). The typed `LearnHeader` /
+  `LearnHeaderModel` read-back model (`LenientParseModel` → frozen `@dataclass`) is **deferred to
+  node 7.1** (its real consumer, which should pin the exact shape); 4.2's round-trip test reads the
+  fields back via `plan.find_metadata_block(body, plan.LEARN_HEADER_KEY)`.
 
 **Boundary-model discipline (forward-looking).** The new learn shapes are **boundary data** and,
 when their handlers land, follow perk's existing boundary-model convention (§8.34 / `perk/boundary.py`,
@@ -4633,5 +4642,35 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
   CAPTURED metadata persists only non-`SKIP` decisions.
 - **Model** configurable via `[subagents] learn-analyst` (both planes; default
   `anthropic/claude-sonnet-4-5`, fallback `anthropic/claude-haiku-4-5`).
-- **Deferred to node 4.2:** the warm `/learn` orchestrator that spawns 2–4 of these in parallel,
-  reconciles the per-angle reports into one classified decision, and persists the CAPTURED metadata.
+- **Landed (node 4.2) — the warm `/learn` orchestrator.** Bare interactive `/learn` is a multi-angle
+  orchestrator (`extension/doors/learn.ts`, mirroring `/pr-review`): **TS owns the deterministic
+  spine** (gather + branch), **the model owns the judgment** (spawn / reconcile / capture).
+  - **Gather once.** The parent runs `perk learn evidence --render --json` via `runColdDoor` (the
+    single gather — §8.35 "the parent gathers once") and **also writes `<bundle_dir>/manifest.json`**
+    (the full `EvidenceBundleOut` payload, the same as `--json` stdout incl. `render`) so the
+    children can `read` the manifest (they cannot read the door's stdout). Written unconditionally on
+    a materialized bundle (independent of `--json`), deterministic (no wall-clock); no write on a skip.
+  - **Deterministic learn-docs short-circuit.** A success envelope `skipped:true` (a non-empty
+    `consumed_learn` plan) → clear `pending-learn`, report *"learn-docs plan; learn capture skipped"*,
+    inject **no** prompt, spawn **no** children, create **no** issue.
+  - **Graceful degrade.** A gather failure (`!r.ok`) — or a success envelope with a null `bundle_dir`
+    (defensive) — falls back to the prior simple `learnGuidance` injection (`/learn` is never a dead
+    end). The evidence decode (`decodeEvidence`) is fully LENIENT — never null — so the `bad_output`
+    arm is unreachable (mirrors `decodeLearnCapture`).
+  - **Prompt-driven spawn/reconcile/capture.** Otherwise the parent injects the new warm-only
+    `prompts/stages/learn-orchestrate.md` seed (rendered by `learnOrchestrateGuidance`), carrying the
+    absolute manifest path + bundle dir + the configured `[subagents] learn-analyst` model (a per-call
+    inline override on every spawn). The model spawns 2–4 fresh-context analysts (always incl.
+    `session-deviations`, emphasizing off-track/dead-ends/wasted-effort), reconciles the per-angle
+    `{angle, verdict, candidates[], fyi[]}` reports into ONE classified `decision` + a synthesized
+    markdown body recording the per-angle nuance, then calls the `learn` tool to capture (with
+    `decision`/`target`) or — on `SKIP`/nothing durable — with **no `summary`** (clears the marker, no
+    issue). A missing/malformed child report is a skipped angle (noted, never fatal).
+  - **The `learn` tool** gains `decision` (JSON-schema enum of the five captured tokens) + `target`
+    (string) params; the tool-boundary decode mirrors the `summary` strictness (a present-but-mistyped
+    or out-of-enum value ⇒ `bad_input`, marker NOT cleared; absent ⇒ the decision-less path).
+  - **Unchanged paths.** Headless bare `/learn` stays the safe marker-clear (cannot drive a turn /
+    spawn children); `/learn <text>` / `/learn skip` stay the verbatim-capture / marker-clear escape
+    hatches (decision-less); cold `perk learn` launch stays the simple investigate+capture
+    (`stages/learn.md` unchanged — the four `learn-*` golden cases + cold/warm parity preserved).
+    **Deferred (out of scope):** cold-launch orchestration (the node is the warm orchestrator).

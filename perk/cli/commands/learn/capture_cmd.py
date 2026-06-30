@@ -14,6 +14,7 @@ from pathlib import Path
 
 import click
 
+from perk import plan
 from perk.backends import issue_backend, resolve
 from perk.backends.issue_backend import IssueBackendError
 from perk.boundary import OutputModel
@@ -41,10 +42,29 @@ class LearnCaptureResult:
     required=True,
     help="Path to the captured-learnings markdown (a run-scoped scratch file).",
 )
+@click.option(
+    "--decision",
+    type=click.Choice([d.value for d in plan.CapturedDecision]),
+    default=None,
+    help="The reconciled captured-classification token to persist on the learn-header.",
+)
+@click.option(
+    "--target",
+    default=None,
+    help="An optional routable pointer (e.g. a doc path) for the captured classification.",
+)
 @click.option("--dry-run", is_flag=True, help="Compose without creating an issue or clearing.")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
-def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json: bool) -> None:
+def capture_learn(
+    ctx: click.Context,
+    *,
+    body_path: Path,
+    decision: str | None,
+    target: str | None,
+    dry_run: bool,
+    as_json: bool,
+) -> None:
     """Create the perk:learn issue from captured learnings and clear pending-learn (land → learn).
 
     \b
@@ -54,7 +74,13 @@ def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json
         repo_root = require_repo(ctx)
         if not dry_run:
             require_github(ctx)
-        result = _learn_capture_impl(repo_root=repo_root, body_path=body_path, dry_run=dry_run)
+        result = _learn_capture_impl(
+            repo_root=repo_root,
+            body_path=body_path,
+            decision=decision,
+            target=target,
+            dry_run=dry_run,
+        )
     except IssueBackendError as exc:
         fail(
             ctx,
@@ -80,7 +106,14 @@ def capture_learn(ctx: click.Context, *, body_path: Path, dry_run: bool, as_json
         _render_human(result)
 
 
-def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> LearnCaptureResult:
+def _learn_capture_impl(
+    *,
+    repo_root: Path,
+    body_path: Path,
+    decision: str | None = None,
+    target: str | None = None,
+    dry_run: bool,
+) -> LearnCaptureResult:
     plan_ref = cache.read_plan_ref(repo_root)
     if plan_ref is None:
         raise UserFacingCliError(
@@ -113,6 +146,8 @@ def _learn_capture_impl(*, repo_root: Path, body_path: Path, dry_run: bool) -> L
         body=body_text,
         run_id=str(run_id) if isinstance(run_id, str) else None,
         plan_id=issue,
+        decision=decision,
+        target=target,
     )
     commented = _backlink(backend, issue=issue, learn=learn_issue)
     cache.clear_marker(repo_root, cache.PENDING_LEARN)

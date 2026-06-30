@@ -169,7 +169,15 @@ class _FakeBackend:
         return self._find_by_run_id(run_id)
 
     def create_learn_issue(
-        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        plan_id: str,
+        decision: str | None = None,
+        target: str | None = None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
         if dry_run:
             return issue_backend.IssueRef(id="0", url="(dry-run)", existed=False)

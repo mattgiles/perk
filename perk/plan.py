@@ -43,7 +43,8 @@ CONSOLIDATED_LABEL_DESCRIPTION = "perk learn issue consolidated into docs/learne
 
 PLAN_HEADER_KEY = "plan-header"
 PLAN_BODY_KEY = "plan-body"
-LEARN_HEADER_KEY = "learn-header"  # carries { run_id, created, plan } in the learn issue body
+# carries { run_id, created, plan, decision, target? } in the learn issue body
+LEARN_HEADER_KEY = "learn-header"
 
 # The valid `plan-header` field names (the staged-population schema; lifecycle.md). Used by
 # the submit-time `update_plan_header` write to reject unknown keys (LBYL on the schema).
@@ -74,6 +75,18 @@ _INLINE_OPEN = "`perk:metadata-block:{key}`"
 _INLINE_CLOSE = "`/perk:metadata-block:{key}`"
 
 BlockStyle = Literal["html", "inline-code"]
+
+
+class CapturedDecision(StrEnum):
+    """The durable CAPTURED-classification token persisted on a `perk:learn` issue header
+    (contracts.md §8.35). The closed reconciliation DECISION set **minus** ``SKIP`` — a skip
+    creates no issue, so only these five tokens are ever stored."""
+
+    CAPTURE_LEARN = "CAPTURE_LEARN"
+    SHOULD_BE_CODE = "SHOULD_BE_CODE"
+    UPDATE_EXISTING_DOC = "UPDATE_EXISTING_DOC"
+    NEW_DOC = "NEW_DOC"
+    STALE_DOC = "STALE_DOC"
 
 
 class LifecycleStage(StrEnum):
@@ -277,6 +290,31 @@ def render_metadata_block(key: str, data: dict[str, object], *, style: BlockStyl
         f"</details>\n"
         f"{_CLOSE.format(key=key)}"
     )
+
+
+def render_learn_header(
+    *,
+    run_id: str | None,
+    created: str,
+    plan: object,
+    decision: str | None,
+    target: str | None,
+    style: BlockStyle = "html",
+) -> str:
+    """Render the ``learn-header`` metadata block both backends share (contracts.md §8.35).
+
+    Builds the metadata dict in declaration order (``run_id``, ``created``, ``plan``, then
+    ``decision`` and ``target`` **only when present**) and renders via
+    :func:`render_metadata_block`, so the header is byte-identical in shape and the optional
+    captured-classification fields round-trip in either encoding. ``plan`` is the backend-owned
+    opaque value (GitHub stores its int issue number; Linear stores its string id).
+    """
+    data: dict[str, object] = {"run_id": run_id, "created": created, "plan": plan}
+    if decision is not None:
+        data["decision"] = decision
+    if target is not None:
+        data["target"] = target
+    return render_metadata_block(LEARN_HEADER_KEY, data, style=style)
 
 
 def replace_metadata_block(text: str, key: str, data: dict[str, object]) -> str:

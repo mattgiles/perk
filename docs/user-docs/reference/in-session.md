@@ -138,12 +138,20 @@ auto-drives `/objective-reconcile`. Paired tool:
 ### `/learn`
 
 Investigate the landed change and capture learnings into a perk:learn issue, then clear the
-pending-learn semaphore and release the worktree. `/learn` examines a **session-grounded evidence
-bundle** — the planning + implementation sessions, the saved plan, the merged PR, and an
-existing-docs inventory; **missing evidence is surfaced, not guessed**. `/learn skip` clears the
-marker only; `/learn <text>` captures the text verbatim. Paired tool:
+pending-learn semaphore and release the worktree. Bare interactive `/learn` is a **multi-angle
+orchestrator**: it gathers a **session-grounded evidence bundle** once — the planning +
+implementation sessions, the saved plan, the merged PR, and an existing-docs inventory (**missing
+evidence is surfaced, not guessed**) — then spawns **2–4 fresh-context `perk.learn-analyst`
+children** (analyzing distinct angles in isolation), reconciles their reports into **one classified
+decision**, and captures it with a **routable classification** persisted on the perk:learn issue
+header (the `{decision, target?}` shape — both backends), or skips when nothing durable survives. A
+learn-docs consolidation plan short-circuits to a marker-clear no-op; if the bundle can't be
+gathered, `/learn` degrades to a simple single-pass capture (never a dead end). `/learn skip` clears
+the marker only; `/learn <text>` captures the text verbatim (decision-less). The analyst model is
+configurable via `[subagents] learn-analyst`. Paired tool:
 
-- **`learn`** — capture learnings (or clear the marker only). *Terminating.*
+- **`learn`** — capture learnings with an optional `decision`/`target` classification (or clear the
+  marker only). *Terminating.*
 
 ## Objective doors (warm)
 

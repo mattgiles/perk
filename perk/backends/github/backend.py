@@ -252,7 +252,15 @@ class GitHubIssueBackend:
         return None if found is None else _issue_ref(found)
 
     def create_learn_issue(
-        self, *, title: str, body: str, run_id: str | None, plan_id: str, dry_run: bool = False
+        self,
+        *,
+        title: str,
+        body: str,
+        run_id: str | None,
+        plan_id: str,
+        decision: str | None = None,
+        target: str | None = None,
+        dry_run: bool = False,
     ) -> issue_backend.IssueRef:
         plan_number = _number(plan_id)
         with _translate():
@@ -262,6 +270,8 @@ class GitHubIssueBackend:
                 repo_root=self._repo_root,
                 run_id=run_id,
                 plan_number=plan_number,
+                decision=decision,
+                target=target,
                 dry_run=dry_run,
             )
         return _issue_ref(created)
