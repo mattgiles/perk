@@ -10,6 +10,8 @@ from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import PlanState
 from perk.cli.cli import cli
+from perk.cli.commands.learn import evidence_cmd
+from perk.learn.evidence import EvidenceBundle, EvidenceSource
 from perk.state import cache
 
 _REF = plan.PlanRef(
@@ -38,7 +40,14 @@ class _FakeBackend:
         return "PLAN BODY"
 
 
-def _run(monkeypatch, *, header: dict[str, object], write_ref: bool = True, as_json: bool = True):
+def _run(
+    monkeypatch,
+    *,
+    header: dict[str, object],
+    write_ref: bool = True,
+    as_json: bool = True,
+    do_render: bool = False,
+):
     runner = CliRunner()
     with runner.isolated_filesystem() as d:
         _git_init(d)
@@ -49,6 +58,8 @@ def _run(monkeypatch, *, header: dict[str, object], write_ref: bool = True, as_j
         args = ["learn", "evidence"]
         if as_json:
             args.append("--json")
+        if do_render:
+            args.append("--render")
         result = runner.invoke(cli, args)
     return result
 
@@ -67,7 +78,9 @@ def test_evidence_json_envelope(monkeypatch):
         "bundle_dir",
         "sources",
         "existing_docs",
+        "render",
     }
+    assert data["render"] is None
     assert data["success"] is True and data["skipped"] is False
     assert data["plan_id"] == "7"
     categories = {s["category"] for s in data["sources"]}
@@ -118,3 +131,101 @@ def test_evidence_not_a_repo_exits_2():
         result = runner.invoke(cli, ["learn", "evidence", "--json"])
     assert result.exit_code == 2
     assert json.loads(result.output)["error_type"] == "not_a_repo"
+
+
+_SESSION_LINES = "\n".join(
+    [
+        json.dumps({"type": "session", "id": "S"}),
+        json.dumps(
+            {
+                "type": "message",
+                "id": "u",
+                "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            }
+        ),
+    ]
+)
+
+
+def _bundle_with_session(repo_root: Path) -> EvidenceBundle:
+    """A gathered bundle with one found planning-session source materialized on disk."""
+    bundle_dir = repo_root / ".perk" / "workflow" / "scratch" / "learn-evidence"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    jsonl = bundle_dir / "planning-main.jsonl"
+    jsonl.write_text(_SESSION_LINES, encoding="utf-8")
+    artifact = jsonl.relative_to(repo_root).as_posix()
+    return EvidenceBundle(
+        skipped=False,
+        skip_reason=None,
+        plan_id="7",
+        bundle_dir=bundle_dir.relative_to(repo_root).as_posix(),
+        sources=(
+            EvidenceSource(
+                category="planning-session", label="main", status="found", artifact=artifact
+            ),
+            EvidenceSource(category="existing-docs", label="inventory", status="missing"),
+        ),
+        existing_docs=(),
+    )
+
+
+def _run_render(monkeypatch, *, bundle_factory, as_json: bool = True):
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        cache.write_plan_ref(Path(d), _REF)
+        monkeypatch.setattr(
+            evidence_cmd, "gather_evidence", lambda root, ref: bundle_factory(Path(d))
+        )
+        args = ["learn", "evidence", "--render"]
+        if as_json:
+            args.append("--json")
+        result = runner.invoke(cli, args)
+        chunk = Path(d) / ".perk/workflow/scratch/learn-evidence/chunks/planning-main.md"
+        chunk_exists = chunk.is_file()
+    return result, chunk_exists
+
+
+def test_render_json_arm(monkeypatch):
+    result, chunk_exists = _run_render(monkeypatch, bundle_factory=_bundle_with_session)
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["render"] is not None
+    sessions = data["render"]["sessions"]
+    assert len(sessions) == 1
+    report = sessions[0]
+    assert set(report) == {
+        "role",
+        "source",
+        "entries_read",
+        "entries_kept",
+        "entries_pruned",
+        "malformed_lines",
+        "duplicate_groups",
+        "truncations",
+        "boilerplate",
+        "chunk_paths",
+    }
+    assert report["role"] == "planning-session/main"
+    assert report["chunk_paths"] == [
+        ".perk/workflow/scratch/learn-evidence/chunks/planning-main.md"
+    ]
+    assert chunk_exists
+
+
+def test_render_human_arm(monkeypatch):
+    result, _ = _run_render(monkeypatch, bundle_factory=_bundle_with_session, as_json=False)
+    assert result.exit_code == 0
+    assert "render: planning-session/main" in result.output
+
+
+def test_render_skip_plan_yields_null(monkeypatch):
+    result = _run(monkeypatch, header={"consumed_learn": ["12"]}, do_render=True)
+    assert result.exit_code == 0
+    assert json.loads(result.output)["render"] is None
+
+
+def test_no_render_keeps_render_null(monkeypatch):
+    result = _run(monkeypatch, header={"run_id": "01RUN_P", "impl_run_ids": []})
+    assert result.exit_code == 0
+    assert json.loads(result.output)["render"] is None

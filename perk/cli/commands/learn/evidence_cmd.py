@@ -12,6 +12,7 @@ codes: 0 ok (skip OR gathered manifest) · 1 no plan-ref / invalid · 2 not-a-re
 """
 
 import json
+from pathlib import Path
 
 import click
 
@@ -20,18 +21,32 @@ from perk.cli.commands.learn.shared import fail
 from perk.cli.context import require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.learn.evidence import DocEntry, EvidenceBundle, EvidenceSource, gather_evidence
+from perk.learn.normalize import (
+    BoilerplateDigest,
+    RenderReport,
+    SessionReport,
+    render_evidence,
+)
 from perk.state import cache
 from perk.substrate.output import machine_output, user_output
 
 
 @click.command("evidence")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable manifest to stdout.")
+@click.option(
+    "--render",
+    "do_render",
+    is_flag=True,
+    help="Normalize the found session JSONLs into bounded, untrusted-DATA-fenced Markdown chunks.",
+)
 @click.pass_context
-def evidence_learn(ctx: click.Context, *, as_json: bool) -> None:
+def evidence_learn(ctx: click.Context, *, as_json: bool, do_render: bool) -> None:
     """Gather a landed plan's session-grounded evidence bundle (read-only; the /learn cold door).
 
     \b
     Run from inside the plan's worktree (it reads the local cache.plan-ref).
+    With --render, the found session JSONLs are projected into bounded fenced chunks under the
+    bundle's chunks/ dir and a normalization report rides the --json envelope's `render` field.
     """
     try:
         repo_root = require_repo(ctx)
@@ -51,10 +66,29 @@ def evidence_learn(ctx: click.Context, *, as_json: bool) -> None:
         )
         return
 
+    render = _maybe_render(repo_root, bundle) if do_render else None
+
     if as_json:
-        machine_output(json.dumps(EvidenceBundleOut.from_domain(bundle).model_dump(mode="json")))
+        out = EvidenceBundleOut.from_domain(bundle, render=render)
+        machine_output(json.dumps(out.model_dump(mode="json")))
     else:
-        _render_human(bundle)
+        _render_human(bundle, render)
+
+
+_SESSION_CATEGORIES = ("planning-session", "implementation-session")
+
+
+def _maybe_render(repo_root: Path, bundle: EvidenceBundle) -> RenderReport | None:
+    """Project the bundle's found session sources into bounded chunks; ``None`` for a skipped
+    bundle (a learn-docs plan) or one with no materialized bundle dir."""
+    if bundle.skipped or bundle.bundle_dir is None:
+        return None
+    sessions = tuple(
+        (f"{s.category}/{s.label}", s.artifact)
+        for s in bundle.sources
+        if s.category in _SESSION_CATEGORIES and s.status == "found" and s.artifact is not None
+    )
+    return render_evidence(repo_root, repo_root / bundle.bundle_dir, sessions)
 
 
 class EvidenceSourceOut(OutputModel):
@@ -90,11 +124,63 @@ class DocEntryOut(OutputModel):
         return cls(kind=entry.kind, path=entry.path, title=entry.title, snippet=entry.snippet)
 
 
+class BoilerplateDigestOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`BoilerplateDigest` (order load-bearing)."""
+
+    label: str
+    count: int
+
+    @classmethod
+    def from_domain(cls, digest: BoilerplateDigest) -> "BoilerplateDigestOut":
+        return cls(label=digest.label, count=digest.count)
+
+
+class SessionReportOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`SessionReport` (order load-bearing)."""
+
+    role: str
+    source: str
+    entries_read: int
+    entries_kept: int
+    entries_pruned: int
+    malformed_lines: int
+    duplicate_groups: int
+    truncations: int
+    boilerplate: tuple[BoilerplateDigestOut, ...]
+    chunk_paths: tuple[str, ...]
+
+    @classmethod
+    def from_domain(cls, report: SessionReport) -> "SessionReportOut":
+        return cls(
+            role=report.role,
+            source=report.source,
+            entries_read=report.entries_read,
+            entries_kept=report.entries_kept,
+            entries_pruned=report.entries_pruned,
+            malformed_lines=report.malformed_lines,
+            duplicate_groups=report.duplicate_groups,
+            truncations=report.truncations,
+            boilerplate=tuple(BoilerplateDigestOut.from_domain(b) for b in report.boilerplate),
+            chunk_paths=report.chunk_paths,
+        )
+
+
+class RenderReportOut(OutputModel):
+    """The ``--json`` serialization boundary of :class:`RenderReport` (order load-bearing)."""
+
+    sessions: tuple[SessionReportOut, ...]
+
+    @classmethod
+    def from_domain(cls, report: RenderReport) -> "RenderReportOut":
+        return cls(sessions=tuple(SessionReportOut.from_domain(s) for s in report.sessions))
+
+
 class EvidenceBundleOut(OutputModel):
     """The ``--json`` serialization boundary of :class:`EvidenceBundle` (order load-bearing).
 
     Always serializes the full shape (no ``exclude_unset``) so a machine consumer sees stable keys
-    (absent values render ``null``) — matching the ``LearnCaptureOut`` full-dump convention.
+    (absent values render ``null``) — matching the ``LearnCaptureOut`` full-dump convention. The
+    ``render`` field is declared LAST and is ``null`` unless ``--render`` was passed.
     """
 
     success: bool
@@ -106,9 +192,12 @@ class EvidenceBundleOut(OutputModel):
     bundle_dir: str | None
     sources: tuple[EvidenceSourceOut, ...]
     existing_docs: tuple[DocEntryOut, ...]
+    render: RenderReportOut | None = None
 
     @classmethod
-    def from_domain(cls, bundle: EvidenceBundle) -> "EvidenceBundleOut":
+    def from_domain(
+        cls, bundle: EvidenceBundle, *, render: RenderReport | None = None
+    ) -> "EvidenceBundleOut":
         return cls(
             success=True,
             error_type=None,
@@ -119,10 +208,11 @@ class EvidenceBundleOut(OutputModel):
             bundle_dir=bundle.bundle_dir,
             sources=tuple(EvidenceSourceOut.from_domain(s) for s in bundle.sources),
             existing_docs=tuple(DocEntryOut.from_domain(d) for d in bundle.existing_docs),
+            render=None if render is None else RenderReportOut.from_domain(render),
         )
 
 
-def _render_human(bundle: EvidenceBundle) -> None:
+def _render_human(bundle: EvidenceBundle, render: RenderReport | None = None) -> None:
     if bundle.skipped:
         user_output(click.style("learn evidence skipped", dim=True) + f" — {bundle.skip_reason}")
         return
@@ -145,6 +235,13 @@ def _render_human(bundle: EvidenceBundle) -> None:
         f"plan {plan_status}, pr {pr_status}, planning {planning_summary}, "
         f"{impl_runs} impl run(s), docs: {docs}"
     )
+    if render is not None:
+        for report in render.sessions:
+            user_output(
+                f"render: {report.role} kept {report.entries_kept}/{report.entries_read} "
+                f"({report.duplicate_groups} dup, {report.truncations} trunc) → "
+                f"{len(report.chunk_paths)} chunk(s)"
+            )
 
 
 def _first_status(by_category: dict[str, list[EvidenceSource]], category: str) -> str:

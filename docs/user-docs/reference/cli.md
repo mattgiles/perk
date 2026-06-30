@@ -440,6 +440,14 @@ never guessed**, and never fails the command. A learn-docs consolidation plan (n
 `consumed_learn`) returns a stable skip up front. `--json` emits the machine-readable bundle (the
 default is a compact human summary to stderr).
 
+`--render` additionally normalizes the **found** session JSONLs into bounded, untrusted-DATA-fenced
+Markdown chunks under `.perk/workflow/scratch/learn-evidence/chunks/` (one or more `<stem>[-N].md`
+parts per session role) through a deterministic pipeline — branch selection, boilerplate-drop,
+dedup, prune, per-payload truncation, then split-by-budget at entry boundaries (no entry is ever
+elided). With `--json`, a stable normalization report (per-role counters + chunk paths) rides the
+envelope's `render` field (`null` unless `--render`); with the human summary, one `render:` line per
+role. `--render` and `--json` are independent.
+
 ### `perk worktree` (alias `wt`)
 
 Create, list, and remove git worktrees: `create` (`new`), `list` (`ls`), `remove` (`rm`), `wipe`.
