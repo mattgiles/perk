@@ -350,3 +350,67 @@ def test_prepend_callout_noop_when_command_present():
 
 def test_prepend_callout_empty_body():
     assert plan.prepend_callout("", "CALLOUT", command="perk impl 42") == "CALLOUT\n"
+
+
+# --------------------------------------------------------------------- LearnHeader read-back
+
+
+def test_learn_header_roundtrip_html_style():
+    body = plan.render_learn_header(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        plan=45,
+        decision="SHOULD_BE_CODE",
+        target="perk/foo.py::bar",
+    )
+    header = plan.parse_learn_header(body)
+    assert header == plan.LearnHeader(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        plan=45,
+        decision=plan.CapturedDecision.SHOULD_BE_CODE,
+        target="perk/foo.py::bar",
+    )
+
+
+def test_learn_header_roundtrip_inline_code_style():
+    body = plan.render_learn_header(
+        run_id="01RID",
+        created="2026-06-30T00:00:00Z",
+        plan="ENG-45",
+        decision="NEW_DOC",
+        target=None,
+        style="inline-code",
+    )
+    header = plan.parse_learn_header(body)
+    assert header is not None
+    assert header.plan == "ENG-45"
+    assert header.decision is plan.CapturedDecision.NEW_DOC
+    assert header.target is None
+
+
+def test_learn_header_absent_block_is_none():
+    assert plan.parse_learn_header("no learn-header here at all") is None
+
+
+def test_learn_header_unknown_decision_degrades_to_none():
+    body = plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY,
+        {"run_id": "01RID", "created": "t", "plan": 45, "decision": "FUTURE_TOKEN"},
+    )
+    header = plan.parse_learn_header(body)
+    assert header is not None
+    # The rest of the header is preserved; only the unknown decision degrades.
+    assert header.run_id == "01RID"
+    assert header.plan == 45
+    assert header.decision is None
+
+
+def test_learn_header_targetless_has_none_target():
+    body = plan.render_learn_header(
+        run_id="01RID", created="t", plan=50, decision="CAPTURE_LEARN", target=None
+    )
+    header = plan.parse_learn_header(body)
+    assert header is not None
+    assert header.decision is plan.CapturedDecision.CAPTURE_LEARN
+    assert header.target is None

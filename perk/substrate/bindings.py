@@ -50,6 +50,7 @@ DELIVERABLE_COMMAND_TARGETS: frozenset[str] = frozenset(
         "objective-reconcile",
         "objective-replan",
         "learn-docs",
+        "learn-code",
         "pr-review",
         "skills-create",
         "skills-refine",

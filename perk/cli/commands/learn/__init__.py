@@ -18,6 +18,7 @@ import click
 
 from perk.cli.alias import AliasGroup
 from perk.cli.commands.learn.capture_cmd import capture_learn
+from perk.cli.commands.learn.code_cmd import code_learn
 from perk.cli.commands.learn.docs_check_cmd import docs_check_learn
 from perk.cli.commands.learn.docs_cmd import docs_learn
 from perk.cli.commands.learn.docs_sync_cmd import docs_sync_learn
@@ -58,8 +59,8 @@ learn_group = LearnGroup(
     "learn",
     help=(
         "Capture + consolidate learnings. Bare `perk learn` launches the learn stage (a primed "
-        "pi session); `capture`, `docs`, `docs-check`, `docs-sync`, and `evidence` are the cold "
-        "workers the warm doors delegate to."
+        "pi session); `capture`, `code`, `docs`, `docs-check`, `docs-sync`, and `evidence` are the "
+        "cold workers the warm doors delegate to."
     ),
     # Launcher options (--worktree/--dry-run/--remote/pi-args) must survive group-level parsing
     # so they reach resolve_command intact for the default-dispatch fall-through.
@@ -67,6 +68,7 @@ learn_group = LearnGroup(
 )
 
 learn_group.add_command(capture_learn)
+learn_group.add_command(code_learn)
 learn_group.add_command(docs_learn)
 learn_group.add_command(docs_check_learn)
 learn_group.add_command(docs_sync_learn)

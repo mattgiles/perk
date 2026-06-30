@@ -17,12 +17,13 @@ const EXPECTED: ReadonlyArray<readonly [string, string, string]> = [
   ["command:objective-reconcile", "perk-objective-reconcile", "nudge"],
   ["command:objective-replan", "perk-objective-replan", "nudge"],
   ["command:learn-docs", "perk-learn-docs", "nudge"],
+  ["command:learn-code", "perk-learn-code", "nudge"],
   ["command:pr-review", "perk-pr-review", "nudge"],
   ["command:skills-create", "perk-skill-author", "nudge"],
   ["command:skills-refine", "perk-skill-author", "nudge"],
 ];
 
-test("loadDefaultBindings: returns the 12 shipped default bindings", () => {
+test("loadDefaultBindings: returns the 13 shipped default bindings", () => {
   const bindings = loadDefaultBindings();
   assert.deepEqual(
     bindings.map((b) => [b.trigger, b.skill, b.mode]),
