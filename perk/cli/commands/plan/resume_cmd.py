@@ -23,7 +23,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -66,6 +66,9 @@ def resume_cmd(
         config = require_config(ctx)
         plan_id = parse_plan_id(plan)
         backend = resolve.resolve_issue_backend(repo_root)
+        # Gated on the real-launch path so the `--dry-run`/`--json` preview stays byte-unchanged.
+        if not dry_run:
+            log_step(f"looking up plan #{plan_id}")
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

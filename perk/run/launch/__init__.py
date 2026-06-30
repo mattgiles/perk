@@ -47,6 +47,7 @@ from perk import github as github
 from perk.backends.linear import agent as linear_agent
 from perk.cli.ensure import Ensure
 from perk.convergence import init
+from perk.convergence.init.extension_install import consumer_perk_package_dir
 from perk.run import runner as runner
 from perk.run.launch.materialize import (
     _WORKTREE_SETUP_TIMEOUT_S,
@@ -78,7 +79,7 @@ from perk.run.launch.worktree import (
 from perk.state import cache, run_id
 from perk.substrate import git as git
 from perk.substrate.config import Config, StageModel, load_local_linear_api_key
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_done, log_step, machine_output, user_output
 from perk.substrate.registry import Stage
 
 # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
@@ -258,7 +259,15 @@ def launch_stage(
     # best-effort + non-fatal internally. It is idempotent and depends on neither `env` nor `chdir`,
     # so it runs here — the repo-root install is fully warmed before `materialize_extensions` clones
     # it into the worktree. `worktree: none` stages load from this repo-root install directly.
-    init.ensure_extension_install_present(repo_root, self_repo=init.is_self_repo(repo_root))
+    # Narrate the install ONLY when one actually happens: the common path (package present) is an
+    # instant locked no-op that returns `None`, so a cheap unlocked pre-check decides whether to
+    # emit the step line. The extra `is_dir()` is purely cosmetic — the function re-checks
+    # authoritatively under its own lock, so it can never cause a double install.
+    self_repo = init.is_self_repo(repo_root)
+    if not self_repo and not consumer_perk_package_dir(repo_root).is_dir():
+        log_step("installing perk extension (@mgiles/perk)")
+    if init.ensure_extension_install_present(repo_root, self_repo=self_repo) is not None:
+        log_done("installed perk extension")
     # Materialize the plan body into the worktree so in-session checkpoints can seed from
     # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.

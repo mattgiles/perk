@@ -762,6 +762,25 @@ def test_create_bases_off_fresh_origin_trunk(git_repo_with_remote, monkeypatch):
     assert _sha(wt) == advanced  # based off freshly-fetched origin/main, not stale local HEAD
 
 
+def test_create_narrates_worktree_creation(git_repo_with_remote, monkeypatch, capsys):
+    """A fresh worktree-create launch narrates the create wait + its completion milestone."""
+    clone, _remote, _advance = git_repo_with_remote
+    cache.write_plan_ref(clone, _PLAN_REF)
+    _no_exec(monkeypatch)
+    launch_stage(
+        repo_root=clone,
+        config=Config(worktree_root=clone / ".worktrees"),
+        stage=_stage("implement"),
+        worktree=None,
+        dry_run=False,
+        remote=None,
+        pi_args=[],
+    )
+    err = capsys.readouterr().err
+    assert "creating worktree plan-42" in err
+    assert "created worktree plan-42" in err
+
+
 def test_launch_injects_cli_version_env(git_repo_with_remote, monkeypatch):
     """The local launch seam injects PERK_CLI_VERSION = the running CLI's version into the exec
     env, alongside PERK_RUN_ID, so the extension can surface the soft version-parity signal."""
@@ -1056,7 +1075,9 @@ def test_sync_fast_forwards_clean_read_only_none_stage(tmp_path, monkeypatch, ca
     calls = _patch_sync_git(monkeypatch)
     _launch_plan(tmp_path)
     assert calls.merge_ff_only == ["origin/main"]
-    assert "synced main → origin/main" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "fetching origin" in err  # the new step before the network round-trip
+    assert "synced main → origin/main" in err
 
 
 def test_sync_skips_on_dirty_tree(tmp_path, monkeypatch, capsys):

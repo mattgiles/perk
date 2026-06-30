@@ -105,6 +105,7 @@ def test_dry_run_resolves_stage_without_launching(monkeypatch):
         assert data["plan_ref"]["pr_id"] == "7"
         # dry run writes no ref
         assert not cache.plan_ref_path(Path(d)).exists()
+        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
 
 
 def test_url_argument_peeled_to_id_reaches_backend(monkeypatch):
@@ -148,6 +149,7 @@ def test_real_resume_writes_ref_and_launches(monkeypatch):
         result = runner.invoke(cli, ["plan", "resume", "7"])
         assert result.exit_code == 0
         assert launched["stage"] == "submit"  # PR open -> submit
+        assert "looking up plan #7" in result.stderr  # narrates the backend lookup wait
         # the ref was materialized at the repo root for launch_stage to derive from
         assert cache.read_plan_ref(Path(d)) is not None
 
@@ -160,7 +162,8 @@ def test_nothing_to_resume_exits_0(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "resume", "7", "--json"])
         assert result.exit_code == 0
-        assert json.loads(result.output)["resumed_stage"] is None
+        # Parse stdout (not the combined .output): the real-path `looking up …` line is on stderr.
+        assert json.loads(result.stdout)["resumed_stage"] is None
 
 
 def test_plan_not_found_exits_1(monkeypatch):
@@ -171,7 +174,8 @@ def test_plan_not_found_exits_1(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "resume", "999", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "plan_not_found"
+        # Parse stdout (not the combined .output): the real-path `looking up …` line is on stderr.
+        assert json.loads(result.stdout)["error_type"] == "plan_not_found"
 
 
 def test_invalid_plan_id_exits_1(monkeypatch):

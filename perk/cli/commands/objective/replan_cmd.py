@@ -34,7 +34,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 # The carry-candidate set: unfinished work carries forward; `done`/`skipped` stay as history on the
@@ -188,6 +188,10 @@ def replan_objective(
 
         store = resolve.resolve_objective_store(repo_root)
         is_linear = store.backend_id != resolve.GITHUB_BACKEND_ID
+        # Gated on the real-launch path so the `--dry-run`/`--json` preview stays byte-unchanged;
+        # one line covers the immediately-following `read_issue` lookup too.
+        if not dry_run:
+            log_step(f"looking up objective #{objective_id}")
         state = store.get_objective(objective_id=objective_id)
         if state is None:
             raise UserFacingCliError(

@@ -145,6 +145,7 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         assert "<untrusted_objective_unfinished_nodes>" in text
         assert "node 1.2" in text and "node 2.1" in text
         assert "node 1.1" not in text  # done node excluded
+        assert "looking up" not in result.stderr  # the lookup line is gated off the dry-run path
 
 
 def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
@@ -157,6 +158,7 @@ def test_real_launch_threads_supersedes_handoff_and_fresh_run_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 0, result.output
+        assert "looking up objective #42" in result.stderr  # narrates the backend lookup wait
     assert launched["stage"] == "objective-author"  # borrows the objective-author stage
     assert launched["handoff_extra"] == {"supersedes": "42"}
     assert launched["run_id_override"] is None  # FRESH run_id minted (net-new objective)
@@ -188,7 +190,8 @@ def test_refuses_not_found(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_not_found"
+        # Parse stdout: the real-path `looking up #42` line is on stderr (combined .output).
+        assert json.loads(result.stdout)["error_type"] == "objective_not_found"
 
 
 def test_refuses_already_superseded(monkeypatch):
@@ -201,7 +204,7 @@ def test_refuses_already_superseded(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_not_open"
+        assert json.loads(result.stdout)["error_type"] == "objective_not_open"
 
 
 def test_refuses_non_open_github_objective(monkeypatch):
@@ -212,7 +215,7 @@ def test_refuses_non_open_github_objective(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "replan", "42", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_not_open"
+        assert json.loads(result.stdout)["error_type"] == "objective_not_open"
 
 
 def test_rejects_remote(monkeypatch):

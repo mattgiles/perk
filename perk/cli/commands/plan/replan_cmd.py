@@ -33,7 +33,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -154,6 +154,10 @@ def replan(
         launch.resolve_target(stage, remote)
 
         backend = resolve.resolve_issue_backend(repo_root)
+        # Gated on the real-launch path so the `--dry-run`/`--json` preview stays byte-unchanged;
+        # one line covers the immediately-following `get_plan_body` lookup too.
+        if not dry_run:
+            log_step(f"looking up plan #{plan_id}")
         state = backend.get_plan(issue_id=plan_id)
         if state is None:
             raise UserFacingCliError(

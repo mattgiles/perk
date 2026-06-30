@@ -16,7 +16,7 @@ from perk.run.launch.worktree import ResolvedWorktree
 from perk.state import cache
 from perk.substrate.binding_delivery import render_cold_bindings
 from perk.substrate.config import Config
-from perk.substrate.output import user_output
+from perk.substrate.output import log_warn
 from perk.substrate.registry import Stage
 
 
@@ -169,9 +169,9 @@ def _resolve_prompt(
     trigger = binding_trigger or f"stage:{stage.id}"
     delivery = render_cold_bindings(config.user_bindings, repo_root, trigger)
     for issue in delivery.issues:
-        user_output(f"⚠ skill binding: {issue}")
+        log_warn(f"skill binding: {issue}")
     for warning in delivery.warnings:
-        user_output(f"⚠ {warning}")
+        log_warn(warning)
     if delivery.text and prompt is not None:
         prompt = f"{prompt}\n\n{delivery.text}"
     return prompt

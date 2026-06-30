@@ -16,7 +16,7 @@ from perk.github import GitHubError
 from perk.run import runner
 from perk.run.launch.worktree import Target
 from perk.state import cache, run_id
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_warn, machine_output, user_output
 from perk.substrate.registry import Stage
 
 
@@ -50,8 +50,8 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
             base = github.default_branch(repo_root)
         except GitHubError as exc:
             base = "main"
-            user_output(
-                f"⚠ could not resolve the default branch ({exc}); basing the dispatch on "
+            log_warn(
+                f"could not resolve the default branch ({exc}); basing the dispatch on "
                 f"{base!r} — pass an explicit base if that is wrong."
             )
     pr_id = plan_ref.pr_id
@@ -124,7 +124,7 @@ def _drive_remote_target(*, stage: Stage, target: Target, repo_root: Path, dry_r
     cache.write_dispatch(repo_root, rid, final)
     confirm = cache.read_dispatch(repo_root, rid)
     if confirm is None or confirm.status != "dispatched":
-        user_output(f"⚠ dispatch record for run {rid} did not confirm 'dispatched' after finalize.")
+        log_warn(f"dispatch record for run {rid} did not confirm 'dispatched' after finalize.")
 
     user_output(
         f"dispatched stage '{stage.id}' to {runner_label} — run {handle.url or handle.run_ref}"

@@ -26,7 +26,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init.extension_install import consumer_npm_install_root
 from perk.github import GitHubError
 from perk.state import cache
-from perk.substrate.output import user_output
+from perk.substrate.output import log_done, log_step, log_warn, user_output
 
 # Per-command wall-clock cap for `[worktree] setup` commands (10 minutes) — `uv sync` / `npm ci`
 # can be slow on a cold cache, but a hung command must not wedge the launch forever.
@@ -48,6 +48,8 @@ def run_worktree_setup(worktree: Path, commands: list[str]) -> None:
     The single canonical setup-execution path; the cold door and ``perk worktree create`` both
     consume it (mirrors ``materialize_plan_body``).
     """
+    if commands:
+        log_step("running worktree setup")
     for command in commands:
         user_output(f"  $ {command}")
         try:
@@ -90,13 +92,15 @@ def materialize_plan_body(repo_root: Path, worktree: Path, plan_ref: plan.PlanRe
     pr_id = plan_ref.pr_id.strip()
     if not pr_id:
         return
+    log_step(f"fetching plan #{pr_id} body")
     try:
         body = resolve.resolve_issue_backend(repo_root).get_plan_body(issue_id=pr_id)
     except (GitHubError, IssueBackendError) as exc:
-        user_output(f"  (checkpoints: could not fetch plan #{pr_id} body — {exc})")
+        log_warn(f"checkpoints: could not fetch plan #{pr_id} body — {exc}")
         return
     if body:
         cache.write_plan_body(worktree, body)
+        log_done(f"cached plan #{pr_id} body")
 
 
 def materialize_skills(repo_root: Path, worktree: Path) -> None:
@@ -114,14 +118,14 @@ def materialize_skills(repo_root: Path, worktree: Path) -> None:
     """
     src = repo_root / ".agents" / "skills"
     if not src.is_dir():
-        user_output(
-            "  (skills: repo .agents/skills/ missing — run `perk init`; "
-            "this session may have no skills)"
+        log_warn(
+            "skills: repo .agents/skills/ missing — run `perk init`; "
+            "this session may have no skills"
         )
         return
     sources = [entry for entry in sorted(src.iterdir()) if entry.is_dir()]
     if not sources:
-        user_output("  (skills: repo .agents/skills/ is empty — run `perk init`)")
+        log_warn("skills: repo .agents/skills/ is empty — run `perk init`")
         return
     dst = worktree / ".agents" / "skills"
     dst.mkdir(parents=True, exist_ok=True)
@@ -137,8 +141,9 @@ def materialize_skills(repo_root: Path, worktree: Path) -> None:
             continue  # a real dir/file already there — never clobber
         link.symlink_to(target, target_is_directory=True)
         linked += 1
-    # The success count is folded into the launch banner (computed up front from repo_root);
-    # only the missing/empty-source warnings above are emitted here.
+    # Confirm the total delivered (not just freshly `linked`) so the count matches the banner and
+    # reads correctly on an idempotent resume (where every skill is present and linked == 0).
+    log_done(f"mirrored {len(sources)} skills")
 
 
 def _count_skill_sources(repo_root: Path) -> int:
@@ -229,7 +234,7 @@ def materialize_extensions(repo_root: Path, worktree: Path) -> None:
     except OSError:
         src_empty = True
     if src_empty:
-        user_output("  (extensions: repo .pi/npm not staged — pi will install them in-session)")
+        log_warn("extensions: repo .pi/npm not staged — pi will install them in-session")
         return
     dst = worktree / ".pi" / "npm"
     dst_modules = dst / "node_modules"
@@ -245,6 +250,6 @@ def materialize_extensions(repo_root: Path, worktree: Path) -> None:
         # resume guard above doesn't permanently cache a half-copied (corrupt) install — a failed
         # stage must degrade to pi installing fresh in-session, never to a broken tree.
         shutil.rmtree(dst, ignore_errors=True)
-        user_output(
-            f"  (extensions: could not stage .pi/npm — {exc}; pi will install them in-session)"
-        )
+        log_warn(f"extensions: could not stage .pi/npm — {exc}; pi will install them in-session")
+        return
+    log_done("staged extensions")

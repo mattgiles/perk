@@ -34,7 +34,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -167,6 +167,10 @@ def plan_objective(
             require_github(ctx)
 
         store = resolve.resolve_objective_store(repo_root)
+        # Gated on the real-launch path so the `--dry-run`/`--json` preview surfaces (the only paths
+        # that emit machine-readable stdout) stay byte-unchanged.
+        if not dry_run:
+            log_step(f"looking up objective #{number}")
         state = store.get_objective(objective_id=number)
         if state is None:
             raise UserFacingCliError(
