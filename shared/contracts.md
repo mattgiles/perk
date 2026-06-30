@@ -4730,3 +4730,45 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
     hatches (decision-less); cold `perk learn` launch stays the simple investigate+capture
     (`stages/learn.md` unchanged — the four `learn-*` golden cases + cold/warm parity preserved).
     **Deferred (out of scope):** cold-launch orchestration (the node is the warm orchestrator).
+
+**Generated routing + on-demand checks (node 6.1) — `perk learn docs-sync` / `docs-check`.** The
+`docs/learned/` navigation is **generated from per-doc frontmatter** (the SSOT) and drift is
+**detectable on demand**, without wiring freshness into `just ci`/`just test`.
+
+- **SSOT.** Every `docs/learned/**/*.md` doc **except `docs/learned/index.md`** carries `title` +
+  `read_when` YAML frontmatter. The doc set's category = the posix relative dir under `docs/learned/`
+  (e.g. `workflow`); slug = the filename stem; ordering is **alphabetical by `(category, slug)`** (no
+  hardcoded category list). `read_learned_docs(repo_root)` (in `perk/learn/docs_scan.py`) is the
+  shared, never-raising full-metadata reader (untruncated values; `OSError`/parse failure → `None`).
+- **Two generated artifacts** (`perk/learn/docs_sync.py`, a pure deterministic leaf importing only
+  `docs_scan`):
+  - **The terse routing block** → `.pi/APPEND_SYSTEM.md` (loaded ambiently into every session's
+    system prompt): one line per doc, `- **<category>/<slug>** — <read_when>` (full, untruncated; no
+    escaping — not a table).
+  - **The per-doc catalog table** → `docs/learned/index.md`: a fixed header plus one
+    `| <category> | [<slug>.md](<category>/<slug>.md) | <read_when, `|`-escaped> |` row per doc (links
+    use the real filename; a table cell escapes `|`→`\|`).
+- **Markers + preamble.** Each artifact wraps its generated region in
+  `<!-- BEGIN perk docs-sync … -->` / `<!-- END perk docs-sync -->`. `render_with_markers` replaces
+  strictly **between** the markers when both are present (a hand-editable preamble outside them
+  survives), else bootstraps `preamble + BEGIN + region + END`. Generation is **byte-for-byte
+  deterministic** (sorted, fixed formatting, single trailing newline, no wall-clock/random) — re-running
+  `docs-sync` on a converged tree is a no-op.
+- **`perk learn docs-sync`** (options `--json`, `--dry-run`; `require_repo` only — purely local) writes
+  only artifacts whose content changed (`--dry-run` writes nothing) and reports `written`/`unchanged`.
+  Exit `0` ok · `2` not-a-repo.
+- **`perk learn docs-check`** (option `--json`; `require_repo` only; read-only) splits **freshness**
+  (each artifact's live marked region must match a fresh render — absent markers or a mismatch ⇒
+  stale) from **advisory hygiene** (`missing_frontmatter`, `source_code_blocks`, plus the reused
+  `docs_scan.scan_docs_richly` dup-`read_when`/stale-pointer/broken-link facts). **Freshness gates the
+  exit; hygiene is advisory** (always printed, never changes a fresh exit): exit `0` fresh · `1` stale
+  · `2` not-a-repo. **Not added to `[[ci]]`** (a deliberate follow-up — promoting freshness into CI is
+  a one-line `[[ci]]` add gating only on freshness).
+- **The source-code-block heuristic.** A fenced block is flagged copied-source-looking only when its
+  info-string is a source language (`py/python/ts/typescript/js/javascript/tsx/jsx/rust/rs/go`) **and**
+  its body has `>= 10` non-blank lines (`_MAX_SOURCE_BLOCK_LINES`). Data-format/CLI fences
+  (`json/yaml/toml/text/console/sh/bash/diff/ini`) and untagged fences are always allowed. Advisory only.
+- **Live-tree converge.** Node 6.1 ran `docs-sync` once and committed the regenerated
+  `docs/learned/index.md` + `.pi/APPEND_SYSTEM.md`. A deliberate, documented consequence: the routing
+  order is now `pi`, `toolchain`, `workflow` (alphabetical), the per-category mega-line blob is gone
+  (replaced by per-doc lines), and the catalog's renamed-file links + row counts are corrected.

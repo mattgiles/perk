@@ -79,6 +79,23 @@ class DocEntry:
 
 
 @dataclass(frozen=True)
+class LearnedDoc:
+    """One learned doc, read for generation: its category, slug, repo-rel path, and FULL metadata.
+
+    The single source of truth the ``docs-sync`` generator + ``docs-check`` checker share. Unlike
+    :class:`DocEntry`, ``title``/``read_when`` are the **untruncated** frontmatter values (the
+    generator must reproduce them verbatim); ``None`` when the doc lacks frontmatter or it is
+    unreadable/malformed.
+    """
+
+    category: str  # the posix relative dir under docs/learned/ (e.g. "workflow")
+    slug: str  # the filename stem (e.g. "plan-factories")
+    path: str  # repo-relative posix path
+    title: str | None
+    read_when: str | None
+
+
+@dataclass(frozen=True)
 class StalePointer:
     """A source pointer that no longer resolves (a "ghost")."""
 
@@ -219,6 +236,58 @@ def _truncate(value: str | None) -> str | None:
     if len(flat) <= _SNIPPET_LEN:
         return flat
     return flat[: _SNIPPET_LEN - 1].rstrip() + "…"
+
+
+# ---------------------------------------------------------------------------
+# Full-metadata learned-doc read (the generation SSOT)
+# ---------------------------------------------------------------------------
+
+
+def read_learned_docs(repo_root: Path) -> tuple[LearnedDoc, ...]:
+    """Read every ``docs/learned/**/*.md`` doc's FULL frontmatter metadata (the generation SSOT).
+
+    Excludes ``docs/learned/index.md`` (the generated output, not a source). Deterministic — sorted
+    by ``(category, slug)`` — and **never raises**: an unreadable file or malformed frontmatter
+    yields ``title``/``read_when`` = ``None``. Unlike :func:`scan_existing_docs`, the values are
+    **untruncated** (the generator reproduces them verbatim).
+    """
+    root = repo_root / _LEARNED_GLOB[0]
+    if not root.is_dir():
+        return ()
+    index_md = root / "index.md"
+    docs: list[LearnedDoc] = []
+    for path in root.glob(_LEARNED_GLOB[1]):
+        if not path.is_file() or path == index_md:
+            continue
+        rel_to_root = path.relative_to(root)
+        category = rel_to_root.parent.as_posix()
+        title, read_when = _learned_frontmatter(path)
+        docs.append(
+            LearnedDoc(
+                category=category,
+                slug=path.stem,
+                path=_rel(repo_root, path),
+                title=title,
+                read_when=read_when,
+            )
+        )
+    return tuple(sorted(docs, key=lambda d: (d.category, d.slug)))
+
+
+def _learned_frontmatter(path: Path) -> tuple[str | None, str | None]:
+    """Best-effort FULL ``(title, read_when)`` for one learned doc; never raises."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None, None
+    front = _frontmatter_dict(text)
+    if not front:
+        return None, None
+    try:
+        meta = _DocFrontmatter.model_validate(front)
+    except ValueError:
+        return None, None
+    return meta.title, meta.read_when
 
 
 # ---------------------------------------------------------------------------
