@@ -368,3 +368,17 @@ def test_wipe_empty(git_repo):
     result = CliRunner().invoke(cli, ["worktree", "wipe"], obj=_ctx(git_repo))
     assert result.exit_code == 0, result.output
     assert "no plan worktrees to wipe" in result.output
+
+
+def test_wipe_recovers_broken_worktree(git_repo, monkeypatch):
+    wt = _add_plan_wt(git_repo, 1)
+    # Reproduce the `validation failed … '.git' does not exist` mode a prior interrupted run left.
+    (wt / ".git").unlink()
+    monkeypatch.setattr(plans, "get_plan", lambda **k: _plan_state("MERGED"))
+    # --force: the broken worktree's `git status` walks up to the (dirty) main test repo.
+    result = CliRunner().invoke(cli, ["worktree", "wipe", "--force"], obj=_ctx(git_repo))
+    assert result.exit_code == 0, result.output
+    assert not (git_repo / ".worktrees" / "plan-1").exists()
+    assert "plan-1" not in {w.path.name for w in git.worktree_list(git_repo)}
+    assert "plan-1" not in _branches(git_repo)
+    assert "wiped 1 worktree(s)" in result.output

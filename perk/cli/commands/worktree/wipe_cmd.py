@@ -63,7 +63,10 @@ def _classify_worktree(
 _MAX_GATHER_WORKERS = 32
 
 # Worktree removal is dominated by the filesystem rm -rf (lock-free); parallelize it too.
-_MAX_REMOVE_WORKERS = 32
+# 32 concurrent `rm -rf`s of `node_modules`/`.venv` trees thrash the disk badly enough that
+# individual removals starve and time out (the broken-worktree residue then accrues); a smaller
+# pool lets each finish on the primary git path.
+_MAX_REMOVE_WORKERS = 8
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,13 @@ def _gather_facts(
         return _skip_facts("plan issue not found")
     if state.pr is None:
         return _skip_facts("no PR linked to plan")
+    # The working dir is entirely gone (a fully-missing entry whose `.git`-walk would otherwise
+    # run `git status` against an unexpected ancestor or crash on a nonexistent cwd). Flow it
+    # through classification with neutral facts; the end-of-pool prune clears its admin record.
+    if not wt_path.exists():
+        return _GatheredFacts(
+            skip_reason=None, pr_state=state.pr.state, is_dirty=False, has_pending_learn=False
+        )
     return _GatheredFacts(
         skip_reason=None,
         pr_state=state.pr.state,
@@ -239,6 +249,12 @@ def _wipe_impl(*, repo_root: Path, worktree_root: Path, dry_run: bool, force: bo
         user_output(click.style("✓ ", fg="green") + f"removed {name}")
         removed_worktrees.append(wt)
         removed += 1
+
+    # Prune stale admin entries BEFORE branch deletes. A fallback-path removal leaves a stale
+    # `.git/worktrees/<id>` entry; until it is pruned git still believes the (deleted) dir has the
+    # plan branch checked out and refuses `git branch -D` with "checked out at …". This single
+    # serialized prune also sweeps pre-existing orphan admin entries already on disk.
+    git.worktree_prune(repo_root)
 
     # d. Batched local branch delete (-D: the PR is provably MERGED, so force is safe).
     branches = [wt.branch or wt.path.name for wt in removed_worktrees]

@@ -44,6 +44,63 @@ def test_worktree_lifecycle(git_repo):
     assert "wt1" not in {w.path.name for w in git.worktree_list(git_repo)}
 
 
+def test_worktree_prune_clears_orphan_admin_entry(git_repo):
+    import shutil
+
+    wt = git_repo / ".worktrees" / "orphan"
+    git.worktree_add(git_repo, wt, branch="orphan", create_branch=True)
+    # Delete the working dir directly, leaving the .git/worktrees/<id> admin entry behind.
+    shutil.rmtree(wt)
+    assert "orphan" in {w.path.name for w in git.worktree_list(git_repo)}
+
+    git.worktree_prune(git_repo)
+    assert "orphan" not in {w.path.name for w in git.worktree_list(git_repo)}
+
+
+def test_worktree_remove_recovers_from_missing_gitlink(git_repo):
+    wt = git_repo / ".worktrees" / "broken"
+    git.worktree_add(git_repo, wt, branch="broken", create_branch=True)
+    # Reproduce the `validation failed … '.git' does not exist` mode (--force does NOT bypass it).
+    (wt / ".git").unlink()
+
+    git.worktree_remove(git_repo, wt, force=True)  # must not raise
+    assert not wt.exists()
+
+    git.worktree_prune(git_repo)
+    assert "broken" not in {w.path.name for w in git.worktree_list(git_repo)}
+
+
+def test_worktree_remove_recovers_from_timeout(git_repo, monkeypatch):
+    wt = git_repo / ".worktrees" / "slow"
+    git.worktree_add(git_repo, wt, branch="slow", create_branch=True)
+
+    real_run = git._run
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["worktree", "remove"]:
+            raise git.GitError(f"git worktree remove --force {wt} timed out")
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(git, "_run", fake_run)
+    git.worktree_remove(git_repo, wt, force=True)  # must not raise — fallback removes the dir
+    assert not wt.exists()
+
+
+def test_worktree_remove_dirty_refusal_not_recovered(git_repo):
+    import pytest
+
+    wt = git_repo / ".worktrees" / "dirty"
+    git.worktree_add(git_repo, wt, branch="dirty", create_branch=True)
+    (wt / "uncommitted.txt").write_text("x\n", encoding="utf-8")
+
+    # The dirty refusal is NOT recoverable: the shutil.rmtree fallback must not fire, so the
+    # worktree (and its uncommitted work) survives.
+    with pytest.raises(git.GitError):
+        git.worktree_remove(git_repo, wt, force=False)
+    assert wt.exists()
+    assert (wt / "uncommitted.txt").exists()
+
+
 def test_tracked_paths(git_repo):
     import pytest
 
