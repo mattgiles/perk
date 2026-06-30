@@ -4505,9 +4505,15 @@ EvidenceBundle = {
   plan_id: str|null, bundle_dir: str|null, # bundle_dir relative to repo_root
   sources: EvidenceSource[],
   existing_docs: DocEntry[],
+  docs_findings: DocFindings,                # the node-5.1 rich scan (declared after existing_docs)
 }
 EvidenceSource = { category, label, status, artifact: str|null, detail: str|null }
 DocEntry       = { kind, path, title: str|null, snippet: str|null }
+DocFindings    = { stale_pointers: StalePointer[], broken_doc_paths: BrokenDocPath[],
+                   duplicate_groups: DuplicateGroup[] }
+StalePointer   = { doc, pointer, reason }            # reason ∈ {missing-file, missing-symbol}
+BrokenDocPath  = { doc, target }
+DuplicateGroup = { basis, key, docs: str[] }         # basis ∈ {title, read_when}
 ```
 
 `status ∈ {found, missing, ambiguous}`. `artifact` paths are **relative to repo_root** (portable).
@@ -4544,7 +4550,53 @@ three conventional roots: `docs/learned/**/*.md` (frontmatter `title`/`read_when
 (frontmatter `name`/`description`). **Top-level `skills/` is deliberately excluded** — it is perk's
 own codebase, not the workflow-managed skill surface. Per entry: `DocEntry{kind, path, title,
 snippet}`, snippets bounded (`≈240` chars), sorted by path (deterministic); non-existent roots yield
-nothing. The rich stale/duplicate checker is **node 5.1**.
+nothing.
+
+**The rich existing-docs checker (node 5.1, `perk/learn/docs_scan.py::scan_docs_richly`).** A
+**deterministic, advisory** enrichment of the basic inventory: `scan_existing_docs` and the rich
+scan live together in a dependency-light pure leaf (`perk/learn/docs_scan.py`, imports only stdlib +
+`yaml` + `perk.boundary`) so node 6.1's `docs-check` reuses it without dragging in
+`github`/`backends`; `evidence.py` re-exports `DocEntry`/`scan_existing_docs` so existing call sites
+are byte-identical. `scan_docs_richly(repo_root) -> DocFindings` re-globs the same three roots,
+reads full bodies, is **deterministic** (sorted output, no wall-clock/random), **never raises**
+(per-doc try/except; `OSError` → skip), and is **bounded** (each doc read once; each finding family
+sorted **then** capped at `_MAX_FINDINGS = 200` — a pathological guard that never bites a normal
+corpus). It produces verifiable FACTS only; the de-dup **decision** is the analyst's (below).
+
+- **`DocFindings`** (frozen dataclasses → `OutputModel` serialize edge): `stale_pointers:
+  StalePointer[]`, `broken_doc_paths: BrokenDocPath[]`, `duplicate_groups: DuplicateGroup[]` (each
+  always present, empty tuples when nothing found; empty `DocFindings()` on a skip bundle).
+- **Stale source pointers (phantoms) — the high-value check.** For each doc, inline-code spans
+  (`` `([^`\n]+)` ``) whose *entire* content matches
+  `^(?P<path>[\w./-]+\.(?:py|ts|tsx|js))(?:::(?P<symbol>[\w.]+))?$` **and** whose `path` first
+  segment is in `_SOURCE_ROOTS = ("perk", "extension", "shared", "tests", "agents")` (the real
+  source dirs — excludes example/third-party/runtime; `.md` is the broken-link rule). Verify:
+  `repo_root/path` not a file → `StalePointer(reason="missing-file")`; file present **and** a
+  `::symbol` present **and** `symbol.split(".")[-1]` **not** a substring of the file text →
+  `StalePointer(reason="missing-symbol")`. Deduped per doc; sorted by `(doc, pointer)`.
+- **Broken doc paths — the routing-drift check.** Markdown links (`\[[^\]]*\]\(([^)]+)\)`); strip a
+  trailing `#fragment`; keep **only** targets ending in `.md`; **skip** any target with whitespace
+  or `|` (drops the validated false-positive code-snippet shapes `](cmd: C)` / `](scratch|runs)`)
+  and `http(s)://`/`mailto:`. Resolve relative to the doc's parent dir (normalizing `..`, so
+  cross-tree links resolve); a non-existent target → `BrokenDocPath`. Sorted by `(doc, target)`.
+  (Catches stale `index.md` catalog links.)
+- **Duplicate / routing collisions — the cheap guard (rare by design).** Normalize =
+  `" ".join(value.lower().split())`. Group **same-kind** docs by normalized non-empty `title`
+  (≥2 → `basis="title"`); group **learned** docs by normalized non-empty `read_when` (≥2 →
+  `basis="read_when"`). Sorted by `(basis, key)`; `docs` sorted within. Expected **empty** on a
+  healthy curated corpus — it guards accidental literal duplication and is node 6.1's "duplicated
+  read_when" substrate, **not** the dedup mechanism.
+- **De-dup is candidate-vs-corpus (the analyst, not Python).** The decision "does the learning being
+  captured already live in an existing doc?" is the existing-docs angle's, made against the **full**
+  `existing_docs[]` inventory **plus** these verified facts (it is never starved). The scan is
+  corpus-wide and **high-recall** — learned docs carry historical pointers — so the analyst weighs
+  findings by relevance to the candidate doc(s) for THIS capture (whole-corpus hygiene is node
+  6.1's `docs-check`). Within-corpus exact collision is only the guard above.
+- **`gather_evidence`** calls `scan_docs_richly(repo_root)` unconditionally on a non-skip bundle and
+  stores the result on `EvidenceBundle.docs_findings`; the `--json` envelope (`EvidenceBundleOut`)
+  serializes `docs_findings: DocFindings` declared **after `existing_docs`, before `render`**, so
+  the `manifest.json` write carries it automatically. The human summary line gains a findings tail
+  (`docs: N (stale-ptr: a, broken-link: b, dup-groups: c)`).
 
 **The session-normalization render (node 3.2, `perk learn evidence --render`).** An opt-in `--render`
 flag projects the bundle's **found** session JSONLs into bounded, untrusted-DATA-fenced Markdown
@@ -4628,7 +4680,11 @@ warm `/learn` orchestrator parses; only the reconciliation logic is deferred.
 - **Four angles** (one assigned per spawn, mirroring `pr-reviewer`): `plan-vs-implementation`
   (plan vs what shipped), `session-deviations` (course-corrections & durable gotchas),
   `validation-risk` (what stayed risky / under-tested), `existing-docs` (doc routing onto the
-  manifest's `existing_docs[]` inventory, enriched by node 5.1 later).
+  manifest's `existing_docs[]` inventory **plus the node-5.1 `docs_findings`**: de-dup is
+  candidate-vs-corpus — decide whether THIS capture's learning already lives in an existing doc,
+  weighing `stale_pointers`/`broken_doc_paths`/`duplicate_groups` **by relevance** to the candidate
+  doc(s); carries the two erk clauses — *VERIFY-not-HARMONIZE* (confirm both docs reference real,
+  existing code before disambiguating) and *one-ghost-+-one-real → `STALE_DOC` the ghost*).
 - **Input.** The task prompt names (a) the assigned angle and (b) the absolute path to the
   `perk learn evidence --render --json` manifest (§8.35 above) plus the bundle dir. The child reads
   the shared bundle — manifest statuses, `existing_docs[]`, `render.sessions[].chunk_paths`,

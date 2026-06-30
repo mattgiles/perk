@@ -440,7 +440,14 @@ and implementation session JSONLs (main + worker, labelled distinctly), and a ba
 inventory, materializing the artifacts under `.perk/workflow/scratch/learn-evidence/`. Each source
 carries a `found` / `missing` / `ambiguous` status — a missing or ambiguous source is **surfaced,
 never guessed**, and never fails the command. A learn-docs consolidation plan (non-empty
-`consumed_learn`) returns a stable skip up front. `--json` emits the machine-readable bundle (the
+`consumed_learn`) returns a stable skip up front.
+
+The `--json` bundle also carries `docs_findings` — an advisory, deterministic enrichment of the
+existing-docs inventory: `stale_pointers` (source pointers like `` `perk/x.py::sym` `` that no
+longer resolve), `broken_doc_paths` (doc→doc `.md` links that no longer exist), and
+`duplicate_groups` (the rare exact title/`read_when` collision guard). It surfaces doc drift
+advisorily (the `/learn` existing-docs analyst weighs it candidate-vs-corpus); it never fixes
+anything. `--json` emits the machine-readable bundle (the
 default is a compact human summary to stderr). On a gathered (non-skip) bundle the command also
 writes the full manifest to `.perk/workflow/scratch/learn-evidence/manifest.json` — the same payload
 as `--json` stdout (written unconditionally, so the bundle is self-contained for the `/learn` analyst

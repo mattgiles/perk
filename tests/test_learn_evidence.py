@@ -6,7 +6,8 @@ from pathlib import Path
 from perk import github, plan
 from perk.backends import resolve
 from perk.backends.issue_backend import IssueBackendError, PlanState
-from perk.learn import evidence
+from perk.learn import docs_scan
+from perk.learn.docs_scan import DocFindings, StalePointer
 from perk.learn.evidence import gather_evidence, scan_existing_docs
 from perk.state.session_pointers import (
     SessionClassPointers,
@@ -156,6 +157,7 @@ def test_skip_on_consumed_learn(tmp_path: Path, monkeypatch):
     assert bundle.skipped is True
     assert bundle.skip_reason and "consumed_learn" in bundle.skip_reason
     assert bundle.sources == () and bundle.existing_docs == ()
+    assert bundle.docs_findings == DocFindings()  # empty rich scan on a skip bundle
     assert bundle.bundle_dir is None
     assert pr_calls == []  # no PR gathering on skip
 
@@ -212,6 +214,29 @@ def test_full_gather_materializes_all(tmp_path: Path, monkeypatch):
 
     assert by_cat["existing-docs"].status == "found"
     assert len(bundle.existing_docs) == 1
+    assert bundle.docs_findings == DocFindings()  # the planted doc carries no stale pointers
+
+
+def test_full_gather_populates_docs_findings(tmp_path: Path, monkeypatch):
+    _git_init(tmp_path)
+    # `perk/run/launch.py` is a dir here → the cited pointer's file is gone (a phantom).
+    (tmp_path / "perk/run/launch").mkdir(parents=True)
+    _write(
+        tmp_path / "docs/learned/foo.md",
+        "---\ntitle: Foo\nread_when: x\n---\nSee `perk/run/launch.py::gone`.\n",
+    )
+    backend = _FakeBackend(header={"run_id": "01RUN_P", "impl_run_ids": []})
+    _patch_backend(monkeypatch, backend)
+    _no_pr(monkeypatch)
+
+    bundle = gather_evidence(tmp_path, _ref())
+
+    assert bundle.skipped is False
+    assert bundle.docs_findings.stale_pointers == (
+        StalePointer(
+            doc="docs/learned/foo.md", pointer="perk/run/launch.py::gone", reason="missing-file"
+        ),
+    )
 
 
 def test_impl_runs_resolved(tmp_path: Path, monkeypatch):
@@ -393,4 +418,4 @@ def test_truncate_bounds_snippet(tmp_path: Path):
     long = "x " * 400
     _write(tmp_path / "docs/learned/long.md", f"---\ntitle: T\nread_when: {long}\n---\n")
     entry = scan_existing_docs(tmp_path)[0]
-    assert entry.snippet is not None and len(entry.snippet) <= evidence._SNIPPET_LEN
+    assert entry.snippet is not None and len(entry.snippet) <= docs_scan._SNIPPET_LEN
