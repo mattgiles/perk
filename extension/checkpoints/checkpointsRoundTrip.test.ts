@@ -488,7 +488,8 @@ test("explicit `## Steps` plans: no generation, no injection, no (generated) suf
       "explicit steps → no steps-context injection",
     );
     await h.invokeCommand("checkpoints");
-    const msg = h.notifies.find((m) => m.includes("checkpoints"));
+    // Skip the uniform `perk: checkpoints — running…` entry toast; assert the status line.
+    const msg = h.notifies.find((m) => m.includes("checkpoints") && m.includes("·"));
     assert.ok(msg && !msg.includes("(generated)"), `no (generated) suffix: ${JSON.stringify(msg)}`);
   } finally {
     reg.unregister();

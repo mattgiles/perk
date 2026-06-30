@@ -33,11 +33,14 @@ function headfulCtx(notifies: { message: string; severity?: string }[]) {
 
 test("registerPerkCommand emits one info entry toast before the inner handler runs", async () => {
   const { pi, captured } = fakePi();
-  const order: string[] = [];
   const seen: { args: string; ctx: unknown }[] = [];
+  let completed = false;
   const handler = async (args: string, ctx: unknown) => {
-    order.push("handler");
+    // Yield control so an omitted `await` in the wrapper would let the wrapped handler
+    // resolve before this records — proving the wrapper genuinely awaits to completion.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     seen.push({ args, ctx });
+    completed = true;
   };
 
   // biome-ignore lint/suspicious/noExplicitAny: minimal handler shape for the test
@@ -52,9 +55,9 @@ test("registerPerkCommand emits one info entry toast before the inner handler ru
 
   // exactly one info notify with the running… message
   assert.deepEqual(notifies, [{ message: "perk: demo — running…", severity: "info" }]);
-  // toast emitted before the inner handler (notify is synchronous before the first await)
-  assert.deepEqual(order, ["handler"]);
-  // the inner handler received the same (args, ctx) and was awaited
+  // the wrapper awaited the inner handler to completion (it yielded control before recording)
+  assert.equal(completed, true);
+  // the inner handler received the same (args, ctx)
   assert.equal(seen.length, 1);
   assert.equal(seen[0]?.args, "the-args");
   assert.equal(seen[0]?.ctx, ctx);
@@ -105,4 +108,9 @@ test("registerPerkCommand is headless-safe (!hasUI falls to stderr, handler stil
   }
 
   assert.equal(ran, true);
+  // the report() stderr fallback actually emitted the entry toast in headless mode
+  assert.ok(
+    errors.some((e) => e.includes("perk: demo — running…")),
+    `stderr fallback emitted the entry toast: ${JSON.stringify(errors)}`,
+  );
 });
