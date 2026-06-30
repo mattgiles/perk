@@ -185,3 +185,18 @@ def test_malformed_frontmatter_never_raises(tmp_path: Path):
 
 def test_empty_roots_all_empty(tmp_path: Path):
     assert scan_docs_richly(tmp_path) == DocFindings()
+
+
+def test_non_utf8_doc_skipped_never_raises(tmp_path: Path):
+    # A non-UTF-8 `.md` raises UnicodeDecodeError on read; the scan degrades to skip, never raises.
+    bad = tmp_path / "docs/learned/binary.md"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(b"\xff\xfe not valid utf-8 \x80\n")
+    assert scan_docs_richly(tmp_path) == DocFindings()
+
+
+def test_pathological_link_target_skipped_never_raises(tmp_path: Path):
+    # A link target with an embedded NUL byte makes `(parent / target).resolve()` raise
+    # ValueError; the per-link guard degrades to skip rather than crashing the scan.
+    _write(tmp_path / "docs/learned/index.md", "[x](bad\x00name.md)\n")
+    assert scan_docs_richly(tmp_path) == DocFindings()

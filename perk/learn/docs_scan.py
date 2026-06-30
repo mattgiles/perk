@@ -142,7 +142,7 @@ def _scan_root(repo_root: Path, kind: str, glob: tuple[str, str]) -> list[DocEnt
             continue
         try:
             text = path.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         title, snippet = _doc_metadata(kind, text)
         out.append(DocEntry(kind=kind, path=_rel(repo_root, path), title=title, snippet=snippet))
@@ -278,7 +278,7 @@ def _read_docs(repo_root: Path) -> list[_ScannedDoc]:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
-            except OSError:
+            except (OSError, UnicodeDecodeError):
                 continue
             title, read_when = _collision_bases(kind, text)
             out.append(
@@ -311,6 +311,16 @@ def _collision_bases(kind: str, text: str) -> tuple[str | None, str | None]:
     return title, None
 
 
+def _is_existing_file(path: Path) -> bool:
+    """``path.is_file()`` hardened against a pathological, text-derived path (an embedded NUL byte
+    raises ``ValueError``; OS-illegal characters raise ``OSError``) — a bad path degrades to
+    "not a file", never raises out of the advisory scan."""
+    try:
+        return path.is_file()
+    except (OSError, ValueError):
+        return False
+
+
 def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
     """The phantom source pointers a doc cites: backtick ``path::symbol`` spans that no longer
     resolve (missing file, or present file whose last symbol segment is absent from its text)."""
@@ -323,7 +333,7 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
         if path.split("/")[0] not in _SOURCE_ROOTS:
             continue
         target = repo_root / path
-        if not target.is_file():
+        if not _is_existing_file(target):
             found.setdefault(span, StalePointer(doc=doc.rel, pointer=span, reason="missing-file"))
             continue
         symbol = match.group("symbol")
@@ -331,7 +341,7 @@ def _stale_pointers(repo_root: Path, doc: _ScannedDoc) -> list[StalePointer]:
             continue
         try:
             body = target.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         if symbol.split(".")[-1] not in body:
             found.setdefault(span, StalePointer(doc=doc.rel, pointer=span, reason="missing-symbol"))
@@ -355,8 +365,11 @@ def _broken_doc_paths(repo_root: Path, doc: _ScannedDoc) -> list[BrokenDocPath]:
             continue
         if target.startswith(("http://", "https://", "mailto:")):
             continue
-        resolved = (parent / target).resolve()
-        if not resolved.is_file():
+        try:
+            resolved = (parent / target).resolve()
+        except (OSError, ValueError):
+            continue  # a pathological link target degrades to skip, never crashes the scan
+        if not _is_existing_file(resolved):
             found.setdefault(raw, BrokenDocPath(doc=doc.rel, target=target))
     return sorted(found.values(), key=lambda b: b.target)
 
