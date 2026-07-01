@@ -257,7 +257,9 @@ def test_run_worktree_setup_runs_each_command_in_order(tmp_path, monkeypatch, ca
 
     monkeypatch.setattr(launch.subprocess, "run", _run)
     launch.run_worktree_setup(tmp_path, ["uv sync", "npm ci"])
-    assert "running worktree setup" in capsys.readouterr().err  # the header precedes the echoes
+    err = capsys.readouterr().err
+    assert "running worktree setup" in err  # the header precedes the echoes
+    assert "\u2713 worktree setup complete" in err  # the success path resolves the step
     assert [c[0] for c in calls] == [
         ["bash", "-lc", "uv sync"],
         ["bash", "-lc", "npm ci"],

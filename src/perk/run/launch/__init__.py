@@ -80,7 +80,7 @@ from perk.run.launch.worktree import (
 from perk.state import cache, run_id
 from perk.substrate import git as git
 from perk.substrate.config import Config, StageModel, load_local_linear_api_key
-from perk.substrate.output import log_done, log_step, log_warn, machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage
 
 # pi locks its agent-dir JSON via proper-lockfile, which holds a lock as a *directory*
@@ -271,13 +271,14 @@ def launch_stage(
     self_repo = init.is_self_repo(repo_root)
     narrate_install = not self_repo and not consumer_perk_package_dir(repo_root).is_dir()
     if narrate_install:
-        log_step("installing perk extension (@mgiles/perk)")
-    installed_line = init.ensure_extension_install_present(repo_root, self_repo=self_repo)
-    if narrate_install:
-        if installed_line is not None or consumer_perk_package_dir(repo_root).is_dir():
-            log_done("installed perk extension")
-        else:
-            log_warn("perk extension install failed (non-fatal); pi will install it in-session")
+        with io_step("installing perk extension (@mgiles/perk)") as s:
+            installed_line = init.ensure_extension_install_present(repo_root, self_repo=self_repo)
+            if installed_line is not None or consumer_perk_package_dir(repo_root).is_dir():
+                s.done("installed perk extension")
+            else:
+                s.warn("perk extension install failed (non-fatal); pi will install it in-session")
+    else:
+        init.ensure_extension_install_present(repo_root, self_repo=self_repo)
     # Materialize the plan body into the worktree so in-session checkpoints can seed from
     # its `## Steps` list. Best-effort + loud-but-non-fatal (a worktree without a body just yields
     # inert checkpoints). Uses the derived ref, falling back to the repo-root active ref.
