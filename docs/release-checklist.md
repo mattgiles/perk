@@ -202,7 +202,7 @@ Build both publish surfaces locally:
 
 ```bash
 rm -rf dist *.tgz
-uv build
+uv build --package perk
 uvx twine check dist/*
 wheel="$(ls dist/*.whl)"
 uvx --from "$wheel" perk --help

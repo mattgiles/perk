@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 
+[manifest]
+members = [
+    "perk",
+    "perk-dev",
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -228,6 +234,17 @@ dev = [
     { name = "ruff", specifier = ">=0.15.15" },
     { name = "ty", specifier = ">=0.0.1" },
 ]
+
+[[package]]
+name = "perk-dev"
+version = "0.0.0"
+source = { editable = "packages/perk-dev" }
+dependencies = [
+    { name = "perk" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "perk", editable = "." }]
 
 [[package]]
 name = "pluggy"

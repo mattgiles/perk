@@ -19,6 +19,7 @@ CI-robust; in CI both toolchains are present so they actually run.
 import json
 import shutil
 import subprocess
+import tarfile
 import tomllib
 import zipfile
 from pathlib import Path
@@ -84,8 +85,10 @@ def built_wheel(tmp_path_factory):
     if shutil.which("uv") is None:
         pytest.skip("uv not on PATH")
     out_dir = tmp_path_factory.mktemp("wheel_build")
+    # `--package perk` pins the build to the perk workspace member so the never-published
+    # `perk-dev` member is never built (the wheel under test is unambiguously perk's).
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(out_dir)],
+        ["uv", "build", "--wheel", "--package", "perk", "--out-dir", str(out_dir)],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
@@ -95,6 +98,29 @@ def built_wheel(tmp_path_factory):
     wheels = list(out_dir.glob("*.whl"))
     assert len(wheels) == 1, wheels
     return wheels[0]
+
+
+@pytest.fixture(scope="session")
+def built_sdist(tmp_path_factory):
+    """Build perk's sdist exactly once per session (shared via the `wheel_build` xdist group).
+
+    `--package perk` pins the build to the perk workspace member; the sdist under test is
+    unambiguously perk's (never the never-published `perk-dev` member).
+    """
+    if shutil.which("uv") is None:
+        pytest.skip("uv not on PATH")
+    out_dir = tmp_path_factory.mktemp("sdist_build")
+    subprocess.run(
+        ["uv", "build", "--sdist", "--package", "perk", "--out-dir", str(out_dir)],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    sdists = list(out_dir.glob("*.tar.gz"))
+    assert len(sdists) == 1, sdists
+    return sdists[0]
 
 
 @pytest.mark.xdist_group("wheel_build")
@@ -122,6 +148,25 @@ def test_wheel_bundles_prompts(built_wheel):
     with zipfile.ZipFile(built_wheel) as zf:
         names = set(zf.namelist())
     assert "perk/_prompts/README.md" in names, names
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_wheel_excludes_perk_dev(built_wheel):
+    # The never-published `perk-dev` workspace member must never leak into perk's published wheel.
+    with zipfile.ZipFile(built_wheel) as zf:
+        names = zf.namelist()
+    offenders = [n for n in names if "perk_dev" in n or "perk-dev" in n]
+    assert not offenders, offenders
+
+
+@pytest.mark.xdist_group("wheel_build")
+def test_sdist_excludes_perk_dev(built_sdist):
+    # The never-published `perk-dev` member (and the whole `packages/` tree) must never leak into
+    # perk's published sdist; the sdist `only-include` excludes `packages/`.
+    with tarfile.open(built_sdist) as tf:
+        names = tf.getnames()
+    offenders = [n for n in names if "perk_dev" in n or "perk-dev" in n or "/packages/" in n]
+    assert not offenders, offenders
 
 
 @pytest.mark.xdist_group("wheel_build")
