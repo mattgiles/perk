@@ -18,8 +18,11 @@ perk-dev changelog-commits  →  classify (this doc)  →  human reviews  →  a
       (facts)                    (proposal JSON)         (the gate)        (changelog-apply *)        (structural lint)
 ```
 
-`*` `perk-dev changelog-apply` is **forthcoming (node 3.2)**; until it ships, apply the reviewed
-entries by editing `CHANGELOG.md` by hand (see [`docs/releasing.md`](../releasing.md)).
+`*` `perk-dev changelog-apply --proposal <file>` applies the approved proposal: it appends each
+entry as a bullet under its `### <category>` subsection of `[Unreleased]` (stamping the primary
+commit's short hash as the ` (hash)` token) and advances the `<!-- As of <hash> -->` marker to the
+proposal's `head_commit`. `--dry-run` prints the intended new `[Unreleased]` section without
+writing anything (see [`docs/releasing.md`](../releasing.md)).
 
 The classifier's whole job is the middle box: **facts in, a reviewed proposal out.** It never
 mutates `CHANGELOG.md` and never advances the `<!-- As of <hash> -->` marker — those belong to
@@ -64,8 +67,8 @@ proposing entries.
 
 ## Output contract
 
-The classifier emits a **proposal JSON** object — the pinned shape that node 3.2's
-`perk-dev changelog-apply` will consume:
+The classifier emits a **proposal JSON** object — the pinned shape that
+`perk-dev changelog-apply` consumes:
 
 ```json
 {
