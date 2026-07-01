@@ -1,0 +1,34 @@
+{
+  "since_commit": "fa6b1150c7e2a9d4b8f31e6a5d2c9b8a7f6e5d4c",
+  "head_commit": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d",
+  "entries": [
+    {
+      "category": "Added",
+      "text": "a new user-facing capability",
+      "commits": ["1234567890abcdef1234567890abcdef12345678"],
+      "confidence": "high",
+      "backend": null
+    },
+    {
+      "category": "Major Changes",
+      "text": "a headline shift rolled up from several commits",
+      "commits": ["abcdef1", "fedcba9"],
+      "confidence": "medium",
+      "backend": "github"
+    },
+    {
+      "category": "Added",
+      "text": "a second addition in the same proposal",
+      "commits": ["76543210"],
+      "confidence": "high",
+      "backend": null
+    },
+    {
+      "category": "Removed",
+      "text": "a retired knob",
+      "commits": ["0fedcba"],
+      "confidence": "low",
+      "backend": null
+    }
+  ]
+}
