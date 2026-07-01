@@ -628,6 +628,9 @@ def test_create_dry_run_does_not_scaffold_or_launch(monkeypatch, tmp_path):
     }
     assert not (tmp_path / ".perk" / "skills" / "foo").exists()
     assert calls == []
+    # No scaffold on --dry-run — no banner, no scaffold narration.
+    assert "scaffolding" not in result.stderr
+    assert "skills \u00b7" not in result.stderr
 
 
 def test_create_real_run_scaffolds_then_launches(monkeypatch, tmp_path):
@@ -636,6 +639,10 @@ def test_create_real_run_scaffolds_then_launches(monkeypatch, tmp_path):
     result = CliRunner().invoke(cli, ["skills", "create", "foo"], obj=_ctx(tmp_path))
     assert result.exit_code == 0, result.output
     assert (tmp_path / ".perk" / "skills" / "foo" / "SKILL.md").is_file()
+    # The banner heads the pre-launch narration, then the scaffold wait narrates + resolves.
+    err = result.stderr
+    assert err.index("skills \u00b7") < err.index("scaffolding .perk/skills/foo")
+    assert "\u2713 scaffolded .perk/skills/foo" in err
     assert len(calls) == 1
     kwargs = calls[0]
     assert kwargs["binding_trigger"] == "command:skills-create"
