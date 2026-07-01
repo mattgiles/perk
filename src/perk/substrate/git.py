@@ -432,6 +432,37 @@ def has_remote(repo: Path, name: str = "origin") -> bool:
     return name in proc.stdout.split()
 
 
+def remote_tag_commit(
+    repo: Path, tag: str, *, remote: str = "origin", timeout: int = 120
+) -> str | None:
+    """The commit SHA ``refs/tags/<tag>`` points to on ``remote``, or ``None`` when absent.
+
+    A single ``git ls-remote --tags`` probe (network op — uses a generous ``timeout`` like
+    ``fetch``). Prefers the peeled ``refs/tags/<tag>^{}`` line (annotated tags peel to their
+    commit); falls back to the tag-ref line itself (a lightweight tag points directly at the
+    commit). ``None`` means the remote *answered* and the tag is absent; a failed probe
+    (offline / bad remote / timeout) raises ``GitError`` so callers can distinguish *absent*
+    from *unknown*.
+    """
+    ref = f"refs/tags/{tag}"
+    # Both patterns are passed explicitly: an exact ref pattern alone SUPPRESSES the peeled
+    # `^{}` line ls-remote would otherwise print for an annotated tag (patterns match ref
+    # names, and the peeled pseudo-ref only matches when asked for by name).
+    out = _run(["ls-remote", "--tags", remote, ref, f"{ref}^{{}}"], cwd=repo, timeout=timeout)
+    peeled: str | None = None
+    plain: str | None = None
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) != 2:
+            continue
+        sha, name = parts
+        if name == f"{ref}^{{}}":
+            peeled = sha
+        elif name == ref:
+            plain = sha
+    return peeled if peeled is not None else plain
+
+
 def delete_remote_branches(
     repo: Path, names: list[str], *, remote: str = "origin", timeout: int = 120
 ) -> list[str]:

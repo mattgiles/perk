@@ -178,6 +178,23 @@ def test_rewrite_force_with_lease_succeeds(tmp_path):
     assert _git(bare, "rev-parse", "plan-x").strip() == amended
 
 
+def test_remote_tag_commit(tmp_path):
+    import pytest
+
+    work, _bare = _work_and_bare(tmp_path)
+    head = _git(work, "rev-parse", "HEAD").strip()
+    _git(work, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+    _git(work, "tag", "light")
+    _git(work, "push", "-q", "origin", "v1.0.0", "light")
+    tag_object = _git(work, "rev-parse", "v1.0.0").strip()
+    assert tag_object != head  # annotated: the tag object is a distinct object
+    assert git.remote_tag_commit(work, "v1.0.0") == head  # peeled commit, not the tag object
+    assert git.remote_tag_commit(work, "light") == head  # lightweight points at the commit
+    assert git.remote_tag_commit(work, "v9.9.9") is None  # remote answered; tag absent
+    with pytest.raises(git.GitError):  # a failed probe is exceptional, not "absent"
+        git.remote_tag_commit(work, "v1.0.0", remote="no-such-remote")
+
+
 def test_is_dirty(tmp_path):
     work, _ = _work_and_bare(tmp_path)
     assert git.is_dirty(work) is False

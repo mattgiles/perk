@@ -157,7 +157,10 @@ The **facts + lint + apply** tooling (`changelog-commits`, `changelog-check`, `c
    `[Unreleased]` → `[X.Y.Z] - <date>`, and add a fresh empty `[Unreleased]` above it **with a new
    `<!-- As of <hash> -->` marker at the release HEAD**.
 4. **Verify locally:** `just test` (so `test_version_lockstep` proves
-   `pyproject == package.json == __version__`).
+   `pyproject == package.json == __version__`). `perk-dev release-info` (or `--json`) reports the
+   current release state in one shot — the version surfaces, the `v{version}` tag (local + origin),
+   the latest release header, and whether the changelog marker is at HEAD — handy before and after
+   the bump.
 5. **Land the release commit** on `main` via the normal PR flow.
 6. **Tag:** create + push an **annotated** tag `vX.Y.Z` on the merged commit
    (e.g. `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`).

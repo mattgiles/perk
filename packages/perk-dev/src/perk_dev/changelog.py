@@ -21,7 +21,7 @@ from perk.boundary import (
 from perk.substrate import git
 
 _MARKER_RE = re.compile(r"^<!-- As of ([0-9a-f]{7,40}) -->$")
-_RELEASE_HEADER_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}")
+_RELEASE_HEADER_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - (\d{4}-\d{2}-\d{2})")
 # Structural-linter patterns (``changelog-check``). Distinct from the strict facts patterns above:
 # these accept *malformed* shapes so the linter can name the defect rather than silently miss it.
 _RELEASE_HEADER_STRICT_RE = re.compile(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\s*$")
@@ -68,6 +68,16 @@ def latest_release_version(text: str) -> str | None:
         match = _RELEASE_HEADER_RE.match(line)
         if match is not None:
             return match.group(1)
+    return None
+
+
+def latest_release(text: str) -> tuple[str, str] | None:
+    """``(version, date)`` of the first ``## [X.Y.Z] - DATE`` header (top-down = newest), or
+    ``None`` when no release header exists."""
+    for line in text.splitlines():
+        match = _RELEASE_HEADER_RE.match(line)
+        if match is not None:
+            return match.group(1), match.group(2)
     return None
 
 
