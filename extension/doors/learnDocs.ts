@@ -24,8 +24,8 @@ interface LearnDocsGatherPayload {
   learn_numbers: string[];
 }
 
-/** Strict decode — the guidance dereferences both fields; `launched` is unconsumed. */
-function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
+/** Strict decode — the guidance dereferences both fields; `launched` is unconsumed. Exported for offline reject-branch tests. */
+export function decodeGather(payload: ColdJson): LearnDocsGatherPayload | null {
   const inboxPath = stringField(payload, "inbox_path");
   const numbers = payload.learn_numbers;
   if (inboxPath === undefined) return null;

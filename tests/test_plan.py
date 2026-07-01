@@ -414,3 +414,15 @@ def test_learn_header_targetless_has_none_target():
     assert header is not None
     assert header.decision is plan.CapturedDecision.CAPTURE_LEARN
     assert header.target is None
+
+
+def test_learn_header_present_but_malformed_block_is_none():
+    # A present, well-delimited block whose ``plan`` value is a list cannot coerce to
+    # ``str | int | None`` (LenientParseModel is coercing, not strict) → the lenient parse raises
+    # ``ValidationError``, which ``parse_learn_header`` catches and degrades to the whole-header
+    # ``None`` (the gather-time default route must never brick on a stray header).
+    body = plan.render_metadata_block(
+        plan.LEARN_HEADER_KEY,
+        {"run_id": "01RID", "created": "t", "plan": [1, 2, 3]},
+    )
+    assert plan.parse_learn_header(body) is None

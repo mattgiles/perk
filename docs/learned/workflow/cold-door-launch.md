@@ -1,12 +1,12 @@
 ---
 title: The cold-door pi-launch seam and composing --json surfaces
-read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, or refactoring launch/run modules behind byte-exact test pins.
+read_when: You are touching launch_stage's argv construction, injecting child env vars at the launch seam (the merge-order setdefault layering, incl. the Linear-key env-seed before chdir), running a repo-configured `[worktree] setup` hook before exec (`run_worktree_setup`, the single canonical path; remote `position_worktree` skips it), pi project-trust on ephemeral worktrees, mirroring `.agents/skills/` into a worktree at launch positioning, wrapping a last-wins CLI, composing/testing a Python surface that nests a command emitting machine_output, asserting CliRunner stdout/stderr byte-identity on Click ≥8.2, applying the leveled progress-log discipline (`log_step`/`log_done`/`log_warn`, all stderr — narrate-where-the-I/O-happens, never dangle a step, post-check a conditionally-narrated step), or refactoring launch/run modules behind byte-exact test pins.
 ---
 
 # The cold-door pi-launch seam
 
 A perk *local* stage launch ends by `execvpe`-ing into `pi`: the perk CLI process **becomes** pi. This
-seam (`perk/run/launch.py`) carries a handful of non-obvious mechanics about argv construction, pi's
+seam (`perk/run/launch/`) carries a handful of non-obvious mechanics about argv construction, pi's
 project-trust prompt on throwaway worktrees, and what happens when a `--json` surface composes a
 launcher that emits its own JSON.
 
@@ -103,7 +103,7 @@ positioning time. Two compounding root causes:
    main repo's skills. The dangling skill-binding warnings (`bindingDelivery.ts` pointer fallback)
    are a *symptom* of this, not a separate bug.
 
-**The fix shape:** `materialize_skills(repo_root, worktree)` in `perk/run/launch.py` mirrors
+**The fix shape:** `materialize_skills(repo_root, worktree)` in `perk/run/launch/materialize.py` mirrors
 `materialize_plan_body`, wired into `launch_stage`'s `if stage.worktree != "none":` block **right
 after `materialize_plan_body`** (after the `dry_run` early return, before `os.chdir`/`os.execvpe`).
 It creates **per-skill symlinks** — one per entry of `repo_root/.agents/skills/*` — each pointing at
@@ -203,7 +203,7 @@ The node-4.3 dignified sweep of `perk/run/launch.py` / the run worker establishe
   `github` cannot live in `cache.py` without creating a real import cycle. When a backlog says
   "move helper X to a shared home", check the candidate home's import posture first:
   **promote-in-place in the consumer-owning module** is the correct move when the shared home is
-  a leaf. This is why the public plan-body materializer lives in `launch.py`, with the run worker
+  a leaf. This is why the public plan-body materializer lives in the `perk/run/launch/` package, with the run worker
   as the documented second consumer, rather than relocated.
 - **Frozen-dataclass state transitions**: keep the initial construction, then use
   `dataclasses.replace` for every subsequent status evolution — unchanged fields carry by
@@ -219,6 +219,40 @@ dispatch JSON to stdout via `machine_output` and returns. A surface that wants a
 fields (e.g. `run_id`) out of the captured text — otherwise it emits **two** JSON objects and corrupts
 the stream. (`user_output`→stderr is unaffected and can flow through.) **General trap:** any Python
 surface nesting a command that calls `machine_output` must isolate that inner stdout.
+
+## Leveled progress-log discipline
+
+The cold-door launch path narrates its perceptible waits through the glyph-only leveled-log
+vocabulary in `perk/substrate/output.py` — `log_step` (a wait starting), `log_done` (a wait
+finished), `log_warn` (a degraded/skipped step) — **all routed through `user_output` → stderr**
+(python-cli-guidelines.md §7.5). Because the logs are stderr-only, they never touch the stdout
+`--json` payload. Three rules govern their use:
+
+- **Narrate the wait wherever the I/O happens — never gate narration on a flag the narrated I/O
+  ignores.** The reasoning trap is conflating "keep stdout pristine" with "gate on `dry_run`" —
+  the two are **independent** because the log is stderr-only. A backend lookup that *also* runs on
+  the dry-run path (dry-run resolves its `--json` via the same read) must narrate
+  **unconditionally**; the stderr line leaves the stdout `--json` payload byte-unchanged regardless,
+  so the `dry_run` gate was never needed for byte-invariance. Gate a `log_step` only on whether the
+  I/O actually happens, not on the output mode.
+
+- **Every narrated step must RESOLVE — never dangle.** Once a `log_step` (`›` step line) is
+  emitted, **every** code path out of the narrated region (empty data, early return, a swallowed
+  failure) must emit a `log_done` (done line) or `log_warn` (warn line). A dangling step is a false
+  "stuck" signal — it contradicts the python-cli-guidelines §7.5 principle that an *unresolved*
+  step line genuinely pinpoints where a launch hung. Audit each `log_step` for the branch that
+  forgets to close it.
+
+- **Post-check disambiguation for a conditionally-narrated step.** When a step is narrated behind an
+  unlocked pre-check and the best-effort function returns `None` — an **ambiguous** outcome (a
+  concurrent process won the cross-process lock → the op effectively succeeded, OR the op genuinely
+  failed) — **re-check the observable state after the call** to decide between a done line and a warn
+  line, rather than assuming `None` means failure.
+
+Cross-link: adding new stderr progress lines re-triggers the combined-stream gotcha in
+**"Testing `--json` surfaces"** below — parse `result.stdout` for the JSON payload and
+`result.stderr` for the progress lines; comparing `result.output` (the combined stream) fails
+spuriously once a step line lands ahead of the payload.
 
 ## Testing `--json` surfaces (Click 8.4.1 gotcha)
 
@@ -236,7 +270,7 @@ because the stderr note lands in the combined stream.
 
 ## Cross-references
 
-- `perk/run/launch.py` — `launch_stage` argv construction + `--approve` trust injection
+- `perk/run/launch/` — `launch_stage` argv construction + `--approve` trust injection
 - `perk/cli/commands/objective_cmd.py` — the supervisor that composes the remote dispatch launcher
 - `docs/learned/workflow/objective-lifecycle.md` — the supervisor design that composes these mechanics
 - `docs/learned/workflow/remote-runner.md` — the remote dispatch path that emits the nested `machine_output`

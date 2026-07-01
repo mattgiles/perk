@@ -1,6 +1,6 @@
 ---
 title: The `/learn` evidence pipeline — cross-run session pointers, JSONL export, normalization, the bundle manifest, and the multi-angle orchestrator
-read_when: You are touching any stage of the `/learn` evidence pipeline (objective #896) — the run-cache `session-pointers.json` carrier + `resolve_plan_sessions`, the `perk/learn/export.py` JSONL byte-copy seam, `perk learn evidence` (the bundle manifest + `--render` normalization), or the warm `/learn` multi-angle orchestrator — or you need the Pi session-file persistence / JSONL-grammar facts those consumers depend on.
+read_when: You are touching any stage of the `/learn` evidence pipeline (objective #896) — the run-cache `session-pointers.json` carrier + `resolve_plan_sessions`, the `perk/learn/export.py` JSONL byte-copy seam, `perk learn evidence` (the bundle manifest + `--render` normalization), or the warm `/learn` multi-angle orchestrator — or you need the Pi session-file persistence / JSONL-grammar facts those consumers depend on, the rich existing-docs scan (`scan_docs_richly` — the deterministic-FACTS vs LLM-JUDGMENT split, the live-corpus heuristic-validation discipline, the never-raises path-guard family), or splitting a deterministic detector from an LLM decider.
 ---
 
 # The `/learn` evidence pipeline
@@ -214,8 +214,47 @@ session's `learn` tool still had the pre-PR JSON schema, so the new field was re
 property. A tool/param added by a PR is callable only after the extension is rebuilt/reloaded; the
 classification rides the header only on the next run.
 
+## The rich existing-docs scan (`scan_docs_richly`) — facts feed judgment
+
+`scan_docs_richly` (`perk/learn/docs_scan.py`) is the deterministic, advisory corpus scan consumed by
+both `perk/learn/evidence.py` (the bundle manifest's `docs_findings`) and the docs-factory inbox
+(`factory_common.py`'s `_scan_section`). It surfaces verifiable facts about the three docs roots so
+the docs-plan analyst can do cleanup-first + UPDATE-vs-NEW placement. Three cross-cutting learnings:
+
+- **Deterministic-FACTS vs LLM-JUDGMENT split.** The Python layer emits only **verifiable FACTS** —
+  stale source pointers (phantom `path::symbol` spans), broken doc→doc `.md` links, and exact
+  normalized title/`read_when` collisions. The de-dup **DECISION** stays with the LLM analyst and is
+  **candidate-vs-corpus** ("does THIS capture already live in an existing doc?"), powered by those
+  facts plus the full docs inventory — the scan **never decides de-dup**. Within-corpus
+  exact-collision detection (`_duplicate_groups`) fires **0× on a curated corpus** (every title is
+  unique), so it is a cheap **GUARD, never the dedup mechanism**. Reusable rule: whenever you split
+  a deterministic detector from an LLM decider, the detector emits facts + guards; the decision is
+  the model's.
+
+- **Validate detection heuristics against the LIVE corpus — learned docs intentionally carry
+  historical pointers.** The rules were shaped by running them on `docs/learned` live: **~30% of
+  code-pointers are `missing-file`** because learned docs cite filenames **as-they-were**
+  (landing-log narrative surviving module→package splits) — **intentional history, NOT drift to
+  fix**. Broken catalog links to *renamed* files are the high-value signal. A corpus-hygiene
+  scanner is **high-recall by design** — weigh findings by relevance and tune precision against the
+  real corpus before committing the rules. (This is the principle that governs a doc-cleanup
+  judgment call: fix present-tense mechanics pointers, leave narrative history — see
+  `cold-door-launch.md`'s stale-pointer cleanup.)
+
+- **"Never raises" must catch `UnicodeDecodeError` and guard text-derived path ops.** A file scanner
+  guarded only by `except OSError` is **incomplete**: `read_text(encoding="utf-8")` on a
+  non-UTF-8/binary file raises `UnicodeDecodeError` (a `ValueError` subclass, **not** `OSError`),
+  and `.is_file()`/`.resolve()` on a path **derived from untrusted document text** can raise
+  `ValueError` (embedded NUL) or `OSError` (OS-illegal chars). The airtight pattern (as built):
+  catch `(OSError, UnicodeDecodeError)` on **every** read, route text-derived existence checks
+  through a guarded helper (`_is_existing_file` catching `(OSError, ValueError)`), and wrap the
+  per-link `resolve()` in its own try/except → degrade to skip. Absence/badness always degrades to
+  "skip this finding", never a crash out of the advisory scan.
+
 ## Cross-references
 
+- `perk/learn/docs_scan.py` — `scan_docs_richly` + the `_is_existing_file` / per-read exception guards.
+- `cold-door-launch.md` — the stale-pointer cleanup judgment (fix present-tense, leave narrative history).
 - `plan-save-surfaces.md` — the `impl_run_ids` staged header field.
 - `worktree-lifecycle.md` — the `main_worktree_root` primitive.
 - `pydantic-boundary-models.md` — the parse→domain boundary + the deferred serialize edge.
