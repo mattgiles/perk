@@ -99,7 +99,7 @@ def test_gather_happy_path(tmp_path):
     assert info.runtime_version == perk_version
     assert info.tag_name == "v1.2.3"
     assert info.tag_exists is True
-    assert info.tag_commit == head and len(info.tag_commit) == 40  # peeled, full SHA
+    assert info.tag_commit == head and len(head) == 40  # peeled, full SHA
     assert info.tag_at_head is True
     assert info.tag_on_remote is None  # no origin remote: unknowable, not "absent"
     assert info.remote_tag_commit is None
