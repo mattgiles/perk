@@ -154,14 +154,18 @@ exec and cannot be filtered; the only lever is to make pi have nothing to instal
 guard (`_LAUNCH_BANNER_EMITTED`) on first emit and no-ops on every later call, so the banner never
 doubles. `launch_stage` emits it immediately after the cold-local invariant and **before**
 `resolve_worktree` (before the git-worktree-add), gated `if not dry_run` — the sole emitter for
-every non-narrating launch command. But four cold-door commands narrate a backend lookup
-(`log_step("looking up #X")`) *before* they call `launch_stage`, and that lookup is load-bearing
-(its result builds the seed), so it cannot move after the launch. Those four — `objective plan`,
-`objective replan`, `plan resume`, `plan replan` — therefore emit the banner **themselves**, right
-before their `looking up` narration, through one shared seam — `print_launch_banner_gated(repo_root,
-*, dry_run, remote)` — so the gate (`not dry_run and remote is None`) lives in exactly one place
-instead of duplicated across the four call sites; `launch_stage`'s own call is then the no-op
-fallback. The guard is reset by an autouse
+every non-narrating launch command. But several cold-door commands narrate load-bearing pre-launch
+I/O *before* they call `launch_stage` (its result builds the seed, so it cannot move after the
+launch). Four narrate a backend lookup (`log_step("looking up #X")`) — `objective plan`,
+`objective replan`, `plan resume`, `plan replan` — and the two learn factories (`perk learn docs` /
+`perk learn code`, through the shared `run_factory`) narrate a `perk:learn` listing + (docs only) a
+docs scan. All of them emit the banner **themselves**, right before their gather/lookup narration,
+through one shared seam — `print_launch_banner_gated(repo_root, *, dry_run, remote)` — so the gate
+(`not dry_run and remote is None`) lives in exactly one place instead of duplicated across the call
+sites; `launch_stage`'s own call is then the no-op fallback. The learn factories add one further
+gate: the banner is emitted only when `not gather_only`, because `--gather` is a warm sub-call
+(feeds JSON to a warm door) that must stay banner-free — the gather narration itself is stderr-only
+so it never corrupts the `--gather` stdout payload. The guard is reset by an autouse
 `conftest.py` fixture so the process-global flag never leaks across tests. Both counts (skills =
 dir count in `.agents/skills/`; extensions = package count in `.pi/settings.json`) are knowable up
 front from `repo_root`, so the first render is accurate. The `remote is None` test (not

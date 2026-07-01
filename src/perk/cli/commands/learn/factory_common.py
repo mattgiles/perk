@@ -35,7 +35,7 @@ from perk.plan import CapturedDecision, parse_learn_header
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import log_done, log_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -220,17 +220,22 @@ def gather(
     Raises ``UserFacingCliError`` (``no_learn_issues``, cross-hinting the sibling factory) when
     this kind's filtered subset is empty.
     """
+    log_step("listing open perk:learn issues")
     all_issues = resolve.resolve_issue_backend(repo_root).list_learn_issues()
     doc_destined, code_destined = partition_by_destination(all_issues)
     selected = kind.select(doc_destined, code_destined)
+    # Resolve the listing step on BOTH branches — never dangle, even when empty.
+    log_done(f"found {len(selected)} {kind.name} learning(s)")
     if not selected:
         raise UserFacingCliError(kind.empty_message, error_type="no_learn_issues")
 
     inventory: tuple[DocEntry, ...] = ()
     findings = DocFindings()
     if kind.include_docs_scan:
+        log_step("scanning existing docs")
         inventory = scan_existing_docs(repo_root)
         findings = scan_docs_richly(repo_root)
+        log_done(f"scanned {len(inventory)} doc(s)")
 
     inbox_path = cache.scratch_dir(repo_root) / kind.inbox_filename
     inbox_path.parent.mkdir(parents=True, exist_ok=True)
@@ -238,6 +243,7 @@ def gather(
         render_inbox(selected, kind=kind, inventory=inventory, findings=findings),
         encoding="utf-8",
     )
+    log_done(f"materialized inbox → {inbox_path.name}")
     return inbox_path, selected
 
 
@@ -264,6 +270,12 @@ def run_factory(
         # Resolve the run target up front so `--remote` on this local-only stage is rejected before
         # any gather (plan is cold_remote:false).
         launch.resolve_target(stage, remote)
+
+        # Head a real local launch with the banner BEFORE narrating the gather waits (mirrors the
+        # four sibling cold doors). --gather is a warm sub-call (feeds JSON to a warm door) so it
+        # stays banner-free; print_launch_banner_gated already gates out --dry-run/--remote.
+        if not gather_only:
+            launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
 
         inbox_path, issues = gather(repo_root, kind=kind)
     except IssueBackendError as exc:

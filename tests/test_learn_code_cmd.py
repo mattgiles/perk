@@ -107,7 +107,7 @@ def test_code_inbox_carries_classification_target_no_scan(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "code", "--gather", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["learn_numbers"] == ["47", "48"]
         text = (Path(d) / _INBOX_REL).read_text(encoding="utf-8")
         assert "Learning #47" in text and "Learning #48" in text
@@ -135,9 +135,29 @@ def test_code_empty_inbox_cross_hints_docs(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "code", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "no_learn_issues"
         assert "perk learn docs" in payload["message"]
+
+
+def test_code_gather_narrates_without_docs_scan(monkeypatch):
+    """The code factory narrates the listing wait but omits the docs-scan line (lean inbox)."""
+    _authed(monkeypatch)
+    _stub_list(monkeypatch)
+
+    def boom_launch(**k):
+        raise AssertionError("--gather must not launch")
+
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["learn", "code", "--gather"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert "listing open perk:learn issues" in err
+        # The code factory omits the docs scan (kind.include_docs_scan is False).
+        assert "scanning existing docs" not in err
 
 
 def test_code_remote_blocked(monkeypatch):
@@ -148,7 +168,7 @@ def test_code_remote_blocked(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "code", "--remote", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "remote_blocked"
+        assert json.loads(result.stdout)["error_type"] == "remote_blocked"
 
 
 def test_code_not_a_repo_exit_2():
@@ -156,4 +176,4 @@ def test_code_not_a_repo_exit_2():
     with runner.isolated_filesystem():  # no git init
         result = runner.invoke(cli, ["learn", "code", "--json"])
         assert result.exit_code == 2
-        assert json.loads(result.output)["error_type"] == "not_a_repo"
+        assert json.loads(result.stdout)["error_type"] == "not_a_repo"
