@@ -79,8 +79,8 @@ pins a surface, where one exists).
 | Surface | Owner / how it moves |
 | --- | --- |
 | git tag `vX.Y.Z` | maintainer; asserted == both planes by `validate-release-versions` (`.github/workflows/release.yml`) |
-| `CHANGELOG.md` release headers `## [X.Y.Z] - YYYY-MM-DD` | maintainer at release |
-| `<!-- As of <hash> -->` cursor | maintainer (manual now; Phase 2 tooling later) |
+| `CHANGELOG.md` release headers `## [X.Y.Z] - YYYY-MM-DD` | `perk-dev bump-version` (the release roll) |
+| `<!-- As of <hash> -->` cursor | `perk-dev changelog-apply` during accrual; `perk-dev bump-version` re-seats it at the release HEAD |
 | GitHub Release `vX.Y.Z` | the `github-release` capstone, after both registries publish |
 
 ### Planned (Phase 5)
@@ -142,29 +142,27 @@ Entries accrue between releases via a facts → classify → review → apply �
    result (pinned categories, the ` (hash)` token discipline).
 
 The **facts + lint + apply** tooling (`changelog-commits`, `changelog-check`, `changelog-apply`)
-**now exists**, and classification follows the categorizer doc. Only the **release roll**
-(node 4.2) remains **forthcoming** and is done by hand until then.
+**now exists**, and classification follows the categorizer doc. The **release roll** is tooled
+too: `perk-dev bump-version` performs it (with the version bump) at release time.
 
 ## Release runbook (coordinated dual-plane)
 
-1. **Bump the SSOT:** `uv version --bump patch` (or `minor`, or `uv version X.Y.Z`). This edits
-   `pyproject.toml`, re-locks `uv.lock`, and refreshes the editable install (so `perk.__version__`
-   reflects it).
-2. **Mirror to npm:** `npm version "$(uv version --short)" --no-git-tag-version` (updates
-   `package.json` + `package-lock.json`; no git commit/tag). If a given `uv` lacks `--short`, read
-   the bare version from `pyproject.toml` `[project] version` instead.
-3. **Roll the CHANGELOG:** strip the parenthesized hash tokens from the released bullets, rename
-   `[Unreleased]` → `[X.Y.Z] - <date>`, and add a fresh empty `[Unreleased]` above it **with a new
-   `<!-- As of <hash> -->` marker at the release HEAD**.
-4. **Verify locally:** `just test` (so `test_version_lockstep` proves
+1. **Bump + roll:** `perk-dev bump-version X.Y.Z` (or `--bump patch|minor|major`). One command
+   covers the whole release edit: `pyproject.toml` + `uv.lock` via `uv version --no-sync`,
+   `package.json` + `package-lock.json` via `npm version --no-git-tag-version`, and the CHANGELOG
+   roll (tokens stripped from the released bullets, `[Unreleased]` → `[X.Y.Z] - <date>`, a fresh
+   `[Unreleased]` with a new `<!-- As of <hash> -->` marker at the release HEAD). The env sync is
+   deferred: the next `uv run` re-syncs, so `perk.__version__` catches up on its own. `--dry-run`
+   prints the intended new sections without writing anything.
+2. **Verify locally:** `just test` (so `test_version_lockstep` proves
    `pyproject == package.json == __version__`). `perk-dev release-info` (or `--json`) reports the
    current release state in one shot — the version surfaces, the `v{version}` tag (local + origin),
    the latest release header, and whether the changelog marker is at HEAD — handy before and after
    the bump.
-5. **Land the release commit** on `main` via the normal PR flow.
-6. **Tag:** create + push an **annotated** tag `vX.Y.Z` on the merged commit
+3. **Land the release commit** on `main` via the normal PR flow.
+4. **Tag:** create + push an **annotated** tag `vX.Y.Z` on the merged commit
    (e.g. `git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0`).
-7. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
+5. The tag push triggers `release.yml`: `validate-release-versions` asserts the tag matches both
    plane versions. On success, `publish-pypi` and `publish-npm` run behind their deployment
    environment approvals; the GitHub Release is created only after both registries publish.
 

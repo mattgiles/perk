@@ -239,30 +239,22 @@ git pull --ff-only
 git switch -c release/vX.Y.Z
 ```
 
-Bump the Python source of truth:
+Bump the version and roll the changelog in one step:
 
 ```bash
-uv version X.Y.Z
+perk-dev bump-version X.Y.Z
 ```
 
-Mirror it to npm:
+(or `perk-dev bump-version --bump patch|minor|major`; `--dry-run` previews the changelog roll
+without writing anything.)
 
-```bash
-npm version "$(uv version --short)" --no-git-tag-version
-```
-
-If your `uv` does not support `uv version --short`, read the version from `pyproject.toml`
-and pass it to `npm version` manually.
-
-Update `CHANGELOG.md` (the **two-phase changelog convention** — see
-[releasing.md](./releasing.md#changelog-discipline) for the full convention):
-
-1. Strip the parenthesized short-hash tokens from the released bullets (released sections carry no
-   tokens).
-2. Change `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
-3. Add a fresh empty `## [Unreleased]` section above it **with a new `<!-- As of <hash> -->` marker
-   at the release HEAD**.
-4. Keep the existing change entries under the new release heading.
+This bumps `pyproject.toml` + `uv.lock` (via `uv version --no-sync`), mirrors the version to
+`package.json` + `package-lock.json` (via `npm version --no-git-tag-version`), and rolls
+`CHANGELOG.md` per the **two-phase changelog convention** — see
+[releasing.md](./releasing.md#changelog-discipline) for the full convention: the released bullets
+lose their parenthesized short-hash tokens, `## [Unreleased]` becomes `## [X.Y.Z] - YYYY-MM-DD`,
+and a fresh `## [Unreleased]` is added above it **with a new `<!-- As of <hash> -->` marker at the
+release HEAD**.
 
 Run checks:
 
