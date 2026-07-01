@@ -1,6 +1,6 @@
 ---
 title: ruff check vs ruff format — CI vs pre-commit hook
-read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit appears to have not advanced after a pre-commit hook ran, or you are writing a generic function and hit UP047 (PEP-695 inline generic vs the legacy `TypeVar(bound=...)`).
+read_when: You are debugging a CI-green / commit-rejected discrepancy, a commit appears to have not advanced after a pre-commit hook ran, you are writing a generic function and hit UP047 (PEP-695 inline generic vs the legacy `TypeVar(bound=...)`), or you hit an ambiguous-unicode lint on a semantic glyph (`›`/`✓`/`⚠`) — RUF003 in a `#` comment, RUF002 in a docstring.
 ---
 
 # `ruff check` vs `ruff format`
@@ -61,6 +61,16 @@ An en-dash (`–`) inside a docstring — e.g. a numeric range like "Nodes 3.2�
 **RUF002** (ambiguous-unicode-character-docstring). Use a plain hyphen (`-`) in docstring ranges;
 the **em-dash** (`—`) is fine. (Sibling to the RUF043 note above — both bite prose under test/source
 that looks innocuous.)
+
+### Sibling: `RUF003` on a semantic glyph in a `#` comment
+
+The same ambiguous-unicode family fires on literal **semantic glyphs** — the leveled-log vocabulary
+`›` (U+203A), `✓`, `⚠` (see `perk/substrate/output.py`): a glyph in a `#` comment trips **`RUF003`**
+(ambiguous-unicode-character-comment), and the same glyph in a docstring trips **`RUF002`**. The
+rule: keep semantic glyphs inside **string literals / format strings** (where they belong and are
+not flagged), and **reword prose comments to avoid the literal glyph** — say "step line" /
+"done/warn line", not the glyph itself. (Same family as the RUF002 en-dash note above — the fix is
+rewording the *comment/docstring*, never the string literal that legitimately carries the glyph.)
 
 ## `RUF022`: keep `__all__` isort-sorted
 

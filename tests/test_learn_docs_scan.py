@@ -177,6 +177,30 @@ def test_max_findings_truncation_is_deterministic(tmp_path: Path):
     assert [b.target for b in broken] == [f"link-{i:03d}.md" for i in range(200)]
 
 
+def test_max_findings_truncation_stale_pointers(tmp_path: Path):
+    # 250 distinct phantom `perk/…::x` pointers in one doc; `perk/` never exists in tmp so each is
+    # a missing-file stale pointer. Cap-then-sort determinism: the 200 lexicographically-smallest
+    # pointer tokens survive (sorted by (doc, pointer) BEFORE the `_MAX_FINDINGS` cap).
+    spans = " ".join(f"`perk/z-{i:03d}.py::sym`" for i in range(250))
+    _write(tmp_path / "docs/learned/x.md", spans + "\n")
+    pointers = scan_docs_richly(tmp_path).stale_pointers
+    assert len(pointers) == 200  # _MAX_FINDINGS
+    assert [p.pointer for p in pointers] == [f"perk/z-{i:03d}.py::sym" for i in range(200)]
+
+
+def test_max_findings_truncation_duplicate_groups(tmp_path: Path):
+    # 250 distinct titles, each shared by two learned docs → 250 title-collision groups; cap-then-
+    # sort keeps the 200 lexicographically-smallest keys (sorted by (basis, key) BEFORE the cap).
+    for i in range(250):
+        title = f"dup title {i:03d}"
+        _write(tmp_path / f"docs/learned/a{i:03d}.md", f"---\ntitle: {title}\n---\nA\n")
+        _write(tmp_path / f"docs/learned/b{i:03d}.md", f"---\ntitle: {title}\n---\nB\n")
+    groups = scan_docs_richly(tmp_path).duplicate_groups
+    assert len(groups) == 200  # _MAX_FINDINGS
+    assert all(g.basis == "title" for g in groups)
+    assert [g.key for g in groups] == [f"dup title {i:03d}" for i in range(200)]
+
+
 def test_malformed_frontmatter_never_raises(tmp_path: Path):
     _write(tmp_path / "docs/learned/bad.md", "---\nthis: : : not yaml\n---\nBody\n")
     # No crash; malformed frontmatter contributes no collision basis.

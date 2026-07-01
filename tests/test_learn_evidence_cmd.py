@@ -167,6 +167,33 @@ def test_evidence_json_serializes_docs_findings(monkeypatch):
     ]
 
 
+def test_evidence_json_serializes_duplicate_groups(monkeypatch):
+    # Plant two learned docs sharing an EXACT title; assert the duplicate-group element shape
+    # (basis/key/docs) rides the `--json` envelope so the analyst reads it faithfully (guards the
+    # frozen DuplicateGroup → lenient DuplicateGroupOut serialization for the third finding family).
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        root = Path(d)
+        _git_init(d)
+        cache.write_plan_ref(root, _REF)
+        learned = root / "docs/learned"
+        learned.mkdir(parents=True)
+        (learned / "a.md").write_text("---\ntitle: Shared\nread_when: a\n---\nA\n", "utf-8")
+        (learned / "b.md").write_text("---\ntitle: Shared\nread_when: b\n---\nB\n", "utf-8")
+        monkeypatch.setattr(
+            resolve,
+            "resolve_issue_backend",
+            lambda r: _FakeBackend({"run_id": "01RUN_P", "impl_run_ids": []}),
+        )
+        monkeypatch.setattr(github, "list_prs_for_branch", lambda **k: ())
+        result = runner.invoke(cli, ["learn", "evidence", "--json"])
+    assert result.exit_code == 0
+    findings = json.loads(result.output)["docs_findings"]
+    assert findings["duplicate_groups"] == [
+        {"basis": "title", "key": "shared", "docs": ["docs/learned/a.md", "docs/learned/b.md"]}
+    ]
+
+
 def test_evidence_no_plan_ref_exits_1(monkeypatch):
     result = _run(monkeypatch, header={"run_id": "x"}, write_ref=False)
     assert result.exit_code == 1

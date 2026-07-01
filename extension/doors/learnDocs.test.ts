@@ -6,7 +6,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fakePerk, loadPerkSession, scaffoldRepo } from "../testing/harness.ts";
-import { learnDocsGuidance } from "./learnDocs.ts";
+import { decodeGather, learnDocsGuidance } from "./learnDocs.ts";
+
+// --- decodeGather reject branches (the strict decode returns null) ------------------------------
+
+test("decodeGather: missing inbox_path rejects", () => {
+  assert.equal(decodeGather({ learn_numbers: ["45"] }), null);
+});
+
+test("decodeGather: non-array learn_numbers rejects", () => {
+  assert.equal(decodeGather({ inbox_path: "inbox.md", learn_numbers: "45" }), null);
+});
+
+test("decodeGather: bad element types in learn_numbers reject", () => {
+  assert.equal(decodeGather({ inbox_path: "inbox.md", learn_numbers: [{}, true] }), null);
+});
+
+test("decodeGather: valid payload coerces numbers to string ids", () => {
+  assert.deepEqual(decodeGather({ inbox_path: "inbox.md", learn_numbers: [45, "50"] }), {
+    inbox_path: "inbox.md",
+    learn_numbers: ["45", "50"],
+  });
+});
 
 test("learnDocsGuidance names the inbox path", () => {
   const text = learnDocsGuidance(".perk/workflow/scratch/learn-docs-inbox.md", ["45", "50"]);
