@@ -76,7 +76,7 @@ def test_gather_writes_inbox_and_emits_numbers(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "docs", "--gather", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["success"] is True and payload["launched"] is False
         assert payload["learn_numbers"] == ["45", "50"]  # opaque string ids (contracts §8.21)
         inbox = Path(d) / _INBOX_REL
@@ -130,6 +130,42 @@ def test_launches_with_inbox_seeded_prompt(monkeypatch):
     assert "perk-learn-docs" not in prompt
 
 
+def test_gather_narrates_waits_without_banner(monkeypatch):
+    """`--gather` (a warm sub-call) narrates each real wait on stderr but heads no banner."""
+    _authed(monkeypatch)
+    _stub_list(monkeypatch)
+
+    def boom_launch(**k):
+        raise AssertionError("--gather must not launch")
+
+    monkeypatch.setattr(launch, "launch_stage", boom_launch)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["learn", "docs", "--gather"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert "listing open perk:learn issues" in err
+        assert "scanning existing docs" in err
+        assert "materialized inbox" in err
+        # --gather is banner-free (the warm path feeds JSON to a warm door).
+        assert "skills \u00b7" not in err
+
+
+def test_real_launch_banner_precedes_narration(monkeypatch):
+    """A real local launch heads stderr with the banner BEFORE the gather narration."""
+    _authed(monkeypatch)
+    _stub_list(monkeypatch)
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["learn", "docs"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("listing open perk:learn issues")
+
+
 def test_no_learn_issues_exits_1(monkeypatch):
     _authed(monkeypatch)
     _stub_list(monkeypatch, issues=())
@@ -138,7 +174,7 @@ def test_no_learn_issues_exits_1(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "no_learn_issues"
+        assert json.loads(result.stdout)["error_type"] == "no_learn_issues"
 
 
 def test_remote_blocked(monkeypatch):
@@ -149,7 +185,7 @@ def test_remote_blocked(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["learn", "docs", "--remote", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "remote_blocked"
+        assert json.loads(result.stdout)["error_type"] == "remote_blocked"
 
 
 def test_not_a_repo_exit_2():
@@ -157,7 +193,7 @@ def test_not_a_repo_exit_2():
     with runner.isolated_filesystem():  # no git init
         result = runner.invoke(cli, ["learn", "docs", "--json"])
         assert result.exit_code == 2
-        assert json.loads(result.output)["error_type"] == "not_a_repo"
+        assert json.loads(result.stdout)["error_type"] == "not_a_repo"
 
 
 def test_docs_factory_filters_out_should_be_code(monkeypatch):
