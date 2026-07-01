@@ -24,6 +24,17 @@ class Worktree:
 
 
 @dataclass(frozen=True)
+class CommitInfo:
+    """One first-parent commit from ``log_first_parent`` (raw; presentation is the caller's
+    concern)."""
+
+    hash: str  # full 40-char SHA
+    subject: str
+    body: str  # full commit body (untruncated)
+    files: tuple[str, ...]  # changed paths (unfiltered)
+
+
+@dataclass(frozen=True)
 class MergeProbe:
     """The result of a best-effort local merge-conflict probe (`detect_merge_conflicts`).
 
@@ -325,6 +336,56 @@ def _parse_merge_conflicts(stdout: str) -> tuple[str, ...]:
             seen.add(path)
             paths.append(path)
     return tuple(paths)
+
+
+def resolve_commit(repo: Path, ref: str) -> str | None:
+    """Full 40-char commit SHA that ``ref`` peels to, or ``None`` when it does not resolve.
+
+    Peels tags/branches/short-hashes to a commit via ``rev-parse --verify --quiet <ref>^{commit}``;
+    an unresolvable ref exits non-zero → GitError → None (LBYL, mirrors ``remote_ref_exists``).
+    """
+    try:
+        out = _run(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], cwd=repo)
+    except GitError:
+        return None
+    return out.strip() or None
+
+
+def log_first_parent(repo: Path, *, since: str, until: str = "HEAD") -> list[CommitInfo]:
+    """First-parent commits in ``<since>..<until>`` (newest first), each with its changed paths.
+
+    Two ``git log --first-parent`` passes: metadata (RS/US-delimited hash/subject/body) and a
+    ``--name-only`` pass keyed by hash. An empty range yields ``[]``. Raises ``GitError`` if
+    ``since`` is unresolvable (callers resolve it first via ``resolve_commit``).
+    """
+    rng = f"{since}..{until}"
+    meta = _run(["log", rng, "--first-parent", "--format=%x1e%H%x1f%s%x1f%b"], cwd=repo)
+    names = _run(["log", rng, "--first-parent", "--name-only", "--format=%x1e%H"], cwd=repo)
+
+    files_by_hash: dict[str, tuple[str, ...]] = {}
+    for chunk in names.split("\x1e"):
+        lines = chunk.splitlines()
+        if not lines:
+            continue
+        files_by_hash[lines[0]] = tuple(line for line in lines[1:] if line)
+
+    commits: list[CommitInfo] = []
+    for chunk in meta.split("\x1e"):
+        if not chunk:
+            continue
+        fields = chunk.rstrip("\n").split("\x1f", 2)
+        if len(fields) < 3:
+            continue
+        commit_hash, subject, body = fields
+        commits.append(
+            CommitInfo(
+                hash=commit_hash,
+                subject=subject,
+                body=body,
+                files=files_by_hash.get(commit_hash, ()),
+            )
+        )
+    return commits
 
 
 def worktree_add(

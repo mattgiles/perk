@@ -419,3 +419,34 @@ def test_merge_ff_only_false_on_divergence(git_repo_with_remote):
     advance()
     git.fetch(clone)
     assert git.merge_ff_only(clone, "origin/main") is False
+
+
+def test_resolve_commit(git_repo):
+    full = git.resolve_commit(git_repo, "HEAD")
+    assert full is not None and len(full) == 40
+    assert full == _sha(git_repo, "HEAD")
+    # A bogus ref does not resolve.
+    assert git.resolve_commit(git_repo, "0000000") is None
+
+
+def test_log_first_parent(git_repo):
+    base = _sha(git_repo, "HEAD")
+    (git_repo / "a.txt").write_text("a\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "add a (#11)\n\nbody one")
+    (git_repo / "b.txt").write_text("b\n", encoding="utf-8")
+    _git(git_repo, "add", ".")
+    _git(git_repo, "commit", "-qm", "add b (#12)")
+
+    commits = git.log_first_parent(git_repo, since=base)
+    assert len(commits) == 2
+    # Newest first.
+    assert commits[0].subject == "add b (#12)"
+    assert commits[1].subject == "add a (#11)"
+    assert len(commits[0].hash) == 40
+    assert commits[1].body == "body one"
+    assert commits[0].files == ("b.txt",)
+    assert commits[1].files == ("a.txt",)
+
+    # Empty range yields [].
+    assert git.log_first_parent(git_repo, since="HEAD") == []
