@@ -47,7 +47,7 @@ pins a surface, where one exists).
 | --- | --- | --- | --- |
 | `pyproject.toml` `[project] version` | **SSOT** | `uv version` | `test_version_lockstep` |
 | `package.json` `version` | mirror | `npm version` | `test_version_lockstep` |
-| `perk.__version__` (`perk/__init__.py`) | derived | `importlib.metadata` + `tomllib` fallback | `test_version_lockstep` |
+| `perk.__version__` (`src/perk/__init__.py`) | derived | `importlib.metadata` + `tomllib` fallback | `test_version_lockstep` |
 
 ### Lockfiles (auto-maintained)
 
@@ -60,13 +60,13 @@ pins a surface, where one exists).
 
 | Surface | Owner | Guard |
 | --- | --- | --- |
-| `perk --version` | `perk/cli/cli.py` (`click.version_option`) | — |
-| AGENTS managed stamp `perk version: {…}` | `perk/convergence/init/blocks.py` (written by `perk init`) | — |
-| consumer npm pin `npm:@mgiles/perk@{…}` | `perk/convergence/init/settings.py` | `test_npm_pin_lockstep` |
-| extension-install pin `@mgiles/perk@{…}` | `perk/convergence/init/extension_install.py` | `test_npm_pin_lockstep` |
-| remote-runner PyPI pin `uv tool install perk=={…}` | `perk/run/workflow_artifacts.py` | — |
-| `PERK_CLI_VERSION` launch env var (informational) | `perk/run/launch/__init__.py` | — |
-| materialize splash `perk v{…}` | `perk/run/launch/materialize.py` | — |
+| `perk --version` | `src/perk/cli/cli.py` (`click.version_option`) | — |
+| AGENTS managed stamp `perk version: {…}` | `src/perk/convergence/init/blocks.py` (written by `perk init`) | — |
+| consumer npm pin `npm:@mgiles/perk@{…}` | `src/perk/convergence/init/settings.py` | `test_npm_pin_lockstep` |
+| extension-install pin `@mgiles/perk@{…}` | `src/perk/convergence/init/extension_install.py` | `test_npm_pin_lockstep` |
+| remote-runner PyPI pin `uv tool install perk=={…}` | `src/perk/run/workflow_artifacts.py` | — |
+| `PERK_CLI_VERSION` launch env var (informational) | `src/perk/run/launch/__init__.py` | — |
+| materialize splash `perk v{…}` | `src/perk/run/launch/materialize.py` | — |
 | extension self-version via `perkVersion()` | `extension/substrate/resources.ts` (reads the shipped `@mgiles/perk` `package.json`; compared against `PERK_CLI_VERSION` for the soft drift signal) | — |
 
 ### Release-time markers (maintainer, at release)

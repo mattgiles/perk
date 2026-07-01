@@ -14,8 +14,8 @@ def shared_dir() -> Path:
 
     - **Installed wheel:** carried as package data at ``perk/_shared`` (hatchling
       ``force-include``).
-    - **Editable / dev install:** read the repo sibling ``<repo>/shared`` (the
-      ``force-include`` copy does not exist in an editable checkout).
+    - **Editable / dev install:** read the repo-root ``shared/`` (two levels above the
+      ``src/perk`` package; the ``force-include`` copy does not exist in an editable checkout).
     """
     # Installed: package data alongside the perk package. `resources.files("perk")`
     # never raises here (the package is imported), and a missing dir is reported by
@@ -24,8 +24,8 @@ def shared_dir() -> Path:
     if candidate.is_dir():
         return candidate
 
-    # Editable / dev: sibling of the perk/ package inside the repo.
-    sibling = Path(__file__).resolve().parent.parent / "shared"
+    # Editable / dev: the repo-root `shared/` (two levels above the `src/perk` package).
+    sibling = Path(__file__).resolve().parents[2] / "shared"
     if sibling.is_dir():
         return sibling
 
@@ -42,14 +42,14 @@ def agents_dir() -> Path:
 
     - **Installed wheel:** carried as package data at ``perk/_agents`` (hatchling
       ``force-include``).
-    - **Editable / dev install:** read the repo sibling ``<repo>/agents`` (the
-      ``force-include`` copy does not exist in an editable checkout).
+    - **Editable / dev install:** read the repo-root ``agents/`` (two levels above the
+      ``src/perk`` package; the ``force-include`` copy does not exist in an editable checkout).
     """
     candidate = Path(str(resources.files("perk"))) / "_agents"
     if candidate.is_dir():
         return candidate
 
-    sibling = Path(__file__).resolve().parent.parent / "agents"
+    sibling = Path(__file__).resolve().parents[2] / "agents"
     if sibling.is_dir():
         return sibling
 
@@ -66,14 +66,14 @@ def prompts_dir() -> Path:
 
     - **Installed wheel:** carried as package data at ``perk/_prompts`` (hatchling
       ``force-include``).
-    - **Editable / dev install:** read the repo sibling ``<repo>/prompts`` (the
-      ``force-include`` copy does not exist in an editable checkout).
+    - **Editable / dev install:** read the repo-root ``prompts/`` (two levels above the
+      ``src/perk`` package; the ``force-include`` copy does not exist in an editable checkout).
     """
     candidate = Path(str(resources.files("perk"))) / "_prompts"
     if candidate.is_dir():
         return candidate
 
-    sibling = Path(__file__).resolve().parent.parent / "prompts"
+    sibling = Path(__file__).resolve().parents[2] / "prompts"
     if sibling.is_dir():
         return sibling
 

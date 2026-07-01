@@ -40,7 +40,7 @@ jobs:
       - name: Install Node deps
         run: npm ci
 
-      # Lint: `uv run ruff check perk tests` + `npm run lint` (biome check extension).
+      # Lint: `uv run ruff check src/perk tests` + `npm run lint` (biome check extension).
       # Deliberately NO `ruff format` here — that is the pre-commit hook's job
       # (see docs/learned/toolchain/ruff.md).
       - name: Lint

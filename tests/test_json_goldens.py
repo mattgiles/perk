@@ -9,7 +9,7 @@ proves the serialized keys stayed byte-identical.
 Regen all snapshots with ``PERK_UPDATE_GOLDEN=1 uv run pytest tests/test_json_goldens.py``.
 """
 
-from tests._golden import assert_golden
+from _golden import assert_golden
 
 # --- init report --------------------------------------------------------------------------
 

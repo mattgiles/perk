@@ -6,8 +6,7 @@ fail CI on any un-regenerated drift, so a schema change is always reviewed.
 """
 
 import pytest
-
-from tests._schemas import SCHEMAS, SchemaEntry, assert_schema, iter_schema_files
+from _schemas import SCHEMAS, SchemaEntry, assert_schema, iter_schema_files
 
 
 @pytest.mark.parametrize("entry", SCHEMAS, ids=lambda e: e.path)
@@ -23,7 +22,7 @@ def test_no_orphan_or_missing_schema_files() -> None:
     committed = {p.name for p in iter_schema_files()}
     registered = {entry.path.rsplit("/", 1)[-1] for entry in SCHEMAS}
     # Names are unique across subdirs; compare full relative paths for total coverage.
-    from tests._schemas import SCHEMAS_DIR
+    from _schemas import SCHEMAS_DIR
 
     committed_rel = {str(p.relative_to(SCHEMAS_DIR)) for p in iter_schema_files()}
     registered_rel = {entry.path for entry in SCHEMAS}

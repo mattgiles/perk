@@ -16,5 +16,5 @@ except PackageNotFoundError:  # raw, uninstalled source tree — read the SSOT d
     import tomllib
     from pathlib import Path
 
-    _pp = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    _pp = Path(__file__).resolve().parents[2] / "pyproject.toml"
     __version__ = tomllib.loads(_pp.read_text(encoding="utf-8"))["project"]["version"]
