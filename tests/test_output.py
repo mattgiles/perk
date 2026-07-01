@@ -8,6 +8,7 @@ interleaved output) the resolution rewrites the step line in place via cursor-up
 """
 
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -137,3 +138,31 @@ class TestIoStepRewriteMode:
         err = capsys.readouterr().err
         assert "\x1b[" not in err
         assert err == "  \u203a step\n  \u2713 done\n"
+
+
+def test_log_step_call_sites_confined_to_the_output_module():
+    """Step lines go through `io_step` — a raw `log_step(` call site in production code is a step
+    that can dangle. `log_step` stays public as `io_step`'s emitter (this suite pins its format),
+    but the only production file allowed to call it is the output module itself. The pattern
+    requires the call paren, so import lines never match; comments are not stripped — don't name
+    the call form in prose (say "step line" instead)."""
+    src_root = Path(__file__).resolve().parent.parent / "src" / "perk"
+    allowed = src_root / "substrate" / "output.py"
+    files = sorted(src_root.rglob("*.py"))
+    assert files, "vacuous scan: src/perk yielded no Python files"
+    assert allowed in files, "vacuous scan: the sanctioned seam file was not discovered"
+    violations: list[str] = []
+    allowed_matches = False
+    for file in files:
+        for lineno, line in enumerate(file.read_text(encoding="utf-8").splitlines(), start=1):
+            if "log_step(" not in line:
+                continue
+            if file == allowed:
+                allowed_matches = True
+                continue
+            violations.append(f"{file.relative_to(src_root)}:{lineno}: {line.strip()}")
+    assert allowed_matches, "vacuous scan: output.py itself no longer matches the pattern"
+    assert not violations, (
+        "raw log_step( call sites outside perk/substrate/output.py — narrate through io_step "
+        "instead (it emits the step AND makes its resolution structural):\n" + "\n".join(violations)
+    )
