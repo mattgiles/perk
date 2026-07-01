@@ -34,7 +34,7 @@ from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
-from perk.substrate.output import log_step, machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 # The carry-candidate set: unfinished work carries forward; `done`/`skipped` stay as history on the
@@ -190,72 +190,79 @@ def replan_objective(
         is_linear = store.backend_id != resolve.GITHUB_BACKEND_ID
         # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
         launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
-        # Narrate the backend lookup wait (one line covers the immediately-following `read_issue`
-        # too). The lookup runs on the dry-run path too (dry-run materializes the real artifact via
-        # these reads), so the narration is NOT gated on `dry_run`; the line goes to stderr, leaving
-        # the `--json` stdout payload byte-unchanged.
-        log_step(f"looking up objective #{objective_id}")
-        state = store.get_objective(objective_id=objective_id)
-        if state is None:
-            raise UserFacingCliError(
-                f"Objective {objective_id} not found", error_type="objective_not_found"
-            )
-        # Refuse an already-superseded objective (lineage stamp present).
-        if state.header.get("superseded_by"):
-            raise UserFacingCliError(
-                f"Objective {objective_id} is already superseded by "
-                f"{state.header.get('superseded_by')}; replan its successor instead.",
-                error_type="objective_not_open",
-            )
-        # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED): reuse the issue tier's
-        # read_issue.state (mirrors `objective author --from`).
-        if store.backend_id == resolve.GITHUB_BACKEND_ID:
-            issue_read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=objective_id)
-            if issue_read is not None and issue_read.state != "OPEN":
+        # Narrate the backend gather as one step (lookup, OPEN check, engagement + node-engagement
+        # reads, prose read, and the scratch write). The reads run on the dry-run path too (dry-run
+        # materializes the real artifact), so the narration is NOT gated on `dry_run`; the lines go
+        # to stderr, leaving the `--json` stdout payload byte-unchanged. The refusal raises escape
+        # the step (dangling + the error text below).
+        with io_step(f"looking up objective #{objective_id}") as s:
+            state = store.get_objective(objective_id=objective_id)
+            if state is None:
                 raise UserFacingCliError(
-                    f"Objective {objective_id} is not open (state="
-                    f"{issue_read.state or 'unknown'}); replan re-authors an OPEN objective. "
-                    "Create a fresh objective instead.",
+                    f"Objective {objective_id} not found", error_type="objective_not_found"
+                )
+            # Refuse an already-superseded objective (lineage stamp present).
+            if state.header.get("superseded_by"):
+                raise UserFacingCliError(
+                    f"Objective {objective_id} is already superseded by "
+                    f"{state.header.get('superseded_by')}; replan its successor instead.",
                     error_type="objective_not_open",
                 )
+            # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED): reuse the issue tier's
+            # read_issue.state (mirrors `objective author --from`).
+            if store.backend_id == resolve.GITHUB_BACKEND_ID:
+                issue_read = resolve.resolve_issue_backend(repo_root).read_issue(
+                    issue_id=objective_id
+                )
+                if issue_read is not None and issue_read.state != "OPEN":
+                    raise UserFacingCliError(
+                        f"Objective {objective_id} is not open (state="
+                        f"{issue_read.state or 'unknown'}); replan re-authors an OPEN objective. "
+                        "Create a fresh objective instead.",
+                        error_type="objective_not_open",
+                    )
 
-        unfinished = [n for n in state.nodes if n.status in _UNFINISHED]
+            unfinished = [n for n in state.nodes if n.status in _UNFINISHED]
 
-        # Read objective + node-issue engagement, fail-soft: a backend hiccup must never break the
-        # replan launch. Empty/None on no engagement → the scratch + seed are byte-unchanged.
-        try:
-            comments = store.read_comments(objective_id=objective_id)
-            edits = store.read_description_edits(objective_id=objective_id)
-            node_engagements = tuple(
-                (n.id, store.read_node_engagement(objective_id=objective_id, node_id=n.id))
-                for n in unfinished
+            # Read objective + node-issue engagement, fail-soft: a backend hiccup must never
+            # break the replan launch. Empty/None on no engagement → the scratch + seed are
+            # byte-unchanged.
+            try:
+                comments = store.read_comments(objective_id=objective_id)
+                edits = store.read_description_edits(objective_id=objective_id)
+                node_engagements = tuple(
+                    (n.id, store.read_node_engagement(objective_id=objective_id, node_id=n.id))
+                    for n in unfinished
+                )
+                engagement_block = render_objective_engagement(
+                    project_comments=comments,
+                    project_description_edits=edits,
+                    node_engagements=node_engagements,
+                )
+            except ObjectiveStoreError:
+                engagement_block = None
+
+            # Materialize the old objective (even on --dry-run, so the dry run shows the real
+            # artifact).
+            scratch_path = _scratch_path(repo_root, objective_id)
+            scratch_path.parent.mkdir(parents=True, exist_ok=True)
+            # The objective prose is the Reconcilable body; fall back to the title when no prose
+            # split is available (GitHub objectives store prose in the body comment, not
+            # get_objective).
+            prose = _objective_prose(store, objective_id) or state.title
+            scratch_path.write_text(
+                _render_existing_objective(
+                    objective_id,
+                    state.title,
+                    state.url,
+                    prose,
+                    unfinished,
+                    is_linear=is_linear,
+                    engagement_block=engagement_block,
+                ),
+                encoding="utf-8",
             )
-            engagement_block = render_objective_engagement(
-                project_comments=comments,
-                project_description_edits=edits,
-                node_engagements=node_engagements,
-            )
-        except ObjectiveStoreError:
-            engagement_block = None
-
-        # Materialize the old objective (even on --dry-run, so the dry run shows the real artifact).
-        scratch_path = _scratch_path(repo_root, objective_id)
-        scratch_path.parent.mkdir(parents=True, exist_ok=True)
-        # The objective prose is the Reconcilable body; fall back to the title when no prose split
-        # is available (GitHub objectives store prose in the body comment, not get_objective).
-        prose = _objective_prose(store, objective_id) or state.title
-        scratch_path.write_text(
-            _render_existing_objective(
-                objective_id,
-                state.title,
-                state.url,
-                prose,
-                unfinished,
-                is_linear=is_linear,
-                engagement_block=engagement_block,
-            ),
-            encoding="utf-8",
-        )
+            s.done(f"materialized objective #{objective_id} → {scratch_path.name}")
     except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return

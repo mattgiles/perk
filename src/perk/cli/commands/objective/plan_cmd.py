@@ -34,7 +34,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.prompts import render
 from perk.run import launch
-from perk.substrate.output import log_step, machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -171,46 +171,48 @@ def plan_objective(
         launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
         # resolves the node via this read), so the narration is NOT gated on `dry_run`; the line
-        # goes to stderr, leaving the `--json` stdout payload byte-unchanged.
-        log_step(f"looking up objective #{number}")
-        state = store.get_objective(objective_id=number)
-        if state is None:
-            raise UserFacingCliError(
-                f"Objective #{number} not found", error_type="objective_not_found"
-            )
+        # goes to stderr, leaving the `--json` stdout payload byte-unchanged. The refusal raises
+        # escape the step (dangling + the error text below).
+        with io_step(f"looking up objective #{number}") as s:
+            state = store.get_objective(objective_id=number)
+            if state is None:
+                raise UserFacingCliError(
+                    f"Objective #{number} not found", error_type="objective_not_found"
+                )
 
-        graph = objective.build_graph(list(state.nodes))
-        plannable = {n.id: n for n in graph.plannable_nodes()}
-        if node_id is not None:
-            node = plannable.get(node_id)
-            if node is None:
-                raise _node_not_plannable_error(graph, number, node_id)
-        else:
-            sel = graph.classify_for_planning()
-            if sel.kind == "plannable":
-                assert sel.node is not None
-                node = sel.node
-            elif sel.kind == "complete":
-                raise UserFacingCliError(
-                    f"Objective #{number} is complete — every node is done or skipped. "
-                    "Nothing to plan.",
-                    error_type="no_actionable_node",
-                )
-            elif sel.kind == "in_flight":
-                assert sel.node is not None
-                raise UserFacingCliError(
-                    f"No new node to plan: node {sel.node.id} has a plan in flight "
-                    f"(pr {sel.node.pr or 'pending'}, status {sel.node.status.value}). "
-                    f"Implement it (`perk implement {sel.node.pr}` when set), or reset it to "
-                    "re-plan.",
-                    error_type="objective_in_flight",
-                )
+            graph = objective.build_graph(list(state.nodes))
+            plannable = {n.id: n for n in graph.plannable_nodes()}
+            if node_id is not None:
+                node = plannable.get(node_id)
+                if node is None:
+                    raise _node_not_plannable_error(graph, number, node_id)
             else:
-                raise UserFacingCliError(
-                    f"No actionable node on objective #{number}: every remaining node is blocked "
-                    "by an unfinished dependency (or explicitly blocked).",
-                    error_type="no_actionable_node",
-                )
+                sel = graph.classify_for_planning()
+                if sel.kind == "plannable":
+                    assert sel.node is not None
+                    node = sel.node
+                elif sel.kind == "complete":
+                    raise UserFacingCliError(
+                        f"Objective #{number} is complete — every node is done or skipped. "
+                        "Nothing to plan.",
+                        error_type="no_actionable_node",
+                    )
+                elif sel.kind == "in_flight":
+                    assert sel.node is not None
+                    raise UserFacingCliError(
+                        f"No new node to plan: node {sel.node.id} has a plan in flight "
+                        f"(pr {sel.node.pr or 'pending'}, status {sel.node.status.value}). "
+                        f"Implement it (`perk implement {sel.node.pr}` when set), or reset it to "
+                        "re-plan.",
+                        error_type="objective_in_flight",
+                    )
+                else:
+                    raise UserFacingCliError(
+                        f"No actionable node on objective #{number}: every remaining node is "
+                        "blocked by an unfinished dependency (or explicitly blocked).",
+                        error_type="no_actionable_node",
+                    )
+            s.done(f"found objective #{number} — node {node.id}")
 
         # Claims skipped by pending-first selection (possibly live in another terminal, possibly
         # abandoned) — surfaced so a multi-terminal user can coordinate / explicitly resume.
@@ -230,12 +232,16 @@ def plan_objective(
                     dim=True,
                 )
             )
+        # Narrate the node-mark write (narration follows the I/O: this write genuinely does not
+        # run on --dry-run, so the step is real-run-only).
         if not dry_run:
-            store.update_objective_node(
-                objective_id=number,
-                node_id=node.id,
-                status=marked_status,
-            )
+            with io_step(f"marking node {node.id} planning") as mark:
+                store.update_objective_node(
+                    objective_id=number,
+                    node_id=node.id,
+                    status=marked_status,
+                )
+                mark.done(f"marked node {node.id} planning")
     except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return
@@ -253,10 +259,14 @@ def plan_objective(
     # seed. Skipped on a dry run (resolve-only, offline). Read AFTER the node is marked above.
     engagement_block = ""
     if not dry_run:
-        try:
-            ne = store.read_node_engagement(objective_id=number, node_id=node.id)
-        except ObjectiveStoreError:
-            ne = EMPTY_NODE_ENGAGEMENT
+        with io_step("reading node engagement") as eng:
+            try:
+                ne = store.read_node_engagement(objective_id=number, node_id=node.id)
+            except ObjectiveStoreError:
+                ne = EMPTY_NODE_ENGAGEMENT
+                eng.warn("node engagement unavailable — continuing without it")
+            else:
+                eng.done("read node engagement")
         engagement_block = render_node_engagement(ne) or ""
 
     seed = _seed_prompt(

@@ -23,7 +23,7 @@ from perk.cli.context import require_config, require_github, require_repo
 from perk.cli.ensure import UserFacingCliError
 from perk.run import launch, resume
 from perk.state import cache
-from perk.substrate.output import log_step, machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -70,17 +70,19 @@ def resume_cmd(
         launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait. The lookup runs on the dry-run path too (dry-run
         # resolves the stage via this same read), so the narration is NOT gated on `dry_run`; the
-        # line goes to stderr, leaving the `--json` stdout payload byte-unchanged.
-        log_step(f"looking up plan #{plan_id}")
-        state = backend.get_plan(issue_id=plan_id)
-        if state is None:
-            raise UserFacingCliError(
-                f"Plan issue #{plan_id} not found", error_type="plan_not_found"
+        # line goes to stderr, leaving the `--json` stdout payload byte-unchanged. The not-found
+        # raise escapes the step (dangling + the error text below).
+        with io_step(f"looking up plan #{plan_id}") as s:
+            state = backend.get_plan(issue_id=plan_id)
+            if state is None:
+                raise UserFacingCliError(
+                    f"Plan issue #{plan_id} not found", error_type="plan_not_found"
+                )
+            ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
+            stage_id = resume.resolve_resume_stage(
+                state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
             )
-        ref = resume.reconstruct_plan_ref(state, provider=backend.backend_id)
-        stage_id = resume.resolve_resume_stage(
-            state, has_pending_learn=cache.has_marker(repo_root, cache.PENDING_LEARN)
-        )
+            s.done(f"found plan #{plan_id}")
     except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=f"resume failed\n{exc}")
         return

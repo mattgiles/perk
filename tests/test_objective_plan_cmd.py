@@ -99,7 +99,12 @@ def test_selects_next_node_marks_planning_and_launches(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 0, result.output
-        assert "looking up objective #7" in result.stderr  # narrates the backend lookup wait
+        err = result.stderr
+        assert "looking up objective #7" in err  # narrates the backend lookup wait
+        assert "\u2713 found objective #7 \u2014 node 1.2" in err  # the lookup resolves on select
+        # The real-run-only node-mark write and engagement read are narrated too (gap coverage).
+        assert "marking node 1.2 planning" in err and "\u2713 marked node 1.2 planning" in err
+        assert "reading node engagement" in err
     # The next actionable node (1.2) is selected + marked planning, then launched with the seed.
     assert marked["node_id"] == "1.2" and marked["status"] is N.PLANNING
     assert launched["stage"] == "objective-plan"
@@ -331,6 +336,9 @@ def test_dry_run_marks_nothing_launches_nothing(monkeypatch):
         assert payload["skipped_claims"] == []  # always present, empty when no claims exist
         # The lookup runs on the dry-run path too, so the wait IS narrated (to stderr).
         assert "looking up objective #7" in result.stderr
+        # The node-mark write and engagement read do NOT run on a dry run — neither is narrated.
+        assert "marking node" not in result.stderr
+        assert "node engagement" not in result.stderr
 
 
 def test_real_launch_banner_precedes_lookup(monkeypatch):
@@ -390,7 +398,7 @@ def test_objective_required_when_number_omitted(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "plan", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "objective_required"
+        assert json.loads(result.stdout)["error_type"] == "objective_required"
 
 
 def test_objective_not_found(monkeypatch):
@@ -651,7 +659,7 @@ def test_not_a_repo_exit_2():
     with runner.isolated_filesystem():  # no git init
         result = runner.invoke(cli, ["objective", "plan", "7", "--json"])
         assert result.exit_code == 2
-        assert json.loads(result.output)["error_type"] == "not_a_repo"
+        assert json.loads(result.stdout)["error_type"] == "not_a_repo"
 
 
 # --- _seed_prompt model injection ----------------------------------------------------
