@@ -41,7 +41,8 @@ testpaths = ["tests"]
 addopts = "-n auto --dist loadgroup"
 
 [tool.hatch.build.targets.wheel]
-packages = ["perk"]
+# `src/perk` — hatchling strips the `src/` prefix, so the wheel still contains `perk/…`.
+packages = ["src/perk"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "shared" = "perk/_shared"
@@ -49,7 +50,13 @@ packages = ["perk"]
 "prompts" = "perk/_prompts"
 
 [tool.hatch.build.targets.sdist]
-only-include = ["perk", "shared", "agents", "prompts", "README.md"]
+only-include = ["src/perk", "shared", "agents", "prompts", "README.md"]
+
+# Workspace root: `perk` (this [project]) is the root member; additional members
+# live under packages/*. The glob currently matches nothing (packages/ arrives with
+# a later node); a modern uv treats a zero-match member glob as "root is the sole member".
+[tool.uv.workspace]
+members = ["packages/*"]
 
 # Marks this repository as perk's own source tree. `perk init` reads this to wire
 # perk's extension as a local-path package (dev) instead of the published npm package.
@@ -58,20 +65,20 @@ self = true
 
 [tool.ty.environment]
 python-version = "3.13"
-# `.` keeps `from perk...` resolving (the prior default root); `tests` adds bare-name
-# cross-test-module imports (e.g. `from _linear_fakes import _FakeLinear`) so ty resolves
-# them the way pytest does at runtime (prepend import mode, no `tests/__init__.py`).
-root = [".", "tests"]
+# `src` resolves `from perk...` (the package lives at src/perk); `tests` resolves the bare-name
+# cross-test-module imports (e.g. `from _linear_fakes import _FakeLinear`) the way pytest does at
+# runtime (prepend import mode, no `tests/__init__.py`).
+root = ["src", "tests"]
 
 [tool.ty.src]
 # Only type-check perk's own code.
-include = ["perk", "tests"]
+include = ["src/perk", "tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
 # Only lint/format perk's own code.
-include = ["perk/**/*.py", "tests/**/*.py"]
+include = ["src/perk/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PLW1514", "PTH", "PLR1702", "PLC0415"]

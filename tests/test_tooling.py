@@ -79,7 +79,7 @@ def _subprocess_run_sites(
 
 def test_subprocess_run_only_in_sanctioned_wrappers_with_check_and_timeout():
     offenders: list[str] = []
-    for path in sorted((REPO_ROOT / "perk").rglob("*.py")):
+    for path in sorted((REPO_ROOT / "src" / "perk").rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         rel = path.relative_to(REPO_ROOT)
         for call, func in _subprocess_run_sites(tree):

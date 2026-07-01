@@ -31,12 +31,12 @@ lock:
 
 # format everything (ruff + biome)
 fmt:
-    uv run ruff format perk tests
+    uv run ruff format src/perk tests
     npm run format
 
 # lint python (ruff)
 lint-py:
-    uv run ruff check perk tests
+    uv run ruff check src/perk tests
 
 # lint typescript (biome)
 lint-js:
