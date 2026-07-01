@@ -13,7 +13,7 @@ import click
 from perk import __version__ as _perk_version
 from perk.substrate.git import repo_root
 from perk.substrate.output import machine_output, user_output
-from perk_dev import changelog
+from perk_dev import changelog, release
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
@@ -72,6 +72,66 @@ def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -
         for c in result.commits:
             pr = f" (PR #{c.pr})" if c.pr is not None else ""
             user_output(f"  {c.hash[:7]}  {c.subject}{pr}")
+
+
+def _release_summary_lines(info: release.ReleaseInfo) -> list[str]:
+    """The pinned human summary (tests assert substrings; wording tweaks stay cheap)."""
+    mismatch = " (\u2260 pyproject)"
+    package = info.package_json_version or "none"
+    if info.package_json_version is not None and info.package_json_version != info.current_version:
+        package += mismatch
+    runtime = info.runtime_version
+    if runtime != info.current_version:
+        runtime += mismatch
+    versions = (
+        f"pyproject {info.current_version} \u00b7 package.json {package} \u00b7 runtime {runtime}"
+    )
+
+    if info.tag_commit is None:
+        tag = f"tag {info.tag_name}: missing"
+    elif info.tag_at_head:
+        tag = f"tag {info.tag_name}: at HEAD"
+    else:
+        tag = f"tag {info.tag_name}: at {info.tag_commit[:7]} (not HEAD)"
+    origin = {True: "yes", False: "no", None: "unknown"}[info.tag_on_remote]
+    tag += f" \u00b7 origin: {origin}"
+
+    if info.latest_release_version is not None:
+        latest = f"latest release: {info.latest_release_version} ({info.latest_release_date})"
+    else:
+        latest = "latest release: none"
+
+    if info.marker_hash is None:
+        marker = "marker: none"
+    elif info.marker_commit is None:
+        marker = f"marker: {info.marker_hash} (unresolvable)"
+    elif info.marker_at_head:
+        marker = f"marker: at HEAD ({info.marker_commit[:7]})"
+    else:
+        marker = f"marker: {info.marker_commit[:7]} behind HEAD ({info.head_commit[:7]})"
+
+    return [versions, tag, latest, marker]
+
+
+@cli.command("release-info")
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def release_info(ctx: click.Context, *, as_json: bool) -> None:
+    """Report machine-readable release state (versions, tag, latest release, changelog marker)."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        info = release.gather(root)
+    except release.ReleaseError as exc:
+        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        return
+    if as_json:
+        machine_output(json.dumps(release.ReleaseInfoOut.from_domain(info).model_dump(mode="json")))
+    else:
+        for line in _release_summary_lines(info):
+            user_output(line)
 
 
 @cli.command("changelog-apply")
