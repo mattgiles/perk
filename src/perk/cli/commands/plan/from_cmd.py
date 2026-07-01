@@ -37,7 +37,7 @@ from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
 from perk.substrate.config import Config
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
@@ -183,41 +183,51 @@ def plan_from(
         launch.resolve_target(stage, remote)
 
         backend = resolve.resolve_issue_backend(repo_root)
-        src = backend.read_issue(issue_id=issue_id)
-        if src is None:
-            raise UserFacingCliError(
-                f"Issue {issue_id} not found — cannot adopt it.",
-                error_type="adopt_not_found",
-            )
-        if src.state != "OPEN":
-            raise UserFacingCliError(
-                f"Issue {issue_id} is not open (state={src.state or 'unknown'}); adoption stamps "
-                "an OPEN human issue in place. Reopen it or create a fresh plan instead.",
-                error_type="adopt_not_open",
-            )
-        if plan.has_metadata_block(src.body, plan.PLAN_HEADER_KEY):
-            raise UserFacingCliError(
-                f"Issue {issue_id} is already a perk plan; use `perk plan replan {issue_id}` to "
-                "re-author it in place.",
-                error_type="already_a_plan",
-            )
+        # Banner first: head a real local launch with the banner BEFORE narrating the gather.
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+        # Narrate the backend gather as one step (issue read + engagement reads + the scratch
+        # write). The reads run on the dry-run path too (dry-run materializes the real artifact),
+        # so the narration is NOT gated on `dry_run`; the lines go to stderr, leaving the `--json`
+        # stdout payload byte-unchanged. The refusal raises escape the step (dangling + the error
+        # text below).
+        with io_step(f"looking up issue #{issue_id}") as s:
+            src = backend.read_issue(issue_id=issue_id)
+            if src is None:
+                raise UserFacingCliError(
+                    f"Issue {issue_id} not found — cannot adopt it.",
+                    error_type="adopt_not_found",
+                )
+            if src.state != "OPEN":
+                raise UserFacingCliError(
+                    f"Issue {issue_id} is not open (state={src.state or 'unknown'}); adoption "
+                    "stamps an OPEN human issue in place. Reopen it or create a fresh plan "
+                    "instead.",
+                    error_type="adopt_not_open",
+                )
+            if plan.has_metadata_block(src.body, plan.PLAN_HEADER_KEY):
+                raise UserFacingCliError(
+                    f"Issue {issue_id} is already a perk plan; use `perk plan replan {issue_id}` "
+                    "to re-author it in place.",
+                    error_type="already_a_plan",
+                )
 
-        # Read the issue's human engagement, fail-soft: a backend hiccup must never break the
-        # adoption launch. Empty/None on no engagement → the scratch + seed are byte-unchanged.
-        try:
-            comments = backend.read_comments(issue_id=issue_id)
-            edits = backend.read_description_edits(issue_id=issue_id)
-            engagement_block = render_adopted_engagement(comments, edits)
-        except IssueBackendError:
-            engagement_block = None
+            # Read the issue's human engagement, fail-soft: a backend hiccup must never break the
+            # adoption launch. Empty/None on no engagement → the scratch + seed are byte-unchanged.
+            try:
+                comments = backend.read_comments(issue_id=issue_id)
+                edits = backend.read_description_edits(issue_id=issue_id)
+                engagement_block = render_adopted_engagement(comments, edits)
+            except IssueBackendError:
+                engagement_block = None
 
-        # Materialize the source issue (even on --dry-run, so the dry run shows the real artifact).
-        scratch_path = _scratch_path(repo_root, issue_id)
-        scratch_path.parent.mkdir(parents=True, exist_ok=True)
-        scratch_path.write_text(
-            _render_source_issue(issue_id, src.title, src.url, src.body, engagement_block),
-            encoding="utf-8",
-        )
+            # Materialize the source issue (even on --dry-run, so the dry run shows the artifact).
+            scratch_path = _scratch_path(repo_root, issue_id)
+            scratch_path.parent.mkdir(parents=True, exist_ok=True)
+            scratch_path.write_text(
+                _render_source_issue(issue_id, src.title, src.url, src.body, engagement_block),
+                encoding="utf-8",
+            )
+            s.done(f"materialized issue #{issue_id} → {scratch_path.name}")
     except IssueBackendError as exc:
         _fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return

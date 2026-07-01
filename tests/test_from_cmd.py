@@ -93,9 +93,12 @@ def test_dry_run_json_materializes_and_does_not_launch(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "from", "7", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["success"] is True
         assert payload["issue"] == "7"
+        # The reads run on the dry-run path too, so the wait IS narrated — banner-free.
+        assert "looking up issue #7" in result.stderr
+        assert "skills \u00b7" not in result.stderr
         scratch = (Path(d) / _SCRATCH_REL).resolve()
         assert Path(payload["scratch_path"]).resolve() == scratch
         text = scratch.read_text(encoding="utf-8")
@@ -113,6 +116,10 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 0, result.output
+        # The banner heads the pre-launch narration, then the gather narrates + resolves.
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up issue #7")
+        assert "\u2713 materialized issue #7 \u2192 adopt-7.md" in err
     assert launched["stage"] == "plan"  # borrows the plan stage
     assert launched["handoff_extra"] == {"adopt_from": "7"}
     assert launched["run_id_override"] is None  # a FRESH run_id is minted (cold_local)
@@ -195,7 +202,7 @@ def test_refuses_not_found(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "adopt_not_found"
 
 
@@ -207,7 +214,7 @@ def test_refuses_non_open_issue(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "adopt_not_open"
 
 
@@ -225,7 +232,7 @@ def test_refuses_issue_already_a_plan(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["plan", "from", "7", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "already_a_plan"
         assert "replan" in payload["message"]
 
@@ -277,7 +284,7 @@ def test_file_mode_dry_run_json_emits_file_and_does_not_launch(monkeypatch):
         Path(d, "notes.md").write_text("build the widget", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", "notes.md", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["success"] is True
         assert payload["dry_run"] is True
         assert payload["file"] == str(Path(d, "notes.md").resolve())
@@ -293,7 +300,7 @@ def test_file_mode_empty_file_errors(monkeypatch):
         Path(d, "empty.md").write_text("   \n", encoding="utf-8")
         result = runner.invoke(cli, ["plan", "from", "empty.md", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "seed_file_error"
 
 
@@ -304,5 +311,5 @@ def test_file_mode_non_utf8_errors(monkeypatch):
         Path(d, "bin.md").write_bytes(b"\xff\xfe\x00bad")
         result = runner.invoke(cli, ["plan", "from", "bin.md", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "seed_file_error"

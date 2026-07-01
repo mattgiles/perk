@@ -37,7 +37,7 @@ from perk.prompts import render
 from perk.run import launch
 from perk.state import cache
 from perk.substrate.config import Config
-from perk.substrate.output import machine_output, user_output
+from perk.substrate.output import io_step, machine_output, user_output
 from perk.substrate.registry import Stage, load_registry
 
 
@@ -257,44 +257,55 @@ def _author_from(
         launch.resolve_target(stage, remote)
 
         store = resolve.resolve_objective_store(repo_root)
-        src = store.read_objective_source(source_id=source_id)
-        if src is None:
-            raise UserFacingCliError(
-                f"Source {source_id} not found — cannot adopt it as an objective.",
-                error_type="adopt_not_found",
-            )
-        if plan.has_metadata_block(src.prose, "objective-header"):
-            raise UserFacingCliError(
-                f"Source {source_id} is already a perk objective; reconcile it with "
-                f"`perk objective reconcile {source_id}` or plan its nodes normally.",
-                error_type="already_an_objective",
-            )
-        # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED — skipped). Resolved via
-        # the issue tier's `read_issue.state` (the objective source shape carries no `state`).
-        if store.backend_id == resolve.GITHUB_BACKEND_ID:
-            issue_read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=source_id)
-            if issue_read is not None and issue_read.state != "OPEN":
+        # Banner first: head a real local launch with the banner BEFORE narrating the gather.
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
+        # Narrate the backend gather as one step (source read + OPEN check + engagement read +
+        # the scratch write). The reads run on the dry-run path too (dry-run materializes the real
+        # artifact), so the narration is NOT gated on `dry_run`; the lines go to stderr, leaving
+        # the `--json` stdout payload byte-unchanged. The refusal raises escape the step (dangling
+        # + the error text below).
+        with io_step(f"looking up source {source_id}") as s:
+            src = store.read_objective_source(source_id=source_id)
+            if src is None:
                 raise UserFacingCliError(
-                    f"Issue {source_id} is not open (state={issue_read.state or 'unknown'}); "
-                    "adoption stamps an OPEN human source in place. Reopen it or author a fresh "
-                    "objective instead.",
-                    error_type="adopt_not_open",
+                    f"Source {source_id} not found — cannot adopt it as an objective.",
+                    error_type="adopt_not_found",
                 )
+            if plan.has_metadata_block(src.prose, "objective-header"):
+                raise UserFacingCliError(
+                    f"Source {source_id} is already a perk objective; reconcile it with "
+                    f"`perk objective reconcile {source_id}` or plan its nodes normally.",
+                    error_type="already_an_objective",
+                )
+            # GitHub-only OPEN refusal (Linear projects have no OPEN/CLOSED — skipped). Resolved
+            # via the issue tier's `read_issue.state` (the objective source shape carries no
+            # `state`).
+            if store.backend_id == resolve.GITHUB_BACKEND_ID:
+                issue_read = resolve.resolve_issue_backend(repo_root).read_issue(issue_id=source_id)
+                if issue_read is not None and issue_read.state != "OPEN":
+                    raise UserFacingCliError(
+                        f"Issue {source_id} is not open (state={issue_read.state or 'unknown'}); "
+                        "adoption stamps an OPEN human source in place. Reopen it or author a "
+                        "fresh objective instead.",
+                        error_type="adopt_not_open",
+                    )
 
-        # Read project-level human engagement, fail-soft: a backend hiccup must never break the
-        # adoption launch. Empty/None on no engagement → the scratch + seed are byte-unchanged.
-        try:
-            comments = store.read_comments(objective_id=source_id)
-            engagement_block = render_adopted_engagement(comments, ())
-        except ObjectiveStoreError:
-            engagement_block = None
+            # Read project-level human engagement, fail-soft: a backend hiccup must never break
+            # the adoption launch. Empty/None on no engagement → the scratch + seed are
+            # byte-unchanged.
+            try:
+                comments = store.read_comments(objective_id=source_id)
+                engagement_block = render_adopted_engagement(comments, ())
+            except ObjectiveStoreError:
+                engagement_block = None
 
-        # Materialize the source (even on --dry-run, so the dry run shows the real artifact).
-        scratch_path = _scratch_path(repo_root, source_id)
-        scratch_path.parent.mkdir(parents=True, exist_ok=True)
-        scratch_path.write_text(
-            _render_source(src, engagement_block=engagement_block), encoding="utf-8"
-        )
+            # Materialize the source (even on --dry-run, so the dry run shows the real artifact).
+            scratch_path = _scratch_path(repo_root, source_id)
+            scratch_path.parent.mkdir(parents=True, exist_ok=True)
+            scratch_path.write_text(
+                _render_source(src, engagement_block=engagement_block), encoding="utf-8"
+            )
+            s.done(f"materialized source {source_id} → {scratch_path.name}")
     except ObjectiveStoreError as exc:
         fail(ctx, as_json=as_json, error_type="github_error", message=str(exc))
         return

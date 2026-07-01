@@ -101,8 +101,11 @@ def test_dry_run_materializes_scratch_and_does_not_launch(monkeypatch):
             cli, ["objective", "author", "--from", "proj-1", "--dry-run", "--json"]
         )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["success"] is True and payload["source"] == "proj-1"
+        # The reads run on the dry-run path too, so the wait IS narrated — banner-free.
+        assert "looking up source proj-1" in result.stderr
+        assert "skills \u00b7" not in result.stderr
         scratch = (Path(d) / _SCRATCH_REL).resolve()
         assert Path(payload["scratch_path"]).resolve() == scratch
         text = scratch.read_text(encoding="utf-8")
@@ -119,6 +122,10 @@ def test_real_launch_threads_adopt_from_handoff_and_seed(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 0, result.output
+        # The banner heads the pre-launch narration, then the gather narrates + resolves.
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up source proj-1")
+        assert "\u2713 materialized source proj-1 \u2192 objective-adopt-proj-1.md" in err
     assert launched["stage"] == "objective-author"
     assert launched["handoff_extra"] == {"adopt_from": "proj-1"}
     prompt = launched["prompt"] or ""
@@ -148,7 +155,7 @@ def test_refuses_not_found(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "adopt_not_found"
+        assert json.loads(result.stdout)["error_type"] == "adopt_not_found"
 
 
 def test_refuses_already_an_objective(monkeypatch):
@@ -163,7 +170,7 @@ def test_refuses_already_an_objective(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "author", "--from", "proj-1", "--json"])
         assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["error_type"] == "already_an_objective"
         assert "reconcile" in payload["message"]
 
@@ -180,7 +187,7 @@ def test_github_backend_refuses_closed_issue(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "author", "--from", "7", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "adopt_not_open"
+        assert json.loads(result.stdout)["error_type"] == "adopt_not_open"
 
 
 def test_linear_backend_skips_open_check(monkeypatch):
@@ -279,7 +286,7 @@ def test_remote_rejected(monkeypatch):
             cli, ["objective", "author", "--from", "proj-1", "--remote", "ci", "--json"]
         )
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "remote_blocked"
+        assert json.loads(result.stdout)["error_type"] == "remote_blocked"
 
 
 # --- seed-from-file mode (§8.33) ---
@@ -307,6 +314,8 @@ def test_file_mode_launches_fresh_no_adopt_handoff(monkeypatch):
         Path(d, "design.md").write_text("the goal to pursue", encoding="utf-8")
         result = runner.invoke(cli, ["objective", "author", "--from", "design.md", "--json"])
         assert result.exit_code == 0, result.output
+        # File mode has no perceptible pre-launch I/O — no gather narration.
+        assert "looking up source" not in result.stderr
     assert launched["stage"] == "objective-author"
     assert launched["handoff_extra"] is None  # FRESH objective — no adopt_from
     prompt = launched["prompt"] or ""
@@ -329,7 +338,7 @@ def test_file_mode_dry_run_json(monkeypatch):
             cli, ["objective", "author", "--from", "design.md", "--dry-run", "--json"]
         )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["success"] is True and payload["dry_run"] is True
         assert payload["file"] == str(Path(d, "design.md").resolve())
 
@@ -341,7 +350,7 @@ def test_file_mode_empty_file_errors(monkeypatch):
         Path(d, "empty.md").write_text("  \n", encoding="utf-8")
         result = runner.invoke(cli, ["objective", "author", "--from", "empty.md", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "seed_file_error"
+        assert json.loads(result.stdout)["error_type"] == "seed_file_error"
 
 
 def test_missing_file_falls_through_to_source_id(monkeypatch):
@@ -353,4 +362,4 @@ def test_missing_file_falls_through_to_source_id(monkeypatch):
         _git_init(d)
         result = runner.invoke(cli, ["objective", "author", "--from", "missing.md", "--json"])
         assert result.exit_code == 1
-        assert json.loads(result.output)["error_type"] == "adopt_not_found"
+        assert json.loads(result.stdout)["error_type"] == "adopt_not_found"
