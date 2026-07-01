@@ -40,8 +40,6 @@ skills:
   - source: perk
     name: perk-learn
   - source: perk
-    name: perk-learn-code
-  - source: perk
     name: perk-learn-docs
   - source: perk
     name: perk-objective-author
