@@ -5,12 +5,25 @@ resolves and that both reuse seams — perk's version-reading and its git/LBYL h
 are importable. Later nodes hang real ``changelog-*`` / ``release-*`` verbs off this group.
 """
 
+import json
 from pathlib import Path
 
 import click
 
 from perk import __version__ as _perk_version
 from perk.substrate.git import repo_root
+from perk.substrate.output import machine_output, user_output
+from perk_dev import changelog
+
+_EXIT_FOR_TYPE = {"not_a_repo": 2}
+
+
+def _fail(ctx: click.Context, *, as_json: bool, error_type: str, message: str) -> None:
+    if as_json:
+        machine_output(json.dumps({"success": False, "error_type": error_type, "message": message}))
+    else:
+        user_output(click.style("Error: ", fg="red") + message)
+    ctx.exit(_EXIT_FOR_TYPE.get(error_type, 1))
 
 
 @click.group()
@@ -25,6 +38,40 @@ def smoke() -> None:
     root = repo_root(Path.cwd())
     where = str(root) if root is not None else "(not a git repo)"
     click.echo(f"perk-dev smoke: perk {_perk_version} @ {where}")
+
+
+@cli.command("changelog-commits")
+@click.option(
+    "--since",
+    default=None,
+    metavar="<commit>",
+    help="Override the since-commit (skip changelog marker discovery).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -> None:
+    """Report first-parent commits between the changelog cursor (or --since) and HEAD."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        result = changelog.gather(root, since_flag=since)
+    except changelog.ChangelogError as exc:
+        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        return
+    if as_json:
+        machine_output(
+            json.dumps(changelog.ChangelogCommitsOut.from_domain(result).model_dump(mode="json"))
+        )
+    else:
+        user_output(
+            f"since {result.since_commit[:7]} ({result.since_source}) → "
+            f"{result.head_commit[:7]} (HEAD)  ·  {len(result.commits)} commits"
+        )
+        for c in result.commits:
+            pr = f" (PR #{c.pr})" if c.pr is not None else ""
+            user_output(f"  {c.hash[:7]}  {c.subject}{pr}")
 
 
 def main() -> None:
