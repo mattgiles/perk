@@ -169,6 +169,31 @@ def test_sdist_excludes_perk_dev(built_sdist):
     assert not offenders, offenders
 
 
+def test_build_pins_and_all_packages_flag_present():
+    # The `perk-dev` never-published guarantee and the shared-venv dev-member resolution are
+    # PROSE/comment-enforced, not otherwise test-enforced: reverting a pin or the sync flag would
+    # only fail via a downstream symptom (a leaked member, or a `perk_dev` import error). This
+    # guard names the reverted line directly. See docs/learned/workflow/distribution.md and
+    # docs/learned/toolchain/uv-workspace-src-layout.md.
+    build_sites = {
+        "justfile": REPO_ROOT / "justfile",
+        "release.yml": REPO_ROOT / ".github/workflows/release.yml",
+        "release-checklist.md": REPO_ROOT / "docs/release-checklist.md",
+    }
+    for label, path in build_sites.items():
+        assert "uv build --package perk" in path.read_text(encoding="utf-8"), (
+            f"{label} must pin `uv build --package perk` so the dev-only member never leaks"
+        )
+    sync_sites = {
+        "justfile": REPO_ROOT / "justfile",
+        "ci.yml": REPO_ROOT / ".github/workflows/ci.yml",
+    }
+    for label, path in sync_sites.items():
+        assert "uv sync --all-packages" in path.read_text(encoding="utf-8"), (
+            f"{label} must use `uv sync --all-packages` so the dev-only member resolves in the venv"
+        )
+
+
 @pytest.mark.xdist_group("wheel_build")
 def test_wheel_bundles_agents(built_wheel):
     # perk's subagent defs are bundled into the wheel as `perk/_agents` (force-include) so

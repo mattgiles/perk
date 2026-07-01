@@ -26,3 +26,14 @@ def test_version_reuses_perk_version():
 
 def test_smoke_is_registered():
     assert "smoke" in cli.commands
+
+
+def test_smoke_reports_not_a_repo_outside_git():
+    # The `smoke` fallback branch: when `repo_root()` returns None (no enclosing git
+    # repo), the location renders as the literal `(not a git repo)`.
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["smoke"])
+    assert result.exit_code == 0, result.output
+    assert "(not a git repo)" in result.output
+    assert __version__ in result.output
