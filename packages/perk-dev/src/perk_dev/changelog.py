@@ -6,12 +6,18 @@ It applies **no** semantic judgment: no categorization, no inclusion/exclusion, 
 ``--since`` flag → ``[Unreleased]`` marker → latest release header (``vX.Y.Z`` tag).
 """
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from perk.boundary import OutputModel
+from perk.boundary import (
+    OutputModel,
+    StrictInputModel,
+    ValidationError,
+    format_validation_error,
+)
 from perk.substrate import git
 
 _MARKER_RE = re.compile(r"^<!-- As of ([0-9a-f]{7,40}) -->$")
@@ -22,10 +28,20 @@ _RELEASE_HEADER_STRICT_RE = re.compile(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{
 _MARKER_SHAPE_RE = re.compile(r"^<!--\s*As of\s+(\S+)\s*-->\s*$")
 _TRAILING_HASH_RE = re.compile(r" \([0-9a-f]{7,40}\)\s*$")
 _BULLET_RE = re.compile(r"^( *)- ")
-# Keep-a-Changelog 1.1.0 categories plus perk's ``Major Changes``.
-_ALLOWED_CATEGORIES: frozenset[str] = frozenset(
-    {"Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Major Changes"}
+# Keep-a-Changelog 1.1.0 categories plus perk's ``Major Changes``, in the canonical subsection
+# order ``changelog-apply`` inserts by (Major Changes first). Single source of truth: the
+# linter's allowed set is derived from it.
+_CATEGORY_ORDER: tuple[str, ...] = (
+    "Major Changes",
+    "Added",
+    "Changed",
+    "Deprecated",
+    "Removed",
+    "Fixed",
+    "Security",
 )
+_ALLOWED_CATEGORIES: frozenset[str] = frozenset(_CATEGORY_ORDER)
+_SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 _PR_RE = re.compile(r"\(#(\d+)\)")
 _MERGE_PR_RE = re.compile(r"^Merge pull request #(\d+)\b")
 _BODY_TRUNCATE_CHARS = 500
@@ -339,3 +355,219 @@ class ChangelogCheckOut(OutputModel):
             error_type="structural_errors" if has_errors else None,
             findings=tuple(FindingOut.from_domain(f) for f in c.findings),
         )
+
+
+# --- changelog-apply: apply an approved proposal ------------------------------------
+#
+# The deterministic "apply + advance marker" step of the accrual loop. It consumes the
+# categorizer's pinned proposal JSON and performs a **pure text transform** of CHANGELOG.md
+# (no git, no subprocess): append each entry as a top-level bullet under its ``### <category>``
+# subsection of ``[Unreleased]`` (stamping the primary commit's 7-char hash) and advance the
+# ``<!-- As of <hash> -->`` marker to the proposal's ``head_commit``. It never authors,
+# reclassifies, filters, or reorders entries, and it is intentionally NOT idempotent — the
+# marker advance is the loop's re-run guard.
+
+
+class ProposalEntryModel(StrictInputModel):
+    """One proposal entry as pinned by ``docs/release/changelog-categorizer.md``.
+
+    ``confidence`` / ``backend`` are review metadata — part of the pinned shape but unused by
+    apply; optional so a hand-authored apply-only proposal may omit them.
+    """
+
+    category: str
+    text: str
+    commits: list[str]
+    confidence: str | None = None
+    backend: str | None = None
+
+
+class ProposalModel(StrictInputModel):
+    """The pinned proposal envelope (machine-authored batch input — a typo must fail loudly)."""
+
+    since_commit: str
+    head_commit: str
+    entries: list[ProposalEntryModel]
+
+
+@dataclass(frozen=True)
+class ProposalEntry:
+    """One approved entry: its category, bullet body, and contributing commits."""
+
+    category: str
+    text: str
+    commits: tuple[str, ...]
+
+    @property
+    def primary(self) -> str:
+        """The primary (first) commit — its short hash is the stamped ``(hash)`` token."""
+        return self.commits[0]
+
+
+@dataclass(frozen=True)
+class Proposal:
+    """The approved proposal apply consumes (``since_commit`` is review metadata, unused)."""
+
+    since_commit: str
+    head_commit: str
+    entries: tuple[ProposalEntry, ...]
+
+
+def _validate_proposal(proposal: Proposal) -> None:
+    """Content pass over a shape-valid proposal; each defect raises ``bad_proposal``."""
+    for name, sha in (
+        ("since_commit", proposal.since_commit),
+        ("head_commit", proposal.head_commit),
+    ):
+        if _SHA_RE.match(sha) is None:
+            raise ChangelogError("bad_proposal", f"{name} is not a commit SHA: {sha!r}")
+    for i, entry in enumerate(proposal.entries):
+        where = f"entries[{i}]"
+        if entry.category not in _ALLOWED_CATEGORIES:
+            raise ChangelogError("bad_proposal", f"{where}: unknown category: {entry.category!r}")
+        if not entry.commits:
+            raise ChangelogError("bad_proposal", f"{where}: commits is empty")
+        for sha in entry.commits:
+            if _SHA_RE.match(sha) is None:
+                raise ChangelogError("bad_proposal", f"{where}: not a commit SHA: {sha!r}")
+        if not entry.text.strip():
+            raise ChangelogError("bad_proposal", f"{where}: text is empty")
+        if _TRAILING_HASH_RE.search(entry.text) is not None:
+            raise ChangelogError(
+                "bad_proposal",
+                f"{where}: text already ends with a (hash) token — apply stamps exactly one",
+            )
+
+
+def parse_proposal(data: object) -> Proposal:
+    """Parse + validate a proposal object into the frozen domain ``Proposal``.
+
+    The strict model IS the authoritative shape validator (EAFP); the content rules
+    (categories, SHA shapes, no pre-stamped token) run as a separate LBYL pass.
+    """
+    try:
+        model = ProposalModel.model_validate(data)
+    except ValidationError as exc:
+        raise ChangelogError(
+            "bad_proposal", format_validation_error(exc, source="proposal")
+        ) from exc
+    proposal = Proposal(
+        since_commit=model.since_commit,
+        head_commit=model.head_commit,
+        entries=tuple(
+            ProposalEntry(category=e.category, text=e.text, commits=tuple(e.commits))
+            for e in model.entries
+        ),
+    )
+    _validate_proposal(proposal)
+    return proposal
+
+
+def load_proposal(path: Path) -> Proposal:
+    """Read + parse a proposal JSON file (LBYL on presence; the JSON parser is the JSON test)."""
+    if not path.is_file():
+        raise ChangelogError("proposal_not_found", f"{path} not found")
+    text = path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ChangelogError("bad_proposal", f"{path} is not valid JSON: {exc}") from exc
+    return parse_proposal(data)
+
+
+@dataclass(frozen=True)
+class _Segment:
+    """One ``### <category>`` subsection of ``[Unreleased]``: its raw heading + content lines.
+
+    Frozen identity; ``content`` is a mutable accumulator (untouched segments re-emit their
+    lines byte-identically).
+    """
+
+    heading: str
+    content: list[str]
+
+    @property
+    def category(self) -> str:
+        return self.heading[4:].strip()
+
+
+def _unreleased_bounds(lines: list[str]) -> tuple[int, int]:
+    """(header index, exclusive end index) of the ``## [Unreleased]`` section."""
+    start = next((i for i, line in enumerate(lines) if line.strip() == "## [Unreleased]"), None)
+    if start is None:
+        raise ChangelogError("no_unreleased", "CHANGELOG.md has no '## [Unreleased]' section")
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    return start, end
+
+
+def _advance_marker(body: list[str], head_commit: str) -> list[str]:
+    """``body`` with its marker line rewritten to ``head_commit``'s 7-char short hash."""
+    for i, line in enumerate(body):
+        if _MARKER_SHAPE_RE.match(line) is not None:
+            return [*body[:i], f"<!-- As of {head_commit[:7]} -->", *body[i + 1 :]]
+    raise ChangelogError(
+        "marker_missing", "[Unreleased] has no '<!-- As of <hash> -->' marker line"
+    )
+
+
+def _split_segments(body: list[str]) -> tuple[list[str], list[_Segment]]:
+    """Split the ``[Unreleased]`` body into its preamble + ``### `` segments, in order."""
+    preamble: list[str] = []
+    segments: list[_Segment] = []
+    for line in body:
+        if line.startswith("### "):
+            segments.append(_Segment(heading=line, content=[]))
+        elif segments:
+            segments[-1].content.append(line)
+        else:
+            preamble.append(line)
+    return preamble, segments
+
+
+def _with_bullets(content: list[str], bullets: list[str]) -> list[str]:
+    """Existing content with ``bullets`` appended: one leading + one trailing blank line."""
+    kept = list(content)
+    while kept and kept[0].strip() == "":
+        kept.pop(0)
+    while kept and kept[-1].strip() == "":
+        kept.pop()
+    return ["", *kept, *bullets, ""]
+
+
+def _splice_new_segment(segments: list[_Segment], new: _Segment) -> list[_Segment]:
+    """Insert ``new`` by ``_CATEGORY_ORDER`` rank: before the first segment ranked after it."""
+    rank = _CATEGORY_ORDER.index(new.category)
+    for i, seg in enumerate(segments):
+        if seg.category in _ALLOWED_CATEGORIES and _CATEGORY_ORDER.index(seg.category) > rank:
+            return [*segments[:i], new, *segments[i:]]
+    return [*segments, new]
+
+
+def apply_to_text(changelog_text: str, proposal: Proposal) -> str:
+    """The new full changelog text: entries appended + marker advanced (pure, no I/O)."""
+    lines = changelog_text.splitlines()
+    start, end = _unreleased_bounds(lines)
+    body = _advance_marker(lines[start + 1 : end], proposal.head_commit)
+    preamble, segments = _split_segments(body)
+    grouped: dict[str, list[str]] = {}
+    for entry in proposal.entries:
+        grouped.setdefault(entry.category, []).append(f"- {entry.text} ({entry.primary[:7]})")
+    for category, bullets in grouped.items():
+        existing = next((s for s in segments if s.category == category), None)
+        if existing is not None:
+            existing.content[:] = _with_bullets(existing.content, bullets)
+        else:
+            new = _Segment(heading=f"### {category}", content=["", *bullets, ""])
+            segments = _splice_new_segment(segments, new)
+    new_body = preamble + [line for seg in segments for line in (seg.heading, *seg.content)]
+    return "\n".join(lines[: start + 1] + new_body + lines[end:]) + "\n"
+
+
+def extract_unreleased(changelog_text: str) -> str:
+    """The ``## [Unreleased]`` section (trailing blank lines trimmed), for ``--dry-run``."""
+    lines = changelog_text.splitlines()
+    start, end = _unreleased_bounds(lines)
+    section = lines[start:end]
+    while section and section[-1].strip() == "":
+        section.pop()
+    return "\n".join(section) + "\n"

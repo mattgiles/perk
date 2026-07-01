@@ -134,17 +134,16 @@ Entries accrue between releases via a facts → classify → review → apply �
    output shape.
 3. **Human review** — the maintainer reviews the proposal (the `confidence` / `backend` markers
    focus that review) and approves the entries to apply.
-4. **Apply + advance the marker** — append the approved entries under their categories with the
-   ` (hash)` token and advance the `<!-- As of <hash> -->` marker to the newest covered commit.
-   `perk-dev changelog-apply --proposal <file>` will enact this — *forthcoming (node 3.2); until it
-   ships, edit `CHANGELOG.md` by hand.*
+4. **Apply + advance the marker** — `perk-dev changelog-apply --proposal <file>` appends the
+   approved entries under their categories with the ` (hash)` token and advances the
+   `<!-- As of <hash> -->` marker to the proposal's `head_commit`. `--dry-run` prints the intended
+   new `[Unreleased]` section without writing anything.
 5. **Validate** — `just changelog-check` (or `perk-dev changelog-check`) structurally lints the
    result (pinned categories, the ` (hash)` token discipline).
 
-The Phase 2 **facts + lint** tooling (`changelog-commits`, `changelog-check`) **now exists**, and
-classification follows the categorizer doc. The **apply + marker-advance** step (`changelog-apply`,
-node 3.2) and the **release roll** (node 4.2) remain **forthcoming** and are done by hand until
-then.
+The **facts + lint + apply** tooling (`changelog-commits`, `changelog-check`, `changelog-apply`)
+**now exists**, and classification follows the categorizer doc. Only the **release roll**
+(node 4.2) remains **forthcoming** and is done by hand until then.
 
 ## Release runbook (coordinated dual-plane)
 

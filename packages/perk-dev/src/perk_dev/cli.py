@@ -74,6 +74,46 @@ def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -
             user_output(f"  {c.hash[:7]}  {c.subject}{pr}")
 
 
+@cli.command("changelog-apply")
+@click.option(
+    "--proposal",
+    "proposal_path",
+    required=True,
+    metavar="<file>",
+    help="Path to the approved proposal JSON.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print the intended new [Unreleased] section; write nothing.",
+)
+@click.pass_context
+def changelog_apply(ctx: click.Context, *, proposal_path: str, dry_run: bool) -> None:
+    """Apply an approved changelog proposal: append its entries and advance the marker."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        proposal = changelog.load_proposal(Path(proposal_path))
+        changelog_path = root / "CHANGELOG.md"
+        if not changelog_path.exists():
+            raise changelog.ChangelogError("changelog_not_found", f"{changelog_path} not found")
+        text = changelog_path.read_text(encoding="utf-8")
+        new_text = changelog.apply_to_text(text, proposal)
+    except changelog.ChangelogError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    if dry_run:
+        machine_output(changelog.extract_unreleased(new_text), nl=False)
+        user_output("(dry run — no changes written)")
+    else:
+        changelog_path.write_text(new_text, encoding="utf-8")
+        n = len(proposal.entries)
+        entries = "entry" if n == 1 else "entries"
+        user_output(f"Applied {n} {entries}; marker now {proposal.head_commit[:7]}")
+
+
 @cli.command("changelog-check")
 @click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
 @click.pass_context
