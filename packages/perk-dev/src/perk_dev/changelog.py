@@ -9,12 +9,23 @@ It applies **no** semantic judgment: no categorization, no inclusion/exclusion, 
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from perk.boundary import OutputModel
 from perk.substrate import git
 
 _MARKER_RE = re.compile(r"^<!-- As of ([0-9a-f]{7,40}) -->$")
 _RELEASE_HEADER_RE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}")
+# Structural-linter patterns (``changelog-check``). Distinct from the strict facts patterns above:
+# these accept *malformed* shapes so the linter can name the defect rather than silently miss it.
+_RELEASE_HEADER_STRICT_RE = re.compile(r"^## \[\d+\.\d+\.\d+\] - \d{4}-\d{2}-\d{2}\s*$")
+_MARKER_SHAPE_RE = re.compile(r"^<!--\s*As of\s+(\S+)\s*-->\s*$")
+_TRAILING_HASH_RE = re.compile(r" \([0-9a-f]{7,40}\)\s*$")
+_BULLET_RE = re.compile(r"^( *)- ")
+# Keep-a-Changelog 1.1.0 categories plus perk's ``Major Changes``.
+_ALLOWED_CATEGORIES: frozenset[str] = frozenset(
+    {"Added", "Changed", "Deprecated", "Removed", "Fixed", "Security", "Major Changes"}
+)
 _PR_RE = re.compile(r"\(#(\d+)\)")
 _MERGE_PR_RE = re.compile(r"^Merge pull request #(\d+)\b")
 _BODY_TRUNCATE_CHARS = 500
@@ -195,4 +206,136 @@ class ChangelogCommitsOut(OutputModel):
             head_commit=c.head_commit,
             since_source=c.since_source,
             commits=tuple(CommitOut.from_domain(r) for r in c.commits),
+        )
+
+
+# --- changelog-check: a pure text-structural linter ---------------------------------
+#
+# Validates ``CHANGELOG.md`` against the normalized two-phase convention and the pinned
+# Keep-a-Changelog category set. No git, no semantic judgment: a single line-indexed pass over
+# the file text. Structural defects are ``error`` findings (the CLI exits non-zero); softer style
+# issues are ``warning`` findings (exit 0).
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One structural-lint result: its ``severity``, machine ``code``, 1-based ``line``, message."""
+
+    severity: Literal["error", "warning"]
+    code: str
+    line: int | None
+    message: str
+
+
+@dataclass(frozen=True)
+class ChangelogCheck:
+    """The structural-lint report: all findings in first-seen order."""
+
+    findings: tuple[Finding, ...]
+
+    def has_errors(self) -> bool:
+        """Whether any finding is an ``error`` (a method, not a property — it iterates)."""
+        return any(f.severity == "error" for f in self.findings)
+
+
+def check(root: Path) -> ChangelogCheck:
+    """Lint ``root/CHANGELOG.md`` structurally, returning every finding (LBYL on file presence).
+
+    Section state (``pre``/``unreleased``/``released``) drives the per-section bullet-token rule
+    and the marker-position check; only the two ``## [...]`` bracket-header forms transition it, so
+    the ``[Unreleased]`` span (for marker "inside" purposes) is exactly ``section == "unreleased"``.
+    """
+    path = root / "CHANGELOG.md"
+    if not path.exists():
+        raise ChangelogError("changelog_not_found", f"{path} not found")
+    text = path.read_text(encoding="utf-8")
+
+    findings: list[Finding] = []
+
+    def add(
+        severity: Literal["error", "warning"], code: str, line: int | None, message: str
+    ) -> None:
+        findings.append(Finding(severity, code, line, message))
+
+    section = "pre"  # "pre" | "unreleased" | "released"
+    unreleased_count = 0
+    marker_count = 0
+
+    for i, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if stripped == "## [Unreleased]":
+            unreleased_count += 1
+            section = "unreleased"
+            continue
+        if line.startswith("## ["):
+            section = "released"
+            if _RELEASE_HEADER_STRICT_RE.match(line) is None:
+                add("error", "bad_release_header", i, f"malformed release header: {stripped!r}")
+            continue
+        if line.startswith("### "):
+            name = stripped[4:].strip()
+            if name not in _ALLOWED_CATEGORIES:
+                add("error", "unknown_category", i, f"unknown category: {name!r}")
+            continue
+        marker = _MARKER_SHAPE_RE.match(line)
+        if marker is not None:
+            marker_count += 1
+            token = marker.group(1)
+            if re.fullmatch(r"[0-9a-f]{7,40}", token) is None:
+                add("error", "bad_marker_hash", i, f"malformed marker hash: {token!r}")
+            if section != "unreleased":
+                add("error", "marker_outside_unreleased", i, "marker is not inside [Unreleased]")
+            continue
+        bullet = _BULLET_RE.match(line)
+        if bullet is not None:
+            indent = bullet.group(1)
+            if len(indent) % 2 != 0:
+                add("warning", "bad_bullet_indent", i, "bullet indent is not a 2-space multiple")
+            if indent == "":
+                has_token = _TRAILING_HASH_RE.search(line) is not None
+                if section == "unreleased" and not has_token:
+                    add("error", "unreleased_missing_hash", i, "[Unreleased] bullet lacks a token")
+                elif section == "released" and has_token:
+                    add("error", "released_has_hash", i, "released bullet carries a (hash) token")
+            continue
+
+    if unreleased_count == 0:
+        add("error", "no_unreleased", None, "no '## [Unreleased]' section")
+    elif unreleased_count > 1:
+        add("error", "duplicate_unreleased", None, f"{unreleased_count} '## [Unreleased]' sections")
+    if marker_count > 1:
+        add("error", "duplicate_marker", None, f"{marker_count} marker lines")
+    if unreleased_count >= 1 and marker_count == 0:
+        add("warning", "missing_marker", None, "[Unreleased] present but no marker line")
+
+    return ChangelogCheck(tuple(findings))
+
+
+class FindingOut(OutputModel):
+    """The ``--json`` snapshot of one structural-lint finding."""
+
+    severity: str
+    code: str
+    line: int | None
+    message: str
+
+    @classmethod
+    def from_domain(cls, f: Finding) -> "FindingOut":
+        return cls(severity=f.severity, code=f.code, line=f.line, message=f.message)
+
+
+class ChangelogCheckOut(OutputModel):
+    """The ``--json`` envelope for a structural-lint report (perk-dev's success+error_type)."""
+
+    success: bool
+    error_type: str | None
+    findings: tuple[FindingOut, ...]
+
+    @classmethod
+    def from_domain(cls, c: ChangelogCheck) -> "ChangelogCheckOut":
+        has_errors = c.has_errors()
+        return cls(
+            success=not has_errors,
+            error_type="structural_errors" if has_errors else None,
+            findings=tuple(FindingOut.from_domain(f) for f in c.findings),
         )

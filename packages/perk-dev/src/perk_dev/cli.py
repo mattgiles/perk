@@ -74,5 +74,36 @@ def changelog_commits(ctx: click.Context, *, since: str | None, as_json: bool) -
             user_output(f"  {c.hash[:7]}  {c.subject}{pr}")
 
 
+@cli.command("changelog-check")
+@click.option("--json", "as_json", is_flag=True, help="Emit a machine-readable report to stdout.")
+@click.pass_context
+def changelog_check(ctx: click.Context, *, as_json: bool) -> None:
+    """Validate CHANGELOG.md structure (markers, headers, categories, hash tokens)."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=as_json, error_type="not_a_repo", message="not inside a git repository")
+        return
+    try:
+        result = changelog.check(root)
+    except changelog.ChangelogError as exc:
+        _fail(ctx, as_json=as_json, error_type=exc.error_type, message=exc.message)
+        return
+    if as_json:
+        machine_output(
+            json.dumps(changelog.ChangelogCheckOut.from_domain(result).model_dump(mode="json"))
+        )
+    else:
+        for f in result.findings:
+            colour = "red" if f.severity == "error" else "yellow"
+            where = f"line {f.line}: " if f.line is not None else ""
+            user_output(
+                click.style(f"{f.severity}: ", fg=colour) + f"{where}{f.code} — {f.message}"
+            )
+        if not result.has_errors():
+            user_output("CHANGELOG.md OK")
+    if result.has_errors():
+        ctx.exit(1)
+
+
 def main() -> None:
     cli()

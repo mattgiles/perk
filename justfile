@@ -83,5 +83,9 @@ perk *args:
 perk-dev *args:
     uv run perk-dev {{args}}
 
+# validate CHANGELOG.md structure (two-phase convention: markers, headers, hash tokens)
+changelog-check:
+    uv run perk-dev changelog-check
+
 # full local CI: setup, lint, typecheck, test
-ci: setup lint typecheck test
+ci: setup lint typecheck test changelog-check
