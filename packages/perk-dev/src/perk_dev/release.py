@@ -57,11 +57,11 @@ class ReleaseInfo:
     marker_at_head: bool
 
 
-def _read_current_version(root: Path) -> str:
+def read_current_version(root: Path) -> str:
     """``[project].version`` from ``root/pyproject.toml`` — the version SSOT.
 
     It anchors the whole report (the tag name derives from it), so failures here are
-    errors, not nulls.
+    errors, not nulls. Also the current-version seam for ``perk_dev.bump``.
     """
     path = root / "pyproject.toml"
     if not path.is_file():
@@ -110,7 +110,7 @@ def _probe_remote_tag(root: Path, tag_name: str) -> tuple[bool | None, str | Non
 
 def gather(root: Path) -> ReleaseInfo:
     """The release-state facts for ``root`` (report-only: mismatches are facts, not errors)."""
-    current_version = _read_current_version(root)
+    current_version = read_current_version(root)
     head_commit = git.resolve_commit(root, "HEAD")
     if head_commit is None:
         raise ReleaseError("head_unresolvable", "HEAD does not resolve to a commit")

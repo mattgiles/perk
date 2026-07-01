@@ -5,6 +5,7 @@ resolves and that both reuse seams — perk's version-reading and its git/LBYL h
 are importable. Later nodes hang real ``changelog-*`` / ``release-*`` verbs off this group.
 """
 
+import datetime
 import json
 from pathlib import Path
 
@@ -13,7 +14,7 @@ import click
 from perk import __version__ as _perk_version
 from perk.substrate.git import repo_root
 from perk.substrate.output import machine_output, user_output
-from perk_dev import changelog, release
+from perk_dev import bump, changelog, release
 
 _EXIT_FOR_TYPE = {"not_a_repo": 2}
 
@@ -172,6 +173,69 @@ def changelog_apply(ctx: click.Context, *, proposal_path: str, dry_run: bool) ->
         n = len(proposal.entries)
         entries = "entry" if n == 1 else "entries"
         user_output(f"Applied {n} {entries}; marker now {proposal.head_commit[:7]}")
+
+
+@cli.command("bump-version")
+@click.argument("version", required=False, metavar="[X.Y.Z]")
+@click.option(
+    "--bump",
+    "bump_part",
+    type=click.Choice(["patch", "minor", "major"]),
+    default=None,
+    help="Bump the current version by one component.",
+)
+@click.option("--dry-run", is_flag=True, help="Print the intended changes; write nothing.")
+@click.pass_context
+def bump_version(
+    ctx: click.Context, *, version: str | None, bump_part: str | None, dry_run: bool
+) -> None:
+    """Bump the version SSOT + mirrors and roll [Unreleased] to a release section."""
+    root = repo_root(Path.cwd())
+    if root is None:
+        _fail(ctx, as_json=False, error_type="not_a_repo", message="not inside a git repository")
+        return
+    if (version is None) == (bump_part is None):
+        _fail(
+            ctx,
+            as_json=False,
+            error_type="bad_arguments",
+            message="pass exactly one of X.Y.Z or --bump patch|minor|major",
+        )
+        return
+    today = datetime.date.today().isoformat()
+    try:
+        plan = bump.plan_bump(root, explicit=version, bump=bump_part, today=today)
+    except (bump.BumpError, changelog.ChangelogError, release.ReleaseError) as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    if plan.marker_behind_head:
+        user_output(
+            click.style("warning: ", fg="yellow")
+            + "the [Unreleased] marker is behind HEAD — commits since it are not covered by "
+            "this release's notes"
+        )
+    n = plan.rolled.entries
+    entries = "entry" if n == 1 else "entries"
+    roll_line = f"roll [Unreleased] → [{plan.target_version}] - {plan.date} ({n} {entries})"
+    if dry_run:
+        machine_output(
+            changelog.extract_roll_preview(plan.rolled.text, plan.target_version), nl=False
+        )
+        user_output(f"bump {plan.current_version} → {plan.target_version}")
+        user_output(roll_line)
+        user_output("(dry run — no changes written)")
+        return
+    try:
+        bump.execute(root, plan)
+    except bump.BumpError as exc:
+        _fail(ctx, as_json=False, error_type=exc.error_type, message=exc.message)
+        return
+    user_output(f"pyproject.toml + uv.lock → {plan.target_version}")
+    user_output(f"package.json + package-lock.json → {plan.target_version}")
+    user_output(
+        f"CHANGELOG.md: rolled [Unreleased] → [{plan.target_version}] - {plan.date} "
+        f"({n} {entries}); marker now {plan.head_short}"
+    )
 
 
 @cli.command("changelog-check")
