@@ -125,6 +125,33 @@ def test_real_launch_threads_run_id_override_and_seed(monkeypatch):
     assert "plan_save" in prompt
 
 
+def test_real_launch_banner_precedes_lookup(monkeypatch):
+    """A real local launch heads stderr with the banner BEFORE the `looking up #X` narration."""
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    _stub_launch(monkeypatch, {})
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "replan", "42"])
+        assert result.exit_code == 0, result.output
+        err = result.stderr
+        assert err.index("skills \u00b7") < err.index("looking up")
+
+
+def test_dry_run_emits_no_banner(monkeypatch):
+    """The banner is gated off on `--dry-run` (the preview path owns the output)."""
+    _authed(monkeypatch)
+    _stub_plan(monkeypatch)
+    monkeypatch.setattr(launch, "launch_stage", lambda **k: None)
+    runner = CliRunner()
+    with runner.isolated_filesystem() as d:
+        _git_init(d)
+        result = runner.invoke(cli, ["plan", "replan", "42", "--dry-run", "--json"])
+        assert result.exit_code == 0, result.output
+        assert "skills \u00b7" not in result.stderr
+
+
 def test_empty_engagement_scratch_and_seed_byte_unchanged(monkeypatch):
     # No comments/edits → no <untrusted_plan_engagement> block, no engagement clause in the seed.
     _authed(monkeypatch)

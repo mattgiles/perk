@@ -55,6 +55,7 @@ from perk.run.launch.materialize import (
     materialize_plan_body,
     materialize_skills,
     print_launch_banner,
+    print_launch_banner_gated,
     run_worktree_setup,
 )
 from perk.run.launch.prompts import (
@@ -412,6 +413,7 @@ __all__ = [
     "materialize_plan_body",
     "materialize_skills",
     "print_launch_banner",
+    "print_launch_banner_gated",
     "resolve_base",
     "resolve_plan_worktree_name",
     "resolve_target",

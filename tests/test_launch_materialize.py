@@ -863,6 +863,20 @@ def test_print_launch_banner_counts_skills_and_extensions(tmp_path, capsys):
     assert f"perk v{__version__}" in err
 
 
+def test_print_launch_banner_idempotent_emits_once(tmp_path, capsys):
+    """A second `print_launch_banner` call in the same process is a no-op (the guard latches), so
+    the summary marker appears exactly once even across two calls."""
+    repo_root = tmp_path / "repo"
+    _seed_skills(repo_root, "a", "b")
+    _seed_settings(repo_root, 4)
+
+    print_launch_banner(repo_root)
+    print_launch_banner(repo_root)
+
+    err = capsys.readouterr().err
+    assert err.count("skills \u00b7") == 1
+
+
 def test_print_launch_banner_no_ansi_when_not_a_tty(tmp_path, capsys):
     """Under capsys stderr is not a tty, so the summary carries no ANSI escape codes."""
     repo_root = tmp_path / "repo"

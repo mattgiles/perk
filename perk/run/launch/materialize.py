@@ -4,8 +4,9 @@ The canonical materialization paths:
 the ``[worktree] setup`` runner (:func:`run_worktree_setup`), the plan-body cache
 (:func:`materialize_plan_body`, also consumed by ``run_worker.position_worktree``), the
 per-skill symlink mirror (:func:`materialize_skills`), and the extension-install clone-copy
-(:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) heads a real
-launch's output. ``_WORKTREE_SETUP_TIMEOUT_S`` (the per-command wall-clock cap) travels with
+(:func:`materialize_extensions`). The launch banner (:func:`print_launch_banner`) is the
+idempotent once-per-process emitter that heads a real launch's output. ``_WORKTREE_SETUP_TIMEOUT_S``
+(the per-command wall-clock cap) travels with
 :func:`run_worktree_setup` and is re-exported by the package facade so
 ``launch._WORKTREE_SETUP_TIMEOUT_S`` resolves verbatim.
 """
@@ -172,6 +173,12 @@ def _count_extension_packages(repo_root: Path) -> int:
         return 0
 
 
+# The launch banner heads a process's launch output exactly once. A narrating cold-door command
+# emits it before its own pre-launch narration; launch_stage emits it for every other launch.
+# This guard makes the second emitter a no-op so the banner never doubles.
+_LAUNCH_BANNER_EMITTED = False
+
+
 def render_launch_banner(*, skills: int, extensions: int) -> str:
     """The 4-line perk launch banner: the compact box-drawing wordmark, the version, and a summary
     line that absorbs the old ``(skills: mirrored …)`` line plus the extension count."""
@@ -188,9 +195,17 @@ def print_launch_banner(repo_root: Path) -> None:
     ``user_output``. Both counts are knowable before any worktree work, so the first render is
     already accurate — no re-render.
 
+    Idempotent: emits at most once per process; later calls are no-ops. A narrating cold-door
+    command can head its own pre-launch narration with the banner while ``launch_stage`` keeps its
+    call as the no-op fallback for every other launch command.
+
     TTY-gated styling: the summary line is dimmed only on an interactive stderr with ``NO_COLOR``
     unset; ``--json``/piped/CI output stays plain and escape-code-free.
     """
+    global _LAUNCH_BANNER_EMITTED
+    if _LAUNCH_BANNER_EMITTED:
+        return
+    _LAUNCH_BANNER_EMITTED = True  # latch before emitting so re-entrancy cannot double-print
     skills = _count_skill_sources(repo_root)
     extensions = _count_extension_packages(repo_root)
     wordmark, _, summary = render_launch_banner(skills=skills, extensions=extensions).rpartition(
@@ -199,6 +214,20 @@ def print_launch_banner(repo_root: Path) -> None:
     if sys.stderr.isatty() and not os.environ.get("NO_COLOR"):
         summary = click.style(summary, dim=True)
     user_output(f"{wordmark}\n{summary}")
+
+
+def print_launch_banner_gated(repo_root: Path, *, dry_run: bool, remote: str | None) -> None:
+    """Emit the launch banner only for a real local launch — the single gate the four narrating
+    cold-door commands share to head their own pre-launch narration with the banner.
+
+    Skipped on ``--dry-run`` (the preview path owns the output) and on ``--remote`` (the remote
+    path prints no banner). ``remote is None`` is the exact "this is a local launch" test: absent
+    ``--remote`` → ``None`` (local); ``--remote``/``--remote=x`` → ``""``/``"x"`` (both remote).
+    Idempotent via :func:`print_launch_banner`, so ``launch_stage``'s later call is the no-op
+    fallback.
+    """
+    if not dry_run and remote is None:
+        print_launch_banner(repo_root)
 
 
 def _clone_npm_tree(src: Path, dst: Path) -> None:

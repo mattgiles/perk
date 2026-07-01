@@ -188,6 +188,8 @@ def replan_objective(
 
         store = resolve.resolve_objective_store(repo_root)
         is_linear = store.backend_id != resolve.GITHUB_BACKEND_ID
+        # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait (one line covers the immediately-following `read_issue`
         # too). The lookup runs on the dry-run path too (dry-run materializes the real artifact via
         # these reads), so the narration is NOT gated on `dry_run`; the line goes to stderr, leaving

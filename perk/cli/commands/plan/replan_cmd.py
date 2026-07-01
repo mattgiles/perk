@@ -154,6 +154,8 @@ def replan(
         launch.resolve_target(stage, remote)
 
         backend = resolve.resolve_issue_backend(repo_root)
+        # Banner first: head a real local launch with the banner BEFORE narrating the lookup wait.
+        launch.print_launch_banner_gated(repo_root, dry_run=dry_run, remote=remote)
         # Narrate the backend lookup wait (one line covers the immediately-following
         # `get_plan_body` too). The lookup runs on the dry-run path too (dry-run materializes the
         # real artifact via these reads), so the narration is NOT gated on `dry_run`; the line goes
