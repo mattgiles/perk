@@ -39,6 +39,35 @@ Critically, the uv *release ergonomics* need nothing from `uv_build`: `uv build`
 `uv version` are all **backend-agnostic** and work fine over a hatchling backend. Reach for uv's
 release commands without touching the build backend.
 
+## The never-published `packages/perk-dev` workspace member
+
+perk's uv workspace carries a **dev-only member**, `packages/perk-dev`, that must **never** reach
+PyPI. It depends on `perk` via `[tool.uv.sources] perk = { workspace = true }` and reuses perk's
+seams — `perk-dev --version` reuses `perk.__version__`, and it calls `src/perk/substrate/git` — so
+it is a workspace member, not a standalone package. Its exclusion from perk's published artifacts is
+a **belt-and-suspenders** guarantee, three layers deep:
+
+- **Pin `--package perk` at every `uv build` site** so the build only ever produces the `perk`
+  distribution, never the member: `.github/workflows/release.yml`, the `justfile` `build` recipe,
+  and `docs/release-checklist.md`.
+- **`classifiers = ["Private :: Do Not Upload"]`** on the member's `[project]` — the PyPI-honored
+  marker that rejects an accidental upload.
+- **Standing packaging tests** assert the member is absent from perk's published **wheel and
+  sdist**: `tests/test_packaging.py::test_wheel_excludes_perk_dev` and `test_sdist_excludes_perk_dev`
+  (the latter also bars any `/packages/` path from the sdist).
+
+The member's `[project] version` is a static `0.0.0` placeholder — intentionally **not** a
+tracked/version-bearing surface (no lockstep guard), because `perk-dev --version` reuses
+`perk.__version__` rather than carrying its own.
+
+**The prose-enforced reality (tech debt worth documenting):** the `--package perk` build pins and
+the `uv sync --all-packages` sync flag are **prose/comment-enforced, not test-enforced**. Reverting
+either fails only via a **downstream symptom** — dropping `--all-packages` surfaces as an import
+error in `tests/test_perk_dev_cli.py` (the pruned member is gone from the shared venv); dropping a
+`--package perk` pin surfaces as a leaked member caught by the exclusion tests — rather than a
+dedicated guard that names the reverted line. See `toolchain/uv-workspace-src-layout.md` for the
+workspace/`src`-layout mechanics and the `--all-packages` member-pruning trap.
+
 ## The dual-plane `release.yml` workflow
 
 One tag-triggered workflow now serves PRs / main / tags / `workflow_dispatch` via **widened triggers
@@ -78,8 +107,8 @@ first publish, and provenance needs npm ≥ 9.5 — Node 22 ships npm ≥ 10, so
 The durable distribution rule for how consumer-side install commands are pinned:
 
 - **Machine / reproducibility surfaces pin to `__version__`** — the remote-runner consumer install
-  (`perk/run/workflow_artifacts.py`) pins `perk=={__version__}`, and the npm extension wiring
-  (`perk/substrate/settings.py` / the convergence layer) pins `@mgiles/perk@{__version__}`. Both derive
+  (`src/perk/run/workflow_artifacts.py`) pins `perk=={__version__}`, and the npm extension wiring
+  (`src/perk/substrate/settings.py` / the convergence layer) pins `@mgiles/perk@{__version__}`. Both derive
   from the **one** `__version__` SSOT (the `importlib`-derived value).
 - **Human-facing docs stay unpinned (always-latest)** — `README` / get-started read a bare
   `uv tool install perk`.
@@ -95,7 +124,7 @@ The `__version__` SSOT is enforced into the *running session* by three deliberat
 (and one deliberately-rejected one). This builds on the install-pin policy above.
 
 - **`PERK_CLI_VERSION` — a second, *informational* launch env var (the precedent).** `launch_stage`
-  (`perk/run/launch/__init__.py`) injects **two** env vars into the `os.execvpe` env dict: the existing
+  (`src/perk/run/launch/__init__.py`) injects **two** env vars into the `os.execvpe` env dict: the existing
   run-control `PERK_RUN_ID` **and** the new `PERK_CLI_VERSION = __version__`. The distinction (documented
   in contracts §8.2/§8.6a): `PERK_RUN_ID` is run-control data the extension *acts on*; `PERK_CLI_VERSION`
   is **informational only** — read solely to *compare* versions, never to drive state. This is the
@@ -210,8 +239,10 @@ Mechanical reusables that DO transfer from the git lifecycle:
 - `docs/learned/workflow/prompt-templates.md` — the zero-runtime-dep invariant (relevant when a node
   adds a runtime dep)
 - `docs/learned/pi/extension-api.md` — the `session_start` handler the version-drift signal rides
-- `perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
+- `src/perk/run/launch/__init__.py`, `extension/index.ts` — the `PERK_CLI_VERSION` inject + the
   `session_start` drift comparison
 - `docs/learned/toolchain/worktree-node-modules.md` — the `package-lock.json` `pi-ai` bin-path churn
+- `docs/learned/toolchain/uv-workspace-src-layout.md` — the uv-workspace root-package `src`-layout
+  mechanics + the `uv sync --all-packages` member-pruning trap (the `perk-dev` member's home layout)
 - `pyproject.toml`, `package.json`, `.github/workflows/release.yml` — the SSOT version + the dual-plane
   workflow
