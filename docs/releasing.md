@@ -41,6 +41,11 @@ to the running `perk` version. The table below names **every** version-bearing s
 owner so the graph doubles as a guard map (the **Guard** column names the lockstep test that
 pins a surface, where one exists).
 
+> **Not a tracked surface:** `packages/perk-dev` is a never-published, dev-only workspace member.
+> Its `[project] version` is a static `0.0.0` placeholder and is **intentionally not a
+> tracked/version-bearing surface** (so no lockstep guard); `perk-dev --version` reuses
+> `perk.__version__`.
+
 ### SSOT & mirrors
 
 | Surface | Role | Owner / how it moves | Guard |

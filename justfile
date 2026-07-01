@@ -12,9 +12,10 @@ setup: sync install hooks install-cli
 hooks:
     prek install
 
-# create/refresh the python env (3.13) + deps + dev group
+# create/refresh the python env (3.13) + deps + dev group. `--all-packages` installs every
+# workspace member editable (incl. the dev-only `perk-dev`) so `import perk_dev` resolves.
 sync:
-    uv sync
+    uv sync --all-packages
 
 # install node dev dependencies (biome, tsc, types)
 install:
@@ -31,12 +32,12 @@ lock:
 
 # format everything (ruff + biome)
 fmt:
-    uv run ruff format src/perk tests
+    uv run ruff format src/perk packages/perk-dev/src tests
     npm run format
 
 # lint python (ruff)
 lint-py:
-    uv run ruff check src/perk tests
+    uv run ruff check src/perk packages/perk-dev/src tests
 
 # lint typescript (biome)
 lint-js:
@@ -70,13 +71,17 @@ test *args:
     uv run pytest {{args}}
     node --test --test-reporter=dot --test-concurrency=$(( $(getconf _NPROCESSORS_ONLN) * 2 )) "extension/**/*.test.ts"
 
-# build the python wheel + sdist
+# build the python wheel + sdist (pinned to perk — perk-dev is never published)
 build:
-    uv build
+    uv build --package perk
 
 # run perk in the project env, e.g. `just perk init`
 perk *args:
     uv run perk {{args}}
+
+# run perk-dev (dev-only maintainer tooling) in the project env, e.g. `just perk-dev smoke`
+perk-dev *args:
+    uv run perk-dev {{args}}
 
 # full local CI: setup, lint, typecheck, test
 ci: setup lint typecheck test

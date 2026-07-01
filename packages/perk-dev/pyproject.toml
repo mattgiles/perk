@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "perk-dev"
+version = "0.0.0"
+description = "perk's internal maintainer/release tooling (dev-only; never published)."
+requires-python = ">=3.13"
+license = "MIT"
+authors = [{ name = "perk" }]
+classifiers = ["Private :: Do Not Upload"]
+dependencies = ["perk"]
+
+[project.scripts]
+perk-dev = "perk_dev.cli:main"
+
+[tool.uv.sources]
+perk = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/perk_dev"]

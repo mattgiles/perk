@@ -65,20 +65,21 @@ self = true
 
 [tool.ty.environment]
 python-version = "3.13"
-# `src` resolves `from perk...` (the package lives at src/perk); `tests` resolves the bare-name
-# cross-test-module imports (e.g. `from _linear_fakes import _FakeLinear`) the way pytest does at
-# runtime (prepend import mode, no `tests/__init__.py`).
-root = ["src", "tests"]
+# `src` resolves `from perk...` (the package lives at src/perk); `packages/perk-dev/src` resolves
+# `import perk_dev`; `tests` resolves the bare-name cross-test-module imports (e.g. `from
+# _linear_fakes import _FakeLinear`) the way pytest does at runtime (prepend import mode, no
+# `tests/__init__.py`).
+root = ["src", "packages/perk-dev/src", "tests"]
 
 [tool.ty.src]
-# Only type-check perk's own code.
-include = ["src/perk", "tests"]
+# Only type-check perk's own code (incl. the dev-only perk-dev workspace member).
+include = ["src/perk", "packages/perk-dev/src/perk_dev", "tests"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-# Only lint/format perk's own code.
-include = ["src/perk/**/*.py", "tests/**/*.py"]
+# Only lint/format perk's own code (incl. the dev-only perk-dev workspace member).
+include = ["src/perk/**/*.py", "packages/perk-dev/src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PLW1514", "PTH", "PLR1702", "PLC0415"]

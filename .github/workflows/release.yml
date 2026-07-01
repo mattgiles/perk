@@ -55,10 +55,11 @@ jobs:
           enable-cache: true
           python-version: "3.13"
 
-      # `uv build` (no flags) produces both wheel and sdist into dist/. The hatchling
-      # backend force-includes top-level shared/ → perk/_shared and agents/ → perk/_agents.
+      # `uv build --package perk` produces perk's wheel + sdist into dist/, pinned to the
+      # perk workspace member so the never-published `perk-dev` member is never built. The
+      # hatchling backend force-includes top-level shared/ → perk/_shared and agents/ → perk/_agents.
       - name: Build wheel + sdist
-        run: uv build
+        run: uv build --package perk
 
       - name: Validate distributions
         run: uvx twine check dist/*
