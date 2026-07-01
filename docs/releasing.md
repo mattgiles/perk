@@ -120,8 +120,31 @@ marker to the newest covered commit.
 sections carry **no** tokens), rename `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`, and add a
 fresh empty `## [Unreleased]` above it with a **new** marker at the release HEAD.
 
-These changelog steps are performed **manually until the Phase 2 tooling (`perk-dev
-changelog-*`) exists**.
+### The accrual loop
+
+Entries accrue between releases via a facts → classify → review → apply → lint loop:
+
+1. **Gather facts** — `perk-dev changelog-commits` (or `--json`) reports the first-parent commits
+   since the `<!-- As of <hash> -->` marker. It applies **no** judgment beyond dropping the two
+   lockfiles.
+2. **Classify** — an agent (or the maintainer) turns those facts into a reviewed changelog
+   proposal following [`docs/release/changelog-categorizer.md`](./release/changelog-categorizer.md),
+   which owns *all* inclusion/exclusion and categorization judgment (the user-visibility test, the
+   pinned categories, roll-up, backend qualifiers, confidence flags) and pins the proposal-JSON
+   output shape.
+3. **Human review** — the maintainer reviews the proposal (the `confidence` / `backend` markers
+   focus that review) and approves the entries to apply.
+4. **Apply + advance the marker** — append the approved entries under their categories with the
+   ` (hash)` token and advance the `<!-- As of <hash> -->` marker to the newest covered commit.
+   `perk-dev changelog-apply --proposal <file>` will enact this — *forthcoming (node 3.2); until it
+   ships, edit `CHANGELOG.md` by hand.*
+5. **Validate** — `just changelog-check` (or `perk-dev changelog-check`) structurally lints the
+   result (pinned categories, the ` (hash)` token discipline).
+
+The Phase 2 **facts + lint** tooling (`changelog-commits`, `changelog-check`) **now exists**, and
+classification follows the categorizer doc. The **apply + marker-advance** step (`changelog-apply`,
+node 3.2) and the **release roll** (node 4.2) remain **forthcoming** and are done by hand until
+then.
 
 ## Release runbook (coordinated dual-plane)
 
