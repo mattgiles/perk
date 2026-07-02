@@ -102,6 +102,11 @@ from perk.convergence.init.templates import (
     POST_INIT_TEMPLATE,
     converge_config,
 )
+from perk.convergence.init.version_pin import (
+    converge_version_pin,
+    read_version_pin,
+    render_version_pin,
+)
 from perk.github import AuthStatus, GitHubError, RepoAccess
 from perk.run import workflow_artifacts
 from perk.state import cache
@@ -173,6 +178,7 @@ __all__ = [
     "consumer_perk_package_dir",
     "converge_config",
     "converge_repo_skills_manifest",
+    "converge_version_pin",
     "ensure_extension_install_present",
     "extension_install_status",
     "git",
@@ -181,6 +187,8 @@ __all__ = [
     "linear",
     "managed_convergences",
     "materialize_extension_install",
+    "read_version_pin",
+    "render_version_pin",
     "report_to_dict",
     "run_init",
     "shutil",
@@ -271,6 +279,11 @@ def managed_convergences(root: Path, self_repo: bool) -> list[ManagedConvergence
             "runner-workflow",
             ("runner-workflow",),
             lambda apply: workflow_artifacts.converge_runner_workflow(root, self_repo, apply=apply),
+        ),
+        ManagedConvergence(
+            "required-perk-version",
+            ("required-perk-version",),
+            lambda apply: converge_version_pin(root, apply=apply),
         ),
         ManagedConvergence(
             "gitignore-block",

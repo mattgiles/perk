@@ -15,6 +15,10 @@ def test_skills_manifest_capability_present():
     assert "skills-manifest" in {c.name for c in capabilities.CAPABILITIES}
 
 
+def test_required_perk_version_capability_present():
+    assert "required-perk-version" in {c.name for c in capabilities.CAPABILITIES}
+
+
 def test_applicable_returns_full_set_either_way():
     full = {c.name for c in capabilities.CAPABILITIES}
     assert {c.name for c in capabilities.applicable(True)} == full

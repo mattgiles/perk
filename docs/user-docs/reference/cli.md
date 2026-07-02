@@ -54,7 +54,10 @@ without mutating it. It converges a skills-manifest fragment (`.agents/manifest.
 declaring perk's own skills **plus a set of required external skills** (from upstream sources),
 materialized via the `skills` CLI; a missing required skill fails `init` (and `doctor`). It also
 checks for the optional `ast-grep` CLI (structural code search) —
-non-fatal: a missing `ast-grep` is a `⚠️` warning, never a blocking failure. `--force` re-seeds
+non-fatal: a missing `ast-grep` is a `⚠️` warning, never a blocking failure. Init also writes the
+committed `.perk/required-perk-version` pin (the repo's required perk version); `perk doctor`
+reports a missing or stale pin as drift and `--fix` rewrites it to the running CLI's version.
+`--force` re-seeds
 the user-editable config to defaults; `--no-interactive`
 never prompts (CI/supervisor); `--json` emits a machine-readable report.
 

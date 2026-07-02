@@ -61,8 +61,10 @@ The local cache tier — written and read by **both** the CLI (exterior) and the
   dir artifacts and is declared in `writes` by the read-only authoring stages — `plan`,
   `objective-plan`, and `objective-author` (`cache.scratch` still names the broader substrate).
 
-  **perk-owned dot-path construction seam.** Construction of the four **perk-owned** dot-path
-  families — the perk dir, the config files (`config.toml`/`local.toml`), the repo-skills dir
+  **perk-owned dot-path construction seam.** Construction of the **perk-owned** dot-path
+  families — the perk dir, the config files (`config.toml`/`local.toml`), the required-perk-version
+  pin (`.perk/required-perk-version`, constructed via `paths.required_version_file`; Python-only,
+  not mirrored in the TS guard, like skills), the repo-skills dir
   (`.perk/skills`), and the workflow dir — is confined to a per-plane seam: `perk/substrate/paths.py`
   + `extension/substrate/paths.ts` (perk dir / config / skills) plus `cache.workflow_dir` /
   `workflowDir` for the workflow family. Each family is independently redirectable from its single
@@ -1803,7 +1805,8 @@ missing = `warn`) · `github` (auth/access; non-fatal `warn`) ·
 `[issues] backend` is `"linear"`; warn-level, the github D3 mirror; `--fix` ensures the five perk
 labels — §8.21) · `runner` (remote-runner prereqs; report-only, non-fatal — §8.16) ·
 `package` (settings wiring + perk-package ref reconcile + the `extension-install` install-ownership
-check; `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
+check + the `required-perk-version` managed check over the committed `.perk/required-perk-version`
+pin; `--fix` also migrates a former git-clone consumer forward by removing the orphaned clone — §8.6a) ·
 `repository` (gitignore/agents blocks + config present/valid) ·
 `registry` (the registry self-check) · `skills` (the skills-CLI manifest fragment + the
 fail-level `skills-delivery` substrate check + the `repo-skills` repo-authored-skills fragment check

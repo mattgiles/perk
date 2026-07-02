@@ -6,6 +6,7 @@ import pytest
 from perk import __version__
 from perk.cli.ensure import UserFacingCliError
 from perk.convergence.init import run_init
+from perk.substrate import paths
 
 
 def _seed_cfg(pi_dir: Path) -> Path:
@@ -130,6 +131,14 @@ def _identities(packages):
         elif isinstance(p, dict) and isinstance(p.get("source"), str):
             out.add(p["source"])
     return out
+
+
+def test_init_writes_required_perk_version(tmp_path):
+    report = run_init(tmp_path, verify=False)
+    assert report.ok
+    pin = paths.required_version_file(tmp_path)
+    assert pin.read_text(encoding="utf-8") == f"{__version__}\n"
+    assert ".perk/required-perk-version: created" in report.changes
 
 
 def test_init_default_repo_wires_no_foreign_provider_package_except_web_default(tmp_path):

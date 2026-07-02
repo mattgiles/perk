@@ -73,6 +73,7 @@ pins a surface, where one exists).
 | `PERK_CLI_VERSION` launch env var (informational) | `src/perk/run/launch/__init__.py` | — |
 | materialize splash `perk v{…}` | `src/perk/run/launch/materialize.py` | — |
 | extension self-version via `perkVersion()` | `extension/substrate/resources.ts` (reads the shipped `@mgiles/perk` `package.json`; compared against `PERK_CLI_VERSION` for the soft drift signal) | — |
+| `.perk/required-perk-version` managed pin | `src/perk/convergence/init/version_pin.py` (written by `perk init` / `perk doctor --fix`) | — |
 
 ### Release-time markers (maintainer, at release)
 
@@ -82,12 +83,6 @@ pins a surface, where one exists).
 | `CHANGELOG.md` release headers `## [X.Y.Z] - YYYY-MM-DD` | `perk-dev bump-version` (the release roll) |
 | `<!-- As of <hash> -->` cursor | `perk-dev changelog-apply` during accrual; `perk-dev bump-version` re-seats it at the release HEAD |
 | GitHub Release `vX.Y.Z` | the `github-release` capstone, after both registries publish |
-
-### Planned (Phase 5)
-
-| Surface | Status |
-| --- | --- |
-| `.perk/required-perk-version` | a managed file pinning the consumer's required perk version — **not yet built** (objective #1010, node 5.1) |
 
 ## One-time publishing setup
 
@@ -155,7 +150,9 @@ locally, and `perk-dev release-tag` cuts the annotated tag at release time.
    roll (tokens stripped from the released bullets, `[Unreleased]` → `[X.Y.Z] - <date>`, a fresh
    `[Unreleased]` with a new `<!-- As of <hash> -->` marker at the release HEAD). The env sync is
    deferred: the next `uv run` re-syncs, so `perk.__version__` catches up on its own. `--dry-run`
-   prints the intended new sections without writing anything.
+   prints the intended new sections without writing anything. After the bump, run
+   `perk doctor --fix` (or `perk init`) to reconverge the version-stamped managed files (the
+   AGENTS `perk version:` stamp and `.perk/required-perk-version`) into the release commit.
 2. **Verify locally:** `just release-check` judges the release state in one shot — the changelog
    structure, version lockstep across the three surfaces, and local tag agreement (run
    `just release-check --for-publish` before tagging to additionally require a clean tree) — and
