@@ -112,6 +112,8 @@ def _stub_backend(monkeypatch, header: dict[str, object] | None) -> None:
 
 def _git_init(path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "perk tests"], cwd=path, check=True)
 
 
 def test_resolver_happy_path(monkeypatch, tmp_path: Path):
